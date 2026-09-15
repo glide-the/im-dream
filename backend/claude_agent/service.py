@@ -13,6 +13,7 @@
 # [Sync] 2026-09-15: load recent Session projections only on prompt rebuild and fail before Runtime on Admin errors.
 # [Sync] 2026-09-15: reuse the public Registry105 Deck snapshot for Story Workspace prompt assembly.
 # [Sync] 2026-09-15: resolve public managed MCP workspace scope through Registry107.
+# [Sync] 2026-09-15: activate verified Story Runtime through Registry108 without Dream PostgreSQL.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -293,8 +294,11 @@ from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.workflow_managed_mcp_scope_data import (
     AdminWorkflowManagedMcpScopeProvider,
 )
+from services.admin_data.workflow_runtime_activation_data import (
+    AdminWorkflowRuntimeActivationProvider,
+)
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
-from services.admin_data.errors import configuration_invalid
+from services.admin_data.errors import AdminDataError, configuration_invalid
 from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
@@ -754,75 +758,60 @@ async def _activate_story_workspace_dream_runtime(
     actor_id: str,
     cwd: str,
     remote_session_ref: str,
+    provider: AdminWorkflowRuntimeActivationProvider | None = None,
 ) -> None:
-    """Bind verified assembled workspace facts to the Workflow Run."""
+    """Verify local bytes, then bind the Run through Admin Registry108."""
 
     from libs.claude_agent_kit.server.plugin_launcher import (
         read_workspace_launch_manifest,
     )
-    from models.workflow_run import AuthenticatedActorContext
-    from services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
-    from services.story_workspace.dream_launch_infrastructure import (
-        DreamLaunchApplicationError,
-        DreamRuntimeProvisioningService,
-    )
     from services.story_workspace.dream_runtime_activation_service import (
+        DREAM_RUNTIME_INIT_INVALID,
         DREAM_RUNTIME_NOT_READY,
         StoryWorkspaceDreamRuntimeActivationError,
-        StoryWorkspaceDreamRuntimeActivationService,
     )
 
-    verified_plugins = read_workspace_launch_manifest(cwd)
-    db = _db.get_db()
+    manifest = read_workspace_launch_manifest(cwd)
+    if not isinstance(provider, AdminWorkflowRuntimeActivationProvider):
+        raise StoryWorkspaceDreamRuntimeActivationError(
+            DREAM_RUNTIME_NOT_READY,
+            "Admin Runtime activation provider is unavailable",
+        )
     try:
-        row = db.execute(
-            "SELECT workspace_id, source_voice_thread_id FROM workflow_runs "
-            "WHERE id = %s AND created_by = %s",
-            (context.workflow_run_id, actor_id),
-        ).fetchone()
-        if db.in_transaction:
-            db.rollback()
-        if row is None or row["source_voice_thread_id"] != context.thread_id:
-            raise PermissionError("Dream runtime actor/run/thread scope mismatch")
-        try:
-            # A queued Run may outlive an older materialization identity
-            # algorithm. Rebuild only the server-frozen lock's evidence from
-            # the verified immutable installation before enforcing the exact
-            # activation join. Never accept the stale row as equivalent.
-            try:
-                DreamRuntimeProvisioningService(
-                    db
-                ).ensure_frozen_runtime_evidence(
-                    context.runtime_plugin_lock_id
-                )
-            except DreamLaunchApplicationError as exc:
-                raise StoryWorkspaceDreamRuntimeActivationError(
-                    DREAM_RUNTIME_NOT_READY,
-                    "Dream runtime materialization could not be refreshed",
-                ) from exc
-            await StoryWorkspaceDreamRuntimeActivationService(
-                db,
-                token_secret=story_workspace_workflow_token_secret(),
-            ).activate_from_assembled_context(
-                workflow_run_id=context.workflow_run_id,
-                actor_context=AuthenticatedActorContext(
-                    actor_id=actor_id,
-                    workspace_id=str(row["workspace_id"]),
-                ),
-                remote_session_ref=remote_session_ref,
-                verified_plugins=verified_plugins,
-            )
-        except StoryWorkspaceDreamRuntimeActivationError:
-            logger.warning(
-                "Dream assembled runtime rejected: run=%s verified_plugins=%s",
-                context.workflow_run_id,
-                len(verified_plugins),
-            )
-            raise
-    finally:
-        db.close()
+        verified_plugins = [
+            {
+                "package_spec": item["package_spec"],
+                "resolved_version": item["resolved_version"],
+                "artifact_digest": item["artifact_digest"],
+                "has_manifest": item["has_manifest"],
+            }
+            for item in manifest
+        ]
+    except (KeyError, TypeError):
+        raise StoryWorkspaceDreamRuntimeActivationError(
+            DREAM_RUNTIME_INIT_INVALID,
+            "Verified workspace plugin identity is invalid",
+        ) from None
+    try:
+        await asyncio.to_thread(
+            provider.activate_workflow_runtime,
+            actor_id=actor_id,
+            thread_id=context.thread_id,
+            workflow_run_id=context.workflow_run_id,
+            remote_session_ref=remote_session_ref,
+            verified_plugins=verified_plugins,
+        )
+    except AdminDataError as exc:
+        logger.warning(
+            "Admin rejected Dream Runtime activation: run=%s plugins=%s code=%s",
+            context.workflow_run_id,
+            len(verified_plugins),
+            exc.code,
+        )
+        raise StoryWorkspaceDreamRuntimeActivationError(
+            DREAM_RUNTIME_NOT_READY,
+            "Admin Runtime activation did not commit",
+        ) from exc
 
 
 def _store_story_workspace_output_sync(
@@ -2308,6 +2297,14 @@ class ClaudeAgentService:
                 # this turn. The Claude SDK transcript/session remains owned by
                 # the unchanged Phase 3 runner and normal Chat persistence.
                 remote_session_ref=request.thread_id,
+                provider=(
+                    request.admin_turn_persistence
+                    if isinstance(
+                        request.admin_turn_persistence,
+                        AdminWorkflowRuntimeActivationProvider,
+                    )
+                    else None
+                ),
             )
             dream_artifact_turn_ticket = (
                 self._dream_artifact_turn_hook.before_main_turn(

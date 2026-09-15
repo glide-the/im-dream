@@ -8,7 +8,7 @@
 # [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
 # [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
 # [Sync] 2026-09-15: validate the owner-bound broker provider, renewed grant and arbitrary strict ranges.
-# [Sync] 2026-09-15: validate Registry107 managed MCP scope on the exact Thread/Run grant.
+# [Sync] 2026-09-15: validate Registry108 activation and shared unknown-write recovery on the exact grant.
 from __future__ import annotations
 
 import asyncio
@@ -43,6 +43,10 @@ from services.admin_data.deck_workspace_plugins_data import (
 from services.admin_data.workflow_managed_mcp_scope_data import (
     RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE,
 )
+from services.admin_data.workflow_runtime_activation_data import (
+    ACTIVATE_WORKFLOW_RUNTIME,
+    WORKFLOW_RUNTIME_ACTIVATION_SCHEMA_REQUIREMENTS,
+)
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
@@ -63,10 +67,14 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
         GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS,
-        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE)
+        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, ACTIVATE_WORKFLOW_RUNTIME)
     schema_requirements = {
         item.capability: item
-        for item in (*WORKSPACE_SCHEMA_REQUIREMENTS, *SESSION_LIST_SCHEMA_REQUIREMENTS)
+        for item in (
+            *WORKSPACE_SCHEMA_REQUIREMENTS,
+            *SESSION_LIST_SCHEMA_REQUIREMENTS,
+            *WORKFLOW_RUNTIME_ACTIVATION_SCHEMA_REQUIREMENTS,
+        )
     }
     schemas = [item.model_dump() for item in schema_requirements.values()]
     if schema_fault == "missing": schemas.pop(len(WORKSPACE_SCHEMA_REQUIREMENTS) - 1)
@@ -83,7 +91,23 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             operation = request.url.params["operation"]
             value = {"status": state, "request_id": request_id, "operation": operation}
             if state == "committed":
-                value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else ({"message_id": "message-1"} if operation == PERSIST_MESSAGE.capability.name else {"message_id": "message-1", "confirmation_preserved": False})
+                if operation == UPDATE_SESSION.capability.name:
+                    value["result"] = {"changed": True}
+                elif operation == PERSIST_MESSAGE.capability.name:
+                    value["result"] = {"message_id": "message-1"}
+                elif operation == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
+                    value["result"] = {
+                        "thread_id": "thread-1",
+                        "workflow_run_id": workflow_context.workflow_run_id,
+                        "workspace_id": "workspace-1",
+                        "runtime_plugin_lock_id": workflow_context.runtime_plugin_lock_id,
+                        "runtime_load_receipt_id": "rlr_" + "b" * 32,
+                        "agent_session_id": "as_" + "c" * 32,
+                        "status": "running",
+                        "replayed": False,
+                    }
+                else:
+                    value["result"] = {"message_id": "message-1", "confirmation_preserved": False}
         else:
             assert request.headers["authorization"] == "Bearer " + expected_token
             assert request_id in {"write-original", "broker-request"}
@@ -120,6 +144,30 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                 value = {
                     **input_dto,
                     "workspace_id": "workspace-1",
+                }
+            elif name == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
+                assert input_dto == {
+                    "thread_id": "thread-1",
+                    "workflow_run_id": workflow_context.workflow_run_id,
+                    "remote_session_ref": "sdk-thread",
+                    "verified_plugins": [
+                        {
+                            "package_spec": "ink-dream-story@platform-builtin",
+                            "resolved_version": "1.0.0",
+                            "artifact_digest": "sha256:" + "a" * 64,
+                            "has_manifest": True,
+                        }
+                    ],
+                }
+                value = {
+                    "thread_id": "thread-1",
+                    "workflow_run_id": workflow_context.workflow_run_id,
+                    "workspace_id": "workspace-1",
+                    "runtime_plugin_lock_id": workflow_context.runtime_plugin_lock_id,
+                    "runtime_load_receipt_id": "rlr_" + "b" * 32,
+                    "agent_session_id": "as_" + "c" * 32,
+                    "status": "running",
+                    "replayed": False,
                 }
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
@@ -318,6 +366,108 @@ def test_managed_mcp_scope_uses_current_exact_thread_run_grant():
     request = calls[-1]
     assert request.headers["authorization"] == "Bearer " + TOKEN
     assert request.url.path.endswith("/workflow-managed-mcp-scope.resolve")
+
+
+def _dream_context():
+    return StoryWorkspaceDreamRunContext(
+        workflow_run_id="run_" + "a" * 32,
+        thread_id="thread-1",
+        deck_id="deck-1",
+        deck_plugin_id="ink.dream.story-workflow",
+        deck_plugin_version="1.0.0",
+        deck_plugin_binding_id="binding-1",
+        binding_revision=1,
+        deck_runtime_snapshot_id="snapshot-1",
+        runtime_plugin_lock_id="rpl_" + "d" * 32,
+    )
+
+
+def _activate_runtime(value):
+    context = value._resolution.context
+    return value.activate_workflow_runtime(
+        actor_id="42",
+        thread_id="thread-1",
+        workflow_run_id=context.workflow_run_id,
+        remote_session_ref="sdk-thread",
+        verified_plugins=[
+            {
+                "package_spec": "ink-dream-story@platform-builtin",
+                "resolved_version": "1.0.0",
+                "artifact_digest": "sha256:" + "a" * 64,
+                "has_manifest": True,
+            }
+        ],
+    )
+
+
+def test_runtime_activation_uses_exact_thread_run_grant_and_strict_dto():
+    context = _dream_context()
+    value, calls, _ = holder(workflow_context=context)
+    result = _activate_runtime(value)
+    assert result.workflow_run_id == context.workflow_run_id
+    assert result.runtime_plugin_lock_id == context.runtime_plugin_lock_id
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith("/workflow-runtime.activate")
+    with pytest.raises(AdminDataError, match="DREAM_RUNTIME_INIT_INVALID"):
+        value.activate_workflow_runtime(
+            actor_id="42",
+            thread_id="thread-1",
+            workflow_run_id=context.workflow_run_id,
+            remote_session_ref="sdk-thread",
+            verified_plugins=[{"path": "/caller-controlled"}],
+        )
+
+
+def test_runtime_activation_requires_exact_local_placement_capability_before_post():
+    context = _dream_context()
+    capability = next(
+        item
+        for item in WORKFLOW_RUNTIME_ACTIVATION_SCHEMA_REQUIREMENTS
+        if item.capability == "dream.runtime.local-placement.v1"
+    )
+    ordered = {
+        item.capability: item
+        for item in (
+            *WORKSPACE_SCHEMA_REQUIREMENTS,
+            *SESSION_LIST_SCHEMA_REQUIREMENTS,
+            *WORKFLOW_RUNTIME_ACTIVATION_SCHEMA_REQUIREMENTS,
+        )
+    }
+    schema_index = list(ordered).index(capability.capability)
+    value, calls, _ = holder(
+        workflow_context=context,
+        schema_fault=schema_index,
+    )
+    with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
+        _activate_runtime(value)
+    assert all(
+        request.method == "GET"
+        and request.url.path.endswith("/capabilities")
+        for request in calls
+    )
+
+
+def test_unknown_runtime_activation_recovers_original_receipt_without_post_retry():
+    context = _dream_context()
+    value, calls, _ = holder(
+        workflow_context=context,
+        lose_operation=ACTIVATE_WORKFLOW_RUNTIME.capability.name,
+    )
+    with pytest.raises(AdminDataError) as lost:
+        _activate_runtime(value)
+    assert lost.value.outcome_unknown
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        persist(value)
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        _activate_runtime(value)
+    recovered = _activate_runtime(value)
+    assert recovered.workflow_run_id == context.workflow_run_id
+    assert sum(
+        request.method == "POST"
+        and request.url.path.endswith(ACTIVATE_WORKFLOW_RUNTIME.capability.name)
+        for request in calls
+    ) == 1
 
 
 def test_mutable_session_identity_only_reuses_the_most_recent_confirmation():

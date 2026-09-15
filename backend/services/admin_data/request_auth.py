@@ -29,6 +29,7 @@
 # [Sync] 2026-09-15: register Registry104 default-plugin resolve and three evidence-bound Deck writes.
 # [Sync] 2026-09-15: register Registry105 Deck chat-context read for public Chat turns.
 # [Sync] 2026-09-15: register Registry107 managed MCP scope for exact Thread/Run grants.
+# [Sync] 2026-09-15: register Registry108 atomic Workflow Runtime activation.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -68,6 +69,7 @@ from .deck_default_data import DECK_DEFAULT_OPERATIONS
 from .deck_chat_context_data import DECK_CHAT_CONTEXT_OPERATIONS
 from .deck_workspace_plugins_data import DECK_WORKSPACE_PLUGIN_OPERATIONS
 from .workflow_managed_mcp_scope_data import WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS
+from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -121,6 +123,7 @@ class AdminRequestAuth:
                 *DECK_CHAT_CONTEXT_OPERATIONS,
                 *DECK_WORKSPACE_PLUGIN_OPERATIONS,
                 *WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS,
+                *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

@@ -8,7 +8,7 @@
 # [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
 # [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
 # [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
-# [Sync] 2026-09-15: reuse the renewed exact Thread/Run grant for Registry107 managed MCP scope reads.
+# [Sync] 2026-09-15: reuse the exact Thread/Run grant and unknown-write barrier for Registry108 activation.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,6 +45,13 @@ from .workflow_managed_mcp_scope_data import (
     AdminWorkflowManagedMcpScopeProvider,
     AdminWorkflowManagedMcpScopeResolution,
     WorkflowManagedMcpScopeInputDTO,
+)
+from .workflow_runtime_activation_data import (
+    ACTIVATE_WORKFLOW_RUNTIME,
+    AdminWorkflowRuntimeActivationData,
+    AdminWorkflowRuntimeActivationProvider,
+    WorkflowRuntimeActivationInputDTO,
+    WorkflowRuntimeActivationOutputDTO,
 )
 from .workspace_data import require_workspace_capabilities
 from .system_config_data import AdminSystemConfigData
@@ -85,6 +92,7 @@ class AdminTurnPersistence(
     AdminAgentTurnPersistence,
     AdminDeckWorkspacePluginsProvider,
     AdminWorkflowManagedMcpScopeProvider,
+    AdminWorkflowRuntimeActivationProvider,
 ):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
@@ -111,6 +119,9 @@ class AdminTurnPersistence(
         self._managed_mcp_scope_data = AdminWorkflowManagedMcpScopeData(
             client,
             canonical_user_id=resolution.canonical_user_id,
+        )
+        self._workflow_runtime_activation_data = (
+            AdminWorkflowRuntimeActivationData(client)
         )
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -255,6 +266,37 @@ class AdminTurnPersistence(
                 access_token=grant.token,
             )
 
+    def activate_workflow_runtime(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+        remote_session_ref: str,
+        verified_plugins: list[dict],
+    ) -> WorkflowRuntimeActivationOutputDTO:
+        """Persist verified Runtime bindings in one Admin transaction."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        try:
+            input_dto = WorkflowRuntimeActivationInputDTO(
+                thread_id=thread_id,
+                workflow_run_id=workflow_run_id,
+                remote_session_ref=remote_session_ref,
+                verified_plugins=verified_plugins,
+            )
+        except Exception:
+            raise AdminDataError("DREAM_RUNTIME_INIT_INVALID", 409) from None
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            result = self._write(ACTIVATE_WORKFLOW_RUNTIME, input_dto, grant)
+            return result
+
     def _project_sessions(
         self,
         *,
@@ -303,7 +345,7 @@ class AdminTurnPersistence(
         # Every caller holds the same activity lock. Unknown results block a
         # different operation as well as a different input; receipts retain
         # the original operation and immutable input held by this owner.
-        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE:
+        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME:
             raise configuration_invalid()
         pending = self._pending
         if pending is not None:
@@ -312,7 +354,19 @@ class AdminTurnPersistence(
             try:
                 if operation is PERSIST_MESSAGE:
                     require_workspace_capabilities(self._client, pending.request_id)
-                receipt = self._client.receipt(operation, pending.request_id, access_token=grant.token)
+                receipt = (
+                    self._workflow_runtime_activation_data.receipt(
+                        pending.input_dto,
+                        pending.request_id,
+                        access_token=grant.token,
+                    )
+                    if operation is ACTIVATE_WORKFLOW_RUNTIME
+                    else self._client.receipt(
+                        operation,
+                        pending.request_id,
+                        access_token=grant.token,
+                    )
+                )
             except AdminDataError as error:
                 raise AdminDataError(error.code, error.status_code, pending.request_id, True) from None
             if not isinstance(receipt, CommittedReceiptDTO):
@@ -326,6 +380,12 @@ class AdminTurnPersistence(
             elif operation is PERSIST_MESSAGE:
                 require_workspace_capabilities(self._client, pending.request_id)
                 result = self._chat.persist_message(input_dto, pending.request_id, access_token=grant.token)
+            elif operation is ACTIVATE_WORKFLOW_RUNTIME:
+                result = self._workflow_runtime_activation_data.activate(
+                    input_dto,
+                    pending.request_id,
+                    access_token=grant.token,
+                )
             else:
                 result = self._chat.update_session(input_dto, pending.request_id, access_token=grant.token)
         except AdminDataError as error:
@@ -343,6 +403,16 @@ class AdminTurnPersistence(
             self._writes[result.message_id] = _UserWrite(pending.input_dto, pending.request_id, result)
         elif pending.operation is PERSIST_MESSAGE:
             if result.message_id != pending.input_dto.message_id:
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is ACTIVATE_WORKFLOW_RUNTIME:
+            context = self._resolution.context
+            if (
+                context is None
+                or result.thread_id != context.thread_id
+                or result.workflow_run_id != context.workflow_run_id
+                or result.runtime_plugin_lock_id
+                != context.runtime_plugin_lock_id
+            ):
                 raise invalid_response(pending.request_id, write=True)
         else:
             # Session identity is mutable: A -> B -> A must write A again.

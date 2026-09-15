@@ -1,5 +1,6 @@
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
+# [Sync] 2026-09-15: validate Registry108 activation provider and Dream PostgreSQL fence.
 # [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
 #         service callback factories, and ToolEventPayload.
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
@@ -568,6 +569,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             actor_id="7",
             cwd=str(workspace_path),
             remote_session_ref="thread_dream_turn",
+            provider=None,
         )
         self.assertEqual(execution.run_options.model, "dream-balanced")
         self.assertEqual(execution.run_options.server_runtime_env, {
@@ -819,60 +821,86 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("environment_id", parameters)
         self.assertNotIn("deployment_tier", parameters)
 
-    async def test_dream_sdk_init_reprovisions_frozen_runtime_evidence_before_activation(self):
+    async def test_dream_sdk_init_uses_admin_activation_after_local_manifest_verification(self):
+        from services.admin_data.workflow_runtime_activation_data import (
+            AdminWorkflowRuntimeActivationProvider,
+        )
+
         context = self._dream_context()
-        db = unittest.mock.Mock()
-        db.in_transaction = True
-        db.execute.return_value.fetchone.return_value = {
-            "workspace_id": "workspace-dream",
-            "source_voice_thread_id": context.thread_id,
-        }
-        provisioner = unittest.mock.Mock()
-        provisioner_factory = unittest.mock.Mock(return_value=provisioner)
-        activation = unittest.mock.Mock()
-        activation.activate_from_assembled_context = unittest.mock.AsyncMock()
-        activation_factory = unittest.mock.Mock(return_value=activation)
-        init = {
-            "session_id": "claude-session-runtime-repair",
-            "tools": ["mcp__story_workspace__write_dream_run"],
+        provider = AdminWorkflowRuntimeActivationProvider()
+        provider.activate_workflow_runtime = unittest.mock.Mock()
+        verified = {
+            "package_spec": "ink-dream-story@platform-builtin",
+            "resolved_version": "1.0.0",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "has_manifest": True,
+            "physical_path": "/must-not-cross-the-interface",
         }
 
         with (
             unittest.mock.patch.object(
-                service_module._db, "get_db", return_value=db
+                service_module._db,
+                "get_db",
+                side_effect=AssertionError(
+                    "Dream Runtime activation opened PostgreSQL"
+                ),
             ),
             unittest.mock.patch(
                 "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
-                return_value=[{"package_spec": "ink-dream-story@platform-builtin"}],
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.dream_launch_infrastructure.DreamRuntimeProvisioningService",
-                provisioner_factory,
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.dream_runtime_activation_service.StoryWorkspaceDreamRuntimeActivationService",
-                activation_factory,
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.workflow_security.story_workspace_workflow_token_secret",
-                return_value=b"runtime-test-secret",
+                return_value=[verified],
             ),
         ):
             await service_module._activate_story_workspace_dream_runtime(
                 context=context,
                 actor_id="7",
                 cwd="/server-owned/thread-workspace",
-                remote_session_ref=init["session_id"],
+                remote_session_ref="claude-session-runtime-repair",
+                provider=provider,
             )
 
-        provisioner_factory.assert_called_once_with(db)
-        provisioner.ensure_frozen_runtime_evidence.assert_called_once_with(
-            context.runtime_plugin_lock_id
+        provider.activate_workflow_runtime.assert_called_once_with(
+            actor_id="7",
+            thread_id=context.thread_id,
+            workflow_run_id=context.workflow_run_id,
+            remote_session_ref="claude-session-runtime-repair",
+            verified_plugins=[
+                {
+                    key: verified[key]
+                    for key in (
+                        "package_spec",
+                        "resolved_version",
+                        "artifact_digest",
+                        "has_manifest",
+                    )
+                }
+            ],
         )
-        activation.activate_from_assembled_context.assert_awaited_once()
-        self.assertNotIn("deployment_tier", activation_factory.call_args.kwargs)
-        self.assertNotIn("environment_id", activation_factory.call_args.kwargs)
-        db.close.assert_called_once_with()
+
+    async def test_dream_sdk_init_fails_closed_without_admin_activation_provider(self):
+        from services.story_workspace.dream_runtime_activation_service import (
+            StoryWorkspaceDreamRuntimeActivationError,
+        )
+
+        with (
+            unittest.mock.patch.object(
+                service_module._db,
+                "get_db",
+                side_effect=AssertionError(
+                    "Dream Runtime activation opened PostgreSQL"
+                ),
+            ),
+            unittest.mock.patch(
+                "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
+                return_value=[],
+            ),
+        ):
+            with self.assertRaises(StoryWorkspaceDreamRuntimeActivationError):
+                await service_module._activate_story_workspace_dream_runtime(
+                    context=self._dream_context(),
+                    actor_id="7",
+                    cwd="/server-owned/thread-workspace",
+                    remote_session_ref="sdk-thread",
+                )
 
     async def test_dream_turn_skips_legacy_standalone_proposal_persistence(self):
         service = ClaudeAgentService(
