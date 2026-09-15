@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: read fresh Thread SystemConfig through the same draining persistence grant.
 # [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
 # [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
+# [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from threading import Lock, RLock
 from typing import Callable
 from uuid import uuid4
 
+from .agent_turn_persistence import AdminAgentTurnPersistence
 from .chat_data import AdminChatData, PERSIST_MESSAGE, UPDATE_SESSION
 from .chat_models import ChatThreadDTO, ChangedResultDTO, MessagePersistInputDTO, MessagePersistResultDTO, ThreadIdInputDTO, ThreadSessionInputDTO
 from .client import AdminDataClient, DomainOperation
@@ -65,7 +67,7 @@ class AdminTurnSessionProjectionProvider:
         )
 
 
-class AdminTurnPersistence:
+class AdminTurnPersistence(AdminAgentTurnPersistence):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
         clock: Callable[[], datetime] | None = None,

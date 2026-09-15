@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: expose catalog readiness so failed domain refreshes can recover through request authentication.
 # [Sync] 2026-09-15: synchronize catalog refresh/readiness/operation checks while keeping domain HTTP concurrent.
 # [Sync] 2026-09-15: read the dedicated original Preflight receipt without changing generic two-state receipts.
+# [Sync] 2026-09-15: read task-scoped background Reflections receipts with the original task and request IDs.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -146,6 +147,41 @@ class AdminDataClient:
         if result.operation != name or result.request_id != request_id:
             raise invalid_response(request_id)
         # An absent receipt remains an explicit absent DTO; it never triggers a retry.
+        return result
+
+    def reflection_task_receipt(
+        self,
+        operation: DomainOperation[InputT, OutputT],
+        request_id: str,
+        *,
+        task_id: str,
+    ) -> CommittedReceiptDTO[OutputT] | AbsentReceiptDTO:
+        """Read one original background write result under its task receipt actor."""
+
+        from .reflection_task_models import ReflectionTaskId
+
+        name = operation.capability.name
+        if (
+            self._operations.get(name) is not operation
+            or operation.capability.kind != "write"
+            or operation.capability.user_scope is not None
+            or operation.capability.background_scope != "reflections:execute"
+        ):
+            raise AdminDataError(
+                "ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id
+            )
+        TypeAdapter(Identifier).validate_python(request_id)
+        TypeAdapter(ReflectionTaskId).validate_python(task_id, strict=True)
+        output = CommittedReceiptDTO[operation.output_dto] | AbsentReceiptDTO
+        result = self._request(
+            "GET",
+            "/receipts/" + request_id,
+            request_id,
+            output,
+            params={"operation": name, "task_id": task_id},
+        )
+        if result.operation != name or result.request_id != request_id:
+            raise invalid_response(request_id)
         return result
 
     def preflight_original_receipt(self, request_id: str, *, access_token: str):

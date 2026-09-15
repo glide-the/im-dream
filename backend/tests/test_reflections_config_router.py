@@ -1,7 +1,7 @@
 # [Input] Reflections public config/memory-init routes with explicit Admin actor and deterministic adapters.
 # [Output] Original merge/filter/reset responses and Thread-to-config-to-filesystem ordering evidence.
-# [Pos] Provider-free route tests; background Reflections task persistence is outside this suite.
-# [Sync] 2026-09-15: replace public section-config database mocks with the Admin boundary.
+# [Pos] Provider-free config route tests; task persistence has its own Admin runtime suite.
+# [Sync] 2026-09-15: require the public router to have no Dream database import or compatibility alias.
 from __future__ import annotations
 
 import json
@@ -75,15 +75,7 @@ def _harness(monkeypatch, *, thread_exists: bool = True):
     )
     monkeypatch.setattr(router_module, "AdminChatData", lambda _client: chat)
 
-    def fail_direct_database(*_args, **_kwargs):
-        raise AssertionError("public Reflections config must not use Dream database helpers")
-
-    for name in (
-        "get_reflections_section_config",
-        "save_reflections_section_config",
-        "delete_reflections_section_config",
-    ):
-        monkeypatch.setattr(router_module.database, name, fail_direct_database)
+    assert not hasattr(router_module, "database")
 
     original_get = data.get
 

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-# [Input] Consume reflections_config, typed Admin section/Thread reads, remaining task database APIs, workspace libs, and shared auth.
+# [Input] Consume reflections_config, typed Admin Reflections/section/Thread reads, workspace libs, and shared auth.
 # [Output] Register Reflections endpoints:
 #          POST /api/reflections/memory-init      — section memory workspace init
 #          GET  /api/reflections/config/{section} — read effective section config
 #          PUT  /api/reflections/config/{section} — save user custom section config
 #          DELETE /api/reflections/config/{section} — reset to default
+#          POST/GET /api/reflections/tasks/*     — create/start/read/results/events
+#          GET  /api/reflections/latest          — latest task and terminal results
 # [Pos] reflections route node in backend/routers
 # [Sync] 2026-06-06: initial implementation — procedural Memory Workspace initialisation
 #                    for Reflections page sections (echoes / traits / patterns).
 # [Sync] 2026-06-06: add GET/PUT/DELETE /api/reflections/config/{section} for
 #                    per-user custom prompt file editing; memory-init now prefers
 #                    user config over static default.
-# [Sync] 2026-09-15: route public section config and memory-init ownership through Admin; task persistence remains pending.
+# [Sync] 2026-09-15: route public section config, task, event, and result ownership through Admin.
 """Reflections analysis router.
 
 Endpoints
@@ -33,19 +35,16 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
-import os
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-import database
 from reflections_agent import (
-    create_reflections_task,
-    get_or_create_reflection_event_bus,
     get_reflection_event_bus,
+    prepare_reflection_event_bus,
     start_reflections_task,
 )
 from reflections_config import REFLECTIONS_SECTION_CONFIGS, list_sections, get_section_config
@@ -58,6 +57,22 @@ from services.admin_data.reflections_config_data import (
     ReflectionsSectionSaveInputDTO,
 )
 from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.errors import AdminDataError
+from services.admin_data.reflection_task_models import (
+    ReflectionEventListInputDTO,
+    ReflectionTaskCreateInputDTO,
+    ReflectionTaskCreateSnapshotDTO,
+    ReflectionTaskDTO,
+    ReflectionTaskLatestInputDTO,
+    ReflectionTaskLookupDTO,
+)
+from services.admin_data.reflection_task_runtime import (
+    prepare_reflection_memory_workspace,
+    prepare_reflection_workspace_directory,
+    reflection_workspace_root,
+    validate_reflection_workspace_path,
+    write_reflection_workspace_text,
+)
 
 from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
@@ -91,6 +106,8 @@ class SectionConfigUpdateRequest(BaseModel):
 
 
 class ReflectionsTaskCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     sections: Optional[list[str]] = None
     session_ids: Optional[list[str]] = None
     start_date: Optional[str] = None
@@ -111,18 +128,23 @@ def _language_label(language: str) -> str:
     return "Simplified Chinese" if language == "zh" else "English"
 
 
+def _validated_reflection_input(factory, **values):
+    try:
+        return factory(**values)
+    except ValidationError:
+        raise HTTPException(
+            status_code=422, detail={"error": "Invalid Reflections request"}
+        ) from None
+
+
 # ---------------------------------------------------------------------------
 # Workspace helpers
 # ---------------------------------------------------------------------------
 
 
 def _get_workspace_root() -> Path:
-    """Return the workspace root (same env var as workspace.py)."""
-    import tempfile
-    agent_cwd = os.environ.get("AGENT_CWD", "")
-    if agent_cwd:
-        return Path(agent_cwd)
-    return Path(tempfile.gettempdir()) / "ink-agent-workspaces"
+    """Return the shared, explicitly configured Agent workspace root."""
+    return reflection_workspace_root()
 
 
 def _write_section_memory_workspace(thread_id: str, prompt_files: dict[str, str]) -> Path:
@@ -132,16 +154,10 @@ def _write_section_memory_workspace(thread_id: str, prompt_files: dict[str, str]
     Raises ``ValueError`` on path traversal.
     """
     workspace_root = _get_workspace_root()
-    workspace_path = workspace_root / thread_id
-
-    workspace_abs = workspace_path.resolve()
-    root_abs = workspace_root.resolve()
-    if not str(workspace_abs).startswith(str(root_abs)):
-        raise ValueError(f"thread_id resolves outside workspace root: {thread_id!r}")
-
-    workspace_path.mkdir(parents=True, exist_ok=True)
-    memory_dir = workspace_path / "memory"
-    memory_dir.mkdir(exist_ok=True)
+    memory_dir = prepare_reflection_memory_workspace(
+        identifier=thread_id,
+        advertised_path=str(workspace_root / thread_id / "memory"),
+    )
 
     written: list[str] = []
     for filename, content in prompt_files.items():
@@ -149,20 +165,22 @@ def _write_section_memory_workspace(thread_id: str, prompt_files: dict[str, str]
             continue
         if not isinstance(content, str) or not content.strip():
             continue
-        (memory_dir / filename).write_text(content.strip() + "\n", encoding="utf-8")
+        write_reflection_workspace_text(
+            memory_dir / filename, content.strip() + "\n"
+        )
         written.append(filename)
 
     logger.debug(
         "_write_section_memory_workspace: wrote %d files for thread=%s", len(written), thread_id
     )
 
-    proc_dir = memory_dir / "procedural"
-    proc_dir.mkdir(exist_ok=True)
+    proc_dir = prepare_reflection_workspace_directory(memory_dir / "procedural")
     state_file = proc_dir / "analysis_state.json"
+    validate_reflection_workspace_path(state_file)
     if not state_file.exists():
-        state_file.write_text(
+        write_reflection_workspace_text(
+            state_file,
             json.dumps({"completed": False, "results_count": 0}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     return memory_dir
@@ -227,6 +245,11 @@ async def reflections_memory_init(
 
     try:
         memory_dir = _write_section_memory_workspace(thread_id, prompt_files)
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown},
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
     except Exception as exc:
@@ -253,33 +276,56 @@ async def reflections_memory_init(
 # ---------------------------------------------------------------------------
 
 
-def _task_response(task: dict[str, Any], results: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
-    payload = {
-        "id": task["id"],
-        "task_id": task["id"],
-        "status": task["status"],
-        "sections": task.get("sections") or [],
-        "input_snapshot": task.get("input_snapshot") or {},
-        "workspace_path": task.get("workspace_path"),
-        "agent_contract_version": task.get("agent_contract_version"),
-        "error_summary": task.get("error_summary"),
-        "created_at": task.get("created_at"),
-        "started_at": task.get("started_at"),
-        "completed_at": task.get("completed_at"),
-        "updated_at": task.get("updated_at"),
-    }
+def _task_response(task: ReflectionTaskDTO, results=None) -> dict[str, Any]:
+    payload = task.model_dump(mode="json")
     if results is not None:
-        payload["results"] = results
+        payload["results"] = [item.model_dump(mode="json") for item in results]
     return payload
+
+
+def _reflections_data(owner: AdminRequestAuth):
+    try:
+        return owner.reflections_data()
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown},
+        ) from None
+
+
+def _reflections_worker(owner: AdminRequestAuth):
+    try:
+        return owner.reflections_worker_data()
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown},
+        ) from None
+
+
+async def _start_worker(task_id: str, owner: AdminRequestAuth) -> None:
+    try:
+        await start_reflections_task(
+            task_id,
+            worker=_reflections_worker(owner),
+            client=owner.client,
+            session_broker_settings=owner.session_broker_settings,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error_code": exc.code, "request_id": exc.request_id,
+                    "outcome_unknown": exc.outcome_unknown},
+        ) from None
 
 
 @router.post("/api/reflections/tasks", status_code=202)
 async def create_reflections_task_endpoint(
     body: ReflectionsTaskCreateRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Create and start a backend Reflections-agent async task."""
-    user_id = int(current_user["user_id"])
     requested_sections = body.sections or list(list_sections())
     invalid = [section for section in requested_sections if section not in _VALID_SECTIONS]
     if invalid:
@@ -289,18 +335,38 @@ async def create_reflections_task_endpoint(
         )
 
     language = _normalize_reflections_language(body.language)
-    input_snapshot = {
-        "session_ids": body.session_ids or [],
-        "start_date": body.start_date,
-        "end_date": body.end_date,
-        "language": language,
-        "language_label": _language_label(language),
-    }
-    task_id = create_reflections_task(user_id, requested_sections, input_snapshot)
-    await get_or_create_reflection_event_bus(task_id)
+    data = _reflections_data(owner)
+    input_snapshot = _validated_reflection_input(
+        ReflectionTaskCreateSnapshotDTO,
+        session_ids=body.session_ids or [],
+        start_date=body.start_date,
+        end_date=body.end_date,
+        language=language,
+        language_label=_language_label(language),
+    )
+    create_input = _validated_reflection_input(
+        ReflectionTaskCreateInputDTO,
+        sections=requested_sections,
+        input_snapshot=input_snapshot,
+    )
+    created = await invoke_admin_operation(
+        current_user,
+        data.create,
+        create_input,
+    )
+    task = created.task
+    await prepare_reflection_event_bus(
+        task.task_id, worker=_reflections_worker(owner)
+    )
     if body.auto_start:
-        await start_reflections_task(task_id)
-    task = database.get_reflection_task(task_id, user_id)
+        started = await invoke_admin_operation(
+            current_user,
+            data.start,
+            ReflectionTaskLookupDTO(task_id=task.task_id),
+        )
+        task = started.task
+        if not started.terminal or started.report_missing:
+            await _start_worker(task.task_id, owner)
     return Response(
         content=json.dumps(_task_response(task), ensure_ascii=False),
         media_type="application/json",
@@ -312,6 +378,7 @@ async def create_reflections_task_endpoint(
 async def start_reflections_task_endpoint(
     task_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Start a previously-created Reflections task.
 
@@ -319,21 +386,16 @@ async def start_reflections_task_endpoint(
     task begins, which makes task/section events visible as a live stream
     rather than only as replayed completed events.
     """
-    user_id = int(current_user["user_id"])
-    task = database.get_reflection_task(task_id, user_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
-    if task.get("status") in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
-        return Response(
-            content=json.dumps(_task_response(task), ensure_ascii=False),
-            media_type="application/json",
-            status_code=202,
-        )
-    await get_or_create_reflection_event_bus(task_id)
-    await start_reflections_task(task_id)
-    task = database.get_reflection_task(task_id, user_id) or task
+    data = _reflections_data(owner)
+    started = await invoke_admin_operation(
+        current_user,
+        data.start,
+        _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id),
+    )
+    if not started.terminal or started.report_missing:
+        await _start_worker(task_id, owner)
     return Response(
-        content=json.dumps(_task_response(task), ensure_ascii=False),
+        content=json.dumps(_task_response(started.task), ensure_ascii=False),
         media_type="application/json",
         status_code=202,
     )
@@ -343,15 +405,16 @@ async def start_reflections_task_endpoint(
 async def get_reflections_task_endpoint(
     task_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Return the persisted status snapshot for a Reflections-agent task."""
-    user_id = int(current_user["user_id"])
-    task = database.get_reflection_task(task_id, user_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
-    results = database.list_reflection_results(task_id, user_id)
+    result = await invoke_admin_operation(
+        current_user,
+        _reflections_data(owner).get,
+        _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id),
+    )
     return Response(
-        content=json.dumps(_task_response(task, results), ensure_ascii=False),
+        content=json.dumps(_task_response(result.task, result.results), ensure_ascii=False),
         media_type="application/json",
     )
 
@@ -360,15 +423,20 @@ async def get_reflections_task_endpoint(
 async def get_reflections_task_results_endpoint(
     task_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Return structured Reflections results for one task."""
-    user_id = int(current_user["user_id"])
-    task = database.get_reflection_task(task_id, user_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
-    results = database.list_reflection_results(task_id, user_id)
+    result = await invoke_admin_operation(
+        current_user,
+        _reflections_data(owner).get,
+        _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id),
+    )
     return Response(
-        content=json.dumps({"task_id": task_id, "results": results}, ensure_ascii=False),
+        content=json.dumps(
+            {"task_id": task_id,
+             "results": [item.model_dump(mode="json") for item in result.results]},
+            ensure_ascii=False,
+        ),
         media_type="application/json",
     )
 
@@ -376,17 +444,18 @@ async def get_reflections_task_results_endpoint(
 @router.get("/api/reflections/latest")
 async def get_latest_reflections_endpoint(
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Return the latest Reflections task and latest completed results for the user."""
-    user_id = int(current_user["user_id"])
-    task = database.get_latest_reflection_task(user_id)
-    results = database.list_latest_reflection_results(user_id)
+    result = await invoke_admin_operation(
+        current_user,
+        _reflections_data(owner).latest,
+        ReflectionTaskLatestInputDTO(),
+    )
     return Response(
         content=json.dumps(
-            {
-                "task": _task_response(task) if task else None,
-                "results": results,
-            },
+            {"task": _task_response(result.task) if result.task else None,
+             "results": [item.model_dump(mode="json") for item in result.results]},
             ensure_ascii=False,
         ),
         media_type="application/json",
@@ -397,46 +466,53 @@ async def get_latest_reflections_endpoint(
 async def stream_reflections_task_events_endpoint(
     task_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
     """Subscribe to Reflections task events.
 
-    The stream replays in-memory events when the task is still present in this
-    process.  If no in-memory bus exists, it falls back to persisted
-    ``reflection_task_event`` rows and then closes.
+    The stream first reads authorized Admin history, then emits newer events
+    from the process-local bus without repeating a sequence.
     """
-    user_id = int(current_user["user_id"])
-    task = database.get_reflection_task(task_id, user_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
-
     bus = await get_reflection_event_bus(task_id)
-    if bus is None and task.get("status") not in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
-        bus = await get_or_create_reflection_event_bus(task_id)
+    token = await bus.subscribe(last_event_id) if bus is not None else None
+    try:
+        history = await invoke_admin_operation(
+            current_user,
+            _reflections_data(owner).events,
+            _validated_reflection_input(
+                ReflectionEventListInputDTO,
+                task_id=task_id, after_event_id=last_event_id
+            ),
+        )
+    except BaseException:
+        if bus is not None and token is not None:
+            await bus.unsubscribe(token)
+        raise
 
     async def _stream():
-        if bus is None:
-            for event in database.list_reflection_task_events(task_id, user_id, last_event_id):
-                yield (
-                    f"event: {event['event_type']}\n"
-                    f"id: {event['id']}\n"
-                    f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                )
-            return
-
-        token = await bus.subscribe(last_event_id)
         try:
             yield (
                 "event: reflection.stream.connected\n"
                 f"data: {json.dumps({'id': 'stream-connected', 'task_id': task_id, 'type': 'reflection.stream.connected', 'sequence': 0, 'created_at': None, 'payload': {}}, ensure_ascii=False)}\n\n"
             )
+            maximum = 0
+            for event in history.events:
+                maximum = max(maximum, event.sequence)
+                payload = event.model_dump(mode="json")
+                yield (
+                    f"event: {event.type}\n"
+                    f"id: {event.id}\n"
+                    f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                )
+            if bus is None or token is None:
+                return
             async for event in bus.read(token):
-                yield event.to_sse_frame()
-        except asyncio.CancelledError:
-            await bus.unsubscribe(token)
-            raise
+                if event.sequence > maximum:
+                    yield event.to_sse_frame()
         finally:
-            await bus.unsubscribe(token)
+            if bus is not None and token is not None:
+                await bus.unsubscribe(token)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

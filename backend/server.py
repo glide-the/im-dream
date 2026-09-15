@@ -33,6 +33,7 @@
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
 # [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains; PG startup remains pending migration.
+# [Sync] 2026-09-15: compose the Registry99 frozen Reflections operations into the sole Admin request owner.
 # [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    PostgreSQL sink, and publisher lifecycle around the database.
@@ -177,9 +178,11 @@ app = FastAPI(
 async def startup_admin_request_auth():
     """Bind the sole server-owned OAuth request/data owner; missing settings fail closed."""
     from services.admin_data import AdminDataConfig
-    from services.admin_data.request_auth import AdminRequestAuth
+    from services.admin_data.request_auth import create_production_admin_request_auth
 
-    app.state.admin_request_auth = AdminRequestAuth(AdminDataConfig.from_env())
+    app.state.admin_request_auth = create_production_admin_request_auth(
+        AdminDataConfig.from_env()
+    )
 
 
 print(f"🧾 Backend version: {BACKEND_VERSION}")

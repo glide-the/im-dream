@@ -207,6 +207,7 @@
 #                    message, then return a normal resume Turn continuation.
 # [Sync] 2026-09-01: derive one fresh server-owned stale-project cleanup scope
 #                    for the marked repair Turn and pass it only to PreToolUse.
+# [Sync] 2026-09-15: accept the explicit Reflections RTA owner through the shared server persistence marker.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -287,7 +288,7 @@ from services.story_workspace.agent_integration import (
 )
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
-from services.admin_data.turn_persistence import AdminTurnPersistence
+from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.errors import configuration_invalid
 from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
 from services.story_workspace.dream_artifact_turn_hook import (
@@ -1423,7 +1424,7 @@ class ClaudeAgentRunRequest:
     # Public ingress supplies an immutable Admin-derived snapshot, including
     # ordinary-Chat null. It is absent from the browser DTO and SDK options.
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
-    admin_turn_persistence: AdminTurnPersistence | None = field(default=None, repr=False)
+    admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
@@ -1589,7 +1590,7 @@ class ClaudeAgentService:
             platform_model_resolver or resolve_platform_model
         )
         # Test harnesses may inject an authorized snapshot reader. The normal
-        # composition leaves this unset and must supply AdminTurnPersistence.
+        # composition leaves this unset and must supply a server persistence owner.
         self._system_config_reader = system_config_reader
         self._claude_code_runtime_env_provider = (
             claude_code_runtime_env_provider or (lambda: {})
@@ -1627,7 +1628,7 @@ class ClaudeAgentService:
     async def _thread_record(request: ClaudeAgentRunRequest) -> dict | None:
         persistence = request.admin_turn_persistence
         if persistence is not None:
-            if not isinstance(persistence, AdminTurnPersistence):
+            if not isinstance(persistence, AdminAgentTurnPersistence):
                 raise ValueError("Invalid server persistence owner")
             row = await asyncio.to_thread(persistence.thread, actor_id=request.user_id, thread_id=request.thread_id)
             return row.model_dump() if row is not None else None
@@ -1637,7 +1638,7 @@ class ClaudeAgentService:
     async def _save_sdk_session(request: ClaudeAgentRunRequest, session_id: str) -> None:
         persistence = request.admin_turn_persistence
         if persistence is not None:
-            if not isinstance(persistence, AdminTurnPersistence):
+            if not isinstance(persistence, AdminAgentTurnPersistence):
                 raise ValueError("Invalid server persistence owner")
             await asyncio.to_thread(persistence.update_session, actor_id=request.user_id, thread_id=request.thread_id,
                 session_id=session_id, contract_version=_AGENT_RUNTIME_CONTRACT_VERSION)
@@ -1666,7 +1667,7 @@ class ClaudeAgentService:
         # cached system_prompt, while the remaining flags feed AgentRunOptions
         # and per-thread workspace sandbox settings.
         persistence = request.admin_turn_persistence
-        if isinstance(persistence, AdminTurnPersistence):
+        if isinstance(persistence, AdminAgentTurnPersistence):
             sys_cfg = await asyncio.to_thread(
                 persistence.system_config,
                 actor_id=request.user_id,
@@ -1680,7 +1681,7 @@ class ClaudeAgentService:
             raise configuration_invalid()
         session_projection_env = (
             persistence.session_projection_child_env()
-            if isinstance(persistence, AdminTurnPersistence)
+            if isinstance(persistence, AdminAgentTurnPersistence)
             else {}
         )
         system_config_loaded = True
@@ -1760,7 +1761,7 @@ class ClaudeAgentService:
                     state.session_id,
                 )
             recent_sessions: list[dict[str, Any]] = []
-            if isinstance(persistence, AdminTurnPersistence):
+            if isinstance(persistence, AdminAgentTurnPersistence):
                 recent_session_dtos = await asyncio.to_thread(
                     persistence.recent_sessions,
                     actor_id=request.user_id,
@@ -2707,7 +2708,7 @@ class ClaudeAgentService:
         """
         persistence = execution.request.admin_turn_persistence
         if persistence is not None:
-            if not isinstance(persistence, AdminTurnPersistence):
+            if not isinstance(persistence, AdminAgentTurnPersistence):
                 raise ValueError("Invalid server persistence owner")
             message_id = execution.request.message_id or str(uuid4())
             parts = list(execution.request.message_parts) if execution.request.message_parts else [{"type": "text", "text": ""}]
@@ -2972,7 +2973,7 @@ class ClaudeAgentService:
         history_projection_version: int | None = None) -> None:
         persistence = request.admin_turn_persistence
         if persistence is not None:
-            if not isinstance(persistence, AdminTurnPersistence):
+            if not isinstance(persistence, AdminAgentTurnPersistence):
                 raise ValueError("Invalid server persistence owner")
             persistence.persist_assistant(actor_id=request.user_id, thread_id=request.thread_id, message_id=str(uuid4()),
                 parts=parts, metadata=metadata, history_final_text=history_final_text,

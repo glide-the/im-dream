@@ -23,6 +23,7 @@
 # [Sync] 2026-09-15: register OAuth and persistence-grant SystemConfig consumers.
 # [Sync] 2026-09-15: register the three OAuth-only Reflections section-config operations.
 # [Sync] 2026-09-15: derive the turn Session broker transport bounds from Admin HTTP configuration.
+# [Sync] 2026-09-15: bind the Registry99 Reflections contract only in the production owner factory.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -56,6 +57,12 @@ from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 from .workspace_data import ENSURE_DEFAULT_WORKSPACE
 from .system_config_data import SYSTEM_CONFIG_OPERATIONS
 from .reflections_config_data import REFLECTIONS_SECTION_CONFIG_OPERATIONS
+from .reflection_task_data import (
+    AdminReflectionsData,
+    AdminReflectionsWorkerData,
+    FROZEN_REFLECTION_TASK_CONTRACTS,
+    ReflectionTaskContracts,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +87,14 @@ class AdminRequestActor:
 class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
-    def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
+    def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None,
+        verifier: AdminJWTVerifier | None = None,
+        reflection_task_contracts: ReflectionTaskContracts | None = None) -> None:
+        reflection_operations = (
+            reflection_task_contracts.operations
+            if reflection_task_contracts is not None
+            else ()
+        )
         self.client = client or AdminDataClient(
             config,
             operations=(
@@ -104,6 +118,7 @@ class AdminRequestAuth:
                 CURRENT_PROFILE,
                 RESOLVE_WORKFLOW_CONTEXT,
                 PERSIST_USER_MESSAGE,
+                *reflection_operations,
             ),
         )
         self._verifier = verifier or AdminJWTVerifier(config)
@@ -113,6 +128,11 @@ class AdminRequestAuth:
         self._workflow = AdminWorkflowData(self.client)
         self._delegations = AdminDelegationCreator(self.client)
         self._runtime_http_config = RuntimeHttpConfig.from_server_config(config)
+        self._reflection_task_contracts = reflection_task_contracts
+        self._session_broker_settings = SessionProjectionBrokerSettings(
+            timeout_seconds=self._runtime_http_config.timeout_seconds,
+            max_bytes=self._runtime_http_config.max_response_bytes,
+        )
         self._capabilities_ready = False
         self._lock = RLock()
 
@@ -184,11 +204,24 @@ class AdminRequestAuth:
             grant,
             self.client,
             runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config),
-            session_broker_settings=SessionProjectionBrokerSettings(
-                timeout_seconds=self._runtime_http_config.timeout_seconds,
-                max_bytes=self._runtime_http_config.max_response_bytes,
-            ),
+            session_broker_settings=self._session_broker_settings,
         )
+
+    def reflections_data(self) -> AdminReflectionsData:
+        contracts = self._reflection_task_contracts
+        if contracts is None:
+            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503)
+        return AdminReflectionsData(self.client, contracts)
+
+    def reflections_worker_data(self) -> AdminReflectionsWorkerData:
+        contracts = self._reflection_task_contracts
+        if contracts is None:
+            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503)
+        return AdminReflectionsWorkerData(self.client, contracts)
+
+    @property
+    def session_broker_settings(self) -> SessionProjectionBrokerSettings:
+        return self._session_broker_settings
 
     def editor_runtime(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution,
         request_id: str, *, initial_session_id: str | None) -> AdminEditorRuntime:
@@ -208,3 +241,19 @@ class AdminRequestAuth:
             with self._lock:
                 self._capabilities_ready = False
             raise
+
+
+def create_production_admin_request_auth(
+    config: AdminDataConfig,
+    *,
+    client: AdminDataClient | None = None,
+    verifier: AdminJWTVerifier | None = None,
+) -> AdminRequestAuth:
+    """Compose the server owner with the code-frozen Registry99 Reflections table."""
+
+    return AdminRequestAuth(
+        config,
+        client=client,
+        verifier=verifier,
+        reflection_task_contracts=FROZEN_REFLECTION_TASK_CONTRACTS,
+    )
