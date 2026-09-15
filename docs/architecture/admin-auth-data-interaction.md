@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: specify user and Thread SystemConfig operations, ordering and fail-closed consumers. -->
+<!-- [Sync] 2026-09-15: specify Reflections custom-config operations and Thread-to-config-to-filesystem ordering. -->
 <!-- [Sync] 2026-09-15: public Editor tools use exact Admin purpose grants, operations and original-ID receipts; stdio DB credentials are removed. -->
 <!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound turn owner; internal dispatcher SQL remains open. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
@@ -185,6 +186,8 @@ sequenceDiagram
 公开Chat在Thread/message校验后使用current OAuth读取一份用户snapshot，并同时提供给模型选择和附件处理。活动turn使用Factory持有的`AdminTurnPersistence`，以同一actor/Thread、authoritative Run和`server-persistence` grant调用Thread SystemConfig；此读取与user/Session/assistant写共享关闭排空锁。配置必须在Workflow mapper、prompt、Workspace、文件同步和Runtime options之前成功；Admin unavailable、合同漂移或坏JSON均终止该路径，不保留Dream DB/default fallback。Gateway selector只接受显式authorized snapshot；缺少turn owner与reader的内部dispatcher在映射上下文前返回配置错误，等待其生产owner接线。
 
 全部公开Workspace文件入口在执行文件系统调用前读取current OAuth SystemConfig。list/upload/delete/move先做请求参数检查，再读配置；content/download先验证Thread所有权，再读配置，然后执行Mode、路径、realpath/no-symlink与文件操作。这样缺失Thread仍为404，而配置不可用安全返回503，且不会先访问共享FS。
+
+Reflections用户自定义分区配置由registered83的`reflections-section-config.get/save/delete`提供，三项操作只接受current request OAuth。公开GET在Dream把Admin返回的partial prompt对象合并到静态default，并生成display与`usedCustomConfig`；PUT由Dream过滤五个允许文件名和空白内容后保存raw JSON；DELETE保持原`reset:true`回复。`memory-init`先调用Admin Chat确认Thread归属，再读自定义配置，最后执行既有路径检查和共享FS写入；任一身份、capability或配置错误都发生在FS之前。后台Reflections task没有已发布的可续期grant，仍保留旧配置reader和task/result数据库路径，不能据三项OAuth操作声明完整Reflections迁移完成。
 
 资源`default`由Dream配置提供，`desired`仅Admin持久化，`effective/revision`由Dream独立provider/composition的LKG拥有。合法更高revision替换；同rev同值仅diagnostics，同rev异值/回滚invalid；unavailable保留LKG。四值为JSON/TS正安全整数，组合memory bytes精确，不能把技术边界包装成产品配额或用0关闭保护。turn主路径不加policy HTTP查询。
 

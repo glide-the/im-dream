@@ -12,6 +12,7 @@
 # Ink & Memory API Documentation
 
 > [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
+> [Sync] 2026-09-15: Reflections config GET/PUT/DELETE and memory-init ownership/config reads use Admin OAuth operations before filesystem access.
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
 > authorization, the server verifies the DB Claude ID in the current Runtime
 > project. Missing records start a fresh Claude session in the same business
@@ -408,6 +409,46 @@ application does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths
 This runtime-only directory is prepared even when Workspace Mode is disabled;
 that does not initialize the full workspace, pass `cwd`, inject workspace
 context, or expose file surfaces.
+
+---
+
+## Reflections Section Configuration
+
+All routes require the normal Dream bearer token. `section` is one of
+`echoes`, `traits`, or `patterns`.
+
+### GET `/api/reflections/config/{section}`
+
+Reads the user's custom prompt-file object through Admin
+`reflections-section-config.get`, merges accepted files over Dream's static
+section defaults, and returns the display fields, `usedCustomConfig`, and the
+effective `prompt_files`. Invalid or corrupt Admin data fails closed.
+
+### PUT `/api/reflections/config/{section}`
+
+Accepts `{ "prompt_files": { "WORKFLOW.md": "..." } }`. Dream trims non-empty
+content and keeps only the five supported prompt filenames, then sends the raw
+JSON object through Admin `reflections-section-config.save`. The response keeps
+the existing `{ saved, section, updatedFiles }` shape. An unknown write result
+is recovered only with the original request ID and is never resent.
+
+### DELETE `/api/reflections/config/{section}`
+
+Calls Admin `reflections-section-config.delete` and returns the existing
+`{ "reset": true, "section": "..." }` response whether or not a custom row
+previously existed.
+
+### POST `/api/reflections/memory-init`
+
+Accepts `{ "threadId": "...", "section": "echoes" }`. After request and
+section validation, Dream uses Admin Chat data to confirm that the current user
+owns the Thread, reads the custom section configuration through Admin, merges
+it over static defaults, and writes the five prompt files plus
+`memory/procedural/analysis_state.json`. A missing Thread returns `404`.
+Authentication, ownership, capability, or configuration failure occurs before
+filesystem access. The async Reflections task APIs retain their separate
+database-backed task/result lifecycle until a background Admin authority is
+published.
 
 ---
 

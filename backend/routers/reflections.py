@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume reflections_config, database, workspace libs, and shared auth dependency.
+# [Input] Consume reflections_config, typed Admin section/Thread reads, remaining task database APIs, workspace libs, and shared auth.
 # [Output] Register Reflections endpoints:
 #          POST /api/reflections/memory-init      — section memory workspace init
 #          GET  /api/reflections/config/{section} — read effective section config
@@ -11,6 +11,7 @@
 # [Sync] 2026-06-06: add GET/PUT/DELETE /api/reflections/config/{section} for
 #                    per-user custom prompt file editing; memory-init now prefers
 #                    user config over static default.
+# [Sync] 2026-09-15: route public section config and memory-init ownership through Admin; task persistence remains pending.
 """Reflections analysis router.
 
 Endpoints
@@ -49,7 +50,16 @@ from reflections_agent import (
 )
 from reflections_config import REFLECTIONS_SECTION_CONFIGS, list_sections, get_section_config
 
-from .deps import get_current_user
+from services.admin_data.chat_data import AdminChatData
+from services.admin_data.chat_models import ThreadIdInputDTO
+from services.admin_data.reflections_config_data import (
+    AdminReflectionsSectionConfigData,
+    ReflectionsSectionInputDTO,
+    ReflectionsSectionSaveInputDTO,
+)
+from services.admin_data.request_auth import AdminRequestAuth
+
+from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
 logger = logging.getLogger(__name__)
 
@@ -115,31 +125,6 @@ def _get_workspace_root() -> Path:
     return Path(tempfile.gettempdir()) / "ink-agent-workspaces"
 
 
-def _effective_prompt_files(user_id: int, section: str) -> dict[str, str]:
-    """Return the effective prompt_files for *section* for *user_id*.
-
-    Priority:
-      1. User's custom config from ``reflections_section_configs`` DB table.
-      2. Static default from ``reflections_config.py``.
-
-    Custom config may be partial — only files present in the user config are
-    overridden; the rest are filled from the static default.
-    """
-    static_cfg = get_section_config(section)
-    static_files: dict[str, str] = static_cfg.get("prompt_files", {})
-
-    user_files = database.get_reflections_section_config(user_id, section)
-    if not user_files:
-        return static_files
-
-    # Merge: user overrides static defaults file-by-file.
-    merged = dict(static_files)
-    for filename, content in user_files.items():
-        if filename in _VALID_PROMPT_FILES and isinstance(content, str) and content.strip():
-            merged[filename] = content.strip()
-    return merged
-
-
 def _write_section_memory_workspace(thread_id: str, prompt_files: dict[str, str]) -> Path:
     """Write prompt files into the thread workspace memory/ directory.
 
@@ -192,6 +177,7 @@ def _write_section_memory_workspace(thread_id: str, prompt_files: dict[str, str]
 async def reflections_memory_init(
     body: ReflectionsMemoryInitRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Initialise the procedural memory workspace for a Reflections section analysis.
 
@@ -213,13 +199,20 @@ async def reflections_memory_init(
             detail={"error": f"Invalid section '{section}'. Must be one of: {sorted(_VALID_SECTIONS)}"},
         )
 
-    user_id = int(current_user["user_id"])
-    thread = database.get_chat_thread(thread_id, user_id)
-    if thread is None:
+    thread = await invoke_admin_operation(
+        current_user,
+        AdminChatData(owner.client).get_thread,
+        ThreadIdInputDTO(thread_id=thread_id),
+    )
+    if thread.thread is None:
         raise HTTPException(status_code=404, detail={"error": "Thread not found"})
 
     # Resolve effective config (user custom takes priority).
-    user_custom = database.get_reflections_section_config(user_id, section)
+    user_custom = await invoke_admin_operation(
+        current_user,
+        AdminReflectionsSectionConfigData(owner.client).get,
+        ReflectionsSectionInputDTO(section=section),
+    )
     static_cfg = get_section_config(section)
     static_files: dict[str, str] = static_cfg.get("prompt_files", {})
 
@@ -457,6 +450,7 @@ async def stream_reflections_task_events_endpoint(
 async def get_section_config_endpoint(
     section: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Return the effective section config for the current user.
 
@@ -481,8 +475,11 @@ async def get_section_config_endpoint(
             detail={"error": f"Invalid section. Must be one of: {sorted(_VALID_SECTIONS)}"},
         )
 
-    user_id = int(current_user["user_id"])
-    user_custom = database.get_reflections_section_config(user_id, section)
+    user_custom = await invoke_admin_operation(
+        current_user,
+        AdminReflectionsSectionConfigData(owner.client).get,
+        ReflectionsSectionInputDTO(section=section),
+    )
     static_cfg = get_section_config(section)
     static_files: dict[str, str] = static_cfg.get("prompt_files", {})
 
@@ -516,6 +513,7 @@ async def update_section_config_endpoint(
     section: str,
     body: SectionConfigUpdateRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Save user's custom prompt files for a section.
 
@@ -548,8 +546,14 @@ async def update_section_config_endpoint(
             detail={"error": f"No valid prompt file names. Accepted: {sorted(_VALID_PROMPT_FILES)}"},
         )
 
-    user_id = int(current_user["user_id"])
-    database.save_reflections_section_config(user_id, section, filtered)
+    await invoke_admin_operation(
+        current_user,
+        AdminReflectionsSectionConfigData(owner.client).save,
+        ReflectionsSectionSaveInputDTO(
+            section=section,
+            prompt_files_json=json.dumps(filtered, ensure_ascii=False),
+        ),
+    )
 
     return Response(
         content=json.dumps({
@@ -570,6 +574,7 @@ async def update_section_config_endpoint(
 async def reset_section_config_endpoint(
     section: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> Response:
     """Reset user's custom config for a section back to the static default.
 
@@ -581,8 +586,11 @@ async def reset_section_config_endpoint(
             detail={"error": f"Invalid section. Must be one of: {sorted(_VALID_SECTIONS)}"},
         )
 
-    user_id = int(current_user["user_id"])
-    database.delete_reflections_section_config(user_id, section)
+    await invoke_admin_operation(
+        current_user,
+        AdminReflectionsSectionConfigData(owner.client).delete,
+        ReflectionsSectionInputDTO(section=section),
+    )
 
     return Response(
         content=json.dumps({"reset": True, "section": section}),

@@ -5,6 +5,7 @@
 # [Sync] 2026-06-25: add first-release Reflections-agent functional coverage.
 # [Sync] 2026-08-14: keep the explicit SQLite fixture outside the production
 #                    PostgreSQL registration/default-Free boundary.
+# [Sync] 2026-09-15: seed inert fixture password data without calling retired Dream authentication.
 
 from __future__ import annotations
 
@@ -24,7 +25,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import auth
 import database
 from llm_json_parser import try_parse_json_array
 from reflections_agent import ReflectionsTaskEngine, create_reflections_task, get_or_create_reflection_event_bus
@@ -100,11 +100,17 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         # registration boundary, whose PostgreSQL contract includes Admin-owned
         # billing tables and default-Free provisioning.
         fixture_connection = self.database_fixture.connect()
+        for statement in (
+            "ALTER TABLE chat_message ADD COLUMN history_final_text TEXT",
+            "ALTER TABLE chat_message ADD COLUMN history_process_available INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE chat_message ADD COLUMN history_projection_version INTEGER",
+        ):
+            fixture_connection.execute(statement)
         cursor = fixture_connection.execute(
             "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
             (
                 "reflections-agent@example.com",
-                auth.hash_password("secret123"),
+                "retired-auth-fixture",
                 "Reflections Agent",
             ),
         )

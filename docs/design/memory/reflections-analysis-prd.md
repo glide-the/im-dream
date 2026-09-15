@@ -6,6 +6,7 @@
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
 > [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 默认不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；如果当天已点击过或已有当天报告，再次点击必须弹窗确认是否重新分析并选择可分析日记；保留分区独立分析；分析完成后使用 ReflectionBlogPage wrapper 展示结果；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈；echoes / traits / patterns 输出均遵循当前前端语言。
+> [Sync] 2026-09-15: 现行公开配置改由Admin OAuth操作持久化；memory-init按Thread归属、custom配置、共享FS顺序执行，后台task数据库缺口单独保留。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -50,14 +51,14 @@ Reflections 页面是 Ink & Memory 的自我认知功能入口。它通过分析
         └── analysis_state.json       ← 分析状态（section, completed, results_count）
 ```
 
-五个 Markdown 文件由 `reflections_config.py` 中对应分区的 `prompt_files` 字段提供。  
+五个 Markdown 文件以 `reflections_config.py` 中对应分区的 `prompt_files` 为静态default，并叠加Admin保存的用户自定义partial配置。Dream只接受五个已知文件名和非空文本。
 每次分析创建新 thread（一次性会话），分析完成后工作空间保留（供调试），不主动删除。
 
 ---
 
 ## 4. 分区配置文件详细内容
 
-配置存储于 `backend/reflections_config.py`，数据结构为：
+静态default存储于 `backend/reflections_config.py`，数据结构为：
 
 ```python
 REFLECTIONS_SECTION_CONFIGS: dict[str, dict] = {
@@ -79,6 +80,8 @@ REFLECTIONS_SECTION_CONFIGS: dict[str, dict] = {
     "patterns": { ... },
 }
 ```
+
+用户自定义配置通过Admin `reflections-section-config.get/save/delete`保存。公开GET把nullable partial对象合并到上述静态default并返回`usedCustomConfig`；PUT过滤文件名与空白后保存raw JSON；DELETE保持幂等的`reset:true`公开响应。`memory-init`先用Admin `chat-thread.get`确认当前用户拥有Thread，再读取custom配置，最后写入工作区。身份、合同、配置或Thread检查失败时不访问共享FS。后台Reflections task尚无对应长期授权，仍保留旧配置reader和task/result数据库路径。
 
 ### 4.1 共享输出契约（三分区通用，追加到 WORKFLOW.md 末尾）
 
@@ -971,7 +974,7 @@ savedReports 数组（Dashboard 历史报告网格）
 |---|---|
 | Thread 生命周期 | 每次分析创建新 thread，不复用，不保留对话历史 |
 | 工作空间清理 | 分析完成后 workspace 保留（供调试），不主动删除 |
-| memory-init 失败 | 非致命：Agent 无 `<memory_context>` 时跳过 memory 操作，仍按嵌入指令分析 |
+| memory-init 失败 | 请求失败并停止本次初始化；身份、Thread或配置失败前不访问共享FS |
 | sessions_context 上限 | 最多 80 条会话；每条只含 sessionId/date/title/labels，标题截取前 120 字符，不含正文 |
 | JSON 输出数量 | 3–6 个结果，多余的前端不做截断 |
 | 结果解析容错 | 支持剥离 markdown fence（```json ... ```），定位 `[...]` 区间 |
@@ -981,7 +984,7 @@ savedReports 数组（Dashboard 历史报告网格）
 
 ## 14. 扩展性设计
 
-新增分区只需在 `reflections_config.py` 中添加一个 key：
+新增分区需要同时扩展Dream静态配置、Admin公开section DTO/存储约束与前端渲染；只增加本地key不会通过现行closed contract：
 
 ```python
 REFLECTIONS_SECTION_CONFIGS["new_section"] = {
@@ -1000,8 +1003,7 @@ REFLECTIONS_SECTION_CONFIGS["new_section"] = {
 }
 ```
 
-后端 `POST /api/reflections/memory-init` 自动接受新 section（`_VALID_SECTIONS` 从 `list_sections()` 动态生成）。  
-前端 `AnalysisView.tsx` 需手动添加分区渲染块（当前为静态布局）。
+Dream路由的`_VALID_SECTIONS`会从`list_sections()`更新，但Admin consumer的closed section类型和发布operation仍需同一变更。前端 `AnalysisView.tsx` 也需手动添加分区渲染块（当前为静态布局）。
 
 ---
 
@@ -1010,7 +1012,8 @@ REFLECTIONS_SECTION_CONFIGS["new_section"] = {
 | 区域 | 归属文件 |
 |---|---|
 | 三分区静态默认配置（5 文件内容） | `backend/reflections_config.py` |
-| 用户自定义配置 DB 表 + 查询函数 | `backend/database.py` (`reflections_section_configs` 表) |
+| 用户自定义配置公开持久化 | Admin `reflections-section-config.get/save/delete` + `backend/services/admin_data/reflections_config_data.py` |
+| 后台task尚未迁移的自定义配置读取 | `backend/reflections_agent.py` + `backend/database.py` |
 | Memory 初始化端点（优先用户配置） | `backend/routers/reflections.py` → `POST /api/reflections/memory-init` |
 | 配置读写端点 | `backend/routers/reflections.py` → `GET/PUT/DELETE /api/reflections/config/{section}` |
 | 分析编排 + system_prompt 构造 + 解析 | `frontend/app/_dream/api/voiceApi.ts` → `analyzeReflectionsSection` |

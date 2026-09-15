@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: route user and Thread SystemConfig persistence through exact Admin contracts. -->
+<!-- [Sync] 2026-09-15: route public Reflections custom configuration through registered83 Admin operations. -->
 <!-- [Sync] 2026-09-15: public complete/partial assistant persistence uses the bound Admin turn owner and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
@@ -85,6 +86,8 @@ Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifie
 Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, first-login writes and background preference context remain separate domains; SystemConfig is handled by the dedicated operations below.
 
 Settings GET/PUT now use Admin's `user-system-config.get/patch`; PUT returns a fresh independent read after a confirmed patch. Public Chat reads one OAuth-bound snapshot and reuses it for model selection and attachments. Active turns use `thread-system-config.get` through the exact Thread persistence grant before prompt, Workspace or Runtime assembly. Corrupt or unavailable configuration fails closed without a Dream database fallback. Gateway model selection requires an explicit authorized snapshot, so ownerless internal dispatch remains a named migration dependency.
+
+Public Reflections configuration GET/PUT/DELETE now uses three OAuth-bound Admin operations. `memory-init` confirms the Chat Thread owner through Admin, reads the user's custom section configuration, merges it with Dream's static prompt defaults, and only then writes the shared workspace. The ownerless background Reflections worker still reads its custom configuration and task/result state from the remaining Dream database path.
 
 The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
 

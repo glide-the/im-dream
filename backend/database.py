@@ -2,6 +2,7 @@
 # [Sync] 2026-09-15: reuse the unchanged pure Voice Memory projection outside the database module.
 # [Sync] 2026-09-15: nine old social helpers refuse before I/O; public friends use Admin DTOs.
 # [Sync] 2026-09-15: retire direct SystemConfig SQL; all production consumers use Admin contracts.
+# [Sync] 2026-09-15: retire Reflections section-config writes; the ownerless background reader remains pending.
 # [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
@@ -3418,44 +3419,17 @@ def get_reflections_section_config(user_id: int, section: str) -> Optional[dict]
 
 
 def save_reflections_section_config(user_id: int, section: str, prompt_files: dict) -> None:
-    """Upsert user's custom prompt_files for *section*.
+    """Reject the retired Dream-side Reflections configuration writer."""
 
-    ``prompt_files`` is a dict of ``{filename: content}`` for the five memory
-    workspace prompt files.  Only known filenames are accepted by the route
-    layer; this function stores whatever is provided without validation.
-    """
-    db = get_db()
-    try:
-        db.execute(
-            """
-            INSERT INTO reflections_section_configs (user_id, section, prompt_files, updated_at)
-            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id, section) DO UPDATE SET
-                prompt_files = excluded.prompt_files,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (user_id, section, json.dumps(prompt_files, ensure_ascii=False)),
-        )
-        db.commit()
-    finally:
-        db.close()
+    del user_id, section, prompt_files
+    raise RuntimeError("Reflections section configuration persistence is owned by Admin")
 
 
 def delete_reflections_section_config(user_id: int, section: str) -> bool:
-    """Delete user's custom config for *section*, reverting to the static default.
+    """Reject the retired Dream-side Reflections configuration deleter."""
 
-    Returns True if a row was deleted, False if none existed.
-    """
-    db = get_db()
-    try:
-        cursor = db.execute(
-            "DELETE FROM reflections_section_configs WHERE user_id = %s AND section = %s",
-            (user_id, section),
-        )
-        db.commit()
-        return cursor.rowcount > 0
-    finally:
-        db.close()
+    del user_id, section
+    raise RuntimeError("Reflections section configuration persistence is owned by Admin")
 
 
 # ---------------------------------------------------------------------------

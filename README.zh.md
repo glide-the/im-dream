@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: 用户与Thread SystemConfig持久化改用精确Admin合同。 -->
+<!-- [Sync] 2026-09-15: 公开Reflections自定义配置改用registered83 Admin operations。 -->
 <!-- [Sync] 2026-09-15: 公开complete/partial assistant持久化使用绑定的Admin turn owner与原receipt恢复。 -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
@@ -84,6 +85,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、first-login写与后台偏好上下文仍是独立领域；SystemConfig由下述专用operation处理。
 
 Settings GET/PUT 已使用 Admin 用户 SystemConfig operation；PUT 确认 patch 后执行一次独立 fresh read。公开 Chat 读取一份 OAuth snapshot，并复用于模型选择和附件。活动 turn 在 prompt、Workspace 或 Runtime 组装前通过精确 Thread persistence grant 读取。配置损坏或不可用时直接失败，不回退 Dream 数据库。Gateway 模型选择必须收到显式授权 snapshot，因此缺少 owner 的内部 dispatcher 仍是明确迁移依赖。
+
+公开 Reflections 配置 GET/PUT/DELETE 已使用三项 OAuth Admin operation。`memory-init` 先通过 Admin 确认 Chat Thread 归属，再读取用户自定义分区配置，与 Dream 静态提示词默认值合并，最后写入共享工作区。缺少长期 owner 的后台 Reflections worker 仍从 Dream 剩余数据库路径读取自定义配置及 task/result 状态。
 
 共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
 
