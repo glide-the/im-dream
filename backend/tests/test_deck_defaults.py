@@ -1,22 +1,21 @@
-# [Input] Screenplay Deck policy, Deck-default service, persistence helpers, and
-#         Deck routes.
+# [Input] Screenplay Deck policy, legacy persistence helpers and the pure local default-plugin verifier.
 # [Output] Verify one screenplay-role default, retirement visibility, missing-default
 #          creation, zero-ref repair, community validity, and atomic rollback.
 # [Pos] Deck default policy and creation contract test in backend/tests
 # [Sync] 2026-08-14: cover new provisioning and non-destructive legacy repair.
 # [Sync] 2026-08-14: require the active system default in the collectable community query.
 # [Sync] 2026-08-15: cover idempotent legacy-account default creation under actor lock.
+# [Sync] 2026-09-15: verify Registry104 candidates locally without opening Dream PostgreSQL.
 
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
 
 import config
 import database
-from routers import voices as voices_router
+from services.admin_data.deck_default_data import DefaultPluginInstallationDTO
 from services.deck import defaults as deck_defaults
 
 
@@ -132,7 +131,7 @@ def _verified_installation() -> dict[str, Any]:
         "package_name": "drama-forge",
         "marketplace": "drama-studio",
         "resolved_version": "1.0.1",
-        "artifact_digest": "sha256:verified",
+        "artifact_digest": f"sha256:{'a' * 64}",
         "status": "ready",
     }
 
@@ -351,66 +350,40 @@ def test_create_deck_rolls_back_when_default_plugin_changes(monkeypatch) -> None
 
 def test_default_service_resolves_exact_verified_installation(monkeypatch) -> None:
     installation = _verified_installation()
-    fake_db = _CreateDeckDb(installation)
-
-    class _InstallService:
-        def __init__(self, db) -> None:
-            assert db is fake_db
-
-        def list_installations(self):
-            return [installation]
-
-        def verify_installation_artifact(self, record) -> bool:
-            return record is installation
-
-        def check_cli_compatibility(self, record) -> bool:
-            return record is installation
-
-    monkeypatch.setattr(deck_defaults.database, "get_db", lambda: fake_db)
-    monkeypatch.setattr(deck_defaults, "PluginInstallService", _InstallService)
-
-    assert deck_defaults.resolve_default_deck_plugin_ref() == _default_ref()
-    assert fake_db.closed is True
-
-
-def test_reconcile_route_delegates_to_default_service(monkeypatch) -> None:
-    expected = {
-        "deck_id": "screenplay-user-deck",
-        "reconciled": True,
-        "reason": "missing_ref",
-    }
-    actors: list[int] = []
+    candidate = DefaultPluginInstallationDTO(
+        plugin_installation_id=installation["id"],
+        package_name=installation["package_name"],
+        marketplace=installation["marketplace"],
+        resolved_version=installation["resolved_version"],
+        artifact_digest=installation["artifact_digest"],
+        compatibility_json='{"claude_code":">=1.0.0"}',
+    )
+    checked: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        voices_router,
-        "reconcile_default_screenplay_deck_plugin",
-        lambda user_id: actors.append(user_id) or expected,
+        deck_defaults.PluginInstallService,
+        "verify_installation_artifact",
+        staticmethod(lambda record: checked.append(record) or True),
+    )
+    monkeypatch.setattr(
+        deck_defaults.PluginInstallService,
+        "check_cli_compatibility",
+        staticmethod(lambda record: checked.append(record) or True),
     )
 
-    assert voices_router.reconcile_deck_defaults(
-        current_user={"user_id": 7},
-    ) == expected
-    assert actors == [7]
+    assert deck_defaults.resolve_default_deck_plugin_ref(candidate).model_dump() == _default_ref()
+    assert checked == [candidate.model_dump(), candidate.model_dump()]
 
 
-def test_router_fails_closed_without_default_plugin(monkeypatch) -> None:
-    monkeypatch.setattr(
-        voices_router,
-        "resolve_default_deck_plugin_ref",
-        lambda: (_ for _ in ()).throw(voices_router.DefaultDeckPluginUnavailable()),
+@pytest.mark.parametrize("failure", ["missing", "artifact", "cli"])
+def test_default_service_fails_closed_without_local_evidence(monkeypatch, failure: str) -> None:
+    installation = _verified_installation()
+    candidate = DefaultPluginInstallationDTO(
+        plugin_installation_id=installation["id"], package_name=installation["package_name"],
+        marketplace=installation["marketplace"], resolved_version=installation["resolved_version"],
+        artifact_digest=installation["artifact_digest"], compatibility_json="{}",
     )
-    created: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        voices_router.database,
-        "create_deck",
-        lambda *args, **kwargs: created.append(kwargs),
-    )
+    monkeypatch.setattr(deck_defaults.PluginInstallService, "verify_installation_artifact", staticmethod(lambda _record: failure != "artifact"))
+    monkeypatch.setattr(deck_defaults.PluginInstallService, "check_cli_compatibility", staticmethod(lambda _record: failure != "cli"))
 
-    with pytest.raises(HTTPException) as raised:
-        voices_router.create_deck(
-            voices_router.DeckCreateRequest(name="New Deck"),
-            current_user={"user_id": 7},
-        )
-
-    assert raised.value.status_code == 409
-    assert "drama-forge v1.0.1" in str(raised.value.detail)
-    assert created == []
+    with pytest.raises(deck_defaults.DefaultDeckPluginUnavailable):
+        deck_defaults.resolve_default_deck_plugin_ref(None if failure == "missing" else candidate)

@@ -1,82 +1,49 @@
-"""Resolve and reconcile the configured screenplay Deck Claude plugin.
+"""Verify the Admin-selected screenplay Deck Claude plugin on shared storage.
 
-[Input] Product Deck defaults, verified Claude plugin installations, and Deck
-        persistence helpers.
-[Output] Provide one reusable policy boundary for new Deck provisioning and
-         idempotent creation/repair of the actor's default screenplay Deck.
+[Input] Admin's closed six-field candidate plus the existing shared-artifact and CLI verifiers.
+[Output] Return the four-field immutable evidence accepted by Admin Deck writes, or fail closed.
 [Pos] Deck-default application service in backend/services/deck.
 [Sync] 2026-08-14: centralize drama-forge resolution and default-Deck repair.
 [Sync] 2026-08-15: default reconciliation now provisions a missing default for
                    legacy actors while preserving existing Decks and refs.
+[Sync] 2026-09-15: remove Dream SQL/config selection; Admin selects and rechecks policy while Dream verifies local bytes/CLI.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 try:
-    import config
-    import database
     from services.claude_plugin.install_service import PluginInstallService
+    from services.admin_data.deck_default_data import (
+        DefaultPluginEvidenceDTO,
+        DefaultPluginInstallationDTO,
+    )
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend import config, database
     from backend.services.claude_plugin.install_service import PluginInstallService
+    from backend.services.admin_data.deck_default_data import (
+        DefaultPluginEvidenceDTO,
+        DefaultPluginInstallationDTO,
+    )
 
 
 class DefaultDeckPluginUnavailable(RuntimeError):
     """The configured Deck plugin has no verified ready installation."""
 
 
-def resolve_default_deck_plugin_ref() -> dict[str, Any]:
-    """Resolve the configured package/version after integrity checks."""
+def resolve_default_deck_plugin_ref(
+    installation: DefaultPluginInstallationDTO | None,
+) -> DefaultPluginEvidenceDTO:
+    """Verify Admin's candidate against shared bytes and the current Claude CLI."""
 
-    package_name = config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME
-    resolved_version = config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION
-    if not package_name or not resolved_version:
+    if installation is None:
         raise DefaultDeckPluginUnavailable()
-
-    db = database.get_db()
-    try:
-        service = PluginInstallService(db)
-        installation = next(
-            (
-                item
-                for item in service.list_installations()
-                if item.get("package_name") == package_name
-                and item.get("resolved_version") == resolved_version
-                and item.get("status") == "ready"
-            ),
-            None,
-        )
-        if installation is None:
-            raise DefaultDeckPluginUnavailable()
-        if not service.verify_installation_artifact(installation):
-            raise DefaultDeckPluginUnavailable()
-        if not service.check_cli_compatibility(installation):
-            raise DefaultDeckPluginUnavailable()
-        return {
-            "plugin_installation_id": installation["id"],
-            "package_name": installation["package_name"],
-            "resolved_version": installation["resolved_version"],
-            "artifact_digest": installation["artifact_digest"],
-        }
-    finally:
-        db.close()
-
-
-def provision_default_screenplay_deck(user_id: int) -> str:
-    """Create the user's default screenplay Deck with its default plugin."""
-
-    return database.auto_fork_system_decks(
-        user_id,
-        default_plugin_ref=resolve_default_deck_plugin_ref(),
-    )
-
-
-def reconcile_default_screenplay_deck_plugin(user_id: int) -> dict[str, Any]:
-    """Ensure the actor default exists and repair only its empty plugin refs."""
-
-    return database.reconcile_default_screenplay_deck_plugin_ref(
-        user_id,
-        default_plugin_ref=resolve_default_deck_plugin_ref(),
+    record = installation.model_dump()
+    if not PluginInstallService.verify_installation_artifact(record):
+        raise DefaultDeckPluginUnavailable()
+    if not PluginInstallService.check_cli_compatibility(record):
+        raise DefaultDeckPluginUnavailable()
+    return DefaultPluginEvidenceDTO(
+        plugin_installation_id=installation.plugin_installation_id,
+        package_name=installation.package_name,
+        resolved_version=installation.resolved_version,
+        artifact_digest=installation.artifact_digest,
     )

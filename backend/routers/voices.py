@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # [Sync] 2026-09-15: both public Deck list modes use Admin without default or filesystem side effects.
 # [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
-# [Sync] 2026-09-15: four public Voice operations use Admin; Deck/default/plugin/internal data remains pending.
+# [Sync] 2026-09-15: four public Voice operations use Admin; Deck chat-context/internal data remains pending.
 # [Sync] 2026-09-15: five public Deck mutations use Admin; deletion keeps code-owned closed dependency messages.
-# [Input] Consume typed Admin public Deck/Voice writes, legacy Deck create/default APIs and the shared Deck-default service,
-#         and shared auth dependency.
+# [Sync] 2026-09-15: Deck create/default reconcile use Registry104 plus Dream's shared-artifact verifier.
+# [Input] Consume typed Admin public Deck/Voice operations, the local Deck-default verifier and shared auth dependency.
 # [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
 #          fails closed unless its configured default plugin ref is verified;
 #          default-team repair is explicit and idempotent.
@@ -20,7 +20,6 @@
 # [Sync] 2026-08-16: map preserved child/runtime Deck deletion dependencies to HTTP 409.
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
 
 import database
 import config
@@ -28,16 +27,22 @@ import config
 try:
     from services.deck.defaults import (
         DefaultDeckPluginUnavailable,
-        reconcile_default_screenplay_deck_plugin,
         resolve_default_deck_plugin_ref,
     )
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.services.deck.defaults import (
         DefaultDeckPluginUnavailable,
-        reconcile_default_screenplay_deck_plugin,
         resolve_default_deck_plugin_ref,
     )
 
+from services.admin_data.chat_models import ChatStrictDTO
+from services.admin_data.deck_default_data import (
+    AdminDeckDefaultData,
+    DeckCreateInputDTO,
+    DeckDefaultInputDTO,
+    DefaultPluginEvidenceDTO,
+    DefaultPluginResolveInputDTO,
+)
 from services.admin_data.deck_mutation_data import AdminDeckMutationData, DeckUpdateRequestDTO
 from services.admin_data.deck_detail_data import AdminDeckDetailData
 from services.admin_data.deck_list_data import AdminDeckListData, DeckListInputDTO
@@ -50,18 +55,30 @@ from services.admin_data.voice_data import (
 from services.admin_data.request_auth import AdminRequestAuth
 from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
-router = APIRouter()
+
+class _DeckRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Deck request"
 
 
-class DeckCreateRequest(BaseModel):
+router = APIRouter(route_class=_DeckRoute)
+
+
+class DeckCreateRequest(ChatStrictDTO):
     name: str
-    description: str = None
-    name_zh: str = None
-    name_en: str = None
-    description_zh: str = None
-    description_en: str = None
-    icon: str = None
-    color: str = None
+    description: str | None = None
+    name_zh: str | None = None
+    name_en: str | None = None
+    description_zh: str | None = None
+    description_en: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+    def domain_input(self, evidence: DefaultPluginEvidenceDTO) -> DeckCreateInputDTO:
+        return DeckCreateInputDTO(
+            **self.model_dump(),
+            order_index=None,
+            default_plugin_evidence=evidence,
+        )
 
 
 DeckUpdateRequest = DeckUpdateRequestDTO
@@ -85,23 +102,70 @@ async def list_decks(published: bool = False, current_user: dict = Depends(get_c
     return await invoke_admin_operation(current_user, data.list, DeckListInputDTO(community=published))
 
 
+def _deck_default_data(request: Request) -> AdminDeckDefaultData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckDefaultData(owner.client)
+
+
+def _default_deck_plugin_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=(
+            "Default Deck plugin "
+            f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
+            f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
+        ),
+    )
+
+
+def _deck_default_error(exc, request_id):
+    if (
+        not exc.outcome_unknown
+        and exc.status_code == 409
+        and exc.code == "DEFAULT_DECK_PLUGIN_UNAVAILABLE"
+    ):
+        raise _default_deck_plugin_unavailable()
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        },
+    )
+
+
+async def _verified_default_plugin(
+    current_user: dict,
+    data: AdminDeckDefaultData,
+) -> DefaultPluginEvidenceDTO:
+    resolved = await invoke_admin_operation(
+        current_user,
+        data.resolve,
+        DefaultPluginResolveInputDTO(),
+    )
+    try:
+        return resolve_default_deck_plugin_ref(resolved.installation)
+    except DefaultDeckPluginUnavailable:
+        raise _default_deck_plugin_unavailable() from None
+
+
 @router.post("/api/decks/defaults/reconcile")
-def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
+async def reconcile_deck_defaults(
+    current_user: dict = Depends(get_current_user),
+    data: AdminDeckDefaultData = Depends(_deck_default_data),
+):
     """Create a missing actor default or repair its empty verified plugin ref."""
 
-    try:
-        return reconcile_default_screenplay_deck_plugin(current_user["user_id"])
-    except (DefaultDeckPluginUnavailable, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
-            raise
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Default Deck plugin "
-                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
-                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
-            ),
-        ) from None
+    evidence = await _verified_default_plugin(current_user, data)
+    return await invoke_admin_operation(
+        current_user,
+        data.reconcile,
+        DeckDefaultInputDTO(default_plugin_evidence=evidence),
+        error_handler=_deck_default_error,
+    )
 
 
 def _deck_detail_data(request: Request) -> AdminDeckDetailData:
@@ -121,44 +185,22 @@ async def get_deck(deck_id: str, current_user: dict = Depends(get_current_user),
 
 
 @router.post("/api/decks")
-def create_deck(
-    request: DeckCreateRequest, current_user: dict = Depends(get_current_user)
+async def create_deck(
+    request: DeckCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    data: AdminDeckDefaultData = Depends(_deck_default_data),
 ):
     """Create a user Deck with its verified product-default Claude plugin."""
-    user_id = current_user["user_id"]
-    try:
-        default_plugin_ref = resolve_default_deck_plugin_ref()
-        deck_id = database.create_deck(
-            user_id,
-            name=request.name,
-            description=request.description,
-            name_zh=request.name_zh,
-            name_en=request.name_en,
-            description_zh=request.description_zh,
-            description_en=request.description_en,
-            icon=request.icon,
-            color=request.color,
-            default_plugin_ref=default_plugin_ref,
-        )
-    except (DefaultDeckPluginUnavailable, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
-            raise
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Default Deck plugin "
-                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
-                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
-            ),
-        ) from None
-    return {"deck_id": deck_id}
+    evidence = await _verified_default_plugin(current_user, data)
+    return await invoke_admin_operation(
+        current_user,
+        data.create,
+        request.domain_input(evidence),
+        error_handler=_deck_default_error,
+    )
 
 
-class _DeckMutationRoute(SafeRequestValidationRoute):
-    validation_error_detail = "Invalid Deck request"
-
-
-_deck_mutation_router = APIRouter(route_class=_DeckMutationRoute)
+_deck_mutation_router = APIRouter(route_class=_DeckRoute)
 
 
 def _deck_mutation_data(request: Request) -> AdminDeckMutationData:
