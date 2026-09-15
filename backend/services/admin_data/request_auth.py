@@ -27,6 +27,7 @@
 # [Sync] 2026-09-15: register Registry101 local-data import and first-login completion writes.
 # [Sync] 2026-09-15: register Registry103 current-user picture-history reads.
 # [Sync] 2026-09-15: register Registry104 default-plugin resolve and three evidence-bound Deck writes.
+# [Sync] 2026-09-15: register Registry105 Deck chat-context read for public Chat turns.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -63,6 +64,7 @@ from .reflections_config_data import REFLECTIONS_SECTION_CONFIG_OPERATIONS
 from .local_data_import import LOCAL_DATA_IMPORT_OPERATIONS
 from .picture_history_data import PICTURE_HISTORY_OPERATIONS
 from .deck_default_data import DECK_DEFAULT_OPERATIONS
+from .deck_chat_context_data import DECK_CHAT_CONTEXT_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -113,6 +115,7 @@ class AdminRequestAuth:
                 *LOCAL_DATA_IMPORT_OPERATIONS,
                 *PICTURE_HISTORY_OPERATIONS,
                 *DECK_DEFAULT_OPERATIONS,
+                *DECK_CHAT_CONTEXT_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

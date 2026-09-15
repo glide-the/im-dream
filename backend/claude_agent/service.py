@@ -11,6 +11,7 @@
 # [Sync] 2026-09-15: Editor writes and post-tool refresh use the turn-owned Admin runtime; stdio receives no DB or Admin credential.
 # [Sync] 2026-09-15: require fresh Thread SystemConfig from the bound Admin turn owner before context assembly.
 # [Sync] 2026-09-15: load recent Session projections only on prompt rebuild and fail before Runtime on Admin errors.
+# [Sync] 2026-09-15: reuse the public Registry105 Deck snapshot for Story Workspace prompt assembly.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -322,7 +323,8 @@ from libs.claude_agent_kit.types import (
     ToolEventPayload,
 )
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
-from services.deck.chat_context import DeckChatContextService
+from services.deck.chat_context import DeckChatContextAssembler, DeckChatContextService
+from services.admin_data.deck_chat_context_data import AdminDeckChatContextResolution
 from services.admin_gateway import GatewayModel, resolve_platform_model
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
@@ -601,6 +603,7 @@ async def _resolve_story_workspace_dream_deck_prompt(
     *,
     context: StoryWorkspaceDreamRunContext,
     actor_id: str | int,
+    admin_deck_chat_context: AdminDeckChatContextResolution | None = None,
 ) -> str:
     """Resolve the current Deck prompt in workspace-file mode.
 
@@ -610,6 +613,21 @@ async def _resolve_story_workspace_dream_deck_prompt(
     Dream asset turn.
     """
 
+    if admin_deck_chat_context is not None:
+        snapshot = admin_deck_chat_context.context_for(
+            actor_id=str(actor_id),
+            deck_id=context.deck_id,
+            voice_id=context.agent_id,
+        )
+        resolved = await DeckChatContextAssembler(
+            snapshot,
+            selected_voice_id=context.agent_id,
+        ).resolve(dream_mode=True)
+        return resolved.system_prompt
+
+    # Existing durable internal dispatchers do not yet carry request OAuth.
+    # Keep their legacy provider until their typed service identity is wired;
+    # the public Chat path always supplies the immutable Admin snapshot above.
     db = _db.get_db()
     try:
         resolved = await DeckChatContextService(db).resolve(
@@ -1426,6 +1444,12 @@ class ClaudeAgentRunRequest:
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
+    # Immutable Registry105 data snapshot. Browser DTOs cannot author it; the
+    # public route resolves it before persistence, admission, workspace or SSE.
+    admin_deck_chat_context: AdminDeckChatContextResolution | None = field(
+        default=None,
+        repr=False,
+    )
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -2060,6 +2084,7 @@ class ClaudeAgentService:
                 await _resolve_story_workspace_dream_deck_prompt(
                     context=dream_context,
                     actor_id=request.user_id,
+                    admin_deck_chat_context=request.admin_deck_chat_context,
                 )
             )
 

@@ -63,6 +63,7 @@
 #                    failures to retain the committed assistant and use the
 #                    existing typed workbench-sync error contract.
 # [Sync] 2026-09-15: inject SystemConfig only through the explicit test harness boundary.
+# [Sync] 2026-09-15: reuse the public Registry105 Deck DTO for Dream-mode prompt assembly without a second DB read.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -106,6 +107,10 @@ from libs.claude_agent_kit.types import (
 )
 from services.admin_gateway.models import GatewayModel
 from services.admin_data.session_models import SessionPreviewDTO
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextResolution,
+    DeckChatContextOutputDTO,
+)
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
@@ -145,6 +150,38 @@ class _FakeContextBuilder:
 class _FakeBus:
     async def publish(self, frame: str | None) -> None:
         pass
+
+
+def _admin_deck_snapshot(
+    deck_id: str = "deck-dream",
+) -> DeckChatContextOutputDTO:
+    return DeckChatContextOutputDTO.model_validate(
+        {
+            "deck": {
+                "id": deck_id,
+                "name": "Dream Deck",
+                "name_zh": None,
+                "name_en": None,
+                "description": None,
+                "description_zh": None,
+                "description_en": None,
+                "enabled": True,
+            },
+            "voices": [],
+            "plugin_refs": [],
+        }
+    )
+
+
+def _admin_deck_resolution(
+    deck_id: str = "deck-dream",
+) -> AdminDeckChatContextResolution:
+    return AdminDeckChatContextResolution(
+        canonical_user_id="7",
+        deck_id=deck_id,
+        voice_id=None,
+        snapshot=_admin_deck_snapshot(deck_id),
+    )
 
 
 class _StaticDreamContextMapper:
@@ -422,11 +459,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         state = AgentRunState(session_id="thread_dream_turn")
         context = mapper.context
         assert context is not None
+        deck_snapshot = _admin_deck_resolution()
         request = ClaudeAgentRunRequest(
             user_id="7",
             thread_id="thread_dream_turn",
             message_id="dream_agent_" + "a" * 64,
             message_parts=[{"type": "text", "text": "create Dream"}],
+            admin_deck_chat_context=deck_snapshot,
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -513,6 +552,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         resolve_dream_prompt.assert_awaited_once_with(
             context=context,
             actor_id="7",
+            admin_deck_chat_context=deck_snapshot,
         )
         self.assertEqual(
             builder.user_message_calls[0]["voice_system_prompt"],
@@ -545,6 +585,24 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             builder.user_message_calls[0]["model"],
             "dream-balanced",
         )
+
+    async def test_public_dream_prompt_reuses_admin_snapshot_without_database(self):
+        context = self._dream_context()
+        snapshot = _admin_deck_resolution()
+        with unittest.mock.patch.object(
+            service_module._db,
+            "get_db",
+            side_effect=AssertionError("Registry105 snapshot must be reused"),
+        ) as dream_db:
+            prompt = await service_module._resolve_story_workspace_dream_deck_prompt(
+                context=context,
+                actor_id="7",
+                admin_deck_chat_context=snapshot,
+            )
+        dream_db.assert_not_called()
+        self.assertIn("Dream workspace-file turn", prompt)
+        self.assertIn("Dream Deck", prompt)
+        self.assertNotIn("exactly one JSON object", prompt)
 
     async def test_dispatched_auto_repair_turn_receives_fresh_cleanup_scope(self):
         context = self._dream_context()

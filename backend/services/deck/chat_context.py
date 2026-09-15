@@ -23,6 +23,8 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
+from services.admin_data.deck_chat_context_data import DeckChatContextOutputDTO
+
 try:
     from backend.services.claude_plugin.workspace_packer import load_deck_plugin_refs
 except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
@@ -210,4 +212,70 @@ class DeckChatContextService:
             '"order_index":0}]}. This JSON is rendered as a pending Dream proposal; '
             "do not mark it approved. For ordinary questions that do not produce or revise "
             "Dream assets, answer normally."
+        )
+
+
+class DeckChatContextAssembler:
+    """Apply Dream Deck policy and build a prompt from one Admin data snapshot."""
+
+    def __init__(
+        self,
+        snapshot: DeckChatContextOutputDTO,
+        *,
+        selected_voice_id: str | None = None,
+    ) -> None:
+        if not isinstance(snapshot, DeckChatContextOutputDTO):
+            raise TypeError("Deck chat context requires an Admin DTO snapshot")
+        self.snapshot = snapshot
+        self.selected_voice_id = selected_voice_id
+
+    async def resolve(self, *, dream_mode: bool = False) -> DeckChatContext:
+        if self.snapshot.deck.enabled is not True:
+            raise DeckChatContextError(
+                "DECK_DISABLED",
+                "The selected Deck is disabled.",
+                status_code=409,
+            )
+
+        voices = [voice for voice in self.snapshot.voices if voice.enabled is True]
+        if self.selected_voice_id is not None:
+            voices = [voice for voice in voices if voice.id == self.selected_voice_id]
+            if not voices:
+                raise DeckChatContextError(
+                    "AGENT_ACCESS_DENIED",
+                    "Agent not found, disabled, or outside the selected Deck.",
+                    status_code=404,
+                )
+
+        plugin_refs: list[dict[str, Any]] = []
+        for ref in self.snapshot.plugin_refs:
+            if not ref.enabled:
+                continue
+            if ref.installation_status != "ready":
+                raise DeckChatContextError(
+                    "DECK_PLUGIN_UNAVAILABLE",
+                    "The Deck's configured Claude plugin is not ready: "
+                    f"{ref.package_spec} (status={ref.installation_status}).",
+                    status_code=409,
+                )
+            plugin_refs.append(
+                ref.model_dump(exclude={"enabled", "installation_status"})
+            )
+        plugin_provenance = (
+            {"source": "deck_claude_plugin_refs", "plugins": plugin_refs}
+            if plugin_refs
+            else None
+        )
+        prompt = DeckChatContextService._build_prompt(
+            self.snapshot.deck.model_dump(exclude={"enabled"}),
+            [voice.model_dump(exclude={"enabled"}) for voice in voices],
+            plugin_provenance,
+            dream_mode=dream_mode,
+        )
+        return DeckChatContext(
+            deck_id=self.snapshot.deck.id,
+            deck_name=self.snapshot.deck.name,
+            system_prompt=prompt,
+            plugin_refs=tuple(plugin_refs),
+            plugin_provenance=plugin_provenance,
         )

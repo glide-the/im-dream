@@ -39,6 +39,7 @@
 # [Sync] 2026-09-02: cover final-only page flags and owned exact-id process detail.
 # [Sync] 2026-09-04: cover the authenticated backend common Skill slash catalog.
 # [Sync] 2026-09-15: update direct Chat route tests to explicit typed Admin fakes with Dream database fenced.
+# [Sync] 2026-09-15: require Registry105 Deck context before Chat persistence and reuse its immutable DTO.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -72,7 +73,13 @@ from services.admin_data.chat_models import (
     ThreadResultDTO,
 )
 from services.admin_data.errors import AdminDataError
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextResolution,
+    DeckChatContextInputDTO,
+    DeckChatContextOutputDTO,
+)
 from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.system_config_data import SystemConfigGetInputDTO
 from services.admin_data.workflow_data import AdminWorkflowResolution
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
@@ -372,12 +379,71 @@ class _FakeRouteOwner:
         return owner
 
 
-def _system_config(value: dict | None = None):
+def _deck_chat_context(
+    deck_id: str = "deck-1",
+    voice_id: str | None = "voice-2",
+) -> DeckChatContextOutputDTO:
+    return DeckChatContextOutputDTO.model_validate(
+        {
+            "deck": {
+                "id": deck_id,
+                "name": "Deck",
+                "name_zh": None,
+                "name_en": None,
+                "description": None,
+                "description_zh": None,
+                "description_en": None,
+                "enabled": True,
+            },
+            "voices": (
+                [
+                    {
+                        "id": voice_id,
+                        "name": "Story Editor",
+                        "name_zh": None,
+                        "name_en": None,
+                        "system_prompt": "structure agent prompt",
+                        "enabled": True,
+                    }
+                ]
+                if voice_id is not None
+                else []
+            ),
+            "plugin_refs": [],
+        }
+    )
+
+
+def _deck_chat_resolution(
+    deck_id: str = "deck-1",
+    voice_id: str | None = "voice-2",
+) -> AdminDeckChatContextResolution:
+    return AdminDeckChatContextResolution(
+        canonical_user_id="7",
+        deck_id=deck_id,
+        voice_id=voice_id,
+        snapshot=_deck_chat_context(deck_id, voice_id),
+    )
+
+
+def _system_config(
+    value: dict | None = None,
+    *,
+    deck_context: AdminDeckChatContextResolution | None = None,
+):
+    async def invoke(_current_user, _method, input_dto, **_kwargs):
+        if isinstance(input_dto, SystemConfigGetInputDTO):
+            return value or {"workspace_enabled": True}
+        if isinstance(input_dto, DeckChatContextInputDTO):
+            return deck_context or _deck_chat_resolution(
+                input_dto.deck_id,
+                input_dto.voice_id,
+            )
+        raise AssertionError(f"Unexpected Admin operation DTO: {type(input_dto)!r}")
+
     return unittest.mock.patch(
         "routers.claude_agent.invoke_admin_operation",
-        new=unittest.mock.AsyncMock(
-            return_value=value or {"workspace_enabled": True}
-        ),
+        new=unittest.mock.AsyncMock(side_effect=invoke),
     )
 
 
@@ -1447,10 +1513,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         )
         owner = _FakeRouteOwner()
         captured_requests = []
-        deck_context_service = unittest.mock.Mock()
-        deck_context_service.resolve = unittest.mock.AsyncMock(
-            return_value=types.SimpleNamespace(system_prompt="structure agent prompt")
-        )
+        deck_snapshot = _deck_chat_resolution("deck-1", "voice-2")
 
         async def run_streaming(request):
             captured_requests.append(request)
@@ -1467,19 +1530,12 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 pass
             return response
 
-        deck_db = unittest.mock.Mock()
         with (
-            _system_config(),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_db",
-                return_value=deck_db,
-            ),
-            unittest.mock.patch.object(
-                route_module,
-                "DeckChatContextService",
-                return_value=deck_context_service,
-            ),
+            _system_config(deck_context=deck_snapshot),
+            unittest.mock.patch(
+                "database.get_db",
+                side_effect=AssertionError("public Deck context must use Admin"),
+            ) as dream_db,
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
@@ -1494,20 +1550,22 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             response = asyncio.run(call_and_consume())
 
         self.assertEqual(response.media_type, "text/event-stream")
-        deck_context_service.resolve.assert_awaited_once_with(
-            deck_id="deck-1",
-            actor_id="7",
-            voice_id="voice-2",
-        )
+        dream_db.assert_not_called()
         select_calls = [item for item in chat.calls if item[0] == "select_voice"]
         self.assertEqual(len(select_calls), 1)
         self.assertEqual(select_calls[0][1].thread_id, "thread-agent-switch")
         self.assertEqual(select_calls[0][1].deck_id, "deck-1")
         self.assertEqual(select_calls[0][1].voice_id, "voice-2")
         self.assertEqual(select_calls[0][1].expected_voice_id, "voice-1")
-        deck_db.close.assert_called_once_with()
         self.assertEqual(len(captured_requests), 1)
-        self.assertEqual(captured_requests[0].system_prompt, "structure agent prompt")
+        self.assertIs(
+            captured_requests[0].admin_deck_chat_context,
+            deck_snapshot,
+        )
+        self.assertIn(
+            "structure agent prompt",
+            captured_requests[0].system_prompt,
+        )
         self.assertEqual(
             captured_requests[0].message_metadata,
             {"deckId": "deck-1", "voiceId": "voice-2"},
@@ -1532,10 +1590,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             select_voice_changed=False,
         )
         owner = _FakeRouteOwner()
-        deck_context_service = unittest.mock.Mock()
-        deck_context_service.resolve = unittest.mock.AsyncMock(
-            return_value=types.SimpleNamespace(system_prompt="structure agent prompt")
-        )
+        deck_snapshot = _deck_chat_resolution("deck-1", "voice-2")
 
         async def call_route():
             return await route_module.claude_agent_stream(
@@ -1546,17 +1601,11 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             )
 
         with (
-            _system_config(),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_db",
-                return_value=unittest.mock.Mock(),
-            ),
-            unittest.mock.patch.object(
-                route_module,
-                "DeckChatContextService",
-                return_value=deck_context_service,
-            ),
+            _system_config(deck_context=deck_snapshot),
+            unittest.mock.patch(
+                "database.get_db",
+                side_effect=AssertionError("public Deck context must use Admin"),
+            ) as dream_db,
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "run_streaming",
@@ -1570,12 +1619,140 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             raised.exception.detail["error_code"],
             "CHAT_AGENT_CONFLICT",
         )
+        dream_db.assert_not_called()
         select_calls = [item for item in chat.calls if item[0] == "select_voice"]
         self.assertEqual(len(select_calls), 1)
         self.assertEqual(select_calls[0][1].thread_id, "thread-agent-switch-conflict")
         self.assertEqual(select_calls[0][1].deck_id, "deck-1")
         self.assertEqual(select_calls[0][1].voice_id, "voice-2")
         self.assertEqual(select_calls[0][1].expected_voice_id, "voice-1")
+        run_streaming.assert_not_called()
+
+    def test_admin_deck_context_failure_stops_before_bind_persistence_and_sse(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-new-deck",
+            message="start",
+            deck_id="deck-1",
+            voice_id="voice-2",
+        )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-new-deck",
+                "user_id": 7,
+                "deck_id": None,
+                "voice_id": None,
+            }
+        )
+        owner = _FakeRouteOwner()
+
+        async def invoke(_current_user, _method, input_dto, **_kwargs):
+            if isinstance(input_dto, SystemConfigGetInputDTO):
+                return {"workspace_enabled": True}
+            if isinstance(input_dto, DeckChatContextInputDTO):
+                raise route_module.HTTPException(
+                    status_code=503,
+                    detail={"error_code": "ADMIN_CAPABILITY_UNAVAILABLE"},
+                )
+            raise AssertionError(type(input_dto))
+
+        async def call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module,
+                "invoke_admin_operation",
+                new=unittest.mock.AsyncMock(side_effect=invoke),
+            ),
+            unittest.mock.patch(
+                "database.get_db",
+                side_effect=AssertionError("public Deck context must use Admin"),
+            ) as dream_db,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "run_streaming",
+            ) as run_streaming,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(call_route())
+
+        self.assertEqual(raised.exception.status_code, 503)
+        dream_db.assert_not_called()
+        self.assertEqual(
+            [item[0] for item in chat.calls],
+            ["get_thread"],
+        )
+        self.assertEqual(owner.persistences, [])
+        self.assertEqual(owner.editors, [])
+        run_streaming.assert_not_called()
+
+    def test_admin_deck_policy_failure_stops_before_bind_persistence_and_sse(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-disabled-deck",
+            message="start",
+            deck_id="deck-1",
+            voice_id="voice-2",
+        )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-disabled-deck",
+                "user_id": 7,
+                "deck_id": None,
+                "voice_id": None,
+            }
+        )
+        owner = _FakeRouteOwner()
+        ready = _deck_chat_resolution("deck-1", "voice-2")
+        disabled = AdminDeckChatContextResolution(
+            canonical_user_id=ready.canonical_user_id,
+            deck_id=ready.deck_id,
+            voice_id=ready.voice_id,
+            snapshot=ready.snapshot.model_copy(
+                update={
+                    "deck": ready.snapshot.deck.model_copy(
+                        update={"enabled": False}
+                    )
+                }
+            ),
+        )
+
+        async def call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
+            )
+
+        with (
+            _system_config(deck_context=disabled),
+            unittest.mock.patch(
+                "database.get_db",
+                side_effect=AssertionError("public Deck context must use Admin"),
+            ) as dream_db,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "run_streaming",
+            ) as run_streaming,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(call_route())
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["error_code"], "DECK_DISABLED")
+        dream_db.assert_not_called()
+        self.assertEqual([item[0] for item in chat.calls], ["get_thread"])
+        self.assertEqual(owner.persistences, [])
+        self.assertEqual(owner.editors, [])
         run_streaming.assert_not_called()
 
     def test_terminal_dream_leaf_continues_as_canonical_chat_without_authority(self):

@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
 # [Sync] 2026-09-15: create the turn-owned Admin Editor runtime before public Agent execution.
 # [Sync] 2026-09-15: reuse one OAuth SystemConfig snapshot for model selection and attachment preparation.
+# [Sync] 2026-09-15: resolve Deck chat context through Registry105 before persistence, workspace and SSE.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
@@ -79,7 +80,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
-import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import (
@@ -118,7 +118,7 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     sync_attachments_to_workspace_files,
 )
 from libs.file_storage import server_file_storage
-from services.deck.chat_context import DeckChatContextError, DeckChatContextService
+from services.deck.chat_context import DeckChatContextAssembler, DeckChatContextError
 from services.admin_gateway import (
     GatewayInferenceError,
     GatewayModel,
@@ -135,6 +135,10 @@ from services.admin_data import chat_models as chat_dto
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextData,
+    DeckChatContextInputDTO,
+)
 from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
 
@@ -972,25 +976,49 @@ async def claude_agent_stream(
             },
         )
     deck_context = None
+    admin_deck_chat_context = None
     effective_deck_id = requested_deck_id or persisted_deck_id
     effective_voice_id = requested_voice_id or persisted_voice_id
     if effective_voice_id and not effective_deck_id:
         raise HTTPException(status_code=422, detail="voiceId requires deckId")
     if effective_deck_id:
-        deck_db = database.get_db()
         try:
-            deck_context = await DeckChatContextService(deck_db).resolve(
-                deck_id=str(effective_deck_id),
-                actor_id=str(user_id),
-                voice_id=str(effective_voice_id) if effective_voice_id else None,
+            admin_deck_chat_context = await invoke_admin_operation(
+                current_user,
+                AdminDeckChatContextData(
+                    owner.client,
+                    canonical_user_id=actor.canonical_user_id,
+                ).resolve,
+                DeckChatContextInputDTO(
+                    deck_id=str(effective_deck_id),
+                    voice_id=(
+                        str(effective_voice_id)
+                        if effective_voice_id
+                        else None
+                    ),
+                ),
             )
+            deck_context = await DeckChatContextAssembler(
+                admin_deck_chat_context.context_for(
+                    actor_id=str(user_id),
+                    deck_id=str(effective_deck_id),
+                    voice_id=(
+                        str(effective_voice_id)
+                        if effective_voice_id
+                        else None
+                    ),
+                ),
+                selected_voice_id=(
+                    str(effective_voice_id)
+                    if effective_voice_id
+                    else None
+                ),
+            ).resolve()
         except DeckChatContextError as exc:
             raise HTTPException(
                 status_code=exc.status_code,
                 detail={"error_code": exc.code, "message": str(exc)},
             ) from exc
-        finally:
-            deck_db.close()
         if not persisted_deck_id and not (await _chat_invoke(current_user, chat.bind_deck,
             chat_dto.ThreadBindDeckInputDTO(thread_id=thread_id, deck_id=str(effective_deck_id)))).changed:
             raise HTTPException(
@@ -1225,6 +1253,7 @@ async def claude_agent_stream(
         admin_workflow_resolution=workflow_resolution,
         admin_turn_persistence=turn_persistence,
         admin_editor_runtime=editor_runtime,
+        admin_deck_chat_context=admin_deck_chat_context,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,
