@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: verify Editor stdio receives only its local broker tuple, without DATABASE_URL or actor identity.
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
 # [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
@@ -1390,6 +1391,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             hook = await self._capture_pre_tool_use_hook(
                 cwd=str(workspace),
                 editor_state={"cells": [{"id": "cell-1", "content": "hello"}]},
+                allowed_tools=["Read"],
             )
             result = await hook(
                 {
@@ -4327,24 +4329,25 @@ class TestEditorMcpBinding(unittest.TestCase):
         "cells": [{"id": "cell-current", "type": "text", "content": ""}],
     }
 
-    @patch.dict(
-        os.environ,
-        {"DATABASE_URL": "postgresql://unit:secret@127.0.0.1:5432/ink_unit"},
-        clear=False,
-    )
-    def test_stdio_config_projects_only_trusted_actor_and_database_capability(self):
+    def test_stdio_config_projects_only_turn_local_broker_capability(self):
+        broker_env = {
+            "INK_EDITOR_BROKER_HOST": "127.0.0.1",
+            "INK_EDITOR_BROKER_PORT": "31415",
+            "INK_EDITOR_BROKER_CAPABILITY": "a" * 43,
+            "INK_EDITOR_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_EDITOR_BROKER_MAX_BYTES": "1048576",
+        }
         config = agent_runner_module._editor_mcp_stdio_config({
+            **broker_env,
             "INK_AGENT_USER_ID": "7",
             "INK_AGENT_THREAD_ID": "thread-must-not-cross",
             "UNTRUSTED_VALUE": "must-not-cross",
         })
 
         env = config["env"] if isinstance(config, dict) else config.env
-        self.assertEqual(env["INK_AGENT_USER_ID"], "7")
-        self.assertEqual(
-            env["DATABASE_URL"],
-            "postgresql://unit:secret@127.0.0.1:5432/ink_unit",
-        )
+        self.assertTrue(broker_env.items() <= env.items())
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("INK_AGENT_USER_ID", env)
         self.assertNotIn("INK_AGENT_THREAD_ID", env)
         self.assertNotIn("UNTRUSTED_VALUE", env)
 

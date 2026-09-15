@@ -2,6 +2,7 @@
 # [Output] Immutable entity grants and bearer-only public actions with original-ID receipt recovery.
 # [Pos] Runtime authorization consumer; server creation and public runtime credentials stay separate.
 # [Sync] 2026-09-15: require the published unified Workflow schema in creation/discovery readiness.
+# [Sync] 2026-09-15: let purpose-grant creation require additional exact operation contracts.
 # [Sync] 2026-09-14: consume four frozen special-route contracts without PG or generic-operation emulation.
 """A delegation authorizes one purpose, thread/run and optional exact Editor Session."""
 
@@ -20,7 +21,7 @@ from .client import AdminDataClient
 from .config import AdminDataConfig, _origin
 from .errors import AdminDataError, configuration_invalid, invalid_response
 from .http_transport import request_admin_dto
-from .models import AbsentReceiptDTO, CommittedReceiptDTO, DelegationCapabilityDTO, RequestDTO, SchemaCapabilityDTO, StrictDTO
+from .models import AbsentReceiptDTO, CommittedReceiptDTO, DelegationCapabilityDTO, OperationCapabilityDTO, RequestDTO, SchemaCapabilityDTO, StrictDTO
 
 Purpose = Literal["server-persistence", "gateway-cli", "editor-stdio"]
 RuntimeScope = Literal["dream:read", "dream:write", "messages:create", "messages:count_tokens", "models:list", "editor:read", "editor:write"]
@@ -162,14 +163,18 @@ class AdminDelegationCreator:
         self._client = client
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
-    def create(self, requested: DelegationCreateInputDTO, *, access_token: str, request_id: str) -> RuntimeGrant:
+    def create(self, requested: DelegationCreateInputDTO, *, access_token: str, request_id: str,
+        required_operations: tuple[OperationCapabilityDTO, ...] = ()) -> RuntimeGrant:
         capabilities = self._client.capabilities(request_id)
         advertised = {item.capability: item for item in capabilities.schema_capabilities}
         delegation_capabilities = {item.name: item for item in capabilities.auth.delegations}
+        operation_capabilities = {item.name: item for item in capabilities.operations}
         if (len(advertised) != len(capabilities.schema_capabilities)
             or any(advertised.get(item.capability) != item for item in RUNTIME_SCHEMA_REQUIREMENTS)
             or len(delegation_capabilities) != len(capabilities.auth.delegations)
-            or any(delegation_capabilities.get(item.name) != item for item in DELEGATION_CAPABILITIES)):
+            or any(delegation_capabilities.get(item.name) != item for item in DELEGATION_CAPABILITIES)
+            or len(operation_capabilities) != len(capabilities.operations)
+            or any(operation_capabilities.get(item.name) != item for item in required_operations)):
             raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
         result = self._client._create_runtime_delegation(
             DelegationCreateRequestDTO(request_id=request_id, input=requested), access_token=access_token)

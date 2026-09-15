@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: register five OAuth-only public Deck mutations.
 # [Sync] 2026-09-15: register the OAuth-only owned Deck detail read.
 # [Sync] 2026-09-15: register the OAuth-only owned/community Deck list read.
+# [Sync] 2026-09-15: construct one OAuth-owned Editor runtime without projecting its credentials to stdio.
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
@@ -33,6 +34,7 @@ from .jwt_verifier import AdminJWTVerifier
 from .profile_data import AdminProfileData, CURRENT_PROFILE, UserProfileDTO
 from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT
 from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO, RuntimeHttpConfig
+from .editor_runtime import AdminEditorRuntime
 from .turn_persistence import AdminTurnPersistence
 from .user_message_data import PERSIST_USER_MESSAGE
 from .session_data import SESSION_OPERATIONS
@@ -149,3 +151,22 @@ class AdminRequestAuth:
             raise
         return AdminTurnPersistence(resolution, grant, self.client,
             runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config))
+
+    def editor_runtime(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution,
+        request_id: str, *, initial_session_id: str | None) -> AdminEditorRuntime:
+        if not {"dream:read", "dream:write"} <= actor.scopes:
+            raise AdminDataError("INSUFFICIENT_SCOPE", 403, request_id)
+        try:
+            return AdminEditorRuntime(
+                resolution,
+                actor_id=actor.canonical_user_id,
+                access_token=actor.access_token,
+                delegation_creator=self._delegations,
+                runtime_http_config=self._runtime_http_config,
+                initial_session_id=initial_session_id,
+                initial_request_id=request_id,
+            )
+        except AdminDataError:
+            with self._lock:
+                self._capabilities_ready = False
+            raise

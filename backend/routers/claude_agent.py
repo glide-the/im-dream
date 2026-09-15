@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: reuse the shared typed Admin invocation adapter with unchanged Chat error semantics.
 # [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
 # [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
+# [Sync] 2026-09-15: create the turn-owned Admin Editor runtime before public Agent execution.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
@@ -1004,12 +1005,17 @@ async def claude_agent_stream(
         or workflow_resolution.context.agent_id != effective_voice_id
     ):
         raise HTTPException(status_code=409, detail={"error_code": "DREAM_THREAD_BINDING_CONFLICT", "request_id": workflow_request_id, "outcome_unknown": False})
-    persistence_request_id = str(uuid4())
-    try:
-        turn_persistence = await run_in_threadpool(owner.turn_persistence, actor, workflow_resolution, persistence_request_id)
-    except AdminDataError as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or persistence_request_id, "outcome_unknown": exc.outcome_unknown}) from None
-
+    editor_session_id = None
+    if body.editor_state is not None:
+        editor_session_id = body.editor_state.get("id")
+        if not isinstance(editor_session_id, str) or not editor_session_id:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error_code": "EDITOR_SESSION_ID_INVALID",
+                    "message": "The Editor Session identifier must be non-empty text.",
+                },
+            )
     platform_model = await _resolve_platform_model_selection(user_id, body.model)
     if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
@@ -1129,6 +1135,47 @@ async def claude_agent_stream(
         else None
     )
     message_id = message_id or str(uuid4())
+
+    # Construct long-turn owners only after all fallible request preparation.
+    # Factory starts active keepers after admission and owns terminal cleanup.
+    persistence_request_id = str(uuid4())
+    try:
+        turn_persistence = await run_in_threadpool(
+            owner.turn_persistence,
+            actor,
+            workflow_resolution,
+            persistence_request_id,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or persistence_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
+
+    editor_request_id = str(uuid4())
+    try:
+        editor_runtime = await run_in_threadpool(
+            owner.editor_runtime,
+            actor,
+            workflow_resolution,
+            editor_request_id,
+            initial_session_id=editor_session_id,
+        )
+    except AdminDataError as exc:
+        await run_in_threadpool(turn_persistence.close)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or editor_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
+
     if message_id is not None:
         # One Admin transaction guards the control record, reserves the user
         # message and fills only a missing title. Service reuses this known
@@ -1143,6 +1190,7 @@ async def claude_agent_stream(
                 parts=resolved_user_parts, message_id=message_id, metadata=message_metadata)
         except AdminDataError as exc:
             await run_in_threadpool(turn_persistence.close)
+            await run_in_threadpool(editor_runtime.close)
             detail = {"error_code": exc.code, "request_id": exc.request_id, "outcome_unknown": exc.outcome_unknown}
             if exc.code == "CHAT_MESSAGE_IDENTITY_CONFLICT":
                 detail["message"] = "The message identifier is already bound."
@@ -1157,6 +1205,7 @@ async def claude_agent_stream(
         model_runtime_env=model_runtime_env,
         admin_workflow_resolution=workflow_resolution,
         admin_turn_persistence=turn_persistence,
+        admin_editor_runtime=editor_runtime,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,

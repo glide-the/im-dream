@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public Editor tools use exact Admin purpose grants, operations and original-ID receipts; stdio DB credentials are removed. -->
 <!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound turn owner; internal dispatcher SQL remains open. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
@@ -32,9 +33,9 @@
 
 ## 背景与问题
 
-Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。当前扫描108文件候选、835 SQL片段、159事务候选，见[清单](../exec/dream-admin-data-inventory.md)和[事务图](../exec/dream-admin-transaction-boundaries.json)。字符串片段与候选调用不等于全部可达SQL，后续必须补调用链和动态入口复查。
+Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。当前closure scanner覆盖504个模块，报告53个SQL-bearing、43个driver-import、110个legacy helper和470个cursor-call候选；这些数字是源码候选，不是全部可达SQL证明。既有[清单](../exec/dream-admin-data-inventory.md)、[事务图](../exec/dream-admin-transaction-boundaries.json)和current closure scan需要继续结合入口调用链复查。
 
-本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn、assistant完整/部分消息与Factory生命周期，CLI/Editor、内部dispatcher与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
+本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn、assistant完整/部分消息与Factory生命周期，Editor exact Session purpose已接公开Agent turn，CLI、内部dispatcher与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
 
 ## 目标与边界
 
@@ -202,7 +203,7 @@ server先按原顺序stop publisher/refresher/sink/sampler，再Factory.aclose�
 
 ## Runtime 环境阶段事实
 
-新增Admin/Auth服务器秘密由SDK最终merge空值tombstone和内部/外部stdio MCP显式env过滤保护，server os.environ原值保持，二次merge不能复活。确切键/执行模块/正常失败流程见 [SDK环境设计](../design/claude-agent/claude-sdk-env-design.md#8-adminauth-服务器秘密与子进程边界)。现有Gateway helper和Editor DATABASE_URL仍需Admin长期委托/领域DTO替换；这项保护不是完整无PG/无全局凭据验收。
+新增Admin/Auth服务器秘密由SDK最终merge空值tombstone和内部/外部stdio MCP显式env过滤保护，server os.environ原值保持，二次merge不能复活。确切键/执行模块/正常失败流程见 [SDK环境设计](../design/claude-agent/claude-sdk-env-design.md#8-adminauth-服务器秘密与子进程边界)。现有Gateway helper仍需Admin长期委托/领域DTO替换；Editor stdio的`DATABASE_URL`与actor投影已删除，但这项收口不是完整无PG/无全局凭据验收。
 
 ### Browser session 异步状态
 
@@ -234,7 +235,7 @@ Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt�
 
 共有HTTP函数接收显式URL/header/DTO和timeout/响应大小，不持有身份配置。Internal consumer注入service身份与必要用户Bearer；public Runtime consumer只持exact idg，prepared request不继承httpx client的Cookie、auth或默认key headers。响应校验原request_id、闭集DTO和purpose/thread/run/EditorSession/scopes；renew不能改变maximum或降低expiry。
 
-Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。当前仅consumer/keeper候选源码；Agent生命周期、CLI最小投影、Editor stdio和Workflow原确认保护接入仍未完成。
+Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。server-persistence keeper与Editor stdio purpose已接公开Agent生命周期；CLI最小投影和Workflow内部确认保护接入仍未完成。
 
 旧Dream password/Google/Device/token与Python local-cookie logout九条HTTP路径已改为明确410标准Admin authority迁移响应，不解析/转发敏感请求、不执行签发或相关DB动作。Standalone旧auth helpers已拒绝本地签发/密码/refresh权限，两个脚本改为显式Admin OAuth并核对正常生产profile账户；Authlib/bcrypt从manifest/lock/export原子移除，其余版本不变。Gateway subject helper、Agent purpose接线与其他数据库领域仍待迁移；MCP SDK外部OAuth协议保持。此项不等于正常本机登录/模型验收。
 
@@ -250,7 +251,7 @@ Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先
 
 公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。内部confirmation/launch尚未连接其服务身份，继续执行原guard，不借公开迁移删除保护。
 
-Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Gateway/Editor独立目的、内部dispatcher assistant/后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Editor使用另一个exact Session purpose且其idg仍只留主进程。Gateway独立目的、内部dispatcher assistant/后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
 
 ### 公开 Agent Thread 恢复与 SDK Session 回写
 
@@ -277,6 +278,16 @@ owner在单一activity锁中串行user/session/assistant命令及Thread读取，
 Admin `session.save/get/batch/list/text-list/delete`六operation负责owned Session持久化、state/writingThread绑定、name/labels null保留、UTC范围与排序。Dream复用闭集EditorEngine state DTO，覆盖text/widget/suggestion Cells、commentors/tasks/weight；optional在wire省略，只有selectedState可显式null，required nullable字段保留。有限JSON数值与微秒ISO按实际合同校验；错误state/ID/额外字段在I/O前返回安全400，Admin状态损坏返回503，missing get保持404。
 
 公开Session走同一已认证request actor/OAuth与shared threadpool/error adapter，无外部user ID。metadata list移除内部text:null，Dream保留时区date_key、mixed-word metrics与aggregate响应；空batch不发domain request。update/delete收到confirmed result才publish原user-scoped Edit Session event；unknown保留原request ID，不retry、不发event，业务状态按原receipt确认。此Session合同不接受Thread server-persistence grant，后台ContextBuilder/Session tools尚待独立合同，不能投影Editor或扩大purpose绕过权限。公开HTTP/DTO/DB-fenced技术验收不代表正常账户业务验收。
+
+#### 公开 Agent Editor runtime
+
+背景与问题：Editor MCP子进程原先获得`DATABASE_URL`与actor ID并直接读写Session，形成独立认证和数据路径。现行公开Agent turn由主进程OAuth actor创建`editor-stdio` grant，固定当前Thread、exact Editor Session、`run_id=null`及`editor:read/editor:write`，并在创建前匹配`editor-state.load` SHA `1555a622d0030dc2242ee86825fd949f4ea8b0fbe77e28528b19c72804c40335`与`editor-state.replace` SHA `bb37ffff488c49a6e8b69f58a16eb1a4eb454f1d6f014a1b91832c001811a4f6`。
+
+正常流程：Factory仍在admission之后启动active Editor owner。stdio仅得到loopback host/port、每turn随机capability、timeout和最大字节数；不含OAuth、service secret、idg、actor、Admin origin或DB值。每个mutation由子进程请求broker，主进程以exact grant调用public load，应用原mutation后调用replace；成功state进入runtime cache，Service tool-result回调刷新`AgentRunState`并发布既有Session event。`switch_editor`为目标Session创建独立grant并先完成load，成功才由PostToolUse采用缓存。新grant使用请求进入时由主进程保存的OAuth；长turn中该token过期会使未授权Session切换失败并保留原state，现有Admin合同没有旧Editor grant派生或请求OAuth刷新操作，Dream不以service身份、actor参数或PG连接补权限。
+
+状态与失败：replace可能已发送但回复未知时，runtime保留完整input和原request ID，只查询public Editor receipt；absent或查询失败保持unknown且不重发，不同input被阻止，committed核对operation/request/Session后恢复。grant创建、输入或broker检查在POST前失败不进入unknown。Admin missing/permission/stored-state/DTO失败保留原flyweight，不查询Dream PG或写fallback。terminal/cancel在Phase4关闭broker、所有keeper和public clients；SSE disconnect不提前关闭。
+
+影响与验收：Editor确认UI、mutation算法、`.editor/`读、Session event、admission/lease/Runner/EventBus/SSE/resume/cancel、resource LKG、Runtime配置、workspace/TMPDIR均保持。provider-free技术测试覆盖exact hash/grant、prepared bearer headers、switch/cache、unknown receipt/no resend、malformed input和lifecycle；未进行正常本机账户/PG/模型时不报告正常业务验收。现行细节见[Editor MCP](../design/claude-agent/edit-point/mcp-tools.md)与[EditorState生命周期](../design/claude-agent/edit-point/editor-state-lifecycle.md)。
 
 ### 公开 Deck 内容版本边界
 

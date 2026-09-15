@@ -4,6 +4,7 @@
 # [Sync] 2026-09-15: validate Thread/SDK Session scope, native init callbacks and one cross-operation unknown barrier.
 # [Sync] 2026-09-15: validate server-only persistence authority and short-lock current snapshots.
 # [Sync] 2026-09-15: validate assistant full/partial DTOs, four schemas and shared pending barrier.
+# [Sync] 2026-09-15: validate Editor broker ownership beside the existing grant lifecycle.
 from __future__ import annotations
 
 import asyncio
@@ -396,12 +397,22 @@ def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fen
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(monkeypatch, cancel):
+@pytest.mark.parametrize("active_editor", [False, True])
+def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(
+    monkeypatch, cancel, active_editor
+):
     import claude_agent.thread_factory as factory_module
     from claude_agent.service import ClaudeAgentRunRequest
     from claude_agent.stream_events import NormalizedAgentEvent
     from claude_agent.thread_factory import ClaudeAgentThreadFactory
     value, _, runtime = holder()
+    editor_runtime = SimpleNamespace(start_calls=0, close_calls=0)
+    editor_runtime.start = lambda: setattr(
+        editor_runtime, "start_calls", editor_runtime.start_calls + 1
+    )
+    editor_runtime.close = lambda: setattr(
+        editor_runtime, "close_calls", editor_runtime.close_calls + 1
+    )
     monkeypatch.setattr(factory_module, "ClaudeAgentRunner", lambda: SimpleNamespace())
 
     async def scenario():
@@ -412,6 +423,7 @@ def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(mo
         class Service:
             async def assemble_context(self, request, *, state, bus, runner):
                 assert value._keeper is not None
+                assert editor_runtime.start_calls == int(active_editor)
                 state.system_prompt = "explicit-fake-context"
                 return SimpleNamespace(dream_context=None, bus=bus)
             async def execute_session(self, execution):
@@ -421,7 +433,13 @@ def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(mo
             async def mark_auto_repair_failed(self, request):
                 pass
         factory._service = Service()
-        request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", admin_turn_persistence=value)
+        request = ClaudeAgentRunRequest(
+            user_id="42",
+            thread_id="thread-1",
+            admin_turn_persistence=value,
+            admin_editor_runtime=editor_runtime,
+            editor_state={"id": "editor-1"} if active_editor else None,
+        )
         stream = factory.run_streaming(request)
         try:
             first = await asyncio.wait_for(anext(stream), 1)
@@ -431,6 +449,7 @@ def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(mo
             await stream.aclose()
             assert factory.session_snapshot("thread-1")["lifecycle"] == "running"
             assert value.current_grant(actor_id="42", thread_id="thread-1").token == TOKEN
+            assert editor_runtime.close_calls == 0
             assert not released
             if cancel:
                 result = await factory.stop_thread("thread-1")
@@ -444,6 +463,8 @@ def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(mo
             await stream.aclose()
             await factory.aclose()
         assert runtime.closed == [True] and not value._keeper._thread.is_alive()
+        assert editor_runtime.start_calls == int(active_editor)
+        assert editor_runtime.close_calls == 1
     asyncio.run(scenario())
 def assistant_write(value, **changes):
     args = {"actor_id": "42", "thread_id": "thread-1", "message_id": "message-1",

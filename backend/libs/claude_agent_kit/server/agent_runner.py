@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: project only the turn-local Editor broker tuple; remove DATABASE_URL and actor identity from Editor stdio.
 # [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
 #                    results; retain approved call identity until execution ends.
 # [Sync] 2026-09-14: scrub Admin/Auth server-secret keys from every explicit stdio MCP env projection.
@@ -296,7 +297,7 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
-from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
+from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
@@ -318,6 +319,7 @@ from .sdk_env import (
 from .builtin_skill_packages import DEFAULT_BUILTIN_SKILLS_ROOT
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
+from services.admin_data.editor_runtime import EDITOR_BROKER_ENV_NAMES
 
 try:
     from story_workspace.contracts import STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX
@@ -2203,17 +2205,16 @@ def _editor_mcp_stdio_config(
 ) -> McpStdioServerConfig:
     """Build the external stdio MCP config for the EditorState write-only server.
 
-    The Agent still supplies the visible Editor session ID in each tool call,
-    while the trusted actor and effective PostgreSQL capability come only from
-    the server process. Neither value is exposed through prompts or tool input.
+    The Agent supplies the visible Editor Session ID in each tool call. The
+    child receives only one private turn-local broker capability; OAuth,
+    service credentials, Admin bearers and PostgreSQL never cross this edge.
     """
-    trusted_env: dict[str, str] = {}
-    actor_id = str((mcp_env or {}).get("INK_AGENT_USER_ID") or "").strip()
-    database_url = str(os.getenv("DATABASE_URL") or "").strip()
-    if actor_id:
-        trusted_env["INK_AGENT_USER_ID"] = actor_id
-    if database_url:
-        trusted_env["DATABASE_URL"] = database_url
+    trusted_env = {
+        name: str((mcp_env or {}).get(name) or "").strip()
+        for name in EDITOR_BROKER_ENV_NAMES
+    }
+    if any(not value for value in trusted_env.values()):
+        raise ValueError("Editor runtime broker is unavailable")
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
@@ -3545,8 +3546,8 @@ class ClaudeAgentRunner:
         # Fired by the SDK after a tool has executed and its result is
         # available.  Used exclusively to intercept the switch_editor
         # context-switch tool: after the no-op MCP handler returns ok, this
-        # hook reads the target editor_session_id from the tool input, loads
-        # the new editor_state from the database, and writes it into the
+        # hook reads the target editor_session_id from the tool input, adopts
+        # the state already loaded through Admin by the Editor tool, and writes it into the
         # AgentRunState flyweight via opts.editor_state_setter.  Subsequent
         # .editor/ reads in the same turn will see the new document context
         # because PreToolUse reads live_editor_state via opts.editor_state_getter
@@ -3565,9 +3566,9 @@ class ClaudeAgentRunner:
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
                 return {}
 
-            if opts.editor_state_setter is None:
+            if opts.editor_state_setter is None or opts.editor_state_loader is None:
                 logger.warning(
-                    "PostToolUse: switch_editor fired but editor_state_setter is None; "
+                    "PostToolUse: switch_editor fired but Editor runtime callbacks are unavailable; "
                     "skipping context switch."
                 )
                 return {}
@@ -3582,17 +3583,11 @@ class ClaudeAgentRunner:
                 return {}
 
             try:
-                actor_id = int(str(opts.canonical_user_id or "").strip())
-                new_state = await asyncio.to_thread(
-                    load_editor_state_from_db,
-                    new_session_id,
-                    actor_id,
-                )
+                new_state = opts.editor_state_loader(new_session_id)
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "PostToolUse: switch_editor DB load failed for session %r",
+                    "PostToolUse: switch_editor Admin cache load failed for session %r",
                     new_session_id,
-                    exc_info=True,
                 )
                 return {}
 
@@ -3727,9 +3722,7 @@ class ClaudeAgentRunner:
             )
         ):
             mcp_servers["editor"] = _editor_mcp_stdio_config(mcp_env)
-            logger.debug(
-                "Editor MCP enabled with server-owned actor and persistence capability."
-            )
+            logger.debug("Editor MCP enabled with a turn-local persistence broker.")
 
         if (
             _is_trusted_story_workspace_mcp_context(cwd, mcp_env)

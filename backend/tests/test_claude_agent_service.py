@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
 #         service callback factories, and ToolEventPayload.
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
@@ -138,6 +139,35 @@ class _StaticDreamContextMapper:
         return self.context
 
 
+class _FakeAdminEditorRuntime(service_module.AdminEditorRuntime):
+    def __init__(self, states: dict[str, dict] | None = None) -> None:
+        self.states = states or {}
+        self.load_calls: list[str] = []
+
+    def child_env(self) -> dict[str, str]:
+        return {
+            "INK_EDITOR_BROKER_HOST": "127.0.0.1",
+            "INK_EDITOR_BROKER_PORT": "31415",
+            "INK_EDITOR_BROKER_CAPABILITY": "a" * 43,
+            "INK_EDITOR_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_EDITOR_BROKER_MAX_BYTES": "1048576",
+        }
+
+    def cached_state(self, session_id: str) -> dict | None:
+        value = self.states.get(session_id)
+        return dict(value) if value is not None else None
+
+    def load(self, input_dto, request_id: str):
+        del request_id
+        self.load_calls.append(input_dto.session_id)
+        state = self.states.get(input_dto.session_id)
+        return service_module.EditorLoadOutputDTO(
+            session_id=input_dto.session_id,
+            editor_state=state,
+            updated_at="2026-09-15T00:00:00Z" if state is not None else None,
+        )
+
+
 class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
     def test_commits_the_story_bundle_before_emitting_success(self):
         db = unittest.mock.Mock()
@@ -253,6 +283,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 request = ClaudeAgentRunRequest(
                     user_id="7", thread_id="dream-business-thread", resume=resume,
                     editor_state={"id": "note-business-session"},
+                    admin_editor_runtime=_FakeAdminEditorRuntime(),
                     message_parts=[{"type": "text", "text": "isolated fixture"}],
                 )
                 with (
@@ -1509,36 +1540,34 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             turn_ctx.registered_tool_call_ids.add("tool-call-1")
             state = AgentRunState(session_id="thread-editor-write")
             state.with_editor_state({"id": "session-editor-write"}, 7)
-            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            refreshed_state = {
+                "id": "session-editor-write",
+                "cells": [{"id": "cell-1", "type": "text", "content": "new"}],
+            }
+            runtime = _FakeAdminEditorRuntime(
+                {"session-editor-write": refreshed_state}
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(
+                queue, turn_ctx, state, runtime
+            )
             subscription = await service_module.session_event_bus.subscribe("7")
 
             try:
-                with unittest.mock.patch.object(
-                    service_module._db,
-                    "get_session",
-                    return_value={
-                        "id": "session-editor-write",
-                        "editor_state": {
-                            "id": "session-editor-write",
-                            "cells": [{"id": "cell-1", "type": "text", "content": "new"}],
-                        },
-                    },
-                ) as get_session:
-                    await callback(
-                        ToolEventPayload(
-                            type="tool_result",
-                            tool_name="mcp__editor__write_segment",
-                            tool_call_id="tool-call-1",
-                            output={"ok": True, "cellId": "cell-1"},
-                            is_error=False,
-                        )
+                await callback(
+                    ToolEventPayload(
+                        type="tool_result",
+                        tool_name="mcp__editor__write_segment",
+                        tool_call_id="tool-call-1",
+                        output={"ok": True, "cellId": "cell-1"},
+                        is_error=False,
                     )
+                )
 
                 event = await asyncio.wait_for(subscription.get(), timeout=1.0)
             finally:
                 await service_module.session_event_bus.unsubscribe("7", subscription)
 
-            self.assertEqual(get_session.call_args.args, (7, "session-editor-write"))
+            self.assertEqual(runtime.load_calls, [])
             self.assertEqual(event.type, "session_updated")
             self.assertEqual(event.session_id, "session-editor-write")
             self.assertEqual(event.source, "agent")
@@ -1564,30 +1593,30 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
                 "cells": [{"id": "cell-1", "type": "text", "content": "old"}],
             }
             state.with_editor_state(original_state, 7)
-            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            refreshed_state = {
+                "id": "session-editor-write",
+                "cells": [],
+            }
+            runtime = _FakeAdminEditorRuntime(
+                {"session-editor-write": refreshed_state}
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(
+                queue, turn_ctx, state, runtime
+            )
             subscription = await service_module.session_event_bus.subscribe("7")
 
             try:
-                refreshed_state = {
-                    "id": "session-editor-write",
-                    "cells": [],
-                }
-                with unittest.mock.patch.object(
-                    service_module._db,
-                    "get_session",
-                    return_value={"editor_state": refreshed_state},
-                ) as get_session:
-                    output = {"ok": False, "error": error, "cellId": "cell-1"}
-                    await callback(ToolEventPayload(
-                        type="tool_result",
-                        tool_name="mcp__editor__write_segment",
-                        tool_call_id="tool-call-failed",
-                        output=output,
-                        is_error=False,
-                    ))
-                    frame = await queue.get()
-                    with self.assertRaises(asyncio.TimeoutError):
-                        await asyncio.wait_for(subscription.get(), timeout=0.01)
+                output = {"ok": False, "error": error, "cellId": "cell-1"}
+                await callback(ToolEventPayload(
+                    type="tool_result",
+                    tool_name="mcp__editor__write_segment",
+                    tool_call_id="tool-call-failed",
+                    output=output,
+                    is_error=False,
+                ))
+                frame = await queue.get()
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(subscription.get(), timeout=0.01)
             finally:
                 await service_module.session_event_bus.unsubscribe("7", subscription)
 
@@ -1595,8 +1624,8 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertTrue(frame.data["isError"])
             self.assertEqual(frame.data["output"], output)
             self.assertEqual(turn_ctx.collected_parts[-1]["isError"], True)
-            self.assertIs(state.editor_state, refreshed_state)
-            get_session.assert_called_once_with(7, "session-editor-write")
+            self.assertEqual(state.editor_state, refreshed_state)
+            self.assertEqual(runtime.load_calls, [])
 
         for error in ("cell_not_found", "save_failed"):
             with self.subTest(error=error):

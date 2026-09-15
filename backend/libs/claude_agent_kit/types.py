@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
 #          IClaudeAgentSDKClient to server and application layers.
@@ -338,13 +339,16 @@ class AgentRunOptions:
     # result.  Falls back to ``editor_state`` when not set (e.g. unit tests).
     editor_state_getter: Optional[Any] = None
     # Optional setter that writes a new editor_state into the AgentRunState
-    # flyweight.  Called by the PostToolUse hook after a successful
-    # ``switch_editor`` tool call: the hook loads the target session's
-    # editor_state from the database and passes it to this setter so that
+    # flyweight. Called by the PostToolUse hook after a successful
+    # ``switch_editor`` tool call with the Admin runtime's cached state so that
     # subsequent .editor/ reads via ``editor_state_getter`` reflect the new
     # document context.
     # Signature: ``(new_editor_state: dict) -> None``.
     editor_state_setter: Optional[Any] = None
+    # Server-owned cache lookup populated by the Editor stdio broker. The
+    # runner receives no OAuth, Admin bearer, service credential or database
+    # capability. Signature: ``(editor_session_id: str) -> dict | None``.
+    editor_state_loader: Optional[Any] = None
 
 
 @dataclass

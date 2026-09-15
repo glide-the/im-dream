@@ -2,6 +2,7 @@
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
 # [Sync] 2026-09-15: gate public streaming on the bound server grant and atomic user reservation before runtime.
+# [Sync] 2026-09-15: verify exact Editor grant creation and pre-SSE owner cleanup on failure.
 # [Sync] 2026-09-15: verify Admin Workflow read precedes message/SSE and supplies immutable Service snapshot.
 # [Sync] 2026-09-14: verify actual production HTTP adapters and existing response projections.
 from __future__ import annotations
@@ -22,6 +23,7 @@ from services.admin_data.profile_data import CURRENT_PROFILE
 from services.admin_data.request_auth import AdminRequestAuth
 from services.admin_data.workflow_data import RESOLVE_WORKFLOW_CONTEXT, WORKFLOW_SCHEMA_REQUIREMENTS
 from services.admin_data.delegation import DELEGATION_CAPABILITIES, RUNTIME_SCHEMA_REQUIREMENTS
+from services.admin_data.editor_runtime import EDITOR_RUNTIME_CAPABILITIES
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 
 
@@ -91,7 +93,7 @@ def boundary(monkeypatch):
         assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": [item.model_dump() for item in DELEGATION_CAPABILITIES]},
-                "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)]}
+                "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
         elif request.url.path.endswith("/principal"):
             value = {"subject": "opaque-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read"] if request.headers["authorization"] == "Bearer read-only" else ["dream:read", "dream:write"], "status": "active"}
         else:
@@ -101,6 +103,8 @@ def boundary(monkeypatch):
             assert "user_id" not in payload["input"]
             calls.append((operation, payload["input"], request_id))
             value = outputs[operation]
+            if callable(value):
+                value = value(payload["input"], request_id)
             if isinstance(value, Exception): raise value
             if isinstance(value, tuple):
                 status, code = value
@@ -241,14 +245,92 @@ def test_stream_reserves_original_user_identity_through_admin_before_runtime(bou
     assert resolution is not None and resolution.context_for(actor_id="42", thread_id="owned-thread") is None
 
 
-def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(boundary):
+def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
+    boundary, monkeypatch
+):
+    from services.admin_data.editor_runtime import AdminEditorRuntime
+    from services.admin_data.turn_persistence import AdminTurnPersistence
+
     client, outputs, calls, factory = boundary
+    closed = []
+    monkeypatch.setattr(AdminTurnPersistence, "close", lambda self: closed.append("turn"))
+    monkeypatch.setattr(AdminEditorRuntime, "close", lambda self: closed.append("editor"))
     outputs["chat-user-message.persist"] = (409, "CHAT_MESSAGE_IDENTITY_CONFLICT")
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "conflicting value"}]}})
     assert response.status_code == 409 and not factory.run_requests
     assert response.json()["detail"]["error_code"] == "CHAT_MESSAGE_IDENTITY_CONFLICT"
     assert response.json()["detail"]["message"] == "The message identifier is already bound."
     assert len(calls) == 4 and calls[-1][0] == "chat-user-message.persist"
+    assert closed == ["turn", "editor"]
+
+
+def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
+    client, outputs, calls, factory = boundary
+
+    def created(input_dto, _request_id):
+        token_letter = "a" if input_dto["purpose"] == "server-persistence" else "b"
+        return {
+            **input_dto,
+            "token": "idg_" + token_letter * 43,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+            "maximum_expires_at": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
+        }
+
+    outputs["runtime-delegation.create"] = created
+    response = request(client, "POST", "/api/claude-agent", json={
+        "id": "owned-thread",
+        "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "edit"}]},
+        "editor_state": {"id": "session-1"},
+    })
+    assert response.status_code == 200 and len(factory.run_requests) == 1
+    assert [item[0] for item in calls] == [
+        "chat-thread.get",
+        "workflow-context.resolve",
+        "runtime-delegation.create",
+        "runtime-delegation.create",
+        "chat-user-message.persist",
+    ]
+    assert calls[3][1] == {
+        "purpose": "editor-stdio",
+        "thread_id": "owned-thread",
+        "run_id": None,
+        "editor_session_id": "session-1",
+        "scopes": ["editor:read", "editor:write"],
+    }
+    run_request = factory.run_requests[0]
+    run_request.admin_editor_runtime.close()
+    run_request.admin_turn_persistence.close()
+
+
+def test_editor_grant_failure_closes_existing_turn_owner(boundary, monkeypatch):
+    from services.admin_data.turn_persistence import AdminTurnPersistence
+
+    client, outputs, calls, factory = boundary
+    closed = []
+    monkeypatch.setattr(AdminTurnPersistence, "close", lambda self: closed.append(self))
+
+    def created(input_dto, _request_id):
+        if input_dto["purpose"] == "editor-stdio":
+            return (404, "ENTITY_NOT_FOUND")
+        return {
+            **input_dto,
+            "token": "idg_" + "a" * 43,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+            "maximum_expires_at": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
+        }
+
+    outputs["runtime-delegation.create"] = created
+    response = request(client, "POST", "/api/claude-agent", json={
+        "id": "owned-thread",
+        "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "edit"}]},
+        "editor_state": {"id": "missing-session"},
+    })
+    assert response.status_code == 404 and response.json()["detail"]["error_code"] == "ENTITY_NOT_FOUND"
+    assert len(closed) == 1 and not factory.run_requests
+    assert [item[0] for item in calls][-2:] == [
+        "runtime-delegation.create",
+        "runtime-delegation.create",
+    ]
 
 
 @pytest.mark.parametrize("code,status", [("DREAM_THREAD_BINDING_CONFLICT", 409), ("DREAM_SCOPE_REQUIRED", 403), ("ADMIN_UNAVAILABLE", 503)])

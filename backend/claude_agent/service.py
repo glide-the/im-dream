@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: use bound server grants for public Thread resume reads and SDK-native Session updates.
 # [Sync] 2026-09-15: public user persistence uses one Admin atomic command and server-only renewed grant; internal guard stays intact.
 # [Sync] 2026-09-15: public Chat uses its actor/thread-bound immutable Admin Workflow snapshot; internal dispatcher mapper remains pending migration.
+# [Sync] 2026-09-15: Editor writes and post-tool refresh use the turn-owned Admin runtime; stdio receives no DB or Admin credential.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -284,6 +285,7 @@ from services.story_workspace.agent_integration import (
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.turn_persistence import AdminTurnPersistence
+from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
     DreamArtifactTurnHook,
@@ -1418,6 +1420,7 @@ class ClaudeAgentRunRequest:
     # ordinary-Chat null. It is absent from the browser DTO and SDK options.
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     admin_turn_persistence: AdminTurnPersistence | None = field(default=None, repr=False)
+    admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -2042,6 +2045,11 @@ class ClaudeAgentService:
         # document context.
         active_editor_state = request.editor_state if request.editor_state is not None else state.editor_state
         editor_session_id: str = (active_editor_state or {}).get("id") or ""
+        editor_runtime = request.admin_editor_runtime
+        if editor_runtime is not None and not isinstance(editor_runtime, AdminEditorRuntime):
+            raise ValueError("Invalid server Editor runtime owner")
+        if active_editor_state is not None and editor_runtime is None:
+            raise ValueError("Editor context requires an Admin runtime owner")
 
         user_message_content = self._context_builder.build_user_message(
             request.message_parts,
@@ -2096,6 +2104,11 @@ class ClaudeAgentService:
                 "INK_AGENT_USER_ID": str(request.user_id),
                 "INK_AGENT_THREAD_ID": state.session_id,
                 **(
+                    editor_runtime.child_env()
+                    if active_editor_state is not None and editor_runtime is not None
+                    else {}
+                ),
+                **(
                     {
                         "INK_AGENT_WORKFLOW_RUN_ID": (
                             dream_context.workflow_run_id
@@ -2120,12 +2133,17 @@ class ClaudeAgentService:
             editor_state=active_editor_state,
             # Live getter: agent_runner._pre_tool_use_hook calls this instead of
             # reading opts.editor_state so it always sees the AgentRunState
-            # flyweight's latest value (updated after each write-tool DB refresh).
+            # flyweight's latest value (updated after each Admin-backed write refresh).
             editor_state_getter=(lambda s=state: s.editor_state) if active_editor_state is not None else None,
             # Live setter: agent_runner._post_tool_use_hook calls this after a
             # successful switch_editor tool call to update the flyweight with the
-            # new session's editor_state loaded from the database.
+            # new session's editor_state already loaded and cached by the Admin runtime.
             editor_state_setter=(lambda v, s=state: s.with_editor_state(v, s.editor_user_id)) if active_editor_state is not None else None,
+            editor_state_loader=(
+                (lambda session_id, owner=editor_runtime: owner.cached_state(session_id))
+                if active_editor_state is not None and editor_runtime is not None
+                else None
+            ),
         )
 
         dream_artifact_turn_ticket: DreamArtifactTurnTicket | None = None
@@ -2309,7 +2327,10 @@ class ClaudeAgentService:
             on_text_delta=self._make_text_delta_cb(queue, execution.turn_context),
             on_text_done=self._make_text_done_cb(queue, execution.turn_context),
             on_tool_event=self._make_tool_event_cb(
-                queue, execution.turn_context, execution.state
+                queue,
+                execution.turn_context,
+                execution.state,
+                execution.request.admin_editor_runtime,
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=on_error,
@@ -3017,6 +3038,7 @@ class ClaudeAgentService:
         queue: asyncio.Queue,
         turn_ctx: _TurnContext,
         state: Optional[Any] = None,
+        editor_runtime: AdminEditorRuntime | None = None,
     ):
         """Emit SSE tool / reasoning events and collect them into collected_parts.
 
@@ -3038,7 +3060,7 @@ class ClaudeAgentService:
         Ignored entirely: result, message_*, tool_progress, tool_use_summary, etc.
 
         After a successful ``tool_result`` for any tool in ``_EDITOR_WRITE_TOOL_NAMES``,
-        the method reloads ``editor_state`` from the database and updates
+        the method reloads ``editor_state`` through the Admin runtime and updates
         ``state.editor_state`` (the AgentRunState flyweight).  The PreToolUse hook in
         agent_runner reads editor_state via ``opts.editor_state_getter`` which is bound
         to ``state.editor_state``, so subsequent same-turn virtual-index reads
@@ -3219,7 +3241,7 @@ class ClaudeAgentService:
                 turn_ctx.collected_parts.append(evt)
 
                 # Every actor/session-matched Editor result refreshes the single
-                # AgentRunState cache from the DB. Success then publishes the existing
+                # AgentRunState cache from the Admin-owned turn runtime. Success then publishes the existing
                 # session event; business failures only replace stale read context so
                 # same-turn retries cannot keep targeting a removed cell.
                 if (
@@ -3240,24 +3262,38 @@ class ClaudeAgentService:
                         editor_session_id
                         and editor_session_id == live_editor_session_id
                         and user_id
+                        and isinstance(editor_runtime, AdminEditorRuntime)
                     ):
                         try:
-                            import database as _db_mod
-                            fresh_row = await asyncio.to_thread(
-                                _db_mod.get_session, user_id, editor_session_id
+                            fresh_editor_state = editor_runtime.cached_state(
+                                editor_session_id
                             )
-                            if fresh_row and fresh_row.get("editor_state"):
-                                fresh_editor_state = fresh_row["editor_state"]
+                            if fresh_editor_state is None:
+                                loaded = await asyncio.to_thread(
+                                    editor_runtime.load,
+                                    EditorLoadInputDTO(
+                                        session_id=editor_session_id
+                                    ),
+                                    str(uuid4()),
+                                )
+                                fresh_editor_state = (
+                                    loaded.editor_state.model_dump(
+                                        mode="python", exclude_unset=True
+                                    )
+                                    if loaded.editor_state is not None
+                                    else None
+                                )
+                            if fresh_editor_state is not None:
                                 state.editor_state = fresh_editor_state
                                 cache_refreshed = True
                                 logger.debug(
-                                    "editor_state refreshed from DB after %s "
+                                    "editor_state refreshed from Admin after %s "
                                     "(editor_session_id=%s user_id=%s)",
                                     resolved_tool_name, editor_session_id, user_id,
                                 )
                         except Exception:
                             logger.warning(
-                                "editor_state DB-reload failed after write tool=%s "
+                                "editor_state Admin reload failed after write tool=%s "
                                 "editor_session_id=%s user_id=%s",
                                 resolved_tool_name, editor_session_id, user_id,
                             )
