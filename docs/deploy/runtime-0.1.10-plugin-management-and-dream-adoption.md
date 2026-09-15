@@ -90,8 +90,10 @@ Provider-free 测试覆盖 resolver、非法 override、版本成功但管理命
 
 Dream 最终 plugin、resolver、Docker、版本、server 与 registry verifier 合同为
 `180 passed, 6 skipped, 31 subtests passed`。前端使用 Node 24、Corepack 与
-`pnpm@10.28.1` 完成 frozen install 和 Next production build；`main` 与
-`develop` PR 均执行对应 GitHub CI。20 个变更 Markdown 文件的本地相对链接
+`pnpm@10.28.1` 完成 frozen install 和 Next production build；`develop` PR
+执行 Linux backend image 与 frontend build GitHub CI。backend image 内部复验
+SDK、Runtime manifest、package-root `cli.js` 和 `plugin --help`，不调用已经失效且
+试图自行建表的旧 smoke harness。20 个变更 Markdown 文件的本地相对链接
 全部可解析，`git diff --check` 通过。Admin `pnpm test:run` 为 112 files /
 690 tests，TypeScript 与目标 ESLint 通过。
 

@@ -1,7 +1,7 @@
 # [Input] Pull requests that change the Dream backend or this workflow.
-# [Output] A Linux Docker build and public backend smoke-test check.
+# [Output] A Linux Docker build with embedded SDK/Runtime/plugin-management gates.
 # [Pos] Required backend CI for both integration and release pull requests.
-# [Sync] 2026-09-15: run backend qualification for develop PRs and explicit release reruns.
+# [Sync] 2026-09-15: run backend qualification for develop PRs and explicit release reruns without the retired schema-creating smoke harness.
 name: Check Backend (CI)
 
 on:
@@ -28,8 +28,3 @@ jobs:
             -t ink-backend:ci \
             --load \
             backend
-
-      - name: Run backend smoke test (register, login, deck create)
-        run: |
-          chmod +x backend/tests/ci-smoke.sh
-          backend/tests/ci-smoke.sh ink-backend:ci
