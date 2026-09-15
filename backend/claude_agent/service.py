@@ -12,7 +12,7 @@
 # [Sync] 2026-09-15: require fresh Thread SystemConfig from the bound Admin turn owner before context assembly.
 # [Sync] 2026-09-15: load recent Session projections only on prompt rebuild and fail before Runtime on Admin errors.
 # [Sync] 2026-09-15: reuse the public Registry105 Deck snapshot for Story Workspace prompt assembly.
-# [Sync] 2026-09-15: load public workspace plugin metadata through Registry106 before shared-filesystem packing.
+# [Sync] 2026-09-15: resolve public managed MCP workspace scope through Registry107.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -290,6 +290,9 @@ from services.story_workspace.agent_integration import (
 )
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
+from services.admin_data.workflow_managed_mcp_scope_data import (
+    AdminWorkflowManagedMcpScopeProvider,
+)
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.errors import configuration_invalid
 from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
@@ -710,11 +713,25 @@ def _resolve_managed_mcp_workspace_scope_sync(
     *,
     actor_id: str,
     context: StoryWorkspaceDreamRunContext | None,
+    provider: AdminWorkflowManagedMcpScopeProvider | None = None,
 ) -> str | None:
     """Resolve the actor-owned Dream workspace scope for one managed snapshot."""
 
     if context is None:
         return None
+    if isinstance(provider, AdminWorkflowManagedMcpScopeProvider):
+        resolution = provider.managed_mcp_workspace_scope(
+            actor_id=actor_id,
+            thread_id=context.thread_id,
+            workflow_run_id=context.workflow_run_id,
+        )
+        return resolution.workspace_for(
+            actor_id=actor_id,
+            thread_id=context.thread_id,
+            workflow_run_id=context.workflow_run_id,
+        )
+    # Existing durable internal dispatchers do not yet own a renewable
+    # server-persistence grant. Public Chat always supplies the provider above.
     db = _db.get_db()
     try:
         row = db.execute(
@@ -2023,6 +2040,14 @@ class ClaudeAgentService:
                 _resolve_managed_mcp_workspace_scope_sync,
                 actor_id=str(request.user_id),
                 context=dream_context,
+                provider=(
+                    request.admin_turn_persistence
+                    if isinstance(
+                        request.admin_turn_persistence,
+                        AdminWorkflowManagedMcpScopeProvider,
+                    )
+                    else None
+                ),
             )
             snapshot = await loader.load(
                 str(request.user_id),

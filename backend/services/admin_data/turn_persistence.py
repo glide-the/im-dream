@@ -8,7 +8,7 @@
 # [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
 # [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
 # [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
-# [Sync] 2026-09-15: reuse the renewed exact Thread grant for Registry106 workspace metadata reads.
+# [Sync] 2026-09-15: reuse the renewed exact Thread/Run grant for Registry107 managed MCP scope reads.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -39,6 +39,12 @@ from .deck_workspace_plugins_data import (
     AdminDeckWorkspacePluginsProvider,
     DeckWorkspacePluginsInputDTO,
     WorkspaceProfile,
+)
+from .workflow_managed_mcp_scope_data import (
+    AdminWorkflowManagedMcpScopeData,
+    AdminWorkflowManagedMcpScopeProvider,
+    AdminWorkflowManagedMcpScopeResolution,
+    WorkflowManagedMcpScopeInputDTO,
 )
 from .workspace_data import require_workspace_capabilities
 from .system_config_data import AdminSystemConfigData
@@ -78,6 +84,7 @@ class AdminTurnSessionProjectionProvider:
 class AdminTurnPersistence(
     AdminAgentTurnPersistence,
     AdminDeckWorkspacePluginsProvider,
+    AdminWorkflowManagedMcpScopeProvider,
 ):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
@@ -98,6 +105,10 @@ class AdminTurnPersistence(
         self._sessions = AdminSessionData(client)
         self._system_config = AdminSystemConfigData(client)
         self._workspace_plugin_data = AdminDeckWorkspacePluginsData(
+            client,
+            canonical_user_id=resolution.canonical_user_id,
+        )
+        self._managed_mcp_scope_data = AdminWorkflowManagedMcpScopeData(
             client,
             canonical_user_id=resolution.canonical_user_id,
         )
@@ -213,6 +224,32 @@ class AdminTurnPersistence(
                 DeckWorkspacePluginsInputDTO(
                     thread_id=thread_id,
                     profile=profile,
+                ),
+                self._request_id_factory(),
+                access_token=grant.token,
+            )
+
+    def managed_mcp_workspace_scope(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+    ) -> AdminWorkflowManagedMcpScopeResolution:
+        """Resolve the Run workspace through this exact renewable grant."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._managed_mcp_scope_data.resolve(
+                WorkflowManagedMcpScopeInputDTO(
+                    thread_id=thread_id,
+                    workflow_run_id=workflow_run_id,
                 ),
                 self._request_id_factory(),
                 access_token=grant.token,

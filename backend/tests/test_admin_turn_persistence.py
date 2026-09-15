@@ -8,7 +8,7 @@
 # [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
 # [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
 # [Sync] 2026-09-15: validate the owner-bound broker provider, renewed grant and arbitrary strict ranges.
-# [Sync] 2026-09-15: validate Registry106 workspace metadata on the same exact Thread grant.
+# [Sync] 2026-09-15: validate Registry107 managed MCP scope on the exact Thread/Run grant.
 from __future__ import annotations
 
 import asyncio
@@ -40,24 +40,30 @@ from services.admin_data.system_config_data import GET_THREAD_SYSTEM_CONFIG
 from services.admin_data.deck_workspace_plugins_data import (
     RESOLVE_DECK_WORKSPACE_PLUGINS,
 )
+from services.admin_data.workflow_managed_mcp_scope_data import (
+    RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE,
+)
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
 TOKEN = "idg_" + "a" * 43
 
 
-def grant():
-    return RuntimeGrant(TOKEN, "server-persistence", "thread-1", None, None,
+def grant(run_id=None):
+    return RuntimeGrant(TOKEN, "server-persistence", "thread-1", run_id, None,
         ("dream:read", "dream:write"), NOW + timedelta(seconds=100), NOW + timedelta(hours=2))
 
 
 def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None,
-    schema_fault=None, assistant_patch=None, session_rows=None, expected_token=TOKEN):
+    schema_fault=None, assistant_patch=None, session_rows=None, expected_token=TOKEN,
+    workflow_context=None):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     calls, receipt_states = [], ["absent", "committed"]
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
-        GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS)
+        GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS,
+        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE)
     schema_requirements = {
         item.capability: item
         for item in (*WORKSPACE_SCHEMA_REQUIREMENTS, *SESSION_LIST_SCHEMA_REQUIREMENTS)
@@ -106,6 +112,15 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                     "refs": [],
                     "story_workspace_adapter": None,
                 }
+            elif name == RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE.capability.name:
+                assert input_dto == {
+                    "thread_id": "thread-1",
+                    "workflow_run_id": workflow_context.workflow_run_id,
+                }
+                value = {
+                    **input_dto,
+                    "workspace_id": "workspace-1",
+                }
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
                 value = {"changed": True}
@@ -120,7 +135,9 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
     client.capabilities("capabilities-1")
     runtime = SimpleNamespace(closed=[], renew=lambda value, request_id: value, receipt=lambda *args: None)
     runtime.close = lambda: runtime.closed.append(True)
-    value = AdminTurnPersistence(AdminWorkflowResolution("42", "thread-1", None), grant(), client,
+    value = AdminTurnPersistence(AdminWorkflowResolution("42", "thread-1", workflow_context), grant(
+        workflow_context.workflow_run_id if workflow_context is not None else None
+    ), client,
         runtime_client_factory=lambda: runtime, clock=lambda: NOW, request_id_factory=lambda: "write-original",
         session_broker_settings=SessionProjectionBrokerSettings(timeout_seconds=0.5, max_bytes=4096))
     return value, calls, runtime
@@ -277,6 +294,30 @@ def test_workspace_plugin_metadata_uses_current_exact_thread_grant():
     request = calls[-1]
     assert request.headers["authorization"] == "Bearer " + TOKEN
     assert request.url.path.endswith("/deck-workspace-plugins.resolve")
+
+
+def test_managed_mcp_scope_uses_current_exact_thread_run_grant():
+    context = StoryWorkspaceDreamRunContext(
+        workflow_run_id="run_" + "a" * 32,
+        thread_id="thread-1",
+        deck_id="deck-1",
+        deck_plugin_id="ink.dream.story-workflow",
+        deck_plugin_version="1.0.0",
+        deck_plugin_binding_id="binding-1",
+        binding_revision=1,
+        deck_runtime_snapshot_id="snapshot-1",
+        runtime_plugin_lock_id="lock-1",
+    )
+    value, calls, _ = holder(workflow_context=context)
+    resolution = value.managed_mcp_workspace_scope(
+        actor_id="42",
+        thread_id="thread-1",
+        workflow_run_id=context.workflow_run_id,
+    )
+    assert resolution.snapshot.workspace_id == "workspace-1"
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith("/workflow-managed-mcp-scope.resolve")
 
 
 def test_mutable_session_identity_only_reuses_the_most_recent_confirmation():

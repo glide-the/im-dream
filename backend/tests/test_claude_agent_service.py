@@ -399,7 +399,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self._managed_mcp_workspace_patch = unittest.mock.patch.object(
             service_module,
             "_resolve_managed_mcp_workspace_scope_sync",
-            side_effect=lambda *, actor_id, context: (
+            side_effect=lambda *, actor_id, context, provider=None: (
                 "workspace-1" if context is not None else None
             ),
         )
