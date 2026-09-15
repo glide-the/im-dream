@@ -2,6 +2,7 @@
 > [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
 > [Pos] context-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-09-15: Phase 1 reads Thread SystemConfig and recent Session projections through the bound `AdminTurnPersistence`; Admin or DTO failures stop before Workspace, Runtime and SSE, while a successful empty Session list keeps the empty prompt block.
+> [Sync] 2026-09-16: every production dispatcher supplies a bound Admin owner before ThreadFactory; Service has no SQL, database import, implicit mapper or ownerless persistence path.
 > [Sync] 2026-09-13: [当前恢复合同](./claude-session-resume-resolution.md) 替代下文跨项目 JSONL 存在性预检。DB 失败安全终止；缺失当前项目记录才 fresh；state.session_id 是 Dream thread，不是 Claude ID。既有 context builder 与历史上下文装配不变。
 > [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
 > [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
@@ -105,7 +106,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `state` | `AgentRunStatePool` | yes | Cross-turn cache for `system_prompt`, `cwd`, runner presence, lifecycle, and turn count. |
 | `queue` | factory-owned `asyncio.Queue` | yes | Shared queue later used by Phase 3 callbacks. |
 | `runner` | factory-owned runner cache | yes in current service signature | Passed through to `_TurnExecution`; not executed during assembly. |
-| `existing_session` | `AdminTurnPersistence.thread_record(actor_id, thread_id)` | internal | Loaded by `assemble_context`; provides `claude_session_id` and `agent_contract_version` for resume gating. Existing internal dispatch without a turn owner remains a separately tracked legacy path. |
+| `existing_session` | `AdminTurnPersistence.thread_record(actor_id, thread_id)` | internal | Loaded by `assemble_context`; provides `claude_session_id` and `agent_contract_version` for resume gating. Missing production owner stops before context assembly. |
 | `system_config` | `AdminTurnPersistence.system_config(actor_id, thread_id)` | internal | Loaded before prompt/cwd assembly; provides Settings SYSTEM_PROMPT, Workspace Mode, sandbox network policy, full-access approval mode, and user SDK env vars. |
 | `recent_sessions` | `AdminTurnPersistence.recent_sessions(actor_id, thread_id)` | internal, prompt rebuild only | Strict `SessionPreviewDTO` projections for UTC today and the preceding two dates, fetched with `include_text=false`. |
 
@@ -286,7 +287,7 @@ Coverage should stay focused on the contracts above:
 - **Contract version mismatch**: when `existing_session.agent_contract_version` differs from `_AGENT_RUNTIME_CONTRACT_VERSION`, resume is skipped.
 - **Admin Thread load failure**: when the bound owner cannot read or validate the Thread DTO, `assemble_context` fails before Runtime and does not infer a first turn.
 - `_TurnContext` starts clean each turn and does not reuse confirmation or reasoning state.
-- `_TurnExecution.resume_existing_session` is the DB row when resuming, `None` otherwise.
+- `_TurnExecution.resume_existing_session` is the strict Admin Thread projection when resuming, `None` otherwise.
 - Planning prompt optimization tests should assert that optimized prompt text enters through `message_parts`, while `assemble_context` remains optimizer-agnostic.
 - Failure tests should cover Admin read failures without DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
 

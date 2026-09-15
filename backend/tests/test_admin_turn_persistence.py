@@ -870,8 +870,6 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
         managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
     request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", resume=True,
         admin_workflow_resolution=AdminWorkflowResolution("42", "thread-1", None), admin_turn_persistence=value)
-    monkeypatch.setattr(service_module._db, "get_chat_thread", lambda *_: pytest.fail("Public Thread read must use Admin"))
-    monkeypatch.setattr(service_module._db, "update_chat_thread_claude_session", lambda *_: pytest.fail("Public SDK Session must use Admin"))
     monkeypatch.setattr(service_module, "get_or_create_workspace", lambda *_args, **_kwargs: tmp_path.resolve())
     new_id = "44444444-4444-4444-8444-444444444444"
     async def scenario():
@@ -909,10 +907,8 @@ def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fen
     from claude_agent_sdk.types import SystemMessage
     value, calls, _ = holder(lose_operation=UPDATE_SESSION.capability.name if lose_session else None)
     service = ClaudeAgentService(dream_artifact_turn_hook=Mock())
-    monkeypatch.setattr(service_module._db, "update_chat_thread_claude_session", lambda *_: pytest.fail("Public callback must use Admin"))
-    monkeypatch.setattr(service_module._db, "get_db", lambda: pytest.fail("Public user reservation must use Admin"))
-    # Raw assistant persistence has not migrated; inject only that retained
-    # boundary while executing the real service callbacks/cancel/SSE path.
+    # Inject partial persistence while executing the real service callbacks,
+    # cancellation and SSE path through the bound Admin owner.
     partial = AsyncMock()
     monkeypatch.setattr(service, "_persist_partial_assistant", partial)
     async def scenario():

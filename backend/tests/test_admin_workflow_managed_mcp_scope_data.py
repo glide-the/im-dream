@@ -143,11 +143,6 @@ class _Provider(AdminWorkflowManagedMcpScopeProvider):
 
 
 def test_public_scope_resolver_uses_provider_with_dream_pg_fenced(monkeypatch):
-    monkeypatch.setattr(
-        service_module._db,
-        "get_db",
-        lambda: pytest.fail("Public managed MCP scope must not use Dream PG"),
-    )
     assert service_module._resolve_managed_mcp_workspace_scope_sync(
         actor_id="42",
         context=_context(),

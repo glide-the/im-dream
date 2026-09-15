@@ -1,10 +1,11 @@
+# [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
 # [Sync] 2026-09-16: skip duplicate user persistence only for Admin-claimed Dream confirmations.
 # [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
-# [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
+# [Sync] 2026-09-15: complete/partial assistant writes use the bound Admin turn owner.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
 #         claude_agent/context_builder.py, claude_agent/tool_confirmation_store.py.
-#         Reads Admin turn SystemConfig and retains pending database domains.
+#         Reads all durable turn state through the bound Admin owner.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
 # [Sync] 2026-09-15: use bound server grants for public Thread resume reads and SDK-native Session updates.
@@ -260,10 +261,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, Optional
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 from uuid import uuid4
 
-import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from libs.claude_agent_kit.server.sdk_env import resolve_claude_config_home
@@ -287,9 +287,7 @@ from claude_agent.tool_confirmation_store import (
     ToolConfirmationStore,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
-from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from services.story_workspace.agent_integration import parse_agent_story_output
-from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.workflow_managed_mcp_scope_data import (
     AdminWorkflowManagedMcpScopeProvider,
@@ -335,10 +333,9 @@ from libs.claude_agent_kit.types import (
 )
 from services.claude_plugin.workspace_packer import (
     WorkspacePackError,
-    pack_workspace_plugins,
     pack_workspace_plugins_with_refs_loader,
 )
-from services.deck.chat_context import DeckChatContextAssembler, DeckChatContextService
+from services.deck.chat_context import DeckChatContextAssembler
 from services.admin_data.deck_chat_context_data import AdminDeckChatContextResolution
 from services.admin_data.deck_workspace_plugins_data import (
     AdminDeckWorkspacePluginsProvider,
@@ -349,6 +346,17 @@ from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.stream_events import NormalizedAgentEvent
 
 logger = logging.getLogger(__name__)
+
+
+class _DreamContextProvider(Protocol):
+    """Explicit test/composition seam; production turns carry an Admin snapshot."""
+
+    def resolve(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+    ) -> StoryWorkspaceDreamRunContext | None: ...
 
 _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_USER_ID",
@@ -592,7 +600,7 @@ def _pack_thread_workspace_plugins(
     *,
     actor_id: str | None = None,
     thread_id: str | None = None,
-    admin_turn_persistence: AdminAgentTurnPersistence | None = None,
+    admin_turn_persistence: AdminAgentTurnPersistence,
     dream_mode: bool = False,
 ) -> None:
     """Pack the thread-locked Deck's plugins into the thread workspace.
@@ -606,72 +614,52 @@ def _pack_thread_workspace_plugins(
 
     if not deck_id:
         return
-    if isinstance(
-        admin_turn_persistence,
-        AdminDeckWorkspacePluginsProvider,
+    if (
+        not isinstance(admin_turn_persistence, AdminAgentTurnPersistence)
+        or not isinstance(admin_turn_persistence, AdminDeckWorkspacePluginsProvider)
+        or not actor_id
+        or not thread_id
     ):
-        if (
-            not isinstance(admin_turn_persistence, AdminAgentTurnPersistence)
-            or not actor_id
-            or not thread_id
-        ):
-            raise configuration_invalid()
-        profile = "story_workspace" if dream_mode else "standard"
+        raise configuration_invalid()
+    profile = "story_workspace" if dream_mode else "standard"
 
-        def load_admin_refs() -> list[dict[str, Any]]:
-            resolution = admin_turn_persistence.workspace_plugins(
-                actor_id=actor_id,
-                thread_id=thread_id,
-                profile=profile,
-            )
-            snapshot = resolution.snapshot_for(
-                actor_id=actor_id,
-                thread_id=thread_id,
-                profile=profile,
-                deck_id=deck_id,
-            )
-            refs = [ref.model_dump(mode="python") for ref in snapshot.refs]
-            if not dream_mode:
-                return refs
-            adapter = snapshot.story_workspace_adapter
-            if adapter is None or adapter.ready is None:
-                code = (
-                    "CLAUDE_PLUGIN_NOT_FOUND"
-                    if adapter is None or adapter.latest_status is None
-                    else "CLAUDE_PLUGIN_NOT_READY"
-                )
-                raise WorkspacePackError(
-                    code,
-                    "Story Workspace adapter installation is unavailable",
-                )
-            if adapter.ready.package_spec not in {
-                ref["package_spec"] for ref in refs
-            }:
-                refs.append(adapter.ready.model_dump(mode="python"))
+    def load_admin_refs() -> list[dict[str, Any]]:
+        resolution = admin_turn_persistence.workspace_plugins(
+            actor_id=actor_id,
+            thread_id=thread_id,
+            profile=profile,
+        )
+        snapshot = resolution.snapshot_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+            profile=profile,
+            deck_id=deck_id,
+        )
+        refs = [ref.model_dump(mode="python") for ref in snapshot.refs]
+        if not dream_mode:
             return refs
+        adapter = snapshot.story_workspace_adapter
+        if adapter is None or adapter.ready is None:
+            code = (
+                "CLAUDE_PLUGIN_NOT_FOUND"
+                if adapter is None or adapter.latest_status is None
+                else "CLAUDE_PLUGIN_NOT_READY"
+            )
+            raise WorkspacePackError(
+                code,
+                "Story Workspace adapter installation is unavailable",
+            )
+        if adapter.ready.package_spec not in {
+            ref["package_spec"] for ref in refs
+        }:
+            refs.append(adapter.ready.model_dump(mode="python"))
+        return refs
 
-        pack_workspace_plugins_with_refs_loader(
-            workspace=Path(cwd),
-            deck_id=deck_id,
-            refs_loader=load_admin_refs,
-        )
-        return
-
-    # Existing internal/background owners without a Registry106 provider retain
-    # their mapper until their typed identity is connected. Public Chat always
-    # supplies AdminTurnPersistence and cannot fall back to PostgreSQL.
-    db = _db.get_db()
-    try:
-        pack_workspace_plugins(
-            db,
-            workspace=Path(cwd),
-            deck_id=deck_id,
-            server_adapter_package_specs=(
-                ("ink-dream-story@platform-builtin",) if dream_mode else ()
-            ),
-        )
-    finally:
-        db.close()
+    pack_workspace_plugins_with_refs_loader(
+        workspace=Path(cwd),
+        deck_id=deck_id,
+        refs_loader=load_admin_refs,
+    )
 
 
 async def _resolve_story_workspace_dream_deck_prompt(
@@ -688,32 +676,18 @@ async def _resolve_story_workspace_dream_deck_prompt(
     Dream asset turn.
     """
 
-    if admin_deck_chat_context is not None:
-        snapshot = admin_deck_chat_context.context_for(
-            actor_id=str(actor_id),
-            deck_id=context.deck_id,
-            voice_id=context.agent_id,
-        )
-        resolved = await DeckChatContextAssembler(
-            snapshot,
-            selected_voice_id=context.agent_id,
-        ).resolve(dream_mode=True)
-        return resolved.system_prompt
-
-    # Existing durable internal dispatchers do not yet carry request OAuth.
-    # Keep their legacy provider until their typed service identity is wired;
-    # the public Chat path always supplies the immutable Admin snapshot above.
-    db = _db.get_db()
-    try:
-        resolved = await DeckChatContextService(db).resolve(
-            deck_id=context.deck_id,
-            actor_id=str(actor_id),
-            voice_id=context.agent_id,
-            dream_mode=True,
-        )
-        return resolved.system_prompt
-    finally:
-        db.close()
+    if admin_deck_chat_context is None:
+        raise configuration_invalid()
+    snapshot = admin_deck_chat_context.context_for(
+        actor_id=str(actor_id),
+        deck_id=context.deck_id,
+        voice_id=context.agent_id,
+    )
+    resolved = await DeckChatContextAssembler(
+        snapshot,
+        selected_voice_id=context.agent_id,
+    ).resolve(dream_mode=True)
+    return resolved.system_prompt
 
 
 def _resolve_managed_mcp_workspace_scope_sync(
@@ -726,33 +700,18 @@ def _resolve_managed_mcp_workspace_scope_sync(
 
     if context is None:
         return None
-    if isinstance(provider, AdminWorkflowManagedMcpScopeProvider):
-        resolution = provider.managed_mcp_workspace_scope(
-            actor_id=actor_id,
-            thread_id=context.thread_id,
-            workflow_run_id=context.workflow_run_id,
-        )
-        return resolution.workspace_for(
-            actor_id=actor_id,
-            thread_id=context.thread_id,
-            workflow_run_id=context.workflow_run_id,
-        )
-    # Existing durable internal dispatchers do not yet own a renewable
-    # server-persistence grant. Public Chat always supplies the provider above.
-    db = _db.get_db()
-    try:
-        row = db.execute(
-            "SELECT workspace_id FROM workflow_runs "
-            "WHERE id = %s AND created_by = %s",
-            (context.workflow_run_id, actor_id),
-        ).fetchone()
-        if db.in_transaction:
-            db.rollback()
-        if row is None or not row["workspace_id"]:
-            raise PermissionError("Dream managed MCP workspace scope is unavailable")
-        return str(row["workspace_id"])
-    finally:
-        db.close()
+    if not isinstance(provider, AdminWorkflowManagedMcpScopeProvider):
+        raise configuration_invalid()
+    resolution = provider.managed_mcp_workspace_scope(
+        actor_id=actor_id,
+        thread_id=context.thread_id,
+        workflow_run_id=context.workflow_run_id,
+    )
+    return resolution.workspace_for(
+        actor_id=actor_id,
+        thread_id=context.thread_id,
+        workflow_run_id=context.workflow_run_id,
+    )
 
 
 async def _activate_story_workspace_dream_runtime(
@@ -819,9 +778,6 @@ async def _activate_story_workspace_dream_runtime(
 
 # Keepalive interval for SSE comments (seconds).
 _SSE_KEEPALIVE_S: float = float(os.getenv("INK_AGENT_SSE_KEEPALIVE_S", "15") or "15")
-
-# Maximum characters to use when auto-titling a thread from the first user message.
-MAX_THREAD_TITLE_LENGTH: int = 50
 
 # Agent contract version — bump when the system prompt or tool set changes in a
 # way that makes old SDK transcripts incompatible with the current runtime.
@@ -1375,16 +1331,6 @@ def _has_usable_claude_resume(existing_session: Optional[Mapping[str, Any]]) -> 
 # ---------------------------------------------------------------------------
 
 
-def _extract_text_from_parts(parts: Optional[list]) -> str:
-    """Extract text from AI-SDK UIMessage parts for use as a plain string.
-
-    Delegates to ``extract_text_from_parts`` (full UIMessage parts protocol:
-    text + file + source-url + workspace-file).  Used for thread title
-    auto-fill where a compact string representation is needed.
-    """
-    return extract_text_from_parts(parts)
-
-
 def _format_exception_for_sse(exc: BaseException | None) -> str:
     """Return SSE-safe error text, including PEP-678 notes when available."""
 
@@ -1631,7 +1577,7 @@ class ClaudeAgentService:
         claude_code_runtime_env_provider: (
             Callable[[], Mapping[str, str]] | None
         ) = None,
-        dream_context_mapper: DreamThreadContextMapper | None = None,
+        dream_context_mapper: _DreamContextProvider | None = None,
         dream_runtime_init_activator: (
             Callable[..., Awaitable[None]] | None
         ) = None,
@@ -1649,7 +1595,7 @@ class ClaudeAgentService:
         self._claude_code_runtime_env_provider = (
             claude_code_runtime_env_provider or (lambda: {})
         )
-        self._dream_context_mapper = dream_context_mapper or DreamThreadContextMapper()
+        self._dream_context_mapper = dream_context_mapper
         self._dream_runtime_init_activator = (
             dream_runtime_init_activator
             or _activate_story_workspace_dream_runtime
@@ -1674,31 +1620,38 @@ class ClaudeAgentService:
             if not isinstance(resolution, AdminWorkflowResolution):
                 raise ValueError("Invalid server Workflow snapshot")
             return resolution.context_for(actor_id=request.user_id, thread_id=request.thread_id)
-        # Existing durable internal dispatchers retain their production mapper
-        # until their typed Workflow command/service identity is connected.
-        return await asyncio.to_thread(self._dream_context_mapper.resolve, actor_id=request.user_id, thread_id=request.thread_id)
+        if self._dream_context_mapper is None:
+            raise configuration_invalid()
+        return await asyncio.to_thread(
+            self._dream_context_mapper.resolve,
+            actor_id=request.user_id,
+            thread_id=request.thread_id,
+        )
 
     @staticmethod
     async def _thread_record(request: ClaudeAgentRunRequest) -> dict | None:
         persistence = request.admin_turn_persistence
-        if persistence is not None:
-            if not isinstance(persistence, AdminAgentTurnPersistence):
-                raise ValueError("Invalid server persistence owner")
-            row = await asyncio.to_thread(persistence.thread, actor_id=request.user_id, thread_id=request.thread_id)
-            return row.model_dump() if row is not None else None
-        return await asyncio.to_thread(_db.get_chat_thread, request.thread_id, int(request.user_id))
+        if not isinstance(persistence, AdminAgentTurnPersistence):
+            raise configuration_invalid()
+        row = await asyncio.to_thread(
+            persistence.thread,
+            actor_id=request.user_id,
+            thread_id=request.thread_id,
+        )
+        return row.model_dump() if row is not None else None
 
     @staticmethod
     async def _save_sdk_session(request: ClaudeAgentRunRequest, session_id: str) -> None:
         persistence = request.admin_turn_persistence
-        if persistence is not None:
-            if not isinstance(persistence, AdminAgentTurnPersistence):
-                raise ValueError("Invalid server persistence owner")
-            await asyncio.to_thread(persistence.update_session, actor_id=request.user_id, thread_id=request.thread_id,
-                session_id=session_id, contract_version=_AGENT_RUNTIME_CONTRACT_VERSION)
-            return
-        await asyncio.to_thread(_db.update_chat_thread_claude_session,
-            request.thread_id, session_id, _AGENT_RUNTIME_CONTRACT_VERSION)
+        if not isinstance(persistence, AdminAgentTurnPersistence):
+            raise configuration_invalid()
+        await asyncio.to_thread(
+            persistence.update_session,
+            actor_id=request.user_id,
+            thread_id=request.thread_id,
+            session_id=session_id,
+            contract_version=_AGENT_RUNTIME_CONTRACT_VERSION,
+        )
 
     async def assemble_context(
         self,
@@ -2796,52 +2749,23 @@ class ClaudeAgentService:
                 raise ValueError("Invalid pre-persisted confirmation turn")
             return
         persistence = execution.request.admin_turn_persistence
-        if persistence is not None:
-            if not isinstance(persistence, AdminAgentTurnPersistence):
-                raise ValueError("Invalid server persistence owner")
-            message_id = execution.request.message_id or str(uuid4())
-            parts = list(execution.request.message_parts) if execution.request.message_parts else [{"type": "text", "text": ""}]
-            result = await asyncio.to_thread(persistence.persist_user, actor_id=execution.request.user_id,
-                thread_id=execution.request.thread_id, message_id=message_id, parts=parts, metadata=execution.request.message_metadata)
-            execution.request.message_id = result.message_id
-            return
-        import database
-
-        thread_id = execution.request.thread_id
-        user_message_id = execution.request.message_id
-        user_parts = execution.request.message_parts
-        message_metadata = execution.request.message_metadata
-
-        def _save_user() -> None:
-            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
-            database.save_chat_message(
-                thread_id, "user",
-                parts=resolved_user_parts,
-                message_id=user_message_id,
-                metadata=message_metadata,
-            )
-            # Auto-fill thread title from first user message if still NULL.
-            thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
-            if thread and not thread.get("title"):
-                title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
-                database.update_chat_thread_title(thread_id, title)
-
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, _save_user)
-        except (
-            database.ChatMessageIdentityConflict,
-            database.PostgresError,
-        ):
-            logger.exception(
-                "Canonical user message persistence rejected for thread_id=%s",
-                thread_id,
-            )
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to persist user message for thread_id=%s", thread_id
-            )
+        if not isinstance(persistence, AdminAgentTurnPersistence):
+            raise configuration_invalid()
+        message_id = execution.request.message_id or str(uuid4())
+        parts = (
+            list(execution.request.message_parts)
+            if execution.request.message_parts
+            else [{"type": "text", "text": ""}]
+        )
+        result = await asyncio.to_thread(
+            persistence.persist_user,
+            actor_id=execution.request.user_id,
+            thread_id=execution.request.thread_id,
+            message_id=message_id,
+            parts=parts,
+            metadata=execution.request.message_metadata,
+        )
+        execution.request.message_id = result.message_id
 
     async def _persist_partial_assistant(
         self,
@@ -3025,19 +2949,18 @@ class ClaudeAgentService:
         history_final_text: str | None = None, history_process_available: bool = False,
         history_projection_version: int | None = None) -> None:
         persistence = request.admin_turn_persistence
-        if persistence is not None:
-            if not isinstance(persistence, AdminAgentTurnPersistence):
-                raise ValueError("Invalid server persistence owner")
-            persistence.persist_assistant(actor_id=request.user_id, thread_id=request.thread_id, message_id=str(uuid4()),
-                parts=parts, metadata=metadata, history_final_text=history_final_text,
-                history_process_available=history_process_available, history_projection_version=history_projection_version)
-            return
-        # Remaining ownerless internal dispatchers retain their mapper/SQL until
-        # their authoritative owner is connected; public Chat and confirmation supply it.
-        import database
-        database.save_chat_message(request.thread_id, "assistant", parts=parts, metadata=metadata,
-            history_final_text=history_final_text, history_process_available=history_process_available,
-            history_projection_version=history_projection_version)
+        if not isinstance(persistence, AdminAgentTurnPersistence):
+            raise configuration_invalid()
+        persistence.persist_assistant(
+            actor_id=request.user_id,
+            thread_id=request.thread_id,
+            message_id=str(uuid4()),
+            parts=parts,
+            metadata=metadata,
+            history_final_text=history_final_text,
+            history_process_available=history_process_available,
+            history_projection_version=history_projection_version,
+        )
 
     # Keep _persist_turn as a legacy alias used by test stubs / older callers.
     async def _persist_turn(

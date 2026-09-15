@@ -1,4 +1,5 @@
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
+# [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
 # [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
@@ -92,6 +93,7 @@ if str(ROOT) not in sys.path:
 
 import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before service import
 
+import database as _db
 import claude_agent.service as service_module
 import claude_mcp.service as claude_mcp_service_module
 import claude_agent.workspace_context as workspace_context_module
@@ -111,6 +113,7 @@ from libs.claude_agent_kit.types import (
 )
 from services.admin_gateway.models import GatewayModel
 from services.admin_data.session_models import SessionPreviewDTO
+from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.deck_chat_context_data import (
     AdminDeckChatContextResolution,
     DeckChatContextOutputDTO,
@@ -123,15 +126,115 @@ from story_workspace.contracts import (
 )
 
 
+class _LegacyTurnPersistence(AdminAgentTurnPersistence):
+    """Test-only adapter for historical fixtures that still patch database.py."""
+
+    def system_config(self, *, actor_id, thread_id):
+        del thread_id
+        return _db.get_system_config(int(actor_id))
+
+    def recent_sessions(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return ()
+
+    def session_projection_child_env(self):
+        return {}
+
+    def thread(self, *, actor_id, thread_id):
+        row = _db.get_chat_thread(thread_id, int(actor_id))
+        if row is None:
+            return None
+        return SimpleNamespace(model_dump=lambda: dict(row))
+
+    def update_session(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        session_id,
+        contract_version,
+    ):
+        del actor_id
+        _db.update_chat_thread_claude_session(
+            thread_id,
+            session_id,
+            contract_version,
+        )
+
+    def persist_user(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        message_id,
+        parts,
+        metadata,
+    ):
+        _db.save_chat_message(
+            thread_id,
+            "user",
+            parts=parts,
+            message_id=message_id,
+            metadata=metadata,
+        )
+        thread = _db.get_chat_thread(thread_id, int(actor_id))
+        if thread and not thread.get("title"):
+            text = "".join(
+                str(part.get("text") or "")
+                for part in parts
+                if isinstance(part, dict) and part.get("type") == "text"
+            ).strip()
+            _db.update_chat_thread_title(thread_id, text[:50])
+        return SimpleNamespace(message_id=message_id)
+
+    def persist_assistant(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        message_id,
+        parts,
+        metadata,
+        history_final_text,
+        history_process_available,
+        history_projection_version,
+    ):
+        del actor_id
+        return _db.save_chat_message(
+            thread_id,
+            "assistant",
+            parts=parts,
+            message_id=message_id,
+            metadata=metadata,
+            history_final_text=history_final_text,
+            history_process_available=history_process_available,
+            history_projection_version=history_projection_version,
+        )
+
+
 class ClaudeAgentService(_ProductionClaudeAgentService):
-    """Test-only DI for legacy context cases without a public turn owner."""
+    """Test-only DI for historical fixtures without a real Admin server."""
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault(
             "system_config_reader",
-            lambda user_id: service_module._db.get_system_config(int(user_id)),
+            lambda user_id: _db.get_system_config(int(user_id)),
         )
         super().__init__(*args, **kwargs)
+
+    async def assemble_context(self, request, **kwargs):
+        if request.admin_turn_persistence is None:
+            request.admin_turn_persistence = _LegacyTurnPersistence()
+        if (
+            request.admin_workflow_resolution is None
+            and self._dream_context_mapper is None
+        ):
+            request.admin_workflow_resolution = AdminWorkflowResolution(
+                str(request.user_id),
+                request.thread_id,
+                None,
+            )
+        return await super().assemble_context(request, **kwargs)
 
 
 class _FakeContextBuilder:
@@ -249,7 +352,7 @@ class TestStoryWorkspaceOutputTransaction(unittest.IsolatedAsyncioTestCase):
             unittest.mock.patch.object(
                 service_module, "parse_agent_story_output", return_value=payload
             ),
-            unittest.mock.patch.object(service_module._db, "get_db") as database,
+            unittest.mock.patch.object(_db, "get_db") as database,
         ):
             result = await ClaudeAgentService()._store_story_workspace_output(
                 SimpleNamespace(request=request, dream_context=None),
@@ -277,7 +380,7 @@ class TestStoryWorkspaceOutputTransaction(unittest.IsolatedAsyncioTestCase):
             admin_turn_persistence=provider,
         )
         with (
-            unittest.mock.patch.object(service_module._db, "get_db") as database,
+            unittest.mock.patch.object(_db, "get_db") as database,
             self.assertLogs(service_module.logger, level="ERROR") as logs,
         ):
             result = await ClaudeAgentService()._store_story_workspace_output(
@@ -313,9 +416,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             tempfile.TemporaryDirectory(prefix="dream-resume-next-turn-") as tmp,
-            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=lambda *_: dict(row)),
-            unittest.mock.patch.object(service_module._db, "update_chat_thread_claude_session", side_effect=save_id) as save,
+            unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(_db, "get_chat_thread", side_effect=lambda *_: dict(row)),
+            unittest.mock.patch.object(_db, "update_chat_thread_claude_session", side_effect=save_id) as save,
             unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
         ):
             state = AgentRunState(session_id=request.thread_id)
@@ -366,8 +469,8 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
                 with (
                     tempfile.TemporaryDirectory(prefix="dream-resume-service-") as tmp,
-                    unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-                    unittest.mock.patch.object(service_module._db, "get_chat_thread", return_value=stored) as loader,
+                    unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+                    unittest.mock.patch.object(_db, "get_chat_thread", return_value=stored) as loader,
                     unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
                     unittest.mock.patch.object(session_files, "locate_resumable_session", return_value=located) as probe,
                 ):
@@ -393,8 +496,8 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         request = ClaudeAgentRunRequest(user_id="7", thread_id="dream-db-error", resume=True)
         with (
             tempfile.TemporaryDirectory(prefix="dream-resume-db-error-") as tmp,
-            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=RuntimeError("secret database details")),
+            unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(_db, "get_chat_thread", side_effect=RuntimeError("secret database details")),
             unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
             self.assertRaisesRegex(RuntimeError, "^CLAUDE_RESUME_DATABASE_UNAVAILABLE$"),
         ):
@@ -405,7 +508,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
         self._dream_thread_loader = unittest.mock.patch.object(
-            service_module._db,
+            _db,
             "get_chat_thread",
             return_value=None,
         )
@@ -497,12 +600,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             (workspace_path / ".dream").mkdir()
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={"deck_id": "deck-dream"},
                 ),
@@ -535,8 +638,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             "deck-dream",
             actor_id="7",
             thread_id="thread_dream_turn",
-            admin_turn_persistence=None,
+            admin_turn_persistence=unittest.mock.ANY,
             dream_mode=True,
+        )
+        self.assertIsInstance(
+            pack.call_args.kwargs["admin_turn_persistence"],
+            _LegacyTurnPersistence,
         )
         self.assertIs(
             builder.user_message_calls[0]["story_workspace_dream_context"],
@@ -617,7 +724,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         context = self._dream_context()
         snapshot = _admin_deck_resolution()
         with unittest.mock.patch.object(
-            service_module._db,
+            _db,
             "get_db",
             side_effect=AssertionError("Registry105 snapshot must be reused"),
         ) as dream_db:
@@ -685,12 +792,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={"deck_id": context.deck_id},
                 ),
@@ -782,12 +889,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             }) + "\n", encoding="utf-8")
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={
                         "claude_session_id": session_id,
@@ -860,7 +967,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_db",
                 side_effect=AssertionError(
                     "Dream Runtime activation opened PostgreSQL"
@@ -904,7 +1011,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_db",
                 side_effect=AssertionError(
                     "Dream Runtime activation opened PostgreSQL"
@@ -943,42 +1050,24 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         parse.assert_not_called()
 
-    async def test_workspace_pack_adds_server_adapter_only_for_dream_turn(self):
-        db = unittest.mock.Mock()
-        with (
-            unittest.mock.patch.object(
-                service_module._db, "get_db", return_value=db
-            ),
-            unittest.mock.patch.object(
-                service_module, "pack_workspace_plugins"
-            ) as pack,
-        ):
-            service_module._pack_thread_workspace_plugins(
-                "/workspace/thread", "deck-dream"
-            )
-            service_module._pack_thread_workspace_plugins(
-                "/workspace/thread", "deck-dream", dream_mode=True
-            )
-
-        self.assertEqual(
-            pack.call_args_list,
-            [
-                unittest.mock.call(
-                    db,
-                    workspace=Path("/workspace/thread"),
-                    deck_id="deck-dream",
-                    server_adapter_package_specs=(),
-                ),
-                unittest.mock.call(
-                    db,
-                    workspace=Path("/workspace/thread"),
-                    deck_id="deck-dream",
-                    server_adapter_package_specs=(
-                        "ink-dream-story@platform-builtin",
-                    ),
-                ),
-            ],
-        )
+    async def test_workspace_pack_fails_closed_without_the_admin_metadata_owner(self):
+        with unittest.mock.patch.object(
+            service_module,
+            "pack_workspace_plugins_with_refs_loader",
+        ) as pack:
+            with self.assertRaisesRegex(
+                service_module.AdminDataError,
+                "ADMIN_CONFIGURATION_INVALID",
+            ):
+                service_module._pack_thread_workspace_plugins(
+                    "/workspace/thread",
+                    "deck-dream",
+                    actor_id="7",
+                    thread_id="thread-dream",
+                    admin_turn_persistence=object(),  # type: ignore[arg-type]
+                    dream_mode=True,
+                )
+        pack.assert_not_called()
 
     async def test_system_config_is_loaded_before_resume_db_lookup(self):
         builder = _FakeContextBuilder()
@@ -1001,7 +1090,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     {"INK_AGENT_SANDBOX_ENABLED": "false"},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={
                         "system_prompt": "Settings page prompt",
@@ -1028,7 +1117,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     },
                 ) as get_system_config,
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ) as get_chat_thread,
@@ -1113,12 +1202,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_system_config",
                 return_value={"workspace_enabled": False},
             ),
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_chat_thread",
                 return_value=None,
             ),
@@ -1173,7 +1262,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_system_config",
                 return_value={"workspace_enabled": False},
             ),
@@ -1220,12 +1309,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_service_prompt_change"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"system_prompt": "new settings prompt"},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1358,12 +1447,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 return_value=Path(tmp_dir),
             ) as runtime_workspace,
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "list_sessions_in_range",
                 side_effect=AssertionError("legacy range helper must not run"),
             ) as legacy_range,
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "list_sessions",
                 side_effect=AssertionError("legacy Session helper must not run"),
             ) as legacy_all,
@@ -1427,12 +1516,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_service_config_failure"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     side_effect=RuntimeError("system_config unavailable"),
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ) as get_chat_thread,
@@ -1466,7 +1555,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_system_config",
                 side_effect=AssertionError("legacy SystemConfig must not run"),
             ) as legacy_config,
@@ -1618,12 +1707,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_notion_attach"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1741,12 +1830,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
             )
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1992,6 +2081,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                 user_id="7",
                 thread_id="thread-stop-service",
                 message_parts=[{"type": "text", "text": "hello"}],
+                admin_turn_persistence=_LegacyTurnPersistence(),
             )
             session_id = "44444444-4444-4444-8444-444444444444"
 
@@ -2027,7 +2117,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                     new=unittest.mock.AsyncMock(),
                 ) as persist_partial,
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "update_chat_thread_claude_session",
                 ) as persist_session,
             ):
@@ -2108,6 +2198,7 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                         "kind": "story-workspace-dream-auto-repair",
                     },
                     model="claude-test",
+                    admin_turn_persistence=_LegacyTurnPersistence(),
                 ),
                 state=AgentRunState(session_id="thread-persist-repair"),
                 runner=unittest.mock.Mock(),
@@ -2213,10 +2304,8 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
         owner.persist_user.assert_not_called()
         owner.persist_assistant.assert_called_once()
 
-    def test_identity_and_postgres_failures_are_rethrown_before_inference(self):
-        import database
-
-        async def scenario(failure: BaseException):
+    def test_admin_identity_and_transport_failures_stop_before_inference(self):
+        async def scenario(failure: service_module.AdminDataError):
             service = ClaudeAgentService()
             queue: asyncio.Queue = asyncio.Queue()
             turn_ctx = _TurnContext(
@@ -2227,11 +2316,16 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                 ),
             )
             state = AgentRunState(session_id="thread-identity")
+            class RejectingPersistence(AdminAgentTurnPersistence):
+                def persist_user(self, **_kwargs):
+                    raise failure
+
             request = ClaudeAgentRunRequest(
                 user_id="7",
                 thread_id="thread-identity",
                 message_id="public-message-1",
                 message_parts=[{"type": "text", "text": "hello"}],
+                admin_turn_persistence=RejectingPersistence(),
             )
             runner = unittest.mock.Mock()
             runner.run_streaming = unittest.mock.AsyncMock()
@@ -2242,24 +2336,16 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                 run_options=unittest.mock.Mock(),
                 turn_context=turn_ctx,
             )
-            guard_db = unittest.mock.Mock()
-            with (
-                unittest.mock.patch.object(database, "get_db", return_value=guard_db),
-                unittest.mock.patch.object(
-                    database,
-                    "save_chat_message",
-                    side_effect=failure,
-                ),
-            ):
-                with self.assertRaises(type(failure)):
-                    await service.execute_session(execution)
+            with self.assertRaises(service_module.AdminDataError) as caught:
+                await service.execute_session(execution)
+            self.assertIs(caught.exception, failure)
             return runner
 
         for failure in (
-            database.ChatMessageIdentityConflict("public-message-1"),
-            database.PostgresError("database unavailable"),
+            service_module.AdminDataError("CHAT_MESSAGE_IDENTITY_CONFLICT", 409),
+            service_module.AdminDataError("ADMIN_UNAVAILABLE", 503),
         ):
-            with self.subTest(failure=type(failure).__name__):
+            with self.subTest(failure=failure.code):
                 runner = _run(scenario(failure))
                 runner.run_streaming.assert_not_awaited()
 

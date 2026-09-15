@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
 # [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
 # [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
 # [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
@@ -20,6 +21,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -72,7 +74,10 @@ from services.admin_data.story_workspace_confirmation_data import (
     AdminStoryWorkspaceConfirmationData,
 )
 from services.admin_data.deck_plugin_binding_data import AdminDeckPluginBindingData
-from services.story_workspace.guidance_service import build_thread_turn_dispatcher
+from services.story_workspace.guidance_service import (
+    build_thread_turn_dispatcher,
+    prepare_guidance_turn_owner,
+)
 from services.story_workspace.dream_launch_runtime import AdminDreamLaunchRuntime
 
 try:
@@ -1370,6 +1375,7 @@ async def submit_run_guidance(
     workflow_run_id: str,
     request: StoryWorkspaceGuidanceCommandPayload,
     current_user: dict[str, Any] = Depends(get_current_user),
+    request_auth: AdminRequestAuth = Depends(get_admin_request_auth),
     data: AdminStoryWorkspaceGuidanceData = Depends(_guidance_data),
 ):
     """Submit one idempotent guidance command to a guidable run.
@@ -1410,15 +1416,31 @@ async def submit_run_guidance(
     dispatched = False
     if result.dispatch is not None:
         dispatch = result.dispatch
+        turn_owner = None
         try:
+            actor = current_user.get("_admin_actor")
+            if not isinstance(actor, AdminRequestActor):
+                raise AdminDataError("ADMIN_CONFIGURATION_INVALID", 503)
+            turn_owner = await prepare_guidance_turn_owner(
+                request_auth=request_auth,
+                actor=actor,
+                thread_id=dispatch.thread_id,
+                workflow_run_id=result.story_workspace_run_id,
+            )
+            parts = [part.model_dump(mode="json") for part in dispatch.parts]
+            metadata = dispatch.metadata.model_dump(mode="json")
+            owned_turn = turn_owner
+            turn_owner = None
             dispatched = bool(build_thread_turn_dispatcher()(
-                dispatch.thread_id,
-                actor_id,
+                owned_turn,
+                result.story_workspace_run_id,
                 dispatch.message_id,
-                [part.model_dump(mode="json") for part in dispatch.parts],
-                dispatch.metadata.model_dump(mode="json"),
+                parts,
+                metadata,
             ))
         except Exception:
+            if turn_owner is not None:
+                await asyncio.to_thread(turn_owner.persistence.close)
             logger.exception(
                 "Guidance dispatch failed for run_id=%s message_id=%s",
                 workflow_run_id,

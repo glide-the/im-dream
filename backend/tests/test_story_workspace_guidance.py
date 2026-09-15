@@ -1,21 +1,33 @@
-# [Input] Public Story guidance route, Registry115 result DTO and fake Admin data/Runtime dispatch providers.
-# [Output] Preserved 202/error/replay/dispatch behavior plus production database-import fences.
+# [Input] Public Story guidance route, Registry115 result DTO and exact Admin turn-owner composition.
+# [Output] Preserved 202/error/replay/dispatch behavior plus complete production database fences.
 # [Pos] Provider-free Story Workspace guidance contract test.
+# [Sync] 2026-09-16: require Workflow/Deck/persistence owner injection before Runtime scheduling.
 # [Sync] 2026-09-15: replace the retired SQLite persistence harness with Admin DTO and Dream Runtime seams.
 from __future__ import annotations
 
+import asyncio
 import ast
 from pathlib import Path
+import re
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from routers import story_workspace
+from services.story_workspace import guidance_service
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextResolution,
+    DeckChatContextOutputDTO,
+)
 from services.admin_data.errors import AdminDataError
 from services.admin_data.story_workspace_guidance_data import (
     StoryWorkspaceGuidanceResultDTO,
 )
 from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.workflow_data import AdminWorkflowResolution
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 RUN_ID = "run_" + "a" * 32
 ACTOR_ID = "42"
@@ -74,7 +86,70 @@ class RecordingDispatcher:
 
     def __call__(self, *args):
         self.calls.append(args)
+        args[0].persistence.close()
         return self.delivered
+
+
+class FakePersistence:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class FakeTurnOwner:
+    def __init__(self) -> None:
+        self.persistence = FakePersistence()
+
+
+class FakeRequestAuth:
+    pass
+
+
+def turn_context() -> StoryWorkspaceDreamRunContext:
+    return StoryWorkspaceDreamRunContext(
+        workflow_run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        deck_id="deck-guidance",
+        agent_id=None,
+        deck_plugin_id="ink.dream.story-workflow",
+        deck_plugin_version="1.0.0",
+        deck_plugin_binding_id="dpb_" + "b" * 32,
+        binding_revision=1,
+        deck_runtime_snapshot_id="drs_" + "c" * 32,
+        runtime_plugin_lock_id="rpl_" + "d" * 32,
+    )
+
+
+def deck_resolution() -> AdminDeckChatContextResolution:
+    return AdminDeckChatContextResolution(
+        canonical_user_id=ACTOR_ID,
+        deck_id="deck-guidance",
+        voice_id=None,
+        snapshot=DeckChatContextOutputDTO.model_validate({
+            "deck": {
+                "id": "deck-guidance",
+                "name": "Guidance Deck",
+                "name_zh": None,
+                "name_en": None,
+                "description": None,
+                "description_zh": None,
+                "description_en": None,
+                "enabled": True,
+            },
+            "voices": [],
+            "plugin_refs": [],
+        }),
+    )
+
+
+def exact_turn_owner() -> guidance_service.StoryWorkspaceGuidanceTurnOwner:
+    return guidance_service.StoryWorkspaceGuidanceTurnOwner(
+        workflow=AdminWorkflowResolution(ACTOR_ID, THREAD_ID, turn_context()),
+        persistence=FakePersistence(),  # type: ignore[arg-type]
+        deck=deck_resolution(),
+    )
 
 
 def client(data: FakeGuidanceData, dispatcher: RecordingDispatcher):
@@ -86,14 +161,33 @@ def client(data: FakeGuidanceData, dispatcher: RecordingDispatcher):
             1, 2, "oauth",
         ),
     }
+    app.dependency_overrides[story_workspace.get_admin_request_auth] = (
+        lambda: FakeRequestAuth()
+    )
     app.dependency_overrides[story_workspace._guidance_data] = lambda: data
     app.include_router(story_workspace.router)
-    original = story_workspace.build_thread_turn_dispatcher
+    original_dispatcher = story_workspace.build_thread_turn_dispatcher
+    original_prepare = story_workspace.prepare_guidance_turn_owner
+    prepared = []
+    owners = []
+
+    async def prepare(**kwargs):
+        prepared.append(kwargs)
+        owner = FakeTurnOwner()
+        owners.append(owner)
+        return owner
+
+    story_workspace.prepare_guidance_turn_owner = prepare
     story_workspace.build_thread_turn_dispatcher = lambda: dispatcher
     test_client = TestClient(app)
-    test_client._guidance_restore = lambda: setattr(  # type: ignore[attr-defined]
-        story_workspace, "build_thread_turn_dispatcher", original
-    )
+    test_client._guidance_prepared = prepared  # type: ignore[attr-defined]
+    test_client._guidance_owners = owners  # type: ignore[attr-defined]
+
+    def restore():
+        story_workspace.build_thread_turn_dispatcher = original_dispatcher
+        story_workspace.prepare_guidance_turn_owner = original_prepare
+
+    test_client._guidance_restore = restore  # type: ignore[attr-defined]
     return test_client
 
 
@@ -140,7 +234,13 @@ def test_new_guidance_returns_202_and_dispatches_only_after_admin_persistence():
         "idempotency_key": "key-1",
     }
     assert len(dispatcher.calls) == 1
-    assert dispatcher.calls[0][0:3] == (THREAD_ID, ACTOR_ID, "guide_key-1")
+    assert dispatcher.calls[0][1:3] == (RUN_ID, "guide_key-1")
+    assert dispatcher.calls[0][0].persistence.close_calls == 1
+    prepared = test_client._guidance_prepared  # type: ignore[attr-defined]
+    assert len(prepared) == 1
+    assert prepared[0]["thread_id"] == THREAD_ID
+    assert prepared[0]["workflow_run_id"] == RUN_ID
+    assert prepared[0]["actor"].canonical_user_id == ACTOR_ID
 
 
 def test_replay_and_runtime_deferral_preserve_public_202_semantics():
@@ -157,6 +257,10 @@ def test_replay_and_runtime_deferral_preserve_public_202_semantics():
         assert response.status_code == 202
         assert response.json()["dispatched"] is expected
         assert len(dispatcher.calls) == calls
+        prepared = test_client._guidance_prepared  # type: ignore[attr-defined]
+        assert len(prepared) == calls
+        owners = test_client._guidance_owners  # type: ignore[attr-defined]
+        assert all(owner.persistence.close_calls == 1 for owner in owners)
 
 
 def test_business_errors_keep_the_existing_public_codes_and_unknown_state():
@@ -203,6 +307,171 @@ def test_actor_and_body_validation_happen_before_admin_persistence():
     assert dispatcher.calls == []
 
 
+def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkeypatch):
+    workflow = AdminWorkflowResolution(ACTOR_ID, THREAD_ID, turn_context())
+    persistence = FakePersistence()
+
+    class RequestAuth:
+        client = object()
+
+        def __init__(self):
+            self.workflow_calls = []
+            self.persistence_calls = []
+
+        def workflow_context(self, actor, thread_id, request_id):
+            self.workflow_calls.append((actor, thread_id, request_id))
+            return workflow
+
+        def turn_persistence(self, actor, resolution, request_id):
+            self.persistence_calls.append((actor, resolution, request_id))
+            return persistence
+
+    class DeckData:
+        def __init__(self, client, *, canonical_user_id):
+            assert client is request_auth.client
+            assert canonical_user_id == ACTOR_ID
+
+        def resolve(self, input_dto, request_id, *, access_token):
+            assert input_dto.model_dump(mode="json") == {
+                "deck_id": "deck-guidance",
+                "voice_id": None,
+            }
+            assert request_id
+            assert access_token == "oauth"
+            return deck_resolution()
+
+    request_auth = RequestAuth()
+    actor = AdminRequestActor(
+        "subject",
+        ACTOR_ID,
+        "dream",
+        frozenset({"dream:read", "dream:write"}),
+        1,
+        2,
+        "oauth",
+    )
+    monkeypatch.setattr(guidance_service, "AdminDeckChatContextData", DeckData)
+    owner = asyncio.run(guidance_service.prepare_guidance_turn_owner(
+        request_auth=request_auth,  # type: ignore[arg-type]
+        actor=actor,
+        thread_id=THREAD_ID,
+        workflow_run_id=RUN_ID,
+    ))
+    assert owner.workflow is workflow
+    assert owner.persistence is persistence
+    assert owner.deck == deck_resolution()
+    assert request_auth.workflow_calls[0][0:2] == (actor, THREAD_ID)
+    assert request_auth.persistence_calls[0][0:2] == (actor, workflow)
+
+
+def test_dispatcher_closes_unused_owner_when_thread_is_running(monkeypatch):
+    owner = exact_turn_owner()
+    factory = SimpleNamespace(
+        session_snapshot=lambda thread_id: {
+            "lifecycle": "running",
+            "thread_id": thread_id,
+        }
+    )
+    monkeypatch.setattr(
+        "agent_factory.claude_agent_thread_factory",
+        factory,
+    )
+    delivered = guidance_service.build_thread_turn_dispatcher()(
+        owner,
+        RUN_ID,
+        "guide_key-1",
+        [{"type": "text", "text": "guide"}],
+        {"kind": "story-workspace-guidance"},
+    )
+    assert delivered is False
+    assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+
+
+def test_dispatcher_injects_exact_owner_and_closes_after_the_turn(monkeypatch):
+    owner = exact_turn_owner()
+
+    class Factory:
+        def __init__(self):
+            self.requests = []
+
+        def session_snapshot(self, thread_id):
+            assert thread_id == THREAD_ID
+            return None
+
+        def run_streaming(self, request):
+            self.requests.append(request)
+
+            async def stream():
+                if False:
+                    yield ""
+
+            return stream()
+
+    factory = Factory()
+    monkeypatch.setattr(
+        "agent_factory.claude_agent_thread_factory",
+        factory,
+    )
+    monkeypatch.setattr(
+        "services.admin_gateway.resolve_platform_model_alias",
+        lambda actor_id: "dream-balanced" if actor_id == ACTOR_ID else None,
+    )
+
+    async def scenario():
+        delivered = guidance_service.build_thread_turn_dispatcher()(
+            owner,
+            RUN_ID,
+            "guide_key-1",
+            [{"type": "text", "text": "guide"}],
+            {"kind": "story-workspace-guidance"},
+        )
+        assert delivered is True
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert len(factory.requests) == 1
+    request = factory.requests[0]
+    assert request.admin_workflow_resolution is owner.workflow
+    assert request.admin_turn_persistence is owner.persistence
+    assert request.admin_deck_chat_context is owner.deck
+    assert request.thread_id == THREAD_ID
+    assert request.user_id == ACTOR_ID
+    assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+
+
+def test_dispatcher_closes_owner_when_runtime_request_setup_fails(monkeypatch):
+    owner = exact_turn_owner()
+    factory = SimpleNamespace(session_snapshot=lambda _thread_id: None)
+    monkeypatch.setattr(
+        "agent_factory.claude_agent_thread_factory",
+        factory,
+    )
+
+    def fail_model(_actor_id):
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(
+        "services.admin_gateway.resolve_platform_model_alias",
+        fail_model,
+    )
+    with pytest.raises(RuntimeError, match="model unavailable"):
+        guidance_service.build_thread_turn_dispatcher()(
+            owner,
+            RUN_ID,
+            "guide_key-1",
+            [{"type": "text", "text": "guide"}],
+            {"kind": "story-workspace-guidance"},
+        )
+    assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+
+
+def test_turn_owner_rejects_a_different_run_before_runtime():
+    owner = exact_turn_owner()
+    with pytest.raises(AdminDataError, match="ADMIN_RESPONSE_INVALID"):
+        owner.context_for(workflow_run_id="run_" + "f" * 32)
+
+
 def test_guidance_production_seams_have_no_database_import_or_call():
     root = Path(__file__).resolve().parents[2]
     guidance = ast.parse((root / "backend/services/story_workspace/guidance_service.py").read_text())
@@ -219,6 +488,35 @@ def test_guidance_production_seams_have_no_database_import_or_call():
             and node.value.id == "database"
         )
         for node in ast.walk(guidance)
+    )
+
+    service = ast.parse(
+        (root / "backend/claude_agent/service.py").read_text()
+    )
+    assert all(
+        not (
+            isinstance(node, ast.Import)
+            and any(alias.name in {"database", "backend.database"} for alias in node.names)
+        )
+        and not (
+            isinstance(node, ast.ImportFrom)
+            and node.module in {"database", "backend.database"}
+        )
+        for node in ast.walk(service)
+    )
+    sql_start = re.compile(
+        r"^\s*(?:SELECT\b[\s\S]*\bFROM\b|INSERT\s+INTO\b|"
+        r"UPDATE\b[\s\S]*\bSET\b|DELETE\s+FROM\b|"
+        r"WITH\b[\s\S]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b)",
+        re.IGNORECASE,
+    )
+    assert all(
+        not (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and sql_start.search(node.value)
+        )
+        for node in ast.walk(service)
     )
 
     application_source = (

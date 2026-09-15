@@ -14,6 +14,8 @@
 # [Sync] 2026-09-01: cover one normal Dream repair continuation under the same factory lifecycle.
 # [Sync] 2026-09-04: cover the typed post-commit Dream synchronization error
 #                    crossing the factory/EventBus boundary with one terminal.
+# [Sync] 2026-09-16: cover Admin-owned confirmation turn lifecycle while the
+#                    existing per-Thread Runtime lock serializes execution.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -683,6 +685,9 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         from services.story_workspace.dream_confirmation_service import (
             story_workspace_build_dream_confirmation_turn_dispatcher,
         )
+        from services.admin_data.story_workspace_confirmation_data import (
+            AdminStoryWorkspaceConfirmationTurnOwner,
+        )
 
         first_request = _make_request(
             "user_dream_queue",
@@ -716,7 +721,10 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
                 else:
                     second_started.set()
                 await execution.turn_context.queue.put(
-                    'data: {"type":"finish","reason":"success"}\n\n'
+                    'data: {"type":"message-final","content":"done"}\n\n'
+                )
+                await execution.turn_context.queue.put(
+                    'data: {"type":"finish","finishReason":"stop"}\n\n'
                 )
                 await execution.turn_context.queue.put(None)
 
@@ -724,6 +732,12 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
                 self.factory,
                 request_factory=ClaudeAgentRunRequest,
+            )
+            owner_persistence = unittest.mock.Mock()
+            owner = AdminStoryWorkspaceConfirmationTurnOwner(
+                persistence=owner_persistence,
+                workflow=unittest.mock.Mock(),
+                deck=unittest.mock.Mock(),
             )
 
             with unittest.mock.patch(
@@ -735,30 +749,36 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
                 )
                 await asyncio.wait_for(first_started.wait(), timeout=1.0)
 
-                dispatched = dispatcher(
+                dispatch_task = dispatcher(
                     "thread_dream_queue",
                     "user_dream_queue",
                     "dream-confirmation-message",
                     second_parts,
                     second_metadata,
+                    owner,
                 )
-                self.assertTrue(dispatched)
+                self.assertIsInstance(dispatch_task, asyncio.Task)
                 await asyncio.sleep(0)
                 self.assertEqual(executed_messages, ["first"])
 
                 first_release.set()
                 await asyncio.wait_for(first_consumer, timeout=1.0)
                 await asyncio.wait_for(second_started.wait(), timeout=1.0)
+                dispatched = await asyncio.wait_for(dispatch_task, timeout=1.0)
 
                 for _ in range(100):
                     snapshot = self.factory.session_snapshot("thread_dream_queue")
                     if snapshot and snapshot["lifecycle"] == "idle":
                         break
                     await asyncio.sleep(0.01)
-                return dispatched, snapshot
+                return dispatched, snapshot, owner_persistence
 
-        dispatched, snapshot = _run(_scenario())
+        dispatched, snapshot, owner_persistence = _run(_scenario())
         self.assertTrue(dispatched)
+        # The dispatcher starts the lease while queued; ThreadFactory repeats
+        # the idempotent lifecycle calls when the turn starts and settles.
+        self.assertEqual(owner_persistence.start.call_count, 2)
+        self.assertEqual(owner_persistence.close.call_count, 2)
         self.assertEqual(
             executed_messages,
             ["first", "structured confirmation"],

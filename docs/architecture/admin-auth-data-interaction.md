@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: require an actor/Thread/Run-bound Admin owner for every production Agent turn and remove Service DB fallbacks. -->
 <!-- [Sync] 2026-09-16: consume Registry133 and close production launch persistence through Admin DTO/ORM operations. -->
 <!-- [Sync] 2026-09-16: consume Registry130-132 launch Runtime operations and delete Dream provisioning SQL. -->
 <!-- [Sync] 2026-09-16: consume Registry127-129 Agent-type operations with local artifact verification and no Dream database fallback. -->
@@ -149,7 +150,7 @@ Story Workspace七个单项审核入口与一个批量入口现绑定Admin Regis
 
 Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。阶段40已把用户与Thread SystemConfig生产读取/写入改为三个Admin operation；其后fresh closure scanner数字记录在[清单](../exec/dream-admin-data-inventory.md)。源码候选不等于生产可达SQL证明，仍需结合[事务图](../exec/dream-admin-transaction-boundaries.json)与入口调用链复查。
 
-本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile、Chat CRUD/history/ownership/初始message预留以及SystemConfig；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn、assistant完整/部分消息、Thread SystemConfig与Factory生命周期，Editor exact Session purpose已接公开Agent turn，CLI、缺owner的内部dispatcher与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
+本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile、Chat CRUD/history/ownership/初始message预留以及SystemConfig；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接Chat、Reflections、launch、confirmation与Guidance生产turn，覆盖user/assistant消息、Thread/Session、workspace plugin、managed MCP scope、Runtime activation及Factory生命周期；Editor exact Session purpose已接公开Agent turn。旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
 
 ## 目标与边界
 
@@ -296,7 +297,7 @@ sequenceDiagram
 
 用户SystemConfig由registered80的`user-system-config.get`、`user-system-config.patch`和`thread-system-config.get`提供。公开Settings GET使用current OAuth读取；PUT先在Dream执行公开字段清洗、模型与provider配对和Gateway目录校验，再向Admin提交closed ten-field patch。Admin只返回写入确认，Dream随后使用新的request ID执行独立GET，并从该结果生成原`{success,data}`响应。unknown写保留原request ID进入receipt恢复，不假定提交或自动重发。`config_json`由Python JSON decoder读取，保留任意精度整数、`1.0`、`-0.0`、Unicode与未知已保存字段；非法JSON、非object、NaN、Infinity或非有限嵌套数值按上游响应无效处理。
 
-公开Chat在Thread/message校验后使用current OAuth读取一份用户snapshot，并同时提供给模型选择和附件处理。活动turn使用Factory持有的`AdminTurnPersistence`，以同一actor/Thread、authoritative Run和`server-persistence` grant调用Thread SystemConfig；此读取与user/Session/assistant写共享关闭排空锁。配置必须在Workflow mapper、prompt、Workspace、文件同步和Runtime options之前成功；Admin unavailable、合同漂移或坏JSON均终止该路径，不保留Dream DB/default fallback。Gateway selector只接受显式authorized snapshot；缺少turn owner与reader的内部dispatcher在映射上下文前返回配置错误，等待其生产owner接线。
+公开Chat在Thread/message校验后使用current OAuth读取一份用户snapshot，并同时提供给模型选择和附件处理。活动turn使用Factory持有的`AdminTurnPersistence`，以同一actor/Thread、authoritative Run和`server-persistence` grant调用Thread SystemConfig；此读取与user/Session/assistant写共享关闭排空锁。配置必须在Workflow resolution、prompt、Workspace、文件同步和Runtime options之前成功；Admin unavailable、合同漂移或坏JSON均终止该路径，不保留Dream DB/default fallback。所有生产dispatcher均已在ThreadFactory前接入各自Admin owner；缺owner或显式测试mapper以外的替代输入返回`configuration_invalid`。
 
 全部公开Workspace文件入口在执行文件系统调用前读取current OAuth SystemConfig。list/upload/delete/move先做请求参数检查，再读配置；content/download先验证Thread所有权，再读配置，然后执行Mode、路径、realpath/no-symlink与文件操作。这样缺失Thread仍为404，而配置不可用安全返回503，且不会先访问共享FS。
 
@@ -336,7 +337,7 @@ server先按原顺序stop publisher/refresher/sink/sampler，再Factory.aclose�
 
 14个Admin实际输入输出/hash已写入严格Chat DTO与typed consumer，actor token与原request_id显式提供。微秒ISO字符串校验后原样保持，canonical用户ID不按BA sub猜测。原Python最终正文校验已抽为 `backend/chat_message_projection.py`，database旧私有alias和新Message DTO调用同一函数；生成器未复制其规则。消息回复ID还必须匹配原显式message_id，否则写结果保持unknown并用原receipt恢复。
 
-Chat router的create/get/list/search/delete、bind Deck/select Voice与message list/page/process-detail/latest、初始user-message预留、公开turn assistant回写和用户SystemConfig snapshot已接typed consumer；现有搜索器、公开parts投影和微秒/NULL游标保持。共享请求身份与me profile已接入Admin。内部dispatcher persist/title/session、Deck context及其缺失SystemConfig owner等剩余直接DB入口未闭合；现有DTO数量不代表全域迁移完成。
+Chat router的create/get/list/search/delete、bind Deck/select Voice与message list/page/process-detail/latest、初始user-message预留、全部生产turn的assistant/SDK Session回写、Deck context和用户SystemConfig snapshot已接typed consumer；现有搜索器、公开parts投影和微秒/NULL游标保持。共享请求身份与me profile已接入Admin。`ClaudeAgentService`没有直接DB入口，其他非Agent业务领域仍按数据库迁移清单推进；现有DTO数量不代表全域迁移完成。
 
 ## 当前用户资料与请求 actor 的接入状态
 
@@ -358,7 +359,7 @@ Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt�
 
 共有HTTP函数接收显式URL/header/DTO和timeout/响应大小，不持有身份配置。Internal consumer注入service身份与必要用户Bearer；public Runtime consumer只持exact idg，prepared request不继承httpx client的Cookie、auth或默认key headers。响应校验原request_id、闭集DTO和purpose/thread/run/EditorSession/scopes；renew不能改变maximum或降低expiry。
 
-Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。server-persistence keeper与Editor stdio purpose已接公开Agent生命周期；confirmation dispatcher 通过 Registry121 接入同一 owner，CLI最小投影和其他后台路径仍逐项迁移。
+Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。server-persistence keeper已接Chat、Reflections、launch、Registry121 confirmation与Registry115 Guidance生产turn；Editor stdio使用独立exact Session purpose。CLI最小投影与其余非Agent数据库领域继续按清单迁移。
 
 ### Confirmation Runtime 的 claim-bound Admin owner
 
@@ -372,29 +373,29 @@ Dream 校验 dispatch 与 authority 同时存在、Thread/Run/scope/purpose 精�
 
 执行模块`AdminWorkflowData`只发送`workflow-context.resolve`的`{thread_id}`；Admin在同一事务校验唯一线性retry leaf、冻结binding、workspace owner和启动message来源/fingerprint/父状态，经过完整校验的terminal leaf或普通Chat返回`context:null`。Dream strict校验实际十字段、required nullable agent_id、原255边界、Run格式和正JSON-safe revision，operation hash为`f395682ec6cf8f308df652a1aa2792cca86d102eb1fff62a4c6a59792bfc1e66`，同时匹配identity/unified物理capabilities。
 
-公开route在已有Deck/Voice绑定后、message预留与SSE前读取。409/权限/网络/capability/DTO失败直接返回安全错误，不写初始message、不启动runtime。成功时校验thread及当前Deck/Voice，并向内部RunRequest注入不可变`AdminWorkflowResolution`；公开DTO/SDK不含该字段。Service核对actor/thread，含ordinary null均直接复用，不调用旧PG mapper。snapshot不授予新增scope、长期runtime或CLI权限；confirmation 已通过 Registry121 独立派生并注入同类 immutable snapshot，launch 等其余内部路径继续迁移自己的 typed authority。验收聚焦真实HTTP consumer、null/十字段、错配、失败-before-SSE和既有Service行为，技术fixture不代表正常本机业务回执。
+公开route在已有Deck/Voice绑定后、message预留与SSE前读取。409/权限/网络/capability/DTO失败直接返回安全错误，不写初始message、不启动runtime。成功时校验thread及当前Deck/Voice，并向内部RunRequest注入不可变`AdminWorkflowResolution`；公开DTO/SDK不含该字段。Service核对actor/thread，含ordinary null均直接复用，不调用旧PG mapper。snapshot不授予新增scope、长期runtime或CLI权限；Reflections、launch、confirmation与Guidance分别在自己的服务器composition中解析并注入同类typed authority。验收聚焦真实HTTP consumer、null/十字段、错配、失败-before-SSE和既有Service行为，技术fixture不代表正常本机业务回执。
 
 ### 原子 user-turn 与 server-persistence 生命周期
 
 `chat-user-message.persist`的input仅`thread_id/message_id/parts_json/metadata_json/title_candidate`；metadata required nullable，JSON保持Python float、负零、大整数表示，禁NaN/非JSON对象。Dream复用原`extract_text_from_parts`得到包含attachments协议的未截断candidate；Admin在单一事务执行ownedThread update lock、stored confirmation guard，保护当前dispatch lease/control metadata，非confirmation时写rawmessage并按原配置仅填missing title。output仅`message_id/confirmation_preserved`，actualhash `2c5b20900ef867a237613e49a89b4073f4c0c89cd1d2161962f7132084696c37`。
 
-公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。confirmation 已使用上节 claim-bound 服务身份；launch 等其他内部路径仍保留原guard并单独迁移。
+公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。Reflections、launch、confirmation与Guidance使用各自Admin提交结果或claim派生相同purpose owner，浏览器不能构造该对象。
 
-Factory在原admission acquire之后启动该owner的独立renewal和Chat Session broker，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，broker先停止accept并drain已dispatch读取，随后等待同步writer、renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。server grant不进入CLI/Editor/user MCP或Browser；Editor使用另一个exact Session purpose且其idg仍只留主进程。Agent prompt和Chat Session工具都由owner读取Admin `session.list` strict projection。Gateway独立目的、内部dispatcher assistant、Reflections后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+Factory在原admission acquire之后启动该owner的独立renewal和Chat Session broker，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，broker先停止accept并drain已dispatch读取，随后等待同步writer、renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。server grant不进入CLI/Editor/user MCP或Browser；Editor使用另一个exact Session purpose且其idg仍只留主进程。Agent prompt和Chat Session工具都由owner读取Admin `session.list` strict projection；assistant、SDK Session、workspace plugin、managed MCP scope与Runtime activation也使用同一owner。Gateway保持独立目的，其余非Agent数据库领域继续迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
 
 ### 公开 Agent Thread 恢复与 SDK Session 回写
 
-执行模块`ClaudeAgentService._thread_record/_save_sdk_session`在公开request含server owner时复用`AdminTurnPersistence`，调用实际`chat-thread.get/update-session`；只有缺owner的现存内部dispatcher保留原PG入口。读取仅发送thread_id并核对reply Thread与canonical actor；更新只发送thread_id/claude_session_id/agent_contract_version，grant不进入Runtime options。恢复仍执行原当前project transcript与contract版本检查；只有SDK-native init触发early write，final/repair使用同一helper，不改变取消/SSE/lease顺序。
+执行模块`ClaudeAgentService._thread_record/_save_sdk_session`要求`AdminTurnPersistence`并调用实际`chat-thread.get/update-session`；所有生产dispatcher均提供server owner，缺失时停止且不存在PG入口。读取仅发送thread_id并核对reply Thread与canonical actor；更新只发送thread_id/claude_session_id/agent_contract_version，grant不进入Runtime options。恢复仍执行原当前project transcript与contract版本检查；只有SDK-native init触发early write，final/repair使用同一helper，不改变取消/SSE/lease顺序。
 
 owner在单一activity锁中串行user/session/assistant命令及Thread读取，Phase4等待已dispatch的读写。未知写记录原operation/immutable input/request ID；不同操作或输入拒绝，已知user缓存也不能绕过pending。同操作同输入只能查原receipt，absent/读取失败继续unknown，committed恢复结果且不POST重试。Session是可变字段，只有最近一次确认的同输入更新可复用；A→B→A重新执行命令，user message identity冲突保持409。
 
-初始user预留unknown仍在SSE/推理前拒绝。SDK init回写unknown保留原callback日志处理，已经运行的turn与cancel继续既有路径，随后owner管理的不同写被拒绝；公开assistant已进入该屏障，内部dispatcher assistant、Run与FS metadata数据库写仍不经过此owner，因此当前不是全域未知写屏障。验收通过actual Service/native SystemMessage/next-turn transcript/cancel和MockTransport/Thread DB fence，不代表正常本机数据库或模型验收。
+初始user预留unknown仍在SSE/推理前拒绝。SDK init回写unknown保留原callback日志处理，已经运行的turn与cancel继续既有路径，随后owner管理的不同写被拒绝；所有生产Agent dispatcher的assistant与SDK Session均进入该屏障。其他非Agent Run与FS metadata数据库写仍按各自Admin接口清单迁移，因此当前不是全域未知写屏障。验收通过actual Service/native SystemMessage/next-turn transcript/cancel和MockTransport/Thread DB fence，不代表正常本机数据库或模型验收。
 
 ### 公开 assistant 完整与部分消息持久化
 
 背景与问题：公开Chat已经在RunRequest携带绑定当前actor、Thread与authoritative Run的`AdminTurnPersistence`，但成功assistant与cancel/error partial仍由Service直接调用旧`database.save_chat_message`。用户能够收到SSE终态而消息回写仍绕过Admin数据边界，且该写没有加入user/Session已建立的unknown提交屏障。
 
-目标与边界：`ClaudeAgentService`继续按原SSE事件生成reasoning/tool/text parts、`turnStatus`、`finalPartIndex`、duration、usage、model、toolCount与Dream source metadata；公开request把同一值交给owner，owner调用既有`chat-message.persist`。完整消息带原`history_final_text/history_process_available/history_projection_version`，partial保持`null/false/null`。消息ID由Dream服务器生成，不能复用user message ID或SSE turn ID。内部dispatcher尚无authoritative owner，继续使用原SQL入口；本阶段不新增凭据、接口、数据库表、Runner状态或文件行为。
+目标与边界：`ClaudeAgentService`继续按原SSE事件生成reasoning/tool/text parts、`turnStatus`、`finalPartIndex`、duration、usage、model、toolCount与Dream source metadata；每个生产request把同一值交给owner，owner调用既有`chat-message.persist`。完整消息带原`history_final_text/history_process_available/history_projection_version`，partial保持`null/false/null`。消息ID由Dream服务器生成，不能复用user message ID或SSE turn ID。缺authoritative owner直接失败且没有SQL入口；本阶段不新增凭据、接口、数据库表、Runner状态或文件行为。
 
 正常流程与状态：owner先取得当前renewed grant，重新读取catalog并逐项匹配identity、unified、history keyset与final projection四项schema，再提交required八字段DTO。Admin只接受`assistant`角色并返回同一message ID；确认后owner清除pending。成功assistant仍先提交再运行Dream Hook，SDK final safeguard仍在assistant确认后执行。cancel/error仅在收集到parts时写一条`is_partial=true`消息；无可持久化事件时保持原no-op。
 

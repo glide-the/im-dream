@@ -68,18 +68,11 @@ def _capture_loaded_refs(owner, *, dream_mode):
         captured.extend(refs_loader())
         return {"workspace": str(workspace), "deck_id": deck_id}
 
-    with (
-        patch.object(
-            service_module,
-            "pack_workspace_plugins_with_refs_loader",
-            side_effect=consume,
-        ) as pack,
-        patch.object(
-            service_module._db,
-            "get_db",
-            side_effect=AssertionError("public pack must not open Dream DB"),
-        ),
-    ):
+    with patch.object(
+        service_module,
+        "pack_workspace_plugins_with_refs_loader",
+        side_effect=consume,
+    ) as pack:
         service_module._pack_thread_workspace_plugins(
             "/workspace/thread-1",
             "deck-1",
