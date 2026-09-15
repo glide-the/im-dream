@@ -1,7 +1,7 @@
 <!-- [Input] Runtime 0.1.10 release CI, public npm artifacts, Dream resolver/plugin installer, and local screenwriting-skills operation. -->
 <!-- [Output] Version, publication, adoption, validation, failure and rollback evidence for the plugin-management repair. -->
 <!-- [Pos] Current Runtime 0.1.10 release and local Dream adoption receipt; 0.1.9 remains immutable history. -->
-<!-- [Sync] 2026-09-15: record Runtime publication and Dream plugin-management adoption. -->
+<!-- [Sync] 2026-09-15: record completed Runtime publication, Dream merge, CI and plugin-management adoption. -->
 
 # Runtime 0.1.10 插件管理修复与 Dream 接入
 
@@ -42,7 +42,8 @@ HTTP 控制通道或 Agent turn 状态机。
 - 公开 selector integrity 为 `sha512-QlpFq6CvcA2DRudLgJgaQMc5aP7MfJJ5CADY7rbgraTGq0FAF+VJx8VvK/6xFpHb+FgZOCgjlXqmS0nOUIjzuQ==`；平台 integrity 分别为 darwin-arm64 `sha512-bwb3BrIdcNxcUyPFwoUup2QCGkKfun5L/rvmfrz11w1gydPkGj/Dy6n+j/T9BXYYfFvwFWG0f1EKjn2PMYCgCw==`、darwin-x64 `sha512-GbvGTyrxJ0L0+JLuAW0wCvi/1Q2X2TxHMPySFhw61xTzVahjaIKPgQBGEE12im3C40lxyXLjiC0go7PxIOgRwA==`、linux-arm64 `sha512-79AWiXfnbcBpz0MhyBnWgoZje57Xa30PCuP6J6Yj3vMmeSgjv+8fbJe/LRf84ApK6rAnc4pEEBc+Znrx8KzhHQ==`、linux-x64 `sha512-Q0aOjtgfFE6vY21cj+Zrco0wDGm0aWRTCqDN282aYy6NqETd7hiGZX3yMs485ov/ybqQY2KusGVJhqGfZqgv+g==`。
 - 公开 registry acceptance 的 wheel 与 sdist 都解析 SDK `0.2.145`、CLI `2.1.241`、Runtime `0.1.10`、`pluginManagement: true`；公开 darwin-arm64 包通过 Dream 完整本地 Marketplace pipeline。
 - Admin digest 修复由 [dream-im-platform PR #14](https://github.com/glide-the/dream-im-platform/pull/14) 合并为 `69a14aeb60c5b4d59987486d00fe2d4fc3bfc367`；版本为 `0.1.1`，完整单测 `690 passed`。
-- Dream [CI PR #59](https://github.com/glide-the/im-dream/pull/59) 合并为 `36d503a86f474ef9c8f3e6d1495dcc56b01ad9ff`，修正默认 `develop` 分支此前未被 pull-request workflow 监听的问题。
+- Dream [CI PR #59](https://github.com/glide-the/im-dream/pull/59) 合并为 `36d503a86f474ef9c8f3e6d1495dcc56b01ad9ff`，[显式复验入口 PR #61](https://github.com/glide-the/im-dream/pull/61) 合并为 `053dc1cd5ce4b78879fd57009767604cbb030012`；默认 `develop` 分支现已被 pull-request workflow 监听。
+- Dream [Runtime 0.1.10 adoption PR #60](https://github.com/glide-the/im-dream/pull/60) 合并为 `0274ad825a780f70804585e391b6dd46173f19a6`；[backend image CI](https://github.com/glide-the/im-dream/actions/runs/34952828668) 与 [frontend build CI](https://github.com/glide-the/im-dream/actions/runs/34952828097) 全部通过。
 
 ## Dream 执行规则与失败处理
 
@@ -99,4 +100,4 @@ SDK、Runtime manifest、package-root `cli.js` 和 `plugin --help`，不调用�
 
 回退时恢复上一已验证 Dream 提交与匹配 Runtime 安装并只重启操作者拥有的
 Dream backend；不得覆盖已发布 npm 版本、选择 ambient CLI 或把 `0.1.9` 的
-失败回执标记为 ready。Docker 与远程环境需要各自的独立构建和运行验收。
+失败回执标记为 ready。远程部署环境仍需要独立运行验收。
