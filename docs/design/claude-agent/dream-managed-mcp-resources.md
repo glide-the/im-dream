@@ -7,15 +7,51 @@
 <!-- [同步] 2026-09-06：Resources 保留既有远程/本地长页结构；新增 Server 使用调用方隔离的宽弹窗、分组字段、滚动正文与固定操作区；连接详情的 App 控制统一归入 MCP 使用策略。 -->
 <!-- [同步] 2026-09-06：允许与 Dream 后端同网络命名空间的显式 IPv4/IPv6 loopback MCP endpoint，同时保留其他 non-global 字面 IP、URL 用户信息/query/fragment 与 redirect 拒绝。 -->
 <!-- [同步] 2026-09-06：将 2026-08-25 Vite/npm 回执标为历史，并链接当前 Next.js/pnpm source ownership；管理面 Python owner 不变。 -->
+<!-- [同步] 2026-09-16：Registry134-147 将全部数据库访问、事务与权限过滤迁入 Admin typed Drizzle；Dream 仅通过 strict Pydantic DTO 调用 Admin，并保留 MCP 协议、OAuth协调、Runtime与共享文件系统。 -->
 
 # Dream 托管 MCP Resources：管理链路去 CLI 化设计
 
-> 状态：最小实现、正常库迁移、三 transport inventory/Chat、cancel、页面性能、Admin 可见页与真实 OAuth 自动 callback/login/logout/refresh/resume 已完成
-> 证据日期：2026-08-25
+> 状态：Registry134-147 Admin provider 与 Dream DTO consumer 已实现；确定性技术验证已通过，2026-09-16 重构后的真实账户/真实外部 MCP 复验尚待执行
+> 证据日期：2026-09-16
 > 目标 capability：`dream.managed-mcp-resources.v1`，version `1`，`contract_sha256=746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a`
-> 核心结论：Resources 管理面以 PostgreSQL 为唯一配置源，以标准 Python MCP SDK 直接完成发现；Chat 新建和 resume 每个 turn 注入一次数据库一致性快照。Claude Agent SDK 公共接口无需修改；Runtime 仅承担 Agent 执行期 MCP 连接，不接管 Dream 管理数据库或 CRUD/discovery 聚合。本文不承诺 MCP 协议 session 跨进程恢复。
+> 核心结论：Admin 是 `dream_mcp_*` 数据、权限与事务的唯一访问服务；Dream 以 strict DTO 调用 Admin，并以标准 Python MCP SDK 完成发现。Chat new/resume 每个 turn 通过当前 `server-persistence` grant 取得一致快照。Claude Agent SDK 公共接口无需修改；Runtime 仅承担 Agent 执行期 MCP 连接。
 > 配套图集：[Dream 托管 MCP 业务交互时序图](./dream-managed-mcp-business-sequences.md)
 > 当前 Web/Node source ownership：[Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md)。下述 2026-08-25 前端拓扑与命令仅为当时真实回执，不是当前操作指南。
+
+## 2026-09-16 当前数据访问合同
+
+| 能力 | Dream 执行 | Admin 执行 | 授权与失败处理 |
+|---|---|---|---|
+| Resources CRUD / App settings | 路由、Service、Pydantic DTO 映射 | Zod DTO、typed Drizzle、owner/workspace 过滤与 CAS | 公开请求使用当前 OAuth；失败不回退数据库 |
+| credential / discovery snapshot | AES-GCM 加解密、MCP SDK discovery | 加密 envelope 持久化、revision 校验、snapshot invalidation 与事务 | 明文只在 Dream 内存；未知写只查原 request receipt |
+| Agent Runtime snapshot | 解析 Admin DTO 并生成 detached `mcp_servers` | 通过 Thread/Run 绑定 grant 过滤 Server 与 credential | 使用 `server-persistence`；issuer/scope/entity 不匹配即停止 turn |
+| legacy import | 读取有界文件并拒绝 secret/stdio argv | import uniqueness、锁、receipt 和写事务 | 环境中的 OAuth token 调 `/principal` 派生 actor；无 actor 参数 |
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant Dream as Dream API / Runtime
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
+    participant MCP as MCP Server
+    U->>Dream: Resources 操作或 Agent turn
+    Dream->>Admin: strict DTO + OAuth 或 server-persistence grant
+    Admin->>Admin: 校验 operation、scope、Thread/Run 与 capability
+    Admin->>DB: typed Drizzle ORM + 单事务
+    DB-->>Admin: actor/workspace 过滤后的结果
+    Admin-->>Dream: strict response DTO / safe domain error
+    opt discovery 或 Agent tool call
+        Dream->>MCP: Python MCP SDK / Runtime
+        MCP-->>Dream: inventory 或 tool result
+    end
+    Dream-->>U: REST 或 SSE 结果
+```
+
+Reflections 使用单独的 `rta_`，其 allowlist 仍严格限于六项
+Chat/SystemConfig/Session 持久化操作。固定分析 Runtime 注入空的
+`ManagedMcpRuntimeSnapshot`，不会把 RTA 扩权为 managed-MCP 数据凭据。
+本文后续 2026-08-25 基线测量继续作为历史证据；涉及 Dream 直接访问
+PostgreSQL 的旧图已按当前 Admin API 路径校正。
 
 ## 证据标记
 
@@ -122,10 +158,10 @@ sequenceDiagram
 目标架构只有一条生产路径：
 
 1. Admin Drizzle 是 DDL 与 capability 唯一所有者。
-2. PostgreSQL `dream_mcp_*` 专用关系是 actor 配置、凭据引用、最近发现和导入回执的唯一持久真相源。
-3. `ClaudeMcpService` 是 actor 授权、CRUD、状态聚合和错误映射边界。
+2. PostgreSQL `dream_mcp_*` 专用关系是唯一持久真相源，并且只能由 Admin typed Drizzle Repository 访问。
+3. Admin 负责主体/实体权限、CRUD、CAS、事务与 receipt；Dream `ClaudeMcpService` 负责产品状态、标准 MCP discovery/OAuth 与错误映射。
 4. `McpDiscoveryCoordinator` 通过标准 Python MCP SDK 创建**请求内**连接；连接结束即关闭。
-5. `McpRuntimeSnapshotLoader` 在每个 Chat turn 的 new/resume 路径读取一致性快照、在内存中解析 credential ref；Runner 把合并后的配置原子写入该 thread 既有 `CLAUDE_CODE_TMPDIR` 下 `0700` 子目录中的单个 `0600` 临时 JSON，并把 **Path** 传给 Agent SDK，避免含 token/header 的 JSON 出现在 CLI argv。
+5. `ManagedMcpRuntimeSnapshotLoader` 在每个 Chat turn 的 new/resume 路径用 Thread/Run `server-persistence` grant 调用 Admin，并在内存中解析加密 credential envelope；Runner 把合并后的配置原子写入该 thread 既有 `CLAUDE_CODE_TMPDIR` 下 `0700` 子目录中的单个 `0600` 临时 JSON，并把 **Path** 传给 Agent SDK，避免含 token/header 的 JSON 出现在 CLI argv。
 6. `agent_runner` 保持内部名冲突检查和 `ClaudeAgentOptions.mcp_servers` 注入；不新增允许工具通配符。
 
 ### 时序 2：目标 Resources 列表与缓存摘要
@@ -135,12 +171,16 @@ sequenceDiagram
     participant UI as Resources UI
     participant API as Dream API
     participant S as ClaudeMcpService
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     UI->>API: GET capability 与 GET servers（并行）
     API->>S: actor-scoped reads
-    S->>DB: 校验精确 capability（仅成功后按进程缓存）
-    S->>DB: 单次读取 Server + credential 状态
-    DB-->>S: 一致性快照
+    S->>Admin: 校验精确 capability（仅成功后按进程缓存）
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    S->>Admin: 单次读取 Server + credential 状态
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    DB-->>Admin: committed rows/result
+    Admin-->>S: 一致性快照
     S-->>UI: 0 subprocess / 0 MCP 网络请求
     UI->>API: 进入详情后 POST server/discovery（force=false）
     API-->>UI: 本次发现结果或安全错误
@@ -194,17 +234,20 @@ v1 边界：
 sequenceDiagram
     participant UI as Resources UI
     participant API as Dream API
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant D as MCP Discovery
     participant M as Remote MCP
     UI->>API: POST server {transport,url,scope}
     API->>API: actor + URL/SSRF policy + DTO 校验
-    API->>DB: INSERT/幂等返回，revision=1
+    API->>Admin: INSERT/幂等返回，revision=1
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     API->>D: 详情页自动 discovery（force=false）
     D->>M: SDK initialize
     D->>M: list_tools/resources/prompts
     M-->>D: capabilities + inventory
-    D->>DB: 写 revision 绑定的安全快照
+    D->>Admin: 写 revision 绑定的安全快照
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     API-->>UI: ServerDTO + DiscoveryDTO
 ```
 
@@ -216,7 +259,8 @@ sequenceDiagram
     participant API as Dream API
     participant O as OAuth Coordinator
     participant AS as Authorization Server
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     UI->>API: POST auth-operation
     API->>O: actor/server/revision
     O->>AS: metadata + PKCE authorization
@@ -227,8 +271,10 @@ sequenceDiagram
     API->>O: actor-owned operation 接收 callback
     O->>O: 标准 SDK 校验 state/PKCE/expiry
     O->>AS: exchange token
-    O->>DB: AES-GCM + AAD 写 credential，revision++
-    O->>DB: 使旧 discovery snapshot 失效
+    O->>Admin: AES-GCM + AAD 写 credential，revision++
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    O->>Admin: 使旧 discovery snapshot 失效
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     API-->>UI: authenticated；不回显 token
     Note over O,DB: 进程重启后 operation 失效，用户重试；不宣称跨进程恢复
 ```
@@ -308,18 +354,22 @@ sequenceDiagram
 sequenceDiagram
     participant UI as Resources UI
     participant API as Dream API
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant C as Process Cache
     participant R as Running Agent Turn
     UI->>API: PATCH/DELETE + expectedRevision
-    API->>DB: actor scoped FOR UPDATE + CAS
+    API->>Admin: actor scoped FOR UPDATE + CAS
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     alt revision 匹配
-        DB-->>API: commit revision++/delete
+        DB-->>Admin: committed rows/result
+        Admin-->>API: commit revision++/delete
         API->>C: invalidate(server_id)
         API-->>UI: 新 DTO
         Note over R: 已启动 turn 使用 detached snapshot，不热改
     else revision 冲突
-        DB-->>API: no write
+        DB-->>Admin: committed rows/result
+        Admin-->>API: no write
         API-->>UI: 409 MCP_SERVER_REVISION_CONFLICT
     end
 ```
@@ -474,14 +524,17 @@ Workspace Mode 开启和关闭共用同一数据库快照生产路径。关闭�
 sequenceDiagram
     participant UI as Chat UI
     participant S as ClaudeAgentService
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant L as Snapshot Loader
     participant R as Agent Runner
     participant SDK as Claude Agent SDK/Runtime
     UI->>S: new/resume turn（无 MCP config）
-    S->>DB: actor/thread ownership + exact capability
+    S->>Admin: actor/thread ownership + exact capability
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     S->>L: load enabled MCP snapshot
-    L->>DB: servers + credential refs/revisions
+    L->>Admin: servers + credential refs/revisions
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     L-->>S: detached mcp_servers（secret 仅在内存）
     S->>R: AgentRunOptions.claude_mcp_servers
     R->>R: merge + internal name conflict fail closed
@@ -511,18 +564,23 @@ sequenceDiagram
     participant O as Operator
     participant I as Explicit Importer
     participant F as Actor CLI Store
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant V as Validator
     O->>I: run --actor/manifest（显式）
     I->>F: bounded read-only snapshot
     I->>I: canonicalize + redact + hash
-    I->>DB: 查 success receipt + target unique key
+    I->>Admin: 查 success receipt + target unique key
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     alt 已有相同 hash
-        DB-->>I: idempotent no-op
+        DB-->>Admin: committed rows/result
+        Admin-->>I: idempotent no-op
     else 新配置
-        I->>DB: transaction insert server/encrypted credential/receipt
+        I->>Admin: transaction insert server/encrypted credential/receipt
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
     else 同名不同配置
-        DB-->>I: conflict，零覆盖
+        DB-->>Admin: committed rows/result
+        Admin-->>I: conflict，零覆盖
     end
     I->>V: counts/digests/capability validation
     V-->>O: redacted receipt
@@ -543,16 +601,20 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant D as Dream DB-only
-    participant DB as PostgreSQL
+    participant D as Dream Admin client
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant M as Monitor
     participant O as Operator
     participant L as Prior Dream
-    D->>DB: capability + snapshot read
-    DB-->>D: failure/contract mismatch
+    D->>Admin: capability + snapshot read
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    DB-->>Admin: committed rows/result
+    Admin-->>D: failure/contract mismatch
     D-->>M: fail-closed code + trace
     M-->>O: rollback gate
-    O->>DB: 检查 cutover watermark 后的新写入
+    O->>Admin: 检查 cutover watermark 后的新写入
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     alt 无新写入且旧文件在保留窗口
         O->>L: 回滚应用版本
         L-->>O: 原 CLI store 恢复服务

@@ -1,4 +1,5 @@
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
+# [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
 # [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
 # [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
@@ -74,6 +75,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import inspect
 import json
@@ -126,6 +128,23 @@ from story_workspace.contracts import (
 )
 
 
+def _managed_loader(snapshot=None):
+    loader = unittest.mock.Mock()
+    loader.load = unittest.mock.AsyncMock(
+        return_value={} if snapshot is None else snapshot
+    )
+    loader.authorize.side_effect = lambda _authorization: nullcontext()
+    return loader
+
+
+def _bind_test_grant(owner, *, run_id=None):
+    owner.current_grant.return_value = SimpleNamespace(
+        token="idg_test-managed-mcp",
+        run_id=run_id,
+    )
+    return owner
+
+
 class _LegacyTurnPersistence(AdminAgentTurnPersistence):
     """Test-only adapter for historical fixtures that still patch database.py."""
 
@@ -139,6 +158,10 @@ class _LegacyTurnPersistence(AdminAgentTurnPersistence):
 
     def session_projection_child_env(self):
         return {}
+
+    def current_grant(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return SimpleNamespace(token="idg_test-managed-mcp", run_id=None)
 
     def thread(self, *, actor_id, thread_id):
         row = _db.get_chat_thread(thread_id, int(actor_id))
@@ -513,8 +536,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             return_value=None,
         )
         self._dream_thread_loader.start()
-        self.managed_mcp_loader = unittest.mock.Mock()
-        self.managed_mcp_loader.load = unittest.mock.AsyncMock(return_value={})
+        self.managed_mcp_loader = _managed_loader()
         self._managed_mcp_loader_patch = unittest.mock.patch.object(
             claude_mcp_service_module,
             "get_default_managed_mcp_runtime_snapshot_loader",
@@ -853,8 +875,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_shared_thread_resume_uses_persisted_claude_session(self):
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={
+        managed_loader = _managed_loader({
             "remote-readonly": {
                 "type": "http",
                 "url": "https://mcp.example.test",
@@ -1186,8 +1207,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_workspace_mode_disabled_skips_workspace_initialization(self):
         builder = _FakeContextBuilder()
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={})
+        managed_loader = _managed_loader()
         service = ClaudeAgentService(
             context_builder=builder,
             managed_mcp_runtime_snapshot_loader=managed_loader,
@@ -1243,8 +1263,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         managed_loader.load.assert_awaited_once_with("7", None)
 
     async def test_workspace_mode_disabled_injects_managed_mcp_snapshot(self):
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={
+        managed_loader = _managed_loader({
             "remote-readonly": {
                 "type": "http",
                 "url": "https://mcp.example.test/mcp",
@@ -1340,7 +1359,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_recent_sessions_load_only_on_first_build_and_settings_rebuild(self):
         builder = _FakeContextBuilder()
-        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
         broker_env = {
             "INK_SESSION_BROKER_HOST": "127.0.0.1",
             "INK_SESSION_BROKER_PORT": "31415",
@@ -1377,9 +1396,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         ]
         service = _ProductionClaudeAgentService(
             context_builder=builder,
-            managed_mcp_runtime_snapshot_loader=SimpleNamespace(
-                load=unittest.mock.AsyncMock(return_value={})
-            ),
+            managed_mcp_runtime_snapshot_loader=_managed_loader(),
         )
         request = ClaudeAgentRunRequest(
             user_id="7",
@@ -1419,15 +1436,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_recent_session_failure_stops_before_context_without_db_fallback(self):
         builder = _FakeContextBuilder()
-        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
         owner.system_config.return_value = {"workspace_enabled": False}
         owner.thread.return_value = None
         owner.recent_sessions.side_effect = RuntimeError("synthetic Admin failure")
         service = _ProductionClaudeAgentService(
             context_builder=builder,
-            managed_mcp_runtime_snapshot_loader=SimpleNamespace(
-                load=unittest.mock.AsyncMock(return_value={})
-            ),
+            managed_mcp_runtime_snapshot_loader=_managed_loader(),
         )
         request = ClaudeAgentRunRequest(
             user_id="7",
@@ -1472,7 +1487,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_session_broker_unavailable_stops_before_context_or_runtime_workspace(self):
         builder = _FakeContextBuilder()
-        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
         owner.system_config.return_value = {"workspace_enabled": False}
         owner.session_projection_child_env.side_effect = RuntimeError(
             "SESSION_BROKER_UNAVAILABLE"
@@ -1580,8 +1595,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
 class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        loader = unittest.mock.Mock()
-        loader.load = unittest.mock.AsyncMock(return_value={})
+        loader = _managed_loader()
         self._managed_mcp_loader_patch = unittest.mock.patch.object(
             claude_mcp_service_module,
             "get_default_managed_mcp_runtime_snapshot_loader",
@@ -2251,7 +2265,7 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
             import database
 
             service = ClaudeAgentService()
-            owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+            owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
             request = ClaudeAgentRunRequest(
                 user_id="7",
                 thread_id="thread-confirmation-owner",

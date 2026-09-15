@@ -2,6 +2,7 @@
 # [Output] Admin-backed Reflections task engine, durable ordered events, snapshot workspaces, and child Agent execution.
 # [Pos] Reflections background execution node; Dream performs no Reflections SQL or schema management.
 # [Sync] 2026-09-15: replace Dream database persistence with the sixteen-operation Admin Reflections boundary.
+# [Sync] 2026-09-16: keep the six-operation RTA out of MCP by injecting an explicit empty Runtime snapshot.
 """Run Reflections tasks from an immutable Admin worker snapshot."""
 
 from __future__ import annotations
@@ -445,6 +446,7 @@ class ClaudeAgentReflectionsRunner:
                 ),
                 admin_workflow_resolution=AdminWorkflowResolution(actor_id, begin.thread_id, None),
                 admin_turn_persistence=owner,
+                managed_mcp_runtime_snapshot=self._empty_managed_mcp_snapshot(),
             )
             async for _frame in _run_claude_agent_stream(request):
                 pass
@@ -468,6 +470,14 @@ class ClaudeAgentReflectionsRunner:
             if parsed is not None:
                 return parsed
         return []
+
+    @staticmethod
+    def _empty_managed_mcp_snapshot():
+        # Reflections runs a fixed memory-analysis workflow. Its exact RTA
+        # allowlist deliberately has no managed-MCP data operation.
+        from claude_mcp.runtime_snapshot import ManagedMcpRuntimeSnapshot
+
+        return ManagedMcpRuntimeSnapshot()
 
     @staticmethod
     def _build_system_prompt(section: str, memory_path: str, display: str) -> str:

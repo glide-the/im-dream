@@ -2,6 +2,7 @@
 # [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
+# [Sync] 2026-09-16: bind history MCP App projections to the current Admin OAuth authorization.
 # [Sync] 2026-09-15: reuse the shared typed Admin invocation adapter with unchanged Chat error semantics.
 # [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
 # [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
@@ -637,7 +638,7 @@ def _project_chat_message_for_client(
 
 
 async def _load_current_user_mcp_app_resource_bindings(
-    user_id: int | str,
+    current_user: dict,
 ) -> dict[str, dict[str, str]]:
     """Best-effort read of current user-scope descriptor bindings for history."""
 
@@ -645,11 +646,24 @@ async def _load_current_user_mcp_app_resource_bindings(
         from claude_mcp.service import (  # noqa: PLC0415
             get_default_managed_mcp_runtime_snapshot_loader,
         )
+        from claude_mcp.repository import (  # noqa: PLC0415
+            McpDataAuthorization,
+        )
 
         loader = get_default_managed_mcp_runtime_snapshot_loader()
-        if loader is None:
+        actor = current_user.get("_admin_actor")
+        if loader is None or not isinstance(actor, AdminRequestActor):
             return {}
-        return await loader.load_mcp_app_resource_bindings(str(user_id), None)
+        with loader.authorize(
+            McpDataAuthorization(
+                actor_id=actor.canonical_user_id,
+                access_token=actor.access_token,
+            )
+        ):
+            return await loader.load_mcp_app_resource_bindings(
+                actor.canonical_user_id,
+                None,
+            )
     except Exception:  # noqa: BLE001 - history must retain ordinary MCP output
         logger.warning(
             "Managed MCP App history descriptor projection failed safely."
@@ -1457,7 +1471,7 @@ async def claude_agent_thread_messages(
                 detail="limit is required for cursor pagination",
             )
         mcp_app_resource_bindings = (
-            await _load_current_user_mcp_app_resource_bindings(user_id)
+            await _load_current_user_mcp_app_resource_bindings(current_user)
         )
         result = await _chat_invoke(current_user, chat.list_messages, chat_dto.ThreadIdInputDTO(thread_id=thread_id))
         messages = [
@@ -1512,7 +1526,7 @@ async def claude_agent_thread_messages(
     if page.get("has_more") is True and page_messages:
         next_cursor = _encode_chat_message_cursor(thread_id, page_messages[0])
     mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(user_id)
+        await _load_current_user_mcp_app_resource_bindings(current_user)
     )
     return {
         "thread": _project_chat_thread_for_client(thread),
@@ -1549,7 +1563,7 @@ async def claude_agent_thread_message_process(
     if result.message is None:
         raise HTTPException(status_code=404, detail="Message process not found")
     mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(user_id)
+        await _load_current_user_mcp_app_resource_bindings(current_user)
     )
     return _project_chat_message_for_client(
         result.message.model_dump(),

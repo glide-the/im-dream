@@ -4,6 +4,7 @@
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
 # [Sync] 2026-09-16: bind the Registry121 claim-turn owner before confirmation reconciliation.
+# [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules.
@@ -178,12 +179,15 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_admin_request_auth():
     """Bind the sole server-owned OAuth request/data owner; missing settings fail closed."""
+    from claude_mcp.service import configure_default_claude_mcp_service
     from services.admin_data import AdminDataConfig
     from services.admin_data.request_auth import create_production_admin_request_auth
 
-    app.state.admin_request_auth = create_production_admin_request_auth(
+    owner = create_production_admin_request_auth(
         AdminDataConfig.from_env()
     )
+    app.state.admin_request_auth = owner
+    configure_default_claude_mcp_service(owner.client)
 
 
 print(f"🧾 Backend version: {BACKEND_VERSION}")

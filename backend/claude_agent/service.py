@@ -1,4 +1,5 @@
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
+# [Sync] 2026-09-16: load managed MCP only through the current Admin grant or reviewed internal snapshot.
 # [Sync] 2026-09-16: skip duplicate user persistence only for Admin-claimed Dream confirmations.
 # [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
@@ -1417,6 +1418,10 @@ class ClaudeAgentRunRequest:
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
+    # A reviewed internal dispatcher may supply a detached snapshot when its
+    # authority intentionally excludes managed-MCP reads. Public DTOs cannot
+    # author this field. Reflections uses the exact empty snapshot.
+    managed_mcp_runtime_snapshot: Any | None = field(default=None, repr=False)
     # The confirmation coordinator sets this only after Admin returns an exact
     # durable claim for the already-visible user message.
     user_message_pre_persisted: bool = field(default=False, repr=False)
@@ -1930,30 +1935,64 @@ class ClaudeAgentService:
             )
 
         try:
-            loader = self._managed_mcp_runtime_snapshot_loader
-            if loader is None:
-                from claude_mcp.service import (  # noqa: PLC0415
-                    get_default_managed_mcp_runtime_snapshot_loader,
+            snapshot = request.managed_mcp_runtime_snapshot
+            if snapshot is not None:
+                from claude_mcp.runtime_snapshot import (  # noqa: PLC0415
+                    ManagedMcpRuntimeSnapshot,
                 )
 
-                loader = get_default_managed_mcp_runtime_snapshot_loader()
-            managed_workspace_id = await asyncio.to_thread(
-                _resolve_managed_mcp_workspace_scope_sync,
-                actor_id=str(request.user_id),
-                context=dream_context,
-                provider=(
-                    request.admin_turn_persistence
-                    if isinstance(
-                        request.admin_turn_persistence,
-                        AdminWorkflowManagedMcpScopeProvider,
+                if type(snapshot) is not ManagedMcpRuntimeSnapshot:
+                    raise configuration_invalid()
+            else:
+                loader = self._managed_mcp_runtime_snapshot_loader
+                if loader is None:
+                    from claude_mcp.service import (  # noqa: PLC0415
+                        get_default_managed_mcp_runtime_snapshot_loader,
                     )
-                    else None
-                ),
-            )
-            snapshot = await loader.load(
-                str(request.user_id),
-                managed_workspace_id,
-            )
+
+                    loader = get_default_managed_mcp_runtime_snapshot_loader()
+                managed_workspace_id = await asyncio.to_thread(
+                    _resolve_managed_mcp_workspace_scope_sync,
+                    actor_id=str(request.user_id),
+                    context=dream_context,
+                    provider=(
+                        request.admin_turn_persistence
+                        if isinstance(
+                            request.admin_turn_persistence,
+                            AdminWorkflowManagedMcpScopeProvider,
+                        )
+                        else None
+                    ),
+                )
+                persistence = request.admin_turn_persistence
+                current_grant = getattr(persistence, "current_grant", None)
+                authorize = getattr(loader, "authorize", None)
+                if (
+                    not isinstance(persistence, AdminAgentTurnPersistence)
+                    or not callable(current_grant)
+                    or not callable(authorize)
+                ):
+                    raise configuration_invalid()
+                grant = current_grant(
+                    actor_id=str(request.user_id),
+                    thread_id=request.thread_id,
+                )
+                from claude_mcp.repository import (  # noqa: PLC0415
+                    McpDataAuthorization,
+                )
+
+                with authorize(
+                    McpDataAuthorization(
+                        actor_id=str(request.user_id),
+                        access_token=grant.token,
+                        thread_id=request.thread_id,
+                        workflow_run_id=grant.run_id,
+                    )
+                ):
+                    snapshot = await loader.load(
+                        str(request.user_id),
+                        managed_workspace_id,
+                    )
             claude_mcp_servers = {
                 str(name): dict(config)
                 for name, config in snapshot.items()

@@ -1,4 +1,5 @@
 # [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
+# [Sync] 2026-09-16: authorize injected managed-MCP loaders with the current persistence grant in tests.
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
 # [Output] Entity scope, recent Session reads, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
@@ -13,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -867,7 +869,10 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
     value, calls, _ = holder()
     builder = _FakeContextBuilder()
     service = ClaudeAgentService(context_builder=builder, platform_model_resolver=lambda *_: "dream-balanced",
-        managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
+        managed_mcp_runtime_snapshot_loader=SimpleNamespace(
+            load=AsyncMock(return_value={}),
+            authorize=lambda _authorization: nullcontext(),
+        ))
     request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", resume=True,
         admin_workflow_resolution=AdminWorkflowResolution("42", "thread-1", None), admin_turn_persistence=value)
     monkeypatch.setattr(service_module, "get_or_create_workspace", lambda *_args, **_kwargs: tmp_path.resolve())
@@ -1114,7 +1119,10 @@ def test_public_execute_session_persists_original_assistant_parts_with_SQL_fence
                 error="synthetic failure" if outcome=="error" else None,
                 usage={"input_tokens":3,"output_tokens":2}, duration_ms=1250)
     service = ClaudeAgentService(context_builder=_FakeContextBuilder(), platform_model_resolver=lambda *_:"dream-balanced",
-        managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
+        managed_mcp_runtime_snapshot_loader=SimpleNamespace(
+            load=AsyncMock(return_value={}),
+            authorize=lambda _authorization: nullcontext(),
+        ))
     async def scenario():
         request = ClaudeAgentRunRequest(user_id="42",thread_id="thread-1",message_id="user-1",
             message_parts=[{"type":"text","text":"用户文本"}],model="dream-balanced",admin_turn_persistence=value,

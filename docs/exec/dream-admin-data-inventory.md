@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: close Story Workspace Guidance persistence through Registry115 and record the current source scan. -->
+<!-- [Sync] 2026-09-16: close managed-MCP persistence through Registry134-147 and retain the baseline row as history. -->
 <!-- [Sync] 2026-09-15: close eleven Story Workspace catalog routes through Registry114 and record the corrected current scanner. -->
 <!-- [Sync] 2026-09-15: close three current-user picture-history reads through Registry103 and record the fresh scanner. -->
 <!-- [Sync] 2026-09-15: close public local-data import and first-login writes through Registry101 and record the fresh current scanner. -->
@@ -34,6 +35,19 @@
 <!-- [Sync] 2026-09-14: initial exhaustive candidate scan; candidates are not all reachable production SQL. -->
 
 # Dream 生产数据入口清单
+
+## 2026-09-16 managed-MCP 关闭证据
+
+| Dream 文件与入口 | 原访问数据 | 事务/并发要求 | 目标 Admin 模块与接口 | Dream 替换方式 | 验收证据 |
+|---|---|---|---|---|---|
+| `backend/claude_mcp/repository.py`、`backend/claude_mcp/credentials.py` 与 `backend/script/import_claude_mcp_config.py` | Server、App settings、encrypted credential、discovery snapshot、import receipt、schema capability；legacy existing-thread enumeration | actor/workspace 过滤、CAS、credential/snapshot invalidation、import lock、单事务、未知提交；兼容同步只能显式注入 thread provider | Admin `ManagedMcpRepository` + Registry134-147 `managed-mcp.*` strict Zod DTO/typed Drizzle | `AdminManagedMcpRepository` strict Pydantic DTO；公开OAuth、Agent `server-persistence`、import OAuth principal；兼容模块移除隐式 Dream DB fallback | managed-MCP/MCP Apps `184 passed, 3 skipped`；auth/server `195 passed, 4 subtests`；AST 554 modules/80 production entries/19 driver modules/38 legacy helpers/0 parse errors，managed-MCP 相关入口无数据库访问；两仓artifact SHA `9cd4be42914d338d4180c5c85e969b7a452f93570318cc23366b24e7a5cbe5a6` |
+
+下方大表保留 baseline AST 结果用于追溯；其中 managed-MCP repository 的
+`production / 28` 行描述迁移前状态，不能解释为当前生产实现。
+
+当前 source-only 机器回执见
+[`dream-db-closure-after-managed-mcp-registry147-source-only.json`](admin-auth-data-verification/dream-db-closure-after-managed-mcp-registry147-source-only.json)。
+它是源码候选清单，不替代后续完整生产入口运行验证。
 
 共享AdminClient已同步catalog readiness、refresh与operation广告检查；领域HTTP保持并发且未知提交原receipt语义不变。该改动只关闭metadata竞态，不减少其它生产DB迁移清单。
 

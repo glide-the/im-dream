@@ -6,6 +6,7 @@
 # [Sync] 2026-09-15: synchronize catalog refresh/readiness/operation checks while keeping domain HTTP concurrent.
 # [Sync] 2026-09-15: read the dedicated original Preflight receipt without changing generic two-state receipts.
 # [Sync] 2026-09-15: read task-scoped background Reflections receipts with the original task and request IDs.
+# [Sync] 2026-09-16: expose a lock-safe local contract/capability readiness check for managed MCP composition.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from .http_transport import request_admin_dto
 from .models import (
     AbsentReceiptDTO, BrowserExchangeDTO, BrowserHandleDTO, BrowserHandleRequestDTO,
     BrowserResolutionDTO, BrowserRevokedDTO, CapabilitiesDTO, CommittedReceiptDTO,
-    Identifier, OperationCapabilityDTO, PrincipalDTO,
+    Identifier, OperationCapabilityDTO, PrincipalDTO, SchemaCapabilityDTO,
     RequestDTO, StrictDTO,
 )
 
@@ -53,6 +54,8 @@ class AdminDataClient:
         ):
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503)
         self._advertised: dict[str, OperationCapabilityDTO] = {}
+        self._schema_capabilities: dict[str, SchemaCapabilityDTO] = {}
+        self._schema_capabilities_unique = False
         self._capabilities_ready = False
         self._catalog_lock = RLock()
 
@@ -87,17 +90,50 @@ class AdminDataClient:
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
         with self._catalog_lock:
             self._advertised = {}
+            self._schema_capabilities = {}
+            self._schema_capabilities_unique = False
             self._capabilities_ready = False
             result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
             auth = result.auth
             if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
                 raise invalid_response(request_id)
             advertised = {item.name: item for item in result.operations}
+            schemas = {
+                item.capability: item for item in result.schema_capabilities
+            }
             if len(advertised) != len(result.operations):
                 raise invalid_response(request_id)
             self._advertised = advertised
+            self._schema_capabilities = schemas
+            self._schema_capabilities_unique = (
+                len(schemas) == len(result.schema_capabilities)
+            )
             self._capabilities_ready = True
             return result
+
+    def supports(
+        self,
+        operations: tuple[DomainOperation, ...],
+        schema_requirements: tuple[SchemaCapabilityDTO, ...] = (),
+    ) -> bool:
+        """Check the last authenticated catalog without issuing another request."""
+
+        with self._catalog_lock:
+            return (
+                self._capabilities_ready
+                and self._schema_capabilities_unique
+                and all(
+                    self._operations.get(operation.capability.name) is operation
+                    and self._advertised.get(operation.capability.name)
+                    == operation.capability
+                    for operation in operations
+                )
+                and all(
+                    self._schema_capabilities.get(requirement.capability)
+                    == requirement
+                    for requirement in schema_requirements
+                )
+            )
 
     def principal(self, access_token: str, request_id: str) -> PrincipalDTO:
         return self._request("GET", "/principal", request_id, PrincipalDTO, access_token=access_token)
