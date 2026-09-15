@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry169 automatic-repair settlement.
 # [Sync] 2026-09-16: register Registry148-168 Notion connector data operations.
 # [Sync] 2026-09-16: register Registry133 launch replay lookup.
 # [Sync] 2026-09-16: register Registry134-147 managed-MCP data operations.
@@ -81,6 +82,7 @@ from .managed_mcp_data import MANAGED_MCP_OPERATIONS
 from .notion_connector_data import NOTION_CONNECTOR_OPERATIONS
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
+from .dream_auto_repair_data import DREAM_AUTO_REPAIR_OPERATIONS
 from .story_workspace_review_data import STORY_WORKSPACE_REVIEW_OPERATIONS
 from .story_workspace_catalog_data import STORY_WORKSPACE_CATALOG_OPERATIONS
 from .story_workspace_guidance_data import STORY_WORKSPACE_GUIDANCE_OPERATIONS
@@ -146,6 +148,7 @@ class AdminRequestAuth:
                 *NOTION_CONNECTOR_OPERATIONS,
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *STORY_WORKSPACE_OUTPUT_OPERATIONS,
+                *DREAM_AUTO_REPAIR_OPERATIONS,
                 *STORY_WORKSPACE_REVIEW_OPERATIONS,
                 *STORY_WORKSPACE_CATALOG_OPERATIONS,
                 *STORY_WORKSPACE_GUIDANCE_OPERATIONS,

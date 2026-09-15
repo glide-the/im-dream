@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: route automatic-repair insertion and settlement through the bound Admin owner.
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
 # [Sync] 2026-09-16: load managed MCP only through the current Admin grant or reviewed internal snapshot.
 # [Sync] 2026-09-16: skip duplicate user persistence only for Admin-claimed Dream confirmations.
@@ -2616,12 +2617,18 @@ class ClaudeAgentService:
             originating_turn_id=str(originating_turn_id or ""),
             project_cleanup=project_cleanup,
         )
-        await asyncio.to_thread(persist_dream_auto_repair_message, message)
+        await asyncio.to_thread(
+            persist_dream_auto_repair_message,
+            message,
+            provider=execution.request.admin_turn_persistence,
+            actor_id=str(execution.request.user_id),
+        )
         dispatch_claimed = False
         try:
             # ``dispatched`` is committed before publication so SSE, history,
             # and the next Turn share one exact message representation.
             await self._settle_auto_repair_message(
+                execution.request,
                 message,
                 DREAM_AUTO_REPAIR_DISPATCHED,
             )
@@ -2637,6 +2644,7 @@ class ClaudeAgentService:
             if dispatch_claimed:
                 try:
                     await self._settle_auto_repair_message(
+                        execution.request,
                         message,
                         DREAM_AUTO_REPAIR_FAILED,
                     )
@@ -2661,12 +2669,15 @@ class ClaudeAgentService:
 
     @staticmethod
     async def _settle_auto_repair_message(
+        request: ClaudeAgentRunRequest,
         message: Any,
         status: str,
     ) -> None:
         transitioned = await asyncio.to_thread(
             settle_dream_auto_repair_message,
             message.id,
+            provider=request.admin_turn_persistence,
+            actor_id=str(request.user_id),
             thread_id=message.thread_id,
             expected_metadata=dict(message.metadata),
             status=status,
@@ -2721,6 +2732,8 @@ class ClaudeAgentService:
         await asyncio.to_thread(
             settle_dream_auto_repair_message,
             str(request.message_id or ""),
+            provider=request.admin_turn_persistence,
+            actor_id=str(request.user_id),
             thread_id=request.thread_id,
             expected_metadata=dict(metadata),
             status=status,

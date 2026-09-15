@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: validate Registry169 settlement on the shared unknown-write barrier.
 # [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
 # [Sync] 2026-09-16: authorize injected managed-MCP loaders with the current persistence grant in tests.
 # [Sync] 2026-09-16: verify the Notion adapter receives the exact actor, Thread, Run and current grant.
@@ -55,6 +56,11 @@ from services.admin_data.story_workspace_output_data import (
     STORE_STORY_WORKSPACE_OUTPUT,
     STORY_WORKSPACE_OUTPUT_OPERATIONS,
 )
+from services.admin_data.dream_auto_repair_data import (
+    DREAM_AUTO_REPAIR_OPERATIONS,
+    SETTLE_DREAM_AUTO_REPAIR,
+    DreamAutoRepairIdentityDTO,
+)
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
@@ -76,7 +82,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
         GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS,
         RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, ACTIVATE_WORKFLOW_RUNTIME,
-        *STORY_WORKSPACE_OUTPUT_OPERATIONS)
+        *STORY_WORKSPACE_OUTPUT_OPERATIONS, *DREAM_AUTO_REPAIR_OPERATIONS)
     schema_requirements = {
         item.capability: item
         for item in (
@@ -110,6 +116,12 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                         "character_ids": [], "scene_ids": [],
                         "chat_thread_id": "thread-1", "deck_id": None,
                         "deck_name": None, "deck_name_zh": None, "deck_name_en": None,
+                    }
+                elif operation == SETTLE_DREAM_AUTO_REPAIR.capability.name:
+                    value["result"] = {
+                        "message_id": "dream_repair_" + "c" * 40,
+                        "status": "dispatched",
+                        "changed": True,
                     }
                 elif operation == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
                     value["result"] = {
@@ -174,6 +186,31 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                     "character_ids": [], "scene_ids": [],
                     "chat_thread_id": "thread-1", "deck_id": None,
                     "deck_name": None, "deck_name_zh": None, "deck_name_en": None,
+                }
+            elif name == SETTLE_DREAM_AUTO_REPAIR.capability.name:
+                assert input_dto == {
+                    "thread_id": "thread-1",
+                    "message_id": "dream_repair_" + "c" * 40,
+                    "expected_identity": {
+                        "kind": "story-workspace-dream-auto-repair",
+                        "schema_version": "story-workspace-dream-auto-repair/v1",
+                        "originating_message_id": "message-origin",
+                        "originating_turn_id": "turn-origin",
+                        "workflow_run_id": workflow_context.workflow_run_id,
+                        "repair_attempt": 1,
+                        "validation_code": "PROJECT_STORY_SLUG_MISMATCH",
+                        "idempotency_key": "dream-auto-repair/v1:" + "b" * 64,
+                        "project_cleanup": {
+                            "trusted_project_slug": "server-project",
+                            "stale_project_slugs": ["workspace-project"],
+                        },
+                    },
+                    "status": "dispatched",
+                }
+                value = {
+                    "message_id": input_dto["message_id"],
+                    "status": input_dto["status"],
+                    "changed": True,
                 }
             elif name == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
                 assert input_dto == {
@@ -431,6 +468,34 @@ def _dream_context():
     )
 
 
+def _repair_identity(context):
+    return DreamAutoRepairIdentityDTO(
+        kind="story-workspace-dream-auto-repair",
+        schema_version="story-workspace-dream-auto-repair/v1",
+        originating_message_id="message-origin",
+        originating_turn_id="turn-origin",
+        workflow_run_id=context.workflow_run_id,
+        repair_attempt=1,
+        validation_code="PROJECT_STORY_SLUG_MISMATCH",
+        idempotency_key="dream-auto-repair/v1:" + "b" * 64,
+        project_cleanup={
+            "trusted_project_slug": "server-project",
+            "stale_project_slugs": ["workspace-project"],
+        },
+    )
+
+
+def _settle_auto_repair(value):
+    context = value._resolution.context
+    return value.settle_dream_auto_repair(
+        actor_id="42",
+        thread_id="thread-1",
+        message_id="dream_repair_" + "c" * 40,
+        expected_identity=_repair_identity(context),
+        status="dispatched",
+    )
+
+
 def _activate_runtime(value):
     context = value._resolution.context
     return value.activate_workflow_runtime(
@@ -502,6 +567,97 @@ def test_unknown_story_output_recovers_original_receipt_without_post_retry():
     assert sum(
         request.method == "POST"
         and request.url.path.endswith(STORE_STORY_WORKSPACE_OUTPUT.capability.name)
+        for request in calls
+    ) == 1
+
+
+def test_auto_repair_settlement_uses_exact_thread_run_grant_and_dto():
+    context = _dream_context()
+    value, calls, _ = holder(workflow_context=context)
+
+    result = _settle_auto_repair(value)
+
+    assert result.changed is True
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith("/dream-auto-repair.settle")
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        value.settle_dream_auto_repair(
+            actor_id="42",
+            thread_id="thread-1",
+            message_id="dream_repair_" + "c" * 40,
+            expected_identity=_repair_identity(context).model_copy(
+                update={"workflow_run_id": "run_" + "f" * 32}
+            ),
+            status="dispatched",
+        )
+
+
+def test_auto_repair_terminal_state_advances_cached_user_replay():
+    context = _dream_context()
+    value, calls, _ = holder(workflow_context=context)
+    message_id = "dream_repair_" + "c" * 40
+    identity = _repair_identity(context)
+    metadata = {
+        "kind": identity.kind,
+        "schemaVersion": identity.schema_version,
+        "originatingMessageId": identity.originating_message_id,
+        "originatingTurnId": identity.originating_turn_id,
+        "workflowRunId": identity.workflow_run_id,
+        "repairAttempt": identity.repair_attempt,
+        "validationCode": identity.validation_code,
+        "idempotencyKey": identity.idempotency_key,
+        "dispatch_status": "dispatching",
+        "projectCleanup": {
+            "trustedProjectSlug": "server-project",
+            "staleProjectSlugs": ["workspace-project"],
+        },
+    }
+    value.persist_user(
+        actor_id="42",
+        thread_id="thread-1",
+        message_id=message_id,
+        parts=[{"type": "text", "text": "repair"}],
+        metadata=metadata,
+    )
+    _settle_auto_repair(value)
+    terminal = {**metadata, "dispatch_status": "dispatched"}
+    before = len(calls)
+
+    replay = value.persist_user(
+        actor_id="42",
+        thread_id="thread-1",
+        message_id=message_id,
+        parts=[{"type": "text", "text": "repair"}],
+        metadata=terminal,
+    )
+
+    assert replay.message_id == message_id
+    assert len(calls) == before
+
+
+def test_unknown_auto_repair_blocks_other_writes_then_recovers_original_only():
+    context = _dream_context()
+    value, calls, _ = holder(
+        workflow_context=context,
+        lose_operation=SETTLE_DREAM_AUTO_REPAIR.capability.name,
+    )
+    with pytest.raises(AdminDataError) as lost:
+        _settle_auto_repair(value)
+    assert lost.value.outcome_unknown is True
+    before = len(calls)
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        persist(value)
+    assert len(calls) == before
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        _settle_auto_repair(value)
+    recovered = _settle_auto_repair(value)
+    assert recovered.message_id == "dream_repair_" + "c" * 40
+    assert sum(
+        request.method == "POST"
+        and request.url.path.endswith(
+            SETTLE_DREAM_AUTO_REPAIR.capability.name
+        )
         for request in calls
     ) == 1
 

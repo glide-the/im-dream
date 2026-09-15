@@ -1,5 +1,5 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic turn persistence, delegated Notion DTO store, and provider-bound Session broker.
+# [Output] Atomic turn/auto-repair persistence, delegated Notion DTO store, and provider-bound Session broker.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
@@ -11,10 +11,12 @@
 # [Sync] 2026-09-15: reuse the exact Thread/Run grant and unknown-write barrier for Registry108 activation.
 # [Sync] 2026-09-15: persist Registry109 Story proposals through the same Thread grant and unknown-write barrier.
 # [Sync] 2026-09-16: construct an actor/Thread-bound Notion DTO store from the current grant.
+# [Sync] 2026-09-16: share the write barrier with Registry169 repair settlement.
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 from threading import Lock, RLock
 from typing import Callable
 from uuid import uuid4
@@ -63,6 +65,15 @@ from .story_workspace_output_data import (
     StoryWorkspaceOutputInputDTO,
     StoryWorkspaceOutputResultDTO,
 )
+from .dream_auto_repair_data import (
+    SETTLE_DREAM_AUTO_REPAIR,
+    AdminDreamAutoRepairData,
+    AdminDreamAutoRepairProvider,
+    DreamAutoRepairIdentityDTO,
+    DreamAutoRepairSettleInputDTO,
+    DreamAutoRepairSettleOutputDTO,
+    DreamAutoRepairTerminalStatus,
+)
 from .system_config_data import AdminSystemConfigData
 
 
@@ -103,6 +114,7 @@ class AdminTurnPersistence(
     AdminWorkflowManagedMcpScopeProvider,
     AdminWorkflowRuntimeActivationProvider,
     AdminStoryWorkspaceOutputProvider,
+    AdminDreamAutoRepairProvider,
 ):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
@@ -134,6 +146,7 @@ class AdminTurnPersistence(
             AdminWorkflowRuntimeActivationData(client)
         )
         self._story_workspace_output_data = AdminStoryWorkspaceOutputData(client)
+        self._dream_auto_repair_data = AdminDreamAutoRepairData(client)
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._settings = renewal_settings
@@ -359,6 +372,63 @@ class AdminTurnPersistence(
             grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
             return self._write(STORE_STORY_WORKSPACE_OUTPUT, input_dto, grant)
 
+    def settle_dream_auto_repair(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        message_id: str,
+        expected_identity: DreamAutoRepairIdentityDTO,
+        status: DreamAutoRepairTerminalStatus,
+    ) -> DreamAutoRepairSettleOutputDTO:
+        """Settle one persisted repair message through its Admin ORM owner."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if (
+            context is None
+            or context.workflow_run_id != expected_identity.workflow_run_id
+        ):
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        try:
+            input_dto = DreamAutoRepairSettleInputDTO(
+                thread_id=thread_id,
+                message_id=message_id,
+                expected_identity=expected_identity,
+                status=status,
+            )
+        except Exception:
+            raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400) from None
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            result = self._write(SETTLE_DREAM_AUTO_REPAIR, input_dto, grant)
+            # The repair continuation replays the same user message through
+            # the normal turn path. Advance the local reservation to the
+            # Admin-confirmed terminal metadata so that replay remains exact.
+            known = self._writes.get(message_id)
+            if known is not None and known.input_dto.metadata_json is not None:
+                # UserMessageInputDTO already proved this is a JSON object;
+                # updating one closed status cannot introduce non-JSON data.
+                metadata = json.loads(known.input_dto.metadata_json)
+                assert isinstance(metadata, dict)
+                metadata["dispatch_status"] = result.status
+                refreshed = known.input_dto.model_copy(update={
+                    "metadata_json": json.dumps(
+                        metadata,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                })
+                self._writes[message_id] = _UserWrite(
+                    refreshed,
+                    known.request_id,
+                    known.result,
+                )
+            return result
+
     def _project_sessions(
         self,
         *,
@@ -407,7 +477,7 @@ class AdminTurnPersistence(
         # Every caller holds the same activity lock. Unknown results block a
         # different operation as well as a different input; receipts retain
         # the original operation and immutable input held by this owner.
-        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME and operation is not STORE_STORY_WORKSPACE_OUTPUT:
+        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME and operation is not STORE_STORY_WORKSPACE_OUTPUT and operation is not SETTLE_DREAM_AUTO_REPAIR:
             raise configuration_invalid()
         pending = self._pending
         if pending is not None:
@@ -423,6 +493,12 @@ class AdminTurnPersistence(
                         access_token=grant.token,
                     )
                     if operation is ACTIVATE_WORKFLOW_RUNTIME
+                    else self._dream_auto_repair_data.receipt(
+                        pending.input_dto,
+                        pending.request_id,
+                        access_token=grant.token,
+                    )
+                    if operation is SETTLE_DREAM_AUTO_REPAIR
                     else self._story_workspace_output_data.receipt(
                         pending.input_dto,
                         pending.request_id,
@@ -460,6 +536,12 @@ class AdminTurnPersistence(
                     pending.request_id,
                     access_token=grant.token,
                 )
+            elif operation is SETTLE_DREAM_AUTO_REPAIR:
+                result = self._dream_auto_repair_data.settle(
+                    input_dto,
+                    pending.request_id,
+                    access_token=grant.token,
+                )
             else:
                 result = self._chat.update_session(input_dto, pending.request_id, access_token=grant.token)
         except AdminDataError as error:
@@ -480,6 +562,12 @@ class AdminTurnPersistence(
                 raise invalid_response(pending.request_id, write=True)
         elif pending.operation is STORE_STORY_WORKSPACE_OUTPUT:
             if result.chat_thread_id != self._resolution.thread_id:
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is SETTLE_DREAM_AUTO_REPAIR:
+            if (
+                result.message_id != pending.input_dto.message_id
+                or result.status != pending.input_dto.status
+            ):
                 raise invalid_response(pending.request_id, write=True)
         elif pending.operation is ACTIVATE_WORKFLOW_RUNTIME:
             context = self._resolution.context

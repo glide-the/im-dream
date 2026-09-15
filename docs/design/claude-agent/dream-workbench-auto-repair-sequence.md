@@ -9,6 +9,7 @@
 <!-- [Sync] 2026-09-01: show persisted projectCleanup, matching .dream facts, and actionable trusted-root denial. -->
 <!-- [Sync] 2026-09-01: show assistant persistence before both Hook attempts and preserve the committed reply across SSE/history handoff. -->
 <!-- [Sync] 2026-09-04: show the explicit post-commit synchronization terminal and read-only UI reconciliation. -->
+<!-- [Sync] 2026-09-16: show Dream calling Admin DTO operations while Admin alone accesses message rows. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -26,7 +27,8 @@ sequenceDiagram
     participant Bus as EventBus
     participant Service as ClaudeAgentService
     participant Context as DreamWorkbenchContext
-    participant DB as PostgreSQL chat_message
+    participant Admin as Admin data API
+    participant DB as Admin-owned PostgreSQL
     participant Claude as ClaudeAgentRunner
     participant Guard as PreToolUse safety guard
     participant Hook as DreamArtifactTurnHook
@@ -44,8 +46,9 @@ sequenceDiagram
     else 唯一或尚无 project
         Context-->>Service: resolved/missing context
     end
-    Service->>DB: save original user message
-    DB-->>Service: commit
+    Service->>Admin: chat-user-message.persist
+    Admin->>DB: Drizzle message transaction
+    Admin-->>Service: committed DTO
     Service->>Claude: run_streaming(normal options/resume)
     loop Claude 正常输出与工具调用
         Claude-->>Service: normalized callback
@@ -54,8 +57,9 @@ sequenceDiagram
     end
     Claude->>WS: 修改 workspace
     Claude-->>Service: success result
-    Service->>DB: save original assistant(exact reasoning/tool/text parts + session)
-    DB-->>Service: commit
+    Service->>Admin: chat-message.persist(exact reasoning/tool/text parts + session)
+    Admin->>DB: Drizzle assistant transaction
+    Admin-->>Service: committed DTO
     Service->>Hook: after_main_turn(trusted ticket)
     Hook->>Hook: 在任何投影写入前校验 canonical roots、stage collection 与 launch authority
     Hook-->>Service: PROJECT_STORY_SLUG_MISMATCH / agent_repairable
@@ -63,16 +67,19 @@ sequenceDiagram
     Service->>Hook: resolve trusted/stale project cleanup fact
     Hook-->>Service: projectCleanup(trusted, stale[])
     Service->>Service: allowlist 模板 + exact relative paths + stable id/attempt=1
-    Service->>DB: INSERT user chat_message (dispatching)
-    DB-->>Service: commit exact row
-    Service->>DB: CAS dispatching -> dispatched（唯一执行权）
-    DB-->>Service: claim won
+    Service->>Admin: chat-user-message.persist(dispatching)
+    Admin->>DB: Drizzle insert exact user message
+    Admin-->>Service: committed DTO
+    Service->>Admin: dream-auto-repair.settle(dispatched, expected identity)
+    Admin->>DB: lock owned message + validate identity + terminal CAS + receipt
+    Admin-->>Service: changed=true
     Service->>Bus: publish chat-message(exact dispatched id/parts/metadata)
     Bus-->>UI: SSE chat-message
     UI->>UI: 结束当前 AI SDK reader（不报错）
     UI->>API: GET history then status
-    API->>DB: SELECT messages
-    DB-->>API: 原始 assistant + 自动 user 消息
+    API->>Admin: chat history DTO
+    Admin->>DB: owner-filtered Drizzle read
+    Admin-->>API: 原始 assistant + 自动 user 消息
     API-->>UI: 保留 assistant + user 气泡 + running=true
     UI->>API: GET existing /threads/{id}/stream
     API->>Bus: subscribe(replay then live)
@@ -90,7 +97,7 @@ sequenceDiagram
     Context->>WS: rewrite server-owned .dream/WORKBENCH.md facts
     Context-->>Service: trusted/stale/merge direction/trusted delete=false
     Service->>Service: build repr-hidden typed execution scope
-    Service->>DB: exact CAS replay auto user message
+    Service->>Admin: exact chat-user-message.persist replay
     Service->>Claude: run_streaming(normal repair Turn)
     Claude->>WS: 移动/合并到 canonical 目录并修正 project_id/project_slug
     Claude->>Guard: Bash rm -rf exact stale project root
@@ -98,16 +105,18 @@ sequenceDiagram
     Guard-->>Claude: permissionDecision=allow（无需确认框）
     Claude->>WS: 移除旧项目根，不保留重复 EP/entity_id
     Claude-->>Service: success result
-    Service->>DB: save repair assistant(exact reasoning/tool/text parts + session)
-    DB-->>Service: commit
+    Service->>Admin: chat-message.persist(repair assistant + session)
+    Admin->>DB: Drizzle assistant transaction
+    Admin-->>Service: committed DTO
     Service->>Hook: after_main_turn(new trusted ticket)
     Hook-->>Service: validation passed
     Service->>Bus: message-final + finish(stop)
     Bus-->>UI: repair assistant events + terminal
     Factory->>Factory: release admission/lock, RUNNING -> IDLE
     UI->>API: final authoritative history recovery
-    API->>DB: SELECT messages
-    DB-->>UI: original user + original assistant + auto user + repair assistant
+    API->>Admin: chat history DTO
+    Admin->>DB: owner-filtered Drizzle read
+    Admin-->>UI: original user + original assistant + auto user + repair assistant
 ```
 
 ## 2. 错误分类与禁止自动修复
@@ -119,12 +128,14 @@ sequenceDiagram
     participant Hook as DreamArtifactTurnHook
     participant Authority as Server-owned authority
     participant WS as Workspace facts
-    participant DB as PostgreSQL chat_message
+    participant Admin as Admin data API
+    participant DB as Admin-owned PostgreSQL
     participant Bus as EventBus/SSE
     participant UI as ChatPanel
 
-    Service->>DB: persist completed assistant
-    DB-->>Service: commit
+    Service->>Admin: chat-message.persist(completed assistant)
+    Admin->>DB: Drizzle assistant transaction
+    Admin-->>Service: committed DTO
     Service->>Hook: after_main_turn(ticket)
     Hook->>Authority: 校验 actor/thread/run/Deck/plugin/source/frozen facts
     alt 可信身份异常
@@ -203,7 +214,8 @@ sequenceDiagram
     participant Service as ClaudeAgentService
     participant Claude as ClaudeAgentRunner
     participant Hook as DreamArtifactTurnHook
-    participant DB as chat_message
+    participant Admin as Admin data API
+    participant DB as Admin-owned PostgreSQL
     participant Bus as EventBus
 
     Note over Factory,Service: auto request metadata 已声明 repairAttempt=1
@@ -212,24 +224,29 @@ sequenceDiagram
         User->>UI: Stop
         UI->>Factory: existing stop endpoint
         Factory-xService: cancel 唯一 bg_task
-        Service->>DB: partial assistant（如有）+ auto status=failed
+        Service->>Admin: partial assistant（如有）+ settle(failed)
+        Admin->>DB: Drizzle message writes
         Service->>Bus: finish(stop, cancelled=true)
     else Runner/assembly 失败
         Claude-->>Service: failure
-        Service->>DB: auto status=failed
+        Service->>Admin: dream-auto-repair.settle(failed)
+        Admin->>DB: owned message terminal CAS
         Service->>Bus: safe error + finish(error)
     else Claude 成功但 Hook 再失败
-        Service->>DB: persist completed repair assistant SSE parts
-        DB-->>Service: commit
+        Service->>Admin: persist completed repair assistant SSE parts
+        Admin->>DB: Drizzle assistant transaction
+        Admin-->>Service: committed DTO
         Service->>Hook: after_main_turn(ticket)
         Hook-->>Service: structured issue（例如 canonical roots 仍重复）
-        Service->>DB: CAS auto status=failed
+        Service->>Admin: dream-auto-repair.settle(failed)
+        Admin->>DB: owned message terminal CAS + receipt
         Service->>Bus: DREAM_WORKBENCH_AUTO_REPAIR_FAILED + allowlisted 最终 validation code + finish(error)
     end
     Note over Service,Factory: 不构造第二条 auto user 消息，不存在第三个 Turn
     Bus-->>UI: terminal error card 显示安全最终原因
-    UI->>DB: 通过 history API 恢复
-    DB-->>UI: 同一 auto user + 已完成 repair assistant，来源标记“工作台自动修正未通过”
+    UI->>Admin: 通过 history API 恢复
+    Admin->>DB: owner-filtered history read
+    Admin-->>UI: 同一 auto user + 已完成 repair assistant，来源标记“工作台自动修正未通过”
 ```
 
 ## 4. 刷新、断线重连与去重
@@ -241,18 +258,21 @@ sequenceDiagram
     participant UI1 as 原 ChatPanel
     participant Bus as EventBus replay buffer
     participant Producer as Factory bg_task
-    participant DB as chat_message
+    participant Admin as Admin data API
+    participant DB as Admin-owned PostgreSQL
     participant UI2 as 刷新后的 ChatPanel
 
-    Producer->>DB: original assistant 已提交；commit dream_repair_X + CAS dispatched
+    Producer->>Admin: original assistant + dream_repair_X + settle(dispatched)
+    Admin->>DB: Drizzle message transactions
     Producer->>Bus: chat-message(id=dream_repair_X, status=dispatched)
     Bus-->>UI1: chat-message
     UI1-xBus: 主动结束 POST subscriber
     Note over Producer,Bus: producer 继续；subscriber 断开不 cancel bg_task
 
     User->>UI2: 页面刷新/重新进入 Thread
-    UI2->>DB: history API
-    DB-->>UI2: original assistant + dream_repair_X（唯一持久行）
+    UI2->>Admin: history API
+    Admin->>DB: owner-filtered Drizzle read
+    Admin-->>UI2: original assistant + dream_repair_X（唯一持久行）
     UI2->>Producer: status API
     Producer-->>UI2: running=true
     UI2->>Bus: subscribe
@@ -268,8 +288,10 @@ sequenceDiagram
         UI2->>UI2: replace same id；气泡数量不变
     end
 
-    Producer->>DB: Hook 前已 persist final repair assistant/status
+    Producer->>Admin: Hook 前已persist final repair assistant/status
+    Admin->>DB: Drizzle message transactions
     Producer->>Bus: finish
-    UI2->>DB: final history recovery
-    DB-->>UI2: exact ids/parts/metadata
+    UI2->>Admin: final history recovery
+    Admin->>DB: owner-filtered Drizzle read
+    Admin-->>UI2: exact ids/parts/metadata
 ```
