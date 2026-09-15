@@ -1,30 +1,22 @@
-"""Tests for the Deck Plugin manifest and release foundation."""
+"""Tests for the Deck Plugin manifest validation contract.
+
+[Sync] 2026-09-16: retain pure validation after retiring Dream release persistence.
+"""
 
 from __future__ import annotations
 
 import copy
-import sqlite3
 import unittest
 
 from pydantic import ValidationError
 
-from backend import database
-from backend.schema import legacy_main_sqlite
-from backend.models.deck_plugin import (
-    DeckPluginManifestV1,
-    DeckPluginReleaseStatus,
-)
+from backend.models.deck_plugin import DeckPluginManifestV1
 from backend.services.deck_plugin.manifest_validator import (
     DECK_PLUGIN_MANIFEST_INVALID,
     DECK_PLUGIN_SOURCE_DENIED,
     DeckPluginValidationError,
     is_valid_semver,
     validate_manifest,
-)
-from backend.services.deck_plugin.release_service import (
-    DeckPluginReleaseService,
-    DeckPluginReleaseStateError,
-    assert_release_transition,
 )
 
 
@@ -194,106 +186,6 @@ class ManifestValidatorTests(unittest.TestCase):
 
         data["runtime"]["degraded_modes"] = ["continue-without-story-tools"]
         validate_manifest(data, source_allowlist=SOURCE_ALLOWLIST)
-
-
-class ReleaseServiceTests(unittest.TestCase):
-    def setUp(self):
-        self.db = sqlite3.connect(":memory:")
-        self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA foreign_keys=ON")
-        legacy_main_sqlite.create_tables(self.db)
-        self.service = DeckPluginReleaseService(
-            self.db, source_allowlist=SOURCE_ALLOWLIST
-        )
-
-    def tearDown(self):
-        self.db.close()
-
-    def test_database_initialization_is_idempotent_and_indexed(self):
-        legacy_main_sqlite.create_tables(self.db)
-        table = self.db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name='deck_plugin_releases'"
-        ).fetchone()
-        self.assertIsNotNone(table)
-        indexes = {
-            row["name"]
-            for row in self.db.execute("PRAGMA index_list('deck_plugin_releases')")
-        }
-        self.assertIn("idx_deck_plugin_releases_id_version", indexes)
-        self.assertIn("idx_deck_plugin_releases_status", indexes)
-
-    def test_database_table_can_be_rolled_back_and_recovered(self):
-        self.db.execute("DROP TABLE deck_plugin_releases")
-        legacy_main_sqlite.create_tables(self.db)
-        self.assertIsNotNone(
-            self.db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "AND name='deck_plugin_releases'"
-            ).fetchone()
-        )
-
-    def test_crud_unique_constraint_and_release_lifecycle(self):
-        manifest = DeckPluginManifestV1.model_validate(valid_manifest_data())
-        draft = self.service.create_draft(manifest)
-        self.assertTrue(draft.id.startswith("dr_"))
-        self.assertEqual(draft.status, DeckPluginReleaseStatus.DRAFT)
-        draft_hash = draft.manifest_hash
-
-        with self.assertRaises(DeckPluginValidationError) as caught:
-            self.service.create_draft(manifest)
-        self.assertEqual(caught.exception.code, DECK_PLUGIN_MANIFEST_INVALID)
-
-        published = self.service.validate_release(draft.id)
-        self.assertEqual(published.status, DeckPluginReleaseStatus.PUBLISHED)
-        self.assertEqual(published.manifest.status, DeckPluginReleaseStatus.PUBLISHED)
-        self.assertNotEqual(published.manifest_hash, draft_hash)
-        self.assertIsNotNone(published.published_at)
-
-        fetched = self.service.get_release(
-            manifest.deck_plugin_id, manifest.deck_plugin_version
-        )
-        self.assertEqual(fetched.id, draft.id)
-
-        deprecated = self.service.deprecate_release(draft.id)
-        self.assertEqual(deprecated.status, DeckPluginReleaseStatus.DEPRECATED)
-        self.assertEqual(deprecated.manifest_hash, published.manifest_hash)
-        revoked = self.service.revoke_release(draft.id, "security policy")
-        self.assertEqual(revoked.status, DeckPluginReleaseStatus.REVOKED)
-        self.assertEqual(revoked.manifest_hash, published.manifest_hash)
-
-    def test_invalid_transitions_are_rejected(self):
-        with self.assertRaises(DeckPluginReleaseStateError):
-            assert_release_transition(
-                DeckPluginReleaseStatus.PUBLISHED, DeckPluginReleaseStatus.DRAFT
-            )
-
-        draft = self.service.create_draft(
-            DeckPluginManifestV1.model_validate(valid_manifest_data())
-        )
-        with self.assertRaises(DeckPluginReleaseStateError):
-            self.service.deprecate_release(draft.id)
-        self.assertEqual(
-            self.service.get_release(draft.deck_plugin_id, draft.deck_plugin_version).status,
-            DeckPluginReleaseStatus.DRAFT,
-        )
-
-    def test_unique_constraint_is_enforced_by_sqlite(self):
-        manifest = DeckPluginManifestV1.model_validate(valid_manifest_data())
-        release = self.service.create_draft(manifest)
-        row = self.db.execute(
-            "SELECT * FROM deck_plugin_releases WHERE id = ?", (release.id,)
-        ).fetchone()
-        values = dict(row)
-        values["id"] = "dr_duplicate"
-        columns = list(values)
-        placeholders = ",".join("?" for _ in columns)
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                f"INSERT INTO deck_plugin_releases ({','.join(columns)}) "
-                f"VALUES ({placeholders})",
-                [values[column] for column in columns],
-            )
 
 
 if __name__ == "__main__":
