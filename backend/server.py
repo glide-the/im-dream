@@ -3,6 +3,7 @@
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
+# [Sync] 2026-09-16: bind the Registry120 confirmation worker before startup reconciliation and close it with the shared Admin owner.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules.
@@ -386,9 +387,18 @@ async def startup_claude_agent():
 
 @app.on_event("startup")
 async def story_workspace_startup_dream_confirmation_coordinator():
-    """Reconcile accepted Dream confirmations after the Agent is ready."""
+    """Bind the service-only Admin DTO worker, then reconcile confirmations."""
 
-    story_workspace_get_dream_confirmation_coordinator().start()
+    from services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationWorkerData,
+    )
+
+    owner = getattr(app.state, "admin_request_auth", None)
+    if owner is None:
+        raise RuntimeError("Admin request/data owner is unavailable")
+    coordinator = story_workspace_get_dream_confirmation_coordinator()
+    coordinator.bind_worker(AdminStoryWorkspaceConfirmationWorkerData(owner.client))
+    coordinator.start()
 
 
 @app.on_event("startup")

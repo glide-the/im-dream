@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: update launch route harness to override the current Admin default-workspace dependency.
 """Dream launch REST and production gateway integration tests."""
 
 from __future__ import annotations
@@ -203,7 +204,9 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.gateway = ApiGateway()
         self.app = FastAPI()
-        self.app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+        self.app.dependency_overrides[
+            story_workspace._story_workflow_current_user
+        ] = lambda: {
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }

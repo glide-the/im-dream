@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: consume Registry120 Story confirmation DTOs and remove its production PostgreSQL state machine. -->
 <!-- [Sync] 2026-09-15: consume Registry115 Story Guidance persistence and keep same-Thread Runtime dispatch in Dream. -->
 <!-- [Sync] 2026-09-15: consume Registry114 Story catalog operations through strict DTOs and remove eleven production SQL routes. -->
 <!-- [Sync] 2026-09-15: consume Registry111 Story review operations through strict DTOs and remove eight production SQL paths. -->
@@ -32,6 +33,12 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+Story Workspace confirmation现绑定Admin Registry120。Dream浏览器入口使用current OAuth先读取既有`run.read` DTO，校验actor、Run、source Thread与当前状态，然后在共享文件系统中完成两次相同projection/base-revision检查；只有检查稳定才把原camelCase confirmation command作为严格Pydantic DTO提交给Admin。Admin从OAuth主体重新派生owned Run/Workspace/Thread，生成canonical message/metadata，在一个typed Drizzle UOW完成普通user消息、Thread touch、Run transition和receipt。Dream不发送actor、message ID、状态、SQL、表列、数据库、路径或事务选择器，也不保留confirmation PostgreSQL fallback。
+
+Admin只让新持久提交携带即时dispatch；业务幂等重放返回`dispatch:null`，由后台reconciler恢复，避免两个并发响应启动同一Runtime turn。Dream coordinator通过唯一Admin client和`story-confirmation:dispatch`服务scope执行claim/lease/ack：同claim重试恢复、过期租约可接管、不同claim不能续租或确认。Dream继续调度同一Thread Runtime，保留heartbeat、EventBus、SSE、turn/resume/cancel、Agent文件CAS和共享文件系统权限；`user_message_pre_persisted`只有Admin claim的严格message/actor/thread事实完全匹配时才跳过重复user消息保存。Admin失败、capability/hash/DTO错误、越权、状态冲突或未知写入均产生明确失败，不查询Dream数据库。
+
+`submit/fact/claim/lease/ack`的operation SHA依次为`2571aa2cc9c19656c4ac90d33221da65e8a631657adebf9f535ab0fe3c76bb12`、`f455a6075161751d25a229dd64479e2a6d6ca781ea7aacfa5575ec4561f52beb`、`c049317c4383584a7574b11daea1b8c626875d589e0dbbd45dfb739c4ca8cde1`、`a5720992e5a0cbc39773481dd3f98a32e6b535c34ea24df230de6ad5646817e6`和`12aeed9beb6584354aa584ebadf7ce352d68084632c0d2c90a2c768c3a8626c6`，完整Registry120 SHA为`4b0bbfa8caecd42acf0ecc89be4153b6d6fb1e124aac4ff27e937ecb14904795`。本阶段不改数据库schema或Admin migration；其它Dream数据库候选仍按全域清单迁移，不能据此宣称全部关闭。
 
 Story Workspace Guidance现绑定Admin Registry115。Dream从current OAuth构造严格`workflow_run_id/kind/text/step_id/idempotency_key` DTO，不发送actor、Workspace、Thread、message ID或数据库选择器。Admin锁定owned Run/Workspace/source Thread，要求Run为confirmed/failed，派生immutable message与fingerprint，在一个Drizzle UOW提交message、Thread touch、结果、audit及receipt；相同业务命令重放不改变Thread排序，changed input返回409。Dream只对new commit或original-receipt恢复返回的严格dispatch envelope调用既有同Thread Runtime；投递失败保留已提交命令并返回`dispatched:false`，业务replay不重复投递。operation SHA为`a061ed38d2ca10073bbb7fd078e679f072f0cbd4ff1ce900792fbf8725223727`，完整Registry115 SHA为`58ab3cd933165dca7d6ae2d6eb50f46ff8f148e8e7eaf3dd5e46ceab1ad2ba9b`。[Registry115源码扫描](../exec/admin-auth-data-verification/dream-db-closure-after-registry115-source-only.json)为545模块、49个SQL模块、452个SQL literal、27个driver/import模块、50个legacy helper、392个connection/transaction call和133个operation name，parse errors为空；其它数据库候选仍需迁移。
 

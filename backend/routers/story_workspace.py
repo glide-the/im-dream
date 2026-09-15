@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
 # [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
 # [Output] Publish user-scoped Story Workspace product, workflow, artifact, review, and catalog routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
@@ -11,6 +12,7 @@
 # [Sync] 2026-09-15: route Story/Character/Scene review through Registry111 and remove those Dream SQL transactions.
 # [Sync] 2026-09-15: route catalog browse/edit through Registry114 DTO/ORM and remove this router's Dream SQL.
 # [Sync] 2026-09-15: persist Guidance through Registry115 and retain only same-Thread Runtime dispatch in Dream.
+# [Sync] 2026-09-16: route confirmation facts and persistence through Registry120 DTO clients.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -64,6 +66,9 @@ from services.admin_data.story_workspace_catalog_data import (
 from services.admin_data.story_workspace_guidance_data import (
     AdminStoryWorkspaceGuidanceData,
     StoryWorkspaceGuidanceInputDTO,
+)
+from services.admin_data.story_workspace_confirmation_data import (
+    AdminStoryWorkspaceConfirmationData,
 )
 from services.story_workspace.guidance_service import build_thread_turn_dispatcher
 
@@ -212,6 +217,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any: ...
 
     async def get_episode_artifacts(
@@ -259,6 +266,9 @@ class DreamConfirmationService(Protocol):
         request: StoryWorkspaceDreamConfirmationCommand,
         *,
         actor: dict[str, str],
+        run_data: AdminRunData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any: ...
 
 
@@ -965,6 +975,19 @@ def _guidance_data(
     )
 
 
+def _confirmation_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceConfirmationData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceConfirmationData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
+
+
 def _guidance_data_error(exc: AdminDataError, request_id: str):
     if not exc.outcome_unknown:
         if exc.code == "WORKFLOW_RUN_NOT_FOUND" and exc.status_code == 404:
@@ -1052,9 +1075,13 @@ async def story_workspace_get_workflow_run_dream_files(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
 ):
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1062,7 +1089,12 @@ async def story_workspace_get_workflow_run_dream_files(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        service.get_dream_files(workflow_run_id, actor=actor),
+        service.get_dream_files(
+            workflow_run_id,
+            actor=actor,
+            confirmation_data=confirmation_data,
+            access_token=request_actor.access_token,
+        ),
         by_alias=True,
     )
 
@@ -1217,13 +1249,21 @@ async def story_workspace_reconcile_workflow_run_story_index(
 async def story_workspace_submit_workflow_run_dream_confirmation(
     workflow_run_id: str,
     request: StoryWorkspaceDreamConfirmationCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     service: DreamConfirmationService = Depends(get_dream_confirmation_service),
+    run_data: AdminRunData = Depends(_run_data),
+    confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
 ):
     """Persist one hidden confirmation and queue the originating Chat Agent."""
 
     try:
-        actor = {"actor_id": str(current_user["user_id"])}
+        actor = {
+            "actor_id": str(current_user["user_id"]),
+            "workspace_id": str(current_user["workspace_id"]),
+        }
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1235,6 +1275,9 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
             workflow_run_id,
             request,
             actor=actor,
+            run_data=run_data,
+            confirmation_data=confirmation_data,
+            access_token=request_actor.access_token,
         ),
         by_alias=True,
     )

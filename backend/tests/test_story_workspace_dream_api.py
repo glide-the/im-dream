@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: validate Registry120 fact merge and confirmation submission without Dream database persistence.
 # [Sync] 2026-09-15: remove assertions against the retired router Workspace SQL symbol.
 """Actor-scoped REST projection tests for Dream runtime files."""
 
@@ -33,6 +34,10 @@ from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRu
 from routers import story_workspace
 from services.deck import story_workflow_application as gateway_module
 from services.errors.error_registry import ApiRouteError, build_error_payload
+from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.story_workspace_confirmation_data import (
+    StoryWorkspaceConfirmationFactOutputDTO,
+)
 import services.story_workspace.dream_file_service as dream_files
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamContractError,
@@ -46,6 +51,7 @@ from services.story_workspace.dream_file_service import (
 from services.workflow.run_service import WorkflowRunError
 from story_workspace.contracts import (
     StoryWorkspaceDreamAgentActivityResponse,
+    StoryWorkspaceDreamConfirmationAccepted,
     StoryWorkspaceDreamFilesResponse,
     StoryWorkspaceDreamSourceResponse,
     StoryWorkspaceDreamStage,
@@ -58,6 +64,26 @@ OTHER_RUN_ID = "run_fedcba9876543210fedcba9876543210"
 THREAD_ID = "thread-1"
 WORKSPACE_ID = "workspace-1"
 ACTOR_ID = "7"
+REQUEST_ACTOR = AdminRequestActor(
+    subject="subject-7",
+    canonical_user_id=ACTOR_ID,
+    client_id="dream-browser",
+    scopes=frozenset({"dream:read", "dream:write"}),
+    issued_at=1,
+    expires_at=2,
+    access_token="oauth-access-token",
+)
+
+
+def confirmation_data(*, accepted: bool = False, dispatched: bool = False) -> Mock:
+    data = Mock()
+    data.fact.return_value = StoryWorkspaceConfirmationFactOutputDTO(
+        workflow_run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        confirmation_accepted=accepted,
+        confirmation_dispatched=dispatched,
+    )
+    return data
 
 
 def authoritative_run(**overrides: object) -> WorkflowRun:
@@ -166,9 +192,98 @@ class _RecordingGateway:
         self.response = response
         self.calls: list[tuple[str, dict[str, str]]] = []
 
-    async def get_dream_files(self, workflow_run_id: str, *, actor: dict[str, str]):
+    async def get_dream_files(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+        confirmation_data: object,
+        access_token: str,
+    ):
+        assert confirmation_data is not None
+        assert access_token == REQUEST_ACTOR.access_token
         self.calls.append((workflow_run_id, actor))
         return self.response
+
+
+class _RecordingConfirmationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def submit_dream_confirmation(
+        self,
+        workflow_run_id: str,
+        request: object,
+        *,
+        actor: dict[str, str],
+        run_data: object,
+        confirmation_data: object,
+        access_token: str,
+    ) -> StoryWorkspaceDreamConfirmationAccepted:
+        self.calls.append({
+            "workflow_run_id": workflow_run_id,
+            "request": request,
+            "actor": actor,
+            "run_data": run_data,
+            "confirmation_data": confirmation_data,
+            "access_token": access_token,
+        })
+        return StoryWorkspaceDreamConfirmationAccepted(
+            message_id="dream_confirm_" + "a" * 64,
+            story_workspace_run_id=workflow_run_id,
+            thread_id=THREAD_ID,
+            replayed=False,
+            dispatched=False,
+            request_id="confirmation-route-request",
+        )
+
+
+class StoryWorkspaceDreamConfirmationRouteTest(unittest.TestCase):
+    def test_route_passes_current_actor_and_typed_admin_dependencies(self) -> None:
+        app = FastAPI()
+        service = _RecordingConfirmationService()
+        run_data = object()
+        confirmation = object()
+        app.dependency_overrides[story_workspace._story_workflow_current_user] = lambda: {
+            "user_id": int(ACTOR_ID),
+            "workspace_id": WORKSPACE_ID,
+            "_admin_actor": REQUEST_ACTOR,
+        }
+        app.dependency_overrides[story_workspace.get_dream_confirmation_service] = lambda: service
+        app.dependency_overrides[story_workspace._run_data] = lambda: run_data
+        app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation
+        app.include_router(story_workspace.router)
+        client = TestClient(app)
+        try:
+            response = client.post(
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-confirmation",
+                json={
+                    "storyWorkspaceRunId": RUN_ID,
+                    "threadId": THREAD_ID,
+                    "baseRevisions": {"characters": 2, "scenes": 3, "storyboards": 4},
+                    "edits": [],
+                    "idempotencyKey": "swc_route-test",
+                },
+            )
+        finally:
+            client.close()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {
+            "messageId": "dream_confirm_" + "a" * 64,
+            "storyWorkspaceRunId": RUN_ID,
+            "threadId": THREAD_ID,
+            "status": "accepted",
+            "replayed": False,
+            "dispatched": False,
+            "requestId": "confirmation-route-request",
+        })
+        self.assertEqual(len(service.calls), 1)
+        call = service.calls[0]
+        self.assertEqual(call["workflow_run_id"], RUN_ID)
+        self.assertEqual(call["actor"], {"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID})
+        self.assertIs(call["run_data"], run_data)
+        self.assertIs(call["confirmation_data"], confirmation)
+        self.assertEqual(call["access_token"], REQUEST_ACTOR.access_token)
 
 
 class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
@@ -181,7 +296,9 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         app.dependency_overrides[story_workspace.get_current_user] = lambda: {
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
+            "_admin_actor": REQUEST_ACTOR,
         }
+        app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation_data()
         app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
@@ -316,22 +433,23 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 StoryWorkspaceDreamAgentActivityResponse(sequence=1, **value)
 
     def test_existing_run_endpoint_remains_snake_case(self) -> None:
-        class RunGateway(_RecordingGateway):
-            async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]):
-                return {
-                    "workflow_run_id": workflow_run_id,
-                    "source_voice_thread_id": THREAD_ID,
-                }
-
         app = FastAPI()
-        gateway = RunGateway(waiting_response())
+        run_data = Mock()
+        run_data.read.return_value = {
+            "workflow_run_id": RUN_ID,
+            "source_voice_thread_id": THREAD_ID,
+        }
         app.dependency_overrides[story_workspace.get_current_user] = lambda: {
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
+            "_admin_actor": REQUEST_ACTOR,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_run_service] = (
-            lambda: gateway
-        )
+        app.dependency_overrides[story_workspace._story_workflow_current_user] = lambda: {
+            "user_id": int(ACTOR_ID),
+            "workspace_id": WORKSPACE_ID,
+            "_admin_actor": REQUEST_ACTOR,
+        }
+        app.dependency_overrides[story_workspace._run_data] = lambda: run_data
         app.include_router(story_workspace.router)
         with TestClient(app) as client:
             response = client.get(f"/api/story-workspace/workflow-runs/{RUN_ID}")
@@ -346,6 +464,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 workflow_run_id: str,
                 *,
                 actor: dict[str, str],
+                confirmation_data: object,
+                access_token: str,
             ):
                 raise RuntimeError("internal /private/workspace")
 
@@ -354,7 +474,9 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         app.dependency_overrides[story_workspace.get_current_user] = lambda: {
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
+            "_admin_actor": REQUEST_ACTOR,
         }
+        app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation_data()
         app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
@@ -397,7 +519,9 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 app.dependency_overrides[story_workspace.get_current_user] = lambda: {
                     "user_id": int(ACTOR_ID),
                     "email": "writer@example.com",
+                    "_admin_actor": REQUEST_ACTOR,
                 }
+                app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation_data()
                 app.dependency_overrides[
                     story_workspace.get_dream_artifact_service
                 ] = gateway_module.DreamArtifactApplicationService
@@ -458,7 +582,9 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 app.dependency_overrides[story_workspace.get_current_user] = lambda: {
                     "user_id": int(ACTOR_ID),
                     "email": "writer@example.com",
+                    "_admin_actor": REQUEST_ACTOR,
                 }
+                app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation_data()
                 app.dependency_overrides[
                     story_workspace.get_dream_artifact_service
                 ] = lambda: gateway
@@ -505,7 +631,9 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 app.dependency_overrides[story_workspace.get_current_user] = lambda: {
                     "user_id": int(ACTOR_ID),
                     "email": "writer@example.com",
+                    "_admin_actor": REQUEST_ACTOR,
                 }
+                app.dependency_overrides[story_workspace._confirmation_data] = lambda: confirmation_data()
                 app.dependency_overrides[
                     story_workspace.get_dream_artifact_service
                 ] = gateway_module.DreamArtifactApplicationService
@@ -555,6 +683,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         )
         self.run = authoritative_run()
         self.gateway = gateway_module.DreamArtifactApplicationService()
+        self.confirmation_data = confirmation_data()
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -683,6 +812,8 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         return await self.gateway.get_dream_files(
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
+            confirmation_data=self.confirmation_data,
+            access_token=REQUEST_ACTOR.access_token,
         )
 
     async def test_uses_canonical_workspace_root_without_optional_agent_sdk(
@@ -1001,6 +1132,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         reader = Mock()
         reader.workspace_root = self.workspace.resolve()
         reader.read.return_value = complete_response()
+        self.confirmation_data = confirmation_data(accepted=True, dispatched=True)
         with (
             self.wired(),
             patch.object(
@@ -1008,24 +1140,10 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
                 "StoryWorkspaceDreamFileReader",
                 return_value=reader,
             ),
-            patch.object(
-                gateway_module,
-                "story_workspace_read_dream_confirmation_fact",
-                return_value=(True, True),
-            ) as read_confirmation,
         ):
             result = await self.call()
 
-        read_confirmation.assert_called_once()
-        _, fact_kwargs = read_confirmation.call_args
-        self.assertEqual(
-            fact_kwargs,
-            {
-                "actor_id": ACTOR_ID,
-                "thread_id": THREAD_ID,
-                "run_id": RUN_ID,
-            },
-        )
+        self.confirmation_data.fact.assert_called_once()
         self.assertTrue(result.confirmation_accepted)
         self.assertTrue(result.confirmation_dispatched)
         self.assertFalse(result.can_confirm)

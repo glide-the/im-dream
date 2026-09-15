@@ -1,6 +1,7 @@
 # [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
+# [Sync] 2026-09-16: move Dream confirmation facts and persistence to Registry120 Admin DTOs.
 # [Sync] 2026-09-15: retire the Guidance database branch after Registry115 moved persistence to Admin.
 # [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
 # [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
@@ -23,6 +24,7 @@ from pathlib import Path
 import stat
 import sys
 from typing import Any
+from uuid import uuid4
 
 import database
 
@@ -50,13 +52,19 @@ try:
     )
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from services.story_workspace.dream_confirmation_service import (
-        StoryWorkspacePersistedDreamConfirmation,
-        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
-        StoryWorkspaceDreamConfirmationService,
-        story_workspace_read_dream_confirmation_fact,
+        story_workspace_confirmation_command_json,
+        story_workspace_persisted_confirmation,
+        story_workspace_validate_confirmation_projection,
     )
+    from services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationData,
+        StoryWorkspaceConfirmationFactInputDTO,
+        StoryWorkspaceConfirmationSubmitInputDTO,
+    )
+    from services.admin_data.errors import AdminDataError
+    from services.admin_data.run_data import AdminRunData, RunLookupInputDTO
     from services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
     )
@@ -121,13 +129,19 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from backend.services.story_workspace.dream_confirmation_service import (
-        StoryWorkspacePersistedDreamConfirmation,
-        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
-        StoryWorkspaceDreamConfirmationService,
-        story_workspace_read_dream_confirmation_fact,
+        story_workspace_confirmation_command_json,
+        story_workspace_persisted_confirmation,
+        story_workspace_validate_confirmation_projection,
     )
+    from backend.services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationData,
+        StoryWorkspaceConfirmationFactInputDTO,
+        StoryWorkspaceConfirmationSubmitInputDTO,
+    )
+    from backend.services.admin_data.errors import AdminDataError
+    from backend.services.admin_data.run_data import AdminRunData, RunLookupInputDTO
     from backend.services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
     )
@@ -261,78 +275,7 @@ def _sha256(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _dream_confirmation_actor_context(
-    db: Any,
-    dispatch: StoryWorkspaceDreamConfirmationDispatch,
-) -> tuple[str, AuthenticatedActorContext]:
-    run_id = dispatch.metadata.get("story_workspace_run_id")
-    if not isinstance(run_id, str) or not run_id:
-        raise PermissionError("Dream confirmation Run scope is unavailable")
-    row = db.execute(
-        "SELECT workspace_id, source_voice_thread_id FROM workflow_runs "
-        "WHERE id = %s AND created_by = %s",
-        (run_id, dispatch.actor_id),
-    ).fetchone()
-    if db.in_transaction:
-        db.rollback()
-    if row is None or row["source_voice_thread_id"] != dispatch.thread_id:
-        raise PermissionError("Dream confirmation actor/thread scope mismatch")
-    return run_id, AuthenticatedActorContext(
-        actor_id=dispatch.actor_id,
-        workspace_id=str(row["workspace_id"]),
-    )
-
-
-def _prepare_dream_confirmation_before_dispatch(
-    db: Any,
-    dispatch: StoryWorkspaceDreamConfirmationDispatch,
-) -> None:
-    run_id, actor_context = _dream_confirmation_actor_context(db, dispatch)
-    lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
-        db,
-        token_secret=story_workspace_workflow_token_secret(),
-    )
-    # The confirmation row can only be persisted after the server validates all
-    # required Dream stage revisions. That durable row therefore proves both
-    # output readiness and the user's review acceptance, including recovery of
-    # the historical `running + dispatching` split state.
-    asyncio.run(
-        lifecycle.record_output_ready(
-            run_id,
-            actor_context,
-            normalized_result_ready=True,
-        )
-    )
-    asyncio.run(
-        lifecycle.record_confirmation_accepted(
-            run_id,
-            actor_context,
-            review_items_approved=True,
-        )
-    )
-
-
-def _advance_dream_post_confirmation_before_ack(
-    db: Any,
-    dispatch: StoryWorkspaceDreamConfirmationDispatch,
-) -> None:
-    run_id, actor_context = _dream_confirmation_actor_context(db, dispatch)
-    asyncio.run(
-        StoryWorkspaceDreamWorkflowLifecycleService(
-            db,
-            token_secret=story_workspace_workflow_token_secret(),
-        ).record_post_confirmation_dispatched(
-            run_id,
-            actor_context,
-        )
-    )
-
-
-_DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
-    database.get_db,
-    before_dispatch=_prepare_dream_confirmation_before_dispatch,
-    before_dispatched_ack=_advance_dream_post_confirmation_before_ack,
-)
+_DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator()
 
 
 class _StoryWorkspaceApplicationSupport:
@@ -682,13 +625,17 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any:
-        """Project Dream files without blocking the application event loop."""
+        """Project files locally and attach the Admin-owned confirmation fact."""
 
         projection = await asyncio.to_thread(
             self._get_dream_files_sync,
             workflow_run_id,
             actor,
+            confirmation_data,
+            access_token,
         )
         return self._attach_dream_agent_activity(
             projection,
@@ -936,14 +883,35 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         self,
         workflow_run_id: str,
         actor: dict[str, str],
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any:
-        """Run the complete PostgreSQL/filesystem/flock chain in one worker."""
+        """Read the existing projection, then fetch its confirmation fact."""
 
         db = database.get_db()
         try:
-            return self._get_dream_files_from_db(db, workflow_run_id, actor)
+            projection = self._get_dream_files_from_db(db, workflow_run_id, actor)
         finally:
             db.close()
+        try:
+            fact = confirmation_data.fact(
+                StoryWorkspaceConfirmationFactInputDTO(
+                    workflow_run_id=workflow_run_id,
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+        except AdminDataError as exc:
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+        if fact.thread_id != projection.thread_id:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        return projection.model_copy(update={
+            "confirmation_accepted": fact.confirmation_accepted,
+            "confirmation_dispatched": fact.confirmation_dispatched,
+            "can_confirm": (
+                projection.can_confirm and not fact.confirmation_accepted
+            ),
+        })
 
     def _get_episode_artifacts_sync(
         self,
@@ -1344,8 +1312,6 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
-        *,
-        include_confirmation: bool = True,
     ) -> Any:
         """Reuse one already-authorized PostgreSQL connection for a Dream projection."""
 
@@ -1365,15 +1331,8 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
             thread_id = workflow_run.source_voice_thread_id
             if not isinstance(thread_id, str) or not thread_id.strip():
                 raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-            if include_confirmation:
-                thread = database.get_chat_thread(thread_id, actor_id)
-                thread_id_value = str(thread.get("id")) if thread else None
-            else:
-                thread = db.execute(
-                    "SELECT id FROM chat_thread WHERE id = %s AND user_id = %s",
-                    (thread_id, actor_id),
-                ).fetchone()
-                thread_id_value = str(thread["id"]) if thread else None
+            thread = database.get_chat_thread(thread_id, actor_id)
+            thread_id_value = str(thread.get("id")) if thread else None
             if thread_id_value != thread_id:
                 raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
             try:
@@ -1409,21 +1368,7 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
                 workflow_run,
                 projection,
             )
-            if not include_confirmation:
-                return projection
-            confirmation_accepted, confirmation_dispatched = (
-                story_workspace_read_dream_confirmation_fact(
-                    db,
-                    actor_id=str(actor_id),
-                    thread_id=thread_id,
-                    run_id=workflow_run_id,
-                )
-            )
-            return projection.model_copy(update={
-                "confirmation_accepted": confirmation_accepted,
-                "confirmation_dispatched": confirmation_dispatched,
-                "can_confirm": projection.can_confirm and not confirmation_accepted,
-            })
+            return projection
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
         except ApiRouteError:
@@ -1489,14 +1434,20 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
         request: Any,
         *,
         actor: dict[str, str],
+        run_data: AdminRunData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any:
-        """Persist in a worker, then queue the same-thread turn on this loop."""
+        """Validate shared files, persist through Admin, then queue Runtime."""
 
         persisted = await asyncio.to_thread(
             self._submit_dream_confirmation_sync,
             workflow_run_id,
             request,
             actor,
+            run_data,
+            confirmation_data,
+            access_token,
         )
         accepted = persisted.accepted
         dispatch = persisted.dispatch
@@ -1523,81 +1474,79 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
         workflow_run_id: str,
         request: Any,
         actor: dict[str, str],
-    ) -> StoryWorkspacePersistedDreamConfirmation:
-        """Run the complete scoped DB/file/INSERT chain in one worker."""
+        run_data: AdminRunData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
+    ) -> Any:
+        """Use authoritative Admin DTOs around two local projection checks."""
 
         try:
-            db = database.get_db()
             try:
-                try:
-                    actor_id = int(actor["actor_id"])
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    ) from exc
-                actor_context = self._run_actor_context(
-                    db,
-                    workflow_run_id,
-                    actor_id,
-                )
-                workflow_run = WorkflowRunService(
-                    db,
-                    token_secret=story_workspace_workflow_token_secret(),
-                ).read_run(workflow_run_id, actor_context)
-                thread_id = workflow_run.source_voice_thread_id
-                if not isinstance(thread_id, str) or not thread_id.strip():
-                    raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+                actor_id = str(actor["actor_id"])
+                workspace_id = str(actor["workspace_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=403,
+                ) from exc
+            raw_run = run_data.read(
+                RunLookupInputDTO(
+                    workspace_id=workspace_id,
+                    workflow_run_id=workflow_run_id,
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+            workflow_run = WorkflowRun.model_validate(raw_run)
+            if workflow_run.created_by != actor_id:
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            thread_id = workflow_run.source_voice_thread_id
+            if (
+                not isinstance(thread_id, str)
+                or not thread_id.strip()
+                or request.story_workspace_run_id != workflow_run_id
+                or request.thread_id != thread_id
+            ):
+                raise ApiRouteError("CONFIG_VERSION_DRIFT", status_code=409)
 
-                workspace = self._thread_workspace(thread_id)
-                reader = StoryWorkspaceDreamFileReader(workspace)
-                reader_workspace = Path(reader.workspace_root)
-                canonical_parent = workspace.parent
-                if (
-                    reader_workspace != workspace
-                    or reader_workspace.parent != canonical_parent
-                    or reader_workspace.name != thread_id
-                    or not reader_workspace.is_relative_to(canonical_parent)
-                ):
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    )
+            workspace = self._thread_workspace(thread_id)
+            reader = StoryWorkspaceDreamFileReader(workspace)
+            reader_workspace = Path(reader.workspace_root)
+            canonical_parent = workspace.parent
+            if (
+                reader_workspace != workspace
+                or reader_workspace.parent != canonical_parent
+                or reader_workspace.name != thread_id
+                or not reader_workspace.is_relative_to(canonical_parent)
+            ):
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=403,
+                )
 
-                def scoped_run_reader(requested_run_id: str):
-                    if requested_run_id != workflow_run_id:
-                        raise StoryWorkspaceDreamConfirmationError(
-                            "CONFIG_VERSION_DRIFT", 409
-                        )
-                    return workflow_run
-
-                service = StoryWorkspaceDreamConfirmationService(
-                    db,
-                    run_reader=scoped_run_reader,
-                    projection_reader=lambda run, authoritative_thread_id: reader.read(
-                        run,
-                        thread_id=authoritative_thread_id,
-                    ),
-                )
-                persisted = service.submit_confirmation(
-                    workflow_run_id,
-                    request,
-                    actor_id=str(actor_id),
-                )
-                asyncio.run(
-                    StoryWorkspaceDreamWorkflowLifecycleService(
-                        db,
-                        token_secret=story_workspace_workflow_token_secret(),
-                    ).record_confirmation_accepted(
-                        workflow_run_id,
-                        actor_context,
-                        review_items_approved=True,
-                    )
-                )
-                return persisted
-            finally:
-                db.close()
+            first_projection = reader.read(workflow_run, thread_id=thread_id)
+            story_workspace_validate_confirmation_projection(
+                first_projection,
+                request,
+            )
+            # Re-read immediately before the Admin write so a local revision
+            # change never gets submitted with an already-stale file snapshot.
+            final_projection = reader.read(workflow_run, thread_id=thread_id)
+            story_workspace_validate_confirmation_projection(
+                final_projection,
+                request,
+            )
+            result = confirmation_data.submit_recovering(
+                StoryWorkspaceConfirmationSubmitInputDTO(
+                    command_json=story_workspace_confirmation_command_json(request),
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+            return story_workspace_persisted_confirmation(result)
         except StoryWorkspaceDreamConfirmationError as exc:
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+        except AdminDataError as exc:
             raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
         except WorkflowRunError as exc:
             self._raise_run_error(exc)

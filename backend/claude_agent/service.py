@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: skip duplicate user persistence only for Admin-claimed Dream confirmations.
 # [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
 # [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
@@ -1468,6 +1469,9 @@ class ClaudeAgentRunRequest:
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
+    # The confirmation coordinator sets this only after Admin returns an exact
+    # durable claim for the already-visible user message.
+    user_message_pre_persisted: bool = field(default=False, repr=False)
     # Immutable Registry105 data snapshot. Browser DTOs cannot author it; the
     # public route resolves it before persistence, admission, workspace or SSE.
     admin_deck_chat_context: AdminDeckChatContextResolution | None = field(
@@ -2776,6 +2780,19 @@ class ClaudeAgentService:
         message is visible in the thread history even when the SSE stream is
         cancelled mid-flight (e.g. the user switches threads).
         """
+        if execution.request.user_message_pre_persisted:
+            metadata = execution.request.message_metadata
+            if not (
+                isinstance(execution.request.message_id, str)
+                and execution.request.message_id.startswith("dream_confirm_")
+                and isinstance(metadata, dict)
+                and metadata.get("kind") == "story-workspace-dream-confirmation"
+                and metadata.get("dispatch_status") == "dispatching"
+                and isinstance(metadata.get("dispatch_claim_id"), str)
+                and bool(metadata.get("dispatch_claim_id"))
+            ):
+                raise ValueError("Invalid pre-persisted confirmation turn")
+            return
         persistence = execution.request.admin_turn_persistence
         if persistence is not None:
             if not isinstance(persistence, AdminAgentTurnPersistence):
@@ -2792,38 +2809,9 @@ class ClaudeAgentService:
         user_message_id = execution.request.message_id
         user_parts = execution.request.message_parts
         message_metadata = execution.request.message_metadata
-        try:
-            from services.story_workspace.dream_confirmation_service import (
-                StoryWorkspaceDreamConfirmationError,
-                story_workspace_guard_persisted_dream_confirmation_turn,
-            )
-        except ModuleNotFoundError:
-            from backend.services.story_workspace.dream_confirmation_service import (
-                StoryWorkspaceDreamConfirmationError,
-                story_workspace_guard_persisted_dream_confirmation_turn,
-            )
 
         def _save_user() -> None:
             resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
-            db = database.get_db()
-            try:
-                is_persisted_dream_confirmation = (
-                    story_workspace_guard_persisted_dream_confirmation_turn(
-                        db,
-                        thread_id=thread_id,
-                        actor_id=str(execution.request.user_id),
-                        message_id=user_message_id,
-                        parts=resolved_user_parts,
-                        metadata=message_metadata,
-                    )
-                )
-            finally:
-                db.close()
-            if is_persisted_dream_confirmation:
-                # The confirmation service owns this pre-persisted hidden row.
-                # In particular, never replace its newer durable claim lease
-                # with the older request snapshot carried through a thread lock.
-                return
             database.save_chat_message(
                 thread_id, "user",
                 parts=resolved_user_parts,
@@ -2839,13 +2827,6 @@ class ClaudeAgentService:
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(None, _save_user)
-        except StoryWorkspaceDreamConfirmationError:
-            logger.exception(
-                "Rejected non-authoritative Dream control persistence "
-                "for thread_id=%s",
-                thread_id,
-            )
-            raise
         except (
             database.ChatMessageIdentityConflict,
             database.PostgresError,
