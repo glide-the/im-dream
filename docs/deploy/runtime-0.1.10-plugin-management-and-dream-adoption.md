@@ -87,9 +87,12 @@ Provider-free 测试覆盖 resolver、非法 override、版本成功但管理命
 `screenwriting@screenwriting-skills`，保留正常 operation/installation 供 Admin
 复核。该业务验收不读取或公开凭据、Workspace 正文或模型对话。
 
-Dream 聚焦回归在加入不可变 Admin receipt 兼容后为 `26 passed, 6 skipped,
-14 subtests passed`；完整版本/resolver/server 合同在提交前另行记录。Admin
-`pnpm test:run` 为 112 files / 690 tests，TypeScript 与目标 ESLint 通过。
+Dream 最终 plugin、resolver、Docker、版本、server 与 registry verifier 合同为
+`180 passed, 6 skipped, 31 subtests passed`。前端使用 Node 24、Corepack 与
+`pnpm@10.28.1` 完成 frozen install 和 Next production build；`main` 与
+`develop` PR 均执行对应 GitHub CI。20 个变更 Markdown 文件的本地相对链接
+全部可解析，`git diff --check` 通过。Admin `pnpm test:run` 为 112 files /
+690 tests，TypeScript 与目标 ESLint 通过。
 
 回退时恢复上一已验证 Dream 提交与匹配 Runtime 安装并只重启操作者拥有的
 Dream backend；不得覆盖已发布 npm 版本、选择 ambient CLI 或把 `0.1.9` 的

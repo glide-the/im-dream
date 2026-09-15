@@ -1,8 +1,12 @@
+# [Input] Pull requests that change the Dream backend or this workflow.
+# [Output] A Linux Docker build and public backend smoke-test check.
+# [Pos] Required backend CI for both integration and release pull requests.
+# [Sync] 2026-09-15: run the existing backend qualification for develop PRs.
 name: Check Backend (CI)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "backend/**"
       - ".github/workflows/ci-backend.yml"
