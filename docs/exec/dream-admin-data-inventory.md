@@ -573,3 +573,21 @@ Repository 保留业务事务和数据权限；Dream 不会在 Admin OAuth 或 P
 database import模块17、legacy helper调用38、transaction/connection调用308、
 Admin operation名168、parse error 0；`admin_product` entries为空。本结果只关闭
 Product BFF，余下生产候选继续按本清单迁移。
+
+## 2026-09-16 Deck 删除错误边界关闭
+
+| Dream 入口 | 迁移前访问 | Admin 目标与 DTO/ORM | Dream 替换 | 验收证据 |
+|---|---|---|---|---|
+| [backend/routers/voices.py](../../backend/routers/voices.py) | 公共删除已调用 Admin；仅为构造四类409文案而传递导入整个 Dream `database` 模块 | `deck.delete` strict input/result/error DTO；Admin typed Drizzle Repository执行owner、引用关系和事务检查 | route-owned闭合集合把已校验的reason映射为原文案；不执行SQL、不接受user ID、不回退数据库 | 四reason行为测试、production source fence与全仓source-only复扫 |
+
+本阶段不改变 `deck.delete` capability、schema hash、receipt、状态码或 Admin
+事务。缺少 details 仍使用原通用引用文案；未知 reason 或带额外字段的错误体在
+strict DTO解析时继续 fail closed。共享文件系统、Runtime、SSE、资源策略与其他
+Deck 内部数据库入口不在本次小闭环范围内。
+
+实际 source-only 回执
+[dream-db-closure-after-deck-route-source-only.json](admin-auth-data-verification/dream-db-closure-after-deck-route-source-only.json)
+扫描553个Python模块，当前生产候选78、SQL模块44、SQL literal 404、driver或
+database import模块16、legacy helper调用37、transaction/connection调用308、
+Admin operation名168、parse error 0。`voices.py` 条目只剩Admin DTO imports，
+其SQL、driver/database import、legacy helper与transaction字段均为空。

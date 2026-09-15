@@ -4,6 +4,7 @@
 # [Sync] 2026-09-15: four public Voice operations use Admin; Deck chat-context/internal data remains pending.
 # [Sync] 2026-09-15: five public Deck mutations use Admin; deletion keeps code-owned closed dependency messages.
 # [Sync] 2026-09-15: Deck create/default reconcile use Registry104 plus Dream's shared-artifact verifier.
+# [Sync] 2026-09-16: format Admin-owned Deck deletion conflicts without importing Dream database code.
 # [Input] Consume typed Admin public Deck/Voice operations, the local Deck-default verifier and shared auth dependency.
 # [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
 #          fails closed unless its configured default plugin ref is verified;
@@ -21,7 +22,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-import database
 import config
 
 try:
@@ -203,6 +203,21 @@ async def create_deck(
 _deck_mutation_router = APIRouter(route_class=_DeckRoute)
 
 
+_DECK_DELETE_BLOCKED_MESSAGES = {
+    "child_decks": "Deck cannot be deleted while derived Decks still reference it.",
+    "related_threads": "Deck cannot be deleted while related Chat conversations still exist.",
+    "runtime_history": "Deck cannot be deleted because it has immutable runtime history.",
+    "referenced_records": "Deck cannot be deleted because it is still referenced.",
+}
+
+
+def _deck_delete_blocked_message(reason: str) -> str:
+    return _DECK_DELETE_BLOCKED_MESSAGES.get(
+        reason,
+        _DECK_DELETE_BLOCKED_MESSAGES["referenced_records"],
+    )
+
+
 def _deck_mutation_data(request: Request) -> AdminDeckMutationData:
     owner = getattr(request.app.state, "admin_request_auth", None)
     if not isinstance(owner, AdminRequestAuth):
@@ -215,7 +230,7 @@ def _deck_mutation_error(kind: str, deck_id: str):
         if not exc.outcome_unknown:
             if exc.code == "DECK_DELETE_BLOCKED" and exc.status_code == 409 and kind == "delete":
                 reason = exc.details.reason if isinstance(exc.details, DeckDeleteBlockedDetailsDTO) else "referenced_records"
-                raise HTTPException(status_code=409, detail=str(database.DeckDeletionConflict(reason)))
+                raise HTTPException(status_code=409, detail=_deck_delete_blocked_message(reason))
             messages = {
                 "DEFAULT_DECK_PUBLISH_FORBIDDEN": (409, "System-initialized Decks cannot be published"),
                 "SELF_COLLECTION_FORBIDDEN": (409, "You cannot collect your own published Deck"),

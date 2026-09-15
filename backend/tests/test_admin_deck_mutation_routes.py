@@ -2,8 +2,10 @@
 # [Output] Original results/policy/deletion messages, strict detail ownership and unknown receipt evidence.
 # [Pos] Provider-free Deck mutation harness; no copied transaction or normal business data.
 # [Sync] 2026-09-15: fence public Deck SQL and verify code-owned deletion reasons and original UUIDs.
+# [Sync] 2026-09-16: fence the public route from transitive Dream database imports used for error text.
 from __future__ import annotations
 import json
+from pathlib import Path
 from uuid import UUID
 import httpx
 import pytest
@@ -20,6 +22,11 @@ HEADERS={'authorization':'Bearer write-token'}
 ROUTES=[('put','/api/decks/deck-1','deck.update',{'name':'新名'}),('delete','/api/decks/deck-1','deck.delete',None),
  ('post','/api/decks/deck-1/publish','deck.toggle-publication',None),('post','/api/decks/deck-1/fork','deck.collect',None),
  ('post','/api/decks/deck-1/sync','deck.sync-parent',None)]
+
+
+def test_public_deck_route_has_no_dream_database_dependency():
+ source=Path(__file__).parents[1]/'routers'/'voices.py';text=source.read_text(encoding='utf-8')
+ assert 'import database' not in text and 'database.' not in text
 
 @pytest.fixture
 def boundary(monkeypatch):
