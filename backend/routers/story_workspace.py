@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
-# [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
+# [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
+# [Output] Publish user-scoped Story Workspace product, workflow, artifact, review, and catalog routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
 # [Sync] 2026-09-15: read Preflight through Admin OAuth without default Workspace or Dream SQL.
 # [Sync] 2026-09-15: execute Preflight through Admin; existing default Workspace lookup remains pending.
@@ -9,7 +9,7 @@
 # [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
 # [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
 # [Sync] 2026-09-15: route Story/Character/Scene review through Registry111 and remove those Dream SQL transactions.
-# [Sync] 2026-09-15: route internal Agent Story output through Registry109 and remove its Dream DB dependency.
+# [Sync] 2026-09-15: route catalog browse/edit through Registry114 DTO/ORM and remove this router's Dream SQL.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -19,14 +19,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional, Protocol
-from uuid import uuid4
+from typing import Any, Optional, Protocol
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-import database
 from story_workspace.contracts import (
     STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH,
     StoryWorkspaceAgentStoryPayload,
@@ -56,6 +54,12 @@ from services.admin_data.story_workspace_review_data import (
     StoryWorkspaceReviewBatchInputDTO,
     StoryWorkspaceReviewTransitionInputDTO,
 )
+from services.admin_data.story_workspace_catalog_data import (
+    AdminStoryWorkspaceCatalogData,
+    StoryWorkspaceCatalogPatchInputDTO,
+    StoryWorkspaceCatalogReadInputDTO,
+    StoryWorkspaceCatalogWorkspaceInputDTO,
+)
 
 try:
     from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
@@ -67,9 +71,6 @@ try:
     from services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
     )
-    from services.story_workspace.artifact_story_index_repository import (
-        StoryWorkspacePublicStoryRepository,
-    )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
     from backend.services.deck.story_workflow_application import (
@@ -79,9 +80,6 @@ except ModuleNotFoundError:
     )
     from backend.services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
-    )
-    from backend.services.story_workspace.artifact_story_index_repository import (
-        StoryWorkspacePublicStoryRepository,
     )
 
 
@@ -97,44 +95,6 @@ _STORY_INDEX_ROUTE_ERROR_STATUSES: dict[str, frozenset[int]] = {
     "story_index_database_unavailable": frozenset({503}),
     "story_index_write_failed": frozenset({503}),
 }
-
-_STORY_SORT_FIELDS = {"updated_at", "created_at", "title"}
-_CHARACTER_SORT_FIELDS = {"updated_at", "created_at", "name"}
-_SCENE_SORT_FIELDS = {"updated_at", "created_at", "name", "order_index"}
-
-
-_RESOURCE_IDENTIFIER_POLICY = {
-    "story_workspace_workspaces": {
-        "owner_column": "owner_id",
-        "mutable_columns": frozenset({"name", "settings"}),
-    },
-    "story_workspace_stories": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset({"title", "description", "content", "type"}),
-    },
-    "story_workspace_characters": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset(
-            {
-                "name",
-                "identity",
-                "personality",
-                "background",
-                "catchphrase",
-                "tags",
-                "avatar_url",
-            }
-        ),
-    },
-    "story_workspace_scenes": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset(
-            {"name", "description", "story_id", "order_index"}
-        ),
-    },
-}
-_FILTER_COLUMNS = frozenset({"review_status", "status", "type"})
-
 
 class _ReviewActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -388,38 +348,10 @@ async def _story_index_call(awaitable: Any) -> Any:
         )
 
 
-def _story_db() -> Iterator[Any]:
-    db = database.get_db()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def _user_id(current_user: dict[str, Any]) -> int:
-    return int(current_user["user_id"])
-
-
-def _decode_json(value: Any, default: Any) -> Any:
-    if value is None:
-        return default
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    item = dict(row)
-    if "settings" in item:
-        item["settings"] = _decode_json(item["settings"], {})
-    if "tags" in item:
-        item["tags"] = _decode_json(item["tags"], [])
-    if "agent_generated" in item:
-        item["agent_generated"] = bool(item["agent_generated"])
-    return item
+def _story_catalog_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceCatalogData:
+    return AdminStoryWorkspaceCatalogData(owner.client)
 
 
 def _csv_values(raw: Optional[str]) -> list[str]:
@@ -428,159 +360,64 @@ def _csv_values(raw: Optional[str]) -> list[str]:
     return [value.strip() for value in raw.split(",") if value.strip()]
 
 
-def _append_in_filter(
-    conditions: list[str],
-    params: list[Any],
-    column: str,
-    raw: Optional[str],
-) -> None:
-    if column not in _FILTER_COLUMNS:
-        raise HTTPException(status_code=400, detail="Unsupported filter field")
-    values = _csv_values(raw)
-    if not values:
-        return
-    conditions.append(f"{column} IN ({', '.join('%s' for _ in values)})")
-    params.extend(values)
-
-
-def _sort_clause(sort: str, order: str, allowed: set[str]) -> str:
-    if sort not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported sort field")
-    normalized_order = order.lower()
-    if normalized_order not in {"asc", "desc"}:
-        raise HTTPException(status_code=400, detail="Order must be 'asc' or 'desc'")
-    return f" ORDER BY {sort} {normalized_order.upper()}, id ASC"
-
-
-def _paginate_query(
-    db: Any,
-    select_sql: str,
-    count_sql: str,
-    params: list[Any],
-    page: int,
-    per_page: int,
-) -> dict[str, Any]:
-    total = int(db.execute(count_sql, tuple(params)).fetchone()[0])
-    offset = (page - 1) * per_page
-    rows = db.execute(
-        select_sql + " LIMIT %s OFFSET %s",
-        tuple(params) + (per_page, offset),
-    ).fetchall()
-    return {
-        "data": [_row_to_dict(row) for row in rows],
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": (total + per_page - 1) // per_page,
-        },
-    }
-
-
-def _owned_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    owner_column: str,
-    user_id: int,
-) -> Any:
-    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
-    if policy is None or policy["owner_column"] != owner_column:
-        raise HTTPException(status_code=400, detail="Unsupported resource mapping")
-    row = db.execute(
-        f"SELECT * FROM {table} WHERE id = %s AND {owner_column} = %s",
-        (resource_id, user_id),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    return row
-
-
-def _patch_owned_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    owner_column: str,
-    user_id: int,
-    values: dict[str, Any],
-) -> dict[str, Any]:
-    _owned_row(db, table, resource_id, owner_column, user_id)
-    if not values:
-        raise HTTPException(status_code=400, detail="At least one field is required")
-    columns = list(values)
-    allowed_columns = _RESOURCE_IDENTIFIER_POLICY[table]["mutable_columns"]
-    unsupported_columns = set(columns) - allowed_columns
-    if unsupported_columns:
-        raise HTTPException(status_code=400, detail="Unsupported patch field")
-    assignments = ", ".join(f"{column} = %s" for column in columns)
-    cursor = db.execute(
-        f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
-        f"WHERE id = %s AND {owner_column} = %s",
-        tuple(values[column] for column in columns) + (resource_id, user_id),
+def _story_catalog_error(exc: AdminDataError, request_id: str) -> JSONResponse:
+    if not exc.outcome_unknown:
+        if exc.code == "STORY_WORKSPACE_CATALOG_NOT_FOUND" and exc.status_code == 404:
+            return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+        if exc.code in {"INPUT_INVALID", "ADMIN_OPERATION_INPUT_INVALID"} and exc.status_code == 400:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Story Workspace request"})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": {
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        }},
     )
-    if cursor.rowcount != 1:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Resource not found")
-    db.commit()
-    if table == "story_workspace_stories":
-        public_story = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=resource_id,
-            author_id=user_id,
-        )
-        if public_story is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        return public_story
-    return _row_to_dict(_owned_row(db, table, resource_id, owner_column, user_id))
+
+
+def _catalog_input(model, value: dict[str, Any], detail: str):
+    try:
+        return model.model_validate(value)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=detail) from exc
 
 
 @router.get("/workspace")
-def get_workspace(
+async def get_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    row = db.execute(
-        "SELECT * FROM story_workspace_workspaces WHERE owner_id = %s "
-        "ORDER BY created_at ASC, id ASC LIMIT 1",
-        (user_id,),
-    ).fetchone()
-    if row is None:
-        workspace_id = str(uuid4())
-        db.execute(
-            "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
-            "VALUES (%s, %s, %s, %s)",
-            (workspace_id, "默认工作区", user_id, "{}"),
-        )
-        db.commit()
-        row = db.execute(
-            "SELECT * FROM story_workspace_workspaces WHERE id = %s AND owner_id = %s",
-            (workspace_id, user_id),
-        ).fetchone()
-    return _row_to_dict(row)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = StoryWorkspaceCatalogWorkspaceInputDTO.model_validate({"action": "ensure"})
+    result = await invoke_admin_operation(
+        current_user, data.workspace_recovering, input_dto,
+        error_handler=_story_catalog_error,
+    )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/workspace/{workspace_id}")
-def patch_workspace(
+async def patch_workspace(
     workspace_id: str,
     patch: StoryWorkspaceWorkspacePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
     values = patch.model_dump(exclude_unset=True)
-    if "settings" in values:
-        values["settings"] = json.dumps(values["settings"], ensure_ascii=False)
-    return _patch_owned_row(
-        db,
-        "story_workspace_workspaces",
-        workspace_id,
-        "owner_id",
-        _user_id(current_user),
-        values,
+    if not values:
+        raise HTTPException(status_code=400, detail="At least one field is required")
+    input_dto = _catalog_input(StoryWorkspaceCatalogWorkspaceInputDTO, {
+        "action": "patch", "workspace_id": workspace_id, "patch": values,
+    }, "Invalid Workspace patch")
+    result = await invoke_admin_operation(
+        current_user, data.workspace_recovering, input_dto,
+        error_handler=_story_catalog_error,
     )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.get("/stories")
-def list_stories(
+async def list_stories(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     status: Optional[str] = None,
@@ -590,58 +427,43 @@ def list_stories(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    try:
-        return StoryWorkspacePublicStoryRepository(db).list_stories(
-            author_id=_user_id(current_user),
-            q=q,
-            review_status=review_status,
-            status=status,
-            story_type=type,
-            sort=sort,
-            order=order,
-            page=page,
-            per_page=per_page,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Unsupported Story query") from exc
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "story_list", "q": q or None,
+        "review_status": _csv_values(review_status), "status": _csv_values(status),
+        "type": _csv_values(type), "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Story query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/stories/{story_id}")
-def get_story(
+async def get_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    try:
-        return StoryWorkspacePublicStoryRepository(db).get_story(
-            story_id=story_id,
-            author_id=_user_id(current_user),
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="Resource not found") from exc
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "story_detail", "resource_id": story_id,
+    }, "Invalid Story identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/stories/{story_id}")
-def patch_story(
+async def patch_story(
     story_id: str,
     patch: StoryWorkspaceStoryPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _patch_owned_row(
-        db,
-        "story_workspace_stories",
-        story_id,
-        "author_id",
-        _user_id(current_user),
-        patch.model_dump(exclude_unset=True),
-    )
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("story", story_id, patch.model_dump(exclude_unset=True), current_user, data)
 
 
 @router.get("/characters")
-def list_characters(
+async def list_characters(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     sort: str = "updated_at",
@@ -649,68 +471,42 @@ def list_characters(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    conditions = ["author_id = %s"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("name ILIKE %s")
-        params.append(f"%{q}%")
-    _append_in_filter(conditions, params, "review_status", review_status)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_characters" + where
-    select_sql += _sort_clause(sort, order, _CHARACTER_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_characters" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "character_list", "q": q or None,
+        "review_status": _csv_values(review_status), "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Character query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/characters/{character_id}")
-def get_character(
+async def get_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(
-            db,
-            "story_workspace_characters",
-            character_id,
-            "author_id",
-            user_id,
-        )
-    )
-    result["stories"] = StoryWorkspacePublicStoryRepository(
-        db
-    ).list_stories_for_character(
-        character_id=character_id,
-        author_id=user_id,
-    )
-    return result
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "character_detail", "resource_id": character_id,
+    }, "Invalid Character identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/characters/{character_id}")
-def patch_character(
+async def patch_character(
     character_id: str,
     patch: StoryWorkspaceCharacterPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    values = patch.model_dump(exclude_unset=True)
-    if "tags" in values:
-        values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
-    return _patch_owned_row(
-        db,
-        "story_workspace_characters",
-        character_id,
-        "author_id",
-        _user_id(current_user),
-        values,
-    )
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("character", character_id, patch.model_dump(exclude_unset=True), current_user, data)
 
 
 @router.get("/scenes")
-def list_scenes(
+async def list_scenes(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     story_id: Optional[str] = None,
@@ -719,77 +515,56 @@ def list_scenes(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    conditions = ["author_id = %s"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("name ILIKE %s")
-        params.append(f"%{q}%")
-    if story_id:
-        conditions.append("story_id = %s")
-        params.append(story_id)
-    _append_in_filter(conditions, params, "review_status", review_status)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_scenes" + where
-    select_sql += _sort_clause(sort, order, _SCENE_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_scenes" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "scene_list", "q": q or None, "review_status": _csv_values(review_status),
+        "story_id": story_id or None, "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Scene query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/scenes/{scene_id}")
-def get_scene(
+async def get_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(db, "story_workspace_scenes", scene_id, "author_id", user_id)
-    )
-    story = None
-    if result.get("story_id"):
-        story = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=str(result["story_id"]),
-            author_id=user_id,
-        )
-    characters = db.execute(
-        "SELECT c.* FROM story_workspace_characters c "
-        "JOIN story_workspace_scene_characters sc ON sc.character_id = c.id "
-        "WHERE sc.scene_id = %s AND c.author_id = %s "
-        "ORDER BY c.name ASC, c.id ASC",
-        (scene_id, user_id),
-    ).fetchall()
-    result["story"] = story
-    result["characters"] = [_row_to_dict(row) for row in characters]
-    return result
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "scene_detail", "resource_id": scene_id,
+    }, "Invalid Scene identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/scenes/{scene_id}")
-def patch_scene(
+async def patch_scene(
     scene_id: str,
     patch: StoryWorkspaceScenePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    values = patch.model_dump(exclude_unset=True)
-    if "story_id" in values and values["story_id"] is not None:
-        _owned_row(
-            db,
-            "story_workspace_stories",
-            values["story_id"],
-            "author_id",
-            user_id,
-        )
-    return _patch_owned_row(
-        db,
-        "story_workspace_scenes",
-        scene_id,
-        "author_id",
-        user_id,
-        values,
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("scene", scene_id, patch.model_dump(exclude_unset=True), current_user, data)
+
+
+async def _patch_catalog_resource(
+    resource_type: str,
+    resource_id: str,
+    values: dict[str, Any],
+    current_user: dict[str, Any],
+    data: AdminStoryWorkspaceCatalogData,
+) -> Any:
+    if not values:
+        raise HTTPException(status_code=400, detail="At least one field is required")
+    input_dto = _catalog_input(StoryWorkspaceCatalogPatchInputDTO, {
+        "resource_type": resource_type, "resource_id": resource_id, "patch": values,
+    }, "Invalid Story Workspace patch")
+    result = await invoke_admin_operation(
+        current_user, data.patch_recovering, input_dto, error_handler=_story_catalog_error,
     )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 def _story_review_data(

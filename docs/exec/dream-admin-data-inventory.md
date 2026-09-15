@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: close eleven Story Workspace catalog routes through Registry114 and record the corrected current scanner. -->
 <!-- [Sync] 2026-09-15: close three current-user picture-history reads through Registry103 and record the fresh scanner. -->
 <!-- [Sync] 2026-09-15: close public local-data import and first-login writes through Registry101 and record the fresh current scanner. -->
 <!-- [Sync] 2026-09-15: close production SystemConfig calls through registered80 and record the fresh current scanner. -->
@@ -50,6 +51,8 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 ## 当前源码入口映射
 
 此表记录实际消费者范围，发布capability仍由Admin逐请求执行检查。技术合同通过不等于正常本机真实业务验收；完整startup/pool/159事务及其它生产入口继续开放。
+
+Registry114将`story_workspace.py`中的Workspace get/patch、Story/Character/Scene三组list/detail/patch共11个公开入口替换为`AdminStoryWorkspaceCatalogData`。旧`_story_db/_owned_row/_patch_owned_row/_paginate_query`及动态SQL/sort/filter policy从生产路由删除；公开DTO、页面排序/过滤/分页、详情关系和错误状态由provider-free路由测试保持。Admin使用closed Zod DTO、Service和typed Drizzle Repository处理权限与事务，两个write使用原receipt恢复，一个read无receipt。当前[corrected source-only scan](admin-auth-data-verification/dream-db-closure-after-registry114-source-only.json)读取543个Python模块：79个production entry、50个SQL模块、454个SQL literal、28个driver/database import模块、52个legacy helper call、392个connection/transaction call、29个Admin consumer模块、132个operation name，parse errors为空。相对Registry111扫描减少1个SQL模块、9个SQL literal、1个driver/import模块、1个legacy helper和11个connection/transaction call；该差异只证明本切片源码关闭，剩余候选必须继续按调用链迁移。
 
 阶段31只读源码扫描增加无SQL的run_data模块：298scanned/48SQL模块/513字面execute候选、16driver模块、35legacy import模块与121直接helper Call候选，exit0/parse_errors=[]。旧application方法仍供其他调用者使用，默认Workspace及动态Repository/stdio仍未迁移，不能以三个公开领域调用替换推断这些SQL已退出全域。阶段29的297扫描是当时历史，以下原baseline与现有候选表保留各自范围。
 

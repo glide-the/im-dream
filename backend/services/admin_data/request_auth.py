@@ -74,6 +74,7 @@ from .workflow_managed_mcp_scope_data import WORKFLOW_MANAGED_MCP_SCOPE_OPERATIO
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
 from .story_workspace_review_data import STORY_WORKSPACE_REVIEW_OPERATIONS
+from .story_workspace_catalog_data import STORY_WORKSPACE_CATALOG_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -130,6 +131,7 @@ class AdminRequestAuth:
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *STORY_WORKSPACE_OUTPUT_OPERATIONS,
                 *STORY_WORKSPACE_REVIEW_OPERATIONS,
+                *STORY_WORKSPACE_CATALOG_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

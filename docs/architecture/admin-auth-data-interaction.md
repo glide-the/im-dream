@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume Registry114 Story catalog operations through strict DTOs and remove eleven production SQL routes. -->
 <!-- [Sync] 2026-09-15: consume Registry111 Story review operations through strict DTOs and remove eight production SQL paths. -->
 <!-- [Sync] 2026-09-15: close internal Agent Story output through the existing Registry109 DTO/ORM contract. -->
 <!-- [Sync] 2026-09-15: bind Registry109 standalone Story output DTO/ORM UOW and original receipt recovery. -->
@@ -30,6 +31,8 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+Story Workspace的Workspace get/patch、Story list/detail/patch、Character list/detail/patch与Scene list/detail/patch现绑定Admin Registry114。Dream只发送`workspace/action`、闭集`view`或闭集`resource_type/resource_id/patch` DTO；Pydantic RootModel校验响应的view、resource、ID、分页与时区时间，present-fields序列化保留omitted与显式null/false/zero/empty差异。Admin在typed Drizzle Repository中执行owner过滤、稳定排序、分页、详情关系、受控更新和Scene同owner Story检查。read不生成receipt；write未知只查询原request receipt且不重发。11个FastAPI响应及错误反馈保持，路由不再导入Dream database。三个契约SHA为`3fbd32dd7343ae5008d7f71f2475db1b022a95060f2544b9dfbea606af894965`、`317ed15c2f827c44099e0641693d3dcf09bc01186e26586a9b2281226faa142b`、`0ef2cc94d01d488c46a9872efb389b43890e9267460705ebee33ac5ab47180cd`，完整Registry114 SHA为`dc80b77410aac58528dde77578154d9848d9dfc3bf55de4a35c8c315a81af704`。修正后的[源码扫描](../exec/admin-auth-data-verification/dream-db-closure-after-registry114-source-only.json)仍有其它数据库候选，不能据此声明全域关闭。
 
 Story Workspace七个单项审核入口与一个批量入口现绑定Admin Registry111。Dream从当前OAuth取得actor，只发送闭集`resource_type/resource_id(s)/action/notes` DTO；Pydantic验证Admin返回的资源类型、精确ID、时区时间以及批量updated/skipped按请求顺序组成的完整互斥分区。Admin在一个typed Drizzle UOW内执行owner、generated、pending、artifact revision、Story确认级联、逐项audit与operation receipt。Dream继续提供原公开路由、状态码和产品反馈；Admin不可用、权限拒绝、capability/DTO错误或未知提交均返回安全业务失败，未知只查原request receipt且不重发，也不调用Dream SQL。契约SHA为`9f741208c6096b38f414fc5fb7c53d045d771233055dd68005571e7b47392392`与`621206fde4e9322a042940e45234fadfa4bbe01ba5febea67faf7d2ad0050667`，完整Registry111 SHA为`01f1a9ffbd9daf44e9bc640768a13ae636d9e718cb42365ff2de1ba5c244efc3`；其它Story Workspace数据库入口仍按清单迁移。
 

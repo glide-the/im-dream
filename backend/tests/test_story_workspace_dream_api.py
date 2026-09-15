@@ -464,16 +464,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ] = lambda: gateway
                 app.include_router(story_workspace.router)
 
-                with (
-                    patch.object(
-                        story_workspace.database,
-                        "get_db",
-                        side_effect=AssertionError(
-                            "route dependency must not access the database"
-                        ),
-                    ) as route_get_db,
-                    TestClient(app) as client,
-                ):
+                with TestClient(app) as client:
                     response = client.get(
                         f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
                     )
@@ -487,7 +478,6 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 database_fixture.stop()
 
         self.assertEqual(response.status_code, 200, response.text)
-        route_get_db.assert_not_called()
         self.assertEqual(count, 2)
         self.assertEqual(
             gateway.calls,
