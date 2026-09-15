@@ -8,6 +8,7 @@
 # [Sync] 2026-09-15: replace Workflow ingress default SQL with OAuth-write Admin ensure; internal agent-output stays separate.
 # [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
 # [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
+# [Sync] 2026-09-15: route internal Agent Story output through Registry109 and remove its Dream DB dependency.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -40,16 +41,15 @@ from story_workspace.contracts import (
     StoryWorkspaceStoryIndexReconcileCommand,
     StoryWorkspaceWorkspacePatch,
 )
-from services.story_workspace.agent_integration import (
-    AgentIntegrationError,
-    get_or_create_default_workspace,
-    store_agent_story_output,
-)
 from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_current_user, invoke_admin_operation, resolve_admin_default_workspace
 from services.admin_data.errors import AdminDataError
 from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
+from services.admin_data.story_workspace_output_data import (
+    AdminStoryWorkspaceOutputData,
+    StoryWorkspaceOutputInputDTO,
+)
 
 try:
     from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
@@ -1253,33 +1253,69 @@ def batch_review(
     return _batch_review(db, _user_id(current_user), body)
 
 
+def _story_output_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceOutputData:
+    return AdminStoryWorkspaceOutputData(owner.client)
+
+
+def _agent_story_output_error(
+    exc: AdminDataError,
+    request_id: str,
+) -> JSONResponse:
+    if not exc.outcome_unknown and (
+        (exc.code == "ADMIN_OPERATION_INPUT_INVALID" and exc.status_code == 400)
+        or (exc.code == "CHAT_THREAD_NOT_FOUND" and exc.status_code == 404)
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Unable to persist Agent story output"},
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": {
+                "error_code": exc.code,
+                "request_id": exc.request_id or request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            }
+        },
+    )
+
+
 @router.post("/internal/agent-output")
-def receive_agent_story_output(
+async def receive_agent_story_output(
     body: StoryWorkspaceAgentStoryPayload,
     agent_session_id: Optional[str] = Header(None, alias="X-Agent-Session-Id"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    """Receive one authenticated Agent story bundle and persist it atomically."""
+    data: AdminStoryWorkspaceOutputData = Depends(_story_output_data),
+) -> Any:
+    """Persist one authenticated Chat Thread Story bundle through Admin."""
 
     if not agent_session_id or not agent_session_id.strip():
         raise HTTPException(status_code=400, detail="X-Agent-Session-Id is required")
 
-    user_id = _user_id(current_user)
     try:
-        workspace_id = get_or_create_default_workspace(db, user_id)
-        return store_agent_story_output(
-            db,
-            user_id,
-            workspace_id,
-            agent_session_id,
-            body,
+        input_dto = StoryWorkspaceOutputInputDTO(
+            thread_id=agent_session_id.strip(),
+            story=body.model_dump(mode="json"),
         )
-    except AgentIntegrationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail="Unable to persist Agent story output",
-        ) from exc
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Unable to persist Agent story output") from None
+    result = await invoke_admin_operation(
+        current_user,
+        data.store_recovering,
+        input_dto,
+        error_handler=_agent_story_output_error,
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return {
+        "story_id": result.story_id,
+        "review_status": result.review_status,
+        "character_ids": result.character_ids,
+        "scene_ids": result.scene_ids,
+    }
 
 
 def _preflight_data(request: Request, current_user: dict = Depends(get_current_user)) -> AdminPreflightData:

@@ -13,7 +13,7 @@ from pydantic import Field, field_validator, model_validator
 from .chat_models import ChatStrictDTO, EntityId
 from .client import AdminDataClient, DomainOperation
 from .errors import AdminDataError, invalid_response
-from .models import OperationCapabilityDTO
+from .models import CommittedReceiptDTO, OperationCapabilityDTO
 from .workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
 
 
@@ -173,6 +173,48 @@ class AdminStoryWorkspaceOutputData:
             access_token=access_token,
         )
         return self.validate_reply(input_dto, result, request_id, write=True)
+
+    def store_recovering(
+        self,
+        input_dto: StoryWorkspaceOutputInputDTO,
+        request_id: str,
+        *,
+        access_token: str,
+    ) -> StoryWorkspaceOutputResultDTO:
+        """Execute once and recover only the same original committed result."""
+
+        try:
+            return self.store(
+                input_dto,
+                request_id,
+                access_token=access_token,
+            )
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+            original_request_id = request_id
+        try:
+            receipt = self.receipt(
+                input_dto,
+                original_request_id,
+                access_token=access_token,
+            )
+        except AdminDataError as error:
+            raise AdminDataError(
+                error.code,
+                error.status_code,
+                original_request_id,
+                True,
+                error.details,
+            ) from None
+        if not isinstance(receipt, CommittedReceiptDTO):
+            raise AdminDataError(
+                "ADMIN_WRITE_RESULT_UNKNOWN",
+                503,
+                original_request_id,
+                True,
+            )
+        return receipt.result
 
     def receipt(
         self,

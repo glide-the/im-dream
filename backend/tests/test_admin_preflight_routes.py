@@ -2,6 +2,7 @@
 # [Output] Full-field, owner, token, microsecond, capability and no-Dream-SQL evidence.
 # [Pos] Provider-free production-entry harness; no real database, model or signing authority.
 # [Sync] 2026-09-15: fence legacy Workspace/service dependencies and reuse the original public model.
+# [Sync] 2026-09-15: stop patching the retired router Workspace symbol after its production removal.
 from __future__ import annotations
 
 import copy
@@ -46,7 +47,6 @@ def boundary(monkeypatch):
     def no_legacy(*_a, **_kw):
         pytest.fail("Preflight GET must not use Dream SQL/default Workspace/old service")
     monkeypatch.setattr(database, "get_db", no_legacy)
-    monkeypatch.setattr(module, "get_or_create_default_workspace", no_legacy)
     monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_legacy)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     state = {"result": {"preflight": preflight()}}

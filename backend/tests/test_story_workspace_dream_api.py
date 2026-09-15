@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: remove assertions against the retired router Workspace SQL symbol.
 """Actor-scoped REST projection tests for Dream runtime files."""
 
 from __future__ import annotations
@@ -402,15 +403,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ] = gateway_module.DreamArtifactApplicationService
                 app.include_router(story_workspace.router)
 
-                creator = story_workspace.get_or_create_default_workspace
-                with (
-                    patch.object(
-                        story_workspace,
-                        "get_or_create_default_workspace",
-                        wraps=creator,
-                    ) as create_workspace,
-                    TestClient(app) as client,
-                ):
+                with TestClient(app) as client:
                     response = client.get(
                         f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
                     )
@@ -425,7 +418,6 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")
-        create_workspace.assert_not_called()
         self.assertEqual(count, 0)
 
     def test_route_passes_only_actor_and_does_not_resolve_workspace(
@@ -472,13 +464,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ] = lambda: gateway
                 app.include_router(story_workspace.router)
 
-                creator = story_workspace.get_or_create_default_workspace
                 with (
-                    patch.object(
-                        story_workspace,
-                        "get_or_create_default_workspace",
-                        wraps=creator,
-                    ) as create_workspace,
                     patch.object(
                         story_workspace.database,
                         "get_db",
@@ -501,7 +487,6 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 database_fixture.stop()
 
         self.assertEqual(response.status_code, 200, response.text)
-        create_workspace.assert_not_called()
         route_get_db.assert_not_called()
         self.assertEqual(count, 2)
         self.assertEqual(
@@ -1342,14 +1327,9 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("/private/path", payload)
                 self.assertNotIn("private-state", payload)
 
-    async def test_get_never_calls_workspace_creator_or_packer(self) -> None:
+    async def test_get_never_calls_workspace_packer(self) -> None:
         with (
             self.wired(),
-            patch.object(
-                story_workspace,
-                "get_or_create_default_workspace",
-                side_effect=AssertionError("GET must not create a workspace"),
-            ) as create_workspace,
             patch.object(
                 gateway_module,
                 "pack_workspace_plugins",
@@ -1359,7 +1339,6 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         ):
             result = await self.call()
         self.assertEqual(result.run_revision, 0)
-        create_workspace.assert_not_called()
         pack_plugins.assert_not_called()
 
 

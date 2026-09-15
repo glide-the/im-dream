@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: stop patching the retired router Workspace SQL symbol.
 """Focused tests for the one-shot Dream confirmation follow-up."""
 
 from __future__ import annotations
@@ -2271,14 +2272,7 @@ class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
         }
         app.dependency_overrides[story_workspace.get_dream_confirmation_service] = Gateway
         app.include_router(story_workspace.router)
-        with (
-            patch.object(
-                story_workspace,
-                "get_or_create_default_workspace",
-                side_effect=AssertionError("must not create workspace"),
-            ) as create_workspace,
-            TestClient(app) as client,
-        ):
+        with TestClient(app) as client:
             response = client.post(
                 f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-confirmation",
                 json=command().model_dump(mode="json", by_alias=True),
@@ -2299,7 +2293,6 @@ class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
                 "requestId",
             },
         )
-        create_workspace.assert_not_called()
 
 
 class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCase):

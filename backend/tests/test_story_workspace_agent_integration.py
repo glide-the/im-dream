@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import sys
-import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -27,17 +26,20 @@ if str(ROOT) not in sys.path:
 import database
 from agent_stream_events import NormalizedAgentEvent
 from routers import story_workspace
+from services.admin_data.errors import AdminDataError
+from services.admin_data.story_workspace_output_data import (
+    StoryWorkspaceOutputResultDTO,
+)
 from story_workspace.contracts import (
     StoryWorkspaceAgentCharacterPayload,
     StoryWorkspaceAgentScenePayload,
     StoryWorkspaceAgentStoryPayload,
 )
-from services.story_workspace.agent_integration import (
+from services.story_workspace.agent_integration import parse_agent_story_output
+from tests.story_workspace_agent_persistence_oracle import (
     AgentIntegrationError,
-    parse_agent_story_output,
     store_agent_story_output,
 )
-from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 
 
 _SCHEMA = """
@@ -304,29 +306,40 @@ class _StoryWorkspaceDatabaseTest(unittest.TestCase):
 
 class StoryWorkspaceAgentEndpointTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_fixture = LegacyDatabaseModuleFixture(
-            database,
-            Path(self.temp_dir.name) / "agent-output.db",
+        self.actor = story_workspace.AdminRequestActor(
+            subject="subject",
+            canonical_user_id="1",
+            client_id="dream-browser",
+            scopes=frozenset({"dream:write"}),
+            issued_at=1,
+            expires_at=2,
+            access_token="oauth-user",
         )
-        self.database_fixture.start()
-        db = database.get_db()
-        db.executescript(_SCHEMA)
-        db.execute("INSERT INTO users (id) VALUES (1)")
-        db.commit()
-        db.close()
-
+        self.output = StoryWorkspaceOutputResultDTO(
+            story_id="story-1",
+            review_status="pending",
+            character_ids=["character-1"],
+            scene_ids=["scene-1"],
+            chat_thread_id="thread-001",
+            deck_id="deck-1",
+            deck_name="Deck",
+            deck_name_zh=None,
+            deck_name_en=None,
+        )
+        self.store = unittest.mock.Mock(return_value=self.output)
+        self.data = SimpleNamespace(store_recovering=self.store)
         self.app = FastAPI()
-        self.app.dependency_overrides[story_workspace.get_current_user] = lambda: {
-            "user_id": 1
-        }
+        self.app.dependency_overrides[
+            story_workspace.get_current_user
+        ] = self.actor.current_user_projection
+        self.app.dependency_overrides[
+            story_workspace._story_output_data
+        ] = lambda: self.data
         self.app.include_router(story_workspace.router)
         self.client = TestClient(self.app)
 
     def tearDown(self) -> None:
         self.client.close()
-        self.database_fixture.stop()
-        self.temp_dir.cleanup()
 
     def test_internal_agent_output_endpoint_contract(self) -> None:
         anonymous_app = FastAPI()
@@ -351,31 +364,63 @@ class StoryWorkspaceAgentEndpointTest(unittest.TestCase):
         )
         self.assertEqual(invalid_payload.status_code, 422)
 
-        success = self.client.post(
-            "/api/story-workspace/internal/agent-output",
-            json={
-                "title": "端点剧本",
-                "characters": [{"name": "端点角色"}],
-                "scenes": [{"name": "端点场景", "order_index": 0}],
+        with unittest.mock.patch.object(
+            database,
+            "get_db",
+            side_effect=AssertionError("Agent output route must not open Dream DB"),
+        ):
+            success = self.client.post(
+                "/api/story-workspace/internal/agent-output",
+                json={
+                    "title": "端点剧本",
+                    "characters": [{"name": "端点角色"}],
+                    "scenes": [{"name": "端点场景", "order_index": 0}],
+                },
+                headers={"X-Agent-Session-Id": "thread-001"},
+            )
+        self.assertEqual(success.status_code, 200, success.text)
+        self.assertEqual(
+            success.json(),
+            {
+                "story_id": "story-1",
+                "review_status": "pending",
+                "character_ids": ["character-1"],
+                "scene_ids": ["scene-1"],
             },
+        )
+        input_dto, request_id = self.store.call_args.args
+        self.assertEqual(input_dto.thread_id, "thread-001")
+        self.assertEqual(input_dto.story.title, "端点剧本")
+        self.assertTrue(request_id)
+        self.assertEqual(self.store.call_args.kwargs, {"access_token": "oauth-user"})
+
+        self.store.side_effect = AdminDataError(
+            "ADMIN_OPERATION_INPUT_INVALID", 400
+        )
+        failure = self.client.post(
+            "/api/story-workspace/internal/agent-output",
+            json={"title": "存储失败"},
+            headers={"X-Agent-Session-Id": "thread-failure"},
+        )
+        self.assertEqual(failure.status_code, 422)
+
+        self.store.side_effect = AdminDataError(
+            "ADMIN_UNAVAILABLE", 503, "original-request", True
+        )
+        unavailable = self.client.post(
+            "/api/story-workspace/internal/agent-output",
+            json={"title": "结果未知"},
             headers={"X-Agent-Session-Id": "thread-001"},
         )
-        self.assertEqual(success.status_code, 200, success.text)
-        self.assertEqual(success.json()["review_status"], "pending")
-        self.assertEqual(len(success.json()["character_ids"]), 1)
-        self.assertEqual(len(success.json()["scene_ids"]), 1)
-
-        with unittest.mock.patch.object(
-            story_workspace,
-            "store_agent_story_output",
-            side_effect=AgentIntegrationError("injected"),
-        ):
-            failure = self.client.post(
-                "/api/story-workspace/internal/agent-output",
-                json={"title": "存储失败"},
-                headers={"X-Agent-Session-Id": "thread-failure"},
-            )
-        self.assertEqual(failure.status_code, 422)
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertEqual(
+            unavailable.json()["detail"],
+            {
+                "error_code": "ADMIN_UNAVAILABLE",
+                "request_id": "original-request",
+                "outcome_unknown": True,
+            },
+        )
 
 
 import tests._sdk_stubs  # noqa: E402,F401 - install SDK stub before service import
