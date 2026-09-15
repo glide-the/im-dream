@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: retain closed Deck Plugin binding conflict and selection details.
 # [Sync] 2026-09-15: retain four closed Deck deletion reasons, never upstream text.
 # [Input] Admin transport/protocol outcomes and stable request identifiers.
 # [Output] Redacted errors preserving status and unknown-commit recovery semantics.
@@ -6,7 +7,12 @@
 """Safe exceptions: never retain HTTP requests, tokens, URLs or response bodies."""
 
 from dataclasses import dataclass
-from .models import DeckDeleteBlockedDetailsDTO, DeckVersionConflictDetailsDTO
+from .models import (
+    BindingRevisionConflictDetailsDTO,
+    BindingSelectionRejectedDetailsDTO,
+    DeckDeleteBlockedDetailsDTO,
+    DeckVersionConflictDetailsDTO,
+)
 
 
 @dataclass
@@ -17,7 +23,7 @@ class AdminDataError(Exception):
     status_code: int
     request_id: str | None = None
     outcome_unknown: bool = False
-    details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | None = None
+    details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | BindingRevisionConflictDetailsDTO | BindingSelectionRejectedDetailsDTO | None = None
 
     def __str__(self) -> str:
         return f"{self.code} ({self.status_code})"

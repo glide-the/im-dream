@@ -50,6 +50,12 @@ from services.deck_plugin.selection_validation_service import (
     RUNTIME_CONTEXT_UNAVAILABLE,
     SelectionValidationService,
 )
+from services.admin_data.deck_plugin_binding_data import (
+    BindingRevisionConflictDetailsDTO,
+    BindingSelectionRejectedDetailsDTO,
+)
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
 from tests.test_deck_plugin_manifest import valid_manifest_data
 
 
@@ -59,6 +65,19 @@ DECK_ID = "deck-binding-test"
 WORKSPACE_ID = "workspace-binding-test"
 RUNTIME_PLUGIN_ID = "ink-dream-tools@voice-decks"
 DIGEST = "sha256:" + "d" * 64
+
+
+def actor_projection(user_id: int, workspace_id: str) -> dict:
+    actor = AdminRequestActor(
+        subject=f"subject-{user_id}",
+        canonical_user_id=str(user_id),
+        client_id="dream-browser",
+        scopes=frozenset({"dream:read", "dream:write"}),
+        issued_at=1,
+        expires_at=4_102_444_800,
+        access_token=f"test-access-token-{user_id}",
+    )
+    return {**actor.current_user_projection(), "workspace_id": workspace_id}
 
 
 class BindingFixture:
@@ -87,6 +106,7 @@ class BindingFixture:
     def close(self) -> None:
         self.db.close()
         self.temp_dir.cleanup()
+
 
     def _seed(self) -> DeckPluginManifestV1:
         self.db.execute(
@@ -218,6 +238,117 @@ class BindingFixture:
             deck_plugin_version=VERSION,
             expected_binding_revision=expected_revision,
             apply_to="next_run",
+        )
+
+
+class BindingDataAdapter:
+    """Test-only parity adapter around the pre-migration binding domain fixture."""
+
+    def __init__(self, fixture: BindingFixture, actor_id: str = "1") -> None:
+        self.fixture = fixture
+        self.actor_id = actor_id
+
+    def _translate(self, action):
+        try:
+            return action()
+        except BindingAccessError:
+            raise AdminDataError("DECK_ACCESS_DENIED", 404) from None
+        except BindingRevisionConflict as exc:
+            raise AdminDataError(
+                "BINDING_REVISION_CONFLICT",
+                409,
+                details=BindingRevisionConflictDetailsDTO(
+                    current_revision=exc.current_revision
+                ),
+            ) from None
+        except BindingSelectionRejected as exc:
+            raise AdminDataError(
+                "SELECTION_NOT_ALLOWED",
+                422,
+                details=BindingSelectionRejectedDetailsDTO(
+                    validation=exc.validation.model_dump(mode="json")
+                ),
+            ) from None
+
+    def current(self, request, _request_id, *, access_token):
+        return self._translate(
+            lambda: asyncio.run(
+                self.fixture.binding.get_current_state(
+                    deck_id=request.deck_id,
+                    actor_id=self.actor_id,
+                    requested_workspace_id=request.workspace_id,
+                )
+            )
+        )
+
+    def history(self, request, _request_id, *, access_token):
+        return self._translate(
+            lambda: self.fixture.binding.list_history(
+                deck_id=request.deck_id,
+                actor_id=self.actor_id,
+                requested_workspace_id=request.workspace_id,
+                limit=request.limit,
+            )
+        )
+
+    def options(self, request, _request_id, *, access_token):
+        def action():
+            self.fixture.binding.resolve_workspace_access(
+                deck_id=request.deck_id,
+                actor_id=self.actor_id,
+                requested_workspace_id=request.workspace_id,
+            )
+            return asyncio.run(
+                self.fixture.validator.list_options(
+                    deck_id=request.deck_id,
+                    workspace_id=request.workspace_id,
+                    actor_id=self.actor_id,
+                )
+            )
+
+        return self._translate(action)
+
+    def validate(self, request, _request_id, *, access_token):
+        def action():
+            self.fixture.binding.resolve_workspace_access(
+                deck_id=request.deck_id,
+                actor_id=self.actor_id,
+                requested_workspace_id=request.workspace_id,
+            )
+            validation = asyncio.run(
+                self.fixture.validator.validate(
+                    deck_plugin_id=request.deck_plugin_id,
+                    deck_plugin_version=request.deck_plugin_version,
+                    workspace_id=request.workspace_id,
+                    actor_id=self.actor_id,
+                )
+            )
+            return {
+                "deck_id": request.deck_id,
+                "deck_plugin_id": request.deck_plugin_id,
+                "deck_plugin_version": request.deck_plugin_version,
+                "applied_to": request.apply_to,
+                "validation": validation,
+            }
+
+        return self._translate(action)
+
+    def save(self, request, _request_id, *, access_token):
+        update = DeckPluginBindingUpdateRequest(
+            deck_plugin_id=request.deck_plugin_id,
+            deck_plugin_version=request.deck_plugin_version,
+            expected_binding_revision=request.expected_binding_revision,
+            apply_to=request.apply_to,
+        )
+        return self._translate(
+            lambda: asyncio.run(
+                self.fixture.binding.save(
+                    deck_id=request.deck_id,
+                    actor_id=self.actor_id,
+                    requested_workspace_id=request.workspace_id,
+                    request=update,
+                )
+            )
         )
 
 
@@ -521,15 +652,15 @@ class BindingRouterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fixture = BindingFixture()
         app = FastAPI()
-        app.dependency_overrides[binding_router.get_current_user] = lambda: {
-            "user_id": 1,
-            "email": "owner@example.com",
-            "workspace_id": WORKSPACE_ID,
-        }
+        current_user = actor_projection(1, WORKSPACE_ID)
+        app.dependency_overrides[binding_router.get_current_user] = lambda: current_user
         app.dependency_overrides[binding_router._binding_db] = lambda: self.fixture.db
         # This suite isolates binding DTO/domain behavior with an owned fixture.
         # Actual OAuth/default resolution is verified in the Admin ingress suite.
         app.dependency_overrides[binding_router._deck_current_user] = app.dependency_overrides[binding_router.get_current_user]
+        app.dependency_overrides[
+            binding_router._binding_data
+        ] = lambda: BindingDataAdapter(self.fixture)
         app.dependency_overrides[
             binding_router._selection_service
         ] = lambda: self.fixture.validator
@@ -694,13 +825,17 @@ class BindingRouterTests(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
 
         unauthorized_app = FastAPI()
+        unauthorized_user = actor_projection(2, "other-workspace")
         unauthorized_app.dependency_overrides[
             binding_router.get_current_user
-        ] = lambda: {"user_id": 2, "workspace_id": "other-workspace"}
+        ] = lambda: unauthorized_user
         unauthorized_app.dependency_overrides[
             binding_router._binding_db
         ] = lambda: self.fixture.db
         unauthorized_app.dependency_overrides[binding_router._deck_current_user] = unauthorized_app.dependency_overrides[binding_router.get_current_user]
+        unauthorized_app.dependency_overrides[
+            binding_router._binding_data
+        ] = lambda: BindingDataAdapter(self.fixture, actor_id="2")
         unauthorized_app.dependency_overrides[
             binding_router._selection_service
         ] = lambda: self.fixture.validator

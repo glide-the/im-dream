@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: validate closed Deck Plugin binding conflict and selection details.
 # [Sync] 2026-09-15: validate code-owned closed Deck deletion reasons alongside existing conflict revisions.
 # [Input] Admin canonical authentication/service DTO definitions supplied on 2026-09-14.
 # [Output] Strict Pydantic request/response DTOs, separate from database entities.
@@ -146,17 +147,51 @@ class DeckDeleteBlockedDetailsDTO(StrictDTO):
     reason: Literal["child_decks", "related_threads", "runtime_history", "referenced_records"]
 
 
+class BindingRevisionConflictDetailsDTO(StrictDTO):
+    current_revision: int = Field(ge=0, le=9_007_199_254_740_991)
+
+
+class BindingSelectionRecoveryDTO(StrictDTO):
+    owner: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+
+
+class BindingSelectionSummaryDTO(StrictDTO):
+    selectable: bool
+    release_status: str = Field(min_length=1)
+    installation_status: str = Field(min_length=1)
+    compatibility: Literal["passed", "failed", "unknown"]
+    runtime_readiness: str = Field(min_length=1)
+    reason_code: str | None
+    recovery: BindingSelectionRecoveryDTO | None
+    capability_summary: list[str]
+
+    @model_validator(mode="after")
+    def validate_selection(self):
+        if self.selectable != (self.reason_code is None and self.recovery is None):
+            raise ValueError("Selection reason and recovery must match selectable")
+        if self.capability_summary != sorted(set(self.capability_summary)):
+            raise ValueError("Capability summary must be sorted and unique")
+        return self
+
+
+class BindingSelectionRejectedDetailsDTO(StrictDTO):
+    validation: BindingSelectionSummaryDTO
+
+
 class ErrorDTO(StrictDTO):
     code: Identifier
     message: str
-    details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | None = None
+    details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | BindingRevisionConflictDetailsDTO | BindingSelectionRejectedDetailsDTO | None = None
 
     @model_validator(mode="before")
     @classmethod
     def validate_details_owner(cls, value):
         if isinstance(value, dict) and "details" in value:
             owner = {"DECK_VERSION_CONFLICT": DeckVersionConflictDetailsDTO,
-                     "DECK_DELETE_BLOCKED": DeckDeleteBlockedDetailsDTO}.get(value.get("code"))
+                     "DECK_DELETE_BLOCKED": DeckDeleteBlockedDetailsDTO,
+                     "BINDING_REVISION_CONFLICT": BindingRevisionConflictDetailsDTO,
+                     "SELECTION_NOT_ALLOWED": BindingSelectionRejectedDetailsDTO}.get(value.get("code"))
             if owner is None or value["details"] is None:
                 raise ValueError("Unsupported domain error details")
             owner.model_validate(value["details"])

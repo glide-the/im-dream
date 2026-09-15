@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry122-126 Deck Plugin binding operations.
 # [Sync] 2026-09-16: compose Registry121 confirmation worker with Runtime and Session owner settings.
 # [Sync] 2026-09-16: register Registry120 Story confirmation OAuth/background operations.
 # [Sync] 2026-09-15: register Registry111 OAuth-only Story Workspace review operations.
@@ -82,6 +83,7 @@ from .story_workspace_confirmation_data import (
     STORY_WORKSPACE_CONFIRMATION_OPERATIONS,
     AdminStoryWorkspaceConfirmationWorkerData,
 )
+from .deck_plugin_binding_data import DECK_PLUGIN_BINDING_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -141,6 +143,7 @@ class AdminRequestAuth:
                 *STORY_WORKSPACE_CATALOG_OPERATIONS,
                 *STORY_WORKSPACE_GUIDANCE_OPERATIONS,
                 *STORY_WORKSPACE_CONFIRMATION_OPERATIONS,
+                *DECK_PLUGIN_BINDING_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

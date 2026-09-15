@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from routers.story_workspace import router
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError, OAuthPrincipalClaims
 from services.admin_data.preflight_data import EXECUTE_PREFLIGHT, READ_PREFLIGHT, PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS
+from services.admin_data.deck_plugin_binding_data import READ_BINDING
 from services.admin_data.request_auth import AdminRequestAuth
 from services.admin_data.profile_data import CURRENT_PROFILE
 from services.admin_data.run_data import RUN_OPERATIONS
@@ -44,7 +45,8 @@ def boundary(monkeypatch):
     monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
     monkeypatch.setattr(module, "get_story_workflow_run_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
-    operations = [item.capability.model_dump() for item in (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE)]
+    registered_operations = (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE, READ_BINDING)
+    operations = [item.capability.model_dump() for item in registered_operations]
     schemas = [item.model_dump() for item in PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS]
     state = {"default": {"workspace_id": "existing-workspace-1"}, "receipt": None, "receipt_operation": "workspace-default.ensure", "cancel": {"run": run("cancelled")}, "profile": {"user": profile_value()}}
     calls = []
@@ -98,6 +100,13 @@ def boundary(monkeypatch):
                 elif operation == "user-profile.current":
                     assert envelope["input"] == {}
                     value = state["profile"]
+                elif operation == "deck-plugin-binding.current":
+                    value = {
+                        "deck_id": envelope["input"]["deck_id"],
+                        "binding_revision": 0,
+                        "applied_to": "next_run",
+                        "binding": None,
+                    }
                 else:
                     assert envelope["input"]["workspace_id"] == "existing-workspace-1"
                     row = run()
@@ -112,7 +121,7 @@ def boundary(monkeypatch):
         return httpx.Response(200, json={"request_id": rid, "data": value})
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = AdminDataClient(config, client=http, operations=(ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE))
+    client = AdminDataClient(config, client=http, operations=registered_operations)
     owner = AdminRequestAuth(config, client=client, verifier=ScopeVerifier())
     app = FastAPI()
     app.state.admin_request_auth = owner

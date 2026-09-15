@@ -1,13 +1,12 @@
-# [Input] Actual Deck Plugin/binding routes and shared OAuth/default/profile transport fixture.
+# [Input] Actual Deck Plugin/binding routes and shared OAuth/default/profile/Admin-operation fixture.
 # [Output] Default/role provenance, permission/error and original text Workspace technical evidence.
-# [Pos] Provider-free ingress harness; only remaining business providers use explicit test DI.
-# [Sync] 2026-09-15: retain production current-user resolvers and fence all Dream database access.
+# [Pos] Provider-free ingress harness; remaining local Plugin installation provider uses explicit test DI.
+# [Sync] 2026-09-16: exercise binding reads through the typed Admin DTO client.
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from models.deck_plugin import DeckPluginBindingState
 from routers import deck_plugin_binding, deck_plugins
 from routers.story_workspace import _story_workflow_current_user
 from services.admin_data.request_auth import AdminRequestActor
@@ -23,11 +22,6 @@ def deck_boundary(boundary):
     state["profile"]["user"]["role"] = "admin"
     domain_calls = []
 
-    class BindingProvider:
-        async def get_current_state(self, **facts):
-            domain_calls.append(("binding", facts))
-            return DeckPluginBindingState(deck_id=facts["deck_id"], binding_revision=0)
-
     class PluginProvider:
         async def list_installations(self, *, scope_id):
             domain_calls.append(("plugins", {"scope_id": scope_id}))
@@ -36,33 +30,34 @@ def deck_boundary(boundary):
     app = browser.app
     app.include_router(deck_plugin_binding.router)
     app.include_router(deck_plugins.router)
-    app.dependency_overrides[deck_plugin_binding._binding_service] = lambda: BindingProvider()
     app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = lambda: PluginProvider()
     assert not any(resolver in app.dependency_overrides for resolver in (_story_workflow_current_user, deck_plugin_binding._deck_current_user, deck_plugins._deck_plugin_current_user))
     return browser, state, calls, schemas, operations, data, domain_calls
 
 
-@pytest.mark.parametrize("path,expected", [(BINDING, ["workspace-default.ensure"]), (PLUGINS, ["workspace-default.ensure", "user-profile.current"])])
+@pytest.mark.parametrize("path,expected", [(BINDING, ["workspace-default.ensure", "deck-plugin-binding.current"]), (PLUGINS, ["workspace-default.ensure", "user-profile.current"])])
 def test_actual_public_resolver_default_role_then_business_provider(deck_boundary, path, expected):
     browser, _state, calls, *_rest, domain_calls = deck_boundary
     response = browser.get(path, headers=WRITE)
     assert response.status_code == 200 and [item[0] for item in calls] == expected
-    assert len(domain_calls) == 1
     if path == BINDING:
-        assert domain_calls[0][1] == {"deck_id": "deck-1", "actor_id": "42", "requested_workspace_id": "existing-workspace-1"}
+        assert domain_calls == []
+        assert calls[1][2] == {"deck_id": "deck-1", "workspace_id": "existing-workspace-1"}
         assert response.json() == {"deck_id": "deck-1", "binding_revision": 0, "applied_to": "next_run", "binding": None}
     else:
+        assert len(domain_calls) == 1
         assert domain_calls[0][1] == {"scope_id": "existing-workspace-1"}
         assert response.json()["permissions"] == {"can_manage": True, "can_install_local": True, "can_force_purge": True}
 
 
 @pytest.mark.parametrize("path", [BINDING, PLUGINS])
 def test_original_legacy_workspace_text_reaches_existing_domain_unchanged(deck_boundary, path):
-    browser, state, _calls, *_rest, domain_calls = deck_boundary
+    browser, state, calls, *_rest, domain_calls = deck_boundary
     state["default"] = {"workspace_id": "  非UUID工作区\n"}
     response = browser.get(path, headers=WRITE)
     assert response.status_code == 200
-    assert state["default"]["workspace_id"] in domain_calls[0][1].values()
+    target = calls[1][2] if path == BINDING else domain_calls[0][1]
+    assert state["default"]["workspace_id"] in target.values()
 
 
 @pytest.mark.parametrize("path", [BINDING, PLUGINS])
@@ -71,8 +66,9 @@ def test_existing_server_workspace_keeps_original_read_scope_branch(deck_boundar
     monkeypatch.setattr(AdminRequestActor, "current_user_projection", lambda self: {**project(self), "workspace_id": "existing-workspace-1"})
     browser, _state, calls, *_rest, domain_calls = deck_boundary
     response = browser.get(path, headers=READ)
-    assert response.status_code == 200 and len(domain_calls) == 1
-    assert [item[0] for item in calls] == (["user-profile.current"] if path == PLUGINS else [])
+    assert response.status_code == 200
+    assert len(domain_calls) == (1 if path == PLUGINS else 0)
+    assert [item[0] for item in calls] == (["user-profile.current"] if path == PLUGINS else ["deck-plugin-binding.current"])
 
 
 def test_existing_server_role_is_preserved_without_profile_fallback(deck_boundary, monkeypatch):
