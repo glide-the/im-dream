@@ -1,10 +1,11 @@
 # [Input] Pull requests that change the Dream frontend or this workflow.
 # [Output] A frozen pnpm install and production Next.js build check.
 # [Pos] Required frontend CI for both integration and release pull requests.
-# [Sync] 2026-09-15: cover develop PRs and use the repository Node/pnpm toolchain.
+# [Sync] 2026-09-15: cover develop PRs and explicit reruns with the repository Node/pnpm toolchain.
 name: Check Frontend (CI)
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main, develop]
     paths:
