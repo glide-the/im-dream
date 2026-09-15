@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume Registry115 Story Guidance persistence and keep same-Thread Runtime dispatch in Dream. -->
 <!-- [Sync] 2026-09-15: consume Registry114 Story catalog operations through strict DTOs and remove eleven production SQL routes. -->
 <!-- [Sync] 2026-09-15: consume Registry111 Story review operations through strict DTOs and remove eight production SQL paths. -->
 <!-- [Sync] 2026-09-15: close internal Agent Story output through the existing Registry109 DTO/ORM contract. -->
@@ -31,6 +32,8 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+Story Workspace Guidance现绑定Admin Registry115。Dream从current OAuth构造严格`workflow_run_id/kind/text/step_id/idempotency_key` DTO，不发送actor、Workspace、Thread、message ID或数据库选择器。Admin锁定owned Run/Workspace/source Thread，要求Run为confirmed/failed，派生immutable message与fingerprint，在一个Drizzle UOW提交message、Thread touch、结果、audit及receipt；相同业务命令重放不改变Thread排序，changed input返回409。Dream只对new commit或original-receipt恢复返回的严格dispatch envelope调用既有同Thread Runtime；投递失败保留已提交命令并返回`dispatched:false`，业务replay不重复投递。operation SHA为`a061ed38d2ca10073bbb7fd078e679f072f0cbd4ff1ce900792fbf8725223727`，完整Registry115 SHA为`58ab3cd933165dca7d6ae2d6eb50f46ff8f148e8e7eaf3dd5e46ceab1ad2ba9b`。[Registry115源码扫描](../exec/admin-auth-data-verification/dream-db-closure-after-registry115-source-only.json)为545模块、49个SQL模块、452个SQL literal、27个driver/import模块、50个legacy helper、392个connection/transaction call和133个operation name，parse errors为空；其它数据库候选仍需迁移。
 
 Story Workspace的Workspace get/patch、Story list/detail/patch、Character list/detail/patch与Scene list/detail/patch现绑定Admin Registry114。Dream只发送`workspace/action`、闭集`view`或闭集`resource_type/resource_id/patch` DTO；Pydantic RootModel校验响应的view、resource、ID、分页与时区时间，present-fields序列化保留omitted与显式null/false/zero/empty差异。Admin在typed Drizzle Repository中执行owner过滤、稳定排序、分页、详情关系、受控更新和Scene同owner Story检查。read不生成receipt；write未知只查询原request receipt且不重发。11个FastAPI响应及错误反馈保持，路由不再导入Dream database。三个契约SHA为`3fbd32dd7343ae5008d7f71f2475db1b022a95060f2544b9dfbea606af894965`、`317ed15c2f827c44099e0641693d3dcf09bc01186e26586a9b2281226faa142b`、`0ef2cc94d01d488c46a9872efb389b43890e9267460705ebee33ac5ab47180cd`，完整Registry114 SHA为`dc80b77410aac58528dde77578154d9848d9dfc3bf55de4a35c8c315a81af704`。修正后的[源码扫描](../exec/admin-auth-data-verification/dream-db-closure-after-registry114-source-only.json)仍有其它数据库候选，不能据此声明全域关闭。
 
@@ -77,6 +80,7 @@ Next页面、FastAPI编排、Agent Runtime、Runner/ThreadFactory/service/EventB
 | browser handle | Dream无DB，不能内存伪装durable session | Admin encrypted handle store，同client transaction/input绑定、refresh行锁 | PKCE/CSRF/并发refresh/原handle恢复 |
 | REST/SSE/Voice | Browser bases可直达8765，Next无upgrade handler | REST/SSE经Dream同源BFF；现有speech-recognition WS固定关闭1008 | 同源Cookie/origin与流代理验证；不启用ASR |
 | 写恢复 | HTTP超时不证明Admin事务rollback | request_id绑定输入摘要，业务+receipt单commit | 同键同值/异值/并发/unknown response/absent不重建ID |
+| Story Guidance | 旧Dream Service直接查Run/Workspace/Thread并写Message | Registry115 strict DTO→Admin Service→typed Drizzle Repository；Dream只执行成功后的same-Thread Runtime dispatch | immutable message、replay不重排、changed conflict、并发、投递失败隔离、无Dream DB |
 | 资源与Runtime | PG policy/provider/observer，server-ownedRuntime调参 | API独立provider/sink，LKG和模型metadata所有权保留 | monotonic revision/精确memory/global effort/最终model |
 | FS/metadata | tool和service直接SQL +共享FS | Admin授权DTO/CAS/checkpoint；Dream realpath/no-symlink/实体绑定 | 写文件未知metadata恢复与thread tmp精确路径 |
 

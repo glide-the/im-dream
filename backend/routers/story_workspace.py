@@ -10,6 +10,7 @@
 # [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
 # [Sync] 2026-09-15: route Story/Character/Scene review through Registry111 and remove those Dream SQL transactions.
 # [Sync] 2026-09-15: route catalog browse/edit through Registry114 DTO/ORM and remove this router's Dream SQL.
+# [Sync] 2026-09-15: persist Guidance through Registry115 and retain only same-Thread Runtime dispatch in Dream.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -60,6 +61,11 @@ from services.admin_data.story_workspace_catalog_data import (
     StoryWorkspaceCatalogReadInputDTO,
     StoryWorkspaceCatalogWorkspaceInputDTO,
 )
+from services.admin_data.story_workspace_guidance_data import (
+    AdminStoryWorkspaceGuidanceData,
+    StoryWorkspaceGuidanceInputDTO,
+)
+from services.story_workspace.guidance_service import build_thread_turn_dispatcher
 
 try:
     from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
@@ -199,15 +205,6 @@ class StoryWorkflowRunService(Protocol):
         *,
         actor: dict[str, str],
     ) -> Any: ...
-
-    async def submit_guidance(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceGuidanceCommandPayload,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
 
 class DreamArtifactService(Protocol):
     async def get_dream_files(
@@ -955,6 +952,42 @@ def _run_data_error(exc: AdminDataError, request_id: str):
     raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": request_id, "outcome_unknown": exc.outcome_unknown}) from None
 
 
+def _guidance_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceGuidanceData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceGuidanceData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
+
+
+def _guidance_data_error(exc: AdminDataError, request_id: str):
+    if not exc.outcome_unknown:
+        if exc.code == "WORKFLOW_RUN_NOT_FOUND" and exc.status_code == 404:
+            error = workflow_run_route_error(exc.code)
+            return JSONResponse(
+                status_code=error.status_code,
+                content=build_error_payload(error.code),
+            )
+        if exc.code in {"WORKFLOW_RUN_NOT_GUIDABLE", "IDEMPOTENCY_CONFLICT"} and exc.status_code == 409:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=build_error_payload(exc.code),
+            )
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        },
+    ) from None
+
+
 class _RunCommandRoute(SafeRequestValidationRoute):
     validation_error_detail = "Invalid Workflow Run request"
 
@@ -1271,8 +1304,8 @@ router.include_router(_run_cancel_router)
 async def submit_run_guidance(
     workflow_run_id: str,
     request: StoryWorkspaceGuidanceCommandPayload,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    data: AdminStoryWorkspaceGuidanceData = Depends(_guidance_data),
 ):
     """Submit one idempotent guidance command to a guidable run.
 
@@ -1283,12 +1316,49 @@ async def submit_run_guidance(
     different content (``IDEMPOTENCY_CONFLICT``).
     """
     try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
+        actor_id = str(current_user["user_id"])
+        if request.actor != actor_id:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        input_dto = StoryWorkspaceGuidanceInputDTO(
+            workflow_run_id=workflow_run_id,
+            kind=request.kind.value,
+            text=request.text,
+            step_id=request.step_id,
+            idempotency_key=request.idempotency_key,
+        )
+    except (ApiRouteError, ValidationError) as exc:
+        if isinstance(exc, ValidationError):
+            return JSONResponse(status_code=422, content={"detail": "Invalid guidance request"})
         return JSONResponse(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(
-        service.submit_guidance(workflow_run_id, request, actor=actor)
+    result = await invoke_admin_operation(
+        current_user,
+        data.submit_recovering,
+        input_dto,
+        error_handler=_guidance_data_error,
     )
+    if isinstance(result, JSONResponse):
+        return result
+
+    dispatched = False
+    if result.dispatch is not None:
+        dispatch = result.dispatch
+        try:
+            dispatched = bool(build_thread_turn_dispatcher()(
+                dispatch.thread_id,
+                actor_id,
+                dispatch.message_id,
+                [part.model_dump(mode="json") for part in dispatch.parts],
+                dispatch.metadata.model_dump(mode="json"),
+            ))
+        except Exception:
+            logger.exception(
+                "Guidance dispatch failed for run_id=%s message_id=%s",
+                workflow_run_id,
+                dispatch.message_id,
+            )
+    payload = result.model_dump(mode="json", exclude={"dispatch"})
+    payload["dispatched"] = dispatched
+    return payload

@@ -1,6 +1,7 @@
 # [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
+# [Sync] 2026-09-15: retire the Guidance database branch after Registry115 moved persistence to Admin.
 # [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
 # [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
 #                    registry-member artifact reads without changing active state.
@@ -48,11 +49,6 @@ try:
         PreflightService,
     )
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
-    from services.story_workspace.guidance_service import (
-        StoryWorkspaceGuidanceError,
-        StoryWorkspaceGuidanceService,
-        build_thread_turn_dispatcher,
-    )
     from services.story_workspace.dream_confirmation_service import (
         StoryWorkspacePersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationDispatch,
@@ -124,11 +120,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         PreflightService,
     )
     from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
-    from backend.services.story_workspace.guidance_service import (
-        StoryWorkspaceGuidanceError,
-        StoryWorkspaceGuidanceService,
-        build_thread_turn_dispatcher,
-    )
     from backend.services.story_workspace.dream_confirmation_service import (
         StoryWorkspacePersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationDispatch,
@@ -682,42 +673,6 @@ class StoryWorkflowRunApplicationService(_StoryWorkspaceApplicationSupport):
             self._raise_run_error(exc)
         finally:
             db.close()
-
-    async def submit_guidance(
-        self,
-        workflow_run_id: str,
-        request: Any,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Persist and dispatch one guidance command for a guidable run.
-
-        Persistence rides ``chat_message.metadata`` (DEC-032, zero DDL); the
-        default dispatcher hands the guidance to the runner as a new user turn
-        on the chat thread that initiated the run (review note R5).
-        """
-        db = database.get_db()
-        try:
-            actor_context = self._actor(actor)
-            run_service = WorkflowRunService(db, token_secret=story_workspace_workflow_token_secret())
-            service = StoryWorkspaceGuidanceService(
-                db,
-                run_reader=lambda run_id: run_service.read_run(run_id, actor_context),
-                dispatcher=build_thread_turn_dispatcher(),
-            )
-            return service.submit_guidance(
-                workflow_run_id,
-                request,
-                actor_id=actor["actor_id"],
-            )
-        except StoryWorkspaceGuidanceError as exc:
-            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        finally:
-            db.close()
-
-
 
 class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
     """Authorized Dream files, Artifact, re-entry and Story Index service."""
