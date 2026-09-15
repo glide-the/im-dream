@@ -6,8 +6,11 @@
 <!-- [Sync] 2026-09-15: migrate only the owner-scoped GET without default Workspace or SQL. -->
 <!-- [Sync] 2026-09-15: consume the execute domain and original three-state receipt; default lookup remains pending. -->
 <!-- [Sync] 2026-09-15: link the subsequent full Run domain consumer while retaining workflow dependencies. -->
+<!-- [Sync] 2026-09-16: remove the duplicate Dream SQL Preflight service and builder after all production callers adopted Admin DTOs. -->
 
 # Preflight 读取与领域执行现行设计
+
+> 当前公开 Preflight 与 Dream Launch 均通过严格 DTO 调用 Admin `workflow-preflight.execute/read`。Dream 中重复的 `PreflightService` 与 `StoryWorkspacePreflightServiceBuilder` PostgreSQL 实现已经删除；历史 task 与 exec 文档继续保留原实施记录。
 
 ## 背景与问题
 
@@ -15,7 +18,7 @@
 
 ## 目标与边界
 
-GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段，不读 PostgreSQL、不初始化 Workspace、不修改 Preflight或TTL。POST 的领域执行使用已发布 workflow-preflight.execute，默认 Workspace 已接注册76的 OAuth-write ensure，不调用旧 default SQL。Run领域消费见[现行Run设计](workflow-run-admin-consumer-current.md)；SystemConfig、launch生产接线和其它内部default持久化是后续入口。阶段30检查时目录75的launch三项尚未接线，阶段32仅准备metadata/source adapter；当前76注册与技术验收不等于正常业务完成。
+GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段，不读 PostgreSQL、不初始化 Workspace、不修改 Preflight或TTL。POST 的领域执行使用已发布 workflow-preflight.execute，默认 Workspace 使用 OAuth-write `workspace-default.ensure`，不调用旧 default SQL。Dream Launch 通过 `AdminDreamLaunchWorkflowOperations` 组合 source、Preflight、Run、dispatch 与 failure DTO；Run领域消费见[现行Run设计](workflow-run-admin-consumer-current.md)。真实 Google、真实 PostgreSQL 与模型业务验收仍由主协调执行。
 
 ## 概念与规则
 
@@ -50,7 +53,7 @@ GET 坏路径 ID、缺失记录或其他 actor 继续返回原 WORKFLOW_PERMISSI
 
 本地已发布安全回执提供 Admin remaining-read 8cases/74assertions 与原 permission tail 11assertions exit0；它们是隔离技术证据，原完整命令失败历史仍保留。正常服务、真实 PostgreSQL 和 Admin 可见业务验收由主协调执行。
 
-[领域执行技术测试](../../backend/tests/test_admin_preflight_execution.py) 使用生产 POST/认证/client/DTO，旧领域 service/SQL 被 fence，默认 Workspace loader 在测试中显式注入。覆盖 raw JSON、原202/17字段、request-state、三态同UUID receipt、capability/scope/绑定错配/私密validation与无自动重发。这个 fixture不证明生产 default lookup 已迁移，也不证明真实 token 或模型验收。
+[领域执行技术测试](../../backend/tests/test_admin_preflight_execution.py) 使用生产 POST/认证/client/DTO，旧领域 service/SQL 被 fence，默认 Workspace loader 在测试中显式注入以隔离领域合同。覆盖 raw JSON、原202/17字段、request-state、三态同UUID receipt、capability/scope/绑定错配/私密validation与无自动重发。默认 Workspace 的生产接线由独立完整入口套件验证；这些 fixture 不证明真实 token 或模型验收。
 
 ### 默认 Workspace 初始化
 
@@ -58,7 +61,7 @@ GET 坏路径 ID、缺失记录或其他 actor 继续返回原 WORKFLOW_PERMISSI
 
 default需identity/unified两项exact schema与实际hash 5fb0f70b1790979687090e6c04dd837f24ff0a4c0598d95d5085117e65aa2b95，OAuth-write-only；server-persistence/Editor bearer不替代公开授权。初始化失败停止后续PF/Run/launch。HTTP超时保持共享client的504、安全UUID和unknown；坏回复503/unknown，其他拒绝保持安全code/status。显式originalGET只查询原UUID/operation、空input digest、all-null scopes和当前owner，返回absent或committed原textID；absent不触发初始化。默认初始化是写操作，服务器尚无Workspace的Run GET等入口只有dream:read则403；已有服务器workspace_id继续原read路径，PF GET始终不初始化。
 
-[完整生产入口技术测试](../../backend/tests/test_admin_default_workspace.py)保留实际default loader，以MockHTTP替代Admin transport并fence旧DB/service；验证default先于PF/Run、原202/200/201/full模型、原textID、401/403/capability/unknown stop与同UUID两态receipt/no resend。原独立PF/Run领域套件继续用显式default DI隔离各自合同，不据单个套件冒称全项目SQL已迁移。internal agent-output仍直接调用旧default helper，SystemConfig/launch prepare/Voice/failure/其它Run持久化及正常业务验收仍待。
+[完整生产入口技术测试](../../backend/tests/test_admin_default_workspace.py)保留实际default loader，以MockHTTP替代Admin transport并fence旧DB/service；验证default先于PF/Run、原202/200/201/full模型、原textID、401/403/capability/unknown stop与同UUID两态receipt/no resend。Dream Launch 独立套件验证 Admin Preflight/Run 组合与失败恢复。原独立PF/Run领域套件继续用显式default DI隔离各自合同；它们只证明相关生产入口，不代表 Dream 全项目数据库迁移或真实业务验收完成。
 
 ### 三个公开 current-user resolver
 

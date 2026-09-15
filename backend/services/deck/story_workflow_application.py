@@ -2,6 +2,7 @@
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
 # [Sync] 2026-09-16: move Dream confirmation facts and persistence to Registry120 Admin DTOs.
+# [Sync] 2026-09-16: retire the unreachable Dream SQL Preflight authority after Admin DTO adoption.
 # [Sync] 2026-09-16: remove unused imports of the retired Dream SQL Workflow context resolver.
 # [Sync] 2026-09-15: retire the Guidance database branch after Registry115 moved persistence to Admin.
 # [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
@@ -47,10 +48,6 @@ try:
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
     )
-    from services.workflow.preflight_service import (
-        PreflightCheckError,
-        PreflightService,
-    )
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from services.story_workspace.dream_confirmation_service import (
         StoryWorkspaceDreamConfirmationCoordinator,
@@ -85,9 +82,6 @@ try:
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
     )
-    from services.story_workspace.preflight_builder import (
-        StoryWorkspacePreflightServiceBuilder,
-    )
     from services.story_workspace.workflow_security import (
         story_workspace_workflow_token_secret,
     )
@@ -119,10 +113,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamIOError,
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
-    )
-    from backend.services.workflow.preflight_service import (
-        PreflightCheckError,
-        PreflightService,
     )
     from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from backend.services.story_workspace.dream_confirmation_service import (
@@ -157,9 +147,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeBindingContext,
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
-    )
-    from backend.services.story_workspace.preflight_builder import (
-        StoryWorkspacePreflightServiceBuilder,
     )
     from backend.services.story_workspace.workflow_security import (
         story_workspace_workflow_token_secret,
@@ -496,42 +483,7 @@ class _StoryWorkspaceApplicationSupport:
 
 
 class StoryWorkflowRunApplicationService(_StoryWorkspaceApplicationSupport):
-    """Preflight and WorkflowRun command/query application service."""
-
-    @staticmethod
-    def _preflight_service(
-        db: Any,
-        actor: dict[str, str],
-    ) -> PreflightService:
-        return StoryWorkspacePreflightServiceBuilder(
-            db,
-            actor,
-            token_secret=story_workspace_workflow_token_secret(),
-        ).build()
-
-    async def create_preflight(self, request: Any, *, actor: dict[str, str]) -> Any:
-        db = database.get_db()
-        try:
-            return await self._preflight_service(db, actor).execute_preflight(
-                request.deck_id,
-                request.binding_revision,
-                request.input_data,
-                actor["actor_id"],
-            )
-        finally:
-            db.close()
-
-    async def get_preflight(self, preflight_id: str, *, actor: dict[str, str]) -> Any:
-        db = database.get_db()
-        try:
-            return self._preflight_service(db, actor).read_preflight(
-                preflight_id,
-                actor=actor["actor_id"],
-            )
-        except PreflightCheckError as exc:
-            raise ApiRouteError(exc.code, status_code=404) from exc
-        finally:
-            db.close()
+    """Legacy WorkflowRun command/query application service."""
 
     async def create_run(self, request: Any, *, actor: dict[str, str]) -> Any:
         db = database.get_db()
