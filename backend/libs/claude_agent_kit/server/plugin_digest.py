@@ -1,4 +1,4 @@
-"""Deterministic SHA-256 digest over a plugin directory (kit-owned).
+"""Deterministic SHA-256 digests over a plugin directory (kit-owned).
 
 This is the single canonical digest implementation shared by the server-side
 plugin artifact store (``services.claude_plugin``) and the Claude CLI launch
@@ -16,6 +16,11 @@ Verified reference value: a real ``superpowers@claude-plugins-official``
 6.2.0 cache tree (181 entries including the relative in-tree symlink
 ``AGENTS.md -> CLAUDE.md``) digests to
 ``sha256:285f0772167b0e050cc75b9be331137b7212d10ffadb5c461c59955620ba79ea``.
+
+``compute_legacy_admin_plugin_digest`` reproduces the Admin 0.1.0 whole-path
+ordering only to validate already immutable approval receipts. New Admin 0.1.1
+revisions use the canonical component ordering above; artifact identities never
+use the legacy digest.
 """
 
 from __future__ import annotations
@@ -78,6 +83,42 @@ def compute_plugin_digest(root: Path) -> str:
         entries.append((rel_text, item.read_bytes()))
     if not entries:
         raise PluginDigestError(f"plugin directory is empty: {root}")
+    digest = hashlib.sha256()
+    for rel_text, content in entries:
+        rel_encoded = rel_text.encode("utf-8")
+        digest.update(len(rel_encoded).to_bytes(4, "big"))
+        digest.update(rel_encoded)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return DIGEST_PREFIX + digest.hexdigest()
+
+
+def compute_legacy_admin_plugin_digest(root: Path) -> str:
+    """Return the Admin 0.1.0 digest for immutable receipt compatibility.
+
+    Admin 0.1.0 sorted the complete UTF-8 POSIX relative path. Dream's canonical
+    ``pathlib`` ordering compares path components, so the two differ when a
+    sibling file and directory share a prefix (for example ``skills.md`` and
+    ``skills/example/SKILL.md``). The content framing and exclusions are
+    otherwise identical.
+    """
+    root = Path(root).resolve()
+    if not root.is_dir():
+        raise PluginDigestError(f"plugin directory is missing: {root}")
+    entries: list[tuple[str, bytes]] = []
+    for item in root.rglob("*"):
+        relative = item.relative_to(root)
+        if entry_is_excluded(relative):
+            continue
+        rel_text = relative.as_posix()
+        if item.is_symlink():
+            entries.append((rel_text, b"L" + os.readlink(item).encode("utf-8")))
+            continue
+        if item.is_file():
+            entries.append((rel_text, item.read_bytes()))
+    if not entries:
+        raise PluginDigestError(f"plugin directory is empty: {root}")
+    entries.sort(key=lambda entry: entry[0].encode("utf-8"))
     digest = hashlib.sha256()
     for rel_text, content in entries:
         rel_encoded = rel_text.encode("utf-8")

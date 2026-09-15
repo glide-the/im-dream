@@ -5,6 +5,44 @@
 
 # ClaudePlugin 远程 Marketplace 业务模型
 
+<!-- [Sync] 2026-09-15: require qualified Runtime plugin management, preserve immutable Admin 0.1.0 digest receipts, and separate install, artifact and SDK load evidence. -->
+
+## Runtime 插件管理合同
+
+### 背景与问题
+
+已安装的 Runtime `0.1.9` 保留插件目录加载，但发布时的 headless 入口拒绝
+`plugin` 管理命令。Admin 登记/批准目录不等于 Dream 已安装，CLI 的版本输出
+也不等于支持管理命令。错误发生在 marketplace 同步，尚未生成 ready 制品。
+
+### 目标与边界
+
+恢复原 Runtime 非交互命令与处理函数，不另写安装器或 parser。Dream 继续
+使用共享 `PluginInstallService`、operation、artifact store、Deck 引用与 SDK
+启动器，不新增 schema、页面、审批步骤或 control 热安装协议。Runtime 的
+源码修复、新版本发布和本机运行采用分别记录，不覆盖已发布 `0.1.9`。
+Runtime `0.1.10` 已恢复原始非交互管理入口；Dream 采用状态和实际
+`screenwriting-skills` 操作以[发布与接入回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)为准。
+
+### 概念与规则
+
+- 默认可执行文件由 `sdk_env.resolve_claude_cli_path()` 解析，并检查既有 Runtime manifest；不选择 ambient `claude` 或 SDK-bundled CLI。已有 `INK_CLAUDE_CLI_PATH` 是 plugin-only 显式配置，必须是绝对可执行路径，非法时失败而不是回退。
+- CLI 版本检查之后执行 `plugin --help`。缺少管理入口时返回可执行路径和退出码，不泄漏原始输出，不将未知支持状态记为安装成功。
+- 安装顺序仍为已批准 entry → remote revision → marketplace add/update → plugin install → V2 registry/cache containment → manifest/完整 digest → artifact ready。built-in 分支必须通过 plugin validate。
+- Admin `0.1.1` 与 Dream canonical digest 都按 UTF-8 路径组件排序。已持久化的 Admin `0.1.0` entry 不可修改；Dream 可重算其整条 POSIX 路径排序摘要并仅在完整内容相同的情况下接受，artifact 与 Deck 仍只保存既有 canonical digest。
+- CLI 或来源/内容校验失败推进原 operation error，不创建 ready、不重复登记目录；现有重试重新执行安装校验，不改变旧制品身份。
+- ready 插件经 Deck 选择，打包到新 workspace，再由 SDK `plugins` 转为 `--plugin-dir`。加载、Skill 执行和安装是不同证据；禁止将 `/plugin ...` 聊天文本当安装调用。
+- pytest 的历史 SQLite 是明确的隔离 fixture，不能作为 PostgreSQL 业务验收。实际 CLI fixture 必须显式 opt in；已定位到可执行文件后的管理或安装回归判失败，不能归为 BLOCKED/skip。
+
+### 影响范围与验收
+
+恢复 plugin/plugins 的 validate、list、install、uninstall、enable、disable、update
+及 marketplace add/list/update/remove 原注册。使用隔离本地 marketplace 先真实
+安装，再执行安装目录中的 SDK Skill，验证权限、stream、resume、cancel 和
+卸载；另覆盖 resolver、显式路径、版本成功但管理失败、远端 digest 漂移、
+operation 错误、重复安装、Deck 选择与打包。Provider-free 结果不宣称真实
+账户、远端仓库或 PostgreSQL 全业务验收。SDK API 与 MCP Apps Host 不变。
+
 ## 1. 结论
 
 远程 Marketplace 是平台级全局目录，不能继续由 `KNOWN_MARKETPLACE_REPOS` 或
