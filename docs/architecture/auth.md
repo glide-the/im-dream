@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: localStorage import and first-login completion use Admin Registry101 with no Dream DB fallback. -->
 <!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound server-persistence grant and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: register typed fail/envelope without granting actor IDs background authority. -->
@@ -104,7 +105,9 @@ Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实�
 
 `/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Browser由Next `/auth/start/callback/session/logout`执行既有PKCE/handle流程，密码、注册和Google功能在Admin唯一UI。
 
-Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway verifier的旧subject helper仍需purpose迁移。typed `/api/me`/`/auth/me`与独立数据导入保持，导入DB还未迁移。
+Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway verifier的旧subject helper仍需purpose迁移。
+
+`/api/import-local-data`与`/api/import-calendar-recovery`先在Dream按localStorage字段独立解析，转成闭合Session/Picture/Preferences/Report raw-JSON DTO，再以当前OAuth调用同一个`local-data.import`。某字段解析失败只排除对应类别；合法旧Report缺少`timestamp`时使用一次请求内相同UTC时间，已有安全整数毫秒转换为RFC3339，显式非法时间排除整个Report类别。Admin在单一UOW内完成owner检查、四类写入、receipt与audit，回复计数是公开结果；未知提交只读原request ID回执。`/api/mark-first-login-completed`独立调用幂等`first-login.complete`，公开回复仍为`{success:true}`。三入口无Dream数据库fallback，Admin 401/403/capability/transport/DTO失败保持失败，正文、图片、Token与原异常不进入日志。
 
 公开Chat以当前OAuth读取Admin唯一Workflow上下文，在message/SSE前拒绝权限、绑定、capability或DTO失败；immutable snapshot只带已认证actor/thread和原上下文，不含credential，不向Browser/SDK投影。Service包括普通null均复用该snapshot，内部confirmation/launch仍待typed服务身份迁移；不能据此声明后台long-turn授权已完成。
 

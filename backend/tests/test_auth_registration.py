@@ -1,6 +1,7 @@
 # [Input] Canonical registration DB fixtures and retired public email/Google paths.
 # [Output] Preserve transactional provisioning regression checks and refuse Dream local authority.
 # [Pos] Registration migration contracts; Admin owns actual registration and default provisioning.
+# [Sync] 2026-09-15: patch historical DB fixtures at their owning module after Auth removes its last DB import.
 # [Sync] 2026-09-14: public email/Google tests now assert explicit retirement, not local signing.
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+import database
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -94,17 +97,17 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
         try:
             with (
                 mock.patch.object(
-                    auth_router.database,
+                    database,
                     "get_db",
                     return_value=connection,
                 ),
                 mock.patch.object(
-                    auth_router.database,
+                    database,
                     "PostgresIntegrityError",
                     _RegistrationIntegrityError,
                 ),
             ):
-                auth_router.database.create_user("user@example.test", "hash")
+                database.create_user("user@example.test", "hash")
             self.fail("create_user should have raised")
         finally:
             self.assertEqual(connection.rollbacks, 1)
@@ -115,7 +118,7 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
             self._create_user_with_integrity_failure("users_email_uidx")
 
     def test_default_free_integrity_failure_is_not_reported_as_duplicate_email(self) -> None:
-        with self.assertRaises(auth_router.database.UserRegistrationUnavailable):
+        with self.assertRaises(database.UserRegistrationUnavailable):
             self._create_user_with_integrity_failure(
                 "default_free_projection_ready_check"
             )
@@ -124,13 +127,13 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
         connection = _IncompleteRegistrationConnection()
         with (
             mock.patch.object(
-                auth_router.database,
+                database,
                 "get_db",
                 return_value=connection,
             ),
-            self.assertRaises(auth_router.database.UserRegistrationUnavailable),
+            self.assertRaises(database.UserRegistrationUnavailable),
         ):
-            auth_router.database.create_user("user@example.test", "hash")
+            database.create_user("user@example.test", "hash")
 
         self.assertEqual(connection.executions, 2)
         self.assertEqual(connection.commits, 0)
@@ -140,7 +143,7 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
     def test_email_registration_is_retired_without_creating_a_user(self) -> None:
         with (
             mock.patch.dict(os.environ, {"INK_ADMIN_DREAM_BASE_URL": "https://admin.example", "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth", "INK_DREAM_API_RESOURCE": "https://dream.example/api"}),
-            mock.patch.object(auth_router.database, "create_user", side_effect=AssertionError("Dream registration must not write")),
+            mock.patch.object(database, "create_user", side_effect=AssertionError("Dream registration must not write")),
         ):
             response = self.client.post("/api/register", json={"email": "new-user@example.test", "password": "secret123", "display_name": "New User"})
         self.assertEqual(response.status_code, 410)
@@ -150,7 +153,7 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
         app = FastAPI(); app.include_router(oauth_router.router)
         with (
             mock.patch.dict(os.environ, {"INK_ADMIN_DREAM_BASE_URL": "https://admin.example", "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth", "INK_DREAM_API_RESOURCE": "https://dream.example/api"}),
-            mock.patch.object(auth_router.database, "create_user", side_effect=AssertionError("Dream Google signup must not write")),
+            mock.patch.object(database, "create_user", side_effect=AssertionError("Dream Google signup must not write")),
             TestClient(app) as client,
         ):
             response = client.get("/oauth/google/callback?code=synthetic-google-code&state=synthetic-state")

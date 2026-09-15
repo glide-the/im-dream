@@ -24,6 +24,7 @@
 # [Sync] 2026-09-15: register the three OAuth-only Reflections section-config operations.
 # [Sync] 2026-09-15: derive the turn Session broker transport bounds from Admin HTTP configuration.
 # [Sync] 2026-09-15: bind the Registry99 Reflections contract only in the production owner factory.
+# [Sync] 2026-09-15: register Registry101 local-data import and first-login completion writes.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -57,6 +58,7 @@ from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 from .workspace_data import ENSURE_DEFAULT_WORKSPACE
 from .system_config_data import SYSTEM_CONFIG_OPERATIONS
 from .reflections_config_data import REFLECTIONS_SECTION_CONFIG_OPERATIONS
+from .local_data_import import LOCAL_DATA_IMPORT_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -104,6 +106,7 @@ class AdminRequestAuth:
                 *PREFERENCES_OPERATIONS,
                 *SYSTEM_CONFIG_OPERATIONS,
                 *REFLECTIONS_SECTION_CONFIG_OPERATIONS,
+                *LOCAL_DATA_IMPORT_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

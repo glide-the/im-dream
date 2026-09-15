@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: bind Registry101 local-data aggregate/first-login writes and legacy parsing behavior. -->
 <!-- [Sync] 2026-09-15: specify user and Thread SystemConfig operations, ordering and fail-closed consumers. -->
 <!-- [Sync] 2026-09-15: specify Reflections custom-config operations and Thread-to-config-to-filesystem ordering. -->
 <!-- [Sync] 2026-09-15: public Editor tools use exact Admin purpose grants, operations and original-ID receipts; stdio DB credentials are removed. -->
@@ -27,6 +28,8 @@
 # Dream / Admin 认证与数据交互
 
 共享Client以同一catalog锁覆盖readiness、完整refresh与operation广告检查，调用方不会读取加载期间的空广告。fresh成功后按exact合同判断；失败仍清空ready/广告，下一RequestAuth重新加载。领域HTTP在短检查锁外执行，DTO/token/request_id只属于该请求；多个refresh按获取锁顺序完成，不互相覆盖。receipt维持原二态、原UUID且不自动重发。
+
+本地数据迁移绑定Admin Registry101提交`c051a58e9193b0f39f2b211ac9ff5182fea87d73`、tree`49cd33a9cdf0f73c1faebecc01baccfca0af7a5b`。`local-data.import`与`first-login.complete`的operation hash分别为`f2f13ac392be415b42bb9532d42e20bf04fef2400551cd2f528991f4f6de271d`和`f06bbfd87fd905139b40df61eccdda6726678adda304dcd141a0bf52cf874cb0`，均要求current OAuth `dream:write`及identity/unified exact v1 schema。Dream只负责旧localStorage的按字段解析、raw JSON编码、安全整数毫秒到RFC3339转换和公开响应映射；Admin从principal取得owner，以一个UOW执行Session owner检查和四类写入并提交receipt/audit。主导入某类无效不会阻止其它已规范化类别，calendar recovery非法仍固定400，首次登录 absent/0/1均以独立幂等操作完成。两项写响应未知时只查询同operation、同OAuth、同request ID的committed typed receipt；absent、查询失败或坏回执继续unknown，不重复POST，也不调用Dream `import_user_data`或`set_first_login_completed`。
 
 公开好友九操作只用current OAuth与identity/unified exact gate，Admin从subject确定actor，URL仅选择friend/request。Admin唯一执行邀请码policy/pair与code锁/状态转换/原receipt；Dream保留公开int PK/nullable微秒/label/thumbnail/full字段、closed业务400、timeline null403/full falsey404。写unknown原UUID只查receipt，无retry；旧database九helper在I/O前拒绝，其它图片/import/后台SQL未据此关闭。完整功能规则与验收见[好友现行稿](../design/social-friendship-current.md)。
 

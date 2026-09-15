@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document Registry101 aggregate import, calendar recovery and first-login completion. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -323,7 +324,10 @@ Known Device Flow errors include `authorization_pending`, `slow_down`,
 
 ### POST `/api/import-local-data`
 
-One-time import of localStorage data to database on first login.
+One-time import of localStorage data on first login. Dream parses each legacy
+field independently, then sends the accepted Session, Picture, Preferences and
+Report collections to the Admin `local-data.import` aggregate. Admin validates
+the current OAuth owner and commits all accepted categories in one transaction.
 
 **Headers:** `Authorization: Bearer <token>`
 
@@ -342,7 +346,11 @@ One-time import of localStorage data to database on first login.
 }
 ```
 
-All fields are optional. Strings should be JSON-stringified.
+All fields are optional and unknown fields are rejected. Values that represent
+objects or collections must be JSON-stringified. A malformed field contributes
+zero records while other valid fields can still import. A historical Report
+without a `timestamp` receives one request-scoped UTC timestamp; an existing
+timestamp must be a safe integer containing Unix milliseconds.
 
 **Response:**
 ```json
@@ -358,7 +366,29 @@ All fields are optional. Strings should be JSON-stringified.
 ```
 
 **Errors:**
+- `400` - Invalid Admin DTO or calendar recovery value
 - `401` - Missing or invalid token
+- `403` - OAuth scope is insufficient
+- `409` - A Session ID belongs to another user
+- `422` - The public request contains an unknown field or wrong field type
+- `503` - Admin capability, transport, receipt, or response validation failed
+
+An unknown write result is resolved only through the original request receipt;
+Dream does not resend the aggregate or fall back to its database helper.
+
+### POST `/api/import-calendar-recovery`
+
+Accepts the closed body `{ "calendarEntries": "<JSON object>" }`, normalizes
+only Session entries, and calls the same Admin aggregate. The response remains
+`{ "success": true, "imported": { "sessions": n } }`. Missing input returns
+`400 calendarEntries required`; malformed calendar JSON returns the fixed
+`400 Failed to parse calendar` response without echoing the input.
+
+### POST `/api/mark-first-login-completed`
+
+Calls Admin `first-login.complete` with the current OAuth actor. Missing,
+incomplete, and already-complete preference rows all produce the existing
+public response `{ "success": true }` after Admin confirms the stored state.
 
 ---
 
