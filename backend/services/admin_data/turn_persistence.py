@@ -9,6 +9,7 @@
 # [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
 # [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
 # [Sync] 2026-09-15: reuse the exact Thread/Run grant and unknown-write barrier for Registry108 activation.
+# [Sync] 2026-09-15: persist Registry109 Story proposals through the same Thread grant and unknown-write barrier.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,6 +55,13 @@ from .workflow_runtime_activation_data import (
     WorkflowRuntimeActivationOutputDTO,
 )
 from .workspace_data import require_workspace_capabilities
+from .story_workspace_output_data import (
+    STORE_STORY_WORKSPACE_OUTPUT,
+    AdminStoryWorkspaceOutputData,
+    AdminStoryWorkspaceOutputProvider,
+    StoryWorkspaceOutputInputDTO,
+    StoryWorkspaceOutputResultDTO,
+)
 from .system_config_data import AdminSystemConfigData
 
 
@@ -93,6 +101,7 @@ class AdminTurnPersistence(
     AdminDeckWorkspacePluginsProvider,
     AdminWorkflowManagedMcpScopeProvider,
     AdminWorkflowRuntimeActivationProvider,
+    AdminStoryWorkspaceOutputProvider,
 ):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
@@ -123,6 +132,7 @@ class AdminTurnPersistence(
         self._workflow_runtime_activation_data = (
             AdminWorkflowRuntimeActivationData(client)
         )
+        self._story_workspace_output_data = AdminStoryWorkspaceOutputData(client)
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._settings = renewal_settings
@@ -297,6 +307,29 @@ class AdminTurnPersistence(
             result = self._write(ACTIVATE_WORKFLOW_RUNTIME, input_dto, grant)
             return result
 
+    def store_story_workspace_output(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        story: dict,
+    ) -> StoryWorkspaceOutputResultDTO:
+        """Persist one parsed standalone Story proposal in Admin."""
+
+        self._resolution.context_for(actor_id=actor_id, thread_id=thread_id)
+        if self._resolution.context is not None:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        try:
+            input_dto = StoryWorkspaceOutputInputDTO(
+                thread_id=thread_id,
+                story=story,
+            )
+        except Exception:
+            raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400) from None
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._write(STORE_STORY_WORKSPACE_OUTPUT, input_dto, grant)
+
     def _project_sessions(
         self,
         *,
@@ -345,7 +378,7 @@ class AdminTurnPersistence(
         # Every caller holds the same activity lock. Unknown results block a
         # different operation as well as a different input; receipts retain
         # the original operation and immutable input held by this owner.
-        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME:
+        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME and operation is not STORE_STORY_WORKSPACE_OUTPUT:
             raise configuration_invalid()
         pending = self._pending
         if pending is not None:
@@ -361,6 +394,12 @@ class AdminTurnPersistence(
                         access_token=grant.token,
                     )
                     if operation is ACTIVATE_WORKFLOW_RUNTIME
+                    else self._story_workspace_output_data.receipt(
+                        pending.input_dto,
+                        pending.request_id,
+                        access_token=grant.token,
+                    )
+                    if operation is STORE_STORY_WORKSPACE_OUTPUT
                     else self._client.receipt(
                         operation,
                         pending.request_id,
@@ -386,6 +425,12 @@ class AdminTurnPersistence(
                     pending.request_id,
                     access_token=grant.token,
                 )
+            elif operation is STORE_STORY_WORKSPACE_OUTPUT:
+                result = self._story_workspace_output_data.store(
+                    input_dto,
+                    pending.request_id,
+                    access_token=grant.token,
+                )
             else:
                 result = self._chat.update_session(input_dto, pending.request_id, access_token=grant.token)
         except AdminDataError as error:
@@ -403,6 +448,9 @@ class AdminTurnPersistence(
             self._writes[result.message_id] = _UserWrite(pending.input_dto, pending.request_id, result)
         elif pending.operation is PERSIST_MESSAGE:
             if result.message_id != pending.input_dto.message_id:
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is STORE_STORY_WORKSPACE_OUTPUT:
+            if result.chat_thread_id != self._resolution.thread_id:
                 raise invalid_response(pending.request_id, write=True)
         elif pending.operation is ACTIVATE_WORKFLOW_RUNTIME:
             context = self._resolution.context

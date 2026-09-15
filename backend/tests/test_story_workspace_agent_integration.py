@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: preserve Story parsing/isolation while the Agent post-turn persistence path uses Admin.
 # [Input] Consume Agent bundle models/service, Story Workspace endpoint, and Claude success flow.
 # [Output] Verify contract, atomic persistence, idempotency, REST errors, and Chat isolation.
 # [Pos] focused task_204 integration tests in backend/tests.
@@ -379,7 +380,7 @@ class StoryWorkspaceAgentEndpointTest(unittest.TestCase):
 
 import tests._sdk_stubs  # noqa: E402,F401 - install SDK stub before service import
 import claude_agent.service as claude_service_module  # noqa: E402
-from claude_agent.service import ClaudeAgentService  # noqa: E402
+from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService  # noqa: E402
 
 
 class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
@@ -398,11 +399,18 @@ class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
                 return result
 
         execution = SimpleNamespace(
-            request=SimpleNamespace(
+            request=ClaudeAgentRunRequest(
                 user_id="1",
                 thread_id="thread-isolation",
+                admin_turn_persistence=unittest.mock.Mock(
+                    spec=claude_service_module.AdminStoryWorkspaceOutputProvider
+                ),
             ),
-            state=SimpleNamespace(session_id="thread-isolation", turn_count=1),
+            state=SimpleNamespace(
+                session_id="thread-isolation",
+                turn_count=1,
+                current_turn_id="turn-isolation",
+            ),
             runner=_Runner(),
             run_options=SimpleNamespace(),
             turn_context=SimpleNamespace(
@@ -413,6 +421,9 @@ class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
             dream_context=None,
         )
         service = ClaudeAgentService()
+        execution.request.admin_turn_persistence.store_story_workspace_output.side_effect = (
+            RuntimeError("injected store failure")
+        )
 
         with (
             unittest.mock.patch.object(
@@ -424,11 +435,6 @@ class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
                 service,
                 "_persist_assistant_turn",
                 new=unittest.mock.AsyncMock(),
-            ),
-            unittest.mock.patch.object(
-                claude_service_module,
-                "_store_story_workspace_output_sync",
-                side_effect=RuntimeError("injected store failure"),
             ),
             self.assertLogs(claude_service_module.logger, level="ERROR") as logs,
         ):

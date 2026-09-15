@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
 # [Sync] 2026-09-15: validate Registry108 activation provider and Dream PostgreSQL fence.
@@ -115,7 +116,10 @@ from services.admin_data.deck_chat_context_data import (
 )
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.workflow_data import AdminWorkflowResolution
-from story_workspace.contracts import StoryWorkspaceDreamRunContext
+from story_workspace.contracts import (
+    StoryWorkspaceAgentStoryPayload,
+    StoryWorkspaceDreamRunContext,
+)
 
 
 class ClaudeAgentService(_ProductionClaudeAgentService):
@@ -225,51 +229,67 @@ class _FakeAdminEditorRuntime(service_module.AdminEditorRuntime):
         )
 
 
-class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
-    def test_commits_the_story_bundle_before_emitting_success(self):
-        db = unittest.mock.Mock()
-        db.execute.return_value.fetchone.return_value = None
-        payload = unittest.mock.Mock()
+class TestStoryWorkspaceOutputTransaction(unittest.IsolatedAsyncioTestCase):
+    async def test_persists_the_story_bundle_through_the_turn_admin_owner(self):
+        provider = unittest.mock.Mock(
+            spec=service_module.AdminStoryWorkspaceOutputProvider
+        )
+        provider.store_story_workspace_output.return_value = {
+            "story_id": "story-1",
+            "review_status": "pending",
+        }
+        payload = StoryWorkspaceAgentStoryPayload(title="标题")
+        request = SimpleNamespace(
+            user_id="7",
+            thread_id="thread-1",
+            admin_turn_persistence=provider,
+        )
         with (
-            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
             unittest.mock.patch.object(
-                service_module, "get_or_create_default_workspace", return_value="workspace-1"
+                service_module, "parse_agent_story_output", return_value=payload
             ),
-            unittest.mock.patch.object(
-                service_module,
-                "store_agent_story_output",
-                return_value={"story_id": "story-1"},
-            ),
+            unittest.mock.patch.object(service_module._db, "get_db") as database,
         ):
-            result = service_module._store_story_workspace_output_sync(
-                7, "thread-1", payload
+            result = await ClaudeAgentService()._store_story_workspace_output(
+                SimpleNamespace(request=request, dream_context=None),
+                '{"title":"标题"}',
             )
 
         self.assertEqual(result["story_id"], "story-1")
-        db.commit.assert_called_once_with()
-        db.rollback.assert_not_called()
-        db.close.assert_called_once_with()
+        provider.store_story_workspace_output.assert_called_once_with(
+            actor_id="7",
+            thread_id="thread-1",
+            story=payload.model_dump(mode="json"),
+        )
+        database.assert_not_called()
 
-    def test_rolls_back_the_story_bundle_when_persistence_fails(self):
-        db = unittest.mock.Mock()
-        failure = RuntimeError("fixture persistence failure")
+    async def test_admin_failure_keeps_chat_outcome_and_never_falls_back_to_database(self):
+        provider = unittest.mock.Mock(
+            spec=service_module.AdminStoryWorkspaceOutputProvider
+        )
+        provider.store_story_workspace_output.side_effect = RuntimeError(
+            "fixture persistence failure"
+        )
+        request = SimpleNamespace(
+            user_id="7",
+            thread_id="thread-1",
+            admin_turn_persistence=provider,
+        )
         with (
-            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
-            unittest.mock.patch.object(
-                service_module, "get_or_create_default_workspace", return_value="workspace-1"
-            ),
-            unittest.mock.patch.object(
-                service_module, "store_agent_story_output", side_effect=failure
-            ),
+            unittest.mock.patch.object(service_module._db, "get_db") as database,
+            self.assertLogs(service_module.logger, level="ERROR") as logs,
         ):
-            with self.assertRaisesRegex(RuntimeError, "fixture persistence failure"):
-                service_module._store_story_workspace_output_sync(
-                    7, "thread-1", unittest.mock.Mock()
-                )
+            result = await ClaudeAgentService()._store_story_workspace_output(
+                SimpleNamespace(request=request, dream_context=None),
+                '{"title":"标题"}',
+            )
 
-        db.rollback.assert_called_once_with()
-        db.commit.assert_not_called()
-        db.close.assert_called_once_with()
+        self.assertIsNone(result)
+        database.assert_not_called()
+        self.assertIn(
+            "Admin Story Workspace output persistence failed",
+            "\n".join(logs.output),
+        )
 
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):

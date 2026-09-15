@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: standalone Story proposals use Registry109 DTO/ORM persistence and preserve Runtime/SSE/filesystem behavior. -->
 # Claude Agent 架构文档
 <!--
 [Input] Claude Agent application/kit runtime, SDK/CLI contracts, and deployment configuration.
@@ -23,6 +24,9 @@
 作为 Voice/Writing/Chat 的单一 Thread SSE Agent runtime，不依赖第二套会话注册表。
 
 ---
+
+
+公开成功turn完成assistant持久化后，Dream解析standalone Story proposal并调用Registry109；Admin在单一事务保存Story图、回执和审计。失败沿用既有post-turn隔离并返回普通Chat结果，不回退Dream PostgreSQL。旧内部Story输出REST入口仍待迁移；Runtime、SSE、turn/resume/cancel与共享文件系统协议不变。
 
 ## 1. 目录结构
 

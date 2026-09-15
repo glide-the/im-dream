@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: register the Registry109 standalone Story output operation.
 # [Sync] 2026-09-15: register the OAuth-only owner-scoped Preflight read.
 # [Sync] 2026-09-15: register the staged OAuth Preflight execute operation.
 # [Sync] 2026-09-15: register full Workflow Run read/create/retry OAuth operations.
@@ -70,6 +71,7 @@ from .deck_chat_context_data import DECK_CHAT_CONTEXT_OPERATIONS
 from .deck_workspace_plugins_data import DECK_WORKSPACE_PLUGIN_OPERATIONS
 from .workflow_managed_mcp_scope_data import WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
+from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -124,6 +126,7 @@ class AdminRequestAuth:
                 *DECK_WORKSPACE_PLUGIN_OPERATIONS,
                 *WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS,
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
+                *STORY_WORKSPACE_OUTPUT_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

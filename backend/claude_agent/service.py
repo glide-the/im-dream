@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
 # [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
@@ -284,11 +285,7 @@ from claude_agent.tool_confirmation_store import (
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
-from services.story_workspace.agent_integration import (
-    get_or_create_default_workspace,
-    parse_agent_story_output,
-    store_agent_story_output,
-)
+from services.story_workspace.agent_integration import parse_agent_story_output
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.workflow_managed_mcp_scope_data import (
@@ -296,6 +293,9 @@ from services.admin_data.workflow_managed_mcp_scope_data import (
 )
 from services.admin_data.workflow_runtime_activation_data import (
     AdminWorkflowRuntimeActivationProvider,
+)
+from services.admin_data.story_workspace_output_data import (
+    AdminStoryWorkspaceOutputProvider,
 )
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.errors import AdminDataError, configuration_invalid
@@ -812,53 +812,6 @@ async def _activate_story_workspace_dream_runtime(
             DREAM_RUNTIME_NOT_READY,
             "Admin Runtime activation did not commit",
         ) from exc
-
-
-def _store_story_workspace_output_sync(
-    user_id: int,
-    thread_id: str,
-    payload: StoryWorkspaceAgentStoryPayload,
-) -> dict[str, Any]:
-    """Run Story Workspace SQLite persistence on the service executor thread."""
-
-    db = _db.get_db()
-    try:
-        workspace_id = get_or_create_default_workspace(db, user_id)
-        result = store_agent_story_output(
-            db,
-            user_id,
-            workspace_id,
-            thread_id,
-            payload,
-        )
-        source = db.execute(
-            """
-            SELECT thread.id AS chat_thread_id, thread.deck_id,
-                   deck.name AS deck_name, deck.name_zh AS deck_name_zh,
-                   deck.name_en AS deck_name_en
-            FROM chat_thread AS thread
-            LEFT JOIN decks AS deck ON deck.id = thread.deck_id
-            WHERE thread.id = %s AND thread.user_id = %s
-            """,
-            (thread_id, user_id),
-        ).fetchone()
-        result["chat_thread_id"] = thread_id
-        if source is not None:
-            result.update(
-                {
-                    "deck_id": source["deck_id"],
-                    "deck_name": source["deck_name"],
-                    "deck_name_zh": source["deck_name_zh"],
-                    "deck_name_en": source["deck_name_en"],
-                }
-            )
-        db.commit()
-        return result
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
 
 
 # Keepalive interval for SSE comments (seconds).
@@ -2798,18 +2751,20 @@ class ClaudeAgentService:
                 )
             return None
 
-        loop = asyncio.get_running_loop()
+        provider = execution.request.admin_turn_persistence
         try:
-            return await loop.run_in_executor(
-                None,
-                _store_story_workspace_output_sync,
-                int(execution.request.user_id),
-                thread_id,
-                payload,
+            if not isinstance(provider, AdminStoryWorkspaceOutputProvider):
+                raise configuration_invalid()
+            return await asyncio.to_thread(
+                provider.store_story_workspace_output,
+                actor_id=str(execution.request.user_id),
+                thread_id=thread_id,
+                story=payload.model_dump(mode="json"),
             )
         except Exception:
             logger.exception(
-                "Agent story integration failed thread_id=%s stage=store",
+                "Admin Story Workspace output persistence failed "
+                "thread_id=%s stage=store",
                 thread_id,
             )
             return None

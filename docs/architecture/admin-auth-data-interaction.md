@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: bind Registry109 standalone Story output DTO/ORM UOW and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: bind Registry103 current-user picture list/full reads and original public projections. -->
 <!-- [Sync] 2026-09-15: bind Registry101 local-data aggregate/first-login writes and legacy parsing behavior. -->
 <!-- [Sync] 2026-09-15: specify user and Thread SystemConfig operations, ordering and fail-closed consumers. -->
@@ -27,6 +28,8 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+公开Agent成功turn的standalone Story proposal绑定Admin Registry109：Dream保留`parse_agent_story_output`与既有post-turn失败隔离，只把strict Thread/Story/Character/Scene DTO交给当前`AdminTurnPersistence`。Admin派生actor/Workspace/Deck，在一个typed Drizzle UOW中协调Story identity、Character name、Scene order、关系与计数并提交pending-review结果、receipt和audit。unknown响应仅以同operation、同grant和原request ID读取receipt；stored Thread必须与结果Thread相等，Run/Editor scope必须为空。Admin unavailable、capability drift或坏DTO不会调用Dream PostgreSQL；普通Chat已持久化的assistant结果与原SSE终态保持。旧Story Workspace `/internal/agent-output`生产入口仍待迁移，不能把本次关闭范围扩大为全部Story SQL。契约SHA `2b7d9180c78829df86289d717037ddbfd20ecee517d8213e0e71b9388cee65ed`，完整Registry109 SHA `48909feea302787bcbd0ed7a263212eeee163a0e3e7887acfda56cc2b421d513`。
 
 共享Client以同一catalog锁覆盖readiness、完整refresh与operation广告检查，调用方不会读取加载期间的空广告。fresh成功后按exact合同判断；失败仍清空ready/广告，下一RequestAuth重新加载。领域HTTP在短检查锁外执行，DTO/token/request_id只属于该请求；多个refresh按获取锁顺序完成，不互相覆盖。receipt维持原二态、原UUID且不自动重发。
 

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
 # [Output] Entity scope, recent Session reads, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
@@ -47,6 +48,10 @@ from services.admin_data.workflow_runtime_activation_data import (
     ACTIVATE_WORKFLOW_RUNTIME,
     WORKFLOW_RUNTIME_ACTIVATION_SCHEMA_REQUIREMENTS,
 )
+from services.admin_data.story_workspace_output_data import (
+    STORE_STORY_WORKSPACE_OUTPUT,
+    STORY_WORKSPACE_OUTPUT_OPERATIONS,
+)
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
@@ -67,7 +72,8 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
         GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS,
-        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, ACTIVATE_WORKFLOW_RUNTIME)
+        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, ACTIVATE_WORKFLOW_RUNTIME,
+        *STORY_WORKSPACE_OUTPUT_OPERATIONS)
     schema_requirements = {
         item.capability: item
         for item in (
@@ -95,6 +101,13 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                     value["result"] = {"changed": True}
                 elif operation == PERSIST_MESSAGE.capability.name:
                     value["result"] = {"message_id": "message-1"}
+                elif operation == STORE_STORY_WORKSPACE_OUTPUT.capability.name:
+                    value["result"] = {
+                        "story_id": "story-1", "review_status": "pending",
+                        "character_ids": [], "scene_ids": [],
+                        "chat_thread_id": "thread-1", "deck_id": None,
+                        "deck_name": None, "deck_name_zh": None, "deck_name_en": None,
+                    }
                 elif operation == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
                     value["result"] = {
                         "thread_id": "thread-1",
@@ -144,6 +157,20 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                 value = {
                     **input_dto,
                     "workspace_id": "workspace-1",
+                }
+            elif name == STORE_STORY_WORKSPACE_OUTPUT.capability.name:
+                assert input_dto == {
+                    "thread_id": "thread-1",
+                    "story": {
+                        "title": "标题", "description": None, "type": "short",
+                        "content": None, "characters": [], "scenes": [],
+                    },
+                }
+                value = {
+                    "story_id": "story-1", "review_status": "pending",
+                    "character_ids": [], "scene_ids": [],
+                    "chat_thread_id": "thread-1", "deck_id": None,
+                    "deck_name": None, "deck_name_zh": None, "deck_name_en": None,
                 }
             elif name == ACTIVATE_WORKFLOW_RUNTIME.capability.name:
                 assert input_dto == {
@@ -398,6 +425,63 @@ def _activate_runtime(value):
             }
         ],
     )
+
+
+def _store_story_output(value):
+    return value.store_story_workspace_output(
+        actor_id="42",
+        thread_id="thread-1",
+        story={
+            "title": "标题", "description": None, "type": "short",
+            "content": None, "characters": [], "scenes": [],
+        },
+    )
+
+
+def test_story_output_uses_exact_thread_grant_and_strict_dto():
+    value, calls, _ = holder()
+    result = _store_story_output(value)
+    assert result.story_id == "story-1"
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith("/story-workspace-output.store")
+    with pytest.raises(AdminDataError, match="ADMIN_OPERATION_INPUT_INVALID"):
+        value.store_story_workspace_output(
+            actor_id="42", thread_id="thread-1",
+            story={"title": "标题", "workspace_id": "caller"},
+        )
+    for order_index in (-2_147_483_649, 2_147_483_648):
+        with pytest.raises(AdminDataError, match="ADMIN_OPERATION_INPUT_INVALID"):
+            value.store_story_workspace_output(
+                actor_id="42",
+                thread_id="thread-1",
+                story={
+                    "title": "标题", "description": None, "type": "short",
+                    "content": None, "characters": [],
+                    "scenes": [{
+                        "name": "场景", "description": None,
+                        "order_index": order_index,
+                    }],
+                },
+            )
+
+
+def test_unknown_story_output_recovers_original_receipt_without_post_retry():
+    value, calls, _ = holder(lose_operation=STORE_STORY_WORKSPACE_OUTPUT.capability.name)
+    with pytest.raises(AdminDataError) as lost:
+        _store_story_output(value)
+    assert lost.value.outcome_unknown
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        persist(value)
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        _store_story_output(value)
+    recovered = _store_story_output(value)
+    assert recovered.chat_thread_id == "thread-1"
+    assert sum(
+        request.method == "POST"
+        and request.url.path.endswith(STORE_STORY_WORKSPACE_OUTPUT.capability.name)
+        for request in calls
+    ) == 1
 
 
 def test_runtime_activation_uses_exact_thread_run_grant_and_strict_dto():
