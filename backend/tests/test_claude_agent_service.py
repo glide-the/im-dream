@@ -1,6 +1,7 @@
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
 # [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
 # [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
+# [Sync] 2026-09-16: inject Notion persistence through the current Admin turn owner.
 # [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
@@ -162,6 +163,10 @@ class _LegacyTurnPersistence(AdminAgentTurnPersistence):
     def current_grant(self, *, actor_id, thread_id):
         del actor_id, thread_id
         return SimpleNamespace(token="idg_test-managed-mcp", run_id=None)
+
+    def notion_connector_store(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return SimpleNamespace(test_only_admin_notion_store=True)
 
     def thread(self, *, actor_id, thread_id):
         row = _db.get_chat_thread(thread_id, int(actor_id))
@@ -1756,7 +1761,10 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                     runner=unittest.mock.Mock(),
                 )
 
-            build_notion_facade.assert_called_once_with(7)
+            build_notion_facade.assert_called_once_with(
+                7,
+                connector_store=unittest.mock.ANY,
+            )
             sync_builtin_workspace_skills.assert_called_once_with(
                 workspace_path,
                 enabled_platforms={"notion"},

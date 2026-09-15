@@ -1,5 +1,5 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic turn persistence plus a provider-bound Session projection broker with original-ID recovery.
+# [Output] Atomic turn persistence, delegated Notion DTO store, and provider-bound Session broker.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
@@ -10,6 +10,7 @@
 # [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
 # [Sync] 2026-09-15: reuse the exact Thread/Run grant and unknown-write barrier for Registry108 activation.
 # [Sync] 2026-09-15: persist Registry109 Story proposals through the same Thread grant and unknown-write barrier.
+# [Sync] 2026-09-16: construct an actor/Thread-bound Notion DTO store from the current grant.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -179,6 +180,34 @@ class AdminTurnPersistence(
         if self._clock() >= grant.expires_at:
             raise AdminDataError("DELEGATION_EXPIRED", 401)
         return grant
+
+    def notion_connector_store(self, *, actor_id: str, thread_id: str):
+        """Build a short-lived Notion adapter from the current exact turn grant."""
+
+        from notion.store import NotionConnectorStore
+
+        from .notion_connector_data import (
+            AdminNotionConnectorData,
+            NotionAuthorityDTO,
+        )
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+        return NotionConnectorStore(
+            AdminNotionConnectorData(self._client),
+            access_token=grant.token,
+            authority=NotionAuthorityDTO(
+                thread_id=thread_id,
+                workflow_run_id=(
+                    context.workflow_run_id if context is not None else None
+                ),
+            ),
+            expected_user_id=actor_id,
+        )
 
     def persist_user(self, *, actor_id: str, thread_id: str, message_id: str, parts: list, metadata: dict | None) -> UserMessageOutputDTO:
         input_dto = user_message_input(thread_id, message_id, parts, metadata)

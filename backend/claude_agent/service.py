@@ -1,6 +1,7 @@
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
 # [Sync] 2026-09-16: load managed MCP only through the current Admin grant or reviewed internal snapshot.
 # [Sync] 2026-09-16: skip duplicate user persistence only for Admin-claimed Dream confirmations.
+# [Sync] 2026-09-16: resolve Notion metadata through the current Admin turn grant.
 # [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
 # [Sync] 2026-09-15: complete/partial assistant writes use the bound Admin turn owner.
@@ -1849,7 +1850,17 @@ class ClaudeAgentService:
                 )
             else:
                 try:
-                    notion_facade = build_notion_facade(int(request.user_id))
+                    if not isinstance(persistence, AdminAgentTurnPersistence):
+                        raise configuration_invalid()
+                    notion_store = await asyncio.to_thread(
+                        persistence.notion_connector_store,
+                        actor_id=request.user_id,
+                        thread_id=request.thread_id,
+                    )
+                    notion_facade = build_notion_facade(
+                        int(request.user_id),
+                        connector_store=notion_store,
+                    )
                     try:
                         notion_facade.materialize_workspace(
                             workspace_path,

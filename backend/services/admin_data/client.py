@@ -6,6 +6,7 @@
 # [Sync] 2026-09-15: synchronize catalog refresh/readiness/operation checks while keeping domain HTTP concurrent.
 # [Sync] 2026-09-15: read the dedicated original Preflight receipt without changing generic two-state receipts.
 # [Sync] 2026-09-15: read task-scoped background Reflections receipts with the original task and request IDs.
+# [Sync] 2026-09-16: recover connector-scoped background writes without an OAuth credential.
 # [Sync] 2026-09-16: expose a lock-safe local contract/capability readiness check for managed MCP composition.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
@@ -183,6 +184,39 @@ class AdminDataClient:
         if result.operation != name or result.request_id != request_id:
             raise invalid_response(request_id)
         # An absent receipt remains an explicit absent DTO; it never triggers a retry.
+        return result
+
+    def background_receipt(
+        self,
+        operation: DomainOperation[InputT, OutputT],
+        request_id: str,
+        *,
+        connector_id: str,
+    ) -> CommittedReceiptDTO[OutputT] | AbsentReceiptDTO:
+        """Read one connector-scoped result under its original service actor."""
+
+        name = operation.capability.name
+        if (
+            self._operations.get(name) is not operation
+            or operation.capability.kind != "write"
+            or operation.capability.user_scope is not None
+            or operation.capability.background_scope != "connectors:sync"
+        ):
+            raise AdminDataError(
+                "ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id
+            )
+        TypeAdapter(Identifier).validate_python(request_id)
+        TypeAdapter(Identifier).validate_python(connector_id)
+        output = CommittedReceiptDTO[operation.output_dto] | AbsentReceiptDTO
+        result = self._request(
+            "GET",
+            "/receipts/" + request_id,
+            request_id,
+            output,
+            params={"operation": name, "connector_id": connector_id},
+        )
+        if result.operation != name or result.request_id != request_id:
+            raise invalid_response(request_id)
         return result
 
     def reflection_task_receipt(

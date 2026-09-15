@@ -1,20 +1,14 @@
-# [Input] Notion Connector PostgreSQL repository with a pure transactional fake.
-# [Output] Verify five-table behavior, SQL contract, rollback, and snapshot identity.
-# [Pos] test node in backend/tests
-# [Sync] 2026-07-04: initial store coverage for Notion connector persistence.
-# [Sync] 2026-07-08: cover connector list/detail sources hydration for refresh-safe
-#                    resource selections.
-# [Sync] 2026-08-28: keep repository metadata tests free of credential-home paths;
-#                    credential bytes are owned by notion.credentials instead.
-# [Sync] 2026-08-28: assert selected resources remain pending until their exact
-#                    IDs are committed with a successful lightweight snapshot.
-
+# [Input] Admin-backed Notion store, strict DTO transport, and provider-free Admin fixture.
+# [Output] Verify identity binding, resource/snapshot roundtrip, background authority, and source closure.
+# [Pos] Notion Admin DTO adapter contract tests.
+# [Sync] 2026-09-16: replace Dream PostgreSQL repository tests with production DTO-path tests.
 from __future__ import annotations
 
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -23,279 +17,177 @@ TEST_ROOT = Path(__file__).resolve().parent
 if str(TEST_ROOT) not in sys.path:
     sys.path.insert(0, str(TEST_ROOT))
 
-from libs.claude_agent_kit.server.notion_snapshot import (
-    CanonicalWorkspaceSnapshot,
-    SnapshotMetadata,
-    snapshot_identity,
-)
+from libs.claude_agent_kit.server.notion_snapshot import snapshot_identity
 from notion import store
-from notion_postgres_fake import TABLE_NAMES, build_fake_notion_store
+from notion_admin_fake import build_notion_admin_boundary
+from services.admin_data.errors import AdminDataError
+from services.admin_data.notion_connector_data import NotionConnectorCreateInputDTO
 
 
 class TestNotionStore(unittest.TestCase):
-    def setUp(self):
-        self._store, self._database, self._pool = build_fake_notion_store(users={7, 8})
+    def setUp(self) -> None:
+        (
+            self.owner,
+            self.actor,
+            self.state,
+            self.user_store,
+            self.background_store,
+        ) = build_notion_admin_boundary()
         store.close_default_store()
-        store.open_default_store(store=self._store)
+        store.open_default_store(store=self.user_store)
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         store.close_default_store()
+        self.owner.close()
 
-    def _sample_snapshot(self, connector_id: str, workspace_id: str = "workspace-1") -> CanonicalWorkspaceSnapshot:
-        metadata = SnapshotMetadata(
-            workspace_id=workspace_id,
-            resource_connector_id=connector_id,
-            snapshot_version="snap-001",
-            source_revision="rev-001",
-            sync_cursor="cursor-001",
-            fetched_at="2026-07-04T00:00:00Z",
-        )
-        return CanonicalWorkspaceSnapshot(
-            metadata=metadata,
-            connector={
-                "id": connector_id,
-                "platform": "notion",
-                "auth_status": "authenticated",
-                "selected_databases": ["db-1"],
-                "selected_pages": ["page-standalone"],
+    @staticmethod
+    def _sample_snapshot(connector_id: str) -> dict:
+        return {
+            "metadata": {
+                "workspace_id": connector_id,
+                "resource_connector_id": connector_id,
+                "snapshot_version": "snap-001",
+                "source_revision": "rev-001",
+                "sync_cursor": "cursor-001",
+                "fetched_at": "2026-09-16T00:00:00Z",
+                "state": "snapshot_ready",
             },
-            index=[
-                {"page_id": "page-db-1", "title": "Database Page", "url": "https://www.notion.so/page-db-1", "last_edited": "2026-07-03T10:00:00Z"},
-                {"page_id": "page-standalone", "title": "Standalone Page", "url": "https://www.notion.so/page-standalone", "last_edited": "2026-07-02T10:00:00Z"},
-            ],
-            databases=[
-                {
-                    "database_id": "db-1",
-                    "title": "Tasks",
-                    "page_count": 1,
-                    "properties_schema": {"Name": {"type": "title"}},
-                    "last_edited": "2026-07-03T10:00:00Z",
-                    "url": "https://www.notion.so/db-1",
-                }
-            ],
-            database_pages={
-                "db-1": [
-                    {
-                        "page_id": "page-db-1",
-                        "title": "Database Page",
-                        "last_edited": "2026-07-03T10:00:00Z",
-                        "status": "In Progress",
-                    }
-                ]
+            "connector": {"id": connector_id, "platform": "notion"},
+            "index": [{"page_id": "page-1", "title": "Page"}],
+            "databases": [{"database_id": "db-1", "title": "Tasks"}],
+            "database_pages": {"db-1": [{"page_id": "page-1"}]},
+            "pages": {},
+            "identity": {
+                "workspace_id": connector_id,
+                "resource_connector_id": connector_id,
+                "snapshot_version": "snap-001",
+                "source_revision": "rev-001",
+                "sync_cursor": "cursor-001",
             },
-            pages={},
-        )
+        }
 
-    def test_connector_resource_selection_and_snapshot_roundtrip(self):
-        connector = store.create_connector(7, name="Notion", config={"sync_label": "primary"})
-        self.assertEqual(connector["auth_status"], "pending")
-        self.assertEqual(store.list_connectors(7)[0]["id"], connector["id"])
-
-        updated = store.save_auth_state(
-            connector["id"],
+    def test_user_roundtrip_uses_oauth_admin_operations(self) -> None:
+        connector = store.create_connector(7, "Notion", config={"label": "primary"})
+        connector_id = connector["id"]
+        self.assertEqual(connector["user_id"], 7)
+        authenticated = store.save_auth_state(
+            connector_id,
             7,
             auth_status="authenticated",
             config_patch={"connection_label": "primary"},
-            verification_url="https://www.notion.so/workers/cli-login",
-            verification_code="VAF-HWY",
-            poll_interval_seconds=5,
         )
-        self.assertEqual(updated["auth_status"], "authenticated")
-
+        self.assertEqual(authenticated["auth_status"], "authenticated")
         selected = store.replace_connector_resources(
-            connector["id"],
+            connector_id,
             7,
-            databases=[
-                {
-                    "database_id": "db-1",
-                    "title": "Tasks",
-                    "page_count": 1,
-                    "properties_schema": {"Name": {"type": "title"}},
-                    "last_edited": "2026-07-03T10:00:00Z",
-                    "url": "https://www.notion.so/db-1",
-                }
-            ],
-            pages=[
-                {
-                    "page_id": "page-standalone",
-                    "title": "Standalone Page",
-                    "last_edited": "2026-07-02T10:00:00Z",
-                    "url": "https://www.notion.so/page-standalone",
-                }
-            ],
+            databases=[{"database_id": "db-1", "title": "Tasks"}],
+            pages=[{"page_id": "page-1", "title": "Page"}],
         )
-        self.assertEqual(len(selected["resources"]), 2)
         self.assertEqual(selected["connector"]["selected_databases"], ["db-1"])
-        self.assertEqual(selected["connector"]["selected_pages"], ["page-standalone"])
-        self.assertEqual(len(selected["connector"]["sources"]), 2)
-        self.assertEqual(selected["connector"]["sources"][0]["external_id"], "db-1")
+        self.assertEqual(selected["connector"]["selected_pages"], ["page-1"])
         self.assertTrue(
-            all(resource["sync_status"] == "pending" for resource in selected["resources"])
+            all(item["sync_status"] == "pending" for item in selected["resources"])
         )
-        self.assertEqual(store.list_connectors(7)[0]["sources"][0]["external_id"], "db-1")
-        self.assertEqual(store.get_connector(connector["id"], 7)["sources"][1]["external_id"], "page-standalone")
-
-        snapshot = self._sample_snapshot(connector["id"])
+        snapshot = self._sample_snapshot(connector_id)
         saved = store.save_snapshot(
-            connector["id"],
-            7,
-            "workspace-1",
-            snapshot,
-            synced_resources=selected["resources"],
+            connector_id, 7, connector_id, snapshot, selected["resources"]
         )
-        self.assertEqual(saved["metadata"]["snapshot_version"], "snap-001")
-        self.assertEqual(snapshot_identity(saved)["resource_connector_id"], connector["id"])
-
-        current = store.get_current_snapshot("workspace-1", connector["id"], 7)
-        self.assertIsNotNone(current)
-        self.assertEqual(current["metadata"]["snapshot_version"], "snap-001")
-        self.assertEqual(current["index"][1]["title"], "Standalone Page")
-        self.assertEqual(store.list_snapshots(connector["id"], 7)[0]["snapshot"]["metadata"]["snapshot_version"], "snap-001")
-        self.assertEqual(len(store.list_connector_resources(connector["id"], 7)), 2)
+        self.assertEqual(snapshot_identity(saved)["resource_connector_id"], connector_id)
+        self.assertEqual(
+            store.get_current_snapshot(connector_id, connector_id, 7), snapshot
+        )
+        self.assertEqual(store.get_snapshot(connector_id, "snap-001", 7), snapshot)
+        self.assertEqual(len(store.list_snapshots(connector_id, 7)), 1)
         self.assertTrue(
             all(
-                resource["sync_status"] == "synced"
-                for resource in store.list_connector_resources(connector["id"], 7)
+                item["sync_status"] == "synced"
+                for item in store.list_connector_resources(connector_id, 7)
             )
         )
-        self.assertEqual(len(self._database.tables["resource_connectors"]), 1)
-        self.assertEqual(len(self._database.tables["connector_resources"]), 2)
-        self.assertEqual(len(self._database.tables["connector_resource_pages"]), 1)
-        self.assertEqual(len(self._database.tables["connector_snapshots"]), 1)
-
-    def test_attach_thread_finds_connector(self):
-        connector = store.create_connector(7, name="Notion")
-        store.attach_thread_to_connector(connector["id"], 7, "thread-1")
-
-        found = store.get_connector_for_thread("thread-1", 7)
-        self.assertIsNotNone(found)
-        self.assertEqual(found["id"], connector["id"])
-        self.assertEqual(len(self._database.tables["connector_chat_threads"]), 1)
-
-    def test_connector_delete_cascades_all_five_tables(self):
-        connector = store.create_connector(7, name="Notion")
-        store.replace_connector_resources(
-            connector["id"],
-            7,
-            databases=[{"database_id": "db-1", "title": "Tasks"}],
-            pages=[],
-        )
-        store.save_snapshot(connector["id"], 7, "workspace-1", self._sample_snapshot(connector["id"]))
-        store.attach_thread_to_connector(connector["id"], 7, "thread-1")
-
-        self.assertTrue(store.delete_connector(connector["id"], 7))
+        store.attach_thread_to_connector(connector_id, 7, "thread-1")
         self.assertEqual(
-            {table: len(self._database.tables[table]) for table in TABLE_NAMES},
-            {table: 0 for table in TABLE_NAMES},
+            store.get_connector_for_thread("thread-1", 7)["id"], connector_id
         )
-
-    def test_failed_resource_replacement_rolls_back_without_partial_delete(self):
-        connector = store.create_connector(7, name="Notion")
-        store.replace_connector_resources(
-            connector["id"],
-            7,
-            databases=[{"database_id": "db-original", "title": "Original"}],
-            pages=[],
-        )
-        before = {
-            table: [dict(row) for row in rows]
-            for table, rows in self._database.tables.items()
-        }
-        self._database.fail_marker = "notion.resource.insert"
-        with self.assertRaisesRegex(RuntimeError, "injected failure"):
-            store.replace_connector_resources(
-                connector["id"],
-                7,
-                databases=[{"database_id": "db-replacement", "title": "Replacement"}],
-                pages=[],
-            )
-        self._database.fail_marker = None
-
-        self.assertEqual(self._database.tables, before)
-        self.assertEqual(self._pool.connections[-1].commits, 0)
-        self.assertEqual(self._pool.connections[-1].rollbacks, 1)
-
-    def test_failed_page_materialization_rolls_back_snapshot_and_pointer(self):
-        connector = store.create_connector(7, name="Notion")
-        store.replace_connector_resources(
-            connector["id"],
-            7,
-            databases=[{"database_id": "db-1", "title": "Tasks"}],
-            pages=[],
-        )
-        before = {
-            table: [dict(row) for row in rows]
-            for table, rows in self._database.tables.items()
-        }
-        self._database.fail_marker = "notion.resource_page.insert"
-        with self.assertRaisesRegex(RuntimeError, "injected failure"):
-            store.save_snapshot(
-                connector["id"], 7, "workspace-1", self._sample_snapshot(connector["id"])
-            )
-        self._database.fail_marker = None
-
-        self.assertEqual(self._database.tables, before)
-        self.assertEqual(self._pool.connections[-1].commits, 0)
-        self.assertEqual(self._pool.connections[-1].rollbacks, 1)
-
-    def test_runtime_source_is_postgres_only_and_all_queries_are_bound(self):
-        connector = store.create_connector(7, name="Notion")
-        store.get_connector(connector["id"], 7)
-        source = Path(store.__file__).read_text(encoding="utf-8")
-        lowered = source.casefold()
-        for forbidden in (
-            "sqlite3",
-            "begin immediate",
-            "create table",
-            "ink_agent_notion_db_path",
-            "db_path",
-        ):
-            self.assertNotIn(forbidden, lowered)
-        self.assertNotIn("PRAGMA", source)
-        self.assertNotIn("?", source)
-        self.assertNotIn("import database", source)
-        self.assertIn("PostgresUnitOfWork", source)
-        self.assertIn("PostgresPool.from_env", source)
-        queries = [
-            query
-            for connection in self._pool.connections
-            for query, _params in connection.executions
-            if "notion." in query
+        self.assertTrue(store.delete_connector(connector_id, 7))
+        self.assertEqual(store.list_connectors(7), [])
+        user_calls = [
+            call
+            for call in self.state.calls
+            if call[0] != "notion.sync-candidates.list"
         ]
-        self.assertTrue(queries)
-        self.assertTrue(all("%s" in query for query in queries))
-        self.assertTrue(all("?" not in query for query in queries))
-
-    def test_default_runtime_opens_and_closes_only_its_lifecycle_pool(self):
-        class LifecyclePool:
-            def __init__(self):
-                self.open_calls = 0
-                self.close_calls = 0
-
-            def open(self):
-                self.open_calls += 1
-
-            def close(self):
-                self.close_calls += 1
-
-            def connection(self, timeout=None):  # pragma: no cover - not used here
-                raise AssertionError(timeout)
-
-        lifecycle_pool = LifecyclePool()
-        store.close_default_store()
-        with patch.object(
-            store.PostgresPool,
-            "from_env",
-            return_value=lifecycle_pool,
-        ) as factory:
-            configured = store.open_default_store()
-            self.assertIsInstance(configured, store.NotionConnectorStore)
-            self.assertEqual(lifecycle_pool.open_calls, 1)
-            factory.assert_called_once_with(
-                application_name="ink-dream-notion-connectors"
+        self.assertTrue(user_calls)
+        self.assertTrue(
+            all(call[2] == "Bearer notion-oauth-token" for call in user_calls)
+        )
+        self.assertTrue(
+            all(
+                not {
+                    "user_id",
+                    "actor_id",
+                    "canonical_user_id",
+                    "sql",
+                    "table",
+                }
+                & call[1].keys()
+                for call in user_calls
             )
-            store.close_default_store()
-        self.assertEqual(lifecycle_pool.close_calls, 1)
+        )
+
+    def test_background_store_uses_service_scope_without_user_token(self) -> None:
+        connector = self.user_store.create_connector(7, "Notion")
+        self.user_store.save_auth_state(
+            connector["id"], 7, auth_status="authenticated", config_patch={}
+        )
+        candidates = self.background_store.list_sync_candidates()
+        self.assertEqual([item["id"] for item in candidates], [connector["id"]])
+        fetched = self.background_store.get_connector(connector["id"], 7)
+        self.assertEqual(fetched["user_id"], 7)
+        background_calls = [
+            call for call in self.state.calls if call[0].startswith("notion.sync")
+        ]
+        self.assertTrue(background_calls)
+        self.assertTrue(all(call[2] is None for call in background_calls))
+        with self.assertRaises(AdminDataError):
+            self.background_store.create_connector(7, "Forbidden")
+
+    def test_actor_binding_and_dto_extra_fields_fail_closed(self) -> None:
+        with self.assertRaises(AdminDataError):
+            self.user_store.list_connectors(8)
+        with self.assertRaises(ValidationError):
+            NotionConnectorCreateInputDTO.model_validate(
+                {
+                    "authority": None,
+                    "name": "Notion",
+                    "platform": "notion",
+                    "config": {},
+                    "user_id": "7",
+                }
+            )
+
+    def test_default_runtime_requires_explicit_typed_store(self) -> None:
+        self.assertIs(store.default_store(), self.user_store)
+        store.close_default_store()
+        with self.assertRaises(AdminDataError):
+            store.default_store()
+        with self.assertRaises(TypeError):
+            store.open_default_store(store=object())  # type: ignore[arg-type]
+
+    def test_production_store_source_contains_no_database_path(self) -> None:
+        source = Path(store.__file__).read_text(encoding="utf-8").casefold()
+        for forbidden in (
+            "import database",
+            "psycopg",
+            "postgrespool",
+            "postgresunitofwork",
+            "select ",
+            "insert ",
+            "update ",
+            "delete from",
+            "create table",
+            "sqlite",
+        ):
+            self.assertNotIn(forbidden, source)
+        self.assertIn("adminnotionconnectordata", source)
 
 
 if __name__ == "__main__":

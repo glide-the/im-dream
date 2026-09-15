@@ -1,5 +1,6 @@
 # [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
 # [Sync] 2026-09-16: authorize injected managed-MCP loaders with the current persistence grant in tests.
+# [Sync] 2026-09-16: verify the Notion adapter receives the exact actor, Thread, Run and current grant.
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
 # [Output] Entity scope, recent Session reads, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
@@ -240,6 +241,25 @@ def test_holder_rejects_other_actor_or_thread_before_data_access(actor, thread):
     value, calls, _ = holder()
     with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
         value.current_grant(actor_id=actor, thread_id=thread)
+    assert len(calls) == 1
+
+
+def test_notion_store_binds_the_current_actor_thread_and_optional_run():
+    workflow_context = _dream_context()
+    value, calls, _ = holder(workflow_context=workflow_context)
+
+    store = value.notion_connector_store(actor_id="42", thread_id="thread-1")
+
+    assert store._expected_user_id == "42"
+    assert store._authority.model_dump() == {
+        "thread_id": "thread-1",
+        "workflow_run_id": workflow_context.workflow_run_id,
+    }
+    assert store._access_token == TOKEN
+    assert len(calls) == 1
+
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        value.notion_connector_store(actor_id="43", thread_id="thread-1")
     assert len(calls) == 1
 
 

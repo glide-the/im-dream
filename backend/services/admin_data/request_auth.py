@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry148-168 Notion connector data operations.
 # [Sync] 2026-09-16: register Registry133 launch replay lookup.
 # [Sync] 2026-09-16: register Registry134-147 managed-MCP data operations.
 # [Sync] 2026-09-16: register Registry122-126 Deck Plugin binding operations.
@@ -77,6 +78,7 @@ from .deck_chat_context_data import DECK_CHAT_CONTEXT_OPERATIONS
 from .deck_workspace_plugins_data import DECK_WORKSPACE_PLUGIN_OPERATIONS
 from .workflow_managed_mcp_scope_data import WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS
 from .managed_mcp_data import MANAGED_MCP_OPERATIONS
+from .notion_connector_data import NOTION_CONNECTOR_OPERATIONS
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
 from .story_workspace_review_data import STORY_WORKSPACE_REVIEW_OPERATIONS
@@ -141,6 +143,7 @@ class AdminRequestAuth:
                 *DECK_WORKSPACE_PLUGIN_OPERATIONS,
                 *WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS,
                 *MANAGED_MCP_OPERATIONS,
+                *NOTION_CONNECTOR_OPERATIONS,
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *STORY_WORKSPACE_OUTPUT_OPERATIONS,
                 *STORY_WORKSPACE_REVIEW_OPERATIONS,
