@@ -42,6 +42,7 @@ HTTP 控制通道或 Agent turn 状态机。
 - 公开 selector integrity 为 `sha512-QlpFq6CvcA2DRudLgJgaQMc5aP7MfJJ5CADY7rbgraTGq0FAF+VJx8VvK/6xFpHb+FgZOCgjlXqmS0nOUIjzuQ==`；平台 integrity 分别为 darwin-arm64 `sha512-bwb3BrIdcNxcUyPFwoUup2QCGkKfun5L/rvmfrz11w1gydPkGj/Dy6n+j/T9BXYYfFvwFWG0f1EKjn2PMYCgCw==`、darwin-x64 `sha512-GbvGTyrxJ0L0+JLuAW0wCvi/1Q2X2TxHMPySFhw61xTzVahjaIKPgQBGEE12im3C40lxyXLjiC0go7PxIOgRwA==`、linux-arm64 `sha512-79AWiXfnbcBpz0MhyBnWgoZje57Xa30PCuP6J6Yj3vMmeSgjv+8fbJe/LRf84ApK6rAnc4pEEBc+Znrx8KzhHQ==`、linux-x64 `sha512-Q0aOjtgfFE6vY21cj+Zrco0wDGm0aWRTCqDN282aYy6NqETd7hiGZX3yMs485ov/ybqQY2KusGVJhqGfZqgv+g==`。
 - 公开 registry acceptance 的 wheel 与 sdist 都解析 SDK `0.2.145`、CLI `2.1.241`、Runtime `0.1.10`、`pluginManagement: true`；公开 darwin-arm64 包通过 Dream 完整本地 Marketplace pipeline。
 - Admin digest 修复由 [dream-im-platform PR #14](https://github.com/glide-the/dream-im-platform/pull/14) 合并为 `69a14aeb60c5b4d59987486d00fe2d4fc3bfc367`；版本为 `0.1.1`，完整单测 `690 passed`。
+- Dream [CI PR #59](https://github.com/glide-the/im-dream/pull/59) 合并为 `36d503a86f474ef9c8f3e6d1495dcc56b01ad9ff`，修正默认 `develop` 分支此前未被 pull-request workflow 监听的问题。
 
 ## Dream 执行规则与失败处理
 
