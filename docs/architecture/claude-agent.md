@@ -15,6 +15,7 @@
 [Sync] 2026-09-15: first/rebuilt Agent prompts read recent Session projections through the same turn owner; Admin/read-contract failures stop before Workspace, Runtime and SSE.
 [Sync] 2026-09-15: atomic user reservation uses a server-only purpose grant; Factory owns renewal and terminal/cancel cleanup.
 [Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
+[Sync] 2026-09-16: Story Workspace stdio reads the current WorkflowRun through the turn-owned Admin DTO broker and retains only filesystem writes.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
 [Sync] 2026-09-14: resource policy/observer composition consumes strict Admin APIs; LKG and runtime semantics remain unchanged.
 [Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
@@ -116,6 +117,8 @@ ThreadFactory (thread_factory.py)
 公开Chat在返回SSE前读取Admin Workflow上下文，创建绑定actor、Thread与当前Run的server-persistence委托，并原子预留user message和缺失title。Admin执行原stored confirmation guard，Dream只保留原文本投影和raw JSON词法。Service复用已确认相同输入；unknown保留原request ID，只查原receipt，absent阻止新写与推理。
 
 Factory在既有admission成功后启动独立Keeper和Chat Session broker。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，broker先停止accept并drain已dispatch读取，再等待writer、renewal线程和独立HTTP client关闭。confirmation dispatcher 通过 Registry121 从 durable claim 取得相同 owner，并在 Runtime 前注入 Workflow/Deck snapshots；ACK、claim替换或租约过期会在Admin下一次resolve/renew时失效。既有lease、EventBus、Runner与resume/cancel流程保持。grant不投影给CLI、Editor或user MCP。首次或Settings prompt变化时，Service通过owner调用Admin `session.list`取得UTC当天及前两天投影；Chat `get_sessions_range`用同一owner的私有broker取得任意日期及可选正文投影。user stdio只收到broker/policy allowlist，isolated bootstrap在package导入前清除继承env；原fuzzy/labels/limit/vector逻辑留在child。Reflections后台上下文及其他未迁移内部路径仍按各自typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
+
+同一私有broker还提供无实体selector的`workflow-run.current`投影，仅绑定Workflow Run的turn owner启用。Host使用当前可续期grant先调用Admin `workflow-managed-mcp-scope.resolve`，再以返回Workspace调用`workflow-run.read`；两个操作均使用严格Pydantic DTO，对应Admin Zod DTO、Service和typed Drizzle Repository。Host核对actor、Thread、Run、Workspace及冻结Deck来源后才返回完整`WorkflowRun`。Story Workspace stdio只获得broker tuple与既有host-owned actor/Thread/Run相等性上下文，验证回包后调用Dream `StoryWorkspaceDreamFileWriter`；它不持有Admin bearer或PostgreSQL路径。Admin失败、协议漂移或实体错配在打开Thread workspace前终止，禁止数据库回退；CAS、路径规范化、符号链接拒绝和原子文件替换保持不变。
 
 公开Service的Thread读取与SDK init/final/repair Session回写也通过同一owner；reply actor/thread错配拒绝。user/session未知写共享原operation/input/UUID，只有最近确认的Session同输入可复用。SDK init失败保留原日志/既有运行turn与cancel处理；assistant/Run旧DB写尚不在此owner内。
 

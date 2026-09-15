@@ -1,8 +1,9 @@
 # [Input] Turn-local loopback environment and the Session list wire projection.
-# [Output] Strict broker DTOs and a synchronous child client with no Admin or database dependency.
-# [Pos] Neutral user-MCP Session projection protocol shared by the host broker and stdio child.
+# [Output] Strict broker DTOs plus synchronous Session and current-Run child clients with no Admin or database dependency.
+# [Pos] Neutral turn projection protocol shared by the host broker and stdio children.
 # [Sync] 2026-09-15: define the bounded private Session broker protocol.
-"""Strict private protocol for retrieving Session projections over loopback."""
+# [Sync] 2026-09-16: add a selector-free current WorkflowRun projection for Story Workspace filesystem writes.
+"""Strict private protocol for retrieving turn-owned projections over loopback."""
 
 from __future__ import annotations
 
@@ -11,10 +12,12 @@ import json
 import math
 import re
 import socket
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from models.workflow_run import WorkflowRun
 
 
 SESSION_BROKER_HOST_ENV = "INK_SESSION_BROKER_HOST"
@@ -105,6 +108,14 @@ class SessionProjectionRequestDTO(_StrictDTO):
         return self
 
 
+class WorkflowRunProjectionRequestDTO(_StrictDTO):
+    """Request the WorkflowRun already bound to this broker's turn owner."""
+
+    capability: _Capability = Field(repr=False)
+    request_id: _Identifier
+    operation: Literal["workflow-run.current"]
+
+
 class SessionProjectionDTO(_StrictDTO):
     id: Annotated[str, Field(min_length=1)]
     name: str | None
@@ -118,6 +129,10 @@ class SessionProjectionDTO(_StrictDTO):
 
 class SessionProjectionResultDTO(_StrictDTO):
     sessions: list[SessionProjectionDTO]
+
+
+class WorkflowRunProjectionResultDTO(_StrictDTO):
+    run: WorkflowRun
 
 
 class SessionProjectionErrorDTO(_StrictDTO):
@@ -135,6 +150,18 @@ class SessionProjectionResponseDTO(_StrictDTO):
     def validate_shape(self):
         if self.ok == (self.result is None) or self.ok == (self.error is not None):
             raise ValueError("Session broker response shape is invalid")
+        return self
+
+
+class WorkflowRunProjectionResponseDTO(_StrictDTO):
+    ok: bool
+    result: WorkflowRunProjectionResultDTO | None = None
+    error: SessionProjectionErrorDTO | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.ok == (self.result is None) or self.ok == (self.error is not None):
+            raise ValueError("Workflow Run broker response shape is invalid")
         return self
 
 
@@ -197,6 +224,45 @@ class SessionProjectionBrokerClient:
                 "SESSION_BROKER_CONFIGURATION_INVALID", 503
             ) from None
 
+    def _round_trip(self, request: _StrictDTO, request_id: str) -> bytes:
+        try:
+            encoded = request.model_dump_json().encode("utf-8") + b"\n"
+            with socket.create_connection(
+                (self._host, self._port), timeout=self._timeout_seconds
+            ) as connection:
+                connection.settimeout(self._timeout_seconds)
+                connection.sendall(encoded)
+                reader = connection.makefile("rb")
+                raw = reader.readline(self._max_response_bytes + 1)
+        except (OSError, TimeoutError):
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_UNAVAILABLE", 503, request_id
+            ) from None
+        if (
+            not raw
+            or len(raw) > self._max_response_bytes
+            or not raw.endswith(b"\n")
+        ):
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_RESPONSE_INVALID", 503, request_id
+            )
+        return raw[:-1]
+
+    @staticmethod
+    def _raise_remote_error(
+        error: SessionProjectionErrorDTO | None,
+        request_id: str,
+    ) -> None:
+        if error is None:
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_RESPONSE_INVALID", 503, request_id
+            )
+        raise SessionProjectionProtocolError(
+            error.code,
+            error.status_code,
+            error.request_id or request_id,
+        )
+
     def list_sessions(
         self,
         *,
@@ -218,44 +284,15 @@ class SessionProjectionBrokerClient:
             raise SessionProjectionProtocolError(
                 "SESSION_BROKER_INPUT_INVALID", 400, resolved_request_id
             ) from None
+        raw = self._round_trip(request, resolved_request_id)
         try:
-            encoded = request.model_dump_json().encode("utf-8") + b"\n"
-            with socket.create_connection(
-                (self._host, self._port), timeout=self._timeout_seconds
-            ) as connection:
-                connection.settimeout(self._timeout_seconds)
-                connection.sendall(encoded)
-                reader = connection.makefile("rb")
-                raw = reader.readline(self._max_response_bytes + 1)
-        except (OSError, TimeoutError):
-            raise SessionProjectionProtocolError(
-                "SESSION_BROKER_UNAVAILABLE", 503, resolved_request_id
-            ) from None
-        if (
-            not raw
-            or len(raw) > self._max_response_bytes
-            or not raw.endswith(b"\n")
-        ):
-            raise SessionProjectionProtocolError(
-                "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
-            )
-        try:
-            response = SessionProjectionResponseDTO.model_validate_json(raw[:-1])
+            response = SessionProjectionResponseDTO.model_validate_json(raw)
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
             raise SessionProjectionProtocolError(
                 "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
             ) from None
         if not response.ok:
-            error = response.error
-            if error is None:
-                raise SessionProjectionProtocolError(
-                    "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
-                )
-            raise SessionProjectionProtocolError(
-                error.code,
-                error.status_code,
-                error.request_id or resolved_request_id,
-            )
+            self._raise_remote_error(response.error, resolved_request_id)
         result = response.result
         if result is None or (
             not include_text and any(item.text is not None for item in result.sessions)
@@ -264,6 +301,40 @@ class SessionProjectionBrokerClient:
                 "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
             )
         return result
+
+    def current_workflow_run(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> WorkflowRun:
+        """Read the WorkflowRun fixed by the host owner, without an entity selector."""
+
+        resolved_request_id = request_id or str(uuid4())
+        try:
+            request = WorkflowRunProjectionRequestDTO(
+                capability=self._capability,
+                request_id=resolved_request_id,
+                operation="workflow-run.current",
+            )
+        except ValidationError:
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_INPUT_INVALID", 400, resolved_request_id
+            ) from None
+        raw = self._round_trip(request, resolved_request_id)
+        try:
+            response = WorkflowRunProjectionResponseDTO.model_validate_json(raw)
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
+            ) from None
+        if not response.ok:
+            self._raise_remote_error(response.error, resolved_request_id)
+        result = response.result
+        if result is None or type(result.run) is not WorkflowRun:
+            raise SessionProjectionProtocolError(
+                "SESSION_BROKER_RESPONSE_INVALID", 503, resolved_request_id
+            )
+        return result.run
 
 
 __all__ = [
@@ -284,4 +355,7 @@ __all__ = [
     "SessionProjectionRequestDTO",
     "SessionProjectionResponseDTO",
     "SessionProjectionResultDTO",
+    "WorkflowRunProjectionRequestDTO",
+    "WorkflowRunProjectionResponseDTO",
+    "WorkflowRunProjectionResultDTO",
 ]

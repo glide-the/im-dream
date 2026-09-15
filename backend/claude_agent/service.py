@@ -5,6 +5,7 @@
 # [Sync] 2026-09-16: resolve Notion metadata through the current Admin turn grant.
 # [Sync] 2026-09-15: persist parsed standalone Story proposals through Registry109 with no Dream DB fallback.
 # [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
+# [Sync] 2026-09-16: reserve the turn broker tuple as server-owned Story Workspace child context.
 # [Sync] 2026-09-15: complete/partial assistant writes use the bound Admin turn owner.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
 #         claude_agent/context_builder.py, claude_agent/tool_confirmation_store.py.
@@ -270,6 +271,9 @@ from uuid import uuid4
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from libs.claude_agent_kit.server.sdk_env import resolve_claude_config_home
+from libs.claude_agent_kit.server.session_projection_protocol import (
+    SESSION_BROKER_ENV_NAMES,
+)
 from claude_agent.thread_pool import AgentRunState
 from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
@@ -366,6 +370,7 @@ _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_THREAD_ID",
     "INK_AGENT_WORKFLOW_RUN_ID",
     "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
+    *SESSION_BROKER_ENV_NAMES,
 })
 
 _MCP_APPS_RESULT_VERSION = 1

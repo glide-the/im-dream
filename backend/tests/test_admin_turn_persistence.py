@@ -13,6 +13,7 @@
 # [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
 # [Sync] 2026-09-15: validate the owner-bound broker provider, renewed grant and arbitrary strict ranges.
 # [Sync] 2026-09-15: validate Registry108 activation and shared unknown-write recovery on the exact grant.
+# [Sync] 2026-09-16: validate selector-free current WorkflowRun projection through Admin scope/read DTOs.
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +38,7 @@ from services.admin_data.session_data import (
 )
 from services.admin_data.session_models import SessionListInputDTO
 from services.admin_data.session_projection_broker import SessionProjectionBrokerSettings
+from services.admin_data.run_data import READ_RUN
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
@@ -74,14 +76,14 @@ def grant(run_id=None):
 
 def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None,
     schema_fault=None, assistant_patch=None, session_rows=None, expected_token=TOKEN,
-    workflow_context=None):
+    workflow_context=None, run_patch=None):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     calls, receipt_states = [], ["absent", "committed"]
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
         GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS,
-        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, ACTIVATE_WORKFLOW_RUNTIME,
+        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE, READ_RUN, ACTIVATE_WORKFLOW_RUNTIME,
         *STORY_WORKSPACE_OUTPUT_OPERATIONS, *DREAM_AUTO_REPAIR_OPERATIONS)
     schema_requirements = {
         item.capability: item
@@ -172,6 +174,44 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                 value = {
                     **input_dto,
                     "workspace_id": "workspace-1",
+                }
+            elif name == READ_RUN.capability.name:
+                assert input_dto == {
+                    "workspace_id": "workspace-1",
+                    "workflow_run_id": workflow_context.workflow_run_id,
+                }
+                value = {
+                    "run": {
+                        "workflow_run_id": workflow_context.workflow_run_id,
+                        "deck_plugin_id": workflow_context.deck_plugin_id,
+                        "deck_plugin_version": workflow_context.deck_plugin_version,
+                        "workflow_definition_ref": "workflow-1",
+                        "deck_runtime_snapshot_id": workflow_context.deck_runtime_snapshot_id,
+                        "status": "preflight",
+                        "failed_step": None,
+                        "error_code": None,
+                        "retry_of_run_id": None,
+                        "deck_plugin_manifest_hash": "sha256:" + "1" * 64,
+                        "deck_plugin_binding_id": workflow_context.deck_plugin_binding_id,
+                        "binding_revision": workflow_context.binding_revision,
+                        "runtime_plugin_lock_id": workflow_context.runtime_plugin_lock_id,
+                        "runtime_load_receipt_id": None,
+                        "workflow_preflight_id": "pf_" + "2" * 32,
+                        "agent_session_id": None,
+                        "source_voice_thread_id": "thread-1",
+                        "source_message_id": "message-1",
+                        "source_message_time": "2026-09-15T08:00:00Z",
+                        "workspace_id": "workspace-1",
+                        "idempotency_key": "run-request-1",
+                        "input_hash": "sha256:" + "3" * 64,
+                        "semantic_fingerprint": "sha256:" + "4" * 64,
+                        "status_version": 1,
+                        "created_by": "42",
+                        "created_at": "2026-09-15T08:00:00Z",
+                        "started_at": None,
+                        "completed_at": None,
+                        **(run_patch or {}),
+                    }
                 }
             elif name == STORE_STORY_WORKSPACE_OUTPUT.capability.name:
                 assert input_dto == {
@@ -452,6 +492,99 @@ def test_managed_mcp_scope_uses_current_exact_thread_run_grant():
     request = calls[-1]
     assert request.headers["authorization"] == "Bearer " + TOKEN
     assert request.url.path.endswith("/workflow-managed-mcp-scope.resolve")
+
+
+def test_current_run_projection_uses_scope_then_run_dtos_with_exact_grant():
+    context = _dream_context()
+    value, calls, _ = holder(workflow_context=context)
+
+    run = value._session_projection_provider.current_workflow_run("broker-request")
+
+    assert run.workflow_run_id == context.workflow_run_id
+    assert run.workspace_id == "workspace-1"
+    assert run.created_by == "42"
+    assert run.source_voice_thread_id == "thread-1"
+    commands = [request for request in calls if request.method == "POST"]
+    assert [request.url.path.rsplit("/", 1)[-1] for request in commands] == [
+        RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE.capability.name,
+        READ_RUN.capability.name,
+    ]
+    assert all(
+        request.headers["authorization"] == "Bearer " + TOKEN
+        for request in commands
+    )
+
+
+def test_current_run_projection_rejects_non_dream_turn_before_io():
+    value, calls, _ = holder()
+    before = len(calls)
+
+    with pytest.raises(AdminDataError, match="STORY_WORKSPACE_PROJECTION_DENIED"):
+        value._session_projection_provider.current_workflow_run("broker-request")
+
+    assert len(calls) == before
+
+
+@pytest.mark.parametrize(
+    "actor,thread",
+    [("43", "thread-1"), ("42", "other")],
+)
+def test_current_run_projection_rejects_other_owner_before_io(actor, thread):
+    context = _dream_context()
+    value, calls, _ = holder(workflow_context=context)
+    before = len(calls)
+
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        value._project_current_workflow_run(
+            actor_id=actor,
+            thread_id=thread,
+            request_id="broker-request",
+        )
+
+    assert len(calls) == before
+
+
+@pytest.mark.parametrize(
+    "run_patch",
+    [
+        {"source_voice_thread_id": "other"},
+        {"deck_plugin_version": "2.0.0"},
+        {"workspace_id": "other-workspace"},
+        {"created_by": "43"},
+    ],
+)
+def test_current_run_projection_rejects_admin_entity_drift(run_patch):
+    context = _dream_context()
+    value, _calls, _ = holder(
+        workflow_context=context,
+        run_patch=run_patch,
+    )
+
+    with pytest.raises(AdminDataError, match="ADMIN_RESPONSE_INVALID"):
+        value._session_projection_provider.current_workflow_run("broker-request")
+
+
+def test_current_run_projection_uses_the_keeper_current_renewed_token():
+    context = _dream_context()
+    renewed_token = "idg_" + "b" * 43
+    value, calls, _ = holder(
+        workflow_context=context,
+        expected_token=renewed_token,
+    )
+    value._keeper = SimpleNamespace(
+        current=lambda purpose: replace(
+            grant(context.workflow_run_id), token=renewed_token
+        )
+    )
+
+    run = value._session_projection_provider.current_workflow_run("broker-request")
+
+    assert run.workflow_run_id == context.workflow_run_id
+    commands = [request for request in calls if request.method == "POST"]
+    assert all(
+        request.headers["authorization"] == "Bearer " + renewed_token
+        for request in commands
+    )
 
 
 def _dream_context():

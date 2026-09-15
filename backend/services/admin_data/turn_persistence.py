@@ -1,5 +1,5 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic turn/auto-repair persistence, delegated Notion DTO store, and provider-bound Session broker.
+# [Output] Atomic turn/auto-repair persistence, delegated Notion DTO store, and provider-bound Session/current-Run broker.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
@@ -12,6 +12,7 @@
 # [Sync] 2026-09-15: persist Registry109 Story proposals through the same Thread grant and unknown-write barrier.
 # [Sync] 2026-09-16: construct an actor/Thread-bound Notion DTO store from the current grant.
 # [Sync] 2026-09-16: share the write barrier with Registry169 repair settlement.
+# [Sync] 2026-09-16: project the current authoritative WorkflowRun through existing Admin DTO reads.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ import json
 from threading import Lock, RLock
 from typing import Callable
 from uuid import uuid4
+
+from models.workflow_run import WorkflowRun
 
 from .agent_turn_persistence import AdminAgentTurnPersistence
 from .chat_data import AdminChatData, PERSIST_MESSAGE, UPDATE_SESSION
@@ -35,6 +38,7 @@ from .session_projection_broker import (
     SessionProjectionBroker,
     SessionProjectionBrokerSettings,
 )
+from .run_data import AdminRunData, RunLookupInputDTO
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
 from .deck_workspace_plugins_data import (
@@ -92,7 +96,7 @@ class _PendingWrite:
 
 
 class AdminTurnSessionProjectionProvider:
-    """Bind Session list reads to one immutable Chat actor and Thread owner."""
+    """Bind child projections to one immutable Chat actor, Thread and Run owner."""
 
     def __init__(self, owner: "AdminTurnPersistence") -> None:
         self._owner = owner
@@ -104,6 +108,13 @@ class AdminTurnSessionProjectionProvider:
             actor_id=self._owner._resolution.canonical_user_id,
             thread_id=self._owner._resolution.thread_id,
             input_dto=input_dto,
+            request_id=request_id,
+        )
+
+    def current_workflow_run(self, request_id: str) -> WorkflowRun:
+        return self._owner._project_current_workflow_run(
+            actor_id=self._owner._resolution.canonical_user_id,
+            thread_id=self._owner._resolution.thread_id,
             request_id=request_id,
         )
 
@@ -142,6 +153,10 @@ class AdminTurnPersistence(
             client,
             canonical_user_id=resolution.canonical_user_id,
         )
+        self._run_data = AdminRunData(
+            client,
+            canonical_user_id=resolution.canonical_user_id,
+        )
         self._workflow_runtime_activation_data = (
             AdminWorkflowRuntimeActivationData(client)
         )
@@ -164,6 +179,7 @@ class AdminTurnPersistence(
         self._session_projection_broker = SessionProjectionBroker(
             self._session_projection_provider,
             settings=session_broker_settings,
+            workflow_run_provider=self._session_projection_provider,
         )
 
     def start(self) -> None:
@@ -449,6 +465,63 @@ class AdminTurnPersistence(
                 request_id,
                 access_token=grant.token,
             )
+
+    def _project_current_workflow_run(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        request_id: str,
+    ) -> WorkflowRun:
+        """Read the exact turn Run through Admin scope and Run DTO operations."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None:
+            raise AdminDataError(
+                "STORY_WORKSPACE_PROJECTION_DENIED", 403, request_id
+            )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            scope = self._managed_mcp_scope_data.resolve(
+                WorkflowManagedMcpScopeInputDTO(
+                    thread_id=thread_id,
+                    workflow_run_id=context.workflow_run_id,
+                ),
+                request_id,
+                access_token=grant.token,
+            )
+            workspace_id = scope.workspace_for(
+                actor_id=actor_id,
+                thread_id=thread_id,
+                workflow_run_id=context.workflow_run_id,
+            )
+            run = WorkflowRun.model_validate(
+                self._run_data.read(
+                    RunLookupInputDTO(
+                        workspace_id=workspace_id,
+                        workflow_run_id=context.workflow_run_id,
+                    ),
+                    request_id,
+                    access_token=grant.token,
+                )
+            )
+        if (
+            run.workflow_run_id != context.workflow_run_id
+            or run.workspace_id != workspace_id
+            or run.created_by != actor_id
+            or run.source_voice_thread_id != thread_id
+            or run.deck_plugin_id != context.deck_plugin_id
+            or run.deck_plugin_version != context.deck_plugin_version
+            or run.deck_plugin_binding_id != context.deck_plugin_binding_id
+            or run.binding_revision != context.binding_revision
+            or run.deck_runtime_snapshot_id != context.deck_runtime_snapshot_id
+            or run.runtime_plugin_lock_id != context.runtime_plugin_lock_id
+        ):
+            raise invalid_response(request_id)
+        return run
 
     def session_projection_child_env(self) -> dict[str, str]:
         """Return only the started broker tuple for the user MCP child."""

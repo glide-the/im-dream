@@ -1574,7 +1574,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "mcp__story_workspace__write_dream_stage",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
-    async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
+    async def test_story_workspace_stdio_receives_only_trusted_identity_and_broker_env(self):
         self.set_query([])
         runner = self.make_runner()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1600,6 +1600,11 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                             "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
                                 "dream_agent_" + "a" * 64
                             ),
+                            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+                            "INK_SESSION_BROKER_PORT": "31415",
+                            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+                            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+                            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
                             "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
                         },
                     ),
@@ -1617,6 +1622,11 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             env["INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"],
             "dream_agent_" + "a" * 64,
         )
+        self.assertEqual(env["INK_SESSION_BROKER_HOST"], "127.0.0.1")
+        self.assertEqual(env["INK_SESSION_BROKER_PORT"], "31415")
+        self.assertEqual(env["INK_SESSION_BROKER_CAPABILITY"], "a" * 43)
+        self.assertEqual(env["INK_SESSION_BROKER_TIMEOUT_SECONDS"], "10.0")
+        self.assertEqual(env["INK_SESSION_BROKER_MAX_BYTES"], "1048576")
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
     async def test_story_workspace_stdio_is_not_started_without_trusted_run(self):

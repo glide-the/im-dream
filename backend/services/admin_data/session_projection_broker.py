@@ -1,13 +1,15 @@
-# [Input] One bound Session projection provider, strict loopback DTOs and server transport bounds.
+# [Input] Bound Session/current-Run projection providers, strict loopback DTOs and server transport bounds.
 # [Output] A turn-local capability broker that stops acceptance and drains dispatched reads on close.
-# [Pos] Server-only Session projection transport; child processes receive no identity or Admin credential.
+# [Pos] Server-only turn projection transport; child processes receive no Admin or database credential.
 # [Sync] 2026-09-15: add the reusable private broker for Chat Session retrieval.
-"""Private loopback broker for bounded Session list projections."""
+# [Sync] 2026-09-16: reuse the broker capability for a selector-free current WorkflowRun projection.
+"""Private loopback broker for bounded turn-owned projections."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import hmac
+import json
 import logging
 import math
 import secrets
@@ -28,7 +30,12 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     SessionProjectionRequestDTO,
     SessionProjectionResponseDTO,
     SessionProjectionResultDTO,
+    WorkflowRunProjectionRequestDTO,
+    WorkflowRunProjectionResponseDTO,
+    WorkflowRunProjectionResultDTO,
 )
+
+from models.workflow_run import WorkflowRun
 
 from .errors import AdminDataError, configuration_invalid
 from .session_models import SessionListInputDTO, SessionListResultDTO
@@ -43,6 +50,12 @@ class SessionProjectionProvider(Protocol):
     def list_sessions(
         self, input_dto: SessionListInputDTO, request_id: str
     ) -> SessionListResultDTO: ...
+
+
+class WorkflowRunProjectionProvider(Protocol):
+    """Host provider whose identity and current Run are fixed before startup."""
+
+    def current_workflow_run(self, request_id: str) -> WorkflowRun: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +88,10 @@ class SessionProjectionBroker:
         provider: SessionProjectionProvider,
         *,
         settings: SessionProjectionBrokerSettings,
+        workflow_run_provider: WorkflowRunProjectionProvider | None = None,
     ) -> None:
         self._provider = provider
+        self._workflow_run_provider = workflow_run_provider
         self._settings = settings
         self._capability = secrets.token_urlsafe(32)
         TypeAdapter(SessionProjectionRequestDTO).validate_python(
@@ -116,37 +131,73 @@ class SessionProjectionBroker:
     def _response(self, raw: bytes) -> bytes:
         request_id: str | None = None
         try:
-            request = SessionProjectionRequestDTO.model_validate_json(raw)
-            request_id = request.request_id
-            if not hmac.compare_digest(request.capability, self._capability):
-                raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
-            with self._action_lock:
-                with self._lock:
-                    if self._closed:
-                        raise AdminDataError(
-                            "SESSION_BROKER_UNAVAILABLE", 503, request_id
-                        )
-                input_dto = SessionListInputDTO(
-                    start_date=request.start_date,
-                    end_date=request.end_date,
-                    include_text=request.include_text,
+            untrusted = json.loads(raw)
+            if not isinstance(untrusted, dict):
+                raise ValueError("Broker request must be an object")
+            if untrusted.get("operation") == "workflow-run.current":
+                request = WorkflowRunProjectionRequestDTO.model_validate(
+                    untrusted, strict=True
                 )
-                result = self._provider.list_sessions(input_dto, request_id)
-            if type(result) is not SessionListResultDTO:
-                raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
-            projection = SessionProjectionResultDTO.model_validate(
-                result.model_dump(mode="python"), strict=True
-            )
-            if not request.include_text and any(
-                item.text is not None for item in projection.sessions
-            ):
-                raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
-            payload = (
-                SessionProjectionResponseDTO(ok=True, result=projection)
-                .model_dump_json()
-                .encode("utf-8")
-                + b"\n"
-            )
+                request_id = request.request_id
+                if not hmac.compare_digest(request.capability, self._capability):
+                    raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
+                provider = self._workflow_run_provider
+                if provider is None:
+                    raise AdminDataError(
+                        "STORY_WORKSPACE_PROJECTION_DENIED", 403, request_id
+                    )
+                with self._action_lock:
+                    with self._lock:
+                        if self._closed:
+                            raise AdminDataError(
+                                "SESSION_BROKER_UNAVAILABLE", 503, request_id
+                            )
+                    run = provider.current_workflow_run(request_id)
+                if type(run) is not WorkflowRun:
+                    raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
+                payload = (
+                    WorkflowRunProjectionResponseDTO(
+                        ok=True,
+                        result=WorkflowRunProjectionResultDTO(run=run),
+                    )
+                    .model_dump_json()
+                    .encode("utf-8")
+                    + b"\n"
+                )
+            else:
+                request = SessionProjectionRequestDTO.model_validate(
+                    untrusted, strict=True
+                )
+                request_id = request.request_id
+                if not hmac.compare_digest(request.capability, self._capability):
+                    raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
+                with self._action_lock:
+                    with self._lock:
+                        if self._closed:
+                            raise AdminDataError(
+                                "SESSION_BROKER_UNAVAILABLE", 503, request_id
+                            )
+                    input_dto = SessionListInputDTO(
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                        include_text=request.include_text,
+                    )
+                    result = self._provider.list_sessions(input_dto, request_id)
+                if type(result) is not SessionListResultDTO:
+                    raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
+                projection = SessionProjectionResultDTO.model_validate(
+                    result.model_dump(mode="python"), strict=True
+                )
+                if not request.include_text and any(
+                    item.text is not None for item in projection.sessions
+                ):
+                    raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
+                payload = (
+                    SessionProjectionResponseDTO(ok=True, result=projection)
+                    .model_dump_json()
+                    .encode("utf-8")
+                    + b"\n"
+                )
         except (ValidationError, ValueError, TypeError):
             payload = self._error(
                 "SESSION_BROKER_INPUT_INVALID", 400, request_id
@@ -253,4 +304,5 @@ __all__ = [
     "SessionProjectionBroker",
     "SessionProjectionBrokerSettings",
     "SessionProjectionProvider",
+    "WorkflowRunProjectionProvider",
 ]

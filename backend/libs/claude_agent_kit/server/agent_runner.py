@@ -1,5 +1,6 @@
 # [Sync] 2026-09-15: clear inherited user-stdio env in isolated Python before package imports.
 # [Sync] 2026-09-15: project only the Session broker tuple and retrieval policy to user stdio.
+# [Sync] 2026-09-16: project the same turn broker tuple to Story Workspace stdio for current-Run reads.
 # [Sync] 2026-09-15: project only the turn-local Editor broker tuple; remove DATABASE_URL and actor identity from Editor stdio.
 # [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
 #                    results; retain approved call identity until execution ends.
@@ -303,7 +304,10 @@ from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
-from .session_projection_protocol import SESSION_USER_MCP_ENV_NAMES
+from .session_projection_protocol import (
+    SESSION_BROKER_ENV_NAMES,
+    SESSION_USER_MCP_ENV_NAMES,
+)
 from .sdk_env import (
     ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
@@ -2285,7 +2289,7 @@ def _apply_editor_session_binding(
 def _story_workspace_mcp_stdio_config(
     mcp_env: dict[str, str],
 ) -> McpStdioServerConfig:
-    """Build the Story Workspace MCP config with only trusted identity context."""
+    """Build Story Workspace MCP config with bound identity and broker context."""
 
     trusted_env = {
         name: mcp_env[name]
@@ -2294,6 +2298,7 @@ def _story_workspace_mcp_stdio_config(
             "INK_AGENT_THREAD_ID",
             "INK_AGENT_WORKFLOW_RUN_ID",
             "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
+            *SESSION_BROKER_ENV_NAMES,
         )
         if mcp_env.get(name)
     }

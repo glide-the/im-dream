@@ -2,8 +2,8 @@
 
 The Claude Agent supplies only the target run, stage payload, and CAS revision.
 Actor and Chat-thread identity come exclusively from the host-injected stdio
-environment.  Frozen run provenance is loaded from the authoritative
-``WorkflowRun`` on every call and is never accepted as a tool argument.
+environment. Frozen run provenance is loaded through the turn-owned Admin DTO
+projection on every call and is never accepted as a tool argument.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
-from models.workflow_run import AuthenticatedActorContext, WorkflowRun
+from models.workflow_run import WorkflowRun
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamFileWriter,
     WorkflowRun as DreamFileWorkflowRun,
@@ -25,13 +25,13 @@ from services.story_workspace.dream_file_service import (
 from services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
-from services.workflow.run_service import WorkflowRunService
 from story_workspace.contracts import (
     StoryWorkspaceDreamRunToolInput,
     StoryWorkspaceDreamStageToolInput,
 )
 
 from .workspace import get_workspace_root
+from .session_projection_protocol import SessionProjectionBrokerClient
 
 
 _logger = logging.getLogger(__name__)
@@ -102,23 +102,6 @@ def _require_trusted_workflow_run(workflow_run_id: str) -> None:
         raise PermissionError("trusted workflow run context is unavailable")
 
 
-def _read_actor_scoped_run(
-    db: Any,
-    workflow_run_id: str,
-    actor_context: AuthenticatedActorContext,
-) -> WorkflowRun:
-    """Use WorkflowRunService's actor-scoped read path without its DDL constructor.
-
-    ``WorkflowRunService.__init__`` activates run/session tables for write-side
-    workflows.  An MCP read must not perform DDL, so this read-only adapter
-    supplies only the database dependency required by ``read_run``.
-    """
-
-    service = WorkflowRunService.__new__(WorkflowRunService)
-    service.db = db
-    return service.read_run(workflow_run_id, actor_context)
-
-
 def _existing_thread_workspace(thread_id: str) -> Path:
     """Resolve one existing direct child of the workspace root without creating it."""
 
@@ -144,58 +127,32 @@ def _with_authoritative_context(
     workflow_run_id: str,
     operation: Callable[[StoryWorkspaceDreamFileWriter, WorkflowRun], _ResultT],
 ) -> _ResultT:
-    """Open one DB connection, resolve trusted context, then execute a write."""
-
-    import database  # Runtime import keeps the stdio child tied to host DB config.
+    """Read the turn-bound Admin Run projection, then execute a filesystem write."""
 
     actor_id, thread_id = _trusted_actor_and_thread()
-    db = database.get_db()
-    try:
-        workspace_row = db.execute(
-            "SELECT workflow_runs.workspace_id AS id "
-            "FROM workflow_runs "
-            "INNER JOIN story_workspace_workspaces "
-            "ON story_workspace_workspaces.id = workflow_runs.workspace_id "
-            "WHERE workflow_runs.id = %s "
-            "AND story_workspace_workspaces.owner_id = %s "
-            "LIMIT 1",
-            (workflow_run_id, actor_id),
-        ).fetchone()
-        if workspace_row is None:
-            raise PermissionError("actor workspace is unavailable")
-        actor_context = AuthenticatedActorContext(
-            workspace_id=str(workspace_row["id"]),
-            actor_id=str(actor_id),
+    workflow_run = SessionProjectionBrokerClient.from_env(
+        dict(os.environ)
+    ).current_workflow_run()
+    # The backend supports both ``backend.*`` and backend-root imports.
+    # Normalize the authoritative model at this boundary so a process that
+    # loaded both package spellings still satisfies the writer's strict
+    # nominal ``WorkflowRun`` check.
+    if not isinstance(workflow_run, DreamFileWorkflowRun):
+        workflow_run = DreamFileWorkflowRun.model_validate(
+            workflow_run.model_dump(mode="python")
         )
-        workflow_run = _read_actor_scoped_run(
-            db,
-            workflow_run_id,
-            actor_context,
-        )
-        # The backend supports both ``backend.*`` and backend-root imports.
-        # Normalize the authoritative model at this boundary so a process that
-        # loaded both package spellings still satisfies the writer's strict
-        # nominal ``WorkflowRun`` trust check.
-        if not isinstance(workflow_run, DreamFileWorkflowRun):
-            workflow_run = DreamFileWorkflowRun.model_validate(
-                workflow_run.model_dump(mode="python")
-            )
-        if workflow_run.source_voice_thread_id != thread_id:
-            raise PermissionError("run and trusted thread do not match")
-        thread_row = db.execute(
-            "SELECT id FROM chat_thread WHERE id = %s AND user_id = %s",
-            (thread_id, actor_id),
-        ).fetchone()
-        if thread_row is None or str(thread_row["id"]) != thread_id:
-            raise PermissionError("thread ownership is unavailable")
+    if (
+        workflow_run.workflow_run_id != workflow_run_id
+        or workflow_run.created_by != str(actor_id)
+        or workflow_run.source_voice_thread_id != thread_id
+    ):
+        raise PermissionError("Run projection does not match trusted context")
 
-        workspace = _existing_thread_workspace(thread_id)
-        writer = StoryWorkspaceDreamFileWriter(workspace)
-        if Path(writer.workspace_root) != workspace:
-            raise PermissionError("writer workspace binding changed")
-        return operation(writer, workflow_run)
-    finally:
-        db.close()
+    workspace = _existing_thread_workspace(thread_id)
+    writer = StoryWorkspaceDreamFileWriter(workspace)
+    if Path(writer.workspace_root) != workspace:
+        raise PermissionError("writer workspace binding changed")
+    return operation(writer, workflow_run)
 
 
 def _success_json(payload: dict[str, object]) -> str:
