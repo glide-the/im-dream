@@ -2,11 +2,13 @@
 # [Output] Strict contract, capability and public-to-Service provenance checks without PG/model.
 # [Pos] Provider-free Workflow consumer regressions; no duplicate retry/source algorithm.
 # [Sync] 2026-09-15: cover null/ten fields, actor/thread binding and no PG mapper for public snapshots.
+# [Sync] 2026-09-16: prove the retired Dream SQL resolver is absent from production composition.
 from __future__ import annotations
 
 import asyncio
 import json
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import httpx
 import pytest
@@ -14,6 +16,13 @@ from pydantic import ValidationError
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT, WORKFLOW_SCHEMA_REQUIREMENTS, WorkflowContextOutputDTO
+
+
+def test_production_has_no_legacy_workflow_context_database_resolver():
+    backend = Path(__file__).parents[1]
+    assert not (backend / "services/story_workspace/dream_thread_binding.py").exists()
+    application = (backend / "services/deck/story_workflow_application.py").read_text(encoding="utf-8")
+    assert "dream_thread_binding" not in application
 
 
 def context_value():

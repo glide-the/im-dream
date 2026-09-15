@@ -262,7 +262,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | production / 28 | chat_message, chat_thread, claude_plugin_installations, deck_plugin_bindings, deck_plugin_installations, deck_runtime_plugin_locks, decks, runtime_plugin_materializations, story_workspace_workspaces, voices, workflow_preflights, workflow_runs | L627 DreamRuntimeProvisioningService._ensure_materialization: revision; L799 DreamRuntimeProvisioningService._latest_binding_revision: revision | 295,349,502,1165,1450,1462,260,290,1241,1388 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/dream_reentry_service.py](../../backend/services/story_workspace/dream_reentry_service.py) | production / 4 | LATERAL, chat_message, chat_thread, deck_plugin_bindings, deck_plugin_releases, deck_runtime_plugin_locks, deck_runtime_snapshots, decks, jsonb_array_elements, jsonb_array_elements_text, story_workspace_stories, story_workspace_workspaces, workflow_preflights, workflow_runs | L179 StoryWorkspaceDreamReentryService._query_authorized_rows: revision | 179 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/dream_runtime_activation_service.py](../../backend/services/story_workspace/dream_runtime_activation_service.py) | production / 3 | agent_sessions, deck_runtime_plugin_locks, runtime_plugin_materializations | L286 StoryWorkspaceDreamRuntimeActivationService._load_evidence: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | production / 1 | chat_message, deck_plugin_bindings, story_workspace_workspaces, workflow_runs | L351 DreamRunBindingResolver.resolve: revision | 351 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/story_workspace/dream_thread_binding.py`（迁移前基线，现已删除） | production / 1 | chat_message, deck_plugin_bindings, story_workspace_workspaces, workflow_runs | L351 DreamRunBindingResolver.resolve: revision | 351 | 已由Admin `workflow-context.resolve` strict DTO/typed Drizzle aggregate替换 |
 | [backend/services/story_workspace/dream_workflow_lifecycle_service.py](../../backend/services/story_workspace/dream_workflow_lifecycle_service.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/episode_binding_service.py](../../backend/services/story_workspace/episode_binding_service.py) | production / 1 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | production / 2 | chat_message, chat_thread | 详见 JSON 调用线索 | 290 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -447,7 +447,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 2 | 0 |
 | `backend/services/admin_product/identity.py`（迁移前基线，现已删除） | 1 | 0 |
 | [backend/services/story_workspace/dream_reentry_service.py](../../backend/services/story_workspace/dream_reentry_service.py) | 1 | 2 |
-| [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 1 | 0 |
+| `backend/services/story_workspace/dream_thread_binding.py`（迁移前基线，现已删除） | 1 | 0 |
 | [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 1 | 0 |
 | [backend/claude_mcp/repository.py](../../backend/claude_mcp/repository.py) | 0 | 5 |
 | [backend/claude_mcp/service.py](../../backend/claude_mcp/service.py) | 0 | 0 |
@@ -481,7 +481,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 1 |
 | [backend/server.py](../../backend/server.py) | 4 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 1 |
-| [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 0 |
+| `backend/services/story_workspace/dream_thread_binding.py`（迁移前基线，现已删除） | 0 |
 | [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 5 |
 | [backend/claude_agent/context_builder.py](../../backend/claude_agent/context_builder.py) | 0 |
 | [backend/claude_mcp/credentials.py](../../backend/claude_mcp/credentials.py) | 1 |
@@ -591,3 +591,23 @@ Deck 内部数据库入口不在本次小闭环范围内。
 database import模块16、legacy helper调用37、transaction/connection调用308、
 Admin operation名168、parse error 0。`voices.py` 条目只剩Admin DTO imports，
 其SQL、driver/database import、legacy helper与transaction字段均为空。
+
+## 2026-09-16 Workflow Context 旧解析器退役
+
+| Dream 文件与入口 | 迁移前访问 | 事务/并发要求 | 目标 Admin 模块与接口 | Dream 替换方式 | 验收证据 |
+|---|---|---|---|---|---|
+| `backend/services/story_workspace/dream_thread_binding.py` | 直接聚合`chat_thread`、`chat_message`、`workflow_runs`、Workspace与binding并在Dream重算retry/provenance | 完整retry图、同一owner与binding revision必须来自同一数据快照；冲突在Runtime前失败 | `workflow-context.resolve` strict Thread-only DTO → Admin service → typed Drizzle `WorkflowContextRepository` | 旧模块和旧算法测试删除；公开Chat已有`AdminRequestAuth.workflow_context`，Service只消费immutable `AdminWorkflowResolution` | Admin consumer、Chat ingress和Agent Service回归；production source fence；source-only复扫 |
+| [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 两个未使用resolver import使旧模块仍属于production import图 | 无业务I/O；只需去除死引用 | 同上 | 删除两个import分支中的旧symbol | AST确认symbol零引用并通过模块编译 |
+
+Admin producer保留完整 owner、retry leaf、launch message、Workspace、Deck/plugin、
+revision、runtime snapshot和状态校验；Dream不复制该算法，也不从请求接受Run、actor
+或retry selector。普通Chat或终态链仍返回 `context: null`。Agent Service保留显式
+测试mapper seam，但生产请求缺少Admin snapshot时继续配置失败，不会打开数据库。
+
+实际 source-only 回执
+[dream-db-closure-after-workflow-context-retirement-source-only.json](admin-auth-data-verification/dream-db-closure-after-workflow-context-retirement-source-only.json)
+扫描551个Python模块，当前生产候选77、SQL模块43、SQL literal 403、driver或
+database import模块15、legacy helper调用37、transaction/connection调用308、
+Admin operation名168、parse error 0。相对上一回执减少两个Python模块（旧生产
+resolver与其旧测试）、一个生产SQL模块、一个SQL literal和一个database import
+模块；旧模块名不再出现在任何生产import中。

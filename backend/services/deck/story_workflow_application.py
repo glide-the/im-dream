@@ -2,6 +2,7 @@
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
 # [Sync] 2026-09-16: move Dream confirmation facts and persistence to Registry120 Admin DTOs.
+# [Sync] 2026-09-16: remove unused imports of the retired Dream SQL Workflow context resolver.
 # [Sync] 2026-09-15: retire the Guidance database branch after Registry115 moved persistence to Admin.
 # [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
 # [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
@@ -84,10 +85,6 @@ try:
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
     )
-    from services.story_workspace.dream_thread_binding import (
-        DreamRunBindingResolver,
-        DreamThreadBindingConflict,
-    )
     from services.story_workspace.preflight_builder import (
         StoryWorkspacePreflightServiceBuilder,
     )
@@ -160,10 +157,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeBindingContext,
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
-    )
-    from backend.services.story_workspace.dream_thread_binding import (
-        DreamRunBindingResolver,
-        DreamThreadBindingConflict,
     )
     from backend.services.story_workspace.preflight_builder import (
         StoryWorkspacePreflightServiceBuilder,
