@@ -249,7 +249,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | production / 6 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, information_schema.columns | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/selection_validation_service.py](../../backend/services/deck_plugin/selection_validation_service.py) | production / 4 | deck_plugin_installations, deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/errors/error_registry.py](../../backend/services/errors/error_registry.py) | production / 5 | Claude, the | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/events/event_emitter.py](../../backend/services/events/event_emitter.py) | production / 3 | events | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/events/event_emitter.py`（迁移前基线，现已删除） | production / 3 | events | 详见 JSON 调用线索 | 无生产调用者 | 退役未接线实现；未创建无业务调用方的Admin接口 |
 | [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | production / 5 | runtime_plugin_materializations | L342 MaterializationManager._begin_attempt: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/runtime_plugin/reconcile_service.py](../../backend/services/runtime_plugin/reconcile_service.py) | production / 11 | deck_runtime_plugin_locks, runtime_load_receipt_entries, runtime_load_receipts, runtime_plugin_materializations, runtime_plugin_reconcile_attempts, workflow_runs | L277 SqliteCliAuditSink.record: revision; L793 ReconcileService._record_headless_attempt: revision; L820 ReconcileService._record_headless_failure: revision; L849 ReconcileService._persist_receipt: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/agent_integration.py](../../backend/services/story_workspace/agent_integration.py) | production / 25 | story_workspace_characters, story_workspace_scene_characters, story_workspace_scenes, story_workspace_stories, story_workspace_story_characters, story_workspace_workspaces | L106 store_agent_story_output: SAVEPOINT; L137 store_agent_story_output: SAVEPOINT; L350 store_agent_story_output: SAVEPOINT; L353 store_agent_story_output: SAVEPOINT; L354 store_agent_story_output: SAVEPOINT; L356 store_agent_story_output: SAVEPOINT | 79,69,119 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -360,7 +360,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 - `backend/services/deck_plugin/rollback_manager.py`: RollbackManager._table_projection, RollbackManager.rollback_installation
 - `backend/services/deck_plugin/selection_validation_service.py`: SelectionValidationService._installation_scope, SelectionValidationService.list_options, SelectionValidationService.validate
 - `backend/services/errors/error_registry.py`: <module>
-- `backend/services/events/event_emitter.py`: EventEmitter._load, EventEmitter.build_envelope, EventEmitter.emit
+- `backend/services/events/event_emitter.py`（迁移前基线，现已删除）: EventEmitter._load, EventEmitter.build_envelope, EventEmitter.emit
 - `backend/services/runtime_plugin/materialization_manager.py`: MaterializationManager._begin_attempt, MaterializationManager._perform_materialization, MaterializationManager._select
 - `backend/services/runtime_plugin/reconcile_service.py`: ReconcileService._persist_receipt, ReconcileService._record_headless_attempt, ReconcileService._record_headless_failure, ReconcileService.create_load_receipt, ReconcileService.read_receipt, ReconcileService.read_workflow_readiness, SqliteCliAuditSink.record
 - `backend/services/story_workspace/agent_integration.py`: get_or_create_default_workspace, store_agent_story_output
@@ -430,7 +430,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/claude_plugin/marketplace_service.py](../../backend/services/claude_plugin/marketplace_service.py) | 4 | 0 |
 | [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 4 | 0 |
 | [backend/services/deck_plugin/selection_validation_service.py](../../backend/services/deck_plugin/selection_validation_service.py) | 4 | 0 |
-| [backend/services/events/event_emitter.py](../../backend/services/events/event_emitter.py) | 4 | 0 |
+| `backend/services/events/event_emitter.py`（迁移前基线，现已删除） | 4 | 0 |
 | [backend/services/story_workspace/dream_artifact_turn_hook.py](../../backend/services/story_workspace/dream_artifact_turn_hook.py) | 4 | 0 |
 | [backend/services/story_workspace/dream_auto_repair_service.py](../../backend/services/story_workspace/dream_auto_repair_service.py) | 4 | 0 |
 | [backend/claude_agent/service.py](../../backend/claude_agent/service.py) | 3 | 0 |
@@ -611,3 +611,23 @@ database import模块15、legacy helper调用37、transaction/connection调用30
 Admin operation名168、parse error 0。相对上一回执减少两个Python模块（旧生产
 resolver与其旧测试）、一个生产SQL模块、一个SQL literal和一个database import
 模块；旧模块名不再出现在任何生产import中。
+
+## 2026-09-16 未使用 Event 持久化路径退役
+
+全仓生产调用搜索确认 `EventEmitter` 没有业务调用者，仅由它自己的测试和一个
+opt-in旧PostgreSQL integration case导入。因此本阶段删除
+`backend/services/events/event_emitter.py` 及两处专属测试，不为不存在的业务
+流程创建通用event CRUD或无权限语义的Admin操作。`EventEnvelope` strict frozen
+DTO和纯内存`EventConsumer`继续保留；测试改为直接构造DTO，覆盖十类必需payload、
+递归敏感字段拒绝、ID去重、aggregate顺序和gap timeout。
+
+`events` schema与历史设计记录未在本阶段删除。未来若出现真实持久化调用方，必须
+根据该入口的actor、Workspace、幂等、aggregate version并发与事务边界设计具名
+Admin DTO → Service → typed Drizzle Repository 操作，Dream不得恢复SQL路径。
+
+实际 source-only 回执
+[dream-db-closure-after-unused-event-retirement-source-only.json](admin-auth-data-verification/dream-db-closure-after-unused-event-retirement-source-only.json)
+扫描550个Python模块，当前生产候选76、SQL模块42、SQL literal 400、driver或
+database import模块14、legacy helper调用37、transaction/connection调用308、
+Admin operation名168、parse error 0；相对上一回执减少一个无调用者的生产模块、
+一个SQL模块、三个SQL literal和一个driver import模块。

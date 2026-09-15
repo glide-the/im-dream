@@ -1,3 +1,5 @@
+# [Sync] 2026-09-16: remove the integration-only EventEmitter path after production retirement.
+
 """Opt-in real PostgreSQL checks for migrated Dream runtime SQL.
 
 These tests never consult ``DATABASE_URL``.  They run only when the caller
@@ -10,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 import os
 import re
 from typing import Any
@@ -25,9 +26,7 @@ import pytest
 import database as legacy_database
 
 from backend.models.deck_plugin import InstallationStatus
-from backend.models.events import CanonicalEventType, EventEnvelope
 from backend.services.deck_plugin.installation_service import InstallationService
-from backend.services.events.event_emitter import EventEmitter
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
@@ -192,63 +191,6 @@ def postgres_case() -> Any:
         connection.rollback()
         connection.close()
         observer.close()
-
-
-def test_event_emitter_is_append_only_and_retry_idempotent_on_postgres(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(events=1)
-    queued: list[EventEnvelope] = []
-    projections: list[dict[str, Any]] = []
-    emitter = EventEmitter(
-        postgres_case.db,
-        workspace_id="workspace-pg-runtime-test",
-        queue_publisher=queued.append,
-        projection_publisher=projections.append,
-        clock=lambda: datetime(2026, 8, 9, 8, 0, tzinfo=UTC),
-    )
-    envelope = emitter.build_envelope(
-        CanonicalEventType.WORKFLOW_RUN_STEP_PROGRESSED,
-        "run-pg-runtime-test",
-        {
-            "workflow_run_id": "run-pg-runtime-test",
-            "step_id": "draft",
-            "progress": 0.5,
-            "safe_summary": "PostgreSQL boundary verified",
-        },
-        "correlation-pg-runtime-test",
-    )
-
-    asyncio.run(emitter.emit(envelope))
-
-    postgres_case.db.begin_service_scope()
-    try:
-        with pytest.raises(psycopg.Error) as append_only_error:
-            postgres_case.db.execute(
-                "UPDATE events SET correlation_id = %s WHERE event_id = %s",
-                ("forbidden-rewrite", envelope.event_id),
-            )
-        assert append_only_error.value.sqlstate == "55000"
-    finally:
-        if postgres_case.db.in_transaction:
-            postgres_case.db.rollback()
-
-    asyncio.run(emitter.emit(envelope))
-
-    row = postgres_case.db.execute(
-        "SELECT event_id, aggregate_version, occurred_at "
-        "FROM events WHERE event_id = %s",
-        (envelope.event_id,),
-    ).fetchone()
-    assert row is not None
-    assert row["event_id"] == envelope.event_id
-    assert row["aggregate_version"] == 1
-    assert isinstance(row["occurred_at"], datetime)
-    assert queued == [envelope, envelope]
-    assert [item["event_id"] for item in projections] == [
-        envelope.event_id,
-        envelope.event_id,
-    ]
 
 
 def test_plugin_installation_service_commits_inside_outer_rollback(
