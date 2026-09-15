@@ -86,7 +86,7 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 Settings GET/PUT 已使用 Admin 用户 SystemConfig operation；PUT 确认 patch 后执行一次独立 fresh read。公开 Chat 读取一份 OAuth snapshot，并复用于模型选择和附件。活动 turn 在 prompt、Workspace 或 Runtime 组装前通过精确 Thread persistence grant 读取。配置损坏或不可用时直接失败，不回退 Dream 数据库。Gateway 模型选择必须收到显式授权 snapshot，因此缺少 owner 的内部 dispatcher 仍是明确迁移依赖。
 
-公开 Reflections 配置 GET/PUT/DELETE 已使用三项 OAuth Admin operation。`memory-init` 先通过 Admin 确认 Chat Thread 归属，再读取用户自定义分区配置，与 Dream 静态提示词默认值合并，最后写入共享工作区。缺少长期 owner 的后台 Reflections worker 仍从 Dream 剩余数据库路径读取自定义配置及 task/result 状态。
+公开 Reflections 配置 GET/PUT/DELETE 已使用三项 OAuth Admin operation。save/delete 响应丢失时只查询原 request receipt，不发送第二次写入。`memory-init` 先通过 Admin 确认 Chat Thread 归属，再读取用户自定义分区配置，与 Dream 静态提示词默认值合并，最后写入共享工作区。缺少长期 owner 的后台 Reflections worker 仍从 Dream 剩余数据库路径读取自定义配置及 task/result 状态。
 
 共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
 

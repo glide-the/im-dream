@@ -1,6 +1,7 @@
 # [Input] Actual Reflections section DTO consumer, synthetic Admin catalog and controlled raw replies.
-# [Output] Exact contract, raw JSON, OAuth, closed input and no-retry evidence.
+# [Output] Exact contract, raw JSON, OAuth, closed input and original receipt recovery evidence.
 # [Pos] Provider-free registered83 consumer tests; no PostgreSQL, filesystem or normal account.
+# [Sync] 2026-09-15: cover committed/absent/failed original receipt recovery after one write POST.
 # [Sync] 2026-09-15: cover the three published Reflections section-config operations.
 from __future__ import annotations
 
@@ -26,7 +27,13 @@ from services.admin_data.workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
 TOKEN = "oauth-reflections-token"
 
 
-def _boundary(*, get_json: str | None = '{"WORKFLOW.md":"custom"}', lose: str | None = None, operations=REFLECTIONS_SECTION_CONFIG_OPERATIONS):
+def _boundary(
+    *,
+    get_json: str | None = '{"WORKFLOW.md":"custom"}',
+    lose: str | None = None,
+    receipt_mode: str = "absent",
+    operations=REFLECTIONS_SECTION_CONFIG_OPERATIONS,
+):
     config = AdminDataConfig(
         base_url="https://admin.example",
         issuer="https://admin.example/api/auth",
@@ -54,6 +61,36 @@ def _boundary(*, get_json: str | None = '{"WORKFLOW.md":"custom"}', lose: str | 
                 "schema_capabilities": [item.model_dump() for item in WORKFLOW_SCHEMA_REQUIREMENTS],
                 "operations": [item.capability.model_dump() for item in operations],
             }
+        elif "/receipts/" in request.url.path:
+            assert request.headers["authorization"] == "Bearer " + TOKEN
+            operation = request.url.params["operation"]
+            if receipt_mode == "timeout":
+                raise httpx.ReadTimeout("synthetic receipt response loss")
+            if receipt_mode == "invalid":
+                value = {
+                    "status": "committed",
+                    "operation": operation,
+                    "request_id": request_id,
+                    "result": {"saved": False},
+                }
+            elif receipt_mode == "committed":
+                result = (
+                    {"saved": True}
+                    if operation == SAVE_REFLECTIONS_SECTION_CONFIG.capability.name
+                    else {"deleted": False}
+                )
+                value = {
+                    "status": "committed",
+                    "operation": operation,
+                    "request_id": request_id,
+                    "result": result,
+                }
+            else:
+                value = {
+                    "status": "absent",
+                    "operation": operation,
+                    "request_id": request_id,
+                }
         else:
             assert request.headers["authorization"] == "Bearer " + TOKEN
             name = request.url.path.rsplit("/", 1)[-1]
@@ -181,6 +218,85 @@ def test_unknown_save_is_not_retried() -> None:
         http.close()
     assert captured.value.request_id == "save-unknown" and captured.value.outcome_unknown
     assert sum(item.method == "POST" for item in calls) == 1
+
+
+@pytest.mark.parametrize("name", ["save", "delete"])
+def test_unknown_write_recovers_only_the_original_committed_receipt(name: str) -> None:
+    operation = (
+        SAVE_REFLECTIONS_SECTION_CONFIG
+        if name == "save"
+        else DELETE_REFLECTIONS_SECTION_CONFIG
+    )
+    data, calls, http = _boundary(
+        lose=operation.capability.name,
+        receipt_mode="committed",
+    )
+    try:
+        if name == "save":
+            result = data.save(
+                ReflectionsSectionSaveInputDTO(
+                    section="echoes",
+                    prompt_files_json='{"WORKFLOW.md":"custom"}',
+                ),
+                "write-original",
+                access_token=TOKEN,
+            )
+            assert result.saved is True
+        else:
+            result = data.delete(
+                ReflectionsSectionInputDTO(section="echoes"),
+                "write-original",
+                access_token=TOKEN,
+            )
+            assert result.deleted is False
+    finally:
+        http.close()
+    writes = [item for item in calls if item.method == "POST"]
+    receipts = [item for item in calls if "/receipts/" in item.url.path]
+    assert len(writes) == 1 and len(receipts) == 1
+    assert writes[0].headers["x-request-id"] == "write-original"
+    assert receipts[0].headers["x-request-id"] == "write-original"
+    assert receipts[0].url.params["operation"] == operation.capability.name
+
+
+@pytest.mark.parametrize("name", ["save", "delete"])
+@pytest.mark.parametrize("receipt_mode", ["absent", "timeout", "invalid"])
+def test_unknown_write_stays_unknown_when_original_receipt_is_unconfirmed(
+    name: str,
+    receipt_mode: str,
+) -> None:
+    operation = (
+        SAVE_REFLECTIONS_SECTION_CONFIG
+        if name == "save"
+        else DELETE_REFLECTIONS_SECTION_CONFIG
+    )
+    data, calls, http = _boundary(
+        lose=operation.capability.name,
+        receipt_mode=receipt_mode,
+    )
+    try:
+        with pytest.raises(AdminDataError) as captured:
+            if name == "save":
+                data.save(
+                    ReflectionsSectionSaveInputDTO(
+                        section="echoes",
+                        prompt_files_json='{"WORKFLOW.md":"custom"}',
+                    ),
+                    "write-original",
+                    access_token=TOKEN,
+                )
+            else:
+                data.delete(
+                    ReflectionsSectionInputDTO(section="echoes"),
+                    "write-original",
+                    access_token=TOKEN,
+                )
+    finally:
+        http.close()
+    assert captured.value.request_id == "write-original"
+    assert captured.value.outcome_unknown is True
+    assert sum(item.method == "POST" for item in calls) == 1
+    assert sum("/receipts/" in item.url.path for item in calls) == 1
 
 
 def test_missing_registered_operation_stops_after_capability_read() -> None:

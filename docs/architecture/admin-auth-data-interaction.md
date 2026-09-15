@@ -187,7 +187,7 @@ sequenceDiagram
 
 全部公开Workspace文件入口在执行文件系统调用前读取current OAuth SystemConfig。list/upload/delete/move先做请求参数检查，再读配置；content/download先验证Thread所有权，再读配置，然后执行Mode、路径、realpath/no-symlink与文件操作。这样缺失Thread仍为404，而配置不可用安全返回503，且不会先访问共享FS。
 
-Reflections用户自定义分区配置由registered83的`reflections-section-config.get/save/delete`提供，三项操作只接受current request OAuth。公开GET在Dream把Admin返回的partial prompt对象合并到静态default，并生成display与`usedCustomConfig`；PUT由Dream过滤五个允许文件名和空白内容后保存raw JSON；DELETE保持原`reset:true`回复。`memory-init`先调用Admin Chat确认Thread归属，再读自定义配置，最后执行既有路径检查和共享FS写入；任一身份、capability或配置错误都发生在FS之前。后台Reflections task没有已发布的可续期grant，仍保留旧配置reader和task/result数据库路径，不能据三项OAuth操作声明完整Reflections迁移完成。
+Reflections用户自定义分区配置由registered83的`reflections-section-config.get/save/delete`提供，三项操作只接受current request OAuth。公开GET在Dream把Admin返回的partial prompt对象合并到静态default，并生成display与`usedCustomConfig`；PUT由Dream过滤五个允许文件名和空白内容后保存raw JSON；DELETE保持原`reset:true`回复。save/delete响应未知时只以同一OAuth查询原request ID和原operation receipt；committed且原output DTO有效才确认，absent、查询失败或坏回执继续返回outcome unknown，不重新POST。`memory-init`先调用Admin Chat确认Thread归属，再读自定义配置，最后执行既有路径检查和共享FS写入；任一身份、capability或配置错误都发生在FS之前。后台Reflections task没有已发布的可续期grant，仍保留旧配置reader和task/result数据库路径，不能据三项OAuth操作声明完整Reflections迁移完成。
 
 资源`default`由Dream配置提供，`desired`仅Admin持久化，`effective/revision`由Dream独立provider/composition的LKG拥有。合法更高revision替换；同rev同值仅diagnostics，同rev异值/回滚invalid；unavailable保留LKG。四值为JSON/TS正安全整数，组合memory bytes精确，不能把技术边界包装成产品配额或用0关闭保护。turn主路径不加policy HTTP查询。
 

@@ -436,7 +436,8 @@ is recovered only with the original request ID and is never resent.
 
 Calls Admin `reflections-section-config.delete` and returns the existing
 `{ "reset": true, "section": "..." }` response whether or not a custom row
-previously existed.
+previously existed. Like save, an unknown delete result is resolved only from
+the original request receipt and never sends another write.
 
 ### POST `/api/reflections/memory-init`
 

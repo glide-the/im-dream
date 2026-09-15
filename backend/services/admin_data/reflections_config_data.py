@@ -1,6 +1,7 @@
 # [Input] Published Reflections section-config DTOs, exact schemas and current request OAuth.
-# [Output] Closed get/save/delete operations with raw Python JSON projection.
+# [Output] Closed get/save/delete operations with raw JSON and original write receipt recovery.
 # [Pos] Reflections custom-config data consumer; defaults, display, filtering, Agent and filesystem remain in Dream.
+# [Sync] 2026-09-15: recover unknown writes from the original Admin receipt without a second POST.
 # [Sync] 2026-09-15: consume registered83 section config contracts without Dream database fallback.
 """Typed Admin operations for user-owned Reflections prompt configuration."""
 
@@ -12,8 +13,8 @@ from typing import Any, Literal
 from pydantic import Field, field_validator
 
 from .client import AdminDataClient, DomainOperation
-from .errors import invalid_response
-from .models import OperationCapabilityDTO, StrictDTO
+from .errors import AdminDataError, invalid_response
+from .models import CommittedReceiptDTO, OperationCapabilityDTO, StrictDTO
 from .workflow_data import require_workflow_capabilities
 
 
@@ -169,6 +170,37 @@ class AdminReflectionsSectionConfigData:
         )
         return result.prompt_files(request_id)
 
+    def _write(self, operation, input_dto, request_id: str, access_token: str):
+        try:
+            return self._execute(operation, input_dto, request_id, access_token)
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+        try:
+            receipt = self._client.receipt(
+                operation,
+                request_id,
+                access_token=access_token,
+            )
+        except AdminDataError as error:
+            raise AdminDataError(
+                error.code,
+                error.status_code,
+                request_id,
+                True,
+                error.details,
+            ) from None
+        if not isinstance(receipt, CommittedReceiptDTO):
+            raise AdminDataError(
+                "ADMIN_WRITE_RESULT_UNKNOWN",
+                503,
+                request_id,
+                True,
+            )
+        if type(receipt.result) is not operation.output_dto:
+            raise invalid_response(request_id, write=True)
+        return receipt.result
+
     def save(
         self,
         input_dto: ReflectionsSectionSaveInputDTO,
@@ -176,7 +208,7 @@ class AdminReflectionsSectionConfigData:
         *,
         access_token: str,
     ) -> ReflectionsSectionSavedDTO:
-        return self._execute(
+        return self._write(
             SAVE_REFLECTIONS_SECTION_CONFIG,
             input_dto,
             request_id,
@@ -190,7 +222,7 @@ class AdminReflectionsSectionConfigData:
         *,
         access_token: str,
     ) -> ReflectionsSectionDeletedDTO:
-        return self._execute(
+        return self._write(
             DELETE_REFLECTIONS_SECTION_CONFIG,
             input_dto,
             request_id,
