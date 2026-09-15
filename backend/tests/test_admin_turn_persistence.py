@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: validate Editor broker ownership beside the existing grant lifecycle.
 # [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
 # [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
+# [Sync] 2026-09-15: validate the owner-bound broker provider, renewed grant and arbitrary strict ranges.
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,8 @@ from services.admin_data.session_data import (
     LIST_SESSIONS,
     SESSION_LIST_SCHEMA_REQUIREMENTS,
 )
+from services.admin_data.session_models import SessionListInputDTO
+from services.admin_data.session_projection_broker import SessionProjectionBrokerSettings
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
@@ -73,7 +76,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                 value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else ({"message_id": "message-1"} if operation == PERSIST_MESSAGE.capability.name else {"message_id": "message-1", "confirmation_preserved": False})
         else:
             assert request.headers["authorization"] == "Bearer " + expected_token
-            assert request_id == "write-original"
+            assert request_id in {"write-original", "broker-request"}
             if block is not None:
                 entered, release = block
                 entered.set()
@@ -86,11 +89,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
                 assert input_dto == {"thread_id": "thread-1"}
                 value = {"config_json": '{"workspace_enabled":true}'}
             elif name == LIST_SESSIONS.capability.name:
-                assert input_dto == {
-                    "start_date": "2026-09-13",
-                    "end_date": "2026-09-15",
-                    "include_text": False,
-                }
+                assert set(input_dto) == {"start_date", "end_date", "include_text"}
                 value = {"sessions": session_rows or []}
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
@@ -107,7 +106,8 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
     runtime = SimpleNamespace(closed=[], renew=lambda value, request_id: value, receipt=lambda *args: None)
     runtime.close = lambda: runtime.closed.append(True)
     value = AdminTurnPersistence(AdminWorkflowResolution("42", "thread-1", None), grant(), client,
-        runtime_client_factory=lambda: runtime, clock=lambda: NOW, request_id_factory=lambda: "write-original")
+        runtime_client_factory=lambda: runtime, clock=lambda: NOW, request_id_factory=lambda: "write-original",
+        session_broker_settings=SessionProjectionBrokerSettings(timeout_seconds=0.5, max_bytes=4096))
     return value, calls, runtime
 
 
@@ -139,7 +139,8 @@ def test_server_holder_cannot_accept_wrong_purpose_or_frozen_entities(change):
     value, _, _ = holder()
     with pytest.raises(AdminDataError, match="ADMIN_CONFIGURATION_INVALID"):
         AdminTurnPersistence(AdminWorkflowResolution("42", "thread-1", None), replace(grant(), **change), value._client,
-            runtime_client_factory=lambda: None, clock=lambda: NOW)
+            runtime_client_factory=lambda: None, clock=lambda: NOW,
+            session_broker_settings=SessionProjectionBrokerSettings(timeout_seconds=0.5, max_bytes=4096))
 
 
 def test_unknown_write_keeps_original_id_and_recovers_receipt_without_post_retry():
@@ -417,6 +418,66 @@ def test_recent_sessions_use_the_keeper_current_renewed_token():
     assert calls[-1].headers["authorization"] == "Bearer " + renewed_token
 
 
+def test_session_projection_provider_uses_arbitrary_range_text_and_renewed_grant():
+    renewed_token = "idg_" + "b" * 43
+    value, calls, _ = holder(
+        expected_token=renewed_token,
+        session_rows=[{
+            "id": "session-text",
+            "name": "全文",
+            "labels": ["中文"],
+            "created_at": "2026-01-01T08:00:00Z",
+            "updated_at": "2026-08-31T09:00:00Z",
+            "first_line": "第一行",
+            "text": "完整正文",
+        }],
+    )
+    value._keeper = SimpleNamespace(
+        current=lambda purpose: replace(grant(), token=renewed_token)
+    )
+
+    result = value._session_projection_provider.list_sessions(
+        SessionListInputDTO(
+            start_date="2026-01-01",
+            end_date="2026-08-31",
+            include_text=True,
+        ),
+        "broker-request",
+    )
+
+    assert result.sessions[0].text == "完整正文"
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + renewed_token
+    assert request.headers["x-request-id"] == "broker-request"
+    assert json.loads(request.content)["input"] == {
+        "start_date": "2026-01-01",
+        "end_date": "2026-08-31",
+        "include_text": True,
+    }
+
+
+@pytest.mark.parametrize("actor,thread", [("43", "thread-1"), ("42", "other")])
+def test_session_projection_owner_rejects_actor_or_thread_mismatch_before_io(
+    actor, thread
+):
+    value, calls, _ = holder()
+    before = len(calls)
+
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        value._project_sessions(
+            actor_id=actor,
+            thread_id=thread,
+            input_dto=SessionListInputDTO(
+                start_date="2026-01-01",
+                end_date="2026-08-31",
+                include_text=False,
+            ),
+            request_id="broker-request",
+        )
+
+    assert len(calls) == before
+
+
 @pytest.mark.parametrize("actor,thread", [("43", "thread-1"), ("42", "other")])
 def test_recent_sessions_reject_other_entities_before_io(actor, thread):
     value, calls, _ = holder()
@@ -526,7 +587,11 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
         assert resumed.run_options.resume and resumed.run_options.thread_id == new_id
         assert resumed.request.thread_id == "thread-1" and resumed.request.admin_turn_persistence is value
         await service._persist_sdk_session_from_message(resumed, SystemMessage(subtype="init", data={"session_id": new_id}))
-    asyncio.run(scenario())
+    value.start()
+    try:
+        asyncio.run(scenario())
+    finally:
+        value.close()
     assert len(builder.system_prompt_calls) == 1
     assert sum(item.url.path.endswith(LIST_SESSIONS.capability.name) for item in calls) == 1
     assert sum(item.url.path.endswith(UPDATE_SESSION.capability.name) for item in calls) == 1

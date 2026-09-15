@@ -1,12 +1,12 @@
-# [Input] Reads INK_AGENT_USER_ID from env (injected via mcp_env in AgentRunOptions).
-#         Calls database.list_sessions_in_range directly (trusted subprocess context)
-#         and applies configured lightweight retrieval strategy parameters.
+# [Input] Reads only a private Session broker tuple and two retrieval-policy values.
+#         Applies the existing lightweight retrieval strategy to strict Session projections.
 # [Output] Provide GET_SESSIONS_RANGE_TOOL_SPEC, handle_get_sessions_range for the
 #          user MCP server (mcp__user__get_sessions_range).
 # [Pos] tool-definition node in libs/claude_agent_kit/server
 # [Sync] 2026-05-31: initial implementation — Agent cross-session retrieval tool.
 # [Sync] 2026-06-16: add configurable fuzzy retrieval parameters, label matching,
 #                    and a vector-query interface boundary without vector DB wiring.
+# [Sync] 2026-09-15: replace actor/database access with the turn-local Session projection broker.
 
 """MCP tool handler for ``get_sessions_range``.
 
@@ -15,21 +15,21 @@ that is statically injected into the system prompt.  Retrieval defaults to
 character-level fuzzy matching when ``query`` is supplied; date-only calls keep
 the original range-listing behavior.
 
-The tool runs inside the ``user`` MCP stdio subprocess.  The current user's
-``user_id`` is read from the ``INK_AGENT_USER_ID`` environment variable, which
-is injected into the MCP subprocess environment by the agent runner.
+The tool runs inside the ``user`` MCP stdio subprocess. The child receives a
+turn-local loopback capability, never an actor identifier, Admin credential or
+database configuration.
 
-Session context flows via env var:
+Session context flows through a private broker:
 
     ClaudeAgentService.assemble_context
-      → run_options.mcp_env["INK_AGENT_USER_ID"] = str(request.user_id)
+      → run_options.mcp_env receives the server-owned broker tuple
 
-    agent_runner._user_mcp_stdio_config(extra_env=mcp_env)
-      → McpStdioServerConfig.env["INK_AGENT_USER_ID"] = ...
+    agent_runner._user_mcp_stdio_config(mcp_env)
+      → exact allowlist projects broker tuple + retrieval policy
 
     sessions_tool.handle_get_sessions_range()
-      → os.getenv("INK_AGENT_USER_ID")
-      → database.list_sessions_in_range(user_id, start_date, end_date, include_text=...)
+      → SessionProjectionBrokerClient.list_sessions(...)
+      → strict Session projection from the current host owner
 """
 from __future__ import annotations
 
@@ -40,6 +40,13 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
+
+from .session_projection_protocol import (
+    SESSION_FUZZY_MIN_SCORE_ENV,
+    SESSION_RETRIEVAL_MODE_ENV,
+    SessionProjectionBrokerClient,
+    SessionProjectionProtocolError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +143,8 @@ GET_SESSIONS_RANGE_TOOL_SPEC = SessionsToolSpec(
 )
 
 
-_SESSION_RETRIEVAL_MODE_ENV = "INK_AGENT_SESSION_RETRIEVAL_MODE"
-_SESSION_FUZZY_MIN_SCORE_ENV = "INK_AGENT_SESSION_FUZZY_MIN_SCORE"
+_SESSION_RETRIEVAL_MODE_ENV = SESSION_RETRIEVAL_MODE_ENV
+_SESSION_FUZZY_MIN_SCORE_ENV = SESSION_FUZZY_MIN_SCORE_ENV
 _DEFAULT_RETRIEVAL_MODE = "fuzzy"
 _DEFAULT_FUZZY_MIN_SCORE = 0.2
 _VALID_RETRIEVAL_MODES = frozenset({"fuzzy", "vector", "auto"})
@@ -307,9 +314,8 @@ def _session_response(
 
 
 def handle_get_sessions_range(arguments: dict[str, Any] | None) -> str:
-    """Query sessions in [start_date, end_date] for the current user.
+    """Query sessions in [start_date, end_date] through the private broker.
 
-    ``user_id`` is read from ``INK_AGENT_USER_ID`` env var (trusted subprocess).
     Returns a JSON string with a ``sessions`` list; each item contains:
     ``sessionId``, ``name``, ``labels``, ``date``, ``excerpt``.
     """
@@ -346,39 +352,34 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None) -> str:
         warnings.append("vector_retrieval_unconfigured_falling_back_to_fuzzy")
         retrieval_mode = "fuzzy"
 
-    raw_user_id = os.getenv("INK_AGENT_USER_ID", "").strip()
-    if not raw_user_id:
-        return _json_error(
-            "user_context_unavailable",
-            "INK_AGENT_USER_ID is not set in the MCP subprocess environment.",
-        )
-
     try:
-        user_id = int(raw_user_id)
-    except ValueError:
-        return _json_error(
-            "invalid_user_id",
-            f"INK_AGENT_USER_ID is not a valid integer: {raw_user_id!r}",
-        )
-
-    try:
-        import database  # noqa: PLC0415 — runtime import, backend only
-
-        rows = database.list_sessions_in_range(
-            user_id,
-            start_date,
-            end_date,
+        result = SessionProjectionBrokerClient.from_env(dict(os.environ)).list_sessions(
+            start_date=start_date,
+            end_date=end_date,
             include_text=bool(query),
         )
-    except Exception:  # noqa: BLE001
+        rows = [item.model_dump(mode="python") for item in result.sessions]
+    except SessionProjectionProtocolError as error:
         logger.warning(
-            "get_sessions_range: DB query failed; user_id=%s start=%s end=%s",
-            user_id,
+            "get_sessions_range: Session projection failed; code=%s start=%s end=%s",
+            error.code,
             start_date,
             end_date,
-            exc_info=True,
         )
-        return _json_error("db_query_failed")
+        return _json_error(
+            "session_projection_unavailable",
+            service_error_code=error.code,
+        )
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "get_sessions_range: Session projection client failed safely; start=%s end=%s",
+            start_date,
+            end_date,
+        )
+        return _json_error(
+            "session_projection_unavailable",
+            service_error_code="SESSION_BROKER_CLIENT_FAILURE",
+        )
 
     ranked: list[tuple[float, int, dict[str, Any]]] = []
     has_filter = bool(query or requested_labels)

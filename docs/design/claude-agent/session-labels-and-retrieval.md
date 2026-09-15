@@ -2,7 +2,7 @@
 
 Status: Implemented
 Updated: 2026-09-15
-Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sessions_range` MCP 工具；近期prompt已消费Admin `session.list`，任意日期工具仍是独立迁移边界
+Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sessions_range` MCP 工具；公开Chat两条读取均消费Admin `session.list`
 
 ---
 
@@ -43,7 +43,9 @@ Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sess
 
 ---
 
-## 2. 数据库变更
+## 2. 历史数据库变更（2026-05-31）
+
+本节保留最初SQLite实现记录，不是现行生产规范。共享PostgreSQL schema由Admin Drizzle独占管理；Dream不执行运行时DDL、自动建表或SQLite fallback。现行公开Session读写和Agent Chat检索通过Admin DTO/Service/Repository。
 
 ### 2.1 新增列
 
@@ -102,7 +104,9 @@ def list_sessions_in_range(
 
 ---
 
-## 3. API 变更：POST /api/sessions
+## 3. 历史API变更：POST /api/sessions
+
+本节记录原公共形状。现行路由使用Dream strict Pydantic DTO消费Admin Session operation，数据库持久化在Admin完成。
 
 ### 请求体
 
@@ -160,7 +164,7 @@ Admin成功返回空列表时显示原empty文本。401/403/503、能力缺失�
 
 ### 5.1 概述
 
-用于检索**三天前**的历史 session，供 Agent 在用户提及某主题时按需拉取。工具运行在 `user` MCP stdio 子进程（与 `touch_animation` 同一进程）。
+用于检索**三天前**的历史 session，供 Agent 在用户提及某主题时按需拉取。工具运行在只注册`get_sessions_range`的`user` MCP stdio子进程。
 
 2026-06-16 增强后，工具仍以 `start_date` / `end_date` 为必填边界，但增加可选检索维度：
 
@@ -280,17 +284,15 @@ Admin成功返回空列表时显示原empty文本。401/403/503、能力缺失�
 
 出错时返回 `{"ok": false, "error": "<code>", "detail": "<optional detail>"}`。如果调用 `retrieval_mode="vector"`，当前返回 `vector_retrieval_unavailable`，明确表示只定义接口、未配置向量库。
 
-### 5.4 `user_id` 读取方式
+### 5.4 身份与数据来源
 
-工具在 MCP stdio 子进程中运行，通过环境变量 `INK_AGENT_USER_ID` 获取当前用户 ID（由服务端启动并通过 env 绑定当前用户的 stdio 子进程上下文）：
+Chat turn的`AdminTurnPersistence`在主进程固定canonical actor/Thread，并创建私有`SessionProjectionBroker`。child请求只含request ID、ISO日期范围与`include_text`；不能提交actor、Thread、task、SQL或凭据。broker在owner activity lock内取得current renewed `server-persistence` grant，匹配`session.list`及identity schema，再返回strict projection。
 
-```python
-user_id_str = os.getenv("INK_AGENT_USER_ID")
-```
+`include_text=false`时host和child都拒绝正文；query非空时child请求`include_text=true`，随后继续执行原字符fuzzy、labels与limit算法。broker缺失、capability错误、Admin失败、超时、超限或坏DTO返回`session_projection_unavailable`及稳定`service_error_code`，不回退Dream PostgreSQL，也不记录host、port、capability、token、URL、正文或上游异常。
 
 ### 5.5 注册位置
 
-工具在 `mcp_server.py::create_user_mcp_server()` 中注册（与 `touch_animation` 并列）：
+工具在 `mcp_server.py::create_user_mcp_server()` 中注册，是当前user namespace唯一工具：
 
 ```python
 mcp_types.Tool(
@@ -327,24 +329,43 @@ that predate the visible recent entries.  Do not call it on every turn.
 
 ---
 
-## 6. env var 注入路径
+## 6. 私有broker与子进程环境路径
 
-`user_id` 通过以下路径注入 MCP 子进程：
+Factory在admission后先启动turn persistence与broker；Service只有在broker已经可用时组装Runtime options：
 
 ```
-ClaudeAgentService.assemble_context
-  → run_options.mcp_env["INK_AGENT_USER_ID"] = str(request.user_id)
+ClaudeAgentThreadFactory
+  → AdminTurnPersistence.start()
+      → RuntimeGrantKeeper.start()
+      → SessionProjectionBroker.start(127.0.0.1, ephemeral port)
 
-agent_runner.run_streaming(mcp_env=...)
-  → mcp_servers["user"] = _user_mcp_stdio_config(extra_env=mcp_env)
-      → McpStdioServerConfig.env = _stdio_env(extra_env=extra_env)
-          → env["INK_AGENT_USER_ID"] = mcp_env["INK_AGENT_USER_ID"]
+ClaudeAgentService.assemble_context
+  → persistence.session_projection_child_env()
+  → run_options.mcp_env receives the server-owned tuple
+
+agent_runner.run_streaming
+  → _user_mcp_stdio_config(mcp_env)
+      → exact allowlist: host / port / capability / timeout / max-bytes
+         + INK_AGENT_SESSION_RETRIEVAL_MODE
+         + INK_AGENT_SESSION_FUZZY_MIN_SCORE
+      → empty Gateway/Admin credential tombstones
+
+user_mcp_stdio
+  → isolated Python bootstrap clears inherited environment before package imports
+  → entrypoint repeats the exact five-broker/two-policy allowlist
 
 sessions_tool.handle_get_sessions_range()
-  → os.getenv("INK_AGENT_USER_ID")
-  → database.list_sessions_in_range(user_id, start_date, end_date, include_text=bool(query))
+  → SessionProjectionBrokerClient.list_sessions(start_date, end_date, include_text)
+  → host AdminTurnPersistence → Admin session.list
   → sessions_tool fuzzy label/query filter + ranking
+
+Phase 4 owner close
+  → broker stops accepting new requests
+  → drains one already-dispatched synchronous provider call
+  → closes grant keeper and Admin HTTP client
 ```
+
+user stdio不可见非空`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`、Admin/BFF server secrets、`DATABASE_URL`、actor/Thread/task ID或用户自定义env。Story Workspace、Editor、Memory、Notion和Claude Runtime继续使用各自既有投影路径。
 
 ---
 
@@ -368,9 +389,9 @@ sessions_tool.handle_get_sessions_range()
             │
             ├─ MCP 子进程（user_mcp_stdio）
             │      handle_get_sessions_range(arguments)
-            │        → os.getenv("INK_AGENT_USER_ID")
-            │        → database.list_sessions_in_range(user_id, start, end, include_text=True)
-            │        → 字符模糊匹配 title / labels / excerpt / text
+            │        → private broker strict request
+            │        → bound host owner调用Admin session.list(include_text=True)
+            │        → strict response后字符模糊匹配 title / labels / excerpt / text
             │        → 返回 JSON: {"retrieval": {...}, "sessions": [...]}
             │
             └─ Agent 查看 match / labels / excerpt
@@ -384,15 +405,17 @@ sessions_tool.handle_get_sessions_range()
 
 | 文件 | 变更内容 |
 |------|---------|
-| `backend/database.py` | `user_sessions` 新增 `labels` 列；运行时迁移；`save_session` 新增 `labels` 参数；新增 `list_sessions_in_range`、`_parse_labels` 函数；2026-06-16 起 `list_sessions_in_range(..., include_text=True)` 可为 Agent 模糊检索返回正文文本候选 |
-| `backend/routers/sessions.py` | `POST /api/sessions` 接受并转发 `labels` 字段 |
-| `backend/claude_agent/context_builder.py` | `_SESSION_ENTRY_TEMPLATE` 加入 `sessionId` 和 `labels`；`_load_recent_sessions_block` 改用三天窗口；新增 `_fetch_recent_sessions`；系统提示新增并更新 `## Session Retrieval Workflow`，引导 Agent 优先传 `query` |
-| `backend/libs/claude_agent_kit/server/sessions_tool.py` | `GET_SESSIONS_RANGE_TOOL_SPEC`、`handle_get_sessions_range`；2026-06-16 起支持 `query`、`labels`、`label_match`、`retrieval_mode`、`vector_query`、`min_score`、`limit` |
+| Admin `session.list` | 通过Admin Zod DTO、Service与typed Drizzle Repository读取日期范围和可选正文；Dream不管理共享schema |
+| `backend/services/admin_data/turn_persistence.py` | 为prompt与Chat工具提供绑定actor/Thread、current renewed grant的统一Session projection provider；关闭时先drain broker |
+| `backend/services/admin_data/session_projection_broker.py` | turn-local `127.0.0.1` listener、256-bit capability、strict请求/响应、timeout/max-bytes和close drain |
+| `backend/claude_agent/context_builder.py` | `_SESSION_ENTRY_TEMPLATE`加入`sessionId`和`labels`；只渲染Service传入的近期strict projection，系统提示引导Agent优先传`query` |
+| `backend/libs/claude_agent_kit/server/session_projection_protocol.py` | 定义neutral strict broker DTO和同步child client；无Admin、database或PG依赖 |
+| `backend/libs/claude_agent_kit/server/sessions_tool.py` | `GET_SESSIONS_RANGE_TOOL_SPEC`、`handle_get_sessions_range`；支持`query`、`labels`、`label_match`、`retrieval_mode`、`vector_query`、`min_score`、`limit`，候选只来自broker |
 | `backend/libs/claude_agent_kit/server/mcp_server.py` | `create_user_mcp_server` 注册 `get_sessions_range` 工具；`call_tool` 分派逻辑 |
-| `backend/libs/claude_agent_kit/server/agent_runner.py` | `DEFAULT_ALLOWED_TOOLS` 新增 `mcp__user__get_sessions_range`；`_user_mcp_stdio_config` 支持 `extra_env` 透传；`run_streaming` 调用时传入 `mcp_env` |
+| `backend/libs/claude_agent_kit/server/agent_runner.py`、`user_mcp_stdio.py` | `DEFAULT_ALLOWED_TOOLS`保留工具；user stdio只投影broker/policy和credential tombstone；isolated bootstrap在package import前清理，进程入口再次清理 |
 | `docs/design/claude-agent.md` | §7 新增笔记标签与跨 Session 协作检索设计摘要 |
 | `docs/design/claude-agent/claude-agent-context-assembly.md` | §3 更新近期 session 加载范围说明与新格式描述 |
-| `backend/tests/test_sessions_tool.py` | 覆盖旧日期范围兼容、query 全文模糊命中、labels all 过滤、auto 降级、vector 未配置边界 |
+| `backend/tests/test_session_projection_broker.py`、`test_sessions_tool.py` | 覆盖capability/strict字段/大小/超时/关闭drain、日期兼容、全文fuzzy、labels/limit/Unicode、auto/vector与legacy helper throwing |
 
 ### 8.1 相关文档
 
@@ -414,7 +437,7 @@ sessions_tool.handle_get_sessions_range()
 本次处理不需要引入完整搜索系统。最小可行方案是在现有日期范围工具上增加一个可配置检索层：
 
 - 默认策略：字符模糊匹配；
-- 检索候选：仍来自 `database.list_sessions_in_range`；
+- 检索候选：公开Chat由turn-bound broker调用Admin `session.list`取得；
 - 匹配字段：title / labels / excerpt / 正文 text；
 - 标签：作为可选过滤维度，而非唯一检索入口；
 - 向量：只暴露接口，不实现向量库。

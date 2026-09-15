@@ -1,3 +1,5 @@
+# [Sync] 2026-09-15: clear inherited user-stdio env in isolated Python before package imports.
+# [Sync] 2026-09-15: project only the Session broker tuple and retrieval policy to user stdio.
 # [Sync] 2026-09-15: project only the turn-local Editor broker tuple; remove DATABASE_URL and actor identity from Editor stdio.
 # [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
 #                    results; retain approved call identity until execution ends.
@@ -301,11 +303,14 @@ from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
+from .session_projection_protocol import SESSION_USER_MCP_ENV_NAMES
 from .sdk_env import (
     ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
     apply_claude_config_home_to_options,
+    apply_admin_auth_credential_tombstones,
+    apply_gateway_credential_tombstones,
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
@@ -456,7 +461,10 @@ def _write_mcp_config_projection(
             json.dump(
                 {
                     "mcpServers": {
-                        str(name): _mcp_server_config_json_value(config)
+                        str(name): _mcp_server_config_json_value(
+                            config,
+                            preserve_admin_tombstones=(str(name) == "user"),
+                        )
                         for name, config in mcp_servers.items()
                     }
                 },
@@ -483,13 +491,18 @@ def _write_mcp_config_projection(
         raise
 
 
-def _mcp_server_config_json_value(config: object) -> object:
+def _mcp_server_config_json_value(
+    config: object, *, preserve_admin_tombstones: bool = False
+) -> object:
     """Project MCP configuration without restoring server authentication secrets."""
     projected = _mcp_config_json_value(config)
     if isinstance(projected, dict) and isinstance(projected.get("env"), dict):
         projected["env"] = {
             key: value for key, value in projected["env"].items()
-            if key not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+            if (
+                key not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+                or (preserve_admin_tombstones and value == "")
+            )
         }
     return projected
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
@@ -2163,18 +2176,34 @@ def _stdio_env(
     return env
 
 
-def _user_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the user animation + session tool server.
+def _user_mcp_stdio_config(mcp_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+    """Build user stdio with the exact Session broker and retrieval-policy env."""
 
-    *extra_env* is forwarded to ``_stdio_env`` so that session-scoped bindings
-    (e.g. ``INK_AGENT_USER_ID``) reach the subprocess.
-    """
+    source = mcp_env or {}
+    allowed_env = {
+        name: str(source[name])
+        for name in SESSION_USER_MCP_ENV_NAMES
+        if source.get(name) is not None and str(source[name]).strip()
+    }
+    child_env = _stdio_env(extra_env=allowed_env)
+    apply_gateway_credential_tombstones(child_env)
+    apply_admin_auth_credential_tombstones(child_env)
+    module_name = "libs.claude_agent_kit.server.user_mcp_stdio"
+    bootstrap = (
+        "import os,runpy,sys;"
+        f"_names={SESSION_USER_MCP_ENV_NAMES!r};"
+        "_env={name:os.environ[name] for name in _names "
+        "if os.environ.get(name,'').strip()};"
+        "os.environ.clear();os.environ.update(_env);"
+        f"sys.path.insert(0,{str(_REPO_ROOT)!r});"
+        f"runpy.run_module({module_name!r},run_name='__main__')"
+    )
 
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
-        args=["-m", "libs.claude_agent_kit.server.user_mcp_stdio"],
-        env=_stdio_env(extra_env=extra_env),
+        args=["-I", "-c", bootstrap],
+        env=child_env,
     )
 
 
@@ -3701,7 +3730,7 @@ class ClaudeAgentRunner:
             # reaches EOF, later control writes can fail with
             # "ProcessTransport is not ready for writing".  Stdio MCP gives the
             # tool protocol its own child-process stdin/stdout.
-            mcp_servers["user"] = _user_mcp_stdio_config(extra_env=mcp_env)
+            mcp_servers["user"] = _user_mcp_stdio_config(mcp_env)
         if _memory_mcp_enabled() and any(
             tool.startswith(_MEMORY_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):

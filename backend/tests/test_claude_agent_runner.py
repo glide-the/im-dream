@@ -1,3 +1,5 @@
+# [Sync] 2026-09-15: verify isolated user stdio clears to broker/policy values before package imports.
+# [Sync] 2026-09-15: verify user stdio gets only Session broker/policy values plus credential tombstones.
 # [Sync] 2026-09-15: verify Editor stdio receives only its local broker tuple, without DATABASE_URL or actor identity.
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
@@ -3631,6 +3633,105 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
 
 class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
+    def test_user_mcp_child_env_is_exact_and_tombstones_inherited_credentials(self):
+        broker_env = {
+            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+            "INK_SESSION_BROKER_PORT": "31415",
+            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
+            "INK_AGENT_SESSION_RETRIEVAL_MODE": "fuzzy",
+            "INK_AGENT_SESSION_FUZZY_MIN_SCORE": "0.4",
+        }
+        config = agent_runner_module._user_mcp_stdio_config({
+            **broker_env,
+            "ANTHROPIC_AUTH_TOKEN": "gateway-bearer",
+            "ANTHROPIC_API_KEY": "legacy-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
+            "DATABASE_URL": "postgresql://must-not-cross",
+            "INK_AGENT_USER_ID": "7",
+            "INK_AGENT_THREAD_ID": "thread-must-not-cross",
+            "CUSTOM_KEY": "must-not-cross",
+            **{
+                name: "admin-secret"
+                for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+            },
+        })
+        projected = agent_runner_module._mcp_server_config_json_value(
+            config, preserve_admin_tombstones=True
+        )
+        env = projected["env"]
+        self.assertEqual(projected["args"][:2], ["-I", "-c"])
+        bootstrap = projected["args"][2]
+        self.assertLess(
+            bootstrap.index("os.environ.clear()"),
+            bootstrap.index("runpy.run_module"),
+        )
+        self.assertIn(str(agent_runner_module._REPO_ROOT), bootstrap)
+        inherited = {
+            **os.environ,
+            "ANTHROPIC_AUTH_TOKEN": "parent-bearer",
+            "ANTHROPIC_API_KEY": "parent-api-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "parent-oauth",
+            "DATABASE_URL": "postgresql://parent-secret",
+            "INK_AGENT_USER_ID": "99",
+            "INK_AGENT_THREAD_ID": "parent-thread",
+            "CUSTOM_KEY": "parent-custom",
+            **{
+                name: "parent-admin-secret"
+                for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+            },
+            **env,
+        }
+        inspected_names = [
+            *broker_env,
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "DATABASE_URL",
+            "INK_AGENT_USER_ID",
+            "INK_AGENT_THREAD_ID",
+            "CUSTOM_KEY",
+            *sorted(sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES),
+        ]
+        captured = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import json,os,sys; "
+                    "from libs.claude_agent_kit.server.user_mcp_stdio import "
+                    "sanitize_user_mcp_environment; "
+                    "sanitize_user_mcp_environment(os.environ); "
+                    "print(json.dumps({name: os.getenv(name) for name in sys.argv[1:]}))"
+                ),
+                *inspected_names,
+            ],
+            env=inherited,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        child = json.loads(captured.stdout)
+
+        self.assertTrue(broker_env.items() <= child.items())
+        for name in (
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            *sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
+        ):
+            self.assertIsNone(child[name])
+            self.assertEqual(env[name], "")
+        self.assertIsNone(child.get("DATABASE_URL"))
+        self.assertIsNone(child.get("INK_AGENT_USER_ID"))
+        self.assertIsNone(child.get("INK_AGENT_THREAD_ID"))
+        self.assertIsNone(child.get("CUSTOM_KEY"))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("INK_AGENT_USER_ID", env)
+        self.assertNotIn("INK_AGENT_THREAD_ID", env)
+        self.assertNotIn("CUSTOM_KEY", env)
+
     async def test_user_mcp_exposes_only_session_retrieval(self):
         from mcp import types as mcp_types
         from libs.claude_agent_kit.server.mcp_server import (

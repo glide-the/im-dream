@@ -1,11 +1,12 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic user reservations, bound assistant/Thread/SystemConfig/SDK and recent Session operations with original-ID recovery.
+# [Output] Atomic turn persistence plus a provider-bound Session projection broker with original-ID recovery.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
 # [Sync] 2026-09-15: share the unknown barrier with complete/partial assistant writes and exact history schemas.
 # [Sync] 2026-09-15: read fresh Thread SystemConfig through the same draining persistence grant.
 # [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
+# [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,7 +23,11 @@ from .delegation_keeper import RuntimeGrantKeeper, RuntimeRenewalSettings
 from .errors import AdminDataError, configuration_invalid, invalid_response
 from .models import CommittedReceiptDTO, StrictDTO
 from .session_data import AdminSessionData, require_session_list_capabilities
-from .session_models import SessionListInputDTO, SessionPreviewDTO
+from .session_models import SessionListInputDTO, SessionListResultDTO, SessionPreviewDTO
+from .session_projection_broker import (
+    SessionProjectionBroker,
+    SessionProjectionBrokerSettings,
+)
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
 from .workspace_data import require_workspace_capabilities
@@ -43,12 +48,30 @@ class _PendingWrite:
     request_id: str
 
 
+class AdminTurnSessionProjectionProvider:
+    """Bind Session list reads to one immutable Chat actor and Thread owner."""
+
+    def __init__(self, owner: "AdminTurnPersistence") -> None:
+        self._owner = owner
+
+    def list_sessions(
+        self, input_dto: SessionListInputDTO, request_id: str
+    ) -> SessionListResultDTO:
+        return self._owner._project_sessions(
+            actor_id=self._owner._resolution.canonical_user_id,
+            thread_id=self._owner._resolution.thread_id,
+            input_dto=input_dto,
+            request_id=request_id,
+        )
+
+
 class AdminTurnPersistence:
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
         clock: Callable[[], datetime] | None = None,
         renewal_settings: RuntimeRenewalSettings | None = None,
-        request_id_factory: Callable[[], str] | None = None):
+        request_id_factory: Callable[[], str] | None = None,
+        session_broker_settings: SessionProjectionBrokerSettings):
         expected_run = resolution.context.workflow_run_id if resolution.context is not None else None
         if (grant.purpose != "server-persistence" or grant.thread_id != resolution.thread_id
             or grant.run_id != expected_run or grant.editor_session_id is not None
@@ -70,9 +93,15 @@ class AdminTurnPersistence:
         self._closed = False
         self._lock = RLock()
         self._write_lock = Lock()
+        self._close_lock = Lock()
         self._writes: dict[str, _UserWrite] = {}
         self._pending: _PendingWrite | None = None
         self._session_write: tuple[ThreadSessionInputDTO, ChangedResultDTO] | None = None
+        self._session_projection_provider = AdminTurnSessionProjectionProvider(self)
+        self._session_projection_broker = SessionProjectionBroker(
+            self._session_projection_provider,
+            settings=session_broker_settings,
+        )
 
     def start(self) -> None:
         with self._lock:
@@ -83,6 +112,11 @@ class AdminTurnPersistence:
                 keeper = RuntimeGrantKeeper(self._grant, client, clock=self._clock, settings=self._settings)
                 self._runtime_client, self._keeper = client, keeper
                 keeper.start()
+        try:
+            self._session_projection_broker.start()
+        except Exception:
+            self.close()
+            raise
 
     def current_grant(self, *, actor_id: str, thread_id: str) -> RuntimeGrant:
         self._resolution.context_for(actor_id=actor_id, thread_id=thread_id)
@@ -134,21 +168,44 @@ class AdminTurnPersistence:
     ) -> tuple[SessionPreviewDTO, ...]:
         """Read the current actor's recent Session projection through this grant."""
 
+        today = self._clock().astimezone(timezone.utc).date()
+        result = self._project_sessions(
+            actor_id=actor_id,
+            thread_id=thread_id,
+            input_dto=SessionListInputDTO(
+                start_date=(today - timedelta(days=2)).isoformat(),
+                end_date=today.isoformat(),
+                include_text=False,
+            ),
+            request_id=self._request_id_factory(),
+        )
+        return tuple(result.sessions)
+
+    def _project_sessions(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        input_dto: SessionListInputDTO,
+        request_id: str,
+    ) -> SessionListResultDTO:
+        """Read a strict Session projection using this owner's current grant."""
+
+        if type(input_dto) is not SessionListInputDTO:
+            raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400, request_id)
         with self._write_lock:
             grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
-            request_id = self._request_id_factory()
             require_session_list_capabilities(self._client, request_id)
-            today = self._clock().astimezone(timezone.utc).date()
-            result = self._sessions.list(
-                SessionListInputDTO(
-                    start_date=(today - timedelta(days=2)).isoformat(),
-                    end_date=today.isoformat(),
-                    include_text=False,
-                ),
+            return self._sessions.list(
+                input_dto,
                 request_id,
                 access_token=grant.token,
             )
-            return tuple(result.sessions)
+
+    def session_projection_child_env(self) -> dict[str, str]:
+        """Return only the started broker tuple for the user MCP child."""
+
+        return self._session_projection_broker.child_env()
 
     def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
         metadata: dict | None, history_final_text: str | None = None,
@@ -220,14 +277,21 @@ class AdminTurnPersistence:
         return result
 
     def close(self) -> None:
-        with self._lock:
-            self._closed = True
-            keeper, client = self._keeper, self._runtime_client
-        # Cancellation cannot stop an already-dispatched synchronous command.
-        # Phase 4 drains it before application-owned HTTP connections close.
-        with self._write_lock:
-            pass
-        if keeper is not None:
-            keeper.close()
-        if client is not None:
-            client.close()
+        with self._close_lock:
+            with self._lock:
+                if self._closed:
+                    return
+            # Stop new child requests and drain a provider call while the
+            # grant and Admin HTTP resources are still valid.
+            self._session_projection_broker.close()
+            with self._lock:
+                self._closed = True
+                keeper, client = self._keeper, self._runtime_client
+            # Cancellation cannot stop an already-dispatched synchronous command.
+            # Phase 4 drains it before application-owned HTTP connections close.
+            with self._write_lock:
+                pass
+            if keeper is not None:
+                keeper.close()
+            if client is not None:
+                client.close()

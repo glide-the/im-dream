@@ -22,6 +22,7 @@
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
 # [Sync] 2026-09-15: register OAuth and persistence-grant SystemConfig consumers.
 # [Sync] 2026-09-15: register the three OAuth-only Reflections section-config operations.
+# [Sync] 2026-09-15: derive the turn Session broker transport bounds from Admin HTTP configuration.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ from .profile_data import AdminProfileData, CURRENT_PROFILE, UserProfileDTO
 from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT
 from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO, RuntimeHttpConfig
 from .editor_runtime import AdminEditorRuntime
+from .session_projection_broker import SessionProjectionBrokerSettings
 from .turn_persistence import AdminTurnPersistence
 from .user_message_data import PERSIST_USER_MESSAGE
 from .session_data import SESSION_OPERATIONS
@@ -177,8 +179,16 @@ class AdminRequestAuth:
             with self._lock:
                 self._capabilities_ready = False
             raise
-        return AdminTurnPersistence(resolution, grant, self.client,
-            runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config))
+        return AdminTurnPersistence(
+            resolution,
+            grant,
+            self.client,
+            runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config),
+            session_broker_settings=SessionProjectionBrokerSettings(
+                timeout_seconds=self._runtime_http_config.timeout_seconds,
+                max_bytes=self._runtime_http_config.max_response_bytes,
+            ),
+        )
 
     def editor_runtime(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution,
         request_id: str, *, initial_session_id: str | None) -> AdminEditorRuntime:

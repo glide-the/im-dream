@@ -1092,3 +1092,21 @@ Primary六文件provider-free suite在文档一致性修正后以`PYTHONDONTWRIT
 [source/runtime probe receipt](/private/tmp/dream-admin-stage42-agent-session-context/source/command-receipt.json) **exit0/PASS**：`session.list`原SHA、三identity schema、四source hashes、ContextBuilder database import/helper为0；把旧Session helpers替换为记录调用后仍从supplied Admin projection渲染且调用数0。[scanner receipt](/private/tmp/dream-admin-stage42-agent-session-context/scanner/command-receipt.json) **exit0**：302模块、46 SQL-bearing、504 literal SQL候选、16 driver/import、29 legacy database import、102 direct helper Call候选、27直接helper模块、`parse_errors=[]`。ContextBuilder旧import和两helper关闭；`sessions_tool.py`、Reflections后台及其它SQL领域仍开放，正常业务验收未执行。
 
 Markdown gate首次exit1，发现受影响的Thread Session设计稿仍有三个已改名文档的旧链接；更新链接并统一阶段稿、架构、认证、API、上下文和检索设计的失败语义后，fresh [docs receipt](/private/tmp/dream-admin-stage42-agent-session-context/docs/command-receipt.json) **exit0/PASS**：18份affected/current/stage Markdown、434个本地链接、README中英文27/27 headings、7个source headers、4份前置回执和`git diff --check`均通过。门禁同时断言Admin读取失败不得转换成空列表，只有成功空列表或已取得投影的纯渲染错误使用empty block。首次失败是文档库存缺口，不是Session API或Runtime测试失败；fresh成功回执覆盖同一路径的失败回执，因此本段保留该失败事实。
+
+## 阶段43：Chat Session工具消费turn-local Admin projection broker
+
+### 实现边界
+
+复用已冻结的Admin `session.list`与Stage42 `AdminTurnPersistence`，关闭`libs/claude_agent_kit/server/sessions_tool.py`最后一条Chat生产数据库路径。新增neutral strict protocol和server-only loopback broker；request只含capability、request ID、ISO日期、`include_text`，任何actor/Thread/task/SQL/credential字段都由closed DTO在provider前拒绝。Chat provider固定owner的canonical actor/Thread，在共同activity lock内取得current renewed grant、匹配三identity schema并调用现有`AdminSessionData.list`。`include_text=false`在host与child双重禁止正文。
+
+Factory先让persistence keeper ready，再启动`127.0.0.1`临时端口和256-bit capability；Service在Runtime workspace前取得child tuple。生产timeout/max-bytes直接来自已有Admin HTTP配置，缺失时fail closed，不新增业务常量。Phase4先关闭broker accept并drain在途同步读取，再关闭owner writer、keeper与HTTP。SSE disconnect、admission/lease、EventBus、Runner、resume/cancel、Editor、Story Workspace、Memory、Notion、shared FS、TMPDIR与sandbox保持。
+
+Runner的user stdio配置只选择五个broker字段和两个既有retrieval policy，为Claude Gateway credential及Admin/BFF server secret写空tombstone；isolated Python bootstrap在package导入前清空继承环境，`user_mcp_stdio`入口再次只恢复broker/policy。实际子进程capture覆盖parent bearer/API/OAuth/Admin/DB/actor/Thread/custom值并确认全部不可见。`sessions_tool.py`删除`INK_AGENT_USER_ID`、database/PG/pool/Admin client依赖和fallback，保留date/fuzzy/labels/limit/Unicode/vector/auto产品行为；稳定错误不含endpoint、capability、token、URL、正文、body或异常。
+
+本阶段按协调决定只实现Chat provider。Reflections `worker-load`的bounded Session snapshot尚未冻结，因此不猜shape、不借Chat grant、不标完成；其task/section owner和过滤测试在producer contract发布后另行实施。
+
+### 技术回执
+
+Primary最终焦点套件[回执](/private/tmp/dream-admin-stage43-session-tool-broker/primary/command-receipt.json) **exit0，370passed/1skipped/13.63s**。Mandatory Luna初次在sandbox内因loopback bind权限得到21fail、349pass、1skip，判定为harness失败；允许明确命名的`127.0.0.1`临时端口后对最终代码以相同argv fresh执行，[回执](/private/tmp/dream-admin-stage43-session-tool-broker/luna/command-receipt.json) **exit0，370passed/1skipped/13.55s**。Luna额外执行`git diff --check` exit0和八production Python文件compile exit0，且未编辑仓库。
+
+[Source gate](/private/tmp/dream-admin-stage43-session-tool-broker/source/command-receipt.json) **exit0/PASS**：Session tool blocked import与legacy helper mention均为0，neutral protocol无Admin/DB import，stdio clear在运行前，Runner使用exact allowlist+tombstones。[Current AST scanner](/private/tmp/dream-admin-stage43-session-tool-broker/scanner/command-receipt.json) **exit0/PASS**：514 Python modules、80 production entries、52 SQL modules、496 SQL literals、37 driver/database import modules、94 legacy helper calls、457 transaction/connection calls、24 Admin data modules、88 operation names、104 nonproduction entries、166 schema literals、`parse_errors=[]`。相对Stage42冻结baseline，新增三个无DB模块，production entry、driver/database import module、legacy helper call各减少1；全域生产可达SQL和正常业务验收仍保持active/pending。

@@ -108,7 +108,7 @@ ThreadFactory (thread_factory.py)
 
 公开Chat在返回SSE前读取Admin Workflow上下文，创建绑定actor、Thread与当前Run的server-persistence委托，并原子预留user message和缺失title。Admin执行原stored confirmation guard，Dream只保留原文本投影和raw JSON词法。Service复用已确认相同输入；unknown保留原request ID，只查原receipt，absent阻止新写与推理。
 
-Factory在既有admission成功后启动独立Keeper。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，shutdown等待已dispatch的同步writer、renewal线程和独立HTTP client关闭。既有lease、EventBus、Runner与resume/cancel流程保持。该grant不投影给CLI或Editor。首次或Settings prompt变化时，Service通过owner调用Admin `session.list`取得UTC当天及前两天的strict投影；成功空列表才渲染empty block，Admin、能力、超时或DTO失败在Workspace/Runtime/SSE前终止。Session工具、Reflections后台上下文及内部Workflow dispatcher仍待各自typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
+Factory在既有admission成功后启动独立Keeper和Chat Session broker。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，broker先停止accept并drain已dispatch读取，再等待writer、renewal线程和独立HTTP client关闭。既有lease、EventBus、Runner与resume/cancel流程保持。grant不投影给CLI、Editor或user MCP。首次或Settings prompt变化时，Service通过owner调用Admin `session.list`取得UTC当天及前两天投影；Chat `get_sessions_range`用同一owner的私有broker取得任意日期及可选正文投影。user stdio只收到broker/policy allowlist，isolated bootstrap在package导入前清除继承env；原fuzzy/labels/limit/vector逻辑留在child。Reflections后台上下文及内部Workflow dispatcher仍待各自typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
 
 公开Service的Thread读取与SDK init/final/repair Session回写也通过同一owner；reply actor/thread错配拒绝。user/session未知写共享原operation/input/UUID，只有最近确认的Session同输入可复用。SDK init失败保留原日志/既有运行turn与cancel处理；assistant/Run旧DB写尚不在此owner内。
 
@@ -235,7 +235,8 @@ POST /api/claude-agent
     │   │
     │   ├─ Phase 2: server/agent_runner.py
     │   │   └─ ClaudeAgentRunner(session_id, cwd)
-    │   │       └─ env: ANTHROPIC_* → Claude SDK subprocess
+    │   │       ├─ env: ANTHROPIC_* → Claude SDK subprocess
+    │   │       └─ user MCP exact env → private Session broker → Admin session.list
     │   │
     │   └─ Phase 3: service.py
     │       ├─ runner.run_streaming(opts, callbacks)

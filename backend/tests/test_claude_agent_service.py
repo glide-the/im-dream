@@ -17,7 +17,7 @@
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
 #                    assembly, config-change cache rebuild, and config-load
 #                    failure termination.
-# [Sync] 2026-09-15: cover Admin recent Session projection first-build/cache/rebuild behavior.
+# [Sync] 2026-09-15: cover Session broker env/fail-closed and recent projection cache behavior.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
 # [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
 #                    workspace_context Notion block rendering.
@@ -1141,6 +1141,14 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
     async def test_admin_recent_sessions_load_only_on_first_build_and_settings_rebuild(self):
         builder = _FakeContextBuilder()
         owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        broker_env = {
+            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+            "INK_SESSION_BROKER_PORT": "31415",
+            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
+        }
+        owner.session_projection_child_env.return_value = broker_env
         owner.system_config.side_effect = [
             {"workspace_enabled": False, "system_prompt": "old"},
             {"workspace_enabled": False, "system_prompt": "old"},
@@ -1200,6 +1208,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(owner.recent_sessions.call_count, 2)
+        self.assertTrue(broker_env.items() <= first.run_options.mcp_env.items())
         self.assertEqual(
             [call[0][0]["id"] for call in builder.system_prompt_calls],
             ["session-a", "session-b"],
@@ -1260,6 +1269,38 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         runtime_workspace.assert_not_called()
         legacy_range.assert_not_called()
         legacy_all.assert_not_called()
+
+    async def test_session_broker_unavailable_stops_before_context_or_runtime_workspace(self):
+        builder = _FakeContextBuilder()
+        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner.system_config.return_value = {"workspace_enabled": False}
+        owner.session_projection_child_env.side_effect = RuntimeError(
+            "SESSION_BROKER_UNAVAILABLE"
+        )
+        service = _ProductionClaudeAgentService(context_builder=builder)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_session_broker_failure",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_session_broker_failure", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with unittest.mock.patch.object(
+            service_module, "get_or_create_thread_runtime_workspace"
+        ) as runtime_workspace:
+            with self.assertRaisesRegex(RuntimeError, "SESSION_BROKER_UNAVAILABLE"):
+                await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        runtime_workspace.assert_not_called()
 
     async def test_system_config_load_failure_stops_before_context_or_workspace(self):
         builder = _FakeContextBuilder()

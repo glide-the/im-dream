@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: inject the started turn-local Session broker tuple into Runtime options.
 # [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
 #         claude_agent/context_builder.py, claude_agent/tool_confirmation_store.py.
@@ -1677,6 +1678,11 @@ class ClaudeAgentService:
             )
         else:
             raise configuration_invalid()
+        session_projection_env = (
+            persistence.session_projection_child_env()
+            if isinstance(persistence, AdminTurnPersistence)
+            else {}
+        )
         system_config_loaded = True
         settings_system_prompt = _coerce_settings_system_prompt(
             sys_cfg.get("system_prompt")
@@ -2127,6 +2133,7 @@ class ClaudeAgentService:
                 **user_env_vars,
                 "INK_AGENT_USER_ID": str(request.user_id),
                 "INK_AGENT_THREAD_ID": state.session_id,
+                **session_projection_env,
                 **(
                     editor_runtime.child_env()
                     if active_editor_state is not None and editor_runtime is not None

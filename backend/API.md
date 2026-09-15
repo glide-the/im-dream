@@ -14,6 +14,7 @@
 > [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
 > [Sync] 2026-09-15: Reflections config GET/PUT/DELETE and memory-init ownership/config reads use Admin OAuth operations before filesystem access.
 > [Sync] 2026-09-15: Agent recent Session prompt context uses Admin `session.list` through the bound turn owner; Admin failures stop before Runtime.
+> [Sync] 2026-09-15: Chat `mcp__user__get_sessions_range` uses the same turn owner through a private loopback broker; the child receives no actor, database or Admin credential.
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
 > authorization, the server verifies the DB Claude ID in the current Runtime
 > project. Missing records start a fresh Claude session in the same business
