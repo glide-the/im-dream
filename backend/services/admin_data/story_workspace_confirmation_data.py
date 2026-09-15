@@ -1,13 +1,15 @@
-# [Input] Admin Registry120 confirmation contracts, OAuth bearer or service-only claim identity.
-# [Output] Strict lossless submit/fact/claim/lease/ack DTO consumers with bounded recovery.
+# [Input] Admin Registry120/121 contracts, OAuth bearer or service-only claim identity.
+# [Output] Strict confirmation DTO consumers plus a claim-bound Admin turn owner.
 # [Pos] Dream data port; PostgreSQL, ORM, lifecycle, permissions and durable claims stay in Admin.
-# [Sync] 2026-09-16: replace confirmation SQL with five named DTO/ORM business operations.
+# [Sync] 2026-09-16: bind confirmation Runtime to a Registry121 server-persistence grant.
 """Typed Registry120 consumer for Story Workspace confirmation persistence."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -15,8 +17,29 @@ from pydantic import Field, field_validator, model_validator
 from .chat_models import ChatStrictDTO
 from .client import AdminDataClient, DomainOperation
 from .errors import AdminDataError, invalid_response
-from .models import CanonicalUserId, CommittedReceiptDTO, Identifier, OperationCapabilityDTO
+from .models import (
+    CanonicalUserId,
+    CommittedReceiptDTO,
+    Identifier,
+    OperationCapabilityDTO,
+    SchemaCapabilityDTO,
+)
 from .workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
+from .workflow_data import AdminWorkflowData, AdminWorkflowResolution
+from .deck_chat_context_data import (
+    AdminDeckChatContextData,
+    AdminDeckChatContextResolution,
+    DeckChatContextInputDTO,
+)
+from .delegation import (
+    AdminRuntimeClient,
+    DelegationCreatedDTO,
+    DelegationCreateInputDTO,
+    RuntimeGrant,
+    RuntimeHttpConfig,
+)
+from .session_projection_broker import SessionProjectionBrokerSettings
+from .turn_persistence import AdminTurnPersistence
 
 RunId = Annotated[str, Field(pattern=r"^run_[0-9a-f]{32}$")]
 MessageId = Annotated[str, Field(pattern=r"^dream_confirm_[0-9a-f]{64}$")]
@@ -120,6 +143,17 @@ class StoryWorkspaceConfirmationClaimOutputDTO(ChatStrictDTO):
     dispatch: StoryWorkspaceConfirmationDispatchDTO | None
 
 
+class StoryWorkspaceConfirmationClaimTurnOutputDTO(ChatStrictDTO):
+    dispatch: StoryWorkspaceConfirmationDispatchDTO | None
+    authority: DelegationCreatedDTO | None
+
+    @model_validator(mode="after")
+    def authority_matches_dispatch(self):
+        if (self.dispatch is None) != (self.authority is None):
+            raise ValueError("Dispatch and authority must be present together")
+        return self
+
+
 class StoryWorkspaceConfirmationLeaseOutputDTO(ChatStrictDTO):
     renewed: bool
     lease_until: Annotated[float, Field(ge=0, allow_inf_nan=False, strict=True)] | None
@@ -160,6 +194,11 @@ CLAIM_STORY_WORKSPACE_CONFIRMATION = _operation(
     "c049317c4383584a7574b11daea1b8c626875d589e0dbbd45dfb739c4ca8cde1",
     StoryWorkspaceConfirmationClaimInputDTO, StoryWorkspaceConfirmationClaimOutputDTO,
 )
+CLAIM_STORY_WORKSPACE_CONFIRMATION_TURN = _operation(
+    "story-workspace-confirmation.claim-turn", "write", None, "story-confirmation:dispatch",
+    "c971b5f2ee3517eb9c078d70544bfaa46d74a293afc44b1b8386496d9d081e62",
+    StoryWorkspaceConfirmationClaimInputDTO, StoryWorkspaceConfirmationClaimTurnOutputDTO,
+)
 LEASE_STORY_WORKSPACE_CONFIRMATION = _operation(
     "story-workspace-confirmation.lease", "write", None, "story-confirmation:dispatch",
     "a5720992e5a0cbc39773481dd3f98a32e6b535c34ea24df230de6ad5646817e6",
@@ -174,6 +213,7 @@ STORY_WORKSPACE_CONFIRMATION_OPERATIONS = (
     SUBMIT_STORY_WORKSPACE_CONFIRMATION,
     READ_STORY_WORKSPACE_CONFIRMATION_FACT,
     CLAIM_STORY_WORKSPACE_CONFIRMATION,
+    CLAIM_STORY_WORKSPACE_CONFIRMATION_TURN,
     LEASE_STORY_WORKSPACE_CONFIRMATION,
     ACK_STORY_WORKSPACE_CONFIRMATION,
 )
@@ -250,6 +290,29 @@ def _ensure_capabilities(client: AdminDataClient, request_id: str) -> None:
             raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
 
 
+CONFIRMATION_TURN_SCHEMA_REQUIREMENT = SchemaCapabilityDTO(
+    capability="identity.runtime-confirmation-claim.v1",
+    version=1,
+    contract_sha256="d9de67655e6d8d5ae9654d6502a2cf5d9ab1bb6d829975b243eb25e239b08919",
+)
+
+
+def _ensure_turn_capability(client: AdminDataClient, request_id: str) -> None:
+    capabilities = client.capabilities(request_id)
+    schemas = {item.capability: item for item in capabilities.schema_capabilities}
+    if (
+        len(schemas) != len(capabilities.schema_capabilities)
+        or any(
+            schemas.get(item.capability) != item
+            for item in (
+                *WORKFLOW_SCHEMA_REQUIREMENTS,
+                CONFIRMATION_TURN_SCHEMA_REQUIREMENT,
+            )
+        )
+    ):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+
+
 class AdminStoryWorkspaceConfirmationData:
     def __init__(self, client: AdminDataClient, *, canonical_user_id: str) -> None:
         self._client = client
@@ -295,8 +358,18 @@ class AdminStoryWorkspaceConfirmationData:
 
 
 class AdminStoryWorkspaceConfirmationWorkerData:
-    def __init__(self, client: AdminDataClient) -> None:
+    def __init__(
+        self,
+        client: AdminDataClient,
+        *,
+        runtime_http_config: RuntimeHttpConfig | None = None,
+        session_broker_settings: SessionProjectionBrokerSettings | None = None,
+        clock=None,
+    ) -> None:
         self._client = client
+        self._runtime_http_config = runtime_http_config
+        self._session_broker_settings = session_broker_settings
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _execute_recovering(self, operation, input_dto, request_id: str):
         _ensure_capabilities(self._client, request_id)
@@ -317,8 +390,109 @@ class AdminStoryWorkspaceConfirmationWorkerData:
                 raise invalid_response(request_id, write=True)
         return result
 
+    def claim_turn(
+        self, input_dto: StoryWorkspaceConfirmationClaimInputDTO, request_id: str
+    ) -> "AdminStoryWorkspaceConfirmationTurnClaim | None":
+        _ensure_turn_capability(self._client, request_id)
+        result = self._execute_recovering(
+            CLAIM_STORY_WORKSPACE_CONFIRMATION_TURN, input_dto, request_id
+        )
+        if result.dispatch is None or result.authority is None:
+            if result.dispatch is not None or result.authority is not None:
+                raise invalid_response(request_id, write=True)
+            return None
+        metadata = _validate_dispatch(result.dispatch, request_id)
+        if (
+            metadata.dispatch_status != "dispatching"
+            or metadata.dispatch_claim_id != input_dto.claim_id
+        ):
+            raise invalid_response(request_id, write=True)
+        requested = DelegationCreateInputDTO(
+            purpose="server-persistence",
+            thread_id=result.dispatch.thread_id,
+            run_id=metadata.story_workspace_run_id,
+            editor_session_id=None,
+            scopes=["dream:read", "dream:write"],
+        )
+        grant = RuntimeGrant.from_created(
+            result.authority,
+            requested,
+            request_id,
+            now=self._clock(),
+        )
+        return AdminStoryWorkspaceConfirmationTurnClaim(
+            dispatch=result.dispatch,
+            grant=grant,
+        )
+
+    def turn_owner(
+        self,
+        claim: "AdminStoryWorkspaceConfirmationTurnClaim",
+        request_id: str,
+    ) -> "AdminStoryWorkspaceConfirmationTurnOwner":
+        if (
+            self._runtime_http_config is None
+            or self._session_broker_settings is None
+        ):
+            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        metadata = _validate_dispatch(claim.dispatch, request_id)
+        actor_id = claim.dispatch.actor_id
+        workflow = AdminWorkflowData(self._client).resolve(
+            claim.dispatch.thread_id,
+            request_id,
+            access_token=claim.grant.token,
+            canonical_user_id=actor_id,
+        )
+        context = workflow.context_for(
+            actor_id=actor_id,
+            thread_id=claim.dispatch.thread_id,
+        )
+        if (
+            context is None
+            or context.workflow_run_id != metadata.story_workspace_run_id
+        ):
+            raise invalid_response(request_id)
+        deck = AdminDeckChatContextData(
+            self._client,
+            canonical_user_id=actor_id,
+        ).resolve(
+            DeckChatContextInputDTO(
+                deck_id=context.deck_id,
+                voice_id=context.agent_id,
+            ),
+            request_id,
+            access_token=claim.grant.token,
+        )
+        persistence = AdminTurnPersistence(
+            workflow,
+            claim.grant,
+            self._client,
+            runtime_client_factory=lambda: AdminRuntimeClient(
+                self._runtime_http_config
+            ),
+            session_broker_settings=self._session_broker_settings,
+        )
+        return AdminStoryWorkspaceConfirmationTurnOwner(
+            persistence=persistence,
+            workflow=workflow,
+            deck=deck,
+        )
+
     def lease(self, input_dto: StoryWorkspaceConfirmationLeaseInputDTO, request_id: str):
         return self._execute_recovering(LEASE_STORY_WORKSPACE_CONFIRMATION, input_dto, request_id)
 
     def ack(self, input_dto: StoryWorkspaceConfirmationAckInputDTO, request_id: str):
         return self._execute_recovering(ACK_STORY_WORKSPACE_CONFIRMATION, input_dto, request_id)
+
+
+@dataclass(frozen=True, slots=True)
+class AdminStoryWorkspaceConfirmationTurnClaim:
+    dispatch: StoryWorkspaceConfirmationDispatchDTO
+    grant: RuntimeGrant
+
+
+@dataclass(frozen=True, slots=True)
+class AdminStoryWorkspaceConfirmationTurnOwner:
+    persistence: AdminTurnPersistence
+    workflow: AdminWorkflowResolution
+    deck: AdminDeckChatContextResolution

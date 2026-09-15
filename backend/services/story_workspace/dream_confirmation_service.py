@@ -1,9 +1,9 @@
 """Validate Dream files and deliver Admin-owned confirmation work to Runtime."""
 
-# [Input] Registry120 confirmation DTOs, shared-file projection and same-Thread Runtime dispatcher.
-# [Output] DB-free projection validation plus claim/lease/ack reconciliation through Admin.
+# [Input] Registry120/121 DTOs, shared-file projection and claim-bound Admin turn owner.
+# [Output] DB-free validation plus same-Thread Runtime with Admin-only persistence.
 # [Pos] Dream business orchestration; Admin owns all confirmation SQL, lifecycle and durable state.
-# [Sync] 2026-09-16: replace PostgreSQL access with strict Admin DTO operations.
+# [Sync] 2026-09-16: inject a claim-bound AdminTurnPersistence into confirmation Runtime.
 
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ try:
         StoryWorkspaceDreamFilesResponse,
     )
     from services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationTurnClaim,
+        AdminStoryWorkspaceConfirmationTurnOwner,
         AdminStoryWorkspaceConfirmationWorkerData,
         StoryWorkspaceConfirmationAckInputDTO,
         StoryWorkspaceConfirmationClaimInputDTO,
@@ -45,6 +47,8 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamFilesResponse,
     )
     from backend.services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationTurnClaim,
+        AdminStoryWorkspaceConfirmationTurnOwner,
         AdminStoryWorkspaceConfirmationWorkerData,
         StoryWorkspaceConfirmationAckInputDTO,
         StoryWorkspaceConfirmationClaimInputDTO,
@@ -75,7 +79,8 @@ class StoryWorkspaceDreamConfirmationError(RuntimeError):
 
 
 StoryWorkspaceDreamConfirmationDispatcher = Callable[
-    [str, str, str, list, dict], Awaitable[bool]
+    [str, str, str, list, dict, AdminStoryWorkspaceConfirmationTurnOwner],
+    Awaitable[bool],
 ]
 
 
@@ -86,10 +91,14 @@ class StoryWorkspaceDreamConfirmationDispatch:
     message_id: str
     parts: list
     metadata: dict
+    turn_claim: AdminStoryWorkspaceConfirmationTurnClaim | None = None
 
     @classmethod
     def from_admin(
-        cls, value: StoryWorkspaceConfirmationDispatchDTO
+        cls,
+        value: StoryWorkspaceConfirmationDispatchDTO,
+        *,
+        turn_claim: AdminStoryWorkspaceConfirmationTurnClaim | None = None,
     ) -> "StoryWorkspaceDreamConfirmationDispatch":
         try:
             parts = json.loads(value.parts_json)
@@ -104,7 +113,14 @@ class StoryWorkspaceDreamConfirmationDispatch:
             raise StoryWorkspaceDreamConfirmationError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
             )
-        return cls(value.thread_id, value.actor_id, value.message_id, parts, metadata)
+        return cls(
+            value.thread_id,
+            value.actor_id,
+            value.message_id,
+            parts,
+            metadata,
+            turn_claim,
+        )
 
     @property
     def claim_id(self) -> str:
@@ -208,7 +224,14 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
 ) -> StoryWorkspaceDreamConfirmationDispatcher:
     """Queue a resumed turn behind the existing per-Thread Runtime lock."""
 
-    async def consume(thread_id: str, actor_id: str, message_id: str, parts: list, metadata: dict) -> bool:
+    async def consume(
+        thread_id: str,
+        actor_id: str,
+        message_id: str,
+        parts: list,
+        metadata: dict,
+        owner: AdminStoryWorkspaceConfirmationTurnOwner,
+    ) -> bool:
         try:
             selected_factory = factory
             if selected_factory is None:
@@ -222,7 +245,11 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 user_id=str(actor_id), thread_id=thread_id, resume=True,
                 message_id=message_id, message_parts=parts, message_metadata=metadata,
                 user_message_pre_persisted=True,
+                admin_workflow_resolution=owner.workflow,
+                admin_deck_chat_context=owner.deck,
+                admin_turn_persistence=owner.persistence,
             )
+            await asyncio.to_thread(owner.persistence.start)
             result = await drain_chat_agent_turn(selected_factory, request)
             return result.completed
         except asyncio.CancelledError:
@@ -230,10 +257,26 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
         except Exception:
             _logger.exception("Dream confirmation turn failed for thread_id=%s message_id=%s", thread_id, message_id)
             return False
+        finally:
+            try:
+                await asyncio.to_thread(owner.persistence.close)
+            except Exception:
+                _logger.exception(
+                    "Dream confirmation Admin owner close failed for thread_id=%s message_id=%s",
+                    thread_id,
+                    message_id,
+                )
 
-    def dispatch(thread_id: str, actor_id: str, message_id: str, parts: list, metadata: dict) -> Awaitable[bool]:
+    def dispatch(
+        thread_id: str,
+        actor_id: str,
+        message_id: str,
+        parts: list,
+        metadata: dict,
+        owner: AdminStoryWorkspaceConfirmationTurnOwner,
+    ) -> Awaitable[bool]:
         return asyncio.create_task(
-            consume(thread_id, actor_id, message_id, parts, metadata),
+            consume(thread_id, actor_id, message_id, parts, metadata, owner),
             name=f"dream-confirmation-turn-{message_id}",
         )
     return dispatch
@@ -312,11 +355,14 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         self._stop_event = None
 
     def _claim(self, message_id: str | None) -> StoryWorkspaceDreamConfirmationDispatch | None:
-        result = self._require_worker().claim(
+        claim = self._require_worker().claim_turn(
             StoryWorkspaceConfirmationClaimInputDTO(message_id=message_id, claim_id=self._claim_id_factory()),
             self._request_id_factory(),
         )
-        return None if result.dispatch is None else StoryWorkspaceDreamConfirmationDispatch.from_admin(result.dispatch)
+        return None if claim is None else StoryWorkspaceDreamConfirmationDispatch.from_admin(
+            claim.dispatch,
+            turn_claim=claim,
+        )
 
     def schedule(self, dispatch: Optional[StoryWorkspaceDreamConfirmationDispatch]) -> bool:
         if dispatch is None or dispatch.message_id in self._in_flight:
@@ -327,7 +373,11 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         return self._schedule_claimed(self._claim(dispatch.message_id))
 
     def _schedule_claimed(self, claimed: StoryWorkspaceDreamConfirmationDispatch | None) -> bool:
-        if claimed is None or claimed.message_id in self._in_flight:
+        if (
+            claimed is None
+            or claimed.turn_claim is None
+            or claimed.message_id in self._in_flight
+        ):
             return False
         retry = self._retry_state.get(claimed.message_id)
         if retry is not None and self._clock() < retry.not_before:
@@ -404,11 +454,21 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 heartbeat = None
 
         try:
+            if dispatch.turn_claim is None:
+                raise StoryWorkspaceDreamConfirmationError(
+                    "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
+                )
+            owner = await asyncio.to_thread(
+                self._require_worker().turn_owner,
+                dispatch.turn_claim,
+                self._request_id_factory(),
+            )
             heartbeat = asyncio.create_task(
                 self._renew_owned_claim(dispatch), name=f"dream-confirmation-lease-{dispatch.message_id}"
             )
             turn_task = asyncio.ensure_future(self._dispatcher_factory()(
                 dispatch.thread_id, dispatch.actor_id, dispatch.message_id, dispatch.parts, dispatch.metadata,
+                owner,
             ))
             turn_task.set_name(f"dream-confirmation-turn-{dispatch.message_id}")
             done, _ = await asyncio.wait({heartbeat, turn_task}, return_when=asyncio.FIRST_COMPLETED)

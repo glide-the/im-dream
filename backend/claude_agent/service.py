@@ -214,6 +214,8 @@
 #                    for the marked repair Turn and pass it only to PreToolUse.
 # [Sync] 2026-09-15: accept the explicit Reflections RTA owner through the shared server persistence marker.
 
+# [Sync] 2026-09-16: confirmation dispatcher now supplies the existing Admin persistence owner.
+
 """Claude Agent Service — core business logic for Ink & Memory.
 
 Responsibilities:
@@ -3030,8 +3032,8 @@ class ClaudeAgentService:
                 parts=parts, metadata=metadata, history_final_text=history_final_text,
                 history_process_available=history_process_available, history_projection_version=history_projection_version)
             return
-        # Existing internal dispatchers retain their mapper/SQL until their
-        # authoritative turn owner is connected; public Chat supplies it.
+        # Remaining ownerless internal dispatchers retain their mapper/SQL until
+        # their authoritative owner is connected; public Chat and confirmation supply it.
         import database
         database.save_chat_message(request.thread_id, "assistant", parts=parts, metadata=metadata,
             history_final_text=history_final_text, history_process_available=history_process_available,

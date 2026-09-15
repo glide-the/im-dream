@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: compose Registry121 confirmation worker with Runtime and Session owner settings.
 # [Sync] 2026-09-16: register Registry120 Story confirmation OAuth/background operations.
 # [Sync] 2026-09-15: register Registry111 OAuth-only Story Workspace review operations.
 # [Sync] 2026-09-15: register the Registry109 standalone Story output operation.
@@ -77,7 +78,10 @@ from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
 from .story_workspace_review_data import STORY_WORKSPACE_REVIEW_OPERATIONS
 from .story_workspace_catalog_data import STORY_WORKSPACE_CATALOG_OPERATIONS
 from .story_workspace_guidance_data import STORY_WORKSPACE_GUIDANCE_OPERATIONS
-from .story_workspace_confirmation_data import STORY_WORKSPACE_CONFIRMATION_OPERATIONS
+from .story_workspace_confirmation_data import (
+    STORY_WORKSPACE_CONFIRMATION_OPERATIONS,
+    AdminStoryWorkspaceConfirmationWorkerData,
+)
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -255,6 +259,15 @@ class AdminRequestAuth:
     @property
     def session_broker_settings(self) -> SessionProjectionBrokerSettings:
         return self._session_broker_settings
+
+    def story_workspace_confirmation_worker(
+        self,
+    ) -> AdminStoryWorkspaceConfirmationWorkerData:
+        return AdminStoryWorkspaceConfirmationWorkerData(
+            self.client,
+            runtime_http_config=self._runtime_http_config,
+            session_broker_settings=self._session_broker_settings,
+        )
 
     def editor_runtime(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution,
         request_id: str, *, initial_session_id: str | None) -> AdminEditorRuntime:

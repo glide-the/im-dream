@@ -223,10 +223,20 @@ class RecordingWorker:
         self.claims = []
         self.leases = []
         self.acks = []
+        self.owner = SimpleNamespace(
+            persistence=RecordingPersistence(),
+            workflow=object(),
+            deck=object(),
+        )
 
-    def claim(self, input_dto, request_id):
+    def claim_turn(self, input_dto, request_id):
         self.claims.append((input_dto, request_id))
-        return StoryWorkspaceConfirmationClaimOutputDTO(dispatch=self.dispatch)
+        return SimpleNamespace(dispatch=self.dispatch, grant=object())
+
+    def turn_owner(self, claim, request_id):
+        assert claim.dispatch == self.dispatch
+        assert request_id == REQUEST_ID
+        return self.owner
 
     def lease(self, input_dto, request_id):
         self.leases.append((input_dto, request_id))
@@ -239,6 +249,18 @@ class RecordingWorker:
         return StoryWorkspaceConfirmationAckOutputDTO(acked=True)
 
 
+class RecordingPersistence:
+    def __init__(self) -> None:
+        self.started = 0
+        self.closed = 0
+
+    def start(self) -> None:
+        self.started += 1
+
+    def close(self) -> None:
+        self.closed += 1
+
+
 @pytest.mark.asyncio
 async def test_coordinator_claims_exact_message_and_acks_after_runtime_completion() -> None:
     raw_dispatch = claimed_dispatch()
@@ -246,8 +268,8 @@ async def test_coordinator_claims_exact_message_and_acks_after_runtime_completio
     delivered = []
 
     def dispatcher_factory():
-        async def dispatch(thread_id, actor_id, message_id, parts, metadata):
-            delivered.append((thread_id, actor_id, message_id, parts, metadata))
+        async def dispatch(thread_id, actor_id, message_id, parts, metadata, owner):
+            delivered.append((thread_id, actor_id, message_id, parts, metadata, owner))
             return True
         return dispatch
 
@@ -265,6 +287,7 @@ async def test_coordinator_claims_exact_message_and_acks_after_runtime_completio
     assert worker.claims[0][0].message_id == raw_dispatch.message_id
     assert worker.claims[0][0].claim_id == CLAIM_ID
     assert delivered[0][:3] == (THREAD_ID, ACTOR_ID, raw_dispatch.message_id)
+    assert delivered[0][5] is worker.owner
     assert worker.acks[0][0].claim_id == CLAIM_ID
 
 
@@ -284,13 +307,24 @@ async def test_dispatcher_marks_admin_persisted_user_turn_without_rewriting_it()
         factory=object(), request_factory=request_factory
     )
     parsed = StoryWorkspaceDreamConfirmationDispatch.from_admin(claimed_dispatch())
+    persistence = RecordingPersistence()
+    owner = SimpleNamespace(
+        persistence=persistence,
+        workflow=object(),
+        deck=object(),
+    )
     with patch.object(confirmation_module, "drain_chat_agent_turn", drain):
         assert await dispatcher(
             parsed.thread_id, parsed.actor_id, parsed.message_id,
-            parsed.parts, parsed.metadata,
+            parsed.parts, parsed.metadata, owner,
         )
     assert created[0]["resume"] is True
     assert created[0]["user_message_pre_persisted"] is True
+    assert created[0]["admin_turn_persistence"] is persistence
+    assert created[0]["admin_workflow_resolution"] is owner.workflow
+    assert created[0]["admin_deck_chat_context"] is owner.deck
+    assert persistence.started == 1
+    assert persistence.closed == 1
 
 
 @pytest.mark.asyncio

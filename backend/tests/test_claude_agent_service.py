@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
 # [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
@@ -2154,6 +2155,64 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
             "story-workspace-dream-auto-repair",
         )
 
+    def test_claimed_confirmation_uses_admin_owner_without_postgres(self):
+        async def scenario():
+            import database
+
+            service = ClaudeAgentService()
+            owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-confirmation-owner",
+                message_id="dream_confirm_" + "a" * 64,
+                message_parts=[{"type": "text", "text": "confirm"}],
+                message_metadata={
+                    "kind": "story-workspace-dream-confirmation",
+                    "dispatch_status": "dispatching",
+                    "dispatch_claim_id": "claim-owner",
+                },
+                user_message_pre_persisted=True,
+                admin_turn_persistence=owner,
+            )
+            execution = service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=request.thread_id),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            with (
+                unittest.mock.patch.object(
+                    database,
+                    "get_db",
+                    side_effect=AssertionError("confirmation must not open PostgreSQL"),
+                ) as get_db,
+                unittest.mock.patch.object(
+                    database,
+                    "save_chat_message",
+                    side_effect=AssertionError("confirmation must not save through PostgreSQL"),
+                ) as save_chat_message,
+            ):
+                await service._persist_user_message(execution)
+                service._save_assistant_message(
+                    request,
+                    parts=[{"type": "text", "text": "done"}],
+                    metadata={"turnStatus": "completed", "finalPartIndex": 0},
+                    history_final_text="done",
+                    history_process_available=False,
+                    history_projection_version=1,
+                )
+            get_db.assert_not_called()
+            save_chat_message.assert_not_called()
+            return owner
+
+        owner = _run(scenario())
+        owner.persist_user.assert_not_called()
+        owner.persist_assistant.assert_called_once()
+
     def test_identity_and_postgres_failures_are_rethrown_before_inference(self):
         import database
 
@@ -2190,11 +2249,6 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                     database,
                     "save_chat_message",
                     side_effect=failure,
-                ),
-                unittest.mock.patch(
-                    "services.story_workspace.dream_confirmation_service."
-                    "story_workspace_guard_persisted_dream_confirmation_turn",
-                    return_value=False,
                 ),
             ):
                 with self.assertRaises(type(failure)):
