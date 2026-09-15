@@ -224,8 +224,8 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/script/verify_gateway_e2e.py](../../backend/script/verify_gateway_e2e.py) | explicit import/maintenance script; verify callers before retirement / 8 | chat_message, chat_thread, gateway_requests, jsonb_array_elements, messages, platform_users, subscription_token_ledger_entries, subscription_usage_allowances, users | 详见 JSON 调用线索 | 549,592,727,783 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/server.py](../../backend/server.py) | production / 4 | claude_plugin_installations, deck, voice | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/admin_gateway/selection.py](../../backend/services/admin_gateway/selection.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/admin_product/identity.py](../../backend/services/admin_product/identity.py) | production / 1 | users | 详见 JSON 调用线索 | 61 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/admin_product/identity.py`（迁移前文件，现已删除） | production / 1 | users | 单行 active identity 读取 | 61 | 已关闭：主体来自 Admin OAuth principal，Admin Product ORM 再次复核 active canonical/platform identity |
+| [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | production / 0 | Admin HTTP composition | 无本地事务 | 不适用 | 已关闭：只创建 Product client，不创建 PostgreSQL pool或fallback |
 | [backend/services/claude_agent/remote_interaction_guard.py](../../backend/services/claude_agent/remote_interaction_guard.py) | production / 2 | agent_sessions, workflow_runs | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_agent/session_manager.py](../../backend/services/claude_agent/session_manager.py) | production / 17 | agent_sessions, deck_runtime_plugin_locks, runtime_load_receipt_entries, runtime_load_receipts, workflow_runs | L709 SessionManager._acquire_attempt: revision | 762,785,798,301,709,353,660 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | production / 3 | claude_plugin_installations, deck_claude_plugin_refs, decks | 详见 JSON 调用线索 | 40 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -335,8 +335,8 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 - `backend/script/verify_gateway_e2e.py`: _gateway_receipt, _metrics, _thread_receipt, main
 - `backend/server.py`: <module>, startup_claude_plugin_seed._seed
 - `backend/services/admin_gateway/selection.py`: imports only
-- `backend/services/admin_product/identity.py`: PostgresCanonicalUserRepository._find_active_sync
-- `backend/services/admin_product/runtime.py`: LazyProductBffService._delegate
+- `backend/services/admin_product/identity.py`（迁移前基线）: `PostgresCanonicalUserRepository._find_active_sync`；2026-09-16 已删除
+- `backend/services/admin_product/runtime.py`（迁移前基线）: `LazyProductBffService._delegate`；2026-09-16 已移除 pool composition
 - `backend/services/claude_agent/remote_interaction_guard.py`: RemoteInteractionGuard.guard_reload
 - `backend/services/claude_agent/session_manager.py`: SessionManager._acquire_attempt, SessionManager._load_scoped_queued_run, SessionManager._mark_compensation_pending, SessionManager._mark_failed, SessionManager._record_remote_start, SessionManager._rollback_read_transaction, SessionManager._validate_receipt, SessionManager.read_session, SessionManager.terminate_session
 - `backend/services/claude_plugin/deck_refs_service.py`: DeckPluginRefService.assert_deck_owner, DeckPluginRefService.list_refs, DeckPluginRefService.replace_refs
@@ -388,7 +388,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 - `backend/script/**`、`backend/schema/{legacy_main_sqlite,legacy_notion_sqlite,importer}.py`：显式导入/维护候选，不应由 server/runtime 自动调用；后续逐项核查。
 - `backend/tests/**`、`frontend/e2e/**` 与明确验证脚本：可保留隔离 fixture/harness 数据库代码，但不得成为生产 import。
 - `frontend/app/**`、`frontend/packages/**`：初始 rg 未发现 PG/SQL driver；Node MCP Apps token/actor 委托与 BFF 仍需认证流程核查。
-- `backend/server.py` startup/health、`agent_factory.py` 后台 composition、Notion store pool、resource observer sink/publisher、model registry 与 admin_product identity：不因不是业务 router 而漏迁移。
+- `backend/server.py` startup/health、`agent_factory.py` 后台 composition、Notion store pool、resource observer sink/publisher与model registry：不因不是业务 router 而漏迁移。Product BFF identity/pool 已于2026-09-16关闭。
 
 ## 待验收
 
@@ -445,7 +445,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/deck/chat_context.py](../../backend/services/deck/chat_context.py) | 2 | 0 |
 | [backend/services/story_workspace/artifact_story_index_reconcile.py](../../backend/services/story_workspace/artifact_story_index_reconcile.py) | 2 | 0 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 2 | 0 |
-| [backend/services/admin_product/identity.py](../../backend/services/admin_product/identity.py) | 1 | 0 |
+| `backend/services/admin_product/identity.py`（迁移前基线，现已删除） | 1 | 0 |
 | [backend/services/story_workspace/dream_reentry_service.py](../../backend/services/story_workspace/dream_reentry_service.py) | 1 | 2 |
 | [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 1 | 0 |
 | [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 1 | 0 |
@@ -455,7 +455,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/persistence/postgres.py](../../backend/persistence/postgres.py) | 0 | 0 |
 | [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | 0 | 0 |
 
-重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，Deck binding/content/runtime/Gateway，Editor/stdio、MCP/Notion/Product pools与startup。revocation_service仍有sqlite3源码import，必须继续按运行入口及Schema协议清理，不能新建SQLite fallback。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
+重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，Deck binding/content/runtime/Gateway，Editor/stdio、Notion pools与startup。Product pool 已关闭；MCP managed persistence 已由后续 Registry147 阶段关闭。revocation_service仍有sqlite3源码import，必须继续按运行入口及Schema协议清理，不能新建SQLite fallback。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
 
 ### Runtime/共享文件回归与授权依赖
 
@@ -556,3 +556,20 @@ user/Session/assistant共用一个pending。timeout或坏reply保留原operation
 mandatory Luna第一次focused运行exit1，结果28passed/6failed/69deselected；六项失败都是fixture误认为fresh schema GET不会增加请求数，实际新增请求全是`/capabilities` GET且无POST。只修断言后fresh复跑exit0，34passed/69deselected/1.05s，stderr空；Root已读取[首次回执](/private/tmp/dream-admin-stage38-assistant-validation/luna/command-receipt.json)、[复跑回执](/private/tmp/dream-admin-stage38-assistant-validation/luna-rerun/command-receipt.json)及两轮stdout/stderr。
 
 source checker首次因捕获进程未继承`PYTHONPATH`在导入前exit1，保留[回执](/private/tmp/dream-admin-stage38-assistant-validation/source/command-receipt.json)；显式环境重跑[exit0/PASS](/private/tmp/dream-admin-stage38-assistant-validation/source-rerun/command-receipt.json)：actual operations 77、`chat-message.persist`原SHA/八字段、四schema、完整/部分构造和SDK顺序AST、原user/Session方法及500个其它backend Python文件保持，内部SQL gap明确存在，normal acceptance=false。fresh scanner [exit0](/private/tmp/dream-admin-stage38-assistant-validation/scanner/command-receipt.json)：299模块、47 SQL-bearing、512字面SQL候选、16 driver、34 legacy import、117直接helper调用、parse_errors=[]；仅公开Service减少一个legacy helper调用候选，不表示其余数据库领域完成。
+
+## 2026-09-16 Product BFF 数据边界关闭
+
+| Dream 入口 | 迁移前访问 | Admin 目标与 DTO/ORM | Dream 替换 | 验收证据 |
+|---|---|---|---|---|
+| `backend/services/admin_product/identity.py` | 直接读取 `users(id, email, is_active)` | 共享 Admin OAuth `/principal` 提供 canonical ID；Admin Product Repository 在业务 ORM 查询前复核 active canonical/platform identity | 文件删除；不接受 caller user ID | Product subject binding 与 mismatched response 测试通过 |
+| [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | 为一次身份读取创建 Dream `PostgresPool` | 既有 Admin Product strict DTO + signed Product JWT + Product service/Repository事务 | 仅延迟创建 `AdminProductClient` | composition source fence 无 pool/persistence/DATABASE_URL/SQL |
+| [backend/routers/product.py](../../backend/routers/product.py) | 旧同步调用 Dream auth，并尝试本地 session renewal | 复用共享异步 `AdminRequestAuth`；GET/POST 分别要求 `dream:read`/`dream:write` | canonical subject 只来自 Admin principal；保留Pydantic DTO、origin、幂等和安全错误 | focused route/client 21 passed |
+
+本阶段没有新增 Admin schema、migration 或重复 Product API。Admin 已有 Product
+Repository 保留业务事务和数据权限；Dream 不会在 Admin OAuth 或 Product API
+不可用时退回 PostgreSQL。dirty-safe AST 回执
+[dream-db-closure-after-product-bff-source-only.json](admin-auth-data-verification/dream-db-closure-after-product-bff-source-only.json)
+实际扫描553个Python模块，当前生产候选78、SQL模块44、SQL literal 404、driver或
+database import模块17、legacy helper调用38、transaction/connection调用308、
+Admin operation名168、parse error 0；`admin_product` entries为空。本结果只关闭
+Product BFF，余下生产候选继续按本清单迁移。

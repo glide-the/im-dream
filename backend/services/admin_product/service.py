@@ -1,4 +1,10 @@
-"""Subject-binding application service for the Dream Product API BFF."""
+"""Subject-binding application service for the Dream Product API BFF.
+
+[Input] Canonical subject already verified by the shared Admin OAuth dependency and strict Product DTOs.
+[Output] Subject-bound calls to the authoritative Admin Product API.
+[Pos] Dream orchestration boundary; Admin revalidates active identity and owns all Product persistence.
+[Sync] 2026-09-16: remove the redundant Dream PostgreSQL identity lookup.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +12,7 @@ import re
 from typing import Any, Protocol
 
 from .client import AdminProductGateway
-from .errors import ProductBffError, dependency_unavailable, invalid_product_response
-from .identity import CanonicalUserLookup
+from .errors import ProductBffError, invalid_product_response
 from .models import (
     ExecuteSubscriptionCommand,
     PaymentIntentCreate,
@@ -63,10 +68,8 @@ class ProductBffService:
     def __init__(
         self,
         *,
-        canonical_users: CanonicalUserLookup,
         admin_product: AdminProductGateway,
     ) -> None:
-        self._canonical_users = canonical_users
         self._admin_product = admin_product
 
     async def _canonical_subject(self, session_subject: str) -> str:
@@ -79,19 +82,10 @@ class ProductBffService:
                 message="A valid Dream session is required.",
                 status_code=401,
             )
-        try:
-            identity = await self._canonical_users.find_active(session_subject)
-        except ProductBffError:
-            raise
-        except Exception:
-            raise dependency_unavailable() from None
-        if identity is None or identity.canonical_user_id != session_subject:
-            raise ProductBffError(
-                code="CANONICAL_USER_REQUIRED",
-                message="The Dream session is not bound to an active canonical user.",
-                status_code=403,
-            )
-        return identity.canonical_user_id
+        # The public route obtains this value only from the shared Admin OAuth
+        # principal. The Admin Product endpoint verifies the signed subject
+        # against active canonical/platform identity again before data access.
+        return session_subject
 
     async def plans(
         self, session_subject: str, query: PlansQuery, request_id: str

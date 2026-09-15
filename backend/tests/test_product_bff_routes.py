@@ -1,17 +1,43 @@
+"""Product BFF route and Admin-authenticated subject-binding contracts.
+
+[Sync] 2026-09-16: use the Admin OAuth owner fixture and enforce a database-free Product composition.
+"""
+
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import auth
 from routers import product
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
 from services.admin_product.errors import ProductBffError
-from services.admin_product.identity import CanonicalUserIdentity
 from services.admin_product.service import ProductBffService
+
+
+class _AuthOwner:
+    def authenticate(self, access_token, request_id, *, required_scopes):
+        if access_token != "valid-admin-oauth":
+            raise AdminDataError("INVALID_ACCESS_TOKEN", 401, request_id)
+        if required_scopes not in {
+            frozenset({"dream:read"}),
+            frozenset({"dream:write"}),
+        }:
+            raise AssertionError(required_scopes)
+        return AdminRequestActor(
+            subject="better-auth-user-7",
+            canonical_user_id="7",
+            client_id="dream-browser",
+            scopes=frozenset({"dream:read", "dream:write"}),
+            issued_at=1,
+            expires_at=4_102_444_800,
+            access_token=access_token,
+        )
 
 
 class _FakeProductBff:
@@ -72,9 +98,9 @@ class ProductBffRouteTests(unittest.TestCase):
         self.app.dependency_overrides[product.get_product_bff_service] = (
             lambda: self.service
         )
+        self.app.state.admin_request_auth = _AuthOwner()
         self.app.include_router(product.router)
-        self.token = auth.create_access_token(7, "canonical@example.test")
-        self.headers = {"authorization": f"Bearer {self.token}"}
+        self.headers = {"authorization": "Bearer valid-admin-oauth"}
         self.environment = patch.dict(
             os.environ,
             {"INK_ADMIN_PRODUCT_ORIGIN": "https://dream.example.test"},
@@ -369,16 +395,6 @@ class ProductBffRouteTests(unittest.TestCase):
         self.assertNotIn("must-not-leak", forbidden.text)
 
 
-class _Lookup:
-    def __init__(self, identity):
-        self.identity = identity
-        self.subjects = []
-
-    async def find_active(self, subject):
-        self.subjects.append(subject)
-        return self.identity
-
-
 class _Gateway:
     def __init__(self, returned_subject="7"):
         self.returned_subject = returned_subject
@@ -393,31 +409,42 @@ class _Gateway:
 
 
 class ProductBffSubjectBindingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pg_lookup_identity_is_the_only_subject_sent_to_admin(self) -> None:
-        lookup = _Lookup(CanonicalUserIdentity("7"))
+    async def test_authenticated_canonical_subject_is_the_only_subject_sent_to_admin(self) -> None:
         gateway = _Gateway()
-        service = ProductBffService(canonical_users=lookup, admin_product=gateway)  # type: ignore[arg-type]
+        service = ProductBffService(admin_product=gateway)  # type: ignore[arg-type]
         result = await service.subscription_context("7", "req_1")
         self.assertEqual(result["data"]["canonicalUser"]["id"], "7")
-        self.assertEqual(lookup.subjects, ["7"])
         self.assertEqual(gateway.subjects, ["7"])
 
-    async def test_missing_or_mismatched_canonical_identity_fails_closed(self) -> None:
-        missing = ProductBffService(
-            canonical_users=_Lookup(None),  # type: ignore[arg-type]
-            admin_product=_Gateway(),  # type: ignore[arg-type]
-        )
-        with self.assertRaises(ProductBffError) as missing_error:
-            await missing.subscription_context("7", "req_1")
-        self.assertEqual(missing_error.exception.status_code, 403)
+    async def test_invalid_or_mismatched_canonical_subject_fails_closed(self) -> None:
+        service = ProductBffService(admin_product=_Gateway())  # type: ignore[arg-type]
+        for invalid in ("", "0", "-1", "user-7", str(9_223_372_036_854_775_808)):
+            with self.assertRaises(ProductBffError) as invalid_error:
+                await service.subscription_context(invalid, "req_1")
+            self.assertEqual(invalid_error.exception.status_code, 401)
 
         mismatched_response = ProductBffService(
-            canonical_users=_Lookup(CanonicalUserIdentity("7")),  # type: ignore[arg-type]
             admin_product=_Gateway("8"),  # type: ignore[arg-type]
         )
         with self.assertRaises(ProductBffError) as mismatch_error:
             await mismatched_response.subscription_context("7", "req_1")
         self.assertEqual(mismatch_error.exception.status_code, 503)
+
+    def test_product_composition_contains_no_database_access(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "services" / "admin_product"
+        sources = "\n".join(
+            (root / name).read_text(encoding="utf-8")
+            for name in ("__init__.py", "runtime.py", "service.py")
+        )
+        forbidden = (
+            "PostgresPool",
+            "PostgresCanonicalUserRepository",
+            "persistence.postgres",
+            "persistence.unit_of_work",
+            "DATABASE_URL",
+            "SELECT ",
+        )
+        self.assertFalse([value for value in forbidden if value in sources])
 
 
 if __name__ == "__main__":

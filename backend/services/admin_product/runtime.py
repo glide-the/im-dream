@@ -1,19 +1,18 @@
-"""Lazy runtime composition for PostgreSQL identity and Admin Product HTTP."""
+"""Lazy runtime composition for the Admin Product HTTP boundary."""
+
+# [Input] Server-owned Admin Product configuration and HTTP client.
+# [Output] One lazy Product BFF service with no Dream database dependency.
+# [Pos] Production Product composition; Admin validates canonical identity and owns persistence.
+# [Sync] 2026-09-16: remove Dream PostgreSQL identity lookup and pool lifecycle.
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-try:
-    from persistence.postgres import PostgresPool
-except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.persistence.postgres import PostgresPool
-
 from .client import AdminProductClient
 from .config import AdminProductConfig
 from .errors import ProductBffError, configuration_unavailable
-from .identity import PostgresCanonicalUserRepository
 from .models import (
     ExecuteSubscriptionCommand,
     PaymentIntentCreate,
@@ -30,7 +29,6 @@ class LazyProductBffService:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._delegate_service: ProductBffService | None = None
-        self._pool: PostgresPool | None = None
         self._client: AdminProductClient | None = None
 
     async def _delegate(self) -> ProductBffService:
@@ -39,36 +37,19 @@ class LazyProductBffService:
         async with self._lock:
             if self._delegate_service is not None:
                 return self._delegate_service
-            pool: PostgresPool | None = None
             client: AdminProductClient | None = None
             try:
                 configuration = AdminProductConfig.from_env()
-                pool = PostgresPool.from_env(application_name="ink-dream-product-bff")
-                await asyncio.to_thread(pool.open)
                 client = AdminProductClient(configuration)
-                service = ProductBffService(
-                    canonical_users=PostgresCanonicalUserRepository(pool),
-                    admin_product=client,
-                )
+                service = ProductBffService(admin_product=client)
             except ProductBffError:
-                if pool is not None:
-                    try:
-                        await asyncio.to_thread(pool.close)
-                    except Exception:
-                        pass
                 if client is not None:
                     await client.aclose()
                 raise
             except Exception:
-                if pool is not None:
-                    try:
-                        await asyncio.to_thread(pool.close)
-                    except Exception:
-                        pass
                 if client is not None:
                     await client.aclose()
                 raise configuration_unavailable() from None
-            self._pool = pool
             self._client = client
             self._delegate_service = service
             return service
@@ -132,17 +113,11 @@ class LazyProductBffService:
 
     async def aclose(self) -> None:
         async with self._lock:
-            client, pool = self._client, self._pool
+            client = self._client
             self._client = None
-            self._pool = None
             self._delegate_service = None
         if client is not None:
             await client.aclose()
-        if pool is not None:
-            try:
-                await asyncio.to_thread(pool.close)
-            except Exception:
-                pass
 
 
 _default_service = LazyProductBffService()

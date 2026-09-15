@@ -1,7 +1,11 @@
+"""Contract tests for the Dream-to-Admin Product DTO and signed-request boundary.
+
+[Sync] 2026-09-16: remove the retired Dream PostgreSQL canonical-user repository coverage.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 import unittest
 
 import httpx
@@ -14,7 +18,6 @@ from services.admin_product.client import (
 )
 from services.admin_product.config import AdminProductConfig
 from services.admin_product.errors import ProductBffError
-from services.admin_product.identity import PostgresCanonicalUserRepository
 from services.admin_product.models import (
     ExecuteSubscriptionCommand,
     PaymentIntentCreate,
@@ -588,55 +591,6 @@ def json_from_request(request: httpx.Request) -> dict:
     import json
 
     return json.loads(request.content)
-
-
-class _FakeCursor:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _FakeUnitOfWork:
-    def __init__(self, row):
-        self.row = row
-        self.query = ""
-        self.parameters = ()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, query, parameters):
-        self.query = query
-        self.parameters = parameters
-        return _FakeCursor(self.row)
-
-
-class CanonicalUserRepositoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_repository_uses_postgres_parameter_binding_and_no_sqlite_module(self) -> None:
-        unit = _FakeUnitOfWork({"canonical_user_id": "7"})
-        repository = PostgresCanonicalUserRepository(
-            unit_of_work_factory=lambda: unit  # type: ignore[arg-type]
-        )
-        identity = await repository.find_active("7")
-        self.assertEqual(identity.canonical_user_id, "7")  # type: ignore[union-attr]
-        self.assertIn("FROM users", unit.query)
-        self.assertIn("%s::bigint", unit.query)
-        self.assertNotIn("?", unit.query)
-        self.assertEqual(unit.parameters, ("7",))
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "services"
-            / "admin_product"
-            / "identity.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("import database", source)
-        self.assertNotIn("sqlite3", source)
-        self.assertNotIn("database.get_db", source)
 
 
 if __name__ == "__main__":

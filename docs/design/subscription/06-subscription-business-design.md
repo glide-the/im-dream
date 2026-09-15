@@ -5,6 +5,7 @@
 > 适用系统：`ink-admin-memory`、`ink-dream-memory`、PostgreSQL `ink-memory`
 > 配套文档：`../model-service/07-model-service-integration-design.md`
 > 文档性质：最终产品方案与代码级设计；本稿不实现业务代码
+> 现行同步：2026-09-16 Dream Product BFF 复用 Admin OAuth principal，Product 数据与主体有效性复核均由 Admin 持有。
 
 ## 术语与概念定义
 
@@ -375,7 +376,8 @@ Dream 不根据 code 生成名称、价格、推荐、Token 或权益。当前�
 
 ### 9.2 BFF 规则
 
-- 从 Session 取得 canonical user；body/query 中不允许 user override。
+- 从共享 Admin OAuth principal 取得 canonical user；body/query/header 中不允许 user override。
+- Dream Product composition 不创建 PostgreSQL pool、不查询 `users`，也不在 Admin 不可用时回退数据库；Admin Product API 在 ORM 查询前再次校验 signed subject 的 active canonical/platform identity。
 - Pydantic DTO 使用 strict 与 `extra='forbid'`；整数不超过 JS safe integer。
 - 未知字段、缺字段、守恒冲突或枚举未知返回 Dream 502。
 - 连接/timeout 映射 503；安全 4xx 保留状态；不透传 Admin 原 body。
@@ -636,6 +638,8 @@ flowchart LR
 |---|---|
 | `backend/services/admin_product/models.py` | strict Pydantic DTO |
 | `backend/services/admin_product/client.py` | signed subject、deadline、安全错误 |
+| `backend/services/admin_product/service.py` | Admin principal 主体边界；不访问数据库 |
+| `backend/services/admin_product/runtime.py` | 仅组合 Admin HTTP client；不创建 PostgreSQL pool |
 | `backend/routers/product.py` | same-origin BFF、身份防覆盖 |
 | `frontend/app/_dream/api/productApi.ts` | strict Zod、API client |
 | `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceSubscription.ts` | query key、invalidate、命令状态机 |
