@@ -38,6 +38,7 @@
 #                    large-body integrity, and completed-turn metadata projection.
 # [Sync] 2026-09-02: cover final-only page flags and owned exact-id process detail.
 # [Sync] 2026-09-04: cover the authenticated backend common Skill slash catalog.
+# [Sync] 2026-09-15: update direct Chat route tests to explicit typed Admin fakes with Dream database fenced.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -59,6 +60,20 @@ import asyncio
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
+from services.admin_data.chat_models import (
+    ChangedResultDTO,
+    ChatMessageDTO,
+    ChatThreadDTO,
+    LatestMessageResultDTO,
+    MessageDetailResultDTO,
+    MessageListResultDTO,
+    MessagePageResultDTO,
+    ThreadResultDTO,
+)
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.workflow_data import AdminWorkflowResolution
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
@@ -191,6 +206,179 @@ def _skip_if_no_server(cls):
     if _SERVER_SKIP_REASON:
         return unittest.skip(_SERVER_SKIP_REASON)(cls)
     return cls
+
+
+def _admin_user(user_id: int = 7) -> dict:
+    actor = AdminRequestActor(
+        "test-subject",
+        str(user_id),
+        "dream-browser",
+        frozenset({"dream:read", "dream:write"}),
+        1,
+        2,
+        "test-oauth-token",
+    )
+    return {"user_id": user_id, "_admin_actor": actor}
+
+
+def _thread_dto(value: dict | None) -> ChatThreadDTO | None:
+    if value is None:
+        return None
+    return ChatThreadDTO(
+        id=str(value["id"]),
+        user_id=str(value.get("user_id", 7)),
+        title=value.get("title"),
+        deck_id=value.get("deck_id"),
+        voice_id=value.get("voice_id"),
+        claude_session_id=value.get("claude_session_id"),
+        agent_contract_version=value.get("agent_contract_version"),
+        created_at=value.get("created_at"),
+        updated_at=value.get("updated_at"),
+    )
+
+
+def _message_dto(value: dict) -> ChatMessageDTO:
+    parts = value.get("parts", [])
+    if isinstance(parts, str):
+        try:
+            parts = json.loads(parts)
+        except (TypeError, ValueError):
+            parts = []
+    metadata = value.get("metadata")
+    metadata_decode_error = value.get("metadata_decode_error", False)
+    if isinstance(metadata, str):
+        try:
+            decoded = json.loads(metadata)
+        except (TypeError, ValueError):
+            decoded = None
+            metadata_decode_error = True
+        if not isinstance(decoded, dict):
+            metadata_decode_error = True
+        metadata = decoded if isinstance(decoded, dict) else None
+    elif metadata is not None and not isinstance(metadata, dict):
+        metadata = None
+        metadata_decode_error = True
+    created_at = value.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
+    return ChatMessageDTO(
+        id=str(value["id"]),
+        role=value["role"],
+        parts=parts,
+        metadata=metadata,
+        metadata_decode_error=metadata_decode_error,
+        created_at=created_at,
+        history_final_text=value.get("history_final_text"),
+        history_process_available=value.get("history_process_available", False),
+        history_projection_version=value.get("history_projection_version"),
+    )
+
+
+class _FakeAdminChatData:
+    def __init__(self, *, thread: dict | None, messages=None, page=None,
+        latest_message_id: str | None = None, detail=None,
+        select_voice_changed: bool = True) -> None:
+        self.thread = _thread_dto(thread)
+        self.messages = list(messages or [])
+        self.page = page
+        self.latest_message_id = latest_message_id
+        self.detail = detail
+        self.select_voice_changed = select_voice_changed
+        self.calls: list[tuple[str, object]] = []
+
+    def get_thread(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("get_thread", input_dto))
+        return ThreadResultDTO(thread=self.thread)
+
+    def list_messages(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("list_messages", input_dto))
+        return MessageListResultDTO(
+            messages=[_message_dto(item) for item in self.messages]
+        )
+
+    def message_page(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("message_page", input_dto))
+        page = self.page or {
+            "messages": [], "has_more": False,
+            "latest_message_id": self.latest_message_id,
+        }
+        return MessagePageResultDTO(
+            messages=[_message_dto(item) for item in page["messages"]],
+            has_more=page["has_more"],
+            latest_message_id=page.get("latest_message_id"),
+        )
+
+    def latest_message(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("latest_message", input_dto))
+        return LatestMessageResultDTO(message_id=self.latest_message_id)
+
+    def process_detail(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("process_detail", input_dto))
+        return MessageDetailResultDTO(
+            message=_message_dto(self.detail) if self.detail is not None else None
+        )
+
+    def select_voice(self, input_dto, _request_id, *, access_token):
+        assert access_token == "test-oauth-token"
+        self.calls.append(("select_voice", input_dto))
+        return ChangedResultDTO(changed=self.select_voice_changed)
+
+
+class _FakeClosable:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class _FakeTurnPersistence(_FakeClosable):
+    def __init__(self, persist_user=None) -> None:
+        super().__init__()
+        self.persist_user_calls: list[dict] = []
+        self._persist_user = persist_user
+
+    def persist_user(self, **kwargs):
+        self.persist_user_calls.append(kwargs)
+        if self._persist_user is not None:
+            return self._persist_user(**kwargs)
+        return kwargs["message_id"]
+
+
+class _FakeRouteOwner:
+    def __init__(self, *, persistence_factory=None) -> None:
+        self.client = object()
+        self._persistence_factory = persistence_factory or _FakeTurnPersistence
+        self.persistences: list[_FakeTurnPersistence] = []
+        self.editors: list[_FakeClosable] = []
+
+    def workflow_context(self, actor, thread_id, _request_id):
+        return AdminWorkflowResolution(actor.canonical_user_id, thread_id, None)
+
+    def turn_persistence(self, _actor, _resolution, _request_id):
+        owner = self._persistence_factory()
+        self.persistences.append(owner)
+        return owner
+
+    def editor_runtime(self, _actor, _resolution, _request_id, *, initial_session_id):
+        del initial_session_id
+        owner = _FakeClosable()
+        self.editors.append(owner)
+        return owner
+
+
+def _system_config(value: dict | None = None):
+    return unittest.mock.patch(
+        "routers.claude_agent.invoke_admin_operation",
+        new=unittest.mock.AsyncMock(
+            return_value=value or {"workspace_enabled": True}
+        ),
+    )
 
 
 @_skip_if_no_server
@@ -578,29 +766,27 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
             },
             "created_at": created_at,
         }]
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7},
+            page={
+                "messages": rows,
+                "has_more": True,
+                "latest_message_id": "message-large",
+            },
+        )
 
         async def call_route():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
                 limit=1,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "list_chat_message_page",
-                return_value={
-                    "messages": rows,
-                    "has_more": True,
-                    "latest_message_id": "message-large",
-                },
-            ),
+        with unittest.mock.patch.object(
+            route_module,
+            "_load_current_user_mcp_app_resource_bindings",
+            new=unittest.mock.AsyncMock(return_value={}),
         ):
             payload = asyncio.run(call_route())
 
@@ -632,29 +818,27 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
             "history_process_available": True,
             "history_projection_version": 1,
         }
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7},
+            page={
+                "messages": [row],
+                "has_more": False,
+                "latest_message_id": "assistant-projected",
+            },
+        )
 
         async def call_route():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
                 limit=20,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "list_chat_message_page",
-                return_value={
-                    "messages": [row],
-                    "has_more": False,
-                    "latest_message_id": "assistant-projected",
-                },
-            ),
+        with unittest.mock.patch.object(
+            route_module,
+            "_load_current_user_mcp_app_resource_bindings",
+            new=unittest.mock.AsyncMock(return_value={}),
         ):
             payload = asyncio.run(call_route())
 
@@ -682,38 +866,34 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
                 "finalPartIndex": 1,
             },
         }
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}, detail=full
+        )
 
         async def call_detail():
             return await route_module.claude_agent_thread_message_process(
                 "thread-owned",
                 "assistant-1",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_message_process_detail",
-                return_value=full,
-            ) as detail,
+        with unittest.mock.patch.object(
+            route_module,
+            "_load_current_user_mcp_app_resource_bindings",
+            new=unittest.mock.AsyncMock(return_value={}),
         ):
             payload = asyncio.run(call_detail())
         self.assertEqual(payload["id"], "assistant-1")
         self.assertEqual(payload["parts"], full["parts"])
-        detail.assert_called_once_with("thread-owned", "assistant-1")
+        detail_calls = [item for item in chat.calls if item[0] == "process_detail"]
+        self.assertEqual(len(detail_calls), 1)
+        self.assertEqual(detail_calls[0][1].thread_id, "thread-owned")
+        self.assertEqual(detail_calls[0][1].message_id, "assistant-1")
 
-        with unittest.mock.patch.object(
-            route_module.database,
-            "get_chat_thread",
-            return_value=None,
-        ):
-            with self.assertRaises(HTTPException) as captured:
-                asyncio.run(call_detail())
+        chat.thread = None
+        with self.assertRaises(HTTPException) as captured:
+            asyncio.run(call_detail())
         self.assertEqual(captured.exception.status_code, 404)
         self.assertEqual(captured.exception.detail, "Message process not found")
 
@@ -721,52 +901,36 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         import routers.claude_agent as route_module
         from fastapi import HTTPException
 
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7},
+            latest_message_id="message-latest",
+        )
+
         async def call_known():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
                 limit=20,
                 known_latest_message_id="message-latest",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        list_page = unittest.mock.Mock()
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_latest_chat_message_id",
-                return_value="message-latest",
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "list_chat_message_page",
-                list_page,
-            ),
-        ):
-            payload = asyncio.run(call_known())
+        payload = asyncio.run(call_known())
         self.assertTrue(payload["unchanged"])
         self.assertEqual(payload["messages"], [])
-        list_page.assert_not_called()
+        self.assertNotIn("message_page", [item[0] for item in chat.calls])
 
         async def call_invalid():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
                 limit=20,
                 cursor="not-a-cursor",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with unittest.mock.patch.object(
-            route_module.database,
-            "get_chat_thread",
-            return_value={"id": "thread-owned", "user_id": 7},
-        ):
-            with self.assertRaises(HTTPException) as captured:
-                asyncio.run(call_invalid())
+        with self.assertRaises(HTTPException) as captured:
+            asyncio.run(call_invalid())
         self.assertEqual(captured.exception.status_code, 400)
 
     def test_auto_repair_history_preserves_exact_visible_message_contract(self):
@@ -845,55 +1009,44 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         self.assertEqual(projected["parts"], [])
         self.assertNotIn("SECRET_INSTRUCTION", json.dumps(projected))
 
-    def test_corrupt_stored_metadata_fails_closed_through_database_decode(self):
+    def test_corrupt_stored_metadata_fails_closed_through_admin_decode(self):
         import routers.claude_agent as route_module
 
-        class _CorruptMetadataRows:
-            def execute(self, _query, _params):
-                return self
-
-            def fetchall(self):
-                return [
-                    {
-                        "id": "corrupt-private-row",
-                        "role": "user",
-                        "parts": json.dumps(
-                            [{"type": "text", "text": "SECRET_CORRUPT_INSTRUCTION"}]
-                        ),
-                        "metadata": '{"kind":"story-workspace-dream-launch"',
-                        "created_at": "2026-08-11T00:00:00Z",
-                    },
-                    {
-                        "id": "json-null-private-row",
-                        "role": "user",
-                        "parts": json.dumps(
-                            [{"type": "text", "text": "SECRET_JSON_NULL_INSTRUCTION"}]
-                        ),
-                        "metadata": "null",
-                        "created_at": "2026-08-11T00:00:01Z",
-                    },
-                ]
-
-            def close(self):
-                return None
+        messages = [
+            {
+                "id": "corrupt-private-row",
+                "role": "user",
+                "parts": json.dumps(
+                    [{"type": "text", "text": "SECRET_CORRUPT_INSTRUCTION"}]
+                ),
+                "metadata": '{"kind":"story-workspace-dream-launch"',
+                "created_at": "2026-08-11T00:00:00Z",
+            },
+            {
+                "id": "json-null-private-row",
+                "role": "user",
+                "parts": json.dumps(
+                    [{"type": "text", "text": "SECRET_JSON_NULL_INSTRUCTION"}]
+                ),
+                "metadata": "null",
+                "created_at": "2026-08-11T00:00:01Z",
+            },
+        ]
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}, messages=messages
+        )
 
         async def call_route():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_db",
-                return_value=_CorruptMetadataRows(),
-            ),
+        with unittest.mock.patch.object(
+            route_module,
+            "_load_current_user_mcp_app_resource_bindings",
+            new=unittest.mock.AsyncMock(return_value={}),
         ):
             payload = asyncio.run(call_route())
 
@@ -1027,30 +1180,28 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         async def call_route():
             return await route_module.claude_agent_thread_messages(
                 "thread-owned",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={
-                    "id": "thread-owned",
-                    "user_id": 7,
-                    "title": "Owned",
-                    "deck_id": "deck-public",
-                    "voice_id": None,
-                    "claude_session_id": "SECRET_CLAUDE_SESSION",
-                    "agent_contract_version": "SECRET_CONTRACT_VERSION",
-                    "created_at": "2026-08-10T00:00:00Z",
-                    "updated_at": "2026-08-11T00:00:00Z",
-                },
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "list_chat_messages",
-                return_value=messages,
-            ),
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-owned",
+                "user_id": 7,
+                "title": "Owned",
+                "deck_id": "deck-public",
+                "voice_id": None,
+                "claude_session_id": "SECRET_CLAUDE_SESSION",
+                "agent_contract_version": "SECRET_CONTRACT_VERSION",
+                "created_at": "2026-08-10T00:00:00Z",
+                "updated_at": "2026-08-11T00:00:00Z",
+            },
+            messages=messages,
+        )
+        with unittest.mock.patch.object(
+            route_module,
+            "_load_current_user_mcp_app_resource_bindings",
+            new=unittest.mock.AsyncMock(return_value={}),
         ):
             payload = asyncio.run(call_route())
 
@@ -1156,31 +1307,24 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         import routers.claude_agent as route_module
         from fastapi import HTTPException
 
-        list_messages = unittest.mock.Mock()
+        chat = _FakeAdminChatData(thread=None, messages=[{
+            "id": "must-not-read",
+            "role": "user",
+            "parts": [],
+        }])
 
         async def call_route():
             return await route_module.claude_agent_thread_messages(
                 "thread-foreign",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value=None,
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "list_chat_messages",
-                list_messages,
-            ),
-        ):
-            with self.assertRaises(HTTPException) as captured:
-                asyncio.run(call_route())
+        with self.assertRaises(HTTPException) as captured:
+            asyncio.run(call_route())
 
         self.assertEqual(captured.exception.status_code, 404)
-        list_messages.assert_not_called()
+        self.assertNotIn("list_messages", [item[0] for item in chat.calls])
 
 
 @_skip_if_no_server
@@ -1203,24 +1347,21 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
                 )
             ],
         )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-no-workspace", "user_id": 7}
+        )
+        owner = _FakeRouteOwner()
 
         async def _call_route():
             return await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-no-workspace"},
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_system_config",
-                return_value={"workspace_enabled": False},
-            ),
+            _system_config({"workspace_enabled": False}),
             unittest.mock.patch.object(
                 route_module,
                 "get_or_create_workspace",
@@ -1265,34 +1406,27 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             deck_id="deck-1",
             voice_id="voice-2",
         )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-agent-empty",
+                "user_id": 7,
+                "deck_id": "deck-1",
+                "voice_id": "voice-1",
+            }
+        )
 
         async def call_route():
             return await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={
-                    "id": "thread-agent-empty",
-                    "user_id": 7,
-                    "deck_id": "deck-1",
-                    "voice_id": "voice-1",
-                },
-            ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "select_chat_thread_voice",
-            ) as select_voice,
-        ):
-            with self.assertRaises(route_module.HTTPException) as raised:
-                asyncio.run(call_route())
+        with self.assertRaises(route_module.HTTPException) as raised:
+            asyncio.run(call_route())
 
         self.assertEqual(raised.exception.status_code, 400)
-        select_voice.assert_not_called()
+        self.assertNotIn("select_voice", [item[0] for item in chat.calls])
 
     def test_same_deck_agent_switch_updates_next_turn_with_cas(self):
         import routers.claude_agent as route_module
@@ -1303,6 +1437,15 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             deck_id="deck-1",
             voice_id="voice-2",
         )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-agent-switch",
+                "user_id": 7,
+                "deck_id": "deck-1",
+                "voice_id": "voice-1",
+            }
+        )
+        owner = _FakeRouteOwner()
         captured_requests = []
         deck_context_service = unittest.mock.Mock()
         deck_context_service.resolve = unittest.mock.AsyncMock(
@@ -1316,7 +1459,9 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         async def call_and_consume():
             response = await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
             )
             async for _frame in response.body_iterator:
                 pass
@@ -1324,16 +1469,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
 
         deck_db = unittest.mock.Mock()
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={
-                    "id": "thread-agent-switch",
-                    "user_id": 7,
-                    "deck_id": "deck-1",
-                    "voice_id": "voice-1",
-                },
-            ),
+            _system_config(),
             unittest.mock.patch.object(
                 route_module.database,
                 "get_db",
@@ -1344,11 +1480,6 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 "DeckChatContextService",
                 return_value=deck_context_service,
             ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "select_chat_thread_voice",
-                return_value=True,
-            ) as select_voice,
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
@@ -1368,13 +1499,12 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             actor_id="7",
             voice_id="voice-2",
         )
-        select_voice.assert_called_once_with(
-            "thread-agent-switch",
-            7,
-            "deck-1",
-            "voice-2",
-            "voice-1",
-        )
+        select_calls = [item for item in chat.calls if item[0] == "select_voice"]
+        self.assertEqual(len(select_calls), 1)
+        self.assertEqual(select_calls[0][1].thread_id, "thread-agent-switch")
+        self.assertEqual(select_calls[0][1].deck_id, "deck-1")
+        self.assertEqual(select_calls[0][1].voice_id, "voice-2")
+        self.assertEqual(select_calls[0][1].expected_voice_id, "voice-1")
         deck_db.close.assert_called_once_with()
         self.assertEqual(len(captured_requests), 1)
         self.assertEqual(captured_requests[0].system_prompt, "structure agent prompt")
@@ -1392,6 +1522,16 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             deck_id="deck-1",
             voice_id="voice-2",
         )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-agent-switch-conflict",
+                "user_id": 7,
+                "deck_id": "deck-1",
+                "voice_id": "voice-1",
+            },
+            select_voice_changed=False,
+        )
+        owner = _FakeRouteOwner()
         deck_context_service = unittest.mock.Mock()
         deck_context_service.resolve = unittest.mock.AsyncMock(
             return_value=types.SimpleNamespace(system_prompt="structure agent prompt")
@@ -1400,20 +1540,13 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         async def call_route():
             return await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={
-                    "id": "thread-agent-switch-conflict",
-                    "user_id": 7,
-                    "deck_id": "deck-1",
-                    "voice_id": "voice-1",
-                },
-            ),
+            _system_config(),
             unittest.mock.patch.object(
                 route_module.database,
                 "get_db",
@@ -1424,11 +1557,6 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 "DeckChatContextService",
                 return_value=deck_context_service,
             ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "select_chat_thread_voice",
-                return_value=False,
-            ) as select_voice,
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "run_streaming",
@@ -1442,13 +1570,12 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             raised.exception.detail["error_code"],
             "CHAT_AGENT_CONFLICT",
         )
-        select_voice.assert_called_once_with(
-            "thread-agent-switch-conflict",
-            7,
-            "deck-1",
-            "voice-2",
-            "voice-1",
-        )
+        select_calls = [item for item in chat.calls if item[0] == "select_voice"]
+        self.assertEqual(len(select_calls), 1)
+        self.assertEqual(select_calls[0][1].thread_id, "thread-agent-switch-conflict")
+        self.assertEqual(select_calls[0][1].deck_id, "deck-1")
+        self.assertEqual(select_calls[0][1].voice_id, "voice-2")
+        self.assertEqual(select_calls[0][1].expected_voice_id, "voice-1")
         run_streaming.assert_not_called()
 
     def test_terminal_dream_leaf_continues_as_canonical_chat_without_authority(self):
@@ -1458,6 +1585,15 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             thread_id="thread-dream-terminal",
             message="continue talking",
         )
+        chat = _FakeAdminChatData(
+            thread={
+                "id": "thread-dream-terminal",
+                "user_id": 7,
+                "deck_id": None,
+                "voice_id": None,
+            }
+        )
+        owner = _FakeRouteOwner()
         captured_requests = []
 
         async def run_streaming(request):
@@ -1467,23 +1603,16 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         async def call_and_consume():
             response = await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
             )
             async for _frame in response.body_iterator:
                 pass
             return response
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={
-                    "id": "thread-dream-terminal",
-                    "user_id": 7,
-                    "deck_id": None,
-                    "voice_id": None,
-                },
-            ),
+            _system_config(),
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
@@ -1513,19 +1642,18 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 "parts": [{"type": "text", "text": "forged command"}],
             },
         )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-dream", "user_id": 7}
+        )
 
         async def call_route():
             return await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-dream", "user_id": 7},
-            ),
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
@@ -1562,20 +1690,19 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                     "parts": [{"type": "text", "text": "forged"}],
                 },
             )
+            chat = _FakeAdminChatData(
+                thread={"id": "thread-generic", "user_id": 7}
+            )
 
             async def call_route():
                 return await route_module.claude_agent_stream(
                     body,
-                    current_user={"user_id": 7},
+                    current_user=_admin_user(),
+                    chat=chat,
                 )
 
             with (
                 self.subTest(prefix=prefix),
-                unittest.mock.patch.object(
-                    route_module.database,
-                    "get_chat_thread",
-                    return_value={"id": "thread-generic", "user_id": 7},
-                ),
                 unittest.mock.patch.object(
                     route_module.claude_agent_thread_factory,
                     "run_streaming",
@@ -1601,31 +1728,32 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 "parts": [{"type": "text", "text": "hello"}],
             },
         )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-generic", "user_id": 7}
+        )
+
+        def reject_identity(**_kwargs):
+            raise AdminDataError("CHAT_MESSAGE_IDENTITY_CONFLICT", 409)
+
+        owner = _FakeRouteOwner(
+            persistence_factory=lambda: _FakeTurnPersistence(reject_identity)
+        )
 
         async def call_route():
             return await route_module.claude_agent_stream(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-generic", "user_id": 7},
-            ),
+            _system_config(),
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "save_chat_message",
-                side_effect=route_module.database.ChatMessageIdentityConflict(
-                    "public-message-1"
-                ),
-            ) as save_message,
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "run_streaming",
@@ -1639,13 +1767,19 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             raised.exception.detail["error_code"],
             "CHAT_MESSAGE_IDENTITY_CONFLICT",
         )
-        save_message.assert_called_once_with(
-            "thread-generic",
-            "user",
-            [{"type": "text", "text": "hello"}],
-            "public-message-1",
-            None,
+        self.assertEqual(len(owner.persistences), 1)
+        self.assertEqual(
+            owner.persistences[0].persist_user_calls,
+            [{
+                "actor_id": "7",
+                "thread_id": "thread-generic",
+                "parts": [{"type": "text", "text": "hello"}],
+                "message_id": "public-message-1",
+                "metadata": None,
+            }],
         )
+        self.assertEqual(owner.persistences[0].closed, 1)
+        self.assertEqual(owner.editors[0].closed, 1)
         run_streaming.assert_not_called()
 
     def test_concurrent_public_posts_same_id_have_one_cas_winner(self):
@@ -1664,24 +1798,34 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         winner: list[tuple] = []
         winner_lock = threading.Lock()
 
-        def cas_save(*args):
-            envelope = tuple(args)
+        def cas_save(**kwargs):
+            envelope = tuple(
+                (key, json.dumps(value, sort_keys=True))
+                for key, value in sorted(kwargs.items())
+            )
             with winner_lock:
                 if not winner:
                     winner.append(envelope)
                     return "public-race-1"
                 if winner[0] != envelope:
-                    raise route_module.database.ChatMessageIdentityConflict(
-                        "public-race-1"
-                    )
+                    raise AdminDataError("CHAT_MESSAGE_IDENTITY_CONFLICT", 409)
                 return "public-race-1"
+
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-race", "user_id": 7}
+        )
+        owner = _FakeRouteOwner(
+            persistence_factory=lambda: _FakeTurnPersistence(cas_save)
+        )
 
         async def call_routes():
             async def call(body):
                 try:
                     return await route_module.claude_agent_stream(
                         body,
-                        current_user={"user_id": 7},
+                        current_user=_admin_user(),
+                        chat=chat,
+                        owner=owner,
                     )
                 except route_module.HTTPException as exc:
                     return exc
@@ -1689,21 +1833,12 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             return await asyncio.gather(*(call(body) for body in bodies))
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-race", "user_id": 7},
-            ),
+            _system_config(),
             unittest.mock.patch.object(
                 route_module,
                 "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
-            unittest.mock.patch.object(
-                route_module.database,
-                "save_chat_message",
-                side_effect=cas_save,
-            ) as save_message,
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "run_streaming",
@@ -1725,7 +1860,10 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
         )
         self.assertEqual(len(streams), 1)
         self.assertEqual(streams[0].media_type, "text/event-stream")
-        self.assertEqual(save_message.call_count, 2)
+        self.assertEqual(
+            sum(len(item.persist_user_calls) for item in owner.persistences),
+            2,
+        )
         run_streaming.assert_not_called()
 
 
@@ -1735,20 +1873,18 @@ class TestClaudeAgentRouteStop(unittest.TestCase):
 
     def test_stop_thread_validates_owner_and_calls_factory(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-stop", "user_id": 7}
+        )
 
         async def _call_route():
             return await route_module.claude_agent_stop_thread(
                 "thread-stop",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-stop", "user_id": 7},
-            ) as get_chat_thread,
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "stop_thread",
                 new=unittest.mock.AsyncMock(
@@ -1758,11 +1894,12 @@ class TestClaudeAgentRouteStop(unittest.TestCase):
                         "lifecycle": "idle",
                     }
                 ),
-            ) as stop_thread,
-        ):
+            ) as stop_thread:
             response = asyncio.run(_call_route())
 
-        get_chat_thread.assert_called_once_with("thread-stop", 7)
+        get_calls = [item for item in chat.calls if item[0] == "get_thread"]
+        self.assertEqual(len(get_calls), 1)
+        self.assertEqual(get_calls[0][1].thread_id, "thread-stop")
         stop_thread.assert_awaited_once_with("thread-stop")
         self.assertEqual(
             response,
@@ -1788,30 +1925,27 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
             tool_call_id="call-foreign",
             approved=True,
         )
+        chat = _FakeAdminChatData(thread=None)
 
         async def _call_route():
             return await route_module.claude_agent_tool_confirm(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value=None,
-            ) as get_chat_thread,
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "confirm_tool",
-            ) as confirm_tool,
-        ):
+            ) as confirm_tool:
             with self.assertRaises(route_module.HTTPException) as raised:
                 asyncio.run(_call_route())
 
         self.assertEqual(raised.exception.status_code, 404)
         self.assertEqual(raised.exception.detail, "Thread not found")
-        get_chat_thread.assert_called_once_with("thread-foreign", 7)
+        get_calls = [item for item in chat.calls if item[0] == "get_thread"]
+        self.assertEqual(len(get_calls), 1)
+        self.assertEqual(get_calls[0][1].thread_id, "thread-foreign")
         confirm_tool.assert_not_called()
 
     def test_tool_confirm_reports_a_typed_not_pending_conflict(self):
@@ -1822,25 +1956,22 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
             tool_call_id="call-stale",
             approved=True,
         )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}
+        )
 
         async def _call_route():
             return await route_module.claude_agent_tool_confirm(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "confirm_tool",
                 new=unittest.mock.AsyncMock(return_value=None),
-            ),
-        ):
+            ):
             with self.assertRaises(route_module.HTTPException) as raised:
                 asyncio.run(_call_route())
 
@@ -1863,20 +1994,18 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
             approved=False,
             reason="user declined",
         )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}
+        )
 
         async def _call_route():
             return await route_module.claude_agent_tool_confirm(
                 body,
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ) as get_chat_thread,
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "confirm_tool",
                 new=unittest.mock.AsyncMock(
@@ -1887,11 +2016,12 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
                         )
                     )
                 ),
-            ) as confirm_tool,
-        ):
+            ) as confirm_tool:
             response = asyncio.run(_call_route())
 
-        get_chat_thread.assert_called_once_with("thread-owned", 7)
+        get_calls = [item for item in chat.calls if item[0] == "get_thread"]
+        self.assertEqual(len(get_calls), 1)
+        self.assertEqual(get_calls[0][1].thread_id, "thread-owned")
         confirm_tool.assert_awaited_once_with(
             session_id="thread-owned",
             tool_call_id="call-pending",
@@ -1909,24 +2039,19 @@ class TestClaudeAgentThreadStatusRoute(unittest.TestCase):
 
     def test_status_rejects_an_unowned_thread_before_runtime_observation(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(thread=None)
 
         async def _call_route():
             return await route_module.claude_agent_thread_status(
                 "thread-foreign",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value=None,
-            ),
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "tool_confirmation_snapshot",
-            ) as tool_confirmation_snapshot,
-        ):
+            ) as tool_confirmation_snapshot:
             with self.assertRaises(route_module.HTTPException) as raised:
                 asyncio.run(_call_route())
 
@@ -1935,19 +2060,18 @@ class TestClaudeAgentThreadStatusRoute(unittest.TestCase):
 
     def test_status_returns_runtime_pending_confirmation_ids(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}
+        )
 
         async def _call_route():
             return await route_module.claude_agent_thread_status(
                 "thread-owned",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "session_snapshot",
@@ -1977,19 +2101,18 @@ class TestClaudeAgentThreadStatusRoute(unittest.TestCase):
 
     def test_status_not_found_is_known_empty_for_confirmations(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}
+        )
 
         async def _call_route():
             return await route_module.claude_agent_thread_status(
                 "thread-owned",
-                current_user={"user_id": 7},
+                current_user=_admin_user(),
+                chat=chat,
             )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ),
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "session_snapshot",
@@ -2016,23 +2139,18 @@ class TestLegacySessionOwnershipRoutes(unittest.TestCase):
 
     def test_get_foreign_thread_never_observes_runtime(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(thread=None)
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value=None,
-            ),
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "session_snapshot",
-            ) as snapshot,
-        ):
+            ) as snapshot:
             with self.assertRaises(route_module.HTTPException) as raised:
                 asyncio.run(
                     route_module.claude_agent_session_status(
                         "thread-foreign",
-                        current_user={"user_id": 7},
+                        current_user=_admin_user(),
+                        chat=chat,
                     )
                 )
         self.assertEqual(raised.exception.status_code, 404)
@@ -2040,23 +2158,18 @@ class TestLegacySessionOwnershipRoutes(unittest.TestCase):
 
     def test_delete_foreign_thread_never_closes_runtime(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(thread=None)
 
-        with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value=None,
-            ),
-            unittest.mock.patch.object(
+        with unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "close_thread",
-            ) as close_thread,
-        ):
+            ) as close_thread:
             with self.assertRaises(route_module.HTTPException) as raised:
                 asyncio.run(
                     route_module.claude_agent_session_close(
                         "thread-foreign",
-                        current_user={"user_id": 7},
+                        current_user=_admin_user(),
+                        chat=chat,
                     )
                 )
         self.assertEqual(raised.exception.status_code, 404)
@@ -2064,13 +2177,11 @@ class TestLegacySessionOwnershipRoutes(unittest.TestCase):
 
     def test_owned_get_and_delete_use_same_thread_identity(self):
         import routers.claude_agent as route_module
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-owned", "user_id": 7}
+        )
 
         with (
-            unittest.mock.patch.object(
-                route_module.database,
-                "get_chat_thread",
-                return_value={"id": "thread-owned", "user_id": 7},
-            ) as get_thread,
             unittest.mock.patch.object(
                 route_module.claude_agent_thread_factory,
                 "session_snapshot",
@@ -2084,18 +2195,22 @@ class TestLegacySessionOwnershipRoutes(unittest.TestCase):
             status = asyncio.run(
                 route_module.claude_agent_session_status(
                     "thread-owned",
-                    current_user={"user_id": 7},
+                    current_user=_admin_user(),
+                    chat=chat,
                 )
             )
             closed = asyncio.run(
                 route_module.claude_agent_session_close(
                     "thread-owned",
-                    current_user={"user_id": 7},
+                    current_user=_admin_user(),
+                    chat=chat,
                 )
             )
         self.assertEqual(status, {"lifecycle": "idle"})
         self.assertEqual(closed, {"ok": True, "session_id": "thread-owned"})
-        self.assertEqual(get_thread.call_count, 2)
+        get_calls = [item for item in chat.calls if item[0] == "get_thread"]
+        self.assertEqual(len(get_calls), 2)
+        self.assertTrue(all(item[1].thread_id == "thread-owned" for item in get_calls))
         close_thread.assert_called_once_with("thread-owned")
 
 
