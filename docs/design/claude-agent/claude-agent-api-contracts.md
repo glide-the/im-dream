@@ -25,6 +25,7 @@
 > **[Sync] 2026-09-04**: 新增认证只读 `GET /api/claude-agent/skill-commands`，从
 > backend common package catalog 返回 canonical Slash 候选；该读取不创建 Thread、
 > 不执行 Skill，也不改变原 `POST /api/claude-agent` 消息合同。
+> **[Sync] 2026-09-15**: Phase 1首次或Settings prompt重建通过绑定的`AdminTurnPersistence`读取Admin `session.list` strict投影；成功空列表保留empty block，Admin/read-contract失败在Workspace、Runner、CLI与SSE前终止。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -90,7 +91,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 - `server.py` 负责把 HTTP 请求映射为 `ClaudeAgentRunRequest`，并把 SSE 出流委托给 `ClaudeAgentThreadFactory.run_streaming`。
 - `backend/claude_agent/thread_factory.py` 是 SSE 入口（Factory 模式），驱动 Phase 1（`service.assemble_context`）+ Phase 2（`create_agent_runner`）+ Phase 3（`service.execute_session`）+ Phase 4（`_fire_session_ended`），并维护每会话 `asyncio.Lock`、`AgentRunStatePool` 享元、10 分钟 TTL 清扫器。
 - `backend/claude_agent/service.py` 在 Phase 1 / Phase 3 内完成上下文构建、pet-agent 调用和 SSE 事件出流；`run_streaming` 入口已删，对外只暴露 `assemble_context` + `execute_session` + `confirm_tool`。
-- `backend/claude_agent/context_builder.py` 负责把宠物信息、运行时和显式诊断 `long_term_profile` 覆盖拼进 prompt；正式长期记忆由 Mem0 memory MCP 按需召回。
+- `backend/claude_agent/context_builder.py` 只渲染Service已经验证的近期Session投影，并把运行时和显式诊断 `long_term_profile` 覆盖拼进 prompt；正式长期记忆由 Mem0 memory MCP 按需召回。
 
 #### 4.1.1 Common Skill Slash catalog
 
@@ -145,8 +146,9 @@ package validator 枚举 `backend/builtin_skills/common`，并按 canonical ID �
 2. 从 `message` 提取文本（支持纯字符串和 UIMessage `parts` 格式）。
 3. 构建 `ClaudeAgentRunRequest`（`user_id`、`thread_id`、`message_text`、`tool_choice`、`model`、`max_turns`、`cwd`）。
 4. `ClaudeAgentService.assemble_context`（Phase 1）：
-   - 首轮：调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `AgentRunState`。
-   - 后续轮：复用享元缓存的 `state.system_prompt`，不再重新构建。
+   - 首轮或Settings SYSTEM_PROMPT变化：通过绑定的`AdminTurnPersistence.recent_sessions(actor_id, thread_id)`调用Admin `session.list`，把UTC当天及前两天的strict DTO投影传给`ClaudeAgentContextBuilder.build_system_prompt(recent_sessions, ...)`，再写入`AgentRunState`。
+   - Admin成功返回空列表时构建含empty block的system prompt；401/403/503、能力缺失、超时或坏DTO在Workspace、Runner、CLI与SSE前终止，不回退Dream PostgreSQL。
+   - 后续Settings prompt未变：复用享元缓存的`state.system_prompt`，不再请求Session列表。
    - 构建 `user_message`、`AgentRunOptions`，发射初始 `message-metadata` SSE 帧。
 5. Phase 2：创建（或复用）`ClaudeAgentRunner`。
 6. `ClaudeAgentService.execute_session`（Phase 3）：驱动 runner、emit SSE 事件、持久化消息。

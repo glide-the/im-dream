@@ -20,6 +20,7 @@
 <!-- [Sync] 2026-09-15: user preference management uses current OAuth; entity-limited Runtime grants cannot manage it. -->
 <!-- [Sync] 2026-09-15: Deck management uses current request OAuth; purpose grants do not authorize it. -->
 <!-- [Sync] 2026-09-15: public Session operations retain explicit request OAuth; server grants do not expand their scopes. -->
+<!-- [Sync] 2026-09-15: exact server-persistence grants may call only session.list for Agent prompt context; Admin/read-contract failures stop before Workspace, Runtime and SSE. -->
 <!-- [Sync] 2026-09-15: distinguish server turn persistence from CLI and Editor purpose grants. -->
 <!-- [Sync] 2026-09-15: retire standalone authority and require explicit OAuth/profile account matching in scripts. -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
@@ -109,11 +110,11 @@ Authlib在原两个issuer router中仅用于Dream Google/Device authority，现�
 
 公开Agent的Thread resume读取、SDK init/final/repair Session回写和assistant完整/部分消息复用该exact Thread/Run server-persistence grant。`AdminTurnPersistence`校验reply Thread/canonical actor，未知user/session/assistant写共用原operation/input/UUID恢复；最近一次确认Session才可复用，A→B→A必须重新写。SDK init失败继续原日志处理，已经运行的turn/cancel保持原语义；内部dispatcher assistant与Run写不属于此owner，不能据此宣称全域未知写屏障。
 
-公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。成功assistant与cancel/error partial在同一owner内调用既有Chat消息operation，先检查四项exact schema，再提交原parts/metadata/history字段。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。凭据不进入Browser、CLI或Editor；内部dispatcher assistant、后台Session上下文与其它后台领域仍待迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
+公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。成功assistant与cancel/error partial在同一owner内调用既有Chat消息operation，先检查四项exact schema，再提交原parts/metadata/history字段。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。首次或Settings prompt重建时，同一owner以精确授权调用Admin `session.list`取得近期Session投影；401/403/503、能力缺失、超时或坏DTO在Workspace/Runtime/SSE前传播，成功空列表才显示empty block。凭据不进入Browser、CLI或Editor；内部dispatcher assistant、Session工具、Reflections后台上下文与其它后台领域仍待迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
 
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。
 
-公开Session六operation由当前已认证request OAuth执行，继续绑定Admin principal；shared helper只投影该Bearer到指定typed consumer，不接受body actor ID、不做本地renew。Session read/write的工具与后台授权独立于Thread server-persistence，现行Handler拒绝该purpose；后续Editor只能消费exact existing Session的editor-stdio grant。失败/unknown和Edit Session事件规则见[交互设计](admin-auth-data-interaction.md)。
+公开Session六operation由当前已认证request OAuth执行，继续绑定Admin principal；shared helper只投影该Bearer到指定typed consumer，不接受body actor ID、不做本地renew。OAuth行为保持不变。Admin Session Handler只为同配置service已完整解析、绑定Thread、Editor Session为空、包含`dream:read`且未过期的`server-persistence` grant放行`session.list`；save/get/batch/text-list/delete仍拒绝该purpose。Session工具和Reflections后台授权独立于Chat turn owner；Editor只能消费exact existing Session的editor-stdio grant。失败/unknown和Edit Session事件规则见[交互设计](admin-auth-data-interaction.md)。
 
 公开Deck内容版本五operation只使用当前request OAuth与Admin principal，schema要求identity/unified/content-versions/canonical-storage四项exact v1。管理权限不接受Thread或CLI/Editor purpose。共享actor invocation保持同一认证和threadpool，只由domain adapter生成安全错误响应。领域catalog刷新失败清除ready，下一认证重新加载后再执行profile/Chat等operation；不回退旧issuer/SQL。
 

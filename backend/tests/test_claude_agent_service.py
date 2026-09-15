@@ -17,6 +17,7 @@
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
 #                    assembly, config-change cache rebuild, and config-load
 #                    failure termination.
+# [Sync] 2026-09-15: cover Admin recent Session projection first-build/cache/rebuild behavior.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
 # [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
 #                    workspace_context Notion block rendering.
@@ -104,6 +105,9 @@ from libs.claude_agent_kit.types import (
     ToolEventPayload,
 )
 from services.admin_gateway.models import GatewayModel
+from services.admin_data.session_models import SessionPreviewDTO
+from services.admin_data.turn_persistence import AdminTurnPersistence
+from services.admin_data.workflow_data import AdminWorkflowResolution
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 
@@ -120,18 +124,18 @@ class ClaudeAgentService(_ProductionClaudeAgentService):
 
 class _FakeContextBuilder:
     def __init__(self) -> None:
-        self.system_prompt_calls: list[tuple[str, str | None]] = []
+        self.system_prompt_calls: list[tuple[list[dict[str, Any]], str | None]] = []
         self.user_message_calls: list[dict[str, Any]] = []
 
     async def build_system_prompt(
         self,
-        user_id: str,
+        recent_sessions: list[dict[str, Any]],
         *,
         configured_system_prompt: str | None = None,
     ) -> str:
-        self.system_prompt_calls.append((user_id, configured_system_prompt))
+        self.system_prompt_calls.append((recent_sessions, configured_system_prompt))
         suffix = f":{configured_system_prompt}" if configured_system_prompt else ""
-        return f"system-prompt:{user_id}{suffix}"
+        return f"system-prompt:{len(recent_sessions)}{suffix}"
 
     def build_user_message(self, message_parts: list | None, **kwargs: Any) -> list[dict[str, Any]]:
         self.user_message_calls.append(kwargs)
@@ -931,7 +935,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
 
         get_system_config.assert_called_once_with(7)
-        self.assertEqual(builder.system_prompt_calls, [("7", "Settings page prompt")])
+        self.assertEqual(builder.system_prompt_calls, [([], "Settings page prompt")])
         get_chat_thread.assert_called_once_with("thread_service_config", 7)
         get_or_create_workspace.assert_called_once_with(
             "thread_service_config",
@@ -951,7 +955,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.run_options.sandbox_network_mode, "allowlist")
         self.assertEqual(
             execution.run_options.system_prompt,
-            "system-prompt:7:Settings page prompt",
+            "system-prompt:0:Settings page prompt",
         )
         self.assertEqual(str(workspace_path), execution.run_options.cwd)
         self.assertEqual(
@@ -1127,12 +1131,135 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     runner=unittest.mock.Mock(),
                 )
 
-        self.assertEqual(builder.system_prompt_calls, [("7", "new settings prompt")])
+        self.assertEqual(builder.system_prompt_calls, [([], "new settings prompt")])
         self.assertEqual(state.system_config_system_prompt, "new settings prompt")
         self.assertEqual(
             execution.run_options.system_prompt,
-            "system-prompt:7:new settings prompt",
+            "system-prompt:0:new settings prompt",
         )
+
+    async def test_admin_recent_sessions_load_only_on_first_build_and_settings_rebuild(self):
+        builder = _FakeContextBuilder()
+        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner.system_config.side_effect = [
+            {"workspace_enabled": False, "system_prompt": "old"},
+            {"workspace_enabled": False, "system_prompt": "old"},
+            {"workspace_enabled": False, "system_prompt": "new"},
+        ]
+        owner.thread.return_value = None
+        owner.recent_sessions.side_effect = [
+            (SessionPreviewDTO(
+                id="session-a",
+                name="第一篇",
+                labels=["日记"],
+                created_at="2026-09-14T08:00:00Z",
+                updated_at="2026-09-15T09:00:00Z",
+                first_line="早晨",
+                text=None,
+            ),),
+            (SessionPreviewDTO(
+                id="session-b",
+                name="第二篇",
+                labels=[],
+                created_at="2026-09-15T08:00:00Z",
+                updated_at="2026-09-15T10:00:00Z",
+                first_line="夜晚",
+                text=None,
+            ),),
+        ]
+        service = _ProductionClaudeAgentService(
+            context_builder=builder,
+            managed_mcp_runtime_snapshot_loader=SimpleNamespace(
+                load=unittest.mock.AsyncMock(return_value={})
+            ),
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_admin_recent_context",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_admin_recent_context", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir, unittest.mock.patch.object(
+            service_module,
+            "get_or_create_thread_runtime_workspace",
+            return_value=Path(tmp_dir),
+        ):
+            state = AgentRunState(session_id=request.thread_id)
+            first = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+            cached = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+            rebuilt = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+
+        self.assertEqual(owner.recent_sessions.call_count, 2)
+        self.assertEqual(
+            [call[0][0]["id"] for call in builder.system_prompt_calls],
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(first.run_options.system_prompt, "system-prompt:1:old")
+        self.assertEqual(cached.run_options.system_prompt, "system-prompt:1:old")
+        self.assertEqual(rebuilt.run_options.system_prompt, "system-prompt:1:new")
+
+    async def test_admin_recent_session_failure_stops_before_context_without_db_fallback(self):
+        builder = _FakeContextBuilder()
+        owner = unittest.mock.Mock(spec=AdminTurnPersistence)
+        owner.system_config.return_value = {"workspace_enabled": False}
+        owner.thread.return_value = None
+        owner.recent_sessions.side_effect = RuntimeError("synthetic Admin failure")
+        service = _ProductionClaudeAgentService(
+            context_builder=builder,
+            managed_mcp_runtime_snapshot_loader=SimpleNamespace(
+                load=unittest.mock.AsyncMock(return_value={})
+            ),
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_admin_recent_failure",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_admin_recent_failure", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path(tmp_dir),
+            ) as runtime_workspace,
+            unittest.mock.patch.object(
+                service_module._db,
+                "list_sessions_in_range",
+                side_effect=AssertionError("legacy range helper must not run"),
+            ) as legacy_range,
+            unittest.mock.patch.object(
+                service_module._db,
+                "list_sessions",
+                side_effect=AssertionError("legacy Session helper must not run"),
+            ) as legacy_all,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic Admin failure"):
+                await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        runtime_workspace.assert_not_called()
+        legacy_range.assert_not_called()
+        legacy_all.assert_not_called()
 
     async def test_system_config_load_failure_stops_before_context_or_workspace(self):
         builder = _FakeContextBuilder()

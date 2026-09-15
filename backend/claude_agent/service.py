@@ -9,6 +9,7 @@
 # [Sync] 2026-09-15: public Chat uses its actor/thread-bound immutable Admin Workflow snapshot; internal dispatcher mapper remains pending migration.
 # [Sync] 2026-09-15: Editor writes and post-tool refresh use the turn-owned Admin runtime; stdio receives no DB or Admin credential.
 # [Sync] 2026-09-15: require fresh Thread SystemConfig from the bound Admin turn owner before context assembly.
+# [Sync] 2026-09-15: load recent Session projections only on prompt rebuild and fail before Runtime on Admin errors.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -1653,7 +1654,7 @@ class ClaudeAgentService:
     ) -> "_TurnExecution":
         """Build context for the upcoming turn.
 
-        On the first turn of a session: loads DB context and constructs the
+        On the first turn of a session: loads authorized context and constructs the
         system prompt (expensive).  On subsequent turns within the keepalive
         window: reuses the cached ``state.system_prompt``.
 
@@ -1752,8 +1753,19 @@ class ClaudeAgentService:
                     "Phase 1: building system_prompt for session_id=%s",
                     state.session_id,
                 )
+            recent_sessions: list[dict[str, Any]] = []
+            if isinstance(persistence, AdminTurnPersistence):
+                recent_session_dtos = await asyncio.to_thread(
+                    persistence.recent_sessions,
+                    actor_id=request.user_id,
+                    thread_id=request.thread_id,
+                )
+                recent_sessions = [
+                    item.model_dump(mode="python")
+                    for item in recent_session_dtos
+                ]
             system_prompt = await self._context_builder.build_system_prompt(
-                request.user_id,
+                recent_sessions,
                 configured_system_prompt=settings_system_prompt or None,
             )
             state.with_system_prompt(

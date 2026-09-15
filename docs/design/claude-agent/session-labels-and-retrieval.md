@@ -1,8 +1,8 @@
 # 笔记标签（labels）与跨 Session 协作检索设计方案
 
 Status: Implemented
-Updated: 2026-06-16
-Scope: `user_sessions.labels` 属性 + `mcp__user__get_sessions_range` MCP 工具，支持 Agent 跨日期检索历史笔记；2026-06-16 起支持可配置字符模糊检索参数，并预留向量检索接口边界
+Updated: 2026-09-15
+Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sessions_range` MCP 工具；近期prompt已消费Admin `session.list`，任意日期工具仍是独立迁移边界
 
 ---
 
@@ -127,9 +127,9 @@ def list_sessions_in_range(
 
 ### 4.1 加载范围
 
-`_load_recent_sessions_block` 改为仅加载**最近三天**（由常量 `_RECENT_SESSIONS_DAYS = 3` 控制）的 session，使用新函数 `_fetch_recent_sessions`，底层调用 `database.list_sessions_in_range`。
+首次system prompt或Settings prompt变化触发重建时，`ClaudeAgentService`调用绑定当前actor/Thread的`AdminTurnPersistence.recent_sessions`。owner使用current renewed `server-persistence` grant调用Admin `session.list`，范围固定为UTC当天及前两天，`include_text=false`；Service将strict DTO投影传给`ClaudeAgentContextBuilder`。ContextBuilder只按`INK_AGENT_CONTEXT_SESSIONS`截断并渲染，不再import `database`、计算日期或保留`_fetch_recent_sessions`/`_fetch_sessions`兼容读取。
 
-旧函数 `_fetch_sessions` 保留以兼容其他调用路径。
+Admin成功返回空列表时显示原empty文本。401/403/503、能力缺失、超时或坏DTO在Workspace、Runner、CLI与SSE前传播，不回退Dream PostgreSQL；ContextBuilder只对已经取得的投影保留纯渲染异常的empty block。keepalive缓存且Settings prompt未变时不新增Session请求。
 
 ### 4.2 条目格式
 

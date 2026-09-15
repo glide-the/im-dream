@@ -1,11 +1,12 @@
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
-# [Output] Entity scope, known reservation reuse, original-ID recovery and shutdown drain evidence.
+# [Output] Entity scope, recent Session reads, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
 # [Sync] 2026-09-15: validate Thread/SDK Session scope, native init callbacks and one cross-operation unknown barrier.
 # [Sync] 2026-09-15: validate server-only persistence authority and short-lock current snapshots.
 # [Sync] 2026-09-15: validate assistant full/partial DTOs, four schemas and shared pending barrier.
 # [Sync] 2026-09-15: validate Editor broker ownership beside the existing grant lifecycle.
 # [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
+# [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +24,10 @@ from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.chat_data import GET_THREAD, PERSIST_MESSAGE, UPDATE_SESSION
 from services.admin_data.delegation import RuntimeGrant
 from services.admin_data.delegation_keeper import RuntimeGrantKeeper
+from services.admin_data.session_data import (
+    LIST_SESSIONS,
+    SESSION_LIST_SCHEMA_REQUIREMENTS,
+)
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
@@ -38,14 +43,20 @@ def grant():
         ("dream:read", "dream:write"), NOW + timedelta(seconds=100), NOW + timedelta(hours=2))
 
 
-def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None, schema_fault=None, assistant_patch=None):
+def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None,
+    schema_fault=None, assistant_patch=None, session_rows=None, expected_token=TOKEN):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     calls, receipt_states = [], ["absent", "committed"]
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
-    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE, GET_THREAD_SYSTEM_CONFIG)
-    schemas = [item.model_dump() for item in WORKSPACE_SCHEMA_REQUIREMENTS]
-    if schema_fault == "missing": schemas.pop()
+    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
+        GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS)
+    schema_requirements = {
+        item.capability: item
+        for item in (*WORKSPACE_SCHEMA_REQUIREMENTS, *SESSION_LIST_SCHEMA_REQUIREMENTS)
+    }
+    schemas = [item.model_dump() for item in schema_requirements.values()]
+    if schema_fault == "missing": schemas.pop(len(WORKSPACE_SCHEMA_REQUIREMENTS) - 1)
     elif schema_fault == "duplicate": schemas.append(dict(schemas[0]))
     elif isinstance(schema_fault, int): schemas[schema_fault]["contract_sha256"] = "0" * 64
     def transport(request):
@@ -61,7 +72,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             if state == "committed":
                 value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else ({"message_id": "message-1"} if operation == PERSIST_MESSAGE.capability.name else {"message_id": "message-1", "confirmation_preserved": False})
         else:
-            assert request.headers["authorization"] == "Bearer " + TOKEN
+            assert request.headers["authorization"] == "Bearer " + expected_token
             assert request_id == "write-original"
             if block is not None:
                 entered, release = block
@@ -74,6 +85,13 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             elif name == GET_THREAD_SYSTEM_CONFIG.capability.name:
                 assert input_dto == {"thread_id": "thread-1"}
                 value = {"config_json": '{"workspace_enabled":true}'}
+            elif name == LIST_SESSIONS.capability.name:
+                assert input_dto == {
+                    "start_date": "2026-09-13",
+                    "end_date": "2026-09-15",
+                    "include_text": False,
+                }
+                value = {"sessions": session_rows or []}
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
                 value = {"changed": True}
@@ -351,6 +369,130 @@ def test_thread_system_config_read_uses_exact_grant_and_close_drains_it():
     assert request.url.path.endswith(GET_THREAD_SYSTEM_CONFIG.capability.name)
 
 
+def test_recent_sessions_use_exact_utc_window_order_and_current_grant():
+    session_rows = [
+        {
+            "id": "session-new",
+            "name": "新篇",
+            "labels": ["中文", "journal"],
+            "created_at": "2026-09-14T08:00:00Z",
+            "updated_at": "2026-09-15T09:00:00Z",
+            "first_line": "第一行",
+            "text": None,
+        },
+        {
+            "id": "session-old",
+            "name": None,
+            "labels": [],
+            "created_at": "2026-09-13T08:00:00Z",
+            "updated_at": "2026-09-14T09:00:00Z",
+            "first_line": "older",
+            "text": None,
+        },
+    ]
+    value, calls, _ = holder(session_rows=session_rows)
+
+    result = value.recent_sessions(actor_id="42", thread_id="thread-1")
+
+    assert isinstance(result, tuple)
+    assert [item.id for item in result] == ["session-new", "session-old"]
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith(LIST_SESSIONS.capability.name)
+    assert json.loads(request.content)["input"] == {
+        "start_date": "2026-09-13",
+        "end_date": "2026-09-15",
+        "include_text": False,
+    }
+
+
+def test_recent_sessions_use_the_keeper_current_renewed_token():
+    renewed_token = "idg_" + "b" * 43
+    value, calls, _ = holder(expected_token=renewed_token)
+    value._keeper = SimpleNamespace(
+        current=lambda purpose: replace(grant(), token=renewed_token)
+    )
+
+    assert value.recent_sessions(actor_id="42", thread_id="thread-1") == ()
+    assert calls[-1].headers["authorization"] == "Bearer " + renewed_token
+
+
+@pytest.mark.parametrize("actor,thread", [("43", "thread-1"), ("42", "other")])
+def test_recent_sessions_reject_other_entities_before_io(actor, thread):
+    value, calls, _ = holder()
+    before = len(calls)
+
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        value.recent_sessions(actor_id=actor, thread_id=thread)
+
+    assert len(calls) == before
+
+
+@pytest.mark.parametrize(
+    "schema_index",
+    [len(WORKSPACE_SCHEMA_REQUIREMENTS), len(WORKSPACE_SCHEMA_REQUIREMENTS) + 1],
+    ids=["runtime-delegation", "runtime-purpose"],
+)
+def test_recent_sessions_require_exact_runtime_schemas_before_command(schema_index):
+    value, calls, _ = holder(schema_fault=schema_index)
+    before = len(calls)
+
+    with pytest.raises(AdminDataError) as error:
+        value.recent_sessions(actor_id="42", thread_id="thread-1")
+
+    assert error.value.code == "ADMIN_CAPABILITY_UNAVAILABLE"
+    assert len(calls) == before + 1
+    assert calls[-1].method == "GET" and calls[-1].url.path.endswith("/capabilities")
+
+
+def test_recent_sessions_reject_text_when_include_text_is_false():
+    value, calls, _ = holder(
+        session_rows=[{
+            "id": "session-leak",
+            "name": "Title",
+            "labels": [],
+            "created_at": "2026-09-15T08:00:00Z",
+            "updated_at": "2026-09-15T09:00:00Z",
+            "first_line": "preview",
+            "text": "full text",
+        }]
+    )
+
+    with pytest.raises(AdminDataError) as error:
+        value.recent_sessions(actor_id="42", thread_id="thread-1")
+
+    assert error.value.code == "ADMIN_RESPONSE_INVALID"
+    assert calls[-1].url.path.endswith(LIST_SESSIONS.capability.name)
+
+
+def test_close_drains_an_already_dispatched_recent_sessions_read():
+    entered, release, closed = Event(), Event(), Event()
+    value, calls, _ = holder(block=(entered, release))
+    rows, errors = [], []
+
+    def read():
+        try:
+            rows.append(value.recent_sessions(actor_id="42", thread_id="thread-1"))
+        except Exception as error:
+            errors.append(error)
+
+    worker = Thread(target=read)
+    closer = Thread(target=lambda: (value.close(), closed.set()))
+    worker.start()
+    try:
+        assert entered.wait(1)
+        closer.start()
+        assert not closed.wait(0.05)
+    finally:
+        release.set()
+        worker.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+
+    assert closed.is_set() and not errors and rows == [()]
+    assert calls[-1].url.path.endswith(LIST_SESSIONS.capability.name)
+
+
 def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenced(monkeypatch, tmp_path):
     import re
     import claude_agent.service as service_module
@@ -359,7 +501,8 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
     from claude_agent_sdk.types import SystemMessage
     from tests.test_claude_agent_service import _FakeBus, _FakeContextBuilder
     value, calls, _ = holder()
-    service = ClaudeAgentService(context_builder=_FakeContextBuilder(), platform_model_resolver=lambda *_: "dream-balanced",
+    builder = _FakeContextBuilder()
+    service = ClaudeAgentService(context_builder=builder, platform_model_resolver=lambda *_: "dream-balanced",
         managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
     request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", resume=True,
         admin_workflow_resolution=AdminWorkflowResolution("42", "thread-1", None), admin_turn_persistence=value)
@@ -384,6 +527,8 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
         assert resumed.request.thread_id == "thread-1" and resumed.request.admin_turn_persistence is value
         await service._persist_sdk_session_from_message(resumed, SystemMessage(subtype="init", data={"session_id": new_id}))
     asyncio.run(scenario())
+    assert len(builder.system_prompt_calls) == 1
+    assert sum(item.url.path.endswith(LIST_SESSIONS.capability.name) for item in calls) == 1
     assert sum(item.url.path.endswith(UPDATE_SESSION.capability.name) for item in calls) == 1
 
 

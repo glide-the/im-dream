@@ -1,14 +1,15 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic user reservations, bound assistant/Thread/SystemConfig/SDK Session operations and original-ID recovery.
+# [Output] Atomic user reservations, bound assistant/Thread/SystemConfig/SDK and recent Session operations with original-ID recovery.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
 # [Sync] 2026-09-15: share the unknown barrier with complete/partial assistant writes and exact history schemas.
 # [Sync] 2026-09-15: read fresh Thread SystemConfig through the same draining persistence grant.
+# [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock, RLock
 from typing import Callable
 from uuid import uuid4
@@ -20,6 +21,8 @@ from .delegation import AdminRuntimeClient, RuntimeGrant
 from .delegation_keeper import RuntimeGrantKeeper, RuntimeRenewalSettings
 from .errors import AdminDataError, configuration_invalid, invalid_response
 from .models import CommittedReceiptDTO, StrictDTO
+from .session_data import AdminSessionData, require_session_list_capabilities
+from .session_models import SessionListInputDTO, SessionPreviewDTO
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
 from .workspace_data import require_workspace_capabilities
@@ -56,6 +59,7 @@ class AdminTurnPersistence:
         self._client = client
         self._user_messages = AdminUserMessageData(client)
         self._chat = AdminChatData(client)
+        self._sessions = AdminSessionData(client)
         self._system_config = AdminSystemConfigData(client)
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -124,6 +128,27 @@ class AdminTurnPersistence:
                 request_id,
                 access_token=grant.token,
             )
+
+    def recent_sessions(
+        self, *, actor_id: str, thread_id: str
+    ) -> tuple[SessionPreviewDTO, ...]:
+        """Read the current actor's recent Session projection through this grant."""
+
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            request_id = self._request_id_factory()
+            require_session_list_capabilities(self._client, request_id)
+            today = self._clock().astimezone(timezone.utc).date()
+            result = self._sessions.list(
+                SessionListInputDTO(
+                    start_date=(today - timedelta(days=2)).isoformat(),
+                    end_date=today.isoformat(),
+                    include_text=False,
+                ),
+                request_id,
+                access_token=grant.token,
+            )
+            return tuple(result.sessions)
 
     def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
         metadata: dict | None, history_final_text: str | None = None,

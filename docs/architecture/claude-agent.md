@@ -10,6 +10,7 @@
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
 
 [Sync] 2026-09-15: public Thread resume and SDK Session writes use the bound server owner; unknown recovery covers its user/session commands.
+[Sync] 2026-09-15: first/rebuilt Agent prompts read recent Session projections through the same turn owner; Admin/read-contract failures stop before Workspace, Runtime and SSE.
 [Sync] 2026-09-15: atomic user reservation uses a server-only purpose grant; Factory owns renewal and terminal/cancel cleanup.
 [Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
@@ -107,7 +108,7 @@ ThreadFactory (thread_factory.py)
 
 公开Chat在返回SSE前读取Admin Workflow上下文，创建绑定actor、Thread与当前Run的server-persistence委托，并原子预留user message和缺失title。Admin执行原stored confirmation guard，Dream只保留原文本投影和raw JSON词法。Service复用已确认相同输入；unknown保留原request ID，只查原receipt，absent阻止新写与推理。
 
-Factory在既有admission成功后启动独立Keeper。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，shutdown等待已dispatch的同步writer、renewal线程和独立HTTP client关闭。既有lease、EventBus、Runner与resume/cancel流程保持。该grant不投影给CLI或Editor，assistant/后台Session上下文及内部Workflow dispatcher仍待typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
+Factory在既有admission成功后启动独立Keeper。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，shutdown等待已dispatch的同步writer、renewal线程和独立HTTP client关闭。既有lease、EventBus、Runner与resume/cancel流程保持。该grant不投影给CLI或Editor。首次或Settings prompt变化时，Service通过owner调用Admin `session.list`取得UTC当天及前两天的strict投影；成功空列表才渲染empty block，Admin、能力、超时或DTO失败在Workspace/Runtime/SSE前终止。Session工具、Reflections后台上下文及内部Workflow dispatcher仍待各自typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
 
 公开Service的Thread读取与SDK init/final/repair Session回写也通过同一owner；reply actor/thread错配拒绝。user/session未知写共享原operation/input/UUID，只有最近确认的Session同输入可复用。SDK init失败保留原日志/既有运行turn与cancel处理；assistant/Run旧DB写尚不在此owner内。
 
@@ -226,9 +227,11 @@ POST /api/claude-agent
     │   ├─ Admission: active turn + host/cgroup memory headroom
     │   │   └─ insufficient → retryable error + finish（不创建 CLI）
     │   │
-    │   ├─ Phase 1: context_builder
-    │   │   ├─ 查询 database.list_sessions(user_id) → 近期写作会话
-    │   │   └─ 拼装 system_prompt（Ink & Memory 写作助手角色）
+    │   ├─ Phase 1: service + context_builder
+    │   │   ├─ AdminTurnPersistence.recent_sessions(actor_id, thread_id)
+    │   │   │   └─ Admin session.list → strict Session DTO projection
+    │   │   └─ ContextBuilder拼装system_prompt（成功空列表才显示empty block）
+    │   │       └─ Admin/read-contract失败 → Workspace/Runtime/SSE前终止
     │   │
     │   ├─ Phase 2: server/agent_runner.py
     │   │   └─ ClaudeAgentRunner(session_id, cwd)

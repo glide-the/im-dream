@@ -13,6 +13,7 @@
 
 > [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
 > [Sync] 2026-09-15: Reflections config GET/PUT/DELETE and memory-init ownership/config reads use Admin OAuth operations before filesystem access.
+> [Sync] 2026-09-15: Agent recent Session prompt context uses Admin `session.list` through the bound turn owner; Admin failures stop before Runtime.
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
 > authorization, the server verifies the DB Claude ID in the current Runtime
 > project. Missing records start a fresh Claude session in the same business
@@ -576,6 +577,15 @@ Start or resume the current user's Claude Agent turn through the existing
 `text/event-stream` contract. Before creating a Claude Code CLI process tree,
 the backend enforces its configured active-turn cap and checks host/cgroup
 memory headroom.
+
+When the cached system prompt is first built, or rebuilt after a Settings
+`SYSTEM_PROMPT` change, the server uses the current Thread-bound persistence
+grant to request Session previews for UTC today and the prior two days. It
+preserves Admin's order and applies `INK_AGENT_CONTEXT_SESSIONS` while rendering.
+The ContextBuilder receives only validated preview fields and does not access
+Dream PostgreSQL. An Admin, delegation, capability, or DTO failure stops context
+assembly before Workspace or Claude Runtime startup. A keepalive turn with an
+unchanged Settings prompt reuses the cached prompt without another Session call.
 
 When capacity is unavailable the HTTP connection remains protocol-compatible:
 it receives one `error` event followed by the existing `finish` event. New

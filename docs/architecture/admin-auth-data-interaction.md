@@ -18,6 +18,7 @@
 <!-- [Sync] 2026-09-15: define preference raw object projection, NULL merge and unknown-save recovery. -->
 <!-- [Sync] 2026-09-15: define OAuth-only Deck version consumers, four exact capabilities and unknown commit handling. -->
 <!-- [Sync] 2026-09-15: specify bound Thread/SDK Session operations, mutable confirmation reuse and scoped unknown recovery. -->
+<!-- [Sync] 2026-09-15: specify bound recent Session prompt reads and Runtime-before failure behavior. -->
 <!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
 <!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
 <!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
@@ -261,7 +262,7 @@ Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先
 
 公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。内部confirmation/launch尚未连接其服务身份，继续执行原guard，不借公开迁移删除保护。
 
-Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Editor使用另一个exact Session purpose且其idg仍只留主进程。Gateway独立目的、内部dispatcher assistant/后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Editor使用另一个exact Session purpose且其idg仍只留主进程。Agent首次prompt或Settings prompt重建已通过该owner读取Admin `session.list` strict projection；成功空列表显示empty block，Admin/read-contract失败在Workspace/Runtime/SSE前终止。Gateway独立目的、内部dispatcher assistant、Session工具、Reflections后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
 
 ### 公开 Agent Thread 恢复与 SDK Session 回写
 
@@ -287,7 +288,13 @@ owner在单一activity锁中串行user/session/assistant命令及Thread读取，
 
 Admin `session.save/get/batch/list/text-list/delete`六operation负责owned Session持久化、state/writingThread绑定、name/labels null保留、UTC范围与排序。Dream复用闭集EditorEngine state DTO，覆盖text/widget/suggestion Cells、commentors/tasks/weight；optional在wire省略，只有selectedState可显式null，required nullable字段保留。有限JSON数值与微秒ISO按实际合同校验；错误state/ID/额外字段在I/O前返回安全400，Admin状态损坏返回503，missing get保持404。
 
-公开Session走同一已认证request actor/OAuth与shared threadpool/error adapter，无外部user ID。metadata list移除内部text:null，Dream保留时区date_key、mixed-word metrics与aggregate响应；空batch不发domain request。update/delete收到confirmed result才publish原user-scoped Edit Session event；unknown保留原request ID，不retry、不发event，业务状态按原receipt确认。此Session合同不接受Thread server-persistence grant，后台ContextBuilder/Session tools尚待独立合同，不能投影Editor或扩大purpose绕过权限。公开HTTP/DTO/DB-fenced技术验收不代表正常账户业务验收。
+公开Session走同一已认证request actor/OAuth与shared threadpool/error adapter，无外部user ID。metadata list移除内部text:null，Dream保留时区date_key、mixed-word metrics与aggregate响应；空batch不发domain request。update/delete收到confirmed result才publish原user-scoped Edit Session event；unknown保留原request ID，不retry、不发event，业务状态按原receipt确认。公开OAuth行为不变；同一`session.list`仅为Agent recent prompt context接受已经由配置service完整解析、绑定Thread、Editor Session为空、包含`dream:read`且未过期的`server-persistence` grant。其他五项Session operation仍拒绝该purpose。Session tools和Reflections后台读取没有Chat turn owner，继续保持独立授权缺口。公开HTTP/DTO/DB-fenced技术验收不代表正常账户业务验收。
+
+#### Agent最近Session prompt上下文
+
+`AdminTurnPersistence.recent_sessions`在既有activity锁内验证immutable Workflow actor/Thread，读取current renewed grant，并在POST前匹配`session.list` SHA `1936970e27a8b854dd08cd785b0da6534656aa5af0e652750693f86e88860435`与Better Auth/runtime delegation/runtime purpose三项identity schema。输入固定为UTC当天及前两天、`include_text=false`；输出只接受strict `SessionPreviewDTO`且禁止返回正文。读取参与Phase4 close drain，不进入或清除user/SDK Session/assistant unknown写屏障。
+
+Service只在首次system prompt或Settings `SYSTEM_PROMPT`变化触发重建时调用一次，保持Admin的`updated_at DESC`顺序；ContextBuilder按`INK_AGENT_CONTEXT_SESSIONS`截断并只渲染投影。空投影或渲染错误保留原empty文本。Admin不可用、grant/capability漂移或坏DTO在Workspace/Runner/CLI前终止，并由既有安全错误边界返回；不回退Dream PostgreSQL。keepalive且Settings prompt未变不发Session请求。Agent Runtime、SSE、resource LKG、admission/lease、resume/cancel、shared FS与TMPDIR规则不变。
 
 #### 公开 Agent Editor runtime
 

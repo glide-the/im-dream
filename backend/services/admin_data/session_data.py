@@ -1,11 +1,12 @@
-# [Input] Actual six Admin Session capability hashes and explicit authenticated OAuth actor.
-# [Output] Typed Session domain operations with original request IDs and exact reply identity checks.
+# [Input] Actual six Admin Session capability hashes, exact identity schemas and authenticated actor grant.
+# [Output] Typed Session operations, strict recent-context readiness and exact reply identity checks.
 # [Pos] Session consumer; Admin owns persistence/ownership, Dream retains metrics and edit events.
 # [Sync] 2026-09-15: migrate public writing Session reads/writes without database or delegated scope expansion.
 from __future__ import annotations
 
 from .client import AdminDataClient, DomainOperation
-from .errors import invalid_response
+from .delegation import RUNTIME_SCHEMA_REQUIREMENTS
+from .errors import AdminDataError, invalid_response
 from .models import OperationCapabilityDTO
 from . import session_models as dto
 
@@ -46,6 +47,21 @@ DELETE_SESSION = DomainOperation(
     dto.SessionIdInputDTO, dto.SessionDeletedDTO,
 )
 SESSION_OPERATIONS = (SAVE_SESSION, GET_SESSION, BATCH_SESSIONS, LIST_SESSIONS, TEXT_SESSIONS, DELETE_SESSION)
+SESSION_LIST_SCHEMA_REQUIREMENTS = tuple(
+    item
+    for item in RUNTIME_SCHEMA_REQUIREMENTS
+    if item.capability.startswith("identity.")
+)
+
+
+def require_session_list_capabilities(client: AdminDataClient, request_id: str) -> None:
+    capabilities = client.capabilities(request_id)
+    schemas = {item.capability: item for item in capabilities.schema_capabilities}
+    if len(schemas) != len(capabilities.schema_capabilities) or any(
+        schemas.get(item.capability) != item
+        for item in SESSION_LIST_SCHEMA_REQUIREMENTS
+    ):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
 
 
 class AdminSessionData:

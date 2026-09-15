@@ -1,7 +1,6 @@
-# [Input] Consume ClaudeAgentContextBuilder from backend/claude_agent/context_builder.py.
-#         Mock database.list_sessions_in_range to provide writing session fixtures.
+# [Input] Consume ClaudeAgentContextBuilder with validated Session projection fixtures.
 # [Output] Verify system_prompt assembly: header, recent sessions block, runtime context,
-#          session count cap, empty-sessions fallback, and DB error graceful degradation.
+#          session count cap, empty-sessions fallback, and render-error degradation.
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: fresh implementation for Ink & Memory writing-session context.
 #                    (Pawkeyland's context_builder tested pet persona / sticker / necklace —
@@ -19,6 +18,7 @@
 # [Sync] 2026-09-01: cover case-insensitive leading workspace Skill command
 #                    resolution for physical packages and trusted builtin links,
 #                    while rejecting links outside the server package catalog.
+# [Sync] 2026-09-15: supply Admin Session projections directly and fence legacy DB helpers.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -28,7 +28,6 @@ import hashlib
 import sys
 import tempfile
 import unittest
-import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -120,31 +119,22 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def _builder(self, n: int = 5) -> ClaudeAgentContextBuilder:
         return ClaudeAgentContextBuilder(context_session_count=n)
 
-    def _mock_db(self, sessions):
-        """Return a patcher that makes database.list_sessions_in_range return sessions."""
-        import database as _db  # noqa: PLC0415 — local import, backend path
-        return unittest.mock.patch.object(_db, "list_sessions_in_range", return_value=sessions)
-
     def test_prompt_contains_sessions_header(self):
-        with self._mock_db(_fake_sessions(2)):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt(_fake_sessions(2)))
         self.assertIn(_SESSIONS_HEADER.strip(), prompt)
 
     def test_prompt_contains_session_names(self):
         sessions = _fake_sessions(2)
-        with self._mock_db(sessions):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt(sessions))
         for s in sessions:
             self.assertIn(s["name"], prompt)
 
     def test_prompt_contains_writing_assistant_role(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
         self.assertIn("writing assistant", prompt.lower())
 
     def test_prompt_contains_workspace_uri_reference_contract(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
 
         self.assertIn("## Workspace File Reference Protocol", prompt)
         self.assertIn("workspace://files/<path-relative-to-the-current-thread-workspace>", prompt)
@@ -152,60 +142,57 @@ class TestBuildSystemPrompt(unittest.TestCase):
         self.assertIn("Do not emit `workspace://` when no <workspace_context> is present", prompt)
 
     def test_empty_sessions_uses_fallback(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
 
     def test_respects_context_session_count_cap(self):
         sessions = _fake_sessions(10)
-        with self._mock_db(sessions):
-            prompt = _run(ClaudeAgentContextBuilder(context_session_count=3).build_system_prompt("1"))
+        prompt = _run(
+            ClaudeAgentContextBuilder(context_session_count=3).build_system_prompt(
+                sessions
+            )
+        )
         # Only first 3 session names should appear
         for s in sessions[:3]:
             self.assertIn(s["name"], prompt)
         for s in sessions[3:]:
             self.assertNotIn(s["name"], prompt)
 
-    def test_db_error_gracefully_degrades_to_no_sessions(self):
-        import database as _db
-        with unittest.mock.patch.object(_db, "list_sessions_in_range", side_effect=RuntimeError("db down")):
-            prompt = _run(self._builder().build_system_prompt("1"))
+    def test_render_error_gracefully_degrades_to_no_sessions(self):
+        invalid_projection = [{"name": object(), "first_line": "entry"}]
+        prompt = _run(self._builder().build_system_prompt(invalid_projection))
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
         # Prompt should still be a valid string (not raise)
         self.assertIsInstance(prompt, str)
         self.assertGreater(len(prompt), 50)
 
     def test_switch_editor_json_example_survives_template_formatting(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
 
         self.assertIn('returns {"ok": true}', prompt)
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
 
     def test_planning_prompt_architect_template_survives_formatting(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
 
         self.assertIn("You are an Expert Prompt Architect.", prompt)
         self.assertIn("Optimized Prompt:", prompt)
         self.assertIn("USER REQUIREMENT: {{task}}", prompt)
 
     def test_session_retrieval_workflow_mentions_fuzzy_query(self):
-        with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("1"))
+        prompt = _run(self._builder().build_system_prompt([]))
 
         self.assertIn('query="<topic or memory>"', prompt)
         self.assertIn("Default retrieval is character fuzzy matching", prompt)
         self.assertIn('retrieval_mode="vector"', prompt)
 
     def test_configured_system_prompt_is_lower_priority_block(self):
-        with self._mock_db([]):
-            prompt = _run(
-                self._builder().build_system_prompt(
-                    "1",
-                    configured_system_prompt="Always answer with terse bullet points.",
-                )
+        prompt = _run(
+            self._builder().build_system_prompt(
+                [],
+                configured_system_prompt="Always answer with terse bullet points.",
             )
+        )
 
         self.assertIn("## Configurable Page System Prompt (Lower Priority)", prompt)
         self.assertIn("Settings SYSTEM_PROMPT was loaded from system_config", prompt)
@@ -218,16 +205,34 @@ class TestBuildSystemPrompt(unittest.TestCase):
         )
 
     def test_empty_configured_system_prompt_is_omitted(self):
-        with self._mock_db([]):
-            prompt = _run(
-                self._builder().build_system_prompt(
-                    "1",
-                    configured_system_prompt="  \n  ",
-                )
+        prompt = _run(
+            self._builder().build_system_prompt(
+                [],
+                configured_system_prompt="  \n  ",
             )
+        )
 
         self.assertNotIn("## Configurable Page System Prompt", prompt)
         self.assertNotIn("<settings_system_prompt>", prompt)
+
+    def test_supplied_projection_never_calls_legacy_database_helpers(self):
+        import database as database_module
+
+        original_range = database_module.list_sessions_in_range
+        original_all = database_module.list_sessions
+        database_module.list_sessions_in_range = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy ranged Session helper called")
+        )
+        database_module.list_sessions = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy Session helper called")
+        )
+        try:
+            prompt = _run(self._builder().build_system_prompt(_fake_sessions(1)))
+        finally:
+            database_module.list_sessions_in_range = original_range
+            database_module.list_sessions = original_all
+
+        self.assertIn("Session 1", prompt)
 
 
 # ---------------------------------------------------------------------------

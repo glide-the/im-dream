@@ -2,6 +2,38 @@
 
 # Claude Agent Thread Session — 设计模式重构方案
 
+## 现行补充：最近 Session prompt 上下文
+
+### 背景与问题
+
+首轮system prompt原由`ClaudeAgentContextBuilder`直接查询Dream PostgreSQL，导致上下文装配绕过Admin数据接口。公开turn已有绑定canonical actor、Thread与可选Run的`server-persistence` owner，因此最近Session读取应复用这一生命周期，不把数据库、service credential或grant token交给Runtime。
+
+### 目标与边界
+
+`AdminTurnPersistence.recent_sessions`在既有activity锁内验证actor/Thread，取得当前续期grant，匹配`session.list` v1 hash以及Better Auth、runtime delegation、runtime purpose三项identity schema，然后请求UTC当天及前两天且`include_text=false`。它返回strict `SessionPreviewDTO`顺序，不参与或清除unknown write pending。`sessions_tool.py`与Reflections后台Session读取没有Chat turn owner，继续作为独立授权缺口。
+
+### 概念、状态与失败
+
+Service仅在首次prompt或Settings `SYSTEM_PROMPT`变化时读取一次投影；相同keepalive复用`state.system_prompt`。ContextBuilder按`INK_AGENT_CONTEXT_SESSIONS`截断并保留Admin顺序，渲染id/name/labels/created_at/updated_at/first_line；empty投影与渲染错误使用原`_No recent entries found._`。Admin不可用、grant/capability不匹配或DTO损坏在Workspace、Runner和CLI启动前终止，不查询Dream PostgreSQL。Phase 2—4、SSE、resume/cancel、admission/lease、资源LKG、Workspace和`.claude-tmp`状态转换不变。
+
+```mermaid
+sequenceDiagram
+    participant S as ClaudeAgentService
+    participant P as AdminTurnPersistence
+    participant A as Admin session.list
+    participant C as ContextBuilder
+    alt 首次prompt或Settings prompt变化
+        S->>P: recent_sessions(actor_id, thread_id)
+        P->>P: current renewed grant + exact schema gate
+        P->>A: UTC today-2 .. today, include_text=false
+        A-->>P: strict SessionPreviewDTO[]
+        P-->>S: ordered projection
+        S->>C: build_system_prompt(projection)
+    else keepalive且Settings prompt未变
+        S->>S: reuse state.system_prompt
+    end
+```
+
 > [Sync] 2026-09-13: [恢复身份与时序](./claude-session-resume-resolution.md)
 > 是当前合同。Factory 的 state.session_id/锁/EventBus 绑定 Dream thread；Kit
 > AgentRunOptions.thread_id 仅承载已验证的 Claude ID 或 None。旧 user-ID/session
@@ -11,9 +43,9 @@
 > **目标**：引入 Thread 会话模型，通过 sessionId 在角色扮演状态加载前维护 Claude Runner 线程，实现工作空间初始化与宠物系统上下文一次性注入，后续轮次只传递用户消息
 > **关联设计**：
 > - [claude-agent-session-persistence.md §10](./claude-agent-session-persistence.md#10-thread-session--进程内-sessionid-享元层) — 与 DB 持久化层的接合
-> - [claude-agent上下文拼接设计.md §2.1](./claude-agent上下文拼接设计.md#21-享元短路thread-session-模式) — Phase 1 享元短路细节
-> - [ClaudeAgentRunner 模块设计.md §11](./ClaudeAgentRunner%20%E6%A8%A1%E5%9D%97%E8%AE%BE%E8%AE%A1.md#11-thread-session-模式下的-runner-交互) — Runner 在 4 阶段中的位置
-> - [AI Model 会话流程图.md](./AI%20Model%20会话流程图.md#thread-session--sessionid-享元生命周期pawkeyland-落地) — 4 阶段 stateDiagram + 时序图
+> - [Claude Agent上下文拼接设计 §2.1](./claude-agent-context-assembly.md#21-享元短路thread-session-模式) — Phase 1 享元短路细节
+> - [ClaudeAgentRunner模块设计 §11](./claude-agent-runner-design.md#11-thread-session-模式下的-runner-交互) — Runner 在4阶段中的位置
+> - [AI Model会话流程图](./ai-model-session-flow.md#thread-session--sessionid-享元生命周期pawkeyland-落地) — 4阶段stateDiagram与时序图
 
 ---
 
