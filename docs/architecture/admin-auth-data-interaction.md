@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume Registry111 Story review operations through strict DTOs and remove eight production SQL paths. -->
 <!-- [Sync] 2026-09-15: close internal Agent Story output through the existing Registry109 DTO/ORM contract. -->
 <!-- [Sync] 2026-09-15: bind Registry109 standalone Story output DTO/ORM UOW and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: bind Registry103 current-user picture list/full reads and original public projections. -->
@@ -29,6 +30,8 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+Story Workspace七个单项审核入口与一个批量入口现绑定Admin Registry111。Dream从当前OAuth取得actor，只发送闭集`resource_type/resource_id(s)/action/notes` DTO；Pydantic验证Admin返回的资源类型、精确ID、时区时间以及批量updated/skipped按请求顺序组成的完整互斥分区。Admin在一个typed Drizzle UOW内执行owner、generated、pending、artifact revision、Story确认级联、逐项audit与operation receipt。Dream继续提供原公开路由、状态码和产品反馈；Admin不可用、权限拒绝、capability/DTO错误或未知提交均返回安全业务失败，未知只查原request receipt且不重发，也不调用Dream SQL。契约SHA为`9f741208c6096b38f414fc5fb7c53d045d771233055dd68005571e7b47392392`与`621206fde4e9322a042940e45234fadfa4bbe01ba5febea67faf7d2ad0050667`，完整Registry111 SHA为`01f1a9ffbd9daf44e9bc640768a13ae636d9e718cb42365ff2de1ba5c244efc3`；其它Story Workspace数据库入口仍按清单迁移。
 
 公开Agent成功turn的standalone Story proposal绑定Admin Registry109：Dream保留`parse_agent_story_output`与既有post-turn失败隔离，只把strict Thread/Story/Character/Scene DTO交给当前`AdminTurnPersistence`。`POST /api/story-workspace/internal/agent-output`保留原Header、请求体和四字段成功响应，并以当前OAuth actor调用同一consumer；确定性输入/Thread错误保持422，服务、capability或未知提交返回可恢复的安全错误。Admin派生actor/Workspace/Deck，在一个typed Drizzle UOW中协调Story identity、Character name、Scene order、关系与计数并提交pending-review结果、receipt和audit。unknown响应仅以原request ID读取receipt，不重发POST；stored Thread必须与结果Thread相等，Run/Editor scope必须为空。两条生产入口均不调用Dream PostgreSQL，旧SQL实现仅留在测试oracle用于事务语义比对；普通Chat的assistant结果与原SSE终态保持。其它Story Workspace SQL仍按清单迁移。契约SHA `2b7d9180c78829df86289d717037ddbfd20ecee517d8213e0e71b9388cee65ed`，完整Registry109 SHA `48909feea302787bcbd0ed7a263212eeee163a0e3e7887acfda56cc2b421d513`。
 

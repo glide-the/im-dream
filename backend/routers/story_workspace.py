@@ -8,6 +8,7 @@
 # [Sync] 2026-09-15: replace Workflow ingress default SQL with OAuth-write Admin ensure; internal agent-output stays separate.
 # [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
 # [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
+# [Sync] 2026-09-15: route Story/Character/Scene review through Registry111 and remove those Dream SQL transactions.
 # [Sync] 2026-09-15: route internal Agent Story output through Registry109 and remove its Dream DB dependency.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
@@ -49,6 +50,11 @@ from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCre
 from services.admin_data.story_workspace_output_data import (
     AdminStoryWorkspaceOutputData,
     StoryWorkspaceOutputInputDTO,
+)
+from services.admin_data.story_workspace_review_data import (
+    AdminStoryWorkspaceReviewData,
+    StoryWorkspaceReviewBatchInputDTO,
+    StoryWorkspaceReviewTransitionInputDTO,
 )
 
 try:
@@ -96,11 +102,6 @@ _STORY_SORT_FIELDS = {"updated_at", "created_at", "title"}
 _CHARACTER_SORT_FIELDS = {"updated_at", "created_at", "name"}
 _SCENE_SORT_FIELDS = {"updated_at", "created_at", "name", "order_index"}
 
-_REVIEW_RESOURCES = {
-    StoryWorkspaceResourceType.STORY: "story_workspace_stories",
-    StoryWorkspaceResourceType.CHARACTER: "story_workspace_characters",
-    StoryWorkspaceResourceType.SCENE: "story_workspace_scenes",
-}
 
 _RESOURCE_IDENTIFIER_POLICY = {
     "story_workspace_workspaces": {
@@ -532,354 +533,6 @@ def _patch_owned_row(
     return _row_to_dict(_owned_row(db, table, resource_id, owner_column, user_id))
 
 
-def _owned_review_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    user_id: int,
-) -> Any:
-    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
-    if policy is None or policy["owner_column"] != "author_id":
-        raise HTTPException(status_code=400, detail="Unsupported review resource")
-    row = db.execute(
-        f"SELECT * FROM {table} "
-        "WHERE id = %s AND author_id = %s AND agent_generated = 1",
-        (resource_id, user_id),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    return row
-
-
-def _audit_review_action(
-    user_id: int,
-    resource_type: StoryWorkspaceResourceType,
-    resource_id: str,
-    action: StoryWorkspaceBatchAction,
-    previous_status: str,
-    new_status: str,
-    review_notes: Optional[str] = None,
-) -> None:
-    logger.info(
-        "story_workspace_review",
-        extra={
-            "id": str(uuid4()),
-            "user_id": user_id,
-            "resource_type": resource_type.value,
-            "resource_id": resource_id,
-            "action": action.value,
-            "previous_status": previous_status,
-            "new_status": new_status,
-            "review_notes": review_notes,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-
-
-def _transition_pending_review(
-    db: Any,
-    user_id: int,
-    resource_type: StoryWorkspaceResourceType,
-    resource_id: str,
-    action: StoryWorkspaceBatchAction,
-    review_notes: Optional[str] = None,
-) -> dict[str, Any]:
-    table = _REVIEW_RESOURCES[resource_type]
-    try:
-        db.execute("BEGIN")
-        previous = _owned_review_row(db, table, resource_id, user_id)
-        if previous["status"] == "archived" or previous["review_status"] != "pending":
-            raise HTTPException(
-                status_code=400,
-                detail="Item is not in pending review status",
-            )
-
-        if action == StoryWorkspaceBatchAction.CONFIRM:
-            if resource_type == StoryWorkspaceResourceType.STORY:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
-                    "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
-                    "updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                    "AND review_status = 'pending' AND status != 'archived'",
-                    (resource_id, user_id),
-                )
-                # Final story approval is the bundle gate described by Dream:
-                # the reviewed proposal is committed and its linked generated
-                # characters/scenes become usable in one transaction.
-                db.execute(
-                    """
-                    UPDATE story_workspace_scenes
-                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE story_id = %s AND author_id = %s AND agent_generated = 1
-                      AND review_status = 'pending' AND status != 'archived'
-                    """,
-                    (resource_id, user_id),
-                )
-                db.execute(
-                    """
-                    UPDATE story_workspace_characters
-                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE author_id = %s AND agent_generated = 1
-                      AND review_status = 'pending' AND status != 'archived'
-                      AND id IN (
-                        SELECT character_id FROM story_workspace_story_characters
-                        WHERE story_id = %s
-                      )
-                    """,
-                    (user_id, resource_id),
-                )
-            else:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'confirmed', "
-                    "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                    "AND review_status = 'pending' AND status != 'archived'",
-                    (resource_id, user_id),
-                )
-            new_status = "confirmed"
-        else:
-            cursor = db.execute(
-                f"UPDATE {table} SET review_status = 'rejected', review_notes = %s, "
-                "updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                "AND review_status = 'pending' AND status != 'archived'",
-                (review_notes, resource_id, user_id),
-            )
-            new_status = "rejected"
-
-        if cursor.rowcount != 1:
-            raise HTTPException(
-                status_code=400,
-                detail="Item is not in pending review status",
-            )
-        if resource_type == StoryWorkspaceResourceType.STORY:
-            updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
-                story_id=resource_id,
-                author_id=user_id,
-            )
-            if updated is None:
-                raise HTTPException(status_code=404, detail="Resource not found")
-        else:
-            updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    _audit_review_action(
-        user_id,
-        resource_type,
-        resource_id,
-        action,
-        str(previous["review_status"]),
-        new_status,
-        review_notes,
-    )
-    return updated
-
-
-def _archive_story(
-    db: Any,
-    user_id: int,
-    story_id: str,
-) -> dict[str, Any]:
-    try:
-        db.execute("BEGIN")
-        previous = _owned_review_row(
-            db,
-            _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
-            story_id,
-            user_id,
-        )
-        if previous["status"] == "archived":
-            raise HTTPException(status_code=400, detail="Item is already archived")
-        cursor = db.execute(
-            "UPDATE story_workspace_stories "
-            "SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-            "AND status != 'archived'",
-            (story_id, user_id),
-        )
-        if cursor.rowcount != 1:
-            raise HTTPException(status_code=400, detail="Item is already archived")
-        updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=story_id,
-            author_id=user_id,
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    _audit_review_action(
-        user_id,
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.ARCHIVE,
-        str(previous["status"]),
-        "archived",
-    )
-    return updated
-
-
-def _batch_review(
-    db: Any,
-    user_id: int,
-    request: _BatchReviewRequest,
-) -> dict[str, Any]:
-    table = _REVIEW_RESOURCES[request.resource_type]
-    placeholders = ", ".join("%s" for _ in request.ids)
-    try:
-        db.execute("BEGIN")
-        rows = db.execute(
-            f"SELECT * FROM {table} WHERE id IN ({placeholders}) "
-            "AND author_id = %s AND agent_generated = 1",
-            tuple(request.ids) + (user_id,),
-        ).fetchall()
-        previous_by_id = {str(row["id"]): row for row in rows}
-        eligible_ids = [
-            resource_id
-            for resource_id in request.ids
-            if resource_id in previous_by_id
-            and previous_by_id[resource_id]["review_status"] == "pending"
-            and previous_by_id[resource_id]["status"] != "archived"
-        ]
-
-        if eligible_ids:
-            eligible_placeholders = ", ".join("%s" for _ in eligible_ids)
-            common_where = (
-                f"WHERE id IN ({eligible_placeholders}) AND author_id = %s "
-                "AND agent_generated = 1 AND review_status = 'pending' "
-                "AND status != 'archived'"
-            )
-            params: tuple[Any, ...] = tuple(eligible_ids) + (user_id,)
-            if request.action == StoryWorkspaceBatchAction.CONFIRM:
-                if request.resource_type == StoryWorkspaceResourceType.STORY:
-                    cursor = db.execute(
-                        f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
-                        "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
-                        "updated_at = CURRENT_TIMESTAMP " + common_where,
-                        params,
-                    )
-                    for story_id in eligible_ids:
-                        db.execute(
-                            "UPDATE story_workspace_scenes SET review_status = 'confirmed', "
-                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE story_id = %s AND author_id = %s AND agent_generated = 1 "
-                            "AND review_status = 'pending' AND status != 'archived'",
-                            (story_id, user_id),
-                        )
-                        db.execute(
-                            "UPDATE story_workspace_characters SET review_status = 'confirmed', "
-                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE author_id = %s AND agent_generated = 1 "
-                            "AND review_status = 'pending' AND status != 'archived' "
-                            "AND id IN (SELECT character_id FROM story_workspace_story_characters "
-                            "WHERE story_id = %s)",
-                            (user_id, story_id),
-                        )
-                else:
-                    cursor = db.execute(
-                        f"UPDATE {table} SET review_status = 'confirmed', "
-                        "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                        + common_where,
-                        params,
-                    )
-                new_status = "confirmed"
-            elif request.action == StoryWorkspaceBatchAction.REJECT:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'rejected', "
-                    "review_notes = %s, updated_at = CURRENT_TIMESTAMP "
-                    + common_where,
-                    (request.review_notes,) + params,
-                )
-                new_status = "rejected"
-            else:
-                archive_fields = "status = 'archived', "
-                if request.resource_type != StoryWorkspaceResourceType.STORY:
-                    archive_fields += "archived_at = CURRENT_TIMESTAMP, "
-                cursor = db.execute(
-                    f"UPDATE {table} SET {archive_fields}"
-                    "updated_at = CURRENT_TIMESTAMP " + common_where,
-                    params,
-                )
-                new_status = "archived"
-
-            if cursor.rowcount != len(eligible_ids):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Review state changed during batch operation",
-                )
-
-            if request.resource_type == StoryWorkspaceResourceType.STORY:
-                public_repository = StoryWorkspacePublicStoryRepository(db)
-                updated_by_id = {}
-                for story_id in eligible_ids:
-                    public_story = public_repository.get_story_row(
-                        story_id=story_id,
-                        author_id=user_id,
-                    )
-                    if public_story is None:
-                        raise HTTPException(
-                            status_code=404,
-                            detail="Resource not found",
-                        )
-                    updated_by_id[story_id] = public_story
-            else:
-                updated_rows = db.execute(
-                    f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
-                    "AND author_id = %s",
-                    params,
-                ).fetchall()
-                updated_by_id = {
-                    str(row["id"]): _row_to_dict(row) for row in updated_rows
-                }
-        else:
-            new_status = request.action.value
-            updated_by_id = {}
-
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    updated_items = [updated_by_id[resource_id] for resource_id in eligible_ids]
-    skipped_ids = [
-        resource_id for resource_id in request.ids if resource_id not in updated_by_id
-    ]
-    for resource_id in eligible_ids:
-        previous = previous_by_id[resource_id]
-        previous_status = (
-            previous["status"]
-            if request.action == StoryWorkspaceBatchAction.ARCHIVE
-            else previous["review_status"]
-        )
-        _audit_review_action(
-            user_id,
-            request.resource_type,
-            resource_id,
-            request.action,
-            str(previous_status),
-            new_status,
-            request.review_notes,
-        )
-
-    return {
-        "success": True,
-        "action": request.action.value,
-        "resource_type": request.resource_type.value,
-        "total_requested": len(request.ids),
-        "total_updated": len(updated_items),
-        "skipped_ids": skipped_ids,
-        "updated_items": updated_items,
-    }
-
-
 @router.get("/workspace")
 def get_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -1139,118 +792,211 @@ def patch_scene(
     )
 
 
+def _story_review_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceReviewData:
+    return AdminStoryWorkspaceReviewData(owner.client)
+
+
+def _story_review_error(invalid_detail: str, *, batch: bool = False):
+    def handle(exc: AdminDataError, request_id: str) -> JSONResponse:
+        if not exc.outcome_unknown:
+            if exc.code == "STORY_WORKSPACE_REVIEW_NOT_FOUND" and exc.status_code == 404:
+                return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+            if exc.code == "STORY_WORKSPACE_REVIEW_STATE_INVALID" and exc.status_code == 409:
+                return JSONResponse(status_code=400, content={"detail": invalid_detail})
+            if batch and exc.code == "STORY_WORKSPACE_REVIEW_STATE_CHANGED" and exc.status_code == 409:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "Review state changed during batch operation"},
+                )
+            if exc.code in {"INPUT_INVALID", "ADMIN_OPERATION_INPUT_INVALID"} and exc.status_code == 400:
+                return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": {"error_code": exc.code,
+                "request_id": exc.request_id or request_id,
+                "outcome_unknown": exc.outcome_unknown}},
+        )
+
+    return handle
+
+
+async def _transition_story_review(
+    *,
+    resource_type: StoryWorkspaceResourceType,
+    resource_id: str,
+    action: StoryWorkspaceBatchAction,
+    review_notes: str | None,
+    current_user: dict[str, Any],
+    data: AdminStoryWorkspaceReviewData,
+) -> Any:
+    try:
+        input_dto = StoryWorkspaceReviewTransitionInputDTO(
+            resource_type=resource_type.value,
+            resource_id=resource_id,
+            action=action.value,
+            review_notes=review_notes,
+        )
+    except ValidationError:
+        return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+    invalid_detail = (
+        "Item is already archived"
+        if action == StoryWorkspaceBatchAction.ARCHIVE
+        else "Item is not in pending review status"
+    )
+    result = await invoke_admin_operation(
+        current_user,
+        data.transition_recovering,
+        input_dto,
+        error_handler=_story_review_error(invalid_detail),
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return result.item.model_dump(mode="json")
+
+
 @router.post("/stories/{story_id}/confirm")
-def confirm_story(
+async def confirm_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/stories/{story_id}/reject")
-def reject_story(
+async def reject_story(
     story_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/stories/{story_id}/archive")
-def archive_story(
+async def archive_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _archive_story(db, _user_id(current_user), story_id)
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.ARCHIVE,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
+    )
 
 
 @router.post("/characters/{character_id}/confirm")
-def confirm_character(
+async def confirm_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.CHARACTER,
-        character_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.CHARACTER,
+        resource_id=character_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/characters/{character_id}/reject")
-def reject_character(
+async def reject_character(
     character_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.CHARACTER,
-        character_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.CHARACTER,
+        resource_id=character_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/scenes/{scene_id}/confirm")
-def confirm_scene(
+async def confirm_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.SCENE,
-        scene_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.SCENE,
+        resource_id=scene_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/scenes/{scene_id}/reject")
-def reject_scene(
+async def reject_scene(
     scene_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.SCENE,
-        scene_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.SCENE,
+        resource_id=scene_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/batch")
-def batch_review(
+async def batch_review(
     body: _BatchReviewRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _batch_review(db, _user_id(current_user), body)
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    try:
+        input_dto = StoryWorkspaceReviewBatchInputDTO(
+            resource_type=body.resource_type.value,
+            ids=body.ids,
+            action=body.action.value,
+            review_notes=body.review_notes,
+        )
+    except ValidationError:
+        return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+    result = await invoke_admin_operation(
+        current_user,
+        data.batch_recovering,
+        input_dto,
+        error_handler=_story_review_error(
+            "Item is not in pending review status", batch=True
+        ),
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return result.model_dump(mode="json")
 
 
 def _story_output_data(

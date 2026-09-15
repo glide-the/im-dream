@@ -1,477 +1,241 @@
-# [Input] Consume Story Workspace review routes and a temporary SQLite database.
-# [Output] Verify task_203 transitions, batch accounting, auth, and audit logs.
-# [Pos] Focused unittest node for the Story Workspace review workflow.
-# [Sync] 2026-08-01: cover AC-203-01 through AC-203-07.
+# [Input] Authenticated Story Workspace review routes and a strict fake Admin DTO provider.
+# [Output] Public response, validation, failure mapping, order and PostgreSQL-closure assertions.
+# [Pos] Provider-free Dream route contract; Admin Repository tests own persistence semantics.
+# [Sync] 2026-09-15: replace the legacy SQLite review transaction harness with Registry111 route coverage.
 
 from __future__ import annotations
 
-import logging
-import sys
-import tempfile
-import unittest
+import ast
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 import database
 from routers import story_workspace
-from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.story_workspace_review_data import (
+    StoryWorkspaceReviewBatchResultDTO,
+    StoryWorkspaceReviewCharacterDTO,
+    StoryWorkspaceReviewSceneDTO,
+    StoryWorkspaceReviewStoryDTO,
+    StoryWorkspaceReviewTransitionResultDTO,
+)
+
+TIME = "2026-09-15T01:02:03.000Z"
 
 
-_SCHEMA = """
-CREATE TABLE users (id INTEGER PRIMARY KEY);
-CREATE TABLE story_workspace_workspaces (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  owner_id INTEGER NOT NULL,
-  settings TEXT DEFAULT '{}',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE story_workspace_stories (
-  id TEXT PRIMARY KEY,
-  identifier TEXT NOT NULL,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft',
-  review_status TEXT NOT NULL DEFAULT 'pending',
-  type TEXT NOT NULL DEFAULT 'short',
-  author_id INTEGER NOT NULL,
-  workspace_id TEXT NOT NULL,
-  character_count INTEGER NOT NULL DEFAULT 0,
-  scene_count INTEGER NOT NULL DEFAULT 0,
-  agent_generated INTEGER NOT NULL DEFAULT 1,
-  review_notes TEXT CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  confirmed_at DATETIME,
-  published_at DATETIME
-);
-CREATE TABLE story_workspace_characters (
-  id TEXT PRIMARY KEY,
-  identifier TEXT NOT NULL,
-  name TEXT NOT NULL,
-  author_id INTEGER NOT NULL,
-  workspace_id TEXT NOT NULL,
-  story_count INTEGER NOT NULL DEFAULT 0,
-  review_status TEXT NOT NULL DEFAULT 'pending',
-  agent_generated INTEGER NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status TEXT NOT NULL DEFAULT 'active',
-  review_notes TEXT CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
-  confirmed_at DATETIME,
-  archived_at DATETIME
-);
-CREATE TABLE story_workspace_scenes (
-  id TEXT PRIMARY KEY,
-  identifier TEXT NOT NULL,
-  name TEXT NOT NULL,
-  story_id TEXT,
-  author_id INTEGER NOT NULL,
-  workspace_id TEXT NOT NULL,
-  character_count INTEGER NOT NULL DEFAULT 0,
-  order_index INTEGER NOT NULL DEFAULT 0,
-  review_status TEXT NOT NULL DEFAULT 'pending',
-  agent_generated INTEGER NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status TEXT NOT NULL DEFAULT 'active',
-  review_notes TEXT CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
-  confirmed_at DATETIME,
-  archived_at DATETIME
-);
-CREATE TABLE story_workspace_story_characters (
-  story_id TEXT NOT NULL,
-  character_id TEXT NOT NULL,
-  role_type TEXT,
-  PRIMARY KEY (story_id, character_id)
-);
-CREATE TABLE story_workspace_scene_characters (
-  scene_id TEXT NOT NULL,
-  character_id TEXT NOT NULL,
-  PRIMARY KEY (scene_id, character_id)
-);
-"""
+def _story(resource_id: str, action: str) -> StoryWorkspaceReviewStoryDTO:
+    return StoryWorkspaceReviewStoryDTO(
+        id=resource_id, identifier=resource_id, title="Story", description=None,
+        status="archived" if action == "archive" else "published" if action == "confirm" else "draft",
+        review_status="confirmed" if action == "confirm" else "rejected" if action == "reject" else "pending",
+        review_notes="重写" if action == "reject" else None, type="short",
+        character_count=1, scene_count=1, created_at=TIME, updated_at=TIME,
+        confirmed_at=TIME if action == "confirm" else None, source_run_id=None,
+        source_project_id=None, episode_count=None, artifact_status=None,
+        artifact_manifest_revision=None, script_revision=None, artifact_sync_status=None,
+        artifact_indexed_at=None, artifact_sync_error_code=None, script_size_bytes=None,
+        artifact_available=None, reconcile_version=None,
+    )
 
 
-class _CaptureHandler(logging.Handler):
+def _character(resource_id: str, action: str, notes: str | None):
+    return StoryWorkspaceReviewCharacterDTO(
+        id=resource_id, identifier=resource_id, name="Character", avatar_url=None,
+        identity=None, personality=None, background=None, catchphrase=None, tags=[],
+        story_count=1, review_status="confirmed" if action == "confirm" else "rejected",
+        review_notes=notes if action == "reject" else None,
+        status="archived" if action == "archive" else "active", created_at=TIME,
+        updated_at=TIME, confirmed_at=TIME if action == "confirm" else None,
+        archived_at=TIME if action == "archive" else None,
+    )
+
+
+def _scene(resource_id: str, action: str, notes: str | None):
+    return StoryWorkspaceReviewSceneDTO(
+        id=resource_id, identifier=resource_id, name="Scene", description=None,
+        story_id="story-1", character_count=1, order_index=0,
+        review_status="confirmed" if action == "confirm" else "rejected",
+        review_notes=notes if action == "reject" else None,
+        status="archived" if action == "archive" else "active", created_at=TIME,
+        updated_at=TIME, confirmed_at=TIME if action == "confirm" else None,
+        archived_at=TIME if action == "archive" else None,
+    )
+
+
+class FakeReviewData:
     def __init__(self) -> None:
-        super().__init__()
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
-
-
-class StoryWorkspaceReviewTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_fixture = LegacyDatabaseModuleFixture(
-            database,
-            Path(self.temp_dir.name) / "story-review-test.db",
-        )
-        self.database_fixture.start()
-        db = database.get_db()
-        db.executescript(_SCHEMA)
-        db.executemany("INSERT INTO users (id) VALUES (?)", [(1,), (2,)])
-        db.executemany(
-            "INSERT INTO story_workspace_workspaces (id, name, owner_id) "
-            "VALUES (?, ?, ?)",
-            [("ws-1", "Writer One", 1), ("ws-2", "Writer Two", 2)],
-        )
-        self._seed_resources(db)
-        db.commit()
-        db.close()
-
-        self.app = FastAPI()
-        self.app.dependency_overrides[story_workspace.get_current_user] = (
-            lambda: {"user_id": 1, "email": "writer@example.com"}
-        )
-        self.app.include_router(story_workspace.router)
-        self.client = TestClient(self.app)
-
-    def tearDown(self) -> None:
-        self.client.close()
-        self.database_fixture.stop()
-        self.temp_dir.cleanup()
+        self.calls: list[tuple[str, Any, str, str]] = []
+        self.failure: AdminDataError | None = None
 
     @staticmethod
-    def _seed_resources(db) -> None:
-        states = [
-            ("pending-confirm", "pending", "active", 1, 1),
-            ("pending-reject", "pending", "active", 1, 1),
-            ("confirmed", "confirmed", "active", 1, 1),
-            ("rejected", "rejected", "active", 1, 1),
-            ("archived", "pending", "archived", 1, 1),
-            ("other", "pending", "active", 2, 1),
-            ("manual", "pending", "active", 1, 0),
-        ]
-        for suffix, review_status, asset_status, author_id, generated in states:
-            workspace_id = "ws-1" if author_id == 1 else "ws-2"
-            story_status = "archived" if asset_status == "archived" else "draft"
-            db.execute(
-                "INSERT INTO story_workspace_stories "
-                "(id, identifier, title, status, review_status, author_id, "
-                "workspace_id, agent_generated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    f"story-{suffix}",
-                    f"story-{suffix}",
-                    suffix,
-                    story_status,
-                    review_status,
-                    author_id,
-                    workspace_id,
-                    generated,
-                ),
-            )
-            db.execute(
-                "INSERT INTO story_workspace_characters "
-                "(id, identifier, name, author_id, workspace_id, review_status, "
-                "agent_generated, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    f"character-{suffix}",
-                    f"character-{suffix}",
-                    suffix,
-                    author_id,
-                    workspace_id,
-                    review_status,
-                    generated,
-                    asset_status,
-                ),
-            )
-            db.execute(
-                "INSERT INTO story_workspace_scenes "
-                "(id, identifier, name, author_id, workspace_id, review_status, "
-                "agent_generated, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    f"scene-{suffix}",
-                    f"scene-{suffix}",
-                    suffix,
-                    author_id,
-                    workspace_id,
-                    review_status,
-                    generated,
-                    asset_status,
-                ),
-            )
+    def _item(resource_type: str, resource_id: str, action: str, notes: str | None):
+        if resource_type == "story":
+            item = _story(resource_id, action)
+            return item.model_copy(update={"review_notes": notes}) if action == "reject" else item
+        if resource_type == "character":
+            return _character(resource_id, action, notes)
+        return _scene(resource_id, action, notes)
 
-    def _db_value(self, table: str, resource_id: str, column: str):
-        db = database.get_db()
-        try:
-            return db.execute(
-                f"SELECT {column} FROM {table} WHERE id = ?", (resource_id,)
-            ).fetchone()[0]
-        finally:
-            db.close()
-
-    def test_pending_confirm_and_reject_for_all_resource_types(self) -> None:
-        notes = "改" * 2000
-        for plural, prefix in (
-            ("stories", "story"),
-            ("characters", "character"),
-            ("scenes", "scene"),
-        ):
-            with self.subTest(resource=prefix, action="confirm"):
-                response = self.client.post(
-                    f"/api/story-workspace/{plural}/{prefix}-pending-confirm/confirm"
-                )
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["review_status"], "confirmed")
-                self.assertIsNotNone(response.json()["confirmed_at"])
-
-            with self.subTest(resource=prefix, action="reject"):
-                response = self.client.post(
-                    f"/api/story-workspace/{plural}/{prefix}-pending-reject/reject",
-                    json={"review_notes": notes},
-                )
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["review_status"], "rejected")
-                self.assertEqual(response.json()["review_notes"], notes)
-
-    def test_story_confirmation_commits_the_reviewed_bundle_and_publishes(self) -> None:
-        db = database.get_db()
-        try:
-            with db:
-                db.execute(
-                    "INSERT INTO story_workspace_stories "
-                    "(id, identifier, title, status, review_status, author_id, workspace_id, agent_generated) "
-                    "VALUES ('story-bundle', 'story-bundle', 'Bundle', 'draft', 'pending', 1, 'ws-1', 1)"
-                )
-                db.execute(
-                    "INSERT INTO story_workspace_characters "
-                    "(id, identifier, name, author_id, workspace_id, review_status, agent_generated, status) "
-                    "VALUES ('character-bundle', 'character-bundle', 'Bundle role', 1, 'ws-1', 'pending', 1, 'active')"
-                )
-                db.execute(
-                    "INSERT INTO story_workspace_scenes "
-                    "(id, identifier, name, story_id, author_id, workspace_id, review_status, agent_generated, status) "
-                    "VALUES ('scene-bundle', 'scene-bundle', 'Bundle scene', 'story-bundle', 1, 'ws-1', 'pending', 1, 'active')"
-                )
-                db.execute(
-                    "INSERT INTO story_workspace_story_characters (story_id, character_id) "
-                    "VALUES ('story-bundle', 'character-bundle')"
-                )
-        finally:
-            db.close()
-
-        response = self.client.post("/api/story-workspace/stories/story-bundle/confirm")
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["review_status"], "confirmed")
-        self.assertEqual(response.json()["status"], "published")
-        self.assertNotIn("execution", response.json())
-        self.assertEqual(
-            self._db_value("story_workspace_characters", "character-bundle", "review_status"),
-            "confirmed",
-        )
-        self.assertEqual(
-            self._db_value("story_workspace_scenes", "scene-bundle", "review_status"),
-            "confirmed",
+    def transition_recovering(self, input_dto, request_id: str, *, access_token: str):
+        self.calls.append(("transition", input_dto, request_id, access_token))
+        if self.failure:
+            raise self.failure
+        return StoryWorkspaceReviewTransitionResultDTO(
+            resource_type=input_dto.resource_type,
+            item=self._item(input_dto.resource_type, input_dto.resource_id, input_dto.action, input_dto.review_notes),
         )
 
-    def test_non_pending_review_transition_matrix(self) -> None:
-        for plural, prefix in (
-            ("stories", "story"),
-            ("characters", "character"),
-            ("scenes", "scene"),
-        ):
-            for current_status in ("confirmed", "rejected", "archived"):
-                for action in ("confirm", "reject"):
-                    with self.subTest(
-                        resource=prefix,
-                        current_status=current_status,
-                        action=action,
-                    ):
-                        response = self.client.post(
-                            f"/api/story-workspace/{plural}/"
-                            f"{prefix}-{current_status}/{action}",
-                            json={"review_notes": "should not persist"}
-                            if action == "reject"
-                            else None,
-                        )
-                        self.assertEqual(response.status_code, 400, response.text)
+    def batch_recovering(self, input_dto, request_id: str, *, access_token: str):
+        self.calls.append(("batch", input_dto, request_id, access_token))
+        if self.failure:
+            raise self.failure
+        updated_ids = input_dto.ids[:1]
+        return StoryWorkspaceReviewBatchResultDTO(
+            success=True, action=input_dto.action, resource_type=input_dto.resource_type,
+            total_requested=len(input_dto.ids), total_updated=len(updated_ids),
+            skipped_ids=input_dto.ids[1:],
+            updated_items=[self._item(input_dto.resource_type, value, input_dto.action, input_dto.review_notes) for value in updated_ids],
+        )
 
-    def test_story_archive_matrix_preserves_review_status(self) -> None:
+
+def _actor() -> AdminRequestActor:
+    return AdminRequestActor(
+        subject="subject", canonical_user_id="1", client_id="dream-browser",
+        scopes=frozenset({"dream:read", "dream:write"}), issued_at=1,
+        expires_at=4_102_444_800, access_token="oauth-user",
+    )
+
+
+def _client(fake: FakeReviewData):
+    app = FastAPI()
+    app.dependency_overrides[story_workspace.get_current_user] = lambda: _actor().current_user_projection()
+    app.dependency_overrides[story_workspace._story_review_data] = lambda: fake
+    app.include_router(story_workspace.router)
+    return TestClient(app)
+
+
+def test_single_routes_preserve_public_shapes_without_dream_database(monkeypatch):
+    fake = FakeReviewData()
+    monkeypatch.setattr(database, "get_db", lambda: (_ for _ in ()).throw(AssertionError("Dream PostgreSQL path used")))
+    with _client(fake) as client:
         cases = [
-            ("story-pending-confirm", "pending"),
-            ("story-confirmed", "confirmed"),
-            ("story-rejected", "rejected"),
+            ("stories/story-1/confirm", "confirmed", "published"),
+            ("stories/story-2/reject", "rejected", "draft"),
+            ("stories/story-3/archive", "pending", "archived"),
+            ("characters/character-1/confirm", "confirmed", "active"),
+            ("characters/character-2/reject", "rejected", "active"),
+            ("scenes/scene-1/confirm", "confirmed", "active"),
+            ("scenes/scene-2/reject", "rejected", "active"),
         ]
-        for story_id, expected_review_status in cases:
-            with self.subTest(story_id=story_id):
-                response = self.client.post(
-                    f"/api/story-workspace/stories/{story_id}/archive"
-                )
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["status"], "archived")
-                self.assertEqual(
-                    response.json()["review_status"], expected_review_status
-                )
-                repeated = self.client.post(
-                    f"/api/story-workspace/stories/{story_id}/archive"
-                )
-                self.assertEqual(repeated.status_code, 400, repeated.text)
-
-    def test_batch_pending_only_and_result_accounting(self) -> None:
-        response = self.client.post(
-            "/api/story-workspace/batch",
-            json={
-                "action": "confirm",
-                "resource_type": "story",
-                "ids": [
-                    "story-pending-confirm",
-                    "story-confirmed",
-                    "story-other",
-                    "story-missing",
-                ],
-            },
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["total_requested"], 4)
-        self.assertEqual(response.json()["total_updated"], 1)
-        self.assertEqual(
-            response.json()["skipped_ids"],
-            ["story-confirmed", "story-other", "story-missing"],
-        )
-        self.assertEqual(
-            [item["id"] for item in response.json()["updated_items"]],
-            ["story-pending-confirm"],
-        )
-        for forbidden in (
-            "content",
-            "source_thread_ref",
-            "artifact_source_type",
-            "reviewed_script_revision",
-        ):
-            self.assertNotIn(
-                forbidden,
-                response.json()["updated_items"][0],
-            )
-
-        response = self.client.post(
-            "/api/story-workspace/batch",
-            json={
-                "action": "reject",
-                "resource_type": "character",
-                "ids": ["character-pending-reject", "character-rejected"],
-                "review_notes": "批量修改",
-            },
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["total_updated"], 1)
-        self.assertEqual(response.json()["skipped_ids"], ["character-rejected"])
-        self.assertEqual(
-            response.json()["updated_items"][0]["review_notes"], "批量修改"
-        )
-
-        response = self.client.post(
-            "/api/story-workspace/batch",
-            json={
-                "action": "archive",
-                "resource_type": "scene",
-                "ids": ["scene-pending-confirm", "scene-confirmed"],
-            },
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["total_updated"], 1)
-        self.assertEqual(response.json()["skipped_ids"], ["scene-confirmed"])
-        self.assertEqual(response.json()["updated_items"][0]["status"], "archived")
-        self.assertIsNotNone(response.json()["updated_items"][0]["archived_at"])
-
-    def test_review_authentication_and_owner_isolation(self) -> None:
-        anonymous_app = FastAPI()
-        anonymous_app.include_router(story_workspace.router)
-        with TestClient(anonymous_app) as anonymous_client:
-            response = anonymous_client.post(
-                "/api/story-workspace/stories/story-pending-confirm/confirm"
-            )
-        self.assertEqual(response.status_code, 401, response.text)
-
-        for resource, prefix in (
-            ("stories", "story"),
-            ("characters", "character"),
-            ("scenes", "scene"),
-        ):
-            with self.subTest(resource=resource, owner="other"):
-                response = self.client.post(
-                    f"/api/story-workspace/{resource}/{prefix}-other/confirm"
-                )
-                self.assertEqual(response.status_code, 404, response.text)
-            with self.subTest(resource=resource, generated=False):
-                response = self.client.post(
-                    f"/api/story-workspace/{resource}/{prefix}-manual/confirm"
-                )
-                self.assertEqual(response.status_code, 404, response.text)
-
-    def test_review_request_validation_is_atomic(self) -> None:
-        invalid_payloads = [
-            {"action": "publish", "resource_type": "story", "ids": ["story-pending-confirm"]},
-            {"action": "confirm", "resource_type": "episode", "ids": ["story-pending-confirm"]},
-            {"action": "confirm", "resource_type": "story", "ids": []},
-            {"action": "confirm", "resource_type": "story", "ids": [f"id-{index}" for index in range(101)]},
-            {"action": "reject", "resource_type": "story", "ids": ["story-pending-confirm"], "review_notes": "x" * 2001},
-        ]
-        for payload in invalid_payloads:
-            with self.subTest(payload=payload):
-                response = self.client.post(
-                    "/api/story-workspace/batch", json=payload
-                )
-                self.assertEqual(response.status_code, 422, response.text)
-                self.assertEqual(
-                    self._db_value(
-                        "story_workspace_stories",
-                        "story-pending-confirm",
-                        "review_status",
-                    ),
-                    "pending",
-                )
-
-        response = self.client.post(
-            "/api/story-workspace/stories/story-pending-reject/reject",
-            json={"review_notes": "字" * 2001},
-        )
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(
-            self._db_value(
-                "story_workspace_stories",
-                "story-pending-reject",
-                "review_status",
-            ),
-            "pending",
-        )
-
-    def test_review_action_emits_structured_audit_log(self) -> None:
-        handler = _CaptureHandler()
-        old_level = story_workspace.logger.level
-        story_workspace.logger.addHandler(handler)
-        story_workspace.logger.setLevel(logging.INFO)
-        try:
-            response = self.client.post(
-                "/api/story-workspace/characters/character-pending-reject/reject",
-                json={"review_notes": "补充人物动机"},
-            )
-        finally:
-            story_workspace.logger.removeHandler(handler)
-            story_workspace.logger.setLevel(old_level)
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(len(handler.records), 1)
-        record = handler.records[0]
-        self.assertEqual(record.getMessage(), "story_workspace_review")
-        self.assertTrue(record.id)
-        self.assertEqual(record.user_id, 1)
-        self.assertEqual(record.resource_type, "character")
-        self.assertEqual(record.resource_id, "character-pending-reject")
-        self.assertEqual(record.action, "reject")
-        self.assertEqual(record.previous_status, "pending")
-        self.assertEqual(record.new_status, "rejected")
-        self.assertEqual(record.review_notes, "补充人物动机")
-        self.assertTrue(record.created_at.endswith("+00:00"))
+        for path, review_status, status in cases:
+            body = {"review_notes": "重写"} if path.endswith("reject") else {}
+            response = client.post(f"/api/story-workspace/{path}", json=body)
+            assert response.status_code == 200, response.text
+            assert response.json()["review_status"] == review_status
+            assert response.json()["status"] == status
+    assert all(call[3] == "oauth-user" for call in fake.calls)
+    assert fake.calls[0][1].resource_id == "story-1"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_story_result_keeps_safe_projection_and_reject_notes_limit():
+    fake = FakeReviewData()
+    notes = "改" * 2_000
+    with _client(fake) as client:
+        response = client.post("/api/story-workspace/stories/story-2/reject", json={"review_notes": notes})
+        assert response.status_code == 200
+        assert response.json()["review_notes"] == notes
+        for forbidden in ("content", "source_thread_ref", "artifact_source_type", "reviewed_script_revision"):
+            assert forbidden not in response.json()
+        too_long = client.post("/api/story-workspace/stories/story-4/reject", json={"review_notes": "x" * 2_001})
+        assert too_long.status_code == 422
+    assert len(fake.calls) == 1
+
+
+def test_batch_preserves_request_order_accounting_and_supports_archive():
+    fake = FakeReviewData()
+    with _client(fake) as client:
+        response = client.post("/api/story-workspace/batch", json={
+            "action": "confirm", "resource_type": "story", "ids": ["story-1", "story-2", "story-3"]})
+        assert response.status_code == 200, response.text
+        assert response.json()["total_requested"] == 3
+        assert response.json()["total_updated"] == 1
+        assert response.json()["skipped_ids"] == ["story-2", "story-3"]
+        assert [item["id"] for item in response.json()["updated_items"]] == ["story-1"]
+        archived = client.post("/api/story-workspace/batch", json={
+            "action": "archive", "resource_type": "scene", "ids": ["scene-1", "scene-2"]})
+        assert archived.status_code == 200
+        assert archived.json()["updated_items"][0]["status"] == "archived"
+
+
+def test_validation_rejects_invalid_batch_before_admin_call():
+    fake = FakeReviewData()
+    invalid = [
+        {"action": "publish", "resource_type": "story", "ids": ["story-1"]},
+        {"action": "confirm", "resource_type": "episode", "ids": ["story-1"]},
+        {"action": "confirm", "resource_type": "story", "ids": []},
+        {"action": "confirm", "resource_type": "story", "ids": ["same", "same"]},
+        {"action": "confirm", "resource_type": "story", "ids": [f"id-{index}" for index in range(101)]},
+    ]
+    with _client(fake) as client:
+        for payload in invalid:
+            assert client.post("/api/story-workspace/batch", json=payload).status_code == 422
+    assert fake.calls == []
+
+
+def test_admin_errors_keep_original_status_and_unknown_state():
+    fake = FakeReviewData()
+    with _client(fake) as client:
+        fake.failure = AdminDataError("STORY_WORKSPACE_REVIEW_NOT_FOUND", 404, "upstream", False)
+        assert client.post("/api/story-workspace/stories/missing/confirm", json={}).status_code == 404
+        fake.failure = AdminDataError("STORY_WORKSPACE_REVIEW_STATE_INVALID", 409, "upstream", False)
+        invalid = client.post("/api/story-workspace/stories/confirmed/confirm", json={})
+        assert invalid.status_code == 400
+        assert invalid.json() == {"detail": "Item is not in pending review status"}
+        fake.failure = AdminDataError("STORY_WORKSPACE_REVIEW_STATE_CHANGED", 409, "upstream", False)
+        conflict = client.post("/api/story-workspace/batch", json={
+            "action": "confirm", "resource_type": "story", "ids": ["story-1"]})
+        assert conflict.status_code == 409
+        fake.failure = AdminDataError("ADMIN_TIMEOUT", 504, "original", True)
+        unknown = client.post("/api/story-workspace/stories/story-1/confirm", json={})
+        assert unknown.status_code == 504
+        assert unknown.json()["detail"]["outcome_unknown"] is True
+
+
+def test_anonymous_request_still_requires_admin_authentication():
+    app = FastAPI()
+    app.dependency_overrides[story_workspace._story_review_data] = lambda: FakeReviewData()
+    app.include_router(story_workspace.router)
+    with TestClient(app) as client:
+        response = client.post("/api/story-workspace/stories/story-1/confirm", json={})
+    assert response.status_code == 401
+
+
+def test_review_routes_have_no_dream_database_or_legacy_transaction_helper():
+    source_path = Path(story_workspace.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    route_names = {
+        "confirm_story", "reject_story", "archive_story", "confirm_character",
+        "reject_character", "confirm_scene", "reject_scene", "batch_review",
+        "_transition_story_review",
+    }
+    functions = {
+        node.name: node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in route_names
+    }
+    assert set(functions) == route_names
+    forbidden = {"_story_db", "database", "get_db", "execute", "executemany", "commit", "rollback"}
+    for name, node in functions.items():
+        used = {item.id for item in ast.walk(node) if isinstance(item, ast.Name)}
+        attributes = {item.attr for item in ast.walk(node) if isinstance(item, ast.Attribute)}
+        assert not ((used | attributes) & forbidden), name
+    production_symbols = {
+        node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert not production_symbols & {
+        "_owned_review_row", "_transition_pending_review", "_archive_story",
+        "_batch_review", "_audit_review_action",
+    }
