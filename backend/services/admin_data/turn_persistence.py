@@ -8,6 +8,7 @@
 # [Sync] 2026-09-15: read three UTC days of recent Sessions through the current draining grant.
 # [Sync] 2026-09-15: bind arbitrary-date Session projections to a private broker and close it before grant resources.
 # [Sync] 2026-09-15: implement the shared server-owned Agent persistence marker used by Reflections RTA turns.
+# [Sync] 2026-09-15: reuse the renewed exact Thread grant for Registry106 workspace metadata reads.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,6 +33,13 @@ from .session_projection_broker import (
 )
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
+from .deck_workspace_plugins_data import (
+    AdminDeckWorkspacePluginsResolution,
+    AdminDeckWorkspacePluginsData,
+    AdminDeckWorkspacePluginsProvider,
+    DeckWorkspacePluginsInputDTO,
+    WorkspaceProfile,
+)
 from .workspace_data import require_workspace_capabilities
 from .system_config_data import AdminSystemConfigData
 
@@ -67,7 +75,10 @@ class AdminTurnSessionProjectionProvider:
         )
 
 
-class AdminTurnPersistence(AdminAgentTurnPersistence):
+class AdminTurnPersistence(
+    AdminAgentTurnPersistence,
+    AdminDeckWorkspacePluginsProvider,
+):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
         runtime_client_factory: Callable[[], AdminRuntimeClient],
         clock: Callable[[], datetime] | None = None,
@@ -86,6 +97,10 @@ class AdminTurnPersistence(AdminAgentTurnPersistence):
         self._chat = AdminChatData(client)
         self._sessions = AdminSessionData(client)
         self._system_config = AdminSystemConfigData(client)
+        self._workspace_plugin_data = AdminDeckWorkspacePluginsData(
+            client,
+            canonical_user_id=resolution.canonical_user_id,
+        )
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._settings = renewal_settings
@@ -182,6 +197,26 @@ class AdminTurnPersistence(AdminAgentTurnPersistence):
             request_id=self._request_id_factory(),
         )
         return tuple(result.sessions)
+
+    def workspace_plugins(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        profile: WorkspaceProfile,
+    ) -> AdminDeckWorkspacePluginsResolution:
+        """Read pack metadata with this owner's current exact Thread grant."""
+
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._workspace_plugin_data.resolve(
+                DeckWorkspacePluginsInputDTO(
+                    thread_id=thread_id,
+                    profile=profile,
+                ),
+                self._request_id_factory(),
+                access_token=grant.token,
+            )
 
     def _project_sessions(
         self,

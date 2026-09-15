@@ -1,3 +1,7 @@
+# [Input] Immutable Deck plugin metadata plus shared artifact-store and workspace boundaries.
+# [Output] Verified packed plugins, launch manifest, repair receipt and Dream protocol surfaces.
+# [Pos] Dream filesystem executor; metadata may arrive through Admin or legacy internal callers.
+# [Sync] 2026-09-15: add a lazy refs loader so public Registry106 reads occur only for fresh workspaces.
 """Pack Deck-referenced plugin artifacts into an agent workspace.
 
 When a Deck Chat workspace is prepared, the packer:
@@ -25,7 +29,7 @@ import logging
 import os
 from pathlib import Path
 import stat
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from . import artifact_store, runtime, workspace_init
@@ -365,19 +369,35 @@ def _ensure_dream_drama_compatibility(
         os.close(root_fd)
 
 
-def pack_workspace_plugins(
+def _load_legacy_workspace_plugin_refs(
     db: Any,
+    deck_id: str,
+    server_adapter_package_specs: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    refs = load_deck_plugin_refs(db, deck_id)
+    package_specs_seen = {str(ref["package_spec"]) for ref in refs}
+    for adapter_ref in _load_server_adapter_refs(
+        db, server_adapter_package_specs
+    ):
+        package_spec = str(adapter_ref["package_spec"])
+        if package_spec in package_specs_seen:
+            continue
+        package_specs_seen.add(package_spec)
+        refs.append(adapter_ref)
+    return refs
+
+
+def pack_workspace_plugins_with_refs_loader(
     *,
     workspace: Path,
     deck_id: str | None,
-    server_adapter_package_specs: tuple[str, ...] = (),
+    refs_loader: Callable[[], list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    """Idempotently pack a workspace for its locked Deck.
+    """Pack from one metadata loader, invoked only for a fresh Deck workspace.
 
     Returns the pack receipt.  With no Deck (or no enabled refs) the receipt
-    has an empty plugin list and no manifest is created.  Server-selected
-    adapter package specs are resolved from ready installation records only on
-    the first pack; they never mutate Deck refs or a frozen workspace.
+    has an empty plugin list and no manifest is created. A frozen workspace is
+    validated and repaired before the loader can perform database or API I/O.
     """
     workspace = Path(workspace).resolve()
     receipt: dict[str, Any] = {
@@ -454,16 +474,7 @@ def pack_workspace_plugins(
         _write_json(workspace / PACK_RECEIPT_RELATIVE_PATH, receipt)
         return receipt
 
-    refs = load_deck_plugin_refs(db, deck_id)
-    package_specs_seen = {str(ref["package_spec"]) for ref in refs}
-    for adapter_ref in _load_server_adapter_refs(
-        db, server_adapter_package_specs
-    ):
-        package_spec = str(adapter_ref["package_spec"])
-        if package_spec in package_specs_seen:
-            continue
-        package_specs_seen.add(package_spec)
-        refs.append(adapter_ref)
+    refs = refs_loader()
     manifest_entries: list[dict[str, Any]] = []
     receipt_entries: list[dict[str, Any]] = []
     init_steps: list[dict[str, Any]] = []
@@ -592,6 +603,26 @@ def pack_workspace_plugins(
         receipt["init_steps"] = init_steps
     _write_json(workspace / PACK_RECEIPT_RELATIVE_PATH, receipt)
     return receipt
+
+
+def pack_workspace_plugins(
+    db: Any,
+    *,
+    workspace: Path,
+    deck_id: str | None,
+    server_adapter_package_specs: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Compatibility entry for internal callers that still supply a DB handle."""
+
+    return pack_workspace_plugins_with_refs_loader(
+        workspace=workspace,
+        deck_id=deck_id,
+        refs_loader=lambda: _load_legacy_workspace_plugin_refs(
+            db,
+            str(deck_id),
+            server_adapter_package_specs,
+        ),
+    )
 
 
 def _ensure_frozen_runtime(workspace: Path, entry: dict[str, Any]) -> None:

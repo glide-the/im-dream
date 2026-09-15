@@ -8,6 +8,7 @@
 # [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
 # [Sync] 2026-09-15: validate exact UTC recent Session projection and close drain.
 # [Sync] 2026-09-15: validate the owner-bound broker provider, renewed grant and arbitrary strict ranges.
+# [Sync] 2026-09-15: validate Registry106 workspace metadata on the same exact Thread grant.
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +37,9 @@ from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.workspace_data import WORKSPACE_SCHEMA_REQUIREMENTS
 from services.admin_data.system_config_data import GET_THREAD_SYSTEM_CONFIG
+from services.admin_data.deck_workspace_plugins_data import (
+    RESOLVE_DECK_WORKSPACE_PLUGINS,
+)
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
 TOKEN = "idg_" + "a" * 43
@@ -53,7 +57,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
     operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE,
-        GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS)
+        GET_THREAD_SYSTEM_CONFIG, LIST_SESSIONS, RESOLVE_DECK_WORKSPACE_PLUGINS)
     schema_requirements = {
         item.capability: item
         for item in (*WORKSPACE_SCHEMA_REQUIREMENTS, *SESSION_LIST_SCHEMA_REQUIREMENTS)
@@ -91,6 +95,17 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             elif name == LIST_SESSIONS.capability.name:
                 assert set(input_dto) == {"start_date", "end_date", "include_text"}
                 value = {"sessions": session_rows or []}
+            elif name == RESOLVE_DECK_WORKSPACE_PLUGINS.capability.name:
+                assert input_dto == {
+                    "thread_id": "thread-1",
+                    "profile": "standard",
+                }
+                value = {
+                    "thread_id": "thread-1",
+                    "deck_id": "deck-1",
+                    "refs": [],
+                    "story_workspace_adapter": None,
+                }
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
                 value = {"changed": True}
@@ -249,6 +264,19 @@ def test_thread_read_and_session_update_use_exact_server_authority():
     posts = [json.loads(request.content)["input"] for request in calls if request.method == "POST"]
     assert posts == [{"thread_id": "thread-1"}, {"thread_id": "thread-1", "claude_session_id": row.claude_session_id, "agent_contract_version": "current"}, {"thread_id": "thread-1"}]
     assert all(request.headers["authorization"] == "Bearer " + TOKEN for request in calls[1:])
+
+
+def test_workspace_plugin_metadata_uses_current_exact_thread_grant():
+    value, calls, _ = holder()
+    resolution = value.workspace_plugins(
+        actor_id="42",
+        thread_id="thread-1",
+        profile="standard",
+    )
+    assert resolution.snapshot.deck_id == "deck-1"
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith("/deck-workspace-plugins.resolve")
 
 
 def test_mutable_session_identity_only_reuses_the_most_recent_confirmation():

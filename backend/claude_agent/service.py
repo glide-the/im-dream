@@ -12,6 +12,7 @@
 # [Sync] 2026-09-15: require fresh Thread SystemConfig from the bound Admin turn owner before context assembly.
 # [Sync] 2026-09-15: load recent Session projections only on prompt rebuild and fail before Runtime on Admin errors.
 # [Sync] 2026-09-15: reuse the public Registry105 Deck snapshot for Story Workspace prompt assembly.
+# [Sync] 2026-09-15: load public workspace plugin metadata through Registry106 before shared-filesystem packing.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -322,9 +323,16 @@ from libs.claude_agent_kit.types import (
     DreamAutoRepairExecutionScope,
     ToolEventPayload,
 )
-from services.claude_plugin.workspace_packer import pack_workspace_plugins
+from services.claude_plugin.workspace_packer import (
+    WorkspacePackError,
+    pack_workspace_plugins,
+    pack_workspace_plugins_with_refs_loader,
+)
 from services.deck.chat_context import DeckChatContextAssembler, DeckChatContextService
 from services.admin_data.deck_chat_context_data import AdminDeckChatContextResolution
+from services.admin_data.deck_workspace_plugins_data import (
+    AdminDeckWorkspacePluginsProvider,
+)
 from services.admin_gateway import GatewayModel, resolve_platform_model
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
@@ -572,6 +580,9 @@ def _pack_thread_workspace_plugins(
     cwd: str,
     deck_id: Optional[str],
     *,
+    actor_id: str | None = None,
+    thread_id: str | None = None,
+    admin_turn_persistence: AdminAgentTurnPersistence | None = None,
     dream_mode: bool = False,
 ) -> None:
     """Pack the thread-locked Deck's plugins into the thread workspace.
@@ -585,6 +596,60 @@ def _pack_thread_workspace_plugins(
 
     if not deck_id:
         return
+    if isinstance(
+        admin_turn_persistence,
+        AdminDeckWorkspacePluginsProvider,
+    ):
+        if (
+            not isinstance(admin_turn_persistence, AdminAgentTurnPersistence)
+            or not actor_id
+            or not thread_id
+        ):
+            raise configuration_invalid()
+        profile = "story_workspace" if dream_mode else "standard"
+
+        def load_admin_refs() -> list[dict[str, Any]]:
+            resolution = admin_turn_persistence.workspace_plugins(
+                actor_id=actor_id,
+                thread_id=thread_id,
+                profile=profile,
+            )
+            snapshot = resolution.snapshot_for(
+                actor_id=actor_id,
+                thread_id=thread_id,
+                profile=profile,
+                deck_id=deck_id,
+            )
+            refs = [ref.model_dump(mode="python") for ref in snapshot.refs]
+            if not dream_mode:
+                return refs
+            adapter = snapshot.story_workspace_adapter
+            if adapter is None or adapter.ready is None:
+                code = (
+                    "CLAUDE_PLUGIN_NOT_FOUND"
+                    if adapter is None or adapter.latest_status is None
+                    else "CLAUDE_PLUGIN_NOT_READY"
+                )
+                raise WorkspacePackError(
+                    code,
+                    "Story Workspace adapter installation is unavailable",
+                )
+            if adapter.ready.package_spec not in {
+                ref["package_spec"] for ref in refs
+            }:
+                refs.append(adapter.ready.model_dump(mode="python"))
+            return refs
+
+        pack_workspace_plugins_with_refs_loader(
+            workspace=Path(cwd),
+            deck_id=deck_id,
+            refs_loader=load_admin_refs,
+        )
+        return
+
+    # Existing internal/background owners without a Registry106 provider retain
+    # their mapper until their typed identity is connected. Public Chat always
+    # supplies AdminTurnPersistence and cannot fall back to PostgreSQL.
     db = _db.get_db()
     try:
         pack_workspace_plugins(
@@ -2057,6 +2122,9 @@ class ClaudeAgentService:
                         _pack_thread_workspace_plugins,
                         cwd,
                         thread_deck_id,
+                        actor_id=request.user_id,
+                        thread_id=request.thread_id,
+                        admin_turn_persistence=request.admin_turn_persistence,
                         dream_mode=(dream_context is not None),
                     )
                 except Exception:

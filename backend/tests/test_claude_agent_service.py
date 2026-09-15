@@ -1,4 +1,5 @@
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
+# [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
 # [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
 #         service callback factories, and ToolEventPayload.
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
@@ -510,6 +511,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         pack.assert_called_once_with(
             str(workspace_path),
             "deck-dream",
+            actor_id="7",
+            thread_id="thread_dream_turn",
+            admin_turn_persistence=None,
             dream_mode=True,
         )
         self.assertIs(
