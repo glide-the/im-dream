@@ -1,8 +1,12 @@
+# [Input] Launch command, Admin Runtime port and existing Dream workflow/dispatch collaborators.
+# [Output] Source/Run dispatch plus an Admin-prepared immutable Runtime binding projection.
+# [Pos] Dream launch application adapters; remaining source/Run SQL is an explicit later migration scope.
+# [Sync] 2026-09-16: remove local Runtime provisioning and require Registry130-132 at request scope.
 """Production persistence and runtime adapters for Dream launch.
 
 The browser supplies only a Deck, goal, and idempotency key. This module owns
-all persisted source facts, requires an explicit server-side Dream binding,
-refreshes its runtime evidence, creates the workflow, and dispatches the
+all persisted source facts, requires an Admin-prepared Dream binding,
+creates the workflow, and dispatches the
 durable first-turn envelope.
 """
 
@@ -17,51 +21,25 @@ import json
 import logging
 import re
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 import uuid
 
 logger = logging.getLogger(__name__)
 
 try:
-    from models.deck_plugin import (
-        DeckPluginBindingUpdateRequest,
-        DeckRuntimePluginLock,
-    )
     from models.workflow_run import AuthenticatedActorContext, RunStatus
-    from models.runtime_plugin import compute_artifact_set_hash
-    from services.claude_plugin.install_service import (
-        PluginInstallError,
-        PluginInstallService,
-    )
     from services.admin_gateway import (
         GatewayInferenceError,
         resolve_platform_model_alias,
-    )
-    from services.deck.builtin_plugin import (
-        BUILTIN_CLAUDE_PLUGIN_ID,
-        BUILTIN_DECK_PLUGIN_ID,
-        BUILTIN_DECK_PLUGIN_VERSION,
-        seed_builtin_deck_plugin,
-    )
-    from services.deck.runtime_context import make_runtime_context_resolver
-    from services.deck_plugin.binding_service import (
-        BindingRevisionConflict,
-        BindingService,
-    )
-    from services.deck_plugin.installation_service import (
-        InstallationService,
-        InstallationServiceError,
-        InstallationStatus,
-        RuntimePreparation,
-        Scope,
-    )
-    from services.deck_plugin.selection_validation_service import (
-        SelectionValidationService,
     )
     from services.story_workspace.dream_launch_application_service import (
         DreamLaunchApplicationService,
         DreamLaunchIdempotencyConflict,
         DreamLaunchSource,
+    )
+    from services.story_workspace.dream_launch_runtime import (
+        DreamLaunchRuntimeError,
+        PreparedDreamLaunchBinding,
     )
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
@@ -71,7 +49,6 @@ try:
         NormalizedTurnOutcome,
         drain_chat_agent_turn,
     )
-    from services.runtime_plugin.local_placement import LocalRuntimePlacement
     from services.workflow.preflight_service import PreflightService, PreflightStatus
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from story_workspace.contracts import (
@@ -79,45 +56,19 @@ try:
         StoryWorkspaceDreamRunContext,
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
-    from backend.models.deck_plugin import (
-        DeckPluginBindingUpdateRequest,
-        DeckRuntimePluginLock,
-    )
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
-    from backend.models.runtime_plugin import compute_artifact_set_hash
-    from backend.services.claude_plugin.install_service import (
-        PluginInstallError,
-        PluginInstallService,
-    )
     from backend.services.admin_gateway import (
         GatewayInferenceError,
         resolve_platform_model_alias,
-    )
-    from backend.services.deck.builtin_plugin import (
-        BUILTIN_CLAUDE_PLUGIN_ID,
-        BUILTIN_DECK_PLUGIN_ID,
-        BUILTIN_DECK_PLUGIN_VERSION,
-        seed_builtin_deck_plugin,
-    )
-    from backend.services.deck.runtime_context import make_runtime_context_resolver
-    from backend.services.deck_plugin.binding_service import (
-        BindingRevisionConflict,
-        BindingService,
-    )
-    from backend.services.deck_plugin.installation_service import (
-        InstallationService,
-        InstallationServiceError,
-        InstallationStatus,
-        RuntimePreparation,
-        Scope,
-    )
-    from backend.services.deck_plugin.selection_validation_service import (
-        SelectionValidationService,
     )
     from backend.services.story_workspace.dream_launch_application_service import (
         DreamLaunchApplicationService,
         DreamLaunchIdempotencyConflict,
         DreamLaunchSource,
+    )
+    from backend.services.story_workspace.dream_launch_runtime import (
+        DreamLaunchRuntimeError,
+        PreparedDreamLaunchBinding,
     )
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
@@ -127,7 +78,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         NormalizedTurnOutcome,
         drain_chat_agent_turn,
     )
-    from backend.services.runtime_plugin.local_placement import LocalRuntimePlacement
     from backend.services.workflow.preflight_service import (
         PreflightService,
         PreflightStatus,
@@ -143,9 +93,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
 
 
 STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND = "story-workspace-dream-launch"
-STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC = (
-    "ink-dream-story@platform-builtin"
-)
 STORY_WORKSPACE_DREAM_DISPATCH_CLAIM_TTL = timedelta(minutes=5)
 
 
@@ -154,28 +101,6 @@ class DreamLaunchApplicationError(RuntimeError):
         self.code = code
         self.status_code = status_code
         super().__init__(code)
-
-
-@dataclass(frozen=True, slots=True)
-class DreamRuntimePreparationVerifier:
-    expected_runtime_lock_id: str
-
-    def __call__(
-        self,
-        _plugin_id: str,
-        _version: str,
-        checked_lock: DeckRuntimePluginLock,
-    ) -> RuntimePreparation:
-        ready = (
-            checked_lock.runtime_plugin_lock_id == self.expected_runtime_lock_id
-        )
-        return RuntimePreparation(
-            runtime_readiness="loadable" if ready else "lock_mismatch",
-            lock_materialized=ready,
-            load_smoke_passed=ready,
-            error_code=None if ready else "RUNTIME_PLUGIN_NOT_READY",
-            error_summary=None if ready else "runtime lock changed",
-        )
 
 
 def _canonical_json(value: Any) -> str:
@@ -211,6 +136,27 @@ class DreamLaunchBinding:
     deck_plugin_version: str
     deck_plugin_binding_id: str
     binding_revision: int
+
+
+class DreamLaunchRuntimePort(Protocol):
+    """Authorize and prepare launch Runtime metadata through the Admin API."""
+
+    async def authorize(
+        self,
+        *,
+        deck_id: str,
+        workspace_id: str,
+        agent_id: str | None,
+    ) -> None: ...
+
+    async def prepare(
+        self,
+        *,
+        deck_id: str,
+        workspace_id: str,
+        agent_id: str | None,
+        existing_run: Any | None,
+    ) -> PreparedDreamLaunchBinding: ...
 
 
 class DreamLaunchSourceRepository:
@@ -385,451 +331,6 @@ class DreamLaunchSourceRepository:
             or metadata.get("requestFingerprint") != request_fingerprint
         ):
             raise DreamLaunchIdempotencyConflict()
-
-
-class DreamRuntimeProvisioningService:
-    """Ensure the server-owned Dream adapter runtime and active binding."""
-
-    def __init__(
-        self,
-        db: Any,
-        *,
-        runtime_placement: LocalRuntimePlacement | None = None,
-        claude_installer_factory: Callable[[Any], Any] = (
-            PluginInstallService
-        ),
-    ) -> None:
-        self.db = db
-        self._runtime_placement = runtime_placement or LocalRuntimePlacement()
-        self._claude_installer_factory = claude_installer_factory
-
-    async def ensure_binding(
-        self,
-        *,
-        deck_id: str,
-        actor_id: str,
-        workspace_id: str,
-        expected_binding_revision: int | None = None,
-    ) -> DreamLaunchBinding:
-        self._require_scope(deck_id, actor_id, workspace_id)
-        seed_builtin_deck_plugin(self.db)
-        runtime_lock = self._runtime_lock()
-        installation = self._ensure_claude_installation(runtime_lock)
-        self._ensure_materialization(runtime_lock, installation)
-        await self._ensure_deck_installation(runtime_lock, workspace_id)
-        return await self._ensure_active_binding(
-            deck_id=deck_id,
-            actor_id=actor_id,
-            workspace_id=workspace_id,
-            expected_binding_revision=expected_binding_revision,
-        )
-
-    async def require_binding(
-        self,
-        *,
-        deck_id: str,
-        actor_id: str,
-        workspace_id: str,
-    ) -> DreamLaunchBinding:
-        """Require an explicit Dream selection, then refresh runtime evidence."""
-
-        self._require_scope(deck_id, actor_id, workspace_id)
-        current = self._active_binding_row(deck_id)
-        binding = self._expected_builtin_binding(
-            current,
-            actor_id=actor_id,
-            workspace_id=workspace_id,
-        )
-        if binding is None:
-            raise DreamLaunchApplicationError("WORKFLOW_SELECTION_REQUIRED", 409)
-        seed_builtin_deck_plugin(self.db)
-        runtime_lock = self._runtime_lock()
-        installation = self._ensure_claude_installation(runtime_lock)
-        self._ensure_materialization(runtime_lock, installation)
-        await self._ensure_deck_installation(runtime_lock, workspace_id)
-        validation = await SelectionValidationService(
-            self.db,
-            runtime_context_resolver=make_runtime_context_resolver(self.db),
-        ).validate(
-            deck_plugin_id=binding.deck_plugin_id,
-            deck_plugin_version=binding.deck_plugin_version,
-            workspace_id=workspace_id,
-            actor_id=actor_id,
-        )
-        if not validation.selectable:
-            raise DreamLaunchApplicationError(
-                validation.reason_code or "DECK_PLUGIN_UNAVAILABLE",
-                409,
-            )
-        return binding
-
-    def ensure_frozen_runtime_evidence(self, runtime_plugin_lock_id: str) -> None:
-        """Re-provision immutable launch evidence for an idempotent queued replay."""
-
-        row = self.db.execute(
-            "SELECT lock_json FROM deck_runtime_plugin_locks "
-            "WHERE id = %s AND deck_plugin_id = %s AND deck_plugin_version = %s",
-            (
-                runtime_plugin_lock_id,
-                BUILTIN_DECK_PLUGIN_ID,
-                BUILTIN_DECK_PLUGIN_VERSION,
-            ),
-        ).fetchone()
-        if row is None:
-            raise DreamLaunchApplicationError(
-                "DECK_RUNTIME_CONFIG_INVALID", 503
-            )
-        raw_lock = row["lock_json"]
-        runtime_lock = self._validate_runtime_lock(
-            DeckRuntimePluginLock.model_validate(raw_lock)
-            if isinstance(raw_lock, dict)
-            else DeckRuntimePluginLock.model_validate_json(str(raw_lock))
-        )
-        installation = self._ensure_claude_installation(runtime_lock)
-        self._ensure_materialization(runtime_lock, installation)
-
-    def _require_scope(
-        self,
-        deck_id: str,
-        actor_id: str,
-        workspace_id: str,
-    ) -> None:
-        try:
-            numeric_actor = int(actor_id)
-        except (TypeError, ValueError) as exc:
-            raise PermissionError("invalid Dream launch actor") from exc
-        row = self.db.execute(
-            "SELECT deck.id FROM decks AS deck "
-            "JOIN story_workspace_workspaces AS workspace "
-            "ON workspace.id = %s AND workspace.owner_id = deck.owner_id "
-            "WHERE deck.id = %s AND deck.owner_id = %s AND deck.enabled IS TRUE",
-            (workspace_id, deck_id, numeric_actor),
-        ).fetchone()
-        if row is None:
-            raise PermissionError("Deck not found or permission denied")
-
-    def require_agent_scope(self, deck_id: str, agent_id: str | None) -> None:
-        if agent_id is None:
-            return
-        row = self.db.execute(
-            "SELECT id FROM voices WHERE id = %s AND deck_id = %s AND enabled IS TRUE",
-            (agent_id, deck_id),
-        ).fetchone()
-        if row is None:
-            raise DreamLaunchApplicationError("AGENT_ACCESS_DENIED", 404)
-
-    def _runtime_lock(self) -> DeckRuntimePluginLock:
-        row = self.db.execute(
-            "SELECT lock_json FROM deck_runtime_plugin_locks "
-            "WHERE deck_plugin_id = %s AND deck_plugin_version = %s",
-            (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-        ).fetchone()
-        if row is None:
-            raise DreamLaunchApplicationError(
-                "DECK_PLUGIN_UNAVAILABLE", 503
-            )
-        raw_lock = row["lock_json"]
-        runtime_lock = (
-            DeckRuntimePluginLock.model_validate(raw_lock)
-            if isinstance(raw_lock, dict)
-            else DeckRuntimePluginLock.model_validate_json(str(raw_lock))
-        )
-        return self._validate_runtime_lock(runtime_lock)
-
-    @staticmethod
-    def _validate_runtime_lock(
-        runtime_lock: DeckRuntimePluginLock,
-    ) -> DeckRuntimePluginLock:
-        required = [
-            entry for entry in runtime_lock.claude_code_plugins if entry.required
-        ]
-        if (
-            len(required) != 1
-            or required[0].claude_code_plugin_id != BUILTIN_CLAUDE_PLUGIN_ID
-            or required[0].resolved_version != BUILTIN_DECK_PLUGIN_VERSION
-        ):
-            raise DreamLaunchApplicationError(
-                "DECK_RUNTIME_CONFIG_INVALID", 503
-            )
-        return runtime_lock
-
-    def _ensure_claude_installation(
-        self,
-        runtime_lock: DeckRuntimePluginLock,
-    ) -> dict[str, Any]:
-        entry = next(
-            item for item in runtime_lock.claude_code_plugins if item.required
-        )
-        row = self.db.execute(
-            "SELECT * FROM claude_plugin_installations "
-            "WHERE package_name = 'ink-dream-story' "
-            "AND marketplace = 'platform-builtin' AND resolved_version = %s "
-            "AND artifact_digest = %s AND status = 'ready' "
-            "ORDER BY installed_at DESC, id DESC LIMIT 1",
-            (entry.resolved_version, entry.artifact_digest),
-        ).fetchone()
-        installer = self._claude_installer_factory(self.db)
-        if row is None:
-            try:
-                operation = installer.install(
-                    STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC,
-                    source_type="platform-builtin",
-                )
-            except PluginInstallError as exc:
-                raise DreamLaunchApplicationError(
-                    "RUNTIME_PLUGIN_NOT_READY", 503
-                ) from exc
-            installation_id = operation.get("installation_id")
-            row_value = installer.get_installation(str(installation_id))
-            if row_value is None:
-                raise DreamLaunchApplicationError(
-                    "RUNTIME_PLUGIN_NOT_READY", 503
-                )
-            record = dict(row_value)
-        else:
-            record = dict(row)
-        if (
-            record.get("status") != "ready"
-            or record.get("requested_package_spec")
-            != STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC
-            or record.get("resolved_version") != entry.resolved_version
-            or record.get("artifact_digest") != entry.artifact_digest
-            or not installer.verify_installation_artifact(record)
-        ):
-            raise DreamLaunchApplicationError(
-                "RUNTIME_PLUGIN_NOT_READY", 503
-            )
-        return record
-
-    def _ensure_materialization(
-        self,
-        runtime_lock: DeckRuntimePluginLock,
-        installation: dict[str, Any],
-    ) -> None:
-        entry = next(item for item in runtime_lock.claude_code_plugins if item.required)
-        placement = self._runtime_placement
-        now = datetime.now(UTC).isoformat()
-        artifact_set_hash = compute_artifact_set_hash(runtime_lock)
-        key = "sha256:" + hashlib.sha256(
-            f"{placement.runtime_environment_id}\0dream-launch\0"
-            f"{entry.claude_code_plugin_id}\0"
-            f"{entry.resolved_version}\0{entry.artifact_digest}\0"
-            f"{artifact_set_hash}".encode("utf-8")
-        ).hexdigest()
-        existing = self.db.execute(
-            "SELECT runtime_materialization_id FROM runtime_plugin_materializations "
-            "WHERE materialization_key = %s",
-            (key,),
-        ).fetchone()
-        try:
-            if existing is None:
-                self.db.execute(
-                    """
-                    INSERT INTO runtime_plugin_materializations (
-                        runtime_materialization_id, runtime_environment_id,
-                        runtime_pool_id, runtime_node_id, claude_code_plugin_id,
-                        resolved_version, artifact_digest, materialized_digest,
-                        artifact_set_hash, policy_revision, declaration_status,
-                        materialization_status, activation_status,
-                        materialization_key, attempt_id, attempt_count,
-                        verification_status, retention_state, cache_ref,
-                        created_at, updated_at
-                    ) VALUES (%s, %s, %s, 'local', %s, %s, %s, %s, %s, 'dream-launch/v1',
-                              'declared', 'materialized', 'loadable', %s, %s, 1,
-                              'verified', 'shared_artifact', %s, %s, %s)
-                    """,
-                    (
-                        "rm_" + uuid.uuid4().hex,
-                        placement.runtime_environment_id,
-                        placement.runtime_pool_id,
-                        entry.claude_code_plugin_id,
-                        entry.resolved_version,
-                        entry.artifact_digest,
-                        entry.artifact_digest,
-                        artifact_set_hash,
-                        key,
-                        "rpa_" + uuid.uuid4().hex,
-                        installation["artifact_path"],
-                        now,
-                        now,
-                    ),
-                )
-            else:
-                self.db.execute(
-                    "UPDATE runtime_plugin_materializations SET "
-                    "materialized_digest = %s, declaration_status = 'declared', "
-                    "materialization_status = 'materialized', "
-                    "activation_status = 'loadable', verification_status = 'verified', "
-                    "cache_ref = %s, last_error = NULL, updated_at = %s "
-                    "WHERE runtime_materialization_id = %s",
-                    (
-                        entry.artifact_digest,
-                        installation["artifact_path"],
-                        now,
-                        existing["runtime_materialization_id"],
-                    ),
-                )
-            self.db.commit()
-        except Exception:
-            self.db.rollback()
-            raise
-
-    async def _ensure_deck_installation(
-        self,
-        runtime_lock: DeckRuntimePluginLock,
-        workspace_id: str,
-    ) -> None:
-        service = InstallationService(
-            self.db,
-            runtime_preparer=DreamRuntimePreparationVerifier(
-                runtime_lock.runtime_plugin_lock_id
-            ),
-        )
-        row = self.db.execute(
-            "SELECT * FROM deck_plugin_installations "
-            "WHERE scope_type = 'workspace' AND scope_id = %s AND deck_plugin_id = %s",
-            (workspace_id, BUILTIN_DECK_PLUGIN_ID),
-        ).fetchone()
-        try:
-            if row is None:
-                started = await service.install(
-                    BUILTIN_DECK_PLUGIN_ID,
-                    BUILTIN_DECK_PLUGIN_VERSION,
-                    Scope(scope_type="workspace", scope_id=workspace_id),
-                    source_policy_id="system:dream-launch/v1",
-                )
-                await service.complete_installation(
-                    started.deck_plugin_installation_id
-                )
-                return
-            status = InstallationStatus(row["status"])
-            if status is InstallationStatus.INSTALLING:
-                await service.complete_installation(row["id"])
-                return
-            installed = set(json.loads(row["installed_versions_json"] or "[]"))
-            if (
-                status is not InstallationStatus.READY
-                or row["default_version"] != BUILTIN_DECK_PLUGIN_VERSION
-                or BUILTIN_DECK_PLUGIN_VERSION not in installed
-            ):
-                raise DreamLaunchApplicationError(
-                    "DECK_PLUGIN_UNAVAILABLE", 409
-                )
-        except InstallationServiceError as exc:
-            raise DreamLaunchApplicationError(
-                "RUNTIME_PLUGIN_NOT_READY", 503
-            ) from exc
-
-    async def _ensure_active_binding(
-        self,
-        *,
-        deck_id: str,
-        actor_id: str,
-        workspace_id: str,
-        expected_binding_revision: int | None = None,
-    ) -> DreamLaunchBinding:
-        validator = SelectionValidationService(
-            self.db,
-            runtime_context_resolver=make_runtime_context_resolver(self.db),
-        )
-        for attempt in range(2):
-            current = self._active_binding_row(deck_id)
-            # psycopg opens a transaction for this SELECT. BindingService.save
-            # intentionally owns the following CAS transaction and rejects a
-            # dirty boundary, so finish the read-only observation first.
-            if self.db.in_transaction:
-                self.db.rollback()
-            existing = self._expected_builtin_binding(
-                current,
-                actor_id=actor_id,
-                workspace_id=workspace_id,
-            )
-            if existing is not None:
-                return existing
-            revision = (
-                int(current["binding_revision"])
-                if current is not None
-                else self._latest_binding_revision(deck_id)
-            )
-            if expected_binding_revision is not None and revision != expected_binding_revision:
-                raise BindingRevisionConflict(revision)
-            if self.db.in_transaction:
-                self.db.rollback()
-            service = BindingService(self.db, selection_validator=validator)
-            try:
-                response = await service.save(
-                    deck_id=deck_id,
-                    actor_id=actor_id,
-                    requested_workspace_id=workspace_id,
-                    request=DeckPluginBindingUpdateRequest(
-                        deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
-                        deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
-                        expected_binding_revision=revision,
-                        apply_to="next_run",
-                    ),
-                )
-            except BindingRevisionConflict as exc:
-                if expected_binding_revision is not None:
-                    raise
-                winner_row = self._active_binding_row(deck_id)
-                if self.db.in_transaction:
-                    self.db.rollback()
-                winner = self._expected_builtin_binding(
-                    winner_row,
-                    actor_id=actor_id,
-                    workspace_id=workspace_id,
-                )
-                if winner is not None:
-                    return winner
-                if attempt == 0:
-                    continue
-                raise DreamLaunchApplicationError(
-                    "DECK_BINDING_CONFLICT", 409
-                ) from exc
-            return DreamLaunchBinding(
-                deck_plugin_id=response.deck_plugin_id,
-                deck_plugin_version=response.deck_plugin_version,
-                deck_plugin_binding_id=response.deck_plugin_binding_id,
-                binding_revision=response.binding_revision,
-            )
-        raise DreamLaunchApplicationError("DECK_BINDING_CONFLICT", 409)
-
-    def _latest_binding_revision(self, deck_id: str) -> int:
-        row = self.db.execute(
-            "SELECT MAX(binding_revision) AS binding_revision "
-            "FROM deck_plugin_bindings WHERE deck_id = %s",
-            (deck_id,),
-        ).fetchone()
-        return int(row["binding_revision"] or 0) if row is not None else 0
-
-    def _active_binding_row(self, deck_id: str) -> Any | None:
-        return self.db.execute(
-            "SELECT * FROM deck_plugin_bindings "
-            "WHERE deck_id = %s AND status = 'active'",
-            (deck_id,),
-        ).fetchone()
-
-    @staticmethod
-    def _expected_builtin_binding(
-        row: Any | None,
-        *,
-        actor_id: str,
-        workspace_id: str,
-    ) -> DreamLaunchBinding | None:
-        if (
-            row is None
-            or row["deck_plugin_id"] != BUILTIN_DECK_PLUGIN_ID
-            or row["deck_plugin_version"] != BUILTIN_DECK_PLUGIN_VERSION
-            or row["workspace_id"] != workspace_id
-            or row["creator_id"] != actor_id
-        ):
-            return None
-        return DreamLaunchBinding(
-            deck_plugin_id=row["deck_plugin_id"],
-            deck_plugin_version=row["deck_plugin_version"],
-            deck_plugin_binding_id=row["deck_plugin_binding_id"],
-            binding_revision=int(row["binding_revision"]),
-        )
 
 
 def _launch_instruction(goal: str) -> str:
@@ -1309,7 +810,7 @@ class DreamLaunchWorkflowOperationsAdapter:
         *,
         preflight_service: PreflightService,
         token_secret: bytes | str,
-        claude_installer_factory: Callable[[Any], Any] = PluginInstallService,
+        runtime_port: DreamLaunchRuntimePort,
         platform_model_resolver: Callable[[int | str, str | None], str] = (
             resolve_platform_model_alias
         ),
@@ -1318,10 +819,7 @@ class DreamLaunchWorkflowOperationsAdapter:
         self._preflight_service = preflight_service
         self._run_service = WorkflowRunService(db, token_secret=token_secret)
         self._platform_model_resolver = platform_model_resolver
-        self._provisioner = DreamRuntimeProvisioningService(
-            db,
-            claude_installer_factory=claude_installer_factory,
-        )
+        self._runtime_port = runtime_port
         self._existing_run: Any | None = None
         self._actor_context: AuthenticatedActorContext | None = None
 
@@ -1337,9 +835,20 @@ class DreamLaunchWorkflowOperationsAdapter:
             workspace_id=workspace_id,
         )
         self._actor_context = actor_context
-        self._provisioner.require_agent_scope(command.deck_id, command.agent_id)
+        if self.db.in_transaction:
+            self.db.rollback()
+        try:
+            await self._runtime_port.authorize(
+                deck_id=command.deck_id,
+                workspace_id=workspace_id,
+                agent_id=command.agent_id,
+            )
+        except DreamLaunchRuntimeError as exc:
+            raise DreamLaunchApplicationError(exc.code, exc.status_code) from exc
         existing_run = self._existing_replay_run(command, actor_context)
         self._existing_run = existing_run
+        if self.db.in_transaction:
+            self.db.rollback()
         if existing_run is None:
             # Do not hold a database read transaction across the Admin call.
             # A replay returns its already-created authoritative run even when
@@ -1358,26 +867,20 @@ class DreamLaunchWorkflowOperationsAdapter:
                     exc.code,
                     exc.status_code,
                 ) from exc
-
-        if existing_run is not None:
-            self._provisioner._require_scope(
-                command.deck_id,
-                actor_id,
-                workspace_id,
+        try:
+            prepared = await self._runtime_port.prepare(
+                deck_id=command.deck_id,
+                workspace_id=workspace_id,
+                agent_id=command.agent_id,
+                existing_run=existing_run,
             )
-            self._provisioner.ensure_frozen_runtime_evidence(
-                existing_run["runtime_plugin_lock_id"]
-            )
-            return DreamLaunchBinding(
-                deck_plugin_id=existing_run["deck_plugin_id"],
-                deck_plugin_version=existing_run["deck_plugin_version"],
-                deck_plugin_binding_id=existing_run["deck_plugin_binding_id"],
-                binding_revision=int(existing_run["binding_revision"]),
-            )
-        return await self._provisioner.require_binding(
-            deck_id=command.deck_id,
-            actor_id=actor_id,
-            workspace_id=workspace_id,
+        except DreamLaunchRuntimeError as exc:
+            raise DreamLaunchApplicationError(exc.code, exc.status_code) from exc
+        return DreamLaunchBinding(
+            deck_plugin_id=prepared.deck_plugin_id,
+            deck_plugin_version=prepared.deck_plugin_version,
+            deck_plugin_binding_id=prepared.deck_plugin_binding_id,
+            binding_revision=prepared.binding_revision,
         )
 
     async def create_preflight(self, **values: Any) -> Any:
@@ -1504,7 +1007,7 @@ def build_dream_launch_application_service(
     *,
     preflight_service: PreflightService,
     token_secret: bytes | str,
-    claude_installer_factory: Callable[[Any], Any] = PluginInstallService,
+    runtime_port: DreamLaunchRuntimePort,
     turn_dispatcher: Callable[..., Any] | None = None,
     launch_task_registry: DreamLaunchTaskRegistry | None = None,
     dispatch_before_claim: Callable[[], Any] | None = None,
@@ -1527,7 +1030,7 @@ def build_dream_launch_application_service(
             db,
             preflight_service=preflight_service,
             token_secret=token_secret,
-            claude_installer_factory=claude_installer_factory,
+            runtime_port=runtime_port,
             platform_model_resolver=platform_model_resolver,
         ),
         dispatcher=DreamLaunchEnvelopeDispatcher(

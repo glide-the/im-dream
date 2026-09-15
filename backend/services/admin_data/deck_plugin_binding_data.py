@@ -1,7 +1,7 @@
-# [Input] Registry122-129 binding/Agent-type contracts, current OAuth bearer and default Workspace identity.
-# [Output] Strict owner-bound binding DTOs, Runtime verification candidate/evidence and receipt recovery.
+# [Input] Registry122-132 binding/Agent-type/launch contracts, current OAuth bearer and default Workspace identity.
+# [Output] Strict owner-bound binding and current/frozen Runtime DTOs with receipt recovery.
 # [Pos] Dream consumer; SQL, ORM, Runtime metadata, CAS and transactions stay in Admin.
-# [Sync] 2026-09-16: add clear and evidence-bound Runtime plan/prepare operations.
+# [Sync] 2026-09-16: add launch scope plus current/replay Runtime plan and preparation.
 """Typed Admin client for Deck Plugin binding operations."""
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ Revision = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
 PositiveRevision = Annotated[int, Field(ge=1, le=9_007_199_254_740_991)]
 Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 RuntimeLockId = Annotated[str, Field(pattern=r"^rpl_[0-9a-f]{32}$")]
+WorkflowRunId = Annotated[str, Field(pattern=r"^run_[0-9a-f]{32}$")]
 
 
 class BindingScopeInputDTO(ChatStrictDTO):
@@ -101,6 +102,52 @@ class AgentTypeChatDTO(ChatStrictDTO):
     deck_id: Identifier
     agent_type: Literal["chat"]
     binding_revision: Revision
+
+
+class DreamLaunchRuntimeScopeInputDTO(BindingScopeInputDTO):
+    agent_id: Identifier | None
+
+
+class DreamLaunchRuntimeScopeDTO(DreamLaunchRuntimeScopeInputDTO):
+    authorized: Literal[True]
+
+
+class DreamLaunchRuntimePlanInputDTO(DreamLaunchRuntimeScopeInputDTO):
+    mode: Literal["current", "replay"]
+    workflow_run_id: WorkflowRunId | None
+    thread_id: Identifier | None
+
+    @model_validator(mode="after")
+    def require_mode_identity(self):
+        replay = self.workflow_run_id is not None and self.thread_id is not None
+        if (
+            (self.mode == "current" and (self.workflow_run_id is not None or self.thread_id is not None))
+            or (self.mode == "replay" and not replay)
+        ):
+            raise ValueError("Launch Runtime mode and replay identity must match")
+        return self
+
+
+class DreamLaunchRuntimeBindingDTO(ChatStrictDTO):
+    deck_plugin_binding_id: BindingId
+    deck_plugin_id: PluginId
+    deck_plugin_version: PluginVersion
+    binding_revision: PositiveRevision
+
+
+class DreamLaunchRuntimePlanDTO(DreamLaunchRuntimePlanInputDTO):
+    binding: DreamLaunchRuntimeBindingDTO
+    target: AgentTypeRuntimeCandidateDTO
+
+
+class DreamLaunchRuntimePrepareInputDTO(DreamLaunchRuntimePlanInputDTO):
+    expected_binding_revision: PositiveRevision
+    verified_plugin: AgentTypeVerifiedPluginDTO
+
+
+class DreamLaunchRuntimePreparedDTO(DreamLaunchRuntimePlanInputDTO):
+    binding: DreamLaunchRuntimeBindingDTO
+    runtime_ready: Literal[True]
 
 
 class BindingResponseDTO(ChatStrictDTO):
@@ -229,6 +276,9 @@ SAVE_BINDING = _operation("deck-plugin-binding.save", "write", BindingSaveInputD
 CLEAR_BINDING = _operation("deck-plugin-binding.clear", "write", BindingClearInputDTO, AgentTypeChatDTO, "9a89ec380e280fc64b67b9725a68edf3244df0f76e41df8db5fd89b3e3fd44fc")
 PLAN_AGENT_TYPE_RUNTIME = _operation("deck-agent-type.runtime-plan", "read", BindingScopeInputDTO, AgentTypeRuntimePlanDTO, "87a3f0497e3927aa8c8048e6bc79de1b042631f096f85184568201dce378e5f7")
 PREPARE_AGENT_TYPE_RUNTIME = _operation("deck-agent-type.runtime-prepare", "write", AgentTypeRuntimePrepareInputDTO, AgentTypeRuntimePreparedDTO, "9cc1a08d15e0279ed977bb5b7ee25a5ab270cf32a4f67ded719c23e33d000716")
+AUTHORIZE_DREAM_LAUNCH_RUNTIME = _operation("dream-launch.runtime-scope", "read", DreamLaunchRuntimeScopeInputDTO, DreamLaunchRuntimeScopeDTO, "67dbe0a6eb7ddfd9bd1fa668e38f143add53201b725b19506af976319bba2b92")
+PLAN_DREAM_LAUNCH_RUNTIME = _operation("dream-launch.runtime-plan", "read", DreamLaunchRuntimePlanInputDTO, DreamLaunchRuntimePlanDTO, "efd986cef6f891202c4d3ceb889d7491e8227dc097eeb009202a2be92549e9a6")
+PREPARE_DREAM_LAUNCH_RUNTIME = _operation("dream-launch.runtime-prepare", "write", DreamLaunchRuntimePrepareInputDTO, DreamLaunchRuntimePreparedDTO, "d9c2faeb03b86cf562286f283e5bfcd3098e1da81c1b628c2e9aaa5a7b897882")
 DECK_PLUGIN_BINDING_OPERATIONS = (
     READ_BINDING,
     READ_BINDING_HISTORY,
@@ -238,6 +288,9 @@ DECK_PLUGIN_BINDING_OPERATIONS = (
     CLEAR_BINDING,
     PLAN_AGENT_TYPE_RUNTIME,
     PREPARE_AGENT_TYPE_RUNTIME,
+    AUTHORIZE_DREAM_LAUNCH_RUNTIME,
+    PLAN_DREAM_LAUNCH_RUNTIME,
+    PREPARE_DREAM_LAUNCH_RUNTIME,
 )
 
 
@@ -262,6 +315,22 @@ class AdminDeckPluginBindingData:
             raise invalid_response(request_id, write=write)
         if isinstance(input_dto, AgentTypeRuntimePrepareInputDTO) and (
             result.current_binding_revision != input_dto.expected_binding_revision
+        ):
+            raise invalid_response(request_id, write=write)
+        if isinstance(input_dto, DreamLaunchRuntimeScopeInputDTO) and (
+            result.deck_id != input_dto.deck_id
+            or result.workspace_id != input_dto.workspace_id
+            or result.agent_id != input_dto.agent_id
+        ):
+            raise invalid_response(request_id, write=write)
+        if isinstance(input_dto, DreamLaunchRuntimePlanInputDTO) and (
+            result.mode != input_dto.mode
+            or result.workflow_run_id != input_dto.workflow_run_id
+            or result.thread_id != input_dto.thread_id
+        ):
+            raise invalid_response(request_id, write=write)
+        if isinstance(input_dto, DreamLaunchRuntimePrepareInputDTO) and (
+            result.binding.binding_revision != input_dto.expected_binding_revision
         ):
             raise invalid_response(request_id, write=write)
         return result
@@ -331,4 +400,19 @@ class AdminDeckPluginBindingData:
     def runtime_prepare(self, input_dto: AgentTypeRuntimePrepareInputDTO, request_id: str, *, access_token: str):
         return self._write(
             PREPARE_AGENT_TYPE_RUNTIME, input_dto, request_id, access_token
+        )
+
+    def launch_runtime_scope(self, input_dto: DreamLaunchRuntimeScopeInputDTO, request_id: str, *, access_token: str):
+        return self._execute(
+            AUTHORIZE_DREAM_LAUNCH_RUNTIME, input_dto, request_id, access_token
+        )
+
+    def launch_runtime_plan(self, input_dto: DreamLaunchRuntimePlanInputDTO, request_id: str, *, access_token: str):
+        return self._execute(
+            PLAN_DREAM_LAUNCH_RUNTIME, input_dto, request_id, access_token
+        )
+
+    def launch_runtime_prepare(self, input_dto: DreamLaunchRuntimePrepareInputDTO, request_id: str, *, access_token: str):
+        return self._write(
+            PREPARE_DREAM_LAUNCH_RUNTIME, input_dto, request_id, access_token
         )

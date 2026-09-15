@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-16: inject current Admin OAuth into Registry130-132 launch Runtime orchestration.
 # [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
 # [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
 # [Output] Publish user-scoped Story Workspace product, workflow, artifact, review, and catalog routes.
@@ -70,7 +71,9 @@ from services.admin_data.story_workspace_guidance_data import (
 from services.admin_data.story_workspace_confirmation_data import (
     AdminStoryWorkspaceConfirmationData,
 )
+from services.admin_data.deck_plugin_binding_data import AdminDeckPluginBindingData
 from services.story_workspace.guidance_service import build_thread_turn_dispatcher
+from services.story_workspace.dream_launch_runtime import AdminDreamLaunchRuntime
 
 try:
     from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
@@ -173,6 +176,7 @@ class DreamLaunchEndpoint(Protocol):
         request: StoryWorkspaceDreamLaunchCommand,
         *,
         actor: dict[str, str],
+        runtime_port: AdminDreamLaunchRuntime,
     ) -> Any: ...
 
 
@@ -891,10 +895,16 @@ router.include_router(_preflight_execution_router)
 async def story_workspace_start_dream_run(
     request: StoryWorkspaceDreamLaunchCommand,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
     launch_service: DreamLaunchEndpoint = Depends(get_dream_launch_endpoint_service),
 ):
     try:
         actor = _workflow_actor(current_user)
+        admin_actor = current_user.get("_admin_actor")
+        if not isinstance(owner, AdminRequestAuth) or not isinstance(
+            admin_actor, AdminRequestActor
+        ):
+            raise ApiRouteError("ADMIN_CONFIGURATION_INVALID", status_code=503)
     except ApiRouteError as exc:
         return JSONResponse(
             status_code=exc.status_code,
@@ -902,7 +912,15 @@ async def story_workspace_start_dream_run(
         )
 
     async def accepted_response() -> StoryWorkspaceDreamLaunchAccepted:
-        context = await launch_service.start_dream_run(request, actor=actor)
+        runtime_port = AdminDreamLaunchRuntime(
+            AdminDeckPluginBindingData(owner.client),
+            admin_actor.access_token,
+        )
+        context = await launch_service.start_dream_run(
+            request,
+            actor=actor,
+            runtime_port=runtime_port,
+        )
         return StoryWorkspaceDreamLaunchAccepted.from_context(context)
 
     return await _workflow_call(accepted_response(), by_alias=True)

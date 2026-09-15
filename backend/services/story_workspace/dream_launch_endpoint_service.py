@@ -1,3 +1,7 @@
+# [Input] Authenticated launch command, actor and request-scoped Admin Runtime port.
+# [Output] Public launch context or closed route error while retaining Dream workflow execution.
+# [Pos] Dream HTTP application boundary; creates no authentication or database authority.
+# [Sync] 2026-09-16: require Registry130-132 Runtime preparation for every launch attempt.
 """HTTP application boundary for starting one Dream run."""
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ try:
     from services.errors.error_registry import ApiRouteError
     from services.story_workspace.dream_launch_infrastructure import (
         DreamLaunchApplicationError,
+        DreamLaunchRuntimePort,
         DreamLaunchTaskRegistry,
         build_dream_launch_application_service,
     )
@@ -32,6 +37,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.errors.error_registry import ApiRouteError
     from backend.services.story_workspace.dream_launch_infrastructure import (
         DreamLaunchApplicationError,
+        DreamLaunchRuntimePort,
         DreamLaunchTaskRegistry,
         build_dream_launch_application_service,
     )
@@ -78,6 +84,7 @@ class DreamLaunchEndpointService:
         request: StoryWorkspaceDreamLaunchCommand,
         *,
         actor: dict[str, str],
+        runtime_port: DreamLaunchRuntimePort,
     ) -> StoryWorkspaceDreamRunContext:
         db = self._db_factory()
         try:
@@ -91,6 +98,7 @@ class DreamLaunchEndpointService:
                 db,
                 preflight_service=preflight_service,
                 token_secret=token_secret,
+                runtime_port=runtime_port,
                 launch_task_registry=self._task_registry,
             )
             return await service.launch(

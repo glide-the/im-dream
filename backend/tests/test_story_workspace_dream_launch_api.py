@@ -1,11 +1,14 @@
-# [Sync] 2026-09-16: update launch route harness to override the current Admin default-workspace dependency.
+# [Input] Public Dream launch request, Admin Runtime port fakes and isolated legacy workflow fixtures.
+# [Output] Route, idempotency, frozen replay, dispatch and Admin Runtime boundary verification.
+# [Pos] Dream launch business tests; local SQL exists only in the named legacy fixture and fakes.
+# [Sync] 2026-09-16: replace production provisioning tests with Registry130-132 Runtime-port coverage.
 """Dream launch REST and production gateway integration tests."""
 
 from __future__ import annotations
 
 import asyncio
+import ast
 from datetime import UTC, datetime, timedelta
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,23 +30,23 @@ from services.deck.builtin_plugin import (
     BUILTIN_CLAUDE_PLUGIN_ID,
     BUILTIN_DECK_PLUGIN_ID,
     BUILTIN_DECK_PLUGIN_VERSION,
-    builtin_plugin_path,
-    plugin_artifact_digest,
     seed_builtin_deck_plugin,
 )
 from services.deck.story_workflow_application import StoryWorkflowRunApplicationService
-from services.deck_plugin.binding_service import BindingRevisionConflict
-from models.runtime_plugin import compute_artifact_set_hash
 from services.story_workspace.dream_launch_infrastructure import (
     DreamLaunchFailureRecorder,
     DreamLaunchWorkflowOperationsAdapter,
     DreamLaunchApplicationError,
-    DreamRuntimeProvisioningService,
     DreamLaunchTaskRegistry,
     _decode_json_object,
     build_dream_launch_application_service,
     build_dream_agent_turn_dispatcher,
 )
+from services.story_workspace.dream_launch_runtime import (
+    DreamLaunchRuntimeError,
+    PreparedDreamLaunchBinding,
+)
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_gateway import GatewayInferenceError
 from services.story_workspace.dream_launch_application_service import (
     DreamLaunchIdempotencyConflict,
@@ -66,6 +69,32 @@ def test_decode_json_object_accepts_psycopg_native_jsonb_dict() -> None:
     assert decoded is not native_jsonb
 
 
+def test_launch_runtime_boundary_has_no_database_client_or_provisioning_class() -> None:
+    service_root = Path(__file__).parents[1] / "services" / "story_workspace"
+    runtime_source = (service_root / "dream_launch_runtime.py").read_text()
+    runtime_tree = ast.parse(runtime_source)
+    imported_roots = {
+        alias.name.split(".")[0]
+        for node in ast.walk(runtime_tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    called_attributes = {
+        node.func.attr
+        for node in ast.walk(runtime_tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert imported_roots.isdisjoint({"database", "psycopg", "sqlalchemy", "drizzle"})
+    assert called_attributes.isdisjoint({"execute", "cursor", "commit", "rollback"})
+
+    infrastructure_tree = ast.parse(
+        (service_root / "dream_launch_infrastructure.py").read_text()
+    )
+    assert "DreamRuntimeProvisioningService" not in {
+        node.name for node in ast.walk(infrastructure_tree) if isinstance(node, ast.ClassDef)
+    }
+
+
 ACTOR_ID = "71"
 OTHER_ACTOR_ID = "72"
 WORKSPACE_ID = "workspace-dream-launch-api"
@@ -74,7 +103,7 @@ DECK_ID = "deck-dream-launch-api"
 ALTERNATE_DECK_ID = "deck-dream-launch-api-alternate"
 
 
-def test_active_binding_ends_psycopg_read_transaction_before_save() -> None:
+def test_launch_prepare_ends_read_transaction_before_admin_runtime_call() -> None:
     class TrackingDb:
         in_transaction = False
 
@@ -87,40 +116,32 @@ def test_active_binding_ends_psycopg_read_transaction_before_save() -> None:
 
     db = TrackingDb()
 
-    class CleanBoundaryBindingService:
-        def __init__(self, target, **_kwargs):
-            self.target = target
+    class RuntimePort:
+        async def authorize(self, **_kwargs):
+            assert db.in_transaction is False
 
-        async def save(self, **_kwargs):
-            assert self.target.in_transaction is False
-            return SimpleNamespace(
+        async def prepare(self, **_kwargs):
+            assert db.in_transaction is False
+            return PreparedDreamLaunchBinding(
                 deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
                 deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
                 deck_plugin_binding_id="dpb_" + "1" * 32,
                 binding_revision=1,
             )
 
-    with (
-        patch(
-            "services.story_workspace.dream_launch_infrastructure.BindingService",
-            CleanBoundaryBindingService,
-        ),
-        patch(
-            "services.story_workspace.dream_launch_infrastructure.SelectionValidationService",
-            lambda *_args, **_kwargs: object(),
-        ),
-        patch(
-            "services.story_workspace.dream_launch_infrastructure.make_runtime_context_resolver",
-            lambda *_args, **_kwargs: object(),
-        ),
-    ):
-        binding = asyncio.run(
-            DreamRuntimeProvisioningService(db)._ensure_active_binding(
-                deck_id=DECK_ID,
-                actor_id=ACTOR_ID,
-                workspace_id=WORKSPACE_ID,
-            )
+    operations = DreamLaunchWorkflowOperationsAdapter.__new__(
+        DreamLaunchWorkflowOperationsAdapter
+    )
+    operations.db = db
+    operations._runtime_port = RuntimePort()
+    operations._platform_model_resolver = lambda *_args: "dream-balanced"
+    binding = asyncio.run(
+        operations.prepare(
+            launch_command(),
+            actor_id=ACTOR_ID,
+            workspace_id=WORKSPACE_ID,
         )
+    )
 
     assert binding.binding_revision == 1
 
@@ -178,15 +199,16 @@ def launch_command(**overrides: object) -> StoryWorkspaceDreamLaunchCommand:
 
 class ApiGateway:
     def __init__(self) -> None:
-        self.calls: list[tuple[StoryWorkspaceDreamLaunchCommand, dict[str, str]]] = []
+        self.calls: list[tuple[StoryWorkspaceDreamLaunchCommand, dict[str, str], object]] = []
 
     async def start_dream_run(
         self,
         request: StoryWorkspaceDreamLaunchCommand,
         *,
         actor: dict[str, str],
+        runtime_port,
     ) -> StoryWorkspaceDreamRunContext:
-        self.calls.append((request, actor))
+        self.calls.append((request, actor, runtime_port))
         return StoryWorkspaceDreamRunContext(
             workflow_run_id="run_" + "1" * 32,
             thread_id="thread-dream-api",
@@ -204,12 +226,22 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.gateway = ApiGateway()
         self.app = FastAPI()
+        self.owner = AdminRequestAuth.__new__(AdminRequestAuth)
+        self.owner.client = object()
+        self.admin_actor = AdminRequestActor(
+            "subject", ACTOR_ID, "dream-browser", frozenset({"dream:read", "dream:write"}),
+            1, 4_102_444_800, "test-access-token",
+        )
         self.app.dependency_overrides[
             story_workspace._story_workflow_current_user
         ] = lambda: {
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
+            "_admin_actor": self.admin_actor,
         }
+        self.app.dependency_overrides[story_workspace.get_admin_request_auth] = (
+            lambda: self.owner
+        )
         self.app.dependency_overrides[
             story_workspace.get_dream_launch_endpoint_service
         ] = lambda: self.gateway
@@ -233,12 +265,13 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
         self.assertEqual(payload["threadId"], "thread-dream-api")
         self.assertEqual(payload["deckPluginBindingId"], "dpb_" + "2" * 32)
         self.assertFalse(any("_" in key for key in payload))
-        request, actor = self.gateway.calls[0]
+        request, actor, runtime_port = self.gateway.calls[0]
         self.assertEqual(request.deck_id, DECK_ID)
         self.assertEqual(
             actor,
             {"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID},
         )
+        self.assertEqual(runtime_port._access_token, "test-access-token")
 
     def test_start_rejects_client_provenance_fields(self) -> None:
         forbidden = (
@@ -303,56 +336,136 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
         self.assertEqual(self.gateway.calls, [])
 
 
-class FakeClaudePluginInstaller:
-    def __init__(self, db) -> None:
-        self.db = db
+def seed_launch_runtime_fixture(db) -> None:
+    """Prepare legacy workflow reads without exercising a Dream provisioning path."""
 
-    def install(self, package_spec: str, *, source_type: str) -> dict[str, object]:
-        self.assert_contract(package_spec, source_type)
-        installation_id = "cpi_" + "5" * 32
-        digest = plugin_artifact_digest()
-        with self.db:
-            self.db.execute(
-                """
-                INSERT OR IGNORE INTO claude_plugin_installations (
-                    id, requested_package_spec, package_name, marketplace,
-                    requested_version, resolved_version, source_type,
-                    artifact_digest, artifact_path, claude_cli_version,
-                    status, operation_id, installed_at
-                ) VALUES (?, ?, 'ink-dream-story', 'platform-builtin', NULL,
-                          '1.0.0', 'platform-builtin', ?, ?, '2.1.220',
-                          'ready', ?, CURRENT_TIMESTAMP)
-                """,
-                (
-                    installation_id,
-                    package_spec,
-                    digest,
-                    str(builtin_plugin_path()),
-                    "cop_" + "6" * 32,
-                ),
-            )
-        return {"status": "ready", "installation_id": installation_id}
-
-    def get_installation(self, installation_id: str):
-        row = self.db.execute(
-            "SELECT * FROM claude_plugin_installations WHERE id = ?",
-            (installation_id,),
-        ).fetchone()
-        return dict(row) if row is not None else None
-
-    def verify_installation_artifact(self, record: dict[str, object]) -> bool:
-        return (
-            record["artifact_digest"] == plugin_artifact_digest()
-            and Path(str(record["artifact_path"])).resolve()
-            == builtin_plugin_path().resolve()
+    seed_builtin_deck_plugin(db)
+    lock_row = db.execute(
+        "SELECT id, lock_json FROM deck_runtime_plugin_locks "
+        "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
+        (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
+    ).fetchone()
+    runtime_lock = json.loads(lock_row["lock_json"])
+    required = next(
+        entry for entry in runtime_lock["claude_code_plugins"] if entry["required"]
+    )
+    now = datetime.now(UTC).isoformat()
+    with db:
+        db.execute(
+            "INSERT INTO deck_plugin_installations ("
+            "id, scope_type, scope_id, deck_plugin_id, installed_versions_json, "
+            "default_version, status, approved_capabilities_json, source_policy_id, revision) "
+            "VALUES (?, 'workspace', ?, ?, ?, ?, 'ready', ?, 'test:admin-runtime-port', 1)",
+            (
+                "dpi_" + "4" * 32,
+                WORKSPACE_ID,
+                BUILTIN_DECK_PLUGIN_ID,
+                json.dumps([BUILTIN_DECK_PLUGIN_VERSION]),
+                BUILTIN_DECK_PLUGIN_VERSION,
+                json.dumps(["story.workspace.propose"]),
+            ),
+        )
+        db.execute(
+            "INSERT INTO deck_plugin_bindings ("
+            "deck_plugin_binding_id, deck_id, workspace_id, creator_id, deck_plugin_id, "
+            "deck_plugin_version, binding_revision, status, applied_to) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, 'active', 'next_run')",
+            (
+                "dpb_" + "2" * 32,
+                DECK_ID,
+                WORKSPACE_ID,
+                ACTOR_ID,
+                BUILTIN_DECK_PLUGIN_ID,
+                BUILTIN_DECK_PLUGIN_VERSION,
+            ),
+        )
+        db.execute(
+            "INSERT INTO runtime_plugin_materializations ("
+            "runtime_materialization_id, runtime_environment_id, runtime_pool_id, runtime_node_id, "
+            "claude_code_plugin_id, resolved_version, artifact_digest, materialized_digest, "
+            "artifact_set_hash, policy_revision, declaration_status, materialization_status, "
+            "activation_status, materialization_key, attempt_id, attempt_count, verification_status, "
+            "retention_state, cache_ref, created_at, updated_at) "
+            "VALUES (?, 'fixture-local', 'fixture-local', 'fixture-node', ?, ?, ?, ?, ?, "
+            "'fixture/v1', 'declared', 'materialized', 'loadable', ?, ?, 1, 'verified', "
+            "'shared_artifact', 'fixture://admin-owned', ?, ?)",
+            (
+                "rm_" + "3" * 32,
+                required["claude_code_plugin_id"],
+                required["resolved_version"],
+                required["artifact_digest"],
+                required["artifact_digest"],
+                "sha256:" + "7" * 64,
+                "sha256:" + "8" * 64,
+                "rpa_" + "9" * 32,
+                now,
+                now,
+            ),
         )
 
-    @staticmethod
-    def assert_contract(package_spec: str, source_type: str) -> None:
-        if package_spec != "ink-dream-story@platform-builtin":
-            raise AssertionError(package_spec)
-        if source_type != "platform-builtin":
-            raise AssertionError(source_type)
+
+class FakeDreamLaunchRuntime:
+    """Provider-free Admin Runtime port used by the isolated workflow harness."""
+
+    def __init__(self, db, calls: list[dict[str, object]]) -> None:
+        self.db = db
+        self.calls = calls
+
+    async def authorize(self, *, deck_id, workspace_id, agent_id) -> None:
+        self.calls.append({
+            "operation": "scope",
+            "deck_id": deck_id,
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+        })
+        row = self.db.execute(
+            "SELECT deck.id FROM decks AS deck "
+            "JOIN story_workspace_workspaces AS workspace "
+            "ON workspace.id = ? AND workspace.owner_id = deck.owner_id "
+            "WHERE deck.id = ? AND deck.enabled = 1",
+            (workspace_id, deck_id),
+        ).fetchone()
+        if row is None:
+            raise DreamLaunchRuntimeError("DECK_ACCESS_DENIED", 404)
+        if agent_id is not None:
+            voice = self.db.execute(
+                "SELECT id FROM voices WHERE id = ? AND deck_id = ? AND enabled = 1",
+                (agent_id, deck_id),
+            ).fetchone()
+            if voice is None:
+                raise DreamLaunchRuntimeError("AGENT_ACCESS_DENIED", 404)
+
+    async def prepare(
+        self,
+        *,
+        deck_id,
+        workspace_id,
+        agent_id,
+        existing_run,
+    ) -> PreparedDreamLaunchBinding:
+        mode = "replay" if existing_run is not None else "current"
+        self.calls.append({
+            "operation": "prepare",
+            "mode": mode,
+            "deck_id": deck_id,
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+        })
+        row = existing_run
+        if row is None:
+            row = self.db.execute(
+                "SELECT * FROM deck_plugin_bindings "
+                "WHERE deck_id = ? AND workspace_id = ? AND status = 'active'",
+                (deck_id, workspace_id),
+            ).fetchone()
+        if row is None:
+            raise DreamLaunchRuntimeError("WORKFLOW_SELECTION_REQUIRED", 409)
+        return PreparedDreamLaunchBinding(
+            deck_plugin_id=str(row["deck_plugin_id"]),
+            deck_plugin_version=str(row["deck_plugin_version"]),
+            deck_plugin_binding_id=str(row["deck_plugin_binding_id"]),
+            binding_revision=int(row["binding_revision"]),
+        )
 
 
 class RecordingTurnDispatcher:
@@ -421,7 +534,6 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.environment.start()
         db = database.get_db()
         try:
-            seed_builtin_deck_plugin(db)
             with db:
                 db.execute(
                     "INSERT INTO users (id, email, password_hash) VALUES (?, ?, 'hash')",
@@ -451,17 +563,11 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                     "VALUES (?, 'Alternate Dream Deck', ?, 1)",
                     (ALTERNATE_DECK_ID, int(ACTOR_ID)),
                 )
-            await DreamRuntimeProvisioningService(
-                db,
-                claude_installer_factory=FakeClaudePluginInstaller,
-            ).ensure_binding(
-                deck_id=DECK_ID,
-                actor_id=ACTOR_ID,
-                workspace_id=WORKSPACE_ID,
-            )
+            seed_launch_runtime_fixture(db)
         finally:
             db.close()
         self.turn_dispatcher = RecordingTurnDispatcher()
+        self.runtime_port_calls: list[dict[str, object]] = []
 
     async def asyncTearDown(self) -> None:
         self.environment.stop()
@@ -484,7 +590,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
             db,
             preflight_service=application._preflight_service(db, actor),
             token_secret="ink-dream-development-workflow-token-secret-v1",
-            claude_installer_factory=FakeClaudePluginInstaller,
+            runtime_port=FakeDreamLaunchRuntime(db, self.runtime_port_calls),
             turn_dispatcher=self.turn_dispatcher,
             platform_model_resolver=model_resolver,
             **options,
@@ -805,7 +911,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
-    async def test_explicit_dream_binding_creates_authoritative_run_and_dispatches(self) -> None:
+    async def test_admin_prepared_binding_creates_authoritative_run_and_dispatches(self) -> None:
         context = await self.start(launch_command())
 
         self.assertEqual(context.deck_id, DECK_ID)
@@ -813,9 +919,6 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(BUILTIN_CLAUDE_PLUGIN_ID, "ink-dream-story@platform-builtin")
         db = database.get_db()
         try:
-            claude_installation = db.execute(
-                "SELECT * FROM claude_plugin_installations"
-            ).fetchone()
             materialization = db.execute(
                 "SELECT * FROM runtime_plugin_materializations"
             ).fetchone()
@@ -843,10 +946,6 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
-        self.assertEqual(claude_installation["status"], "ready")
-        self.assertEqual(claude_installation["artifact_digest"], plugin_artifact_digest())
-        self.assertEqual(materialization["claude_code_plugin_id"], BUILTIN_CLAUDE_PLUGIN_ID)
-        self.assertEqual(materialization["materialized_digest"], plugin_artifact_digest())
         self.assertEqual(deck_installation["status"], "ready")
         self.assertEqual(binding["deck_plugin_id"], BUILTIN_DECK_PLUGIN_ID)
         self.assertEqual(adapter_refs, 0)
@@ -882,39 +981,16 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("五类工作台文件写完后立即结束", launch_text)
 
-    async def test_materialization_identity_includes_the_artifact_set_hash(self) -> None:
+    async def test_launch_runtime_port_receives_current_plan_before_workflow_writes(self) -> None:
         await self.start(launch_command())
-        db = database.get_db()
-        try:
-            provisioner = DreamRuntimeProvisioningService(
-                db,
-                claude_installer_factory=FakeClaudePluginInstaller,
-            )
-            runtime_lock = provisioner._runtime_lock()
-            entry = runtime_lock.claude_code_plugins[0]
-            artifact_set_hash = compute_artifact_set_hash(runtime_lock)
-            expected_key = "sha256:" + hashlib.sha256(
-                f"ink-local\0dream-launch\0{entry.claude_code_plugin_id}\0"
-                f"{entry.resolved_version}\0{entry.artifact_digest}\0"
-                f"{artifact_set_hash}".encode("utf-8")
-            ).hexdigest()
-            installation = dict(
-                db.execute("SELECT * FROM claude_plugin_installations").fetchone()
-            )
 
-            provisioner._ensure_materialization(runtime_lock, installation)
+        self.assertEqual(
+            [call["operation"] for call in self.runtime_port_calls],
+            ["scope", "prepare"],
+        )
+        self.assertEqual(self.runtime_port_calls[1]["mode"], "current")
 
-            rows = db.execute(
-                "SELECT artifact_set_hash, materialization_key "
-                "FROM runtime_plugin_materializations"
-            ).fetchall()
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["artifact_set_hash"], artifact_set_hash)
-            self.assertEqual(rows[0]["materialization_key"], expected_key)
-        finally:
-            db.close()
-
-    async def test_existing_queued_replay_reprovisions_missing_runtime_evidence(self) -> None:
+    async def test_replay_uses_admin_runtime_port_without_local_materialization_write(self) -> None:
         first = await self.start(launch_command())
         db = database.get_db()
         try:
@@ -928,17 +1004,17 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay, first)
         db = database.get_db()
         try:
-            runtime_lock = DreamRuntimeProvisioningService(db)._runtime_lock()
-            row = db.execute(
-                "SELECT artifact_set_hash FROM runtime_plugin_materializations"
-            ).fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(
-                row["artifact_set_hash"],
-                compute_artifact_set_hash(runtime_lock),
+            self.assertIsNone(
+                db.execute("SELECT 1 FROM runtime_plugin_materializations").fetchone()
             )
         finally:
             db.close()
+        prepare_modes = [
+            call["mode"]
+            for call in self.runtime_port_calls
+            if call["operation"] == "prepare"
+        ]
+        self.assertEqual(prepare_modes, ["current", "replay"])
 
     async def test_replay_and_conflict_preserve_single_source_run_and_dispatch(self) -> None:
         first = await self.start(launch_command())
@@ -959,7 +1035,6 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                     "deck_plugin_bindings",
                     "deck_plugin_installations",
                     "runtime_plugin_materializations",
-                    "claude_plugin_installations",
                 )
             }
             metadata = json.loads(
@@ -1111,57 +1186,31 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("dispatchClaimId", metadata)
         self.assertNotIn("dispatchClaimedAt", metadata)
 
-    async def test_binding_revision_conflict_adopts_concurrent_builtin_winner(
-        self,
-    ) -> None:
-        binding_id = "dpb_" + "9" * 32
+    async def test_missing_current_binding_fails_before_source_creation(self) -> None:
         db = database.get_db()
-        with db:
-            db.execute(
-                "UPDATE deck_plugin_bindings SET status = 'stale' "
-                "WHERE deck_id = ? AND status = 'active'",
-                (DECK_ID,),
-            )
+        try:
+            with db:
+                db.execute(
+                    "UPDATE deck_plugin_bindings SET status = 'stale' "
+                    "WHERE deck_id = ? AND status = 'active'",
+                    (DECK_ID,),
+                )
+        finally:
+            db.close()
 
-        class ConcurrentWinnerBindingService:
-            def __init__(nested_self, db, *, selection_validator) -> None:
-                nested_self.db = db
+        with self.assertRaises(DreamLaunchApplicationError) as captured:
+            await self.start(launch_command(idempotencyKey="dream-api-no-binding"))
 
-            async def save(nested_self, **_values):
-                with nested_self.db:
-                    nested_self.db.execute(
-                        "INSERT INTO deck_plugin_bindings ("
-                        "deck_plugin_binding_id, deck_id, workspace_id, creator_id, "
-                        "deck_plugin_id, deck_plugin_version, binding_revision, "
-                        "status, applied_to) "
-                        "VALUES (?, ?, ?, ?, ?, ?, 2, 'active', 'next_run')",
-                        (
-                            binding_id,
-                            DECK_ID,
-                            WORKSPACE_ID,
-                            ACTOR_ID,
-                            BUILTIN_DECK_PLUGIN_ID,
-                            BUILTIN_DECK_PLUGIN_VERSION,
-                        ),
-                    )
-                raise BindingRevisionConflict(2)
-
-        with patch(
-            "services.story_workspace.dream_launch_infrastructure.BindingService",
-            ConcurrentWinnerBindingService,
-        ):
-            selected = await DreamRuntimeProvisioningService(
-                db,
-                claude_installer_factory=FakeClaudePluginInstaller,
-            ).ensure_binding(
-                deck_id=DECK_ID,
-                actor_id=ACTOR_ID,
-                workspace_id=WORKSPACE_ID,
-            )
-
-        db.close()
-        self.assertEqual(selected.deck_plugin_binding_id, binding_id)
-        self.assertEqual(selected.binding_revision, 2)
+        self.assertEqual(
+            (captured.exception.code, captured.exception.status_code),
+            ("WORKFLOW_SELECTION_REQUIRED", 409),
+        )
+        db = database.get_db()
+        try:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM chat_message").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM workflow_runs").fetchone()[0], 0)
+        finally:
+            db.close()
 
     async def test_slash_command_remains_the_unmodified_launch_text_prefix(self) -> None:
         goal = "/drama-forge:drama-init"
@@ -1254,7 +1303,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
             db.close()
 
     async def test_cross_actor_deck_launch_is_denied_before_source_creation(self) -> None:
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(DreamLaunchApplicationError) as captured:
             await self.start(
                 launch_command(),
                 actor={
@@ -1262,6 +1311,10 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                     "workspace_id": OTHER_WORKSPACE_ID,
                 },
             )
+        self.assertEqual(
+            (captured.exception.code, captured.exception.status_code),
+            ("DECK_ACCESS_DENIED", 404),
+        )
 
         db = database.get_db()
         try:
@@ -1271,107 +1324,38 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
-    async def test_legacy_local_builtin_lock_is_repaired_without_deck_refs(self) -> None:
+    async def test_admin_runtime_scope_failure_is_mapped_before_source_creation(self) -> None:
+        class DeniedRuntime(FakeDreamLaunchRuntime):
+            async def authorize(self, **_values) -> None:
+                raise DreamLaunchRuntimeError("AGENT_ACCESS_DENIED", 404)
+
+        actor = {"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID}
         db = database.get_db()
         try:
-            release = db.execute(
-                "SELECT manifest_json FROM deck_plugin_releases "
-                "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-            ).fetchone()
-            manifest = json.loads(release["manifest_json"])
-            manifest["runtime"]["claude_code_plugins"][0][
-                "claude_code_plugin_id"
-            ] = "ink-dream-story@local"
-            manifest_json = json.dumps(
-                manifest,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
+            application = StoryWorkflowRunApplicationService()
+            service = build_dream_launch_application_service(
+                db,
+                preflight_service=application._preflight_service(db, actor),
+                token_secret="ink-dream-development-workflow-token-secret-v1",
+                runtime_port=DeniedRuntime(db, self.runtime_port_calls),
+                turn_dispatcher=self.turn_dispatcher,
             )
-            manifest_hash = "sha256:" + hashlib.sha256(
-                manifest_json.encode("utf-8")
-            ).hexdigest()
-            lock_row = db.execute(
-                "SELECT lock_json FROM deck_runtime_plugin_locks "
-                "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-            ).fetchone()
-            runtime_lock = json.loads(lock_row["lock_json"])
-            runtime_lock["deck_plugin_manifest_hash"] = manifest_hash
-            runtime_lock["claude_code_plugins"][0][
-                "claude_code_plugin_id"
-            ] = "ink-dream-story@local"
-            runtime_lock["production_ready"] = False
-            runtime_lock["production_readiness_reasons"] = [
-                "repository_local_plugin",
-                "development_runtime_only",
-            ]
-            with db:
-                db.execute(
-                    "UPDATE deck_plugin_releases SET manifest_json = ?, "
-                    "manifest_hash = ?, runtime_spec_json = ? "
-                    "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                    (
-                        manifest_json,
-                        manifest_hash,
-                        json.dumps(manifest["runtime"], sort_keys=True),
-                        BUILTIN_DECK_PLUGIN_ID,
-                        BUILTIN_DECK_PLUGIN_VERSION,
-                    ),
-                )
-                db.execute(
-                    "UPDATE deck_runtime_plugin_locks SET "
-                    "deck_plugin_manifest_hash = ?, lock_json = ? "
-                    "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                    (
-                        manifest_hash,
-                        json.dumps(runtime_lock, sort_keys=True),
-                        BUILTIN_DECK_PLUGIN_ID,
-                        BUILTIN_DECK_PLUGIN_VERSION,
-                    ),
+            with self.assertRaises(DreamLaunchApplicationError) as captured:
+                await service.launch(
+                    launch_command(agentId="voice-denied"),
+                    actor_id=ACTOR_ID,
+                    workspace_id=WORKSPACE_ID,
                 )
         finally:
             db.close()
 
-        context = await self.start(launch_command())
-
-        self.assertEqual(context.deck_plugin_id, BUILTIN_DECK_PLUGIN_ID)
-        db = database.get_db()
+        self.assertEqual(
+            (captured.exception.code, captured.exception.status_code),
+            ("AGENT_ACCESS_DENIED", 404),
+        )
+        read_db = database.get_db()
         try:
-            repaired_manifest = json.loads(
-                db.execute(
-                    "SELECT manifest_json FROM deck_plugin_releases "
-                    "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                    (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-                ).fetchone()[0]
-            )
-            repaired_lock = json.loads(
-                db.execute(
-                    "SELECT lock_json FROM deck_runtime_plugin_locks "
-                    "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
-                    (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-                ).fetchone()[0]
-            )
-            deck_ref_count = db.execute(
-                "SELECT COUNT(*) FROM deck_claude_plugin_refs WHERE deck_id = ?",
-                (DECK_ID,),
-            ).fetchone()[0]
+            self.assertEqual(read_db.execute("SELECT COUNT(*) FROM chat_message").fetchone()[0], 0)
+            self.assertEqual(read_db.execute("SELECT COUNT(*) FROM workflow_runs").fetchone()[0], 0)
         finally:
-            db.close()
-        self.assertEqual(
-            repaired_manifest["runtime"]["claude_code_plugins"][0][
-                "claude_code_plugin_id"
-            ],
-            BUILTIN_CLAUDE_PLUGIN_ID,
-        )
-        self.assertEqual(
-            repaired_lock["claude_code_plugins"][0]["claude_code_plugin_id"],
-            BUILTIN_CLAUDE_PLUGIN_ID,
-        )
-        self.assertTrue(repaired_lock["production_ready"])
-        self.assertEqual(deck_ref_count, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            read_db.close()

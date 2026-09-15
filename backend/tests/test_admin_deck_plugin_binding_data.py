@@ -1,7 +1,7 @@
-# [Input] Registry122-129 binding/Agent-type DTO consumer, fake Admin catalog and closed receipt/error outcomes.
-# [Output] Exact hashes, strict identity binding, one-dispatch recovery and production registration evidence.
+# [Input] Registry122-132 binding/launch DTO consumer, fake Admin catalog and closed receipt/error outcomes.
+# [Output] Exact hashes, current/replay identity binding, one-dispatch recovery and registration evidence.
 # [Pos] Provider-free Dream data-boundary test; no PostgreSQL, filesystem or Runtime.
-# [Sync] 2026-09-16: verify clear and evidence-bound Runtime plan/prepare operations.
+# [Sync] 2026-09-16: verify launch scope/current/replay DTOs and preparation receipt recovery.
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -22,11 +22,20 @@ from services.admin_data.deck_plugin_binding_data import (
     BindingSelectionInputDTO,
     BindingStateDTO,
     BindingResponseDTO,
+    DreamLaunchRuntimeBindingDTO,
+    DreamLaunchRuntimePlanDTO,
+    DreamLaunchRuntimePlanInputDTO,
+    DreamLaunchRuntimePrepareInputDTO,
+    DreamLaunchRuntimePreparedDTO,
+    DreamLaunchRuntimeScopeInputDTO,
+    AUTHORIZE_DREAM_LAUNCH_RUNTIME,
     CLEAR_BINDING,
     DECK_PLUGIN_BINDING_OPERATIONS,
     LIST_BINDING_OPTIONS,
     PLAN_AGENT_TYPE_RUNTIME,
     PREPARE_AGENT_TYPE_RUNTIME,
+    PLAN_DREAM_LAUNCH_RUNTIME,
+    PREPARE_DREAM_LAUNCH_RUNTIME,
     READ_BINDING,
     READ_BINDING_HISTORY,
     SAVE_BINDING,
@@ -113,7 +122,7 @@ class FakeClient:
         )
 
 
-def test_registry122_129_hashes_and_actor_free_inputs_are_exact():
+def test_registry122_132_hashes_and_actor_free_inputs_are_exact():
     assert [item.capability.name for item in DECK_PLUGIN_BINDING_OPERATIONS] == [
         "deck-plugin-binding.current",
         "deck-plugin-binding.history",
@@ -123,6 +132,9 @@ def test_registry122_129_hashes_and_actor_free_inputs_are_exact():
         "deck-plugin-binding.clear",
         "deck-agent-type.runtime-plan",
         "deck-agent-type.runtime-prepare",
+        "dream-launch.runtime-scope",
+        "dream-launch.runtime-plan",
+        "dream-launch.runtime-prepare",
     ]
     assert [item.capability.contract_sha256 for item in DECK_PLUGIN_BINDING_OPERATIONS] == [
         "4b66af7888ed17e16f7e7aa38aded821ad3ecfe148663001dd6c4a66c714fb93",
@@ -133,12 +145,25 @@ def test_registry122_129_hashes_and_actor_free_inputs_are_exact():
         "9a89ec380e280fc64b67b9725a68edf3244df0f76e41df8db5fd89b3e3fd44fc",
         "87a3f0497e3927aa8c8048e6bc79de1b042631f096f85184568201dce378e5f7",
         "9cc1a08d15e0279ed977bb5b7ee25a5ab270cf32a4f67ded719c23e33d000716",
+        "67dbe0a6eb7ddfd9bd1fa668e38f143add53201b725b19506af976319bba2b92",
+        "efd986cef6f891202c4d3ceb889d7491e8227dc097eeb009202a2be92549e9a6",
+        "d9c2faeb03b86cf562286f283e5bfcd3098e1da81c1b628c2e9aaa5a7b897882",
     ]
     with pytest.raises(ValidationError):
         BindingScopeInputDTO.model_validate({
             **scope().model_dump(),
             "actor_id": "42",
         })
+
+    for invalid in (
+        {"mode": "current", "workflow_run_id": "run_" + "1" * 32, "thread_id": "thread"},
+        {"mode": "replay", "workflow_run_id": None, "thread_id": None},
+        {"mode": "replay", "workflow_run_id": "run_" + "1" * 32, "thread_id": None},
+    ):
+        with pytest.raises(ValidationError):
+            DreamLaunchRuntimePlanInputDTO.model_validate({
+                **scope().model_dump(), "agent_id": None, **invalid,
+            })
     with pytest.raises(ValidationError):
         BindingSelectionInputDTO.model_validate({
             **selection().model_dump(),
@@ -282,6 +307,79 @@ def test_unknown_runtime_prepare_reads_only_its_original_receipt():
     ]
 
 
+def test_launch_plan_binds_mode_scope_and_frozen_run_identity():
+    run_id = "run_" + "c" * 32
+    binding = DreamLaunchRuntimeBindingDTO(
+        deck_plugin_binding_id="dpb_" + "d" * 32,
+        deck_plugin_id=PLUGIN_ID,
+        deck_plugin_version=VERSION,
+        binding_revision=3,
+    )
+    target = {
+        "deck_plugin_id": PLUGIN_ID,
+        "deck_plugin_version": VERSION,
+        "runtime_plugin_lock_id": "rpl_" + "e" * 32,
+        "plugin_installation_id": "cpi_" + "f" * 32,
+        "package_spec": "example.runtime",
+        "package_name": "runtime",
+        "marketplace": "platform-builtin",
+        "resolved_version": VERSION,
+        "artifact_digest": "sha256:" + "a" * 64,
+        "compatibility_json": "{}",
+    }
+    command = DreamLaunchRuntimePlanInputDTO(
+        **scope().model_dump(), agent_id=None, mode="replay",
+        workflow_run_id=run_id, thread_id="thread-replay",
+    )
+    result = DreamLaunchRuntimePlanDTO(
+        **command.model_dump(), binding=binding, target=target,
+    )
+    client = FakeClient(result)
+    data = AdminDeckPluginBindingData(client)
+    assert data.launch_runtime_plan(command, REQUEST_ID, access_token="oauth") is result
+    assert client.execute_calls == [(PLAN_DREAM_LAUNCH_RUNTIME, command, REQUEST_ID, "oauth")]
+
+    client.reply = result.model_copy(update={"thread_id": "thread-other"})
+    with pytest.raises(AdminDataError) as mismatch:
+        data.launch_runtime_plan(command, REQUEST_ID, access_token="oauth")
+    assert mismatch.value.code == "ADMIN_RESPONSE_INVALID"
+
+
+def test_unknown_launch_prepare_recovers_only_its_exact_receipt():
+    binding = DreamLaunchRuntimeBindingDTO(
+        deck_plugin_binding_id="dpb_" + "b" * 32,
+        deck_plugin_id=PLUGIN_ID,
+        deck_plugin_version=VERSION,
+        binding_revision=2,
+    )
+    evidence = AgentTypeVerifiedPluginDTO(
+        plugin_installation_id="cpi_" + "a" * 32,
+        package_spec="example.runtime",
+        resolved_version=VERSION,
+        artifact_digest="sha256:" + "b" * 64,
+        has_manifest=True,
+    )
+    command = DreamLaunchRuntimePrepareInputDTO(
+        **scope().model_dump(), agent_id=None, mode="current",
+        workflow_run_id=None, thread_id=None, expected_binding_revision=2,
+        verified_plugin=evidence,
+    )
+    prepared = DreamLaunchRuntimePreparedDTO(
+        **command.model_dump(exclude={"expected_binding_revision", "verified_plugin"}),
+        binding=binding,
+        runtime_ready=True,
+    )
+    client = FakeClient(prepared)
+    client.execute_error = AdminDataError("ADMIN_TIMEOUT", 504, REQUEST_ID, True)
+    client.receipt_reply = CommittedReceiptDTO[DreamLaunchRuntimePreparedDTO](
+        status="committed", operation=PREPARE_DREAM_LAUNCH_RUNTIME.capability.name,
+        request_id=REQUEST_ID, result=prepared,
+    )
+    data = AdminDeckPluginBindingData(client)
+    assert data.launch_runtime_prepare(command, REQUEST_ID, access_token="oauth") == prepared
+    assert client.receipt_calls == [(PREPARE_DREAM_LAUNCH_RUNTIME, REQUEST_ID, "oauth")]
+
+
 def test_error_details_are_owned_by_their_codes():
     conflict = ErrorDTO.model_validate({
         "code": "BINDING_REVISION_CONFLICT",
@@ -317,7 +415,7 @@ def test_error_details_are_owned_by_their_codes():
         })
 
 
-def test_production_request_owner_registers_all_eight_operations():
+def test_production_request_owner_registers_all_eleven_operations():
     config = AdminDataConfig(
         base_url="https://admin.example",
         issuer="https://admin.example/api/auth",
@@ -333,14 +431,21 @@ def test_production_request_owner_registers_all_eight_operations():
         owner.close()
 
 
-def test_eight_operation_kinds_match_read_and_write_scope():
+def test_eleven_operation_kinds_match_read_and_write_scope():
     assert {
         READ_BINDING.capability.kind,
         READ_BINDING_HISTORY.capability.kind,
         LIST_BINDING_OPTIONS.capability.kind,
         VALIDATE_BINDING.capability.kind,
         PLAN_AGENT_TYPE_RUNTIME.capability.kind,
+        AUTHORIZE_DREAM_LAUNCH_RUNTIME.capability.kind,
+        PLAN_DREAM_LAUNCH_RUNTIME.capability.kind,
     } == {"read"}
-    for operation in (SAVE_BINDING, CLEAR_BINDING, PREPARE_AGENT_TYPE_RUNTIME):
+    for operation in (
+        SAVE_BINDING,
+        CLEAR_BINDING,
+        PREPARE_AGENT_TYPE_RUNTIME,
+        PREPARE_DREAM_LAUNCH_RUNTIME,
+    ):
         assert operation.capability.kind == "write"
         assert operation.capability.user_scope == "dream:write"
