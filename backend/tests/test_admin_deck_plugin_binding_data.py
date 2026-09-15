@@ -1,7 +1,7 @@
-# [Input] Registry122-126 binding DTO consumer, fake Admin catalog and closed receipt/error outcomes.
+# [Input] Registry122-129 binding/Agent-type DTO consumer, fake Admin catalog and closed receipt/error outcomes.
 # [Output] Exact hashes, strict identity binding, one-dispatch recovery and production registration evidence.
 # [Pos] Provider-free Dream data-boundary test; no PostgreSQL, filesystem or Runtime.
-# [Sync] 2026-09-16: verify the five Deck Plugin binding Admin operations.
+# [Sync] 2026-09-16: verify clear and evidence-bound Runtime plan/prepare operations.
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -12,14 +12,21 @@ from pydantic import ValidationError
 from services.admin_data.config import AdminDataConfig
 from services.admin_data.deck_plugin_binding_data import (
     AdminDeckPluginBindingData,
+    AgentTypeRuntimePrepareInputDTO,
+    AgentTypeRuntimePreparedDTO,
+    AgentTypeVerifiedPluginDTO,
+    BindingClearInputDTO,
     BindingHistoryInputDTO,
     BindingSaveInputDTO,
     BindingScopeInputDTO,
     BindingSelectionInputDTO,
     BindingStateDTO,
     BindingResponseDTO,
+    CLEAR_BINDING,
     DECK_PLUGIN_BINDING_OPERATIONS,
     LIST_BINDING_OPTIONS,
+    PLAN_AGENT_TYPE_RUNTIME,
+    PREPARE_AGENT_TYPE_RUNTIME,
     READ_BINDING,
     READ_BINDING_HISTORY,
     SAVE_BINDING,
@@ -106,13 +113,16 @@ class FakeClient:
         )
 
 
-def test_registry122_126_hashes_and_actor_free_inputs_are_exact():
+def test_registry122_129_hashes_and_actor_free_inputs_are_exact():
     assert [item.capability.name for item in DECK_PLUGIN_BINDING_OPERATIONS] == [
         "deck-plugin-binding.current",
         "deck-plugin-binding.history",
         "deck-plugin-binding.options",
         "deck-plugin-binding.validate",
         "deck-plugin-binding.save",
+        "deck-plugin-binding.clear",
+        "deck-agent-type.runtime-plan",
+        "deck-agent-type.runtime-prepare",
     ]
     assert [item.capability.contract_sha256 for item in DECK_PLUGIN_BINDING_OPERATIONS] == [
         "4b66af7888ed17e16f7e7aa38aded821ad3ecfe148663001dd6c4a66c714fb93",
@@ -120,6 +130,9 @@ def test_registry122_126_hashes_and_actor_free_inputs_are_exact():
         "aca3a55ce01d9e7754d5cd9be07320cb4240d3d26928c8ff24ba3ea9675fa770",
         "55fc0175170183fc1d5fc5162ef6be15bb863ef43261902c8edda5614bbcdb70",
         "cf91b567af3ae207d0c009947d98fb0dcb2335d3abcbf7e8194f95a02ceeddb2",
+        "9a89ec380e280fc64b67b9725a68edf3244df0f76e41df8db5fd89b3e3fd44fc",
+        "87a3f0497e3927aa8c8048e6bc79de1b042631f096f85184568201dce378e5f7",
+        "9cc1a08d15e0279ed977bb5b7ee25a5ab270cf32a4f67ded719c23e33d000716",
     ]
     with pytest.raises(ValidationError):
         BindingScopeInputDTO.model_validate({
@@ -130,6 +143,19 @@ def test_registry122_126_hashes_and_actor_free_inputs_are_exact():
         BindingSelectionInputDTO.model_validate({
             **selection().model_dump(),
             "ready": True,
+        })
+    with pytest.raises(ValidationError):
+        AgentTypeRuntimePrepareInputDTO.model_validate({
+            **scope().model_dump(),
+            "expected_binding_revision": 0,
+            "verified_plugin": {
+                "plugin_installation_id": "cpi_example",
+                "package_spec": "example.runtime",
+                "resolved_version": VERSION,
+                "artifact_digest": "sha256:" + "a" * 64,
+                "has_manifest": True,
+                "artifact_path": "/caller/path",
+            },
         })
 
 
@@ -216,6 +242,46 @@ def test_absent_or_mismatched_save_receipt_remains_unknown():
     assert mismatched.value.outcome_unknown
 
 
+def test_unknown_runtime_prepare_reads_only_its_original_receipt():
+    evidence = AgentTypeVerifiedPluginDTO(
+        plugin_installation_id="cpi_" + "a" * 32,
+        package_spec="example.runtime",
+        resolved_version=VERSION,
+        artifact_digest="sha256:" + "b" * 64,
+        has_manifest=True,
+    )
+    command = AgentTypeRuntimePrepareInputDTO(
+        **scope().model_dump(),
+        expected_binding_revision=0,
+        verified_plugin=evidence,
+    )
+    prepared = AgentTypeRuntimePreparedDTO(
+        deck_id=DECK_ID,
+        deck_plugin_id=PLUGIN_ID,
+        deck_plugin_version=VERSION,
+        current_binding_revision=0,
+        runtime_ready=True,
+    )
+    client = FakeClient(prepared)
+    client.execute_error = AdminDataError(
+        "ADMIN_TIMEOUT", 504, REQUEST_ID, True
+    )
+    client.receipt_reply = CommittedReceiptDTO[AgentTypeRuntimePreparedDTO](
+        status="committed",
+        operation=PREPARE_AGENT_TYPE_RUNTIME.capability.name,
+        request_id=REQUEST_ID,
+        result=prepared,
+    )
+    data = AdminDeckPluginBindingData(client)
+    assert data.runtime_prepare(
+        command, REQUEST_ID, access_token="oauth"
+    ) == prepared
+    assert len(client.execute_calls) == 1
+    assert client.receipt_calls == [
+        (PREPARE_AGENT_TYPE_RUNTIME, REQUEST_ID, "oauth")
+    ]
+
+
 def test_error_details_are_owned_by_their_codes():
     conflict = ErrorDTO.model_validate({
         "code": "BINDING_REVISION_CONFLICT",
@@ -251,7 +317,7 @@ def test_error_details_are_owned_by_their_codes():
         })
 
 
-def test_production_request_owner_registers_all_five_operations():
+def test_production_request_owner_registers_all_eight_operations():
     config = AdminDataConfig(
         base_url="https://admin.example",
         issuer="https://admin.example/api/auth",
@@ -267,12 +333,14 @@ def test_production_request_owner_registers_all_five_operations():
         owner.close()
 
 
-def test_five_operation_kinds_match_read_and_write_scope():
+def test_eight_operation_kinds_match_read_and_write_scope():
     assert {
         READ_BINDING.capability.kind,
         READ_BINDING_HISTORY.capability.kind,
         LIST_BINDING_OPTIONS.capability.kind,
         VALIDATE_BINDING.capability.kind,
+        PLAN_AGENT_TYPE_RUNTIME.capability.kind,
     } == {"read"}
-    assert SAVE_BINDING.capability.kind == "write"
-    assert SAVE_BINDING.capability.user_scope == "dream:write"
+    for operation in (SAVE_BINDING, CLEAR_BINDING, PREPARE_AGENT_TYPE_RUNTIME):
+        assert operation.capability.kind == "write"
+        assert operation.capability.user_scope == "dream:write"

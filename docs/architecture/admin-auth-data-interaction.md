@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-09-16: consume Registry122-126 Deck Plugin binding operations without Dream database fallback. -->
+<!-- [Sync] 2026-09-16: consume Registry127-129 Agent-type operations with local artifact verification and no Dream database fallback. -->
 <!-- [Sync] 2026-09-16: consume Registry121 claim-turn and inject claim-bound AdminTurnPersistence into confirmation Runtime. -->
 <!-- [Sync] 2026-09-16: consume Registry120 Story confirmation DTOs and remove its production PostgreSQL state machine. -->
 <!-- [Sync] 2026-09-15: consume Registry115 Story Guidance persistence and keep same-Thread Runtime dispatch in Dream. -->
@@ -36,9 +36,11 @@
 
 # Dream / Admin 认证与数据交互
 
-## Deck Plugin Binding（Registry122–126）
+## Deck Plugin Binding 与 Agent Type（Registry122–129）
 
 Dream 的 `plugin-options`、binding current、history、validate 和 save 五个公开入口保留原路径与 JSON 响应，但数据调用统一进入 `AdminDeckPluginBindingData`。严格 Pydantic 输入只包含 Deck、当前/default Workspace、Plugin/version、`next_run`、limit 和 expected revision；current OAuth actor 只从 `_admin_actor` 取得，不能由请求 DTO 或 header 提交用户 ID。返回 DTO 重新校验 Deck、Plugin/version、revision、时间与 selection summary，Admin 服务不可用或契约不匹配直接失败，不回退 Dream PostgreSQL。
+
+`PUT /api/voice-decks/{deck_id}/agent-type` 也使用同一 consumer。Chat 调用 clear；Dream 先调用 runtime-plan，取得 Admin 根据服务端策略、release、lock 和 ready installation 选择的唯一候选。候选只有 package/version/digest/compatibility 等校验字段，没有 artifact path。Dream 从配置的共享 artifact store 派生实际路径，校验 digest、`.claude-plugin/plugin.json` 和本机 Claude CLI，再把精确 evidence 交给 runtime-prepare。Admin 在 receipt transaction 中重新选择并核对事实，幂等写或刷新 materialization，确保 Workspace installation；最后 Dream 使用既有 save CAS 改变 Agent type。
 
 Admin 的对应 Zod DTO → Service → typed Drizzle Repository 在一个 transaction 中重复 owner 检查并读取 release、installation、runtime lock 与 materialization。save 在 receipt UOW 内锁 Deck，比较 expected revision，运行 compatibility，执行 active→stale、insert 下一 revision 和 Deck draft revision 推进。同选择是无副作用返回；冲突映射原409/current revision，selection 不允许映射原422 validation。网络结果未知时 Dream 只读取同 operation/request 的 original receipt，absent 或错配继续报告未知，不重发 POST。
 
@@ -46,7 +48,8 @@ Admin 的对应 Zod DTO → Service → typed Drizzle Repository 在一个 trans
 sequenceDiagram
   participant UI as Dream UI
   participant API as Dream FastAPI
-  participant ADM as Admin Registry122-126
+  participant ADM as Admin Registry122-129
+  participant FS as Shared artifact + Claude CLI
   participant DB as Admin PostgreSQL
   UI->>API: binding read/validate/save
   API->>ADM: strict DTO + current OAuth + request_id
@@ -57,9 +60,16 @@ sequenceDiagram
   DB-->>ADM: committed projection
   ADM-->>API: strict DTO / closed error
   API-->>UI: unchanged public response
+  UI->>API: select Dream Agent type + expected revision
+  API->>ADM: runtime-plan
+  ADM-->>API: closed candidate without path
+  API->>FS: verify digest + manifest + CLI
+  API->>ADM: runtime-prepare + immutable evidence
+  ADM->>DB: recheck + materialization + Workspace installation + receipt
+  API->>ADM: binding.save CAS
 ```
 
-五项 operation hash 与 Admin 生成 artifact 完全一致；Registry121 prefix SHA 保持 `969d316b62c1c77aa5f232030d882fd48b36f01b0728cd4f86b877caa99909af`，Registry126 完整 SHA 为 `67a18f69f0674270c5f316959a7d962ef7a8c201249f4c45ac3a780ed710eada`。本阶段不改 schema 或 migration。`PUT .../agent-type` 仍包含 Dream 本地 artifact/materialization 业务和数据库依赖，按下一阶段拆分；Runtime、SSE、EventBus、共享 workspace、`.claude-tmp`、资源策略 LKG 均未改变。
+新增 clear/runtime-plan/runtime-prepare operation hash 为 `9a89ec380e280fc64b67b9725a68edf3244df0f76e41df8db5fd89b3e3fd44fc`、`87a3f0497e3927aa8c8048e6bc79de1b042631f096f85184568201dce378e5f7`、`9cc1a08d15e0279ed977bb5b7ee25a5ab270cf32a4f67ded719c23e33d000716`；Registry126 prefix SHA 保持 `67a18f69f0674270c5f316959a7d962ef7a8c201249f4c45ac3a780ed710eada`，Registry129 完整 SHA 为 `686f0668c72ca6114d894392d2dd2a2fde228b87fa31a1b858fd1dd553663881`。本阶段不改 schema 或 migration。Runtime、SSE、EventBus、共享 workspace、`.claude-tmp`、资源策略 LKG 均未改变；Dream launch provisioning 的数据库路径仍是后续缺口。
 
 Story Workspace confirmation现绑定Admin Registry120。Dream浏览器入口使用current OAuth先读取既有`run.read` DTO，校验actor、Run、source Thread与当前状态，然后在共享文件系统中完成两次相同projection/base-revision检查；只有检查稳定才把原camelCase confirmation command作为严格Pydantic DTO提交给Admin。Admin从OAuth主体重新派生owned Run/Workspace/Thread，生成canonical message/metadata，在一个typed Drizzle UOW完成普通user消息、Thread touch、Run transition和receipt。Dream不发送actor、message ID、状态、SQL、表列、数据库、路径或事务选择器，也不保留confirmation PostgreSQL fallback。
 

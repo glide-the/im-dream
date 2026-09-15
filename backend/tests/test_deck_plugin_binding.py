@@ -1,7 +1,7 @@
 # [Input] Owned binding fixtures, production DTOs and isolated domain DI.
-# [Output] Binding state/history/CAS/API technical contracts; real auth/default ingress is verified separately.
+# [Output] Binding state/history/CAS and Admin-backed Agent-type route technical contracts.
 # [Pos] Explicit provider-free binding fixture tests, no production fallback.
-# [Sync] 2026-09-15: isolate the default resolver in existing binding-only fixtures after shared OAuth adoption.
+# [Sync] 2026-09-16: replace public Agent-type route database DI with strict Admin adapter fixtures.
 """Focused binding persistence, history, validation, concurrency, and API tests.
 
 [Sync 2026-08-16] Cover the folded Deck panel's append-only history response.
@@ -51,6 +51,11 @@ from services.deck_plugin.selection_validation_service import (
     SelectionValidationService,
 )
 from services.admin_data.deck_plugin_binding_data import (
+    AgentTypeRuntimeCandidateDTO,
+    AgentTypeRuntimePlanDTO,
+    AgentTypeRuntimePreparedDTO,
+    AgentTypeVerifiedPluginDTO,
+    AgentTypeChatDTO,
     BindingRevisionConflictDetailsDTO,
     BindingSelectionRejectedDetailsDTO,
 )
@@ -349,6 +354,66 @@ class BindingDataAdapter:
                     request=update,
                 )
             )
+        )
+
+    def clear(self, request, _request_id, *, access_token):
+        state = self._translate(
+            lambda: self.fixture.binding.clear(
+                deck_id=request.deck_id,
+                actor_id=self.actor_id,
+                requested_workspace_id=request.workspace_id,
+                expected_binding_revision=request.expected_binding_revision,
+            )
+        )
+        return AgentTypeChatDTO(
+            deck_id=request.deck_id,
+            agent_type="chat",
+            binding_revision=state.binding_revision,
+        )
+
+    def runtime_plan(self, request, _request_id, *, access_token):
+        self._translate(
+            lambda: self.fixture.binding.resolve_workspace_access(
+                deck_id=request.deck_id,
+                actor_id=self.actor_id,
+                requested_workspace_id=request.workspace_id,
+            )
+        )
+        return AgentTypeRuntimePlanDTO(
+            deck_id=request.deck_id,
+            current_binding_revision=self.fixture.binding.latest_revision(
+                request.deck_id
+            ),
+            target=AgentTypeRuntimeCandidateDTO(
+                deck_plugin_id=PLUGIN_ID,
+                deck_plugin_version=VERSION,
+                runtime_plugin_lock_id="rpl_" + "2" * 32,
+                plugin_installation_id="cpi_" + "6" * 32,
+                package_spec=RUNTIME_PLUGIN_ID,
+                package_name="ink-dream-tools",
+                marketplace="voice-decks",
+                resolved_version=VERSION,
+                artifact_digest=DIGEST,
+                compatibility_json="{}",
+            ),
+        )
+
+    def runtime_prepare(self, request, _request_id, *, access_token):
+        current_revision = self.fixture.binding.latest_revision(request.deck_id)
+        if request.expected_binding_revision != current_revision:
+            raise AdminDataError(
+                "BINDING_REVISION_CONFLICT",
+                409,
+                details=BindingRevisionConflictDetailsDTO(
+                    current_revision=current_revision
+                ),
+            )
+        return AgentTypeRuntimePreparedDTO(
+            deck_id=request.deck_id,
+            deck_plugin_id=PLUGIN_ID,
+            deck_plugin_version=VERSION,
+            current_binding_revision=current_revision,
+            runtime_ready=True,
         )
 
 
@@ -654,22 +719,94 @@ class BindingRouterTests(unittest.TestCase):
         app = FastAPI()
         current_user = actor_projection(1, WORKSPACE_ID)
         app.dependency_overrides[binding_router.get_current_user] = lambda: current_user
-        app.dependency_overrides[binding_router._binding_db] = lambda: self.fixture.db
         # This suite isolates binding DTO/domain behavior with an owned fixture.
         # Actual OAuth/default resolution is verified in the Admin ingress suite.
         app.dependency_overrides[binding_router._deck_current_user] = app.dependency_overrides[binding_router.get_current_user]
+        self.adapter = BindingDataAdapter(self.fixture)
         app.dependency_overrides[
             binding_router._binding_data
-        ] = lambda: BindingDataAdapter(self.fixture)
-        app.dependency_overrides[
-            binding_router._selection_service
-        ] = lambda: self.fixture.validator
+        ] = lambda: self.adapter
+        self.runtime_verify_patcher = patch.object(
+            binding_router,
+            "verify_agent_type_runtime",
+            side_effect=lambda candidate: AgentTypeVerifiedPluginDTO(
+                plugin_installation_id=candidate.plugin_installation_id,
+                package_spec=candidate.package_spec,
+                resolved_version=candidate.resolved_version,
+                artifact_digest=candidate.artifact_digest,
+                has_manifest=True,
+            ),
+        )
+        self.runtime_verify = self.runtime_verify_patcher.start()
         app.include_router(binding_router.router)
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
         self.client.close()
+        self.runtime_verify_patcher.stop()
         self.fixture.close()
+
+    def test_dream_agent_type_uses_plan_local_evidence_prepare_and_binding_save(self) -> None:
+        response = self.client.put(
+            f"/api/voice-decks/{DECK_ID}/agent-type",
+            json={"agent_type": "dream", "expected_binding_revision": 0},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            {
+                "deck_id": DECK_ID,
+                "agent_type": "dream",
+                "binding_revision": 1,
+            },
+        )
+        self.runtime_verify.assert_called_once()
+        row = self.fixture.db.execute(
+            "SELECT deck_plugin_id, deck_plugin_version, binding_revision, status "
+            "FROM deck_plugin_bindings WHERE deck_id = ?",
+            (DECK_ID,),
+        ).fetchone()
+        self.assertEqual(
+            tuple(row),
+            (PLUGIN_ID, VERSION, 1, "active"),
+        )
+
+    def test_dream_agent_type_rejects_stale_revision_before_local_verification(self) -> None:
+        saved = asyncio.run(
+            self.fixture.binding.save(
+                deck_id=DECK_ID,
+                actor_id="1",
+                requested_workspace_id=WORKSPACE_ID,
+                request=self.fixture.request(0),
+            )
+        )
+        self.assertEqual(saved.binding_revision, 1)
+        response = self.client.put(
+            f"/api/voice-decks/{DECK_ID}/agent-type",
+            json={"agent_type": "dream", "expected_binding_revision": 0},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["current_revision"], 1)
+        self.runtime_verify.assert_not_called()
+
+    def test_dream_agent_type_local_failure_does_not_create_a_binding(self) -> None:
+        self.runtime_verify.side_effect = (
+            binding_router.AgentTypeRuntimeUnavailable()
+        )
+        response = self.client.put(
+            f"/api/voice-decks/{DECK_ID}/agent-type",
+            json={"agent_type": "dream", "expected_binding_revision": 0},
+        )
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(
+            response.json()["error_code"], "RUNTIME_PLUGIN_NOT_READY"
+        )
+        self.assertEqual(
+            self.fixture.db.execute(
+                "SELECT COUNT(*) FROM deck_plugin_bindings"
+            ).fetchone()[0],
+            0,
+        )
 
     def test_authenticated_endpoints_and_frozen_success_shapes(self) -> None:
         methods: dict[str, set[str]] = {}
@@ -829,16 +966,10 @@ class BindingRouterTests(unittest.TestCase):
         unauthorized_app.dependency_overrides[
             binding_router.get_current_user
         ] = lambda: unauthorized_user
-        unauthorized_app.dependency_overrides[
-            binding_router._binding_db
-        ] = lambda: self.fixture.db
         unauthorized_app.dependency_overrides[binding_router._deck_current_user] = unauthorized_app.dependency_overrides[binding_router.get_current_user]
         unauthorized_app.dependency_overrides[
             binding_router._binding_data
         ] = lambda: BindingDataAdapter(self.fixture, actor_id="2")
-        unauthorized_app.dependency_overrides[
-            binding_router._selection_service
-        ] = lambda: self.fixture.validator
         unauthorized_app.include_router(binding_router.router)
         with TestClient(unauthorized_app) as client:
             denied = client.get(f"/api/voice-decks/{DECK_ID}/plugin-binding")
@@ -853,10 +984,6 @@ class BindingRouterTests(unittest.TestCase):
 
     def test_router_uses_existing_auth_dependency(self) -> None:
         app = FastAPI()
-        app.dependency_overrides[binding_router._binding_db] = lambda: self.fixture.db
-        app.dependency_overrides[
-            binding_router._selection_service
-        ] = lambda: self.fixture.validator
         app.include_router(binding_router.router)
         with TestClient(app) as anonymous:
             response = anonymous.get(

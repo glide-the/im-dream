@@ -1,7 +1,7 @@
-# [Input] Registry122-126 binding contract, current OAuth bearer and default Workspace identity.
-# [Output] Strict owner-bound binding state/history/options/validation/save DTOs and receipt recovery.
-# [Pos] Dream consumer; SQL, ORM, compatibility facts, CAS and transactions stay in Admin.
-# [Sync] 2026-09-16: replace five public Deck Plugin binding database paths.
+# [Input] Registry122-129 binding/Agent-type contracts, current OAuth bearer and default Workspace identity.
+# [Output] Strict owner-bound binding DTOs, Runtime verification candidate/evidence and receipt recovery.
+# [Pos] Dream consumer; SQL, ORM, Runtime metadata, CAS and transactions stay in Admin.
+# [Sync] 2026-09-16: add clear and evidence-bound Runtime plan/prepare operations.
 """Typed Admin client for Deck Plugin binding operations."""
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ PluginVersion = Annotated[str, Field(min_length=5)]
 BindingId = Annotated[str, Field(pattern=r"^dpb_[0-9a-f]{32}$")]
 Revision = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
 PositiveRevision = Annotated[int, Field(ge=1, le=9_007_199_254_740_991)]
+Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+RuntimeLockId = Annotated[str, Field(pattern=r"^rpl_[0-9a-f]{32}$")]
 
 
 class BindingScopeInputDTO(ChatStrictDTO):
@@ -49,6 +51,56 @@ class BindingSelectionInputDTO(BindingScopeInputDTO):
 
 class BindingSaveInputDTO(BindingSelectionInputDTO):
     expected_binding_revision: Revision
+
+
+class BindingClearInputDTO(BindingScopeInputDTO):
+    expected_binding_revision: Revision
+
+
+class AgentTypeRuntimeCandidateDTO(ChatStrictDTO):
+    deck_plugin_id: PluginId
+    deck_plugin_version: PluginVersion
+    runtime_plugin_lock_id: RuntimeLockId
+    plugin_installation_id: Identifier
+    package_spec: Identifier
+    package_name: Identifier
+    marketplace: Identifier
+    resolved_version: PluginVersion
+    artifact_digest: Digest
+    compatibility_json: str
+
+
+class AgentTypeRuntimePlanDTO(ChatStrictDTO):
+    deck_id: Identifier
+    current_binding_revision: Revision
+    target: AgentTypeRuntimeCandidateDTO
+
+
+class AgentTypeVerifiedPluginDTO(ChatStrictDTO):
+    plugin_installation_id: Identifier
+    package_spec: Identifier
+    resolved_version: PluginVersion
+    artifact_digest: Digest
+    has_manifest: Literal[True]
+
+
+class AgentTypeRuntimePrepareInputDTO(BindingScopeInputDTO):
+    expected_binding_revision: Revision
+    verified_plugin: AgentTypeVerifiedPluginDTO
+
+
+class AgentTypeRuntimePreparedDTO(ChatStrictDTO):
+    deck_id: Identifier
+    deck_plugin_id: PluginId
+    deck_plugin_version: PluginVersion
+    current_binding_revision: Revision
+    runtime_ready: Literal[True]
+
+
+class AgentTypeChatDTO(ChatStrictDTO):
+    deck_id: Identifier
+    agent_type: Literal["chat"]
+    binding_revision: Revision
 
 
 class BindingResponseDTO(ChatStrictDTO):
@@ -174,12 +226,18 @@ READ_BINDING_HISTORY = _operation("deck-plugin-binding.history", "read", Binding
 LIST_BINDING_OPTIONS = _operation("deck-plugin-binding.options", "read", BindingScopeInputDTO, BindingOptionsDTO, "aca3a55ce01d9e7754d5cd9be07320cb4240d3d26928c8ff24ba3ea9675fa770")
 VALIDATE_BINDING = _operation("deck-plugin-binding.validate", "read", BindingSelectionInputDTO, BindingValidationDTO, "55fc0175170183fc1d5fc5162ef6be15bb863ef43261902c8edda5614bbcdb70")
 SAVE_BINDING = _operation("deck-plugin-binding.save", "write", BindingSaveInputDTO, BindingResponseDTO, "cf91b567af3ae207d0c009947d98fb0dcb2335d3abcbf7e8194f95a02ceeddb2")
+CLEAR_BINDING = _operation("deck-plugin-binding.clear", "write", BindingClearInputDTO, AgentTypeChatDTO, "9a89ec380e280fc64b67b9725a68edf3244df0f76e41df8db5fd89b3e3fd44fc")
+PLAN_AGENT_TYPE_RUNTIME = _operation("deck-agent-type.runtime-plan", "read", BindingScopeInputDTO, AgentTypeRuntimePlanDTO, "87a3f0497e3927aa8c8048e6bc79de1b042631f096f85184568201dce378e5f7")
+PREPARE_AGENT_TYPE_RUNTIME = _operation("deck-agent-type.runtime-prepare", "write", AgentTypeRuntimePrepareInputDTO, AgentTypeRuntimePreparedDTO, "9cc1a08d15e0279ed977bb5b7ee25a5ab270cf32a4f67ded719c23e33d000716")
 DECK_PLUGIN_BINDING_OPERATIONS = (
     READ_BINDING,
     READ_BINDING_HISTORY,
     LIST_BINDING_OPTIONS,
     VALIDATE_BINDING,
     SAVE_BINDING,
+    CLEAR_BINDING,
+    PLAN_AGENT_TYPE_RUNTIME,
+    PREPARE_AGENT_TYPE_RUNTIME,
 )
 
 
@@ -197,12 +255,55 @@ class AdminDeckPluginBindingData:
             or result.applied_to != input_dto.apply_to
         ):
             raise invalid_response(request_id, write=write)
+        if isinstance(input_dto, BindingClearInputDTO) and (
+            result.agent_type != "chat"
+            or result.binding_revision != input_dto.expected_binding_revision
+        ):
+            raise invalid_response(request_id, write=write)
+        if isinstance(input_dto, AgentTypeRuntimePrepareInputDTO) and (
+            result.current_binding_revision != input_dto.expected_binding_revision
+        ):
+            raise invalid_response(request_id, write=write)
         return result
 
     def _execute(self, operation, input_dto, request_id: str, access_token: str):
         require_workflow_capabilities(self._client, request_id)
         result = self._client.execute(operation, input_dto, request_id, access_token=access_token)
-        return self._validate_identity(input_dto, result, request_id, write=operation is SAVE_BINDING)
+        return self._validate_identity(
+            input_dto,
+            result,
+            request_id,
+            write=operation.capability.kind == "write",
+        )
+
+    def _write(self, operation, input_dto, request_id: str, access_token: str):
+        try:
+            return self._execute(operation, input_dto, request_id, access_token)
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+        try:
+            receipt = self._client.receipt(
+                operation, request_id, access_token=access_token
+            )
+        except AdminDataError as error:
+            raise AdminDataError(
+                error.code,
+                error.status_code,
+                request_id,
+                True,
+                error.details,
+            ) from None
+        if (
+            not isinstance(receipt, CommittedReceiptDTO)
+            or type(receipt.result) is not operation.output_dto
+        ):
+            raise AdminDataError(
+                "ADMIN_WRITE_RESULT_UNKNOWN", 503, request_id, True
+            )
+        return self._validate_identity(
+            input_dto, receipt.result, request_id, write=True
+        )
 
     def current(self, input_dto: BindingScopeInputDTO, request_id: str, *, access_token: str):
         return self._execute(READ_BINDING, input_dto, request_id, access_token)
@@ -217,15 +318,17 @@ class AdminDeckPluginBindingData:
         return self._execute(VALIDATE_BINDING, input_dto, request_id, access_token)
 
     def save(self, input_dto: BindingSaveInputDTO, request_id: str, *, access_token: str):
-        try:
-            return self._execute(SAVE_BINDING, input_dto, request_id, access_token)
-        except AdminDataError as error:
-            if not error.outcome_unknown:
-                raise
-        try:
-            receipt = self._client.receipt(SAVE_BINDING, request_id, access_token=access_token)
-        except AdminDataError as error:
-            raise AdminDataError(error.code, error.status_code, request_id, True, error.details) from None
-        if not isinstance(receipt, CommittedReceiptDTO):
-            raise AdminDataError("ADMIN_WRITE_RESULT_UNKNOWN", 503, request_id, True)
-        return self._validate_identity(input_dto, receipt.result, request_id, write=True)
+        return self._write(SAVE_BINDING, input_dto, request_id, access_token)
+
+    def clear(self, input_dto: BindingClearInputDTO, request_id: str, *, access_token: str):
+        return self._write(CLEAR_BINDING, input_dto, request_id, access_token)
+
+    def runtime_plan(self, input_dto: BindingScopeInputDTO, request_id: str, *, access_token: str):
+        return self._execute(
+            PLAN_AGENT_TYPE_RUNTIME, input_dto, request_id, access_token
+        )
+
+    def runtime_prepare(self, input_dto: AgentTypeRuntimePrepareInputDTO, request_id: str, *, access_token: str):
+        return self._write(
+            PREPARE_AGENT_TYPE_RUNTIME, input_dto, request_id, access_token
+        )

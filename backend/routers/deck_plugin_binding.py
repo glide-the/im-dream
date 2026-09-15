@@ -1,7 +1,7 @@
-# [Sync] 2026-09-16: move five binding/options/history/validation routes to Registry122-126 Admin DTOs.
+# [Sync] 2026-09-16: move agent-type clear/plan/prepare to Registry127-129 Admin DTOs plus local artifact verification.
 # [Input] Current Admin OAuth actor, shared default Workspace and typed Admin binding consumer.
-# [Output] Original authenticated binding/options/history/validation API projections.
-# [Pos] Public Deck binding ingress; only agent-type Runtime provisioning still owns a Dream DB dependency.
+# [Output] Original authenticated binding/options/history/validation/Agent-type API projections.
+# [Pos] Public Deck binding ingress; no PostgreSQL client, ORM, transaction or fallback.
 # [Sync] 2026-09-15: resolve default Workspace through the shared registered OAuth-write consumer.
 """Authenticated Deck Plugin binding, options, history, and validation endpoints.
 
@@ -10,16 +10,16 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-import database
 from services.admin_data.request_auth import AdminRequestAuth
 from services.admin_data.deck_plugin_binding_data import (
     AdminDeckPluginBindingData,
+    AgentTypeRuntimePrepareInputDTO,
+    BindingClearInputDTO,
     BindingHistoryInputDTO,
     BindingRevisionConflictDetailsDTO,
     BindingSaveInputDTO,
@@ -27,6 +27,11 @@ from services.admin_data.deck_plugin_binding_data import (
     BindingSelectionInputDTO,
     BindingSelectionRejectedDetailsDTO,
 )
+from services.deck.agent_type_runtime import (
+    AgentTypeRuntimeUnavailable,
+    verify_agent_type_runtime,
+)
+from starlette.concurrency import run_in_threadpool
 
 from .deps import (
     get_admin_request_auth,
@@ -48,16 +53,6 @@ try:
         DeckPluginSelectionRequest,
         DeckPluginSelectionValidationResponse,
     )
-    from backend.services.deck_plugin.binding_service import (
-        BindingAccessError,
-        BindingRevisionConflict,
-        BindingSelectionRejected,
-        BindingService,
-    )
-    from backend.services.deck_plugin.selection_validation_service import (
-        SelectionValidationService,
-    )
-    from backend.services.deck.runtime_context import make_runtime_context_resolver
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
     from models.deck_plugin import (
         DeckPluginBindingResponse,
@@ -71,56 +66,9 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
         DeckPluginSelectionRequest,
         DeckPluginSelectionValidationResponse,
     )
-    from services.deck_plugin.binding_service import (
-        BindingAccessError,
-        BindingRevisionConflict,
-        BindingSelectionRejected,
-        BindingService,
-    )
-    from services.deck_plugin.selection_validation_service import (
-        SelectionValidationService,
-    )
-    from services.deck.runtime_context import make_runtime_context_resolver
-    from services.story_workspace.dream_launch_infrastructure import (
-        DreamLaunchApplicationError,
-        DreamRuntimeProvisioningService,
-    )
-else:
-    from backend.services.story_workspace.dream_launch_infrastructure import (
-        DreamLaunchApplicationError,
-        DreamRuntimeProvisioningService,
-    )
 
 
 router = APIRouter(prefix="/api/voice-decks", tags=["deck-plugin-binding"])
-
-
-async def _binding_db() -> AsyncIterator[Any]:
-    db = database.get_db()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def _selection_service(
-    db: Any = Depends(_binding_db),
-) -> SelectionValidationService:
-    return SelectionValidationService(
-        db,
-        runtime_context_resolver=make_runtime_context_resolver(db),
-    )
-
-
-def _binding_service(
-    db: Any = Depends(_binding_db),
-    validator: SelectionValidationService = Depends(_selection_service),
-) -> BindingService:
-    return BindingService(db, selection_validator=validator)
-
-
-def _actor_id(current_user: dict[str, Any]) -> str:
-    return str(current_user["user_id"])
 
 
 def _requested_workspace(current_user: dict[str, Any]) -> str | None:
@@ -179,6 +127,18 @@ def _binding_admin_error(exc, request_id: str):
                 "message": "The selected Deck Plugin release is not selectable.",
                 "validation": details.validation.model_dump(mode="json"),
             })
+    if not exc.outcome_unknown and exc.code in {
+        "DECK_PLUGIN_UNAVAILABLE",
+        "DECK_RUNTIME_CONFIG_INVALID",
+        "RUNTIME_PLUGIN_NOT_READY",
+    }:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error_code": exc.code,
+                "message": "The Dream Runtime is not ready for this Deck.",
+            },
+        )
     raise HTTPException(status_code=exc.status_code, detail={
         "error_code": exc.code,
         "request_id": exc.request_id or request_id,
@@ -194,58 +154,73 @@ async def put_agent_type(
     deck_id: str,
     request: DeckAgentTypeUpdateRequest,
     current_user: dict[str, Any] = Depends(_deck_current_user),
-    binding: BindingService = Depends(_binding_service),
+    data: AdminDeckPluginBindingData = Depends(_binding_data),
 ):
-    actor_id = _actor_id(current_user)
-    workspace_id = _requested_workspace(current_user)
-    try:
-        resolved_workspace = binding.resolve_workspace_access(
-            deck_id=deck_id,
-            actor_id=actor_id,
-            requested_workspace_id=workspace_id,
-        )
-        if binding.db.in_transaction:
-            binding.db.rollback()
-        if request.agent_type is DeckAgentType.CHAT:
-            state = binding.clear(
-                deck_id=deck_id,
-                actor_id=actor_id,
-                requested_workspace_id=resolved_workspace,
+    scope = _binding_scope(deck_id, current_user)
+    if request.agent_type is DeckAgentType.CHAT:
+        return await invoke_admin_operation(
+            current_user,
+            data.clear,
+            BindingClearInputDTO(
+                **scope.model_dump(),
                 expected_binding_revision=request.expected_binding_revision,
-            )
-            return DeckAgentTypeResponse(
-                deck_id=deck_id,
-                agent_type=DeckAgentType.CHAT,
-                binding_revision=state.binding_revision,
-            )
-        provisioner = DreamRuntimeProvisioningService(binding.db)
-        selected = await provisioner.ensure_binding(
-            deck_id=deck_id,
-            actor_id=actor_id,
-            workspace_id=resolved_workspace,
-            expected_binding_revision=request.expected_binding_revision,
+            ),
+            error_handler=_binding_admin_error,
         )
-        return DeckAgentTypeResponse(
-            deck_id=deck_id,
-            agent_type=DeckAgentType.DREAM,
-            binding_revision=selected.binding_revision,
-        )
-    except BindingAccessError:
-        return _access_denied()
-    except BindingRevisionConflict as exc:
+    plan = await invoke_admin_operation(
+        current_user,
+        data.runtime_plan,
+        scope,
+        error_handler=_binding_admin_error,
+    )
+    if plan.current_binding_revision != request.expected_binding_revision:
         return JSONResponse(
             status_code=409,
             content={
-                "error_code": exc.code,
-                "current_revision": exc.current_revision,
-                "message": str(exc),
+                "error_code": "BINDING_REVISION_CONFLICT",
+                "current_revision": plan.current_binding_revision,
+                "message": "Binding was modified concurrently. Please refresh and confirm your selection.",
             },
         )
-    except DreamLaunchApplicationError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error_code": exc.code, "message": str(exc)},
+    try:
+        evidence = await run_in_threadpool(
+            verify_agent_type_runtime, plan.target
         )
+    except AgentTypeRuntimeUnavailable:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error_code": "RUNTIME_PLUGIN_NOT_READY",
+                "message": "The Dream Runtime is not ready for this Deck.",
+            },
+        )
+    prepared = await invoke_admin_operation(
+        current_user,
+        data.runtime_prepare,
+        AgentTypeRuntimePrepareInputDTO(
+            **scope.model_dump(),
+            expected_binding_revision=request.expected_binding_revision,
+            verified_plugin=evidence,
+        ),
+        error_handler=_binding_admin_error,
+    )
+    selected = await invoke_admin_operation(
+        current_user,
+        data.save,
+        BindingSaveInputDTO(
+            **scope.model_dump(),
+            deck_plugin_id=prepared.deck_plugin_id,
+            deck_plugin_version=prepared.deck_plugin_version,
+            apply_to="next_run",
+            expected_binding_revision=prepared.current_binding_revision,
+        ),
+        error_handler=_binding_admin_error,
+    )
+    return DeckAgentTypeResponse(
+        deck_id=deck_id,
+        agent_type=DeckAgentType.DREAM,
+        binding_revision=selected.binding_revision,
+    )
 
 
 @router.get(

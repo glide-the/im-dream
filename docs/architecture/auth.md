@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-09-16: five Deck Plugin binding routes use current Admin OAuth and Registry122-126. -->
+<!-- [Sync] 2026-09-16: Agent-type clear/Runtime plan/prepare use current Admin OAuth and Registry127-129. -->
 <!-- [Sync] 2026-09-16: confirmation Runtime uses Registry121 claim-bound Admin persistence authority. -->
 <!-- [Sync] 2026-09-15: localStorage import and first-login completion use Admin Registry101 with no Dream DB fallback. -->
 <!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound server-persistence grant and original receipt recovery. -->
@@ -45,7 +45,7 @@ baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/o
 
 Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS与账户映射。Dream Next 是同源 BFF；FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token或维护另一套 session/refresh/device authority。Admin管理和Dream访问权限独立，同主体登录Dream不获得Admin管理。
 
-Deck Plugin binding 的 current/history/options/validate 使用当前 OAuth `dream:read`，save 使用 `dream:write`。Dream 从已校验主体解析 default Workspace 后只提交业务定位字段，Admin 仍重新派生 canonical actor 并检查 Deck/Workspace owner。Google token、Session token、任意用户 ID header、Runtime purpose grant 或 Admin RBAC 身份都不能替代该产品 OAuth access token。
+Deck Plugin binding 的 current/history/options/validate/runtime-plan 使用当前 OAuth `dream:read`，save/clear/runtime-prepare 使用 `dream:write`。Dream 从已校验主体解析 default Workspace 后只提交业务定位字段和本地不可变 artifact 证据；Admin 仍重新派生 canonical actor 并检查 Deck/Workspace owner。Google token、Session token、任意用户 ID header、Runtime purpose grant 或 Admin RBAC 身份都不能替代该产品 OAuth access token。
 
 Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contract.md`。当前客户端已按实际DTO与路径消费；发布能力与本机业务回执分别记录，本稿不自定 endpoint、claim 或 capability。跨项目业务设计见[认证与数据交互](admin-auth-data-interaction.md)。
 
