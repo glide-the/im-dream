@@ -32,7 +32,7 @@ from .sdk_env import resolve_claude_config_home
 
 SESSION_FILE_EXTENSION = ".jsonl"
 
-# Runtime 0.1.9 src/utils/sessionStoragePortable.ts::sanitizePath. This is a
+# Runtime 0.1.10 src/utils/sessionStoragePortable.ts::sanitizePath. This is a
 # storage-format boundary, not a business path-length limit.
 _RUNTIME_PROJECT_NAME_LIMIT = 200
 

@@ -7,6 +7,7 @@
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
 # [Sync] 2026-09-13: atomically pair SDK 0.2.145 with Runtime 0.1.9 package-root cli.js.
+# [Sync] 2026-09-15: install Runtime 0.1.10 and require its restored plugin management entrypoint.
 # [Sync] 2026-09-12: install Info-ZIP so approved ordinary-workspace archive
 #        commands execute in the production backend image.
 # [Sync] 2026-08-26: atomically pair the custom Agent SDK 0.2.144 with its
@@ -63,7 +64,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep zip: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
-ARG INK_CLAUDE_CODE_VERSION=0.1.9
+ARG INK_CLAUDE_CODE_VERSION=0.1.10
 ARG NOTION_CLI_VERSION=0.15.1
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -105,12 +106,13 @@ RUN set -eux; \
 # default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
 # explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
-    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.9"; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.10"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm install -g \
         --registry="${INK_CLAUDE_NPM_REGISTRY}" \
         "@glide-the/ink-claude-code-dream@${INK_CLAUDE_CODE_VERSION}"; \
     test "$(ink-claude-code-dream --version)" = "${CLAUDE_CODE_VERSION} (Claude Code)"; \
+    ink-claude-code-dream plugin --help >/dev/null; \
     DREAM_RUNTIME_ENTRYPOINT="$(realpath "$(command -v ink-claude-code-dream)")"; \
     test "$(basename "${DREAM_RUNTIME_ENTRYPOINT}")" = "cli.js"; \
     DREAM_RUNTIME_ROOT="$(dirname "${DREAM_RUNTIME_ENTRYPOINT}")"; \

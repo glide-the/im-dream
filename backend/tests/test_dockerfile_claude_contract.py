@@ -16,6 +16,7 @@
 #                    archive-backed notion-diary-sync package.
 # [Sync] 2026-09-12: require Info-ZIP in the production image.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and adjacent manifest validation.
+# [Sync] 2026-09-15: require Runtime 0.1.10 and its plugin-management preflight.
 
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.9"
+RUNTIME_VERSION = "0.1.10"
 NOTION_CLI_VERSION = "0.15.1"
 
 
@@ -97,6 +98,7 @@ def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
         'test "$(ink-claude-code-dream --version)" = '
         '"${CLAUDE_CODE_VERSION} (Claude Code)"'
     ) in dockerfile
+    assert "ink-claude-code-dream plugin --help >/dev/null" in dockerfile
     assert ".core.corePruned == true" in dockerfile
     assert ".core.productionEligible == true" in dockerfile
     assert '"@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"' in dockerfile

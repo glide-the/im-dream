@@ -4,6 +4,7 @@
 <!-- [同步] 2026-09-13：MCP Apps 配套设计迁入同目录；此前字段修复验收记录为目录迁移前的执行回执。 -->
 <!-- [同步] 2026-09-13：保留全部现有 MCP 功能，按通用产品设计原则重写；移除过期实现、CLI 管理流程和旧版本结论。 -->
 <!-- [同步] 2026-09-13：修复前端 discovery 元数据字段适配，同步正常/null/错误流程、最小影响范围和技术回归入口。 -->
+<!-- [同步] 2026-09-15：当前 SDK/Runtime 版本事实更新为 0.2.145/0.1.10。 -->
 
 # Claude MCP 资源连接器设计
 
@@ -346,7 +347,7 @@ sequenceDiagram
 
 ## 10. 影响范围与兼容
 
-初次重写只更新设计说明与目录入口；本次字段修复仅改变前端 discovery DTO 声明和 API 适配器，并补充合同/页面回归。直接影响 Resources 详情页的 Server 名称/版本显示，不改变列表、创建/编辑请求、三种 transport、OAuth、权限、缓存、数据库 schema、Runtime/SDK 或版本。MCP Apps 的 Node-only 连接投影和 Host/Chat 结果不消费该页面字段，不需要全项目重命名。当前兼容组合为 Python SDK 0.2.145、Runtime 0.1.9、CLI compatibility 2.1.241；版本事实以 pyproject/lock/resolver/Docker 与对应发布回执为准，不把兼容输出当作产品功能等价。
+初次重写只更新设计说明与目录入口；本次字段修复仅改变前端 discovery DTO 声明和 API 适配器，并补充合同/页面回归。直接影响 Resources 详情页的 Server 名称/版本显示，不改变列表、创建/编辑请求、三种 transport、OAuth、权限、缓存、数据库 schema、Runtime/SDK 或版本。MCP Apps 的 Node-only 连接投影和 Host/Chat 结果不消费该页面字段，不需要全项目重命名。当前兼容组合为 Python SDK 0.2.145、Runtime 0.1.10、CLI compatibility 2.1.241；版本事实以 pyproject/lock/resolver/Docker 与对应发布回执为准，不把兼容输出当作产品功能等价。
 
 后续功能变更需评估 Resources 列表/详情、新建编辑、所有 transport、认证 operation/refresh、actor/workspace 授权、Chat 新建/继续/停止/确认、持久历史、MCP Apps/Node 连接及 importer。现有一次性 importer、legacy adapters 和测试保留；它们不是正常业务链路，不恢复旧 CLI 管理流程。
 

@@ -1,4 +1,11 @@
+<!-- [Input] Deck/ClaudeAgent historical integration design and current plugin installation contract. -->
+<!-- [Output] Preserved integration decisions with current install/pack/load applicability. -->
+<!-- [Pos] Deck integration design; Remote Marketplace owns the deployed installation boundary. -->
+<!-- [Sync] 2026-09-15: retain history and clarify actual installation CLI versus SDK loading. -->
+
 # Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计
+
+> 当前插件安装以 [Remote Marketplace 合同](deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同) 为准：CLI 安装及制品校验必须完成后才能绑定 Deck、打包新 workspace 和 SDK 加载。下面历史规划的“CLI 备选”不替代当前 `PluginInstallService` 的必需管理命令，也不授权活动会话热安装。
 
 > Design Issue：SUO-218
 > Revision Issue：SUO-236

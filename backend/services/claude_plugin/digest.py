@@ -15,6 +15,7 @@ try:
         EXCLUDED_FILE_NAMES,
         PluginDigestError,
         compute_plugin_digest,
+        compute_legacy_admin_plugin_digest,
         digest_is_valid,
         entry_is_excluded,
     )
@@ -26,6 +27,7 @@ except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
         EXCLUDED_FILE_NAMES,
         PluginDigestError,
         compute_plugin_digest,
+        compute_legacy_admin_plugin_digest,
         digest_is_valid,
         entry_is_excluded,
     )
@@ -37,6 +39,7 @@ __all__ = [
     "EXCLUDED_FILE_NAMES",
     "PluginDigestError",
     "compute_plugin_digest",
+    "compute_legacy_admin_plugin_digest",
     "digest_is_valid",
     "entry_is_excluded",
 ]

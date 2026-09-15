@@ -4,14 +4,19 @@ Hard rules (deck-integration-delta §Install Flow):
 
 - argv arrays only.  ``shell=True``, ``os.system`` and string command lines
   are forbidden everywhere in this package.
-- The executable is resolved once via ``shutil.which("claude")`` (or the
-  explicit ``INK_CLAUDE_CLI_PATH`` override) and must be a real file.
+- Default executable resolution reuses the Agent's qualified Dream Runtime
+  resolver; ``INK_CLAUDE_CLI_PATH`` remains an explicit plugin-only override.
 - Every execution records: executable, argv, cwd, CLI version, timeout,
   exit code, sanitized stdout/stderr and the file-tree snapshot delta around
   the managed config dir.
 - A non-zero exit or a timeout never produces a ``ready`` record; the
   operation evidence is still persisted for audit.
 """
+
+# [Input] Qualified Agent CLI resolver and server-managed plugin configuration.
+# [Output] Plugin-management-compatible executable and bounded subprocess receipts.
+# [Pos] Shared plugin install subprocess boundary, not another CLI resolver.
+# [Sync] 2026-09-15: reject version-only compatibility and stop selecting ambient claude.
 
 from __future__ import annotations
 
@@ -22,8 +27,9 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
+
+from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path
 
 from . import runtime
 
@@ -80,20 +86,23 @@ class CliExecution:
 
 
 def resolve_claude_binary() -> Path:
-    """Return the verified path of the real ``claude`` executable."""
+    """Resolve the qualified Runtime or an explicit plugin-only executable."""
     override = os.environ.get(_ENV_CLI_PATH, "").strip()
     candidate: str | None = None
     if override:
-        expanded = Path(override).expanduser()
-        if expanded.is_file() and os.access(expanded, os.X_OK):
-            candidate = str(expanded.resolve())
+        configured_path = Path(override)
+        if configured_path.is_absolute() and configured_path.is_file() and os.access(configured_path, os.X_OK):
+            candidate = str(configured_path.resolve())
     else:
-        found = shutil.which("claude")
+        try:
+            found = resolve_claude_cli_path()
+        except RuntimeError as exc:
+            raise ClaudeCliError(str(exc)) from exc
         if found:
             candidate = str(Path(found).resolve())
     if candidate is None:
         raise ClaudeCliError(
-            "Claude CLI executable not found. Install Claude Code or set "
+            "Dream Runtime executable not found. Install ink-claude-code-dream or set "
             f"{_ENV_CLI_PATH} to an executable path."
         )
     return Path(candidate)
@@ -148,7 +157,7 @@ def snapshot_delta(before: dict[str, str], after: dict[str, str]) -> dict[str, l
 
 
 def get_cli_version(executable: Path | None = None) -> str:
-    """Return the real ``claude --version`` output (single line)."""
+    """Verify plugin command support and return the CLI version (single line)."""
     binary = executable or resolve_claude_binary()
     result = subprocess.run(
         [str(binary), "--version"],
@@ -161,6 +170,17 @@ def get_cli_version(executable: Path | None = None) -> str:
         raise ClaudeCliError(
             f"claude --version failed with exit code {result.returncode}: "
             f"{result.stderr.strip()[:200]}"
+        )
+    # --version succeeds even when a headless build removed management commands.
+    management = subprocess.run(
+        [str(binary), "plugin", "--help"],
+        env=runtime.managed_cli_env(), capture_output=True, text=True,
+        timeout=30, check=False,
+    )
+    if management.returncode != 0:
+        raise ClaudeCliError(
+            f"resolved CLI does not support plugin management "
+            f"(exit {management.returncode}); executable={binary}"
         )
     return result.stdout.strip().splitlines()[0] if result.stdout.strip() else "unknown"
 

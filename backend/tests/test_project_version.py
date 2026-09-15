@@ -2,6 +2,7 @@
 # [Output] Prove the patch metadata bump is complete without changing the API contract.
 # [Pos] Provider-free project-version regression tests.
 # [Sync] 2026-09-13: require backend 0.1.3, frontend 0.0.3, and the matching backend lock.
+# [Sync] 2026-09-15: require backend 0.1.4, frontend 0.0.4, and the matching backend lock.
 
 from pathlib import Path
 import json
@@ -18,13 +19,13 @@ class ProjectVersionTests(unittest.TestCase):
         lock = tomllib.loads((ROOT / "backend/uv.lock").read_text())
         locked = next(package for package in lock["package"]
                       if package["name"] == "ink-and-memory-backend")
-        self.assertEqual(project["project"]["version"], "0.1.3")
-        self.assertEqual(locked["version"], "0.1.3")
+        self.assertEqual(project["project"]["version"], "0.1.4")
+        self.assertEqual(locked["version"], "0.1.4")
         self.assertIn("ink-claude-dream-agent-sdk==0.2.145", project["project"]["dependencies"])
 
     def test_frontend_patch_metadata_and_api_schema_are_explicit(self) -> None:
         frontend = json.loads((ROOT / "frontend/package.json").read_text())
-        self.assertEqual(frontend["version"], "0.0.3")
+        self.assertEqual(frontend["version"], "0.0.4")
         self.assertEqual(frontend["packageManager"], "pnpm@10.28.1")
         self.assertIn('version="2.0.0"', (ROOT / "backend/server.py").read_text())
 

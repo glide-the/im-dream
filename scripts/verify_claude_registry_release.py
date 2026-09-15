@@ -8,6 +8,7 @@
 # [Sync] 2026-08-30: distinguish Dream's portable Runtime baseline from the
 #        clean-room npm 0.1.4 sandbox.notion-cli publication capability.
 # [Sync] 2026-09-12: require package-root cli.js for the current clean-room selector while retaining explicit legacy receipt parsing.
+# [Sync] 2026-09-15: require the installed public Runtime to expose plugin management.
 
 """Accept an already-published Dream Claude SDK/Runtime registry release.
 
@@ -1278,6 +1279,14 @@ def probe_installed_contract(
     if actual_cli_version != expected_cli_version:
         raise AcceptanceError("CLI_VERSION_MISMATCH", "cli-version", "installed Runtime reported an unexpected version")
     payload["cliVersion"] = actual_cli_version
+    plugin_management = runner([str(cli_path), "plugin", "--help"], cwd=root, env=env)
+    if plugin_management.returncode != 0:
+        raise AcceptanceError(
+            "CLI_PLUGIN_MANAGEMENT_MISSING",
+            "cli-plugin-management",
+            "installed Runtime does not expose plugin management",
+        )
+    payload["pluginManagement"] = True
     return payload
 
 

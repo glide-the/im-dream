@@ -3,7 +3,8 @@
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
 <!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
-<!-- [同步] 2026-09-13：源码合同升级到 SDK 0.2.145 × Runtime 0.1.9；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
+<!-- [同步] 2026-09-13：源码合同升级到 SDK 0.2.145 × Runtime 0.1.10；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
+<!-- [同步] 2026-09-15：Dream 默认 plugin 安装也使用同一个 manifest-qualified Runtime resolver。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -15,13 +16,13 @@
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
 > **[同步] 2026-09-12**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.145`
 > 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
-> 门禁的 `ink-claude-code-dream==0.1.9`；npm 默认布局为 package-root `cli.js`，AutoDL local-core 保留独立受检布局。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 门禁的 `ink-claude-code-dream==0.1.10`；npm 默认布局为 package-root `cli.js`，AutoDL local-core 保留独立受检布局。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-09-12**：Python 依赖文件把
 > `ink-claude-dream-agent-sdk==0.2.145` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
 > `--require-hashes`，并排除 official `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime `0.1.9` 已完成同 SHA 四平台资格、五包公开发布与本机 Dream 采用，见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。Docker 源码固定同一版本，但本次未运行镜像构建；AutoDL local-core 是独立受检制品，不能替代 npm 五包验收。
+> CLI 回滚物。Runtime `0.1.10` 已完成同 SHA 四平台资格、五包公开发布与本机 Dream 采用，见[发布与接入回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)。Docker 源码固定同一版本，但本次未运行镜像构建；AutoDL local-core 是独立受检制品，不能替代 npm 五包验收。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -240,19 +241,19 @@ session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbo
 `sandbox.notion-cli` 或 selector digest。Python SDK 已从正式 PyPI 按精确版本与
 SHA-256 锁原子切换到自有 distribution，安装环境不再带 Git `direct_url.json`。
 
-当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.9`：
+当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.10`：
 实际实现来自 Runtime `src`，默认入口为 `src/entrypoints/cli.tsx`，原始源码版权保留，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
 接口资格，不声明官方全产品等价。selector 源位于 Runtime 仓库 `package/`，两个 alias
-都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块。四个平台已完成同 SHA 资格，五个公开归档 integrity 与 CI 原归档一致，本机安装和服务启动身份已核对。具体证据范围见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，不把制品测试扩大为真实用户业务验收。
+都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块。四个平台已完成同 SHA 资格，五个公开归档 integrity 与 CI 原归档一致，本机安装和服务启动身份已核对。具体证据范围见[发布与接入回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)，不把制品测试扩大为真实用户业务验收。
 
 Runtime 只保留原始 `src`（1,902 文件、35 模块目录），其目录、模块路径、
 内容和权限摘要保持不变；重复 `restored-src` 已删除，不维护另一套源码树。
 来源摘要位于 `runtime/source-provenance.json`，原始源码进入构建且保留原版权。
-Dream backend/frontend 项目元数据分别 patch 升级为 `0.1.3`/`0.0.3`，
+Dream backend/frontend 项目元数据分别 patch 升级为 `0.1.4`/`0.0.4`，
 SDK 与 API schema 不变；这不代表生产服务更新。
 
-当前 Docker 源码精确安装 selector `0.1.9`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；精确版本与摘要不符时构建失败，不回退其他版本。本次未运行镜像构建。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
+当前 Docker 源码精确安装 selector `0.1.10`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；精确版本与摘要不符时构建失败，不回退其他版本。本次未运行镜像构建。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -435,7 +436,7 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 
 ## 9. 实现合同与版本化验收
 
-下列实现项描述当前代码合同；执行结果按日期和版本归入独立回执。2026-08-24 的计数不属于 `0.1.9` 新验收，本轮 Docker 只核对源码安装合同、未构建镜像。当前发布与本机采用见[发布回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，MCP Apps 修复与普通 Chat 复验见[恢复回执](../../exec/mcp-apps/local-startup-recovery.md)。
+下列实现项描述当前代码合同；执行结果按日期和版本归入独立回执。2026-08-24 的计数不属于 `0.1.10` 新验收，本轮 Docker 只核对源码安装合同、未构建镜像。当前发布与本机采用见[发布回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)，MCP Apps 修复与普通 Chat 复验见[恢复回执](../../exec/mcp-apps/local-startup-recovery.md)。
 
 - [x] `server.py` 启动加载 `backend/.env`，并在 Agent factory 前验证自有 SDK/Runtime。
 - [x] Runner 与 `SimpleClaudeAgentSDKClient` 都幂等应用共享 env/settings/TMPDIR helper。
