@@ -1,0 +1,11 @@
+{
+  "original_command": "python3 /private/tmp/ink-auth-migration-validation/replay-candidate-0060.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "original_exit": 1,
+  "cause": "last PF DELETE RESTRICT returned actual23001, assertion expected generic foreign_key_violation23503",
+  "actual_original_error": "ERROR:  23001: update or delete on table \"workflow_preflights\" violates RESTRICT setting of foreign key constraint \"workflow_preflight_requests_workflow_preflight_id_workflow_pref\" on table \"workflow_preflight_requests\"\nDETAIL:  Key (workflow_preflight_id)=(pf_46963f2fcd6f49f9a801511127fe62ee) is referenced from table \"workflow_preflight_requests\".\nSCHEMA NAME:  dream\nTABLE NAME:  workflow_preflight_requests\nCONSTRAINT NAME:  workflow_preflight_requests_workflow_preflight_id_workflow_pref\nLOCATION:  ri_ReportViolation, ri_triggers.c:2797\n",
+  "remaining_command": "python3 /private/tmp/ink-auth-migration-validation/verify-candidate-0060-remaining.py",
+  "remaining_exit": 0,
+  "replayed_migrations": false,
+  "official_source": "https://www.postgresql.org/docs/18/errcodes-appendix.html"
+}

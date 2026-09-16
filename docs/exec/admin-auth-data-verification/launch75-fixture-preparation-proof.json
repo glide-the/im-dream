@@ -1,0 +1,66 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "setup_assertions": 46,
+  "cases": 38,
+  "receipts": 18,
+  "accepted": 15,
+  "source": "actual application/ensure and actual Run semantic/model setup, not copied algorithms",
+  "seeds": [
+    {
+      "operation": "dream-launch-source.ensure",
+      "status": 200
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200
+    },
+    {
+      "operation": "dream-launch-source.ensure",
+      "status": 200
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200
+    },
+    {
+      "operation": "dream-launch-source.ensure",
+      "status": 200
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200
+    },
+    {
+      "operation": "dream-launch-source.ensure",
+      "status": 200
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200
+    },
+    {
+      "operation": "dream-launch-source.ensure",
+      "status": 200
+    }
+  ],
+  "legacy_cases": "new isolated source operands only; prior accepted Run72 records unchanged",
+  "normal_database": "untouched",
+  "public_contract": "pending corrected concurrency static gate and Luna"
+}

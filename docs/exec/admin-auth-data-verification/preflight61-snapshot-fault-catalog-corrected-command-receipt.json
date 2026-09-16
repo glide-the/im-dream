@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-selected-faults.mts snapshot",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "case": "snapshot",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"mode\": \"snapshot\",\n  \"public_operation\": \"workflow-preflight.execute\",\n  \"assertions\": 24,\n  \"request_id\": \"pf_fault_bbd03d37f16446a0ad5dd2e128622050\",\n  \"status\": \"failed\",\n  \"failed_check\": \"deck_runtime_snapshot\",\n  \"error_code\": \"DECK_RUNTIME_CONFIG_INVALID\",\n  \"audit\": {\n    \"stages\": 2,\n    \"audits\": 1\n  },\n  \"source_full_projection\": \"equal\",\n  \"snapshot_delta\": 0,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\",\n  \"private_keys_exported\": false\n}\n"
+}

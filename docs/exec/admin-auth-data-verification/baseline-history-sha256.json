@@ -1,0 +1,218 @@
+[
+  {
+    "tag": "0000_yellow_quasimodo",
+    "sha256": "4381172b595aabff11b07781ed03cbd5e26957dfef11757aa7046e9734c37765"
+  },
+  {
+    "tag": "0001_violet_beast",
+    "sha256": "54e1950332fbeb7788bb7cd2c9aac1cf312ad451859a62563c6e5b30e9f6b632"
+  },
+  {
+    "tag": "0002_gorgeous_catseye",
+    "sha256": "be40b579e58fd9f61261dd97114305b41de9f50aad335309e74a1f5e8599f581"
+  },
+  {
+    "tag": "0003_last_warlock",
+    "sha256": "59651aef83d058cfb9c3b00df0ebad9edbf5a1ca2e4d7c043a13f695aadfb2de"
+  },
+  {
+    "tag": "0004_concerned_garia",
+    "sha256": "11116e86711949b97dc5d5fca2e9a785c32c3e11650036713446196fa8a6029a"
+  },
+  {
+    "tag": "0005_cooing_virginia_dare",
+    "sha256": "1a3bac86564fe4a4ba5a5920ceef2dc32cd20eecaa148c486ace04fcecb564fc"
+  },
+  {
+    "tag": "0006_smart_hedge_knight",
+    "sha256": "3184f8cc97c3fa32e8f896836773a5570e5ea81990f4e59b0888eeb78804e150"
+  },
+  {
+    "tag": "0007_curvy_sabretooth",
+    "sha256": "81494343947e1107a150b04b4d7eca6f18236d09370f24a83edb96338c5b37b6"
+  },
+  {
+    "tag": "0008_single_database_comments",
+    "sha256": "787ab731c42d6cd3ca9cc0605827c0c805639bf7a0ea0fa370f023f8b61d4650"
+  },
+  {
+    "tag": "0009_provider_model_sync",
+    "sha256": "758f9102d8d97526ce56e0f45d10e9984fb360ab64885433429b3b6d904e9b53"
+  },
+  {
+    "tag": "0010_story_source_canonical",
+    "sha256": "da2539f5cf89aa79dd72239f63d4a7616b639ddfd06d108a4c1ce147f748a845"
+  },
+  {
+    "tag": "0011_nappy_prodigy",
+    "sha256": "d3466f5e477dab89ab9a352bcf7f5bf1c1618565b28a63ff10254df2c30eb887"
+  },
+  {
+    "tag": "0012_storage_admin_permissions",
+    "sha256": "e7f0d4ea3ef8be7b38c83276162f0be51a7b7c11c73a253e92a515e55f14c3f8"
+  },
+  {
+    "tag": "0013_melted_tombstone",
+    "sha256": "805103624406c08c7c35df7e2f803e416b487a9a588f9a393c6b4059b3f476c1"
+  },
+  {
+    "tag": "0014_subscription_control_plane",
+    "sha256": "36772dbb7a6fd73798f5d355d508b18f48afbf93d12dd439113f9ae671efca29"
+  },
+  {
+    "tag": "0015_platform_users_are_billable",
+    "sha256": "e9c20f6b09c8c744b160ac015b5adf8f67c8ff9b557ea01c460ea080b5a4cade"
+  },
+  {
+    "tag": "0016_default_new_user_daily_tokens",
+    "sha256": "18c92618c738035adf8efe2ff831da40784b7e0c03c1dc6058fcb85898683b41"
+  },
+  {
+    "tag": "0017_subscription_token_only_monthly",
+    "sha256": "fb80f5363367f217af37f1e1c4cb44c0a4166888b79fcd94932ff1c3bb5a5e61"
+  },
+  {
+    "tag": "0018_token_subscription_invariants",
+    "sha256": "d00a9bee41c3969d9a30d599427f5d96190c08a5f20384261f811853f1b280e1"
+  },
+  {
+    "tag": "0019_gateway_canonical_subject_auth",
+    "sha256": "e568a08c734c78b853c8767ea41858d15834bc51d5822eec113df597ffecc569"
+  },
+  {
+    "tag": "0020_token_only_data_cutover",
+    "sha256": "eafc8de14d8bd900fc05579e82cae6bfa32173511383083d8c98f972954cebeb"
+  },
+  {
+    "tag": "0021_subscription_token_ledger",
+    "sha256": "be1e36eb147152cc3694010fdaf3dc93531cdf28438c7b8a17aae948194cdf76"
+  },
+  {
+    "tag": "0022_subscription_payments",
+    "sha256": "495149e2ad8c66e34dbf9673d4f7a3c27f8c9d11454b1020113e92470c0ac51f"
+  },
+  {
+    "tag": "0023_paid_subscription_renewals",
+    "sha256": "0716edde31806e0bac0815a796ea76fbaef748412c9d3df250f43d3f6d7a51af"
+  },
+  {
+    "tag": "0024_paid_subscription_past_due",
+    "sha256": "d25bf13cecc6c917616e03c5e39af386c62f8b8e9fef511f52f675ca6472e8a7"
+  },
+  {
+    "tag": "0025_fancy_shadowcat",
+    "sha256": "507c5743a5f6d925910eaf933ef491aa7750f89a3088cd8f29a7f9dab744ec44"
+  },
+  {
+    "tag": "0026_harsh_victor_mancha",
+    "sha256": "65e74b028eef1ee6fcf1d4de57938a0ef3900fd77dbda680f0332a08b688c6cd"
+  },
+  {
+    "tag": "0027_young_stark_industries",
+    "sha256": "659f7bef3332f0d9b3c0630d60e7302057eb4e70f3d08f217941e59618d8ed7c"
+  },
+  {
+    "tag": "0028_dream_data_migration_registry",
+    "sha256": "0519d55c883da1e22fd01b59b107a5f3c698387f4ed605ea1ae393fe2291f066"
+  },
+  {
+    "tag": "0029_solid_garia",
+    "sha256": "3d94f812977b112118c008c38607334d382a84d179ebb49954277fea4d76a2ca"
+  },
+  {
+    "tag": "0030_dream_artifact_status_expand",
+    "sha256": "4bff6099ea67718808633a94d4a6c1e5bb9ae94c7c7c45420c8e04c0ab5fbb56"
+  },
+  {
+    "tag": "0031_dream_artifact_contract_guards",
+    "sha256": "8d14351cc378b265da8e90903b3aac3f192d5092ad50e66469df52767fe0b839"
+  },
+  {
+    "tag": "0032_dream_schema_authority_cutover",
+    "sha256": "5ce985fb0791ddb5f15bf8745313c4e5e9d068baff74ed5f45d288ba0bd0ea55"
+  },
+  {
+    "tag": "0033_remove_dream_continuing_status",
+    "sha256": "c66d3c992e0682dda1e724435a217c09bc2123f0445a08679f8548cd3fa24d9d"
+  },
+  {
+    "tag": "0034_dream_local_runtime_placement",
+    "sha256": "5afc376ca61364815d075ce2e20eac59a980e669d3408116af9b2131fcf0c757"
+  },
+  {
+    "tag": "0035_brief_wolverine",
+    "sha256": "3926bd018bb75111d0d92200ffa45f5785195cdc8efc02b64b3f028f41983249"
+  },
+  {
+    "tag": "0036_amused_the_executioner",
+    "sha256": "262b3262227a2af06d918da490fd053ba43ac6686b683a125011eb8101474b80"
+  },
+  {
+    "tag": "0037_claude_plugin_remote_marketplace",
+    "sha256": "24b20756c12011e24c492b093f18cdc80dd3464017fe4e694b3d10cd4b95fd9d"
+  },
+  {
+    "tag": "0038_dream_managed_mcp_resources",
+    "sha256": "68e3349dcbddd9c40cc4e88cc491d5f89cfac5cc2947dcc3e7a464c7b63cabfa"
+  },
+  {
+    "tag": "0039_claude_agent_resource_rbac",
+    "sha256": "2c618d9617e5ca931aab989c83718bdac01ddccb2d22874610631292a5da329c"
+  },
+  {
+    "tag": "0040_claude_agent_resource_observer",
+    "sha256": "ab0b28a52b522036697b81510b40e33245655a6dce3726f2e6364d31b3c21e85"
+  },
+  {
+    "tag": "0041_claude_code_runtime_config",
+    "sha256": "0e10c4f93ca646a93bc70ef7c619e60a07dc26892511cee66586a37581d4c8e4"
+  },
+  {
+    "tag": "0042_chat_history_keyset_pagination",
+    "sha256": "1d97eaec46fa43e91365b9a225df14d562310eeb6695bc7c949d724331d6b744"
+  },
+  {
+    "tag": "0043_chat_history_final_projection",
+    "sha256": "b8d5d250d4ee740d7b18885d053476834ce32505388db877cfcb7e575466b235"
+  },
+  {
+    "tag": "0044_serious_red_wolf",
+    "sha256": "f112b4182b6b69cb47dc4373ebf5d646de4a0cdec03ac5ffece288f589a348d5"
+  },
+  {
+    "tag": "0045_abandoned_killraven",
+    "sha256": "b5adf053776e4351c8110b14de2f8537166b273718d26ca92ad4024c6be443fb"
+  },
+  {
+    "tag": "0046_lovely_hemingway",
+    "sha256": "510341a9aab86a95c7d2cd56e7cde7fd869fd64d9a86a6230e71b2c1140c4efe"
+  },
+  {
+    "tag": "0047_provider_managed_accounts_expand",
+    "sha256": "6da3f17d9ac0250b9dcf7717733d192461a67d7aa2176ad6b7ee1129838a960e"
+  },
+  {
+    "tag": "0048_provider_managed_accounts_contract",
+    "sha256": "037c2a413b27a79a1aa77c24e8f6c2809fe32eac2876322c2cbf73c0ea6738f2"
+  },
+  {
+    "tag": "0049_provider_owned_credentials_expand",
+    "sha256": "6f4a8a792b389b9e6d0c265ee3ab22bb6d13f63b9cca2c1264adf6be0ab48aa4"
+  },
+  {
+    "tag": "0050_provider_owned_credentials_contract",
+    "sha256": "fb2d938b4a72c0bc0b8ade53c8980635be1db81975dce9add281489140400f9a"
+  },
+  {
+    "tag": "0051_provider_deleted_credential_orphans_expand",
+    "sha256": "0e517beb407abd9f48f92519b8afa92eed8d45ea4c9016bd9b5250d79a6c4614"
+  },
+  {
+    "tag": "0052_provider_deleted_credential_orphans_contract",
+    "sha256": "beed5546a4ff9bff08002e6e451229924a1910cda2a1484b6929064a203bba8f"
+  },
+  {
+    "tag": "0053_rare_lenny_balinger",
+    "sha256": "1507c0194814a159637ef77f2b52925783ee324aeb22a0177d6b9aa0e74542fc"
+  }
+]

@@ -13,6 +13,7 @@
 
 # Ink & Memory API Documentation
 
+> [Sync] 2026-09-16: Admin DTO APIs own all production persistence; Dream has no database initialization or SQL path.
 > [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
 > [Sync] 2026-09-15: Reflections config GET/PUT/DELETE and memory-init ownership/config reads use Admin OAuth operations before filesystem access.
 > [Sync] 2026-09-15: Agent recent Session prompt context uses Admin `session.list` through the bound turn owner; Admin failures stop before Runtime.
@@ -480,9 +481,9 @@ owns the Thread, reads the custom section configuration through Admin, merges
 it over static defaults, and writes the five prompt files plus
 `memory/procedural/analysis_state.json`. A missing Thread returns `404`.
 Authentication, ownership, capability, or configuration failure occurs before
-filesystem access. The async Reflections task APIs retain their separate
-database-backed task/result lifecycle until a background Admin authority is
-published.
+filesystem access. The async Reflections task APIs use the published Admin
+worker authority and strict task/result/event/report operations; Dream retains
+Agent execution, EventBus, SSE and workspace files.
 
 ---
 
@@ -988,7 +989,7 @@ Decks and retired forks with Deck- or Voice-level local changes remain visible.
 ### POST `/api/decks`
 
 Creates a user Deck and binds the configured default Claude plugin in one
-PostgreSQL transaction. The browser submits only Deck display fields; the server
+Admin transaction. The browser submits only Deck display fields; the server
 resolves the exact configured package/version (default `drama-forge` `1.0.1`),
 requires a ready installation, and verifies artifact digest and Claude CLI
 compatibility before committing the Deck and plugin reference.
@@ -1137,8 +1138,9 @@ operation 仅表示把 connector-owned 轻量索引 materialize 到当前 thread
 
 ## Claude MCP Resources
 
-所有路由都要求正常 Dream 登录。PostgreSQL `dream_mcp_*` 是 Server 配置、
-作用域、启用状态、credential ref 与 discovery snapshot 的唯一事实来源；
+所有路由都要求正常 Dream 登录。Admin 管理的 `dream_mcp_*` 数据是 Server 配置、
+作用域、启用状态、credential ref 与 discovery snapshot 的唯一事实来源；Dream
+通过严格 DTO operation 访问这些数据，不接收数据库凭据；
 正常请求链不会执行 `claude --version`、`claude mcp help/list/get/login/logout`
 或其他 MCP 管理 CLI。Token、Authorization Header、callback code/state 不会
 出现在公开 DTO、普通配置字段或 access log；OAuth 文档只以 actor/server AAD
@@ -1211,24 +1213,14 @@ python test_real_migration.py      # Test with real data
 
 ---
 
-## Database
+## Database access
 
-SQLite database at `backend/data/ink-and-memory.db`
-
-**Initialize/reset:**
-```python
-from database import init_db
-init_db()
-```
-
-**Tables:**
-- `users` - User accounts
-- `user_sessions` - Editor sessions
-- `daily_pictures` - Historical timeline images retained for read-only viewing
-- `user_preferences` - User settings
-- `analysis_reports` - Analysis results
-- `auth_sessions` - Session tokens (optional)
-- `schema_version` - Migration tracking
+Dream has no production database initialization command, credential, pool, SQL,
+ORM or runtime DDL. Admin Drizzle owns schema and migrations; named Admin DTO
+operations own authorization, transactions and persistence. Historical
+database/schema fixtures live under `backend/tests/**` and may run only against
+explicitly named disposable databases. See
+[the current authority contract](../docs/design/database-schema-authority.md).
 
 
 ## Current Deck Claude Plugin refs

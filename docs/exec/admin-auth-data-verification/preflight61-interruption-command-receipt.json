@@ -1,0 +1,66 @@
+{
+  "commands": [
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts checking execute",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "checking",
+      "role": "execute",
+      "exit_code": -9,
+      "expected_signal": "SIGKILL only own child",
+      "output": "",
+      "verified": true
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts checking recover",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "checking",
+      "role": "recover",
+      "exit_code": 0,
+      "expected_signal": null,
+      "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"role\": \"recover\",\n  \"mode\": \"checking\",\n  \"assertions\": 18,\n  \"stage_audits\": 1,\n  \"original_lookup\": \"in_progress, full original source equal, never resumes\",\n  \"persisted_facts\": \"exact unchanged on public GET/replay\",\n  \"snapshot_delta\": 0,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\"\n}\n",
+      "verified": true
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts binding execute",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "binding",
+      "role": "execute",
+      "exit_code": -9,
+      "expected_signal": "SIGKILL only own child",
+      "output": "",
+      "verified": true
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts binding recover",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "binding",
+      "role": "recover",
+      "exit_code": 0,
+      "expected_signal": null,
+      "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"role\": \"recover\",\n  \"mode\": \"binding\",\n  \"assertions\": 18,\n  \"stage_audits\": 2,\n  \"original_lookup\": \"in_progress, full original source equal, never resumes\",\n  \"persisted_facts\": \"exact unchanged on public GET/replay\",\n  \"snapshot_delta\": 0,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\"\n}\n",
+      "verified": true
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts snapshot execute",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "snapshot",
+      "role": "execute",
+      "exit_code": -9,
+      "expected_signal": "SIGKILL only own child",
+      "output": "",
+      "verified": true
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-interruption-validation.mts snapshot recover",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "mode": "snapshot",
+      "role": "recover",
+      "exit_code": 0,
+      "expected_signal": null,
+      "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"role\": \"recover\",\n  \"mode\": \"snapshot\",\n  \"assertions\": 18,\n  \"stage_audits\": 3,\n  \"original_lookup\": \"in_progress, full original source equal, never resumes\",\n  \"persisted_facts\": \"exact unchanged on public GET/replay\",\n  \"snapshot_delta\": 1,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\"\n}\n",
+      "verified": true
+    }
+  ],
+  "exit_code": 0,
+  "scope": "Primary owns three spawned children; only exact self-SIGKILL-after-COMMIT expected, no other processes stopped"
+}

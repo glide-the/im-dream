@@ -1,27 +1,17 @@
-# [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
+# [Input] Admin-authorized Story Workspace DTOs, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
-# [Pos] Deck-domain Story Workflow application orchestration.
-# [Sync] 2026-09-16: remove the zero-caller Run SQL application class after Admin DTO route adoption.
-# [Sync] 2026-09-16: move Dream confirmation facts and persistence to Registry120 Admin DTOs.
-# [Sync] 2026-09-16: retire the unreachable Dream SQL Preflight authority after Admin DTO adoption.
-# [Sync] 2026-09-16: remove unused imports of the retired Dream SQL Workflow context resolver.
-# [Sync] 2026-09-15: retire the Guidance database branch after Registry115 moved persistence to Admin.
-# [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
-# [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
-#                    registry-member artifact reads without changing active state.
+# [Pos] Deck-domain Story Workflow orchestration; all relational access belongs to Admin DTO/ORM services.
+# [Sync] 2026-09-16: move public Artifact authority, run listing, index reads and index writes to Registry185-191.
+# [Sync] 2026-09-16: preserve Dream Runtime, observer, confirmation and shared-filesystem behavior without PostgreSQL access.
 
 """Focused application services for Dream workflow business APIs."""
 
 from __future__ import annotations
 
-from psycopg import Error as PostgresError
-
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import hashlib
 import importlib.util
-import json
 import logging
 from pathlib import Path
 import stat
@@ -29,17 +19,37 @@ import sys
 from typing import Any
 from uuid import uuid4
 
-import database
-
 try:
-    from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
+    from models.workflow_run import RunStatus, WorkflowRun
     from story_workspace.contracts import (
         StoryWorkspaceDreamAgentActivityResponse,
-        StoryWorkspaceDreamRunContext,
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
     from services.errors.error_registry import ApiRouteError
+    from services.admin_data.errors import AdminDataError
+    from services.admin_data.run_data import AdminRunData, RunLookupInputDTO
+    from services.admin_data.story_workspace_artifact_data import (
+        AdminStoryWorkspaceArtifactData,
+        StoryWorkspaceArtifactAuthorityDTO,
+        StoryWorkspaceArtifactAuthorityInputDTO,
+        StoryWorkspaceArtifactCursorDTO,
+        StoryWorkspaceArtifactIndexInputDTO,
+        StoryWorkspaceArtifactIndexReconcileInputDTO,
+        StoryWorkspaceArtifactProjectionDTO,
+        StoryWorkspaceArtifactRunsInputDTO,
+    )
+    from services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationData,
+        StoryWorkspaceConfirmationSubmitInputDTO,
+    )
+    from services.story_workspace.dream_confirmation_service import (
+        StoryWorkspaceDreamConfirmationCoordinator,
+        StoryWorkspaceDreamConfirmationError,
+        story_workspace_confirmation_command_json,
+        story_workspace_persisted_confirmation,
+        story_workspace_validate_confirmation_projection,
+    )
     from services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -48,24 +58,6 @@ try:
         StoryWorkspaceDreamIOError,
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
-    )
-    from services.workflow.run_service import WorkflowRunService
-    from services.story_workspace.dream_confirmation_service import (
-        StoryWorkspaceDreamConfirmationCoordinator,
-        StoryWorkspaceDreamConfirmationError,
-        story_workspace_confirmation_command_json,
-        story_workspace_persisted_confirmation,
-        story_workspace_validate_confirmation_projection,
-    )
-    from services.admin_data.story_workspace_confirmation_data import (
-        AdminStoryWorkspaceConfirmationData,
-        StoryWorkspaceConfirmationFactInputDTO,
-        StoryWorkspaceConfirmationSubmitInputDTO,
-    )
-    from services.admin_data.errors import AdminDataError
-    from services.admin_data.run_data import AdminRunData, RunLookupInputDTO
-    from services.story_workspace.dream_workflow_lifecycle_service import (
-        StoryWorkspaceDreamWorkflowLifecycleService,
     )
     from services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
@@ -83,29 +75,41 @@ try:
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
     )
-    from services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
     from services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryIndexProjector,
         ArtifactStoryProjectionError,
     )
-    from services.story_workspace.artifact_story_index_repository import (
-        ArtifactStoryIndexRepositoryError,
-    )
-    from services.story_workspace.artifact_story_index_service import (
-        ArtifactStoryIndexObservation,
-        ArtifactStoryIndexService,
-        ArtifactStoryIndexSnapshot,
-    )
 except ModuleNotFoundError:  # Support package imports from repository root.
-    from backend.models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
+    from backend.models.workflow_run import RunStatus, WorkflowRun
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentActivityResponse,
-        StoryWorkspaceDreamRunContext,
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
     from backend.services.errors.error_registry import ApiRouteError
+    from backend.services.admin_data.errors import AdminDataError
+    from backend.services.admin_data.run_data import AdminRunData, RunLookupInputDTO
+    from backend.services.admin_data.story_workspace_artifact_data import (
+        AdminStoryWorkspaceArtifactData,
+        StoryWorkspaceArtifactAuthorityDTO,
+        StoryWorkspaceArtifactAuthorityInputDTO,
+        StoryWorkspaceArtifactCursorDTO,
+        StoryWorkspaceArtifactIndexInputDTO,
+        StoryWorkspaceArtifactIndexReconcileInputDTO,
+        StoryWorkspaceArtifactProjectionDTO,
+        StoryWorkspaceArtifactRunsInputDTO,
+    )
+    from backend.services.admin_data.story_workspace_confirmation_data import (
+        AdminStoryWorkspaceConfirmationData,
+        StoryWorkspaceConfirmationSubmitInputDTO,
+    )
+    from backend.services.story_workspace.dream_confirmation_service import (
+        StoryWorkspaceDreamConfirmationCoordinator,
+        StoryWorkspaceDreamConfirmationError,
+        story_workspace_confirmation_command_json,
+        story_workspace_persisted_confirmation,
+        story_workspace_validate_confirmation_projection,
+    )
     from backend.services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -114,24 +118,6 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamIOError,
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
-    )
-    from backend.services.workflow.run_service import WorkflowRunService
-    from backend.services.story_workspace.dream_confirmation_service import (
-        StoryWorkspaceDreamConfirmationCoordinator,
-        StoryWorkspaceDreamConfirmationError,
-        story_workspace_confirmation_command_json,
-        story_workspace_persisted_confirmation,
-        story_workspace_validate_confirmation_projection,
-    )
-    from backend.services.admin_data.story_workspace_confirmation_data import (
-        AdminStoryWorkspaceConfirmationData,
-        StoryWorkspaceConfirmationFactInputDTO,
-        StoryWorkspaceConfirmationSubmitInputDTO,
-    )
-    from backend.services.admin_data.errors import AdminDataError
-    from backend.services.admin_data.run_data import AdminRunData, RunLookupInputDTO
-    from backend.services.story_workspace.dream_workflow_lifecycle_service import (
-        StoryWorkspaceDreamWorkflowLifecycleService,
     )
     from backend.services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
@@ -149,19 +135,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
     )
-    from backend.services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
     from backend.services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryIndexProjector,
         ArtifactStoryProjectionError,
-    )
-    from backend.services.story_workspace.artifact_story_index_repository import (
-        ArtifactStoryIndexRepositoryError,
-    )
-    from backend.services.story_workspace.artifact_story_index_service import (
-        ArtifactStoryIndexObservation,
-        ArtifactStoryIndexService,
-        ArtifactStoryIndexSnapshot,
     )
 
 
@@ -183,6 +159,12 @@ _STORY_INDEX_ERROR_STATUSES = {
     "story_index_database_unavailable": 503,
     "story_index_write_failed": 503,
 }
+_ADMIN_STORY_INDEX_ERROR_CODES = {
+    "STORY_INDEX_INVALID_ARTIFACT": "story_index_invalid_artifact",
+    "STORY_INDEX_CONFLICT": "story_index_conflict",
+    "STORY_INDEX_REVISION_CONFLICT": "story_index_revision_conflict",
+    "STORY_INDEX_WRITE_FAILED": "story_index_write_failed",
+}
 logger = logging.getLogger(__name__)
 
 
@@ -194,18 +176,6 @@ class StoryWorkspaceDreamReentryStageProjection:
     stage_activity_at: datetime | None
 
 
-@dataclass(frozen=True)
-class _AuthorizedStoryIndexContext:
-    """Internal authorization facts; never serialize thread or workspace paths."""
-
-    workflow_run_row: Any
-    actor_id: int
-    thread_id: str
-    thread_workspace: Path
-    episode_authority: StoryWorkspaceEpisodeAuthority
-    refreshed_surface: Any
-
-
 def story_workspace_get_workspace_root() -> Path:
     """Load the canonical workspace resolver only when this projection runs."""
 
@@ -214,10 +184,6 @@ def story_workspace_get_workspace_root() -> Path:
             get_workspace_root as resolve_workspace_root,
         )
     except ModuleNotFoundError:
-        # Importing the parent package eagerly loads the optional agent SDK.
-        # Dream file reads only need the dependency-free canonical resolver,
-        # so load that source module directly when the SDK is absent (or when
-        # this file is imported through the repository-root package layout).
         module_name = "_ink_story_workspace_root_resolver"
         workspace_module = sys.modules.get(module_name)
         if workspace_module is None:
@@ -242,54 +208,11 @@ def story_workspace_get_workspace_root() -> Path:
     return resolve_workspace_root()
 
 
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        allow_nan=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def _sha256(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator()
 
 
 class _StoryWorkspaceApplicationSupport:
-    """Shared authorization/error helpers; exposes no application endpoint."""
-
-    @staticmethod
-    def _run_actor_context(
-        db: Any,
-        workflow_run_id: str,
-        actor_id: int,
-    ) -> AuthenticatedActorContext:
-        """Resolve the run-owned workspace without selecting an actor default."""
-
-        owns_workspace = db.execute(
-            "SELECT id FROM story_workspace_workspaces "
-            "WHERE owner_id = %s LIMIT 1",
-            (actor_id,),
-        ).fetchone()
-        if owns_workspace is None:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        row = db.execute(
-            "SELECT run.workspace_id FROM workflow_runs AS run "
-            "JOIN story_workspace_workspaces AS workspace "
-            "ON workspace.id = run.workspace_id "
-            "WHERE run.id = %s AND run.created_by = %s AND workspace.owner_id = %s",
-            (workflow_run_id, str(actor_id), actor_id),
-        ).fetchone()
-        if row is None:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-        return AuthenticatedActorContext(
-            workspace_id=str(row["workspace_id"]),
-            actor_id=str(actor_id),
-        )
+    """Shared filesystem and safe-error helpers; exposes no data endpoint."""
 
     @staticmethod
     def _thread_workspace(thread_id: str) -> Path:
@@ -302,31 +225,22 @@ class _StoryWorkspaceApplicationSupport:
             or thread_id in {".", ".."}
         ):
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-
         supplied_root = Path(story_workspace_get_workspace_root())
         try:
             resolved_root = supplied_root.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
         if not resolved_root.is_dir():
             raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
-
         supplied_workspace = supplied_root / thread_id
         try:
             metadata = supplied_workspace.lstat()
         except FileNotFoundError as exc:
             raise ApiRouteError("AGENT_EXECUTION_FAILED", status_code=404) from exc
         except (OSError, ValueError) as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-
         try:
             resolved_workspace = supplied_workspace.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
@@ -349,10 +263,7 @@ class _StoryWorkspaceApplicationSupport:
         if isinstance(exc, StoryWorkspaceDreamContractError):
             raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
         if isinstance(exc, StoryWorkspaceDreamIOError):
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
         raise ApiRouteError("AGENT_EXECUTION_FAILED", status_code=422) from exc
 
     @staticmethod
@@ -362,65 +273,7 @@ class _StoryWorkspaceApplicationSupport:
 
             return claude_agent_thread_factory
         except Exception:
-            # A cold/restarted process still has a valid persistent snapshot;
-            # it simply has no live stream to attach.
             return None
-
-    @staticmethod
-    def _authorized_episode_row(
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> Any:
-        """Fail closed on every frozen run/Deck/thread provenance edge."""
-
-        try:
-            actor_id = int(actor["actor_id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
-        if actor_id < 1:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        rows = StoryWorkspaceDreamReentryService._query_authorized_rows(db, actor_id)
-        matches = [row for row in rows if str(row["run_id"]) == workflow_run_id]
-        if len(matches) != 1:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-        row = matches[0]
-        if not StoryWorkspaceDreamReentryService._source_metadata_matches(
-            row["source_metadata"],
-            actor_id=actor_id,
-            workspace_id=str(row["workspace_id"]),
-            run_id=str(row["run_id"]),
-            thread_id=str(row["thread_id"]),
-            deck_id=str(row["deck_id"]),
-            deck_plugin_id=str(row["deck_plugin_id"]),
-            deck_plugin_version=str(row["deck_plugin_version"]),
-            binding_id=str(row["binding_id"]),
-            binding_revision=int(row["binding_revision"]),
-            runtime_snapshot_id=str(row["deck_runtime_snapshot_id"]),
-            runtime_lock_id=str(row["runtime_plugin_lock_id"]),
-        ):
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-        return row
-
-    @staticmethod
-    def _episode_authority_from_source(
-        row: Any,
-        workflow_run_id: str,
-    ) -> StoryWorkspaceEpisodeAuthority | None:
-        try:
-            metadata = (
-                json.loads(row["source_metadata"])
-                if isinstance(row["source_metadata"], str)
-                else None
-            )
-        except (TypeError, ValueError):
-            return None
-        if not isinstance(metadata, dict):
-            return None
-        return StoryWorkspaceEpisodeAuthority.parse(
-            metadata.get("story_workspace_episode_identity"),
-            expected_run_id=workflow_run_id,
-        )
 
     @staticmethod
     def _episode_authority_from_registry(
@@ -452,11 +305,7 @@ class _StoryWorkspaceApplicationSupport:
             else getattr(registry, "active_episode_uid", None)
         )
         selected = next(
-            (
-                item
-                for item in entries
-                if getattr(item, "episode_uid", None) == target_uid
-            ),
+            (item for item in entries if getattr(item, "episode_uid", None) == target_uid),
             None,
         )
         if selected is None:
@@ -471,25 +320,22 @@ class _StoryWorkspaceApplicationSupport:
         )
 
 
-
 class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
-    """Authorized Dream files, Artifact, re-entry and Story Index service."""
+    """Consume Admin authority/ORM contracts and project shared files locally."""
 
     async def get_dream_files(
         self,
         workflow_run_id: str,
         *,
         actor: dict[str, str],
-        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        artifact_data: AdminStoryWorkspaceArtifactData,
         access_token: str,
     ) -> Any:
-        """Project files locally and attach the Admin-owned confirmation fact."""
-
         projection = await asyncio.to_thread(
             self._get_dream_files_sync,
             workflow_run_id,
             actor,
-            confirmation_data,
+            artifact_data,
             access_token,
         )
         return self._attach_dream_agent_activity(
@@ -498,6 +344,544 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
             actor_id=str(actor["actor_id"]),
         )
 
+    async def get_episode_artifacts(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+        episode_id: str | None = None,
+    ) -> Any:
+        return await asyncio.to_thread(
+            self._get_episode_artifacts_sync,
+            workflow_run_id,
+            actor,
+            artifact_data,
+            access_token,
+            episode_id,
+        )
+
+    async def get_episode_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> Any:
+        return await asyncio.to_thread(
+            self._get_episode_index_sync,
+            workflow_run_id,
+            actor,
+            artifact_data,
+            access_token,
+        )
+
+    async def get_story_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        return await asyncio.to_thread(
+            self._get_story_index_sync,
+            workflow_run_id,
+            actor,
+            artifact_data,
+            access_token,
+        )
+
+    async def reconcile_story_index(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceStoryIndexReconcileCommand,
+        *,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+        if_match: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        return await asyncio.to_thread(
+            self._reconcile_story_index_sync,
+            workflow_run_id,
+            request,
+            actor,
+            artifact_data,
+            access_token,
+            if_match,
+        )
+
+    async def list_dream_runs(
+        self,
+        *,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> Any:
+        return await asyncio.to_thread(
+            self._list_dream_runs_sync,
+            actor,
+            artifact_data,
+            access_token,
+        )
+
+    def _authority(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> StoryWorkspaceArtifactAuthorityDTO:
+        try:
+            output = artifact_data.authority(
+                StoryWorkspaceArtifactAuthorityInputDTO(
+                    workflow_run_id=workflow_run_id,
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+        except AdminDataError as exc:
+            if exc.code in {"WORKFLOW_RUN_NOT_FOUND", "DREAM_DELEGATION_ENTITY_DENIED"}:
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=404 if exc.status_code == 404 else 403,
+                ) from exc
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+        self._require_actor(output.authority, actor)
+        return output.authority
+
+    @staticmethod
+    def _require_actor(
+        authority: StoryWorkspaceArtifactAuthorityDTO,
+        actor: dict[str, str],
+    ) -> None:
+        try:
+            actor_id = str(actor["actor_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
+        if authority.run.created_by != actor_id:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+
+    def _list_dream_runs_sync(
+        self,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> Any:
+        authorities: list[StoryWorkspaceArtifactAuthorityDTO] = []
+        cursor: StoryWorkspaceArtifactCursorDTO | None = None
+        seen: set[tuple[str, str]] = set()
+        while True:
+            try:
+                page = artifact_data.list_runs(
+                    StoryWorkspaceArtifactRunsInputDTO(limit=100, cursor=cursor),
+                    uuid4().hex,
+                    access_token=access_token,
+                )
+            except AdminDataError as exc:
+                raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+            for authority in page.runs:
+                self._require_actor(authority, actor)
+            authorities.extend(page.runs)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+            key = (cursor.created_at, cursor.workflow_run_id)
+            if key in seen:
+                raise ApiRouteError("ADMIN_RESPONSE_INVALID", status_code=503)
+            seen.add(key)
+        return StoryWorkspaceDreamReentryService(
+            dream_files_loader=self._load_dream_reentry_stage_projection,
+        ).list_dream_runs(authorities=authorities)
+
+    def _load_dream_reentry_stage_projection(
+        self,
+        authority: StoryWorkspaceArtifactAuthorityDTO,
+    ) -> StoryWorkspaceDreamReentryStageProjection:
+        workflow_run = authority.workflow_run()
+        try:
+            projection = self._read_dream_files_for_authorized_run(
+                workflow_run,
+                thread_id=authority.thread_id,
+            )
+            stage_activity_at = self._dream_reentry_stage_activity_at(projection)
+        except ApiRouteError as exc:
+            if exc.code == "AGENT_EXECUTION_FAILED" and exc.status_code == 404:
+                raise StoryWorkspaceDreamReentryWorkspaceMissing(
+                    authority.thread_id
+                ) from exc
+            raise
+        except StoryWorkspaceDreamFileError as exc:
+            self._raise_dream_file_error(exc)
+        return StoryWorkspaceDreamReentryStageProjection(
+            stages=projection.stages,
+            stage_activity_at=stage_activity_at,
+        )
+
+    @classmethod
+    def _read_dream_files_for_authorized_run(
+        cls,
+        workflow_run: WorkflowRun,
+        *,
+        thread_id: str,
+    ) -> Any:
+        workspace = cls._thread_workspace(thread_id)
+        reader = StoryWorkspaceDreamFileReader(workspace)
+        reader_workspace = Path(reader.workspace_root)
+        canonical_parent = workspace.parent
+        if (
+            reader_workspace != workspace
+            or reader_workspace.parent != canonical_parent
+            or reader_workspace.name != thread_id
+            or not reader_workspace.is_relative_to(canonical_parent)
+        ):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return reader.read(workflow_run, thread_id=thread_id)
+
+    @classmethod
+    def _dream_reentry_stage_activity_at(cls, projection: Any) -> datetime | None:
+        thread_id = getattr(projection, "thread_id", None)
+        run_id = getattr(projection, "story_workspace_run_id", None)
+        stages = getattr(projection, "stages", None)
+        if not isinstance(thread_id, str) or not isinstance(run_id, str):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        if not isinstance(stages, dict):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        workspace = cls._thread_workspace(thread_id)
+        candidates = [
+            workspace / ".dream" / "runtime" / "runs" / run_id / "run.json",
+            *[
+                workspace
+                / ".dream"
+                / "runtime"
+                / "runs"
+                / run_id
+                / "stages"
+                / f"{stage.value}.json"
+                for stage in stages
+            ],
+        ]
+        newest: datetime | None = None
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            except (OSError, RuntimeError) as exc:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+            if not resolved.is_relative_to(workspace):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            try:
+                metadata = resolved.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            observed = datetime.fromtimestamp(metadata.st_mtime, tz=UTC)
+            newest = observed if newest is None else max(newest, observed)
+        return newest
+
+    def _get_dream_files_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> Any:
+        authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
+        workflow_run = authority.workflow_run()
+        thread_id = authority.thread_id
+        try:
+            projection = self._read_dream_files_for_authorized_run(
+                workflow_run,
+                thread_id=thread_id,
+            )
+        except ApiRouteError as exc:
+            if not (
+                exc.code == "AGENT_EXECUTION_FAILED"
+                and exc.status_code == 404
+                and workflow_run.status not in _DREAM_OUTPUT_REQUIRED_STATUSES
+            ):
+                raise
+            projection = StoryWorkspaceDreamFileReader.waiting_response(
+                workflow_run,
+                thread_id=thread_id,
+            )
+        except StoryWorkspaceDreamFileError as exc:
+            self._raise_dream_file_error(exc)
+        self._require_dream_output_for_ready_status(workflow_run, projection)
+        return projection.model_copy(
+            update={
+                "confirmation_accepted": authority.confirmation_accepted,
+                "confirmation_dispatched": authority.confirmation_dispatched,
+                "can_confirm": (
+                    projection.can_confirm and not authority.confirmation_accepted
+                ),
+            }
+        )
+
+    def _episode_registry_context(
+        self,
+        authority: StoryWorkspaceArtifactAuthorityDTO,
+    ) -> tuple[Path, StoryWorkspaceEpisodeAuthority, Any] | None:
+        if authority.episode_authority is None:
+            return None
+        source = StoryWorkspaceEpisodeAuthority.parse(
+            authority.episode_authority.model_dump(by_alias=True),
+            expected_run_id=authority.run.workflow_run_id,
+        )
+        if source is None:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        try:
+            workspace = self._thread_workspace(authority.thread_id)
+        except ApiRouteError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+        canonical_story_slug = binding_service.read_canonical_project_story_slug(
+            source.story_slug
+        )
+        registry = binding_service.read_episode_registry_read_only(
+            StoryWorkspaceEpisodeBindingContext(
+                workflow_run_id=authority.run.workflow_run_id,
+                trusted_project_story_slug=canonical_story_slug,
+                locked_context_story_slug=source.story_slug,
+                run_provenance_story_slug=source.story_slug,
+                episode_uid=source.episode_uid,
+            )
+        )
+        return workspace, source, registry
+
+    def _get_episode_artifacts_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+        episode_id: str | None = None,
+    ) -> Any:
+        authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
+        try:
+            context = self._episode_registry_context(authority)
+            if context is None:
+                return StoryWorkspaceEpisodeArtifactService.unbound_surface(
+                    workflow_run_id
+                )
+            workspace, source, registry = context
+            selected = self._episode_authority_from_registry(
+                source,
+                registry,
+                selected_episode_id=episode_id,
+            )
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+                workflow_run_id,
+                episode_authority=selected,
+            )
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactContractError as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+        except StoryWorkspaceEpisodeBindingError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+
+    def _get_episode_index_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> Any:
+        authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
+        try:
+            context = self._episode_registry_context(authority)
+            if context is None:
+                return StoryWorkspaceEpisodeArtifactService.unbound_index(
+                    workflow_run_id
+                )
+            workspace, source, registry = context
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_index(
+                workflow_run_id,
+                episode_authority=source,
+                registry=registry,
+            )
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactContractError as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+        except StoryWorkspaceEpisodeBindingError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+
+    @staticmethod
+    def _story_index_error_status(code: str) -> int:
+        return _STORY_INDEX_ERROR_STATUSES.get(code, 503)
+
+    @classmethod
+    def _raise_story_index_error(cls, code: str) -> None:
+        code = _ADMIN_STORY_INDEX_ERROR_CODES.get(code, code)
+        safe_code = (
+            code
+            if code in _STORY_INDEX_ERROR_STATUSES
+            else "story_index_database_unavailable"
+        )
+        raise ApiRouteError(
+            safe_code,
+            status_code=cls._story_index_error_status(safe_code),
+        )
+
+    @classmethod
+    def _read_story_index_surface(
+        cls,
+        workspace: Path,
+        workflow_run_id: str,
+        authority: StoryWorkspaceEpisodeAuthority,
+    ) -> Any:
+        try:
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+                workflow_run_id,
+                episode_authority=authority,
+            )
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("artifact_missing", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError("story_index_invalid_artifact", status_code=422) from exc
+
+    def _story_projection(
+        self,
+        authority: StoryWorkspaceArtifactAuthorityDTO,
+    ) -> StoryWorkspaceArtifactProjectionDTO:
+        try:
+            context = self._episode_registry_context(authority)
+            if context is None:
+                self._raise_story_index_error("artifact_missing")
+            workspace, source, registry = context
+            selected = self._episode_authority_from_registry(source, registry)
+            surface = self._read_story_index_surface(
+                workspace,
+                authority.run.workflow_run_id,
+                selected,
+            )
+            if getattr(surface, "opaque_episode_id", None) is None:
+                self._raise_story_index_error("artifact_missing")
+            projected = ArtifactStoryIndexProjector.project(
+                workspace_root=workspace,
+                workflow_run=authority.workflow_run(),
+                actor_id=authority.run.created_by,
+                thread_id=authority.thread_id,
+                episode_authority=selected,
+                refreshed_surface=surface,
+            )
+            return StoryWorkspaceArtifactProjectionDTO(
+                source_project_id=projected.source_project_id,
+                title=projected.title,
+                episode_count=projected.episode_count,
+                artifact_manifest_revision=projected.artifact_manifest_revision,
+                script_revision=projected.script_revision,
+                script_size_bytes=projected.script_size_bytes,
+                artifact_status="available",
+            )
+        except ArtifactStoryProjectionError as exc:
+            self._raise_story_index_error(exc.code)
+        except ApiRouteError as exc:
+            if exc.status_code == 404:
+                self._raise_story_index_error("artifact_missing")
+            raise
+        except StoryWorkspaceEpisodeBindingError as exc:
+            raise ApiRouteError("artifact_missing", status_code=404) from exc
+
+    @staticmethod
+    def _story_index_wire_projection(observation: Any) -> StoryWorkspaceStoryIndexProjection:
+        try:
+            return StoryWorkspaceStoryIndexProjection.model_validate(
+                observation.model_dump()
+            )
+        except (TypeError, ValueError) as exc:
+            raise ApiRouteError("story_index_invalid_artifact", status_code=422) from exc
+
+    def _inspect_story_index(
+        self,
+        workflow_run_id: str,
+        projection: StoryWorkspaceArtifactProjectionDTO,
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        try:
+            result = artifact_data.inspect_index(
+                StoryWorkspaceArtifactIndexInputDTO(
+                    workflow_run_id=workflow_run_id,
+                    projection=projection,
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+        except AdminDataError as exc:
+            self._raise_story_index_error(exc.code)
+        return self._story_index_wire_projection(result.observation)
+
+    def _get_story_index_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
+        projection = self._story_projection(authority)
+        return self._inspect_story_index(
+            workflow_run_id,
+            projection,
+            artifact_data,
+            access_token,
+        )
+
+    def _reconcile_story_index_sync(
+        self,
+        workflow_run_id: str,
+        _request: StoryWorkspaceStoryIndexReconcileCommand,
+        actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
+        if_match: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
+        before_projection = self._story_projection(authority)
+        before = self._inspect_story_index(
+            workflow_run_id,
+            before_projection,
+            artifact_data,
+            access_token,
+        )
+        if if_match != f'"{before.etag}"':
+            self._raise_story_index_error("story_index_revision_conflict")
+
+        fresh_projection = self._story_projection(authority)
+        fresh = self._inspect_story_index(
+            workflow_run_id,
+            fresh_projection,
+            artifact_data,
+            access_token,
+        )
+        if if_match != f'"{fresh.etag}"':
+            self._raise_story_index_error("story_index_revision_conflict")
+        try:
+            result = artifact_data.reconcile_index(
+                StoryWorkspaceArtifactIndexReconcileInputDTO(
+                    workflow_run_id=workflow_run_id,
+                    projection=fresh_projection,
+                    expected_etag=fresh.etag,
+                ),
+                uuid4().hex,
+                access_token=access_token,
+            )
+        except AdminDataError as exc:
+            self._raise_story_index_error(exc.code)
+        return self._story_index_wire_projection(result.observation)
+
     def _attach_dream_agent_activity(
         self,
         projection: Any,
@@ -505,13 +889,6 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         workflow_run_id: str,
         actor_id: str,
     ) -> Any:
-        """Add a safe display hint without making Observer availability fatal.
-
-        Authorization and thread ownership have already been established by the
-        Dream-files projection.  The optional process-local hint cannot change
-        workflow fields, confirmation eligibility, Chat state, or HTTP success.
-        """
-
         try:
             factory = self._dream_agent_thread_factory()
             snapshot = (
@@ -553,706 +930,11 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
             )
             return projection
 
-    async def get_episode_artifacts(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-        episode_id: str | None = None,
-    ) -> Any:
-        """Project one registry Episode after full run provenance authorization."""
-
-        return await asyncio.to_thread(
-            self._get_episode_artifacts_sync,
-            workflow_run_id,
-            actor,
-            episode_id,
-        )
-
-    async def get_episode_index(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Project the body-free registry Episode index for Execution."""
-
-        return await asyncio.to_thread(
-            self._get_episode_index_sync,
-            workflow_run_id,
-            actor,
-        )
-
-    async def get_story_index(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> StoryWorkspaceStoryIndexProjection:
-        """Read the independent Artifact/PostgreSQL revision comparison."""
-
-        return await asyncio.to_thread(
-            self._get_story_index_sync,
-            workflow_run_id,
-            actor,
-        )
-
-    async def reconcile_story_index(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceStoryIndexReconcileCommand,
-        *,
-        actor: dict[str, str],
-        if_match: str,
-    ) -> StoryWorkspaceStoryIndexProjection:
-        """Synchronously retry one authorized, revision-guarded materialization."""
-
-        return await asyncio.to_thread(
-            self._reconcile_story_index_sync,
-            workflow_run_id,
-            request,
-            actor,
-            if_match,
-        )
-
-
-    async def list_dream_runs(
-        self,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Return the canonical actor-scoped Dream re-entry collection."""
-
-        return await asyncio.to_thread(self._list_dream_runs_sync, actor)
-
-    def _list_dream_runs_sync(
-        self,
-        actor: dict[str, str],
-    ) -> Any:
-        service = StoryWorkspaceDreamReentryService(
-            db_factory=database.get_db,
-            dream_files_loader=self._load_dream_reentry_stage_projection,
-        )
-        return service.list_dream_runs(actor=actor)
-
-    def _load_dream_reentry_stage_projection(
-        self,
-        row: Any,
-        actor: dict[str, str],
-        db: Any,
-    ) -> StoryWorkspaceDreamReentryStageProjection:
-        """Preserve Dream files truth while retaining its reliable mtime for sort."""
-
-        try:
-            workflow_values = {
-                field: row[field]
-                for field in WorkflowRun.model_fields
-                if field != "workflow_run_id"
-            }
-            workflow_values["workflow_run_id"] = row["run_id"]
-            workflow_run = WorkflowRun.model_validate(workflow_values)
-            thread_id = workflow_run.source_voice_thread_id
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
-        if not isinstance(thread_id, str) or not thread_id.strip():
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-        try:
-            projection = self._read_dream_files_for_authorized_run(
-                workflow_run,
-                thread_id=thread_id,
-            )
-            stage_activity_at = self._dream_reentry_stage_activity_at(projection)
-        except ApiRouteError as exc:
-            if exc.code == "AGENT_EXECUTION_FAILED" and exc.status_code == 404:
-                raise StoryWorkspaceDreamReentryWorkspaceMissing(thread_id) from exc
-            raise
-        except StoryWorkspaceDreamFileError as exc:
-            self._raise_dream_file_error(exc)
-        return StoryWorkspaceDreamReentryStageProjection(
-            stages=projection.stages,
-            stage_activity_at=stage_activity_at,
-        )
-
-    @classmethod
-    def _read_dream_files_for_authorized_run(
-        cls,
-        workflow_run: WorkflowRun,
-        *,
-        thread_id: str,
-    ) -> Any:
-        """Use the row already proven by re-entry SQL; do not reopen the database."""
-
-        workspace = cls._thread_workspace(thread_id)
-        reader = StoryWorkspaceDreamFileReader(workspace)
-        reader_workspace = Path(reader.workspace_root)
-        canonical_parent = workspace.parent
-        if (
-            reader_workspace != workspace
-            or reader_workspace.parent != canonical_parent
-            or reader_workspace.name != thread_id
-            or not reader_workspace.is_relative_to(canonical_parent)
-        ):
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return reader.read(workflow_run, thread_id=thread_id)
-
-    @classmethod
-    def _dream_reentry_stage_activity_at(cls, projection: Any) -> datetime | None:
-        """Read only canonical, validated stage-file mtimes for re-entry order."""
-
-        thread_id = getattr(projection, "thread_id", None)
-        run_id = getattr(projection, "story_workspace_run_id", None)
-        stages = getattr(projection, "stages", None)
-        if not isinstance(thread_id, str) or not isinstance(run_id, str):
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-        if not isinstance(stages, dict):
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-        workspace = cls._thread_workspace(thread_id)
-        candidates = [
-            workspace / ".dream" / "runtime" / "runs" / run_id / "run.json",
-            *[
-                workspace / ".dream" / "runtime" / "runs" / run_id / "stages" / f"{stage.value}.json"
-                for stage in stages
-            ],
-        ]
-        newest: datetime | None = None
-        for candidate in candidates:
-            try:
-                resolved = candidate.resolve(strict=True)
-            except FileNotFoundError:
-                continue
-            except (OSError, RuntimeError) as exc:
-                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
-            if not resolved.is_relative_to(workspace):
-                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-            try:
-                metadata = resolved.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
-            if not stat.S_ISREG(metadata.st_mode):
-                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-            observed = datetime.fromtimestamp(metadata.st_mtime, tz=UTC)
-            newest = observed if newest is None else max(newest, observed)
-        return newest
-
-    def _get_dream_files_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-        confirmation_data: AdminStoryWorkspaceConfirmationData,
-        access_token: str,
-    ) -> Any:
-        """Read the existing projection, then fetch its confirmation fact."""
-
-        db = database.get_db()
-        try:
-            projection = self._get_dream_files_from_db(db, workflow_run_id, actor)
-        finally:
-            db.close()
-        try:
-            fact = confirmation_data.fact(
-                StoryWorkspaceConfirmationFactInputDTO(
-                    workflow_run_id=workflow_run_id,
-                ),
-                uuid4().hex,
-                access_token=access_token,
-            )
-        except AdminDataError as exc:
-            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        if fact.thread_id != projection.thread_id:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-        return projection.model_copy(update={
-            "confirmation_accepted": fact.confirmation_accepted,
-            "confirmation_dispatched": fact.confirmation_dispatched,
-            "can_confirm": (
-                projection.can_confirm and not fact.confirmation_accepted
-            ),
-        })
-
-    def _get_episode_artifacts_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-        episode_id: str | None = None,
-    ) -> Any:
-        """Keep authorization and pinned filesystem projection in one worker."""
-
-        db = database.get_db()
-        try:
-            return self._get_episode_artifacts_from_db(
-                db,
-                workflow_run_id,
-                actor,
-                episode_id=episode_id,
-            )
-        finally:
-            db.close()
-
-    def _get_episode_index_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> Any:
-        """Keep index authorization and pinned filesystem reads in one worker."""
-
-        db = database.get_db()
-        try:
-            return self._get_episode_index_from_db(
-                db,
-                workflow_run_id,
-                actor,
-            )
-        finally:
-            db.close()
-
-    @staticmethod
-    def _story_index_error_status(code: str) -> int:
-        return _STORY_INDEX_ERROR_STATUSES.get(code, 503)
-
-    @classmethod
-    def _raise_story_index_error(cls, code: str) -> None:
-        safe_code = (
-            code
-            if code in _STORY_INDEX_ERROR_STATUSES
-            else "story_index_database_unavailable"
-        )
-        raise ApiRouteError(
-            safe_code,
-            status_code=cls._story_index_error_status(safe_code),
-        )
-
-    @classmethod
-    def _read_story_index_surface(
-        cls,
-        workspace: Path,
-        workflow_run_id: str,
-        authority: StoryWorkspaceEpisodeAuthority,
-    ) -> Any:
-        """Read one authorized surface through the fixed Story-index boundary."""
-
-        try:
-            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
-                workflow_run_id,
-                episode_authority=authority,
-            )
-        except StoryWorkspaceEpisodeArtifactPathError as exc:
-            raise ApiRouteError("artifact_missing", status_code=404) from exc
-        except StoryWorkspaceEpisodeArtifactError as exc:
-            raise ApiRouteError(
-                "story_index_invalid_artifact",
-                status_code=422,
-            ) from exc
-
-    def _authorized_story_index_context(
-        self,
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> _AuthorizedStoryIndexContext:
-        """Finish relational authorization before the first filesystem probe."""
-
-        row = self._authorized_episode_row(db, workflow_run_id, actor)
-        source_authority = self._episode_authority_from_source(row, workflow_run_id)
-        if source_authority is None:
-            self._raise_story_index_error("artifact_missing")
-        try:
-            actor_id = int(actor["actor_id"])
-            thread_id = str(row["thread_id"])
-            workspace = self._thread_workspace(thread_id)
-        except ApiRouteError as exc:
-            if exc.status_code == 503:
-                raise ApiRouteError(
-                    "story_index_database_unavailable",
-                    status_code=503,
-                ) from exc
-            # A missing, moved, or non-canonical server-owned thread workspace
-            # is intentionally indistinguishable from a missing Artifact.
-            raise ApiRouteError("artifact_missing", status_code=404) from exc
-        try:
-            binding_service = StoryWorkspaceEpisodeBindingService(workspace)
-            registry = binding_service.read_episode_registry_read_only(
-                StoryWorkspaceEpisodeBindingContext(
-                    workflow_run_id=workflow_run_id,
-                    trusted_project_story_slug=source_authority.story_slug,
-                    locked_context_story_slug=source_authority.story_slug,
-                    run_provenance_story_slug=source_authority.story_slug,
-                    episode_uid=source_authority.episode_uid,
-                )
-            )
-            authority = self._episode_authority_from_registry(
-                source_authority,
-                registry,
-            )
-        except StoryWorkspaceEpisodeBindingError as exc:
-            raise ApiRouteError("artifact_missing", status_code=404) from exc
-        surface = self._read_story_index_surface(
-            workspace,
-            workflow_run_id,
-            authority,
-        )
-        if getattr(surface, "opaque_episode_id", None) is None:
-            self._raise_story_index_error("artifact_missing")
-        return _AuthorizedStoryIndexContext(
-            workflow_run_row=row,
-            actor_id=actor_id,
-            thread_id=thread_id,
-            thread_workspace=workspace,
-            episode_authority=authority,
-            refreshed_surface=surface,
-        )
-
-    @classmethod
-    def _story_index_wire_projection(
-        cls,
-        observation: ArtifactStoryIndexObservation,
-    ) -> StoryWorkspaceStoryIndexProjection:
-        try:
-            return StoryWorkspaceStoryIndexProjection.model_validate(
-                observation.public_dict()
-            )
-        except (TypeError, ValueError) as exc:
-            raise ApiRouteError(
-                "story_index_invalid_artifact",
-                status_code=422,
-            ) from exc
-
-    def _inspect_story_index(
-        self,
-        db: Any,
-        context: _AuthorizedStoryIndexContext,
-    ) -> ArtifactStoryIndexObservation:
-        return self._inspect_story_index_snapshot(db, context).observation
-
-    def _inspect_story_index_snapshot(
-        self,
-        db: Any,
-        context: _AuthorizedStoryIndexContext,
-    ) -> ArtifactStoryIndexSnapshot:
-        try:
-            return ArtifactStoryIndexService().inspect_snapshot(
-                db=db,
-                workspace_root=context.thread_workspace,
-                workflow_run=context.workflow_run_row,
-                actor_id=context.actor_id,
-                thread_id=context.thread_id,
-                episode_authority=context.episode_authority,
-                refreshed_surface=context.refreshed_surface,
-            )
-        except (ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError) as exc:
-            self._raise_story_index_error(exc.code)
-
-    def _get_story_index_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> StoryWorkspaceStoryIndexProjection:
-        db = database.get_db()
-        try:
-            context = self._authorized_story_index_context(
-                db,
-                workflow_run_id,
-                actor,
-            )
-            return self._story_index_wire_projection(
-                self._inspect_story_index(db, context)
-            )
-        except (ApiRouteError, ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError):
-            raise
-        except PostgresError as exc:
-            raise ApiRouteError(
-                "story_index_database_unavailable",
-                status_code=503,
-            ) from exc
-        finally:
-            db.close()
-
-    def _reconcile_story_index_sync(
-        self,
-        workflow_run_id: str,
-        _request: StoryWorkspaceStoryIndexReconcileCommand,
-        actor: dict[str, str],
-        if_match: str,
-    ) -> StoryWorkspaceStoryIndexProjection:
-        db = database.get_db()
-        try:
-            context = self._authorized_story_index_context(
-                db,
-                workflow_run_id,
-                actor,
-            )
-            before = self._inspect_story_index_snapshot(db, context)
-            expected = f'"{before.observation.etag}"'
-            if if_match != expected:
-                self._raise_story_index_error("story_index_revision_conflict")
-
-            # Re-read the pinned canonical surface after the If-Match check.
-            refreshed = self._read_story_index_surface(
-                context.thread_workspace,
-                workflow_run_id,
-                context.episode_authority,
-            )
-            refreshed_context = _AuthorizedStoryIndexContext(
-                workflow_run_row=context.workflow_run_row,
-                actor_id=context.actor_id,
-                thread_id=context.thread_id,
-                thread_workspace=context.thread_workspace,
-                episode_authority=context.episode_authority,
-                refreshed_surface=refreshed,
-            )
-            fresh_snapshot = self._inspect_story_index_snapshot(db, refreshed_context)
-            if if_match != f'"{fresh_snapshot.observation.etag}"':
-                self._raise_story_index_error("story_index_revision_conflict")
-
-            story_index_service = ArtifactStoryIndexService()
-            result = story_index_service.materialize_projection(
-                db=db,
-                projection=fresh_snapshot.projection,
-                expected_record=fresh_snapshot.record,
-                require_expected_record=True,
-            )
-            status = str(result.get("status") or "failed")
-            if status in {"failed", "conflict"}:
-                code = str(result.get("errorCode") or "story_index_write_failed")
-                self._raise_story_index_error(code)
-            return self._story_index_wire_projection(
-                story_index_service.inspect_projection(
-                    db=db,
-                    projection=fresh_snapshot.projection,
-                ).observation
-            )
-        except ApiRouteError:
-            raise
-        except (ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError) as exc:
-            self._raise_story_index_error(exc.code)
-        except PostgresError as exc:
-            raise ApiRouteError(
-                "story_index_database_unavailable",
-                status_code=503,
-            ) from exc
-        finally:
-            db.close()
-
-
-    def _authorized_episode_registry_context(
-        self,
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> tuple[Path, StoryWorkspaceEpisodeAuthority, Any] | None:
-        """Resolve one authorized workspace, launch authority, and registry."""
-
-        row = self._authorized_episode_row(
-            db,
-            workflow_run_id,
-            actor,
-        )
-        source_authority = self._episode_authority_from_source(
-            row,
-            workflow_run_id,
-        )
-        if source_authority is None:
-            return None
-        thread_id = str(row["thread_id"])
-        try:
-            workspace = self._thread_workspace(thread_id)
-        except ApiRouteError as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
-        canonical_story_slug = binding_service.read_canonical_project_story_slug(
-            source_authority.story_slug
-        )
-        binding_context = StoryWorkspaceEpisodeBindingContext(
-            workflow_run_id=workflow_run_id,
-            trusted_project_story_slug=canonical_story_slug,
-            locked_context_story_slug=source_authority.story_slug,
-            run_provenance_story_slug=source_authority.story_slug,
-            episode_uid=source_authority.episode_uid,
-        )
-        registry = binding_service.read_episode_registry_read_only(binding_context)
-        return workspace, source_authority, registry
-
-    def _get_episode_index_from_db(
-        self,
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> Any:
-        """Authorize the Run before projecting its body-free Episode index."""
-
-        try:
-            context = self._authorized_episode_registry_context(
-                db,
-                workflow_run_id,
-                actor,
-            )
-            if context is None:
-                return StoryWorkspaceEpisodeArtifactService.unbound_index(
-                    workflow_run_id
-                )
-            workspace, source_authority, registry = context
-            return StoryWorkspaceEpisodeArtifactService(workspace).read_index(
-                workflow_run_id,
-                episode_authority=source_authority,
-                registry=registry,
-            )
-        except ApiRouteError:
-            raise
-        except StoryWorkspaceEpisodeArtifactPathError as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        except StoryWorkspaceEpisodeArtifactContractError as exc:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
-        except StoryWorkspaceEpisodeArtifactError as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-        except StoryWorkspaceEpisodeBindingError as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        except PostgresError as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-
-    def _get_episode_artifacts_from_db(
-        self,
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-        *,
-        episode_id: str | None = None,
-    ) -> Any:
-        """Authorize all relational facts before probing one registry Episode."""
-
-        try:
-            context = self._authorized_episode_registry_context(
-                db,
-                workflow_run_id,
-                actor,
-            )
-            if context is None:
-                return StoryWorkspaceEpisodeArtifactService.unbound_surface(
-                    workflow_run_id
-                )
-            workspace, source_authority, registry = context
-            authority = self._episode_authority_from_registry(
-                source_authority,
-                registry,
-                selected_episode_id=episode_id,
-            )
-            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
-                workflow_run_id,
-                episode_authority=authority,
-            )
-        except ApiRouteError:
-            raise
-        except StoryWorkspaceEpisodeArtifactPathError as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        except StoryWorkspaceEpisodeArtifactContractError as exc:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
-        except StoryWorkspaceEpisodeArtifactError as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-        except StoryWorkspaceEpisodeBindingError as exc:
-            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        except PostgresError as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-
-    def _get_dream_files_from_db(
-        self,
-        db: Any,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> Any:
-        """Reuse one already-authorized PostgreSQL connection for a Dream projection."""
-
-        try:
-            try:
-                actor_id = int(actor["actor_id"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=403,
-                ) from exc
-            actor_context = self._run_actor_context(db, workflow_run_id, actor_id)
-            workflow_run = WorkflowRunService(
-                db,
-                token_secret=story_workspace_workflow_token_secret(),
-            ).read_run(workflow_run_id, actor_context)
-            thread_id = workflow_run.source_voice_thread_id
-            if not isinstance(thread_id, str) or not thread_id.strip():
-                raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-            thread = database.get_chat_thread(thread_id, actor_id)
-            thread_id_value = str(thread.get("id")) if thread else None
-            if thread_id_value != thread_id:
-                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-            try:
-                workspace = self._thread_workspace(thread_id)
-            except ApiRouteError as exc:
-                if not (
-                    exc.code == "AGENT_EXECUTION_FAILED"
-                    and exc.status_code == 404
-                    and workflow_run.status not in _DREAM_OUTPUT_REQUIRED_STATUSES
-                ):
-                    raise
-                # Launch returns before its background turn assembles the
-                # canonical Thread workspace.  GET remains read-only and
-                # reports the existing wire-level waiting projection instead
-                # of turning normal scheduling latency into a 404.
-                projection = StoryWorkspaceDreamFileReader.waiting_response(
-                    workflow_run,
-                    thread_id=thread_id,
-                )
-            else:
-                reader = StoryWorkspaceDreamFileReader(workspace)
-                reader_workspace = Path(reader.workspace_root)
-                canonical_parent = workspace.parent
-                if (
-                    reader_workspace != workspace
-                    or reader_workspace.parent != canonical_parent
-                    or reader_workspace.name != thread_id
-                    or not reader_workspace.is_relative_to(canonical_parent)
-                ):
-                    raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-                projection = reader.read(workflow_run, thread_id=thread_id)
-            self._require_dream_output_for_ready_status(
-                workflow_run,
-                projection,
-            )
-            return projection
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        except ApiRouteError:
-            raise
-        except StoryWorkspaceDreamFileError as exc:
-            self._raise_dream_file_error(exc)
-        except Exception as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-
     @staticmethod
     def _require_dream_output_for_ready_status(
         workflow_run: WorkflowRun,
         projection: Any,
     ) -> None:
-        """Fail closed only after the lifecycle proves output must exist.
-
-        A freshly accepted/running turn may not have materialized ``.dream``
-        yet, so its empty projection is an ordinary read-only waiting state.
-        Output-validating and review descendants, however, are reachable only
-        after the required three-stage output has been produced; absence in
-        those states is contract corruption rather than readiness latency.
-
-        Failed/cancelled runs are deliberately excluded because either may be
-        terminal before the first output exists.
-        """
-
         if workflow_run.status not in _DREAM_OUTPUT_REQUIRED_STATUSES:
             return
         run_revision = getattr(projection, "run_revision", 0)
@@ -1266,7 +948,6 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
             or set(stages) != set(required_stages)
         ):
             raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-
 
 
 class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
@@ -1308,20 +989,14 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
         dispatch = persisted.dispatch
         if dispatch is None:
             return accepted
-
         try:
             self._dream_confirmation_coordinator.schedule(dispatch)
         except Exception:
-            # The committed hidden turn remains pending. The lifecycle scan
-            # will pick it up without asking the user to submit again.
             logger.exception(
-                "Dream confirmation scheduling deferred for run_id=%s "
-                "message_id=%s",
+                "Dream confirmation scheduling deferred for run_id=%s message_id=%s",
                 workflow_run_id,
                 dispatch.message_id,
             )
-        # Scheduled is not consumed. Only the coordinator writes the durable
-        # dispatched acknowledgement after the same Chat Agent turn completes.
         return accepted.model_copy(update={"dispatched": False})
 
     def _submit_dream_confirmation_sync(
@@ -1340,10 +1015,7 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
                 actor_id = str(actor["actor_id"])
                 workspace_id = str(actor["workspace_id"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=403,
-                ) from exc
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
             raw_run = run_data.read(
                 RunLookupInputDTO(
                     workspace_id=workspace_id,
@@ -1374,23 +1046,12 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
                 or reader_workspace.name != thread_id
                 or not reader_workspace.is_relative_to(canonical_parent)
             ):
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=403,
-                )
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
 
             first_projection = reader.read(workflow_run, thread_id=thread_id)
-            story_workspace_validate_confirmation_projection(
-                first_projection,
-                request,
-            )
-            # Re-read immediately before the Admin write so a local revision
-            # change never gets submitted with an already-stale file snapshot.
+            story_workspace_validate_confirmation_projection(first_projection, request)
             final_projection = reader.read(workflow_run, thread_id=thread_id)
-            story_workspace_validate_confirmation_projection(
-                final_projection,
-                request,
-            )
+            story_workspace_validate_confirmation_projection(final_projection, request)
             result = confirmation_data.submit_recovering(
                 StoryWorkspaceConfirmationSubmitInputDTO(
                     command_json=story_workspace_confirmation_command_json(request),
@@ -1403,18 +1064,12 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
             raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
         except AdminDataError as exc:
             raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
         except ApiRouteError:
             raise
         except StoryWorkspaceDreamFileError as exc:
             self._raise_dream_file_error(exc)
         except Exception as exc:
-            raise ApiRouteError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                status_code=503,
-            ) from exc
-
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
 
 
 _ARTIFACT_APPLICATION_SERVICE = DreamArtifactApplicationService()

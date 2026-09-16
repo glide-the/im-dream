@@ -2,6 +2,7 @@
 // [Output] Bounded, no-retry server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
+// [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -47,9 +48,17 @@ export type AdminBffConfig = Readonly<{
   timeoutMilliseconds: number; maxResponseBytes: number;
 }>;
 
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
 function required(environment: Readonly<Record<string, string | undefined>>, key: string): string {
   const value = environment[key]?.trim() ?? '';
-  if (!value || /[\u0000-\u001f\u007f]/.test(value)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
+  if (!value || hasControlCharacter(value)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
   return value;
 }
 
@@ -95,7 +104,7 @@ export class AdminBffClient {
 
   async #request<T>(path: string, requestId: string, schema: z.ZodType<T>, body?: unknown, token?: string, signal?: AbortSignal): Promise<T> {
     identifier.parse(requestId);
-    if (token !== undefined && (!token || /\s|[\u0000-\u001f\u007f]/.test(token))) throw new BffBoundaryError('BFF_SESSION_INVALID', 401);
+    if (token !== undefined && (!token || /\s/.test(token) || hasControlCharacter(token))) throw new BffBoundaryError('BFF_SESSION_INVALID', 401);
     const headers = new Headers({ accept: 'application/json', 'x-request-id': requestId,
       'X-Ink-Dream-Service': this.#config.serviceId, 'X-Ink-Dream-Credential': this.#config.serviceSecret });
     if (body !== undefined) headers.set('content-type', 'application/json');

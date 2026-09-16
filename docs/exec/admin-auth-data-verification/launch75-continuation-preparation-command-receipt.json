@@ -1,0 +1,6 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-launch75-continuation.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_launch75\",\n  \"original_fixture_sha256\": \"ef01594cd9aef0806fd48afdb60b10ab2868856f004f8dce225266ce0251d13c\",\n  \"prior_protected_tables_unchanged\": 17,\n  \"prior_accepted_cases\": 1,\n  \"remaining_cases\": 37,\n  \"full_cases\": 38,\n  \"full_case_facts\": \"unchanged\",\n  \"original_get_checkpoints\": 21,\n  \"corrected_actor_query_cases\": 3,\n  \"new_closed_query_cases\": 3,\n  \"credential_refresh\": \"new technical OAuth only; old tokens/fixture remain retained\",\n  \"private_keys_exported\": false,\n  \"scope\": \"no business writes/lease refresh or original result reset\"\n}\n"
+}

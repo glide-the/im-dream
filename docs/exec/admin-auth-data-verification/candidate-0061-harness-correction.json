@@ -1,0 +1,13 @@
+{
+  "phase": "0061 catalog harness correction",
+  "cause": "PostgreSQL renders text defaults with an explicit ::text cast and returns numeric defaults as strings while the frozen Drizzle descriptor stores normalized defaults.",
+  "correction": "Normalize only the catalog representation before exact comparison; migration SQL, snapshot, descriptor, capability hash and expected business assertions stayed unchanged.",
+  "rerun": {
+    "command": "python3 /private/tmp/ink-auth-migration-validation/replay-candidate-0061.py",
+    "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+    "exit_code": 0,
+    "result": "upgrade/repeat/concurrent/fresh-full-history/partial-rollback/catalog/event/RTA constraints passed"
+  },
+  "normal_database": "untouched",
+  "real_google_or_model": "not_executed"
+}

@@ -12,6 +12,7 @@
 # [Sync] 2026-09-15: persist Registry109 Story proposals through the same Thread grant and unknown-write barrier.
 # [Sync] 2026-09-16: construct an actor/Thread-bound Notion DTO store from the current grant.
 # [Sync] 2026-09-16: share the write barrier with Registry169 repair settlement.
+# [Sync] 2026-09-16: consume Registry185-191 authority/lifecycle/index through the exact turn grant.
 # [Sync] 2026-09-16: project the current authoritative WorkflowRun through existing Admin DTO reads.
 from __future__ import annotations
 
@@ -69,6 +70,18 @@ from .story_workspace_output_data import (
     StoryWorkspaceOutputInputDTO,
     StoryWorkspaceOutputResultDTO,
 )
+from .story_workspace_artifact_data import (
+    ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY,
+    MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY,
+    MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX,
+    READ_STORY_WORKSPACE_ARTIFACT_AUTHORITY,
+    AdminStoryWorkspaceArtifactData,
+    AdminStoryWorkspaceArtifactProvider,
+    StoryWorkspaceArtifactAuthorityInputDTO,
+    StoryWorkspaceArtifactProjectionDTO,
+    StoryWorkspaceEpisodeAuthorityEnsureInputDTO,
+    StoryWorkspaceArtifactOutputReadyInputDTO,
+)
 from .dream_auto_repair_data import (
     SETTLE_DREAM_AUTO_REPAIR,
     AdminDreamAutoRepairData,
@@ -125,6 +138,7 @@ class AdminTurnPersistence(
     AdminWorkflowManagedMcpScopeProvider,
     AdminWorkflowRuntimeActivationProvider,
     AdminStoryWorkspaceOutputProvider,
+    AdminStoryWorkspaceArtifactProvider,
     AdminDreamAutoRepairProvider,
 ):
     def __init__(self, resolution: AdminWorkflowResolution, grant: RuntimeGrant, client: AdminDataClient, *,
@@ -161,6 +175,10 @@ class AdminTurnPersistence(
             AdminWorkflowRuntimeActivationData(client)
         )
         self._story_workspace_output_data = AdminStoryWorkspaceOutputData(client)
+        self._story_workspace_artifact_data = AdminStoryWorkspaceArtifactData(
+            client,
+            canonical_user_id=resolution.canonical_user_id,
+        )
         self._dream_auto_repair_data = AdminDreamAutoRepairData(client)
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -388,6 +406,126 @@ class AdminTurnPersistence(
             grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
             return self._write(STORE_STORY_WORKSPACE_OUTPUT, input_dto, grant)
 
+    def story_workspace_artifact_authority(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+    ):
+        """Read exact Run/launch authority through the renewable turn grant."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        input_dto = StoryWorkspaceArtifactAuthorityInputDTO(
+            workflow_run_id=workflow_run_id
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            request_id = self._request_id_factory()
+            result = self._story_workspace_artifact_data.execute(
+                READ_STORY_WORKSPACE_ARTIFACT_AUTHORITY,
+                input_dto,
+                request_id,
+                access_token=grant.token,
+            )
+        if result.authority.thread_id != thread_id:
+            raise invalid_response(request_id)
+        return result.authority
+
+    def ensure_story_workspace_episode_authority(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+        story_slug: str,
+        episode_code: str,
+    ):
+        """Establish the source-message Episode identity in one Admin UOW."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        input_dto = StoryWorkspaceEpisodeAuthorityEnsureInputDTO(
+            workflow_run_id=workflow_run_id,
+            story_slug=story_slug,
+            episode_code=episode_code,
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._write(
+                ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY,
+                input_dto,
+                grant,
+            )
+
+    def mark_story_workspace_artifact_output_ready(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+    ):
+        """Advance only the Admin-owned output-ready lifecycle transitions."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        input_dto = StoryWorkspaceArtifactOutputReadyInputDTO(
+            workflow_run_id=workflow_run_id,
+            normalized_result_ready=True,
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._write(
+                MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY,
+                input_dto,
+                grant,
+            )
+
+    def materialize_story_workspace_artifact_index(
+        self,
+        *,
+        actor_id: str,
+        thread_id: str,
+        workflow_run_id: str,
+        projection: StoryWorkspaceArtifactProjectionDTO,
+    ):
+        """Persist a Dream-computed normalized file projection in Admin."""
+
+        context = self._resolution.context_for(
+            actor_id=actor_id,
+            thread_id=thread_id,
+        )
+        if context is None or context.workflow_run_id != workflow_run_id:
+            raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+        from .story_workspace_artifact_data import (
+            StoryWorkspaceArtifactIndexInputDTO,
+        )
+
+        input_dto = StoryWorkspaceArtifactIndexInputDTO(
+            workflow_run_id=workflow_run_id,
+            projection=projection,
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._write(
+                MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX,
+                input_dto,
+                grant,
+            )
+
     def settle_dream_auto_repair(
         self,
         *,
@@ -550,7 +688,7 @@ class AdminTurnPersistence(
         # Every caller holds the same activity lock. Unknown results block a
         # different operation as well as a different input; receipts retain
         # the original operation and immutable input held by this owner.
-        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME and operation is not STORE_STORY_WORKSPACE_OUTPUT and operation is not SETTLE_DREAM_AUTO_REPAIR:
+        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE and operation is not ACTIVATE_WORKFLOW_RUNTIME and operation is not STORE_STORY_WORKSPACE_OUTPUT and operation is not SETTLE_DREAM_AUTO_REPAIR and operation is not ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY and operation is not MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY and operation is not MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX:
             raise configuration_invalid()
         pending = self._pending
         if pending is not None:
@@ -578,6 +716,17 @@ class AdminTurnPersistence(
                         access_token=grant.token,
                     )
                     if operation is STORE_STORY_WORKSPACE_OUTPUT
+                    else self._story_workspace_artifact_data.receipt(
+                        operation,
+                        pending.input_dto,
+                        pending.request_id,
+                        access_token=grant.token,
+                    )
+                    if any(operation is item for item in (
+                        ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY,
+                        MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY,
+                        MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX,
+                    ))
                     else self._client.receipt(
                         operation,
                         pending.request_id,
@@ -611,6 +760,17 @@ class AdminTurnPersistence(
                 )
             elif operation is SETTLE_DREAM_AUTO_REPAIR:
                 result = self._dream_auto_repair_data.settle(
+                    input_dto,
+                    pending.request_id,
+                    access_token=grant.token,
+                )
+            elif any(operation is item for item in (
+                ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY,
+                MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY,
+                MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX,
+            )):
+                result = self._story_workspace_artifact_data.execute(
+                    operation,
                     input_dto,
                     pending.request_id,
                     access_token=grant.token,
@@ -650,6 +810,24 @@ class AdminTurnPersistence(
                 or result.workflow_run_id != context.workflow_run_id
                 or result.runtime_plugin_lock_id
                 != context.runtime_plugin_lock_id
+            ):
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is ENSURE_STORY_WORKSPACE_EPISODE_AUTHORITY:
+            if (
+                result.authority.workflow_run_id
+                != pending.input_dto.workflow_run_id
+                or result.authority.story_slug != pending.input_dto.story_slug
+                or result.authority.episode_code != pending.input_dto.episode_code
+            ):
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is MARK_STORY_WORKSPACE_ARTIFACT_OUTPUT_READY:
+            if result.workflow_run_id != pending.input_dto.workflow_run_id:
+                raise invalid_response(pending.request_id, write=True)
+        elif pending.operation is MATERIALIZE_STORY_WORKSPACE_ARTIFACT_INDEX:
+            if (
+                result.observation.run_id != pending.input_dto.workflow_run_id
+                or result.observation.project_id
+                != pending.input_dto.projection.source_project_id
             ):
                 raise invalid_response(pending.request_id, write=True)
         else:

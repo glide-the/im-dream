@@ -1,0 +1,22 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "tables": {
+    "decks": 27,
+    "voices": 22,
+    "story_workspace_workspaces": 21,
+    "deck_plugin_releases": 21,
+    "deck_runtime_plugin_locks": 21,
+    "deck_plugin_bindings": 21,
+    "deck_plugin_installations": 0,
+    "deck_runtime_snapshots": 21,
+    "claude_plugin_installations": 3,
+    "runtime_plugin_materializations": 0,
+    "workflow_preflights": 27,
+    "workflow_runs": 27,
+    "chat_thread": 29
+  },
+  "facts_sha256": "bd31a6e31995b23e4bd9afc4a9e8907cc222288e6f3d5c64fbc1a368b11ae22a",
+  "access": "SELECT only; owned technical facts; private rows not emitted",
+  "normal_database": "untouched"
+}

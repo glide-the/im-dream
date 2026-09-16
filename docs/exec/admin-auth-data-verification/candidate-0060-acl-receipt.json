@@ -1,0 +1,33 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+  "receipts": [
+    {
+      "command": "node drizzle/data/auth-access-policy.mjs",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+      "exit_code": 0,
+      "output": "{\"mode\":\"dry-run\",\"database\":\"ink_auth_data_codex_test_792494523a17_pf61_upgrade\",\"policy_sha256\":\"bf5ff2c18555f1ada0995bcb055f14fc4db9c48894e4411a8dd96be7a69c6df3\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    },
+    {
+      "command": "node drizzle/data/auth-access-policy.mjs --apply",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+      "exit_code": 0,
+      "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_pf61_upgrade\",\"policy_sha256\":\"bf5ff2c18555f1ada0995bcb055f14fc4db9c48894e4411a8dd96be7a69c6df3\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    },
+    {
+      "command": "node drizzle/data/auth-access-policy.mjs --apply",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+      "exit_code": 0,
+      "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_pf61_upgrade\",\"policy_sha256\":\"bf5ff2c18555f1ada0995bcb055f14fc4db9c48894e4411a8dd96be7a69c6df3\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    },
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/verify-0060-actual-roles.mts",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+      "exit_code": 1,
+      "output": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert((await stat(path)).mode&0o777===0o600)\n\n    at <anonymous> (/private/tmp/ink-auth-migration-validation/verify-0060-actual-roles.mts:6:51) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 0,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v24.13.0\n"
+    }
+  ]
+}

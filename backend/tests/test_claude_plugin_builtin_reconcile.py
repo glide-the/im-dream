@@ -1,4 +1,7 @@
-"""Provider-free startup reconciliation tests; no PostgreSQL, CLI or filesystem."""
+"""Provider-free startup reconciliation tests; no PostgreSQL, CLI or runtime DDL.
+
+[Sync] 2026-09-16: assert the production database module is absent after Admin adoption.
+"""
 
 from __future__ import annotations
 
@@ -153,10 +156,9 @@ def test_production_startup_and_database_module_have_no_builtin_sql_fallback():
     root = Path(__file__).resolve().parents[1]
     coordinator = (root / "services/claude_plugin/builtin_reconcile.py").read_text()
     server = (root / "server.py").read_text()
-    database = (root / "database.py").read_text()
+    assert not (root / "database.py").exists()
     assert "import database" not in coordinator
     assert "get_db" not in coordinator
-    assert "backfill_builtin_deck_plugin_refs" not in database
     startup = server.split("async def startup_claude_plugin_seed", 1)[1].split(
         '@app.on_event("shutdown")', 1
     )[0]

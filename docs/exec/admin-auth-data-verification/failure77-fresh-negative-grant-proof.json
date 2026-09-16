@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "setup_assertions": 23,
+  "retained_positive_originals": 6,
+  "retained_prior_full_checkpoint_tables": 17,
+  "new_technical_queued_run_operands": 1,
+  "new_graph_rows": 3,
+  "new_public_negative_grants": 2,
+  "grant_creation": "actual public source.ensure -> claim -> queued Run-bound server-persistence; ordinary Editor",
+  "old_disabled_deck_and_all_run_states": "unchanged",
+  "old_grant_expiry": "not updated",
+  "original_public_exit": 1,
+  "actual_editor_code": "DELEGATION_ENTITY_DENIED",
+  "positive_post_replays": 0,
+  "remaining_denied_cases": 16,
+  "original_gets": 27,
+  "fresh_oauth": "new300s signed last; no private key export",
+  "normal_database": "untouched",
+  "runtime_model_provider_filesystem": "not executed"
+}

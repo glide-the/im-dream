@@ -118,6 +118,9 @@ from libs.claude_agent_kit.types import (
 from services.admin_gateway.models import GatewayModel
 from services.admin_data.session_models import SessionPreviewDTO
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactProvider,
+)
 from services.admin_data.deck_chat_context_data import (
     AdminDeckChatContextResolution,
     DeckChatContextOutputDTO,
@@ -147,7 +150,10 @@ def _bind_test_grant(owner, *, run_id=None):
     return owner
 
 
-class _LegacyTurnPersistence(AdminAgentTurnPersistence):
+class _LegacyTurnPersistence(
+    AdminAgentTurnPersistence,
+    AdminStoryWorkspaceArtifactProvider,
+):
     """Test-only adapter for historical fixtures that still patch database.py."""
 
     def system_config(self, *, actor_id, thread_id):

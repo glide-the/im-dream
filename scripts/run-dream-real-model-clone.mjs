@@ -899,7 +899,7 @@ try {
   await waitForUrl(`${dreamApiBase}/api/health`, dreamApi, 'isolated Dream API');
 
   runPhase = 'provider-free-contract-preflight';
-  await execute(python, ['script/verify_gateway_e2e.py'], {
+  await execute(python, ['tests/harness/verify_gateway_e2e.py'], {
     cwd: backendRoot,
     env: {
       ...dreamEnv,

@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "assertions": 159,
+  "original_tables_retained_full_rows": 125,
+  "first_preparation_tables_retained_full_rows": 17,
+  "all_positive_originals_current_owner_digest_scopes": 5,
+  "old_source_runs_pf_messages_receipts_audits": "all original full rows retained",
+  "active_owned_fault_functions": 0,
+  "normal_database": "untouched",
+  "provider_model_runtime_filesystem": "not executed"
+}

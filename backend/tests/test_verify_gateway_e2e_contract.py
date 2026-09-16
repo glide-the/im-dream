@@ -1,6 +1,7 @@
 # [Input] Named verifier pure/public contracts with fake responses and database fences.
 # [Output] Redacted model/account preflight and canonical verification regression evidence.
 # [Pos] Provider-free harness contract; never runs a real account/model acceptance.
+# [Sync] 2026-09-16: consume the explicitly test-only SQL receipt harness.
 # [Sync] 2026-09-15: cover explicit Admin OAuth and account matching before I/O/model writes.
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import json
 
 import pytest
 
-from backend.script import verify_gateway_e2e as verifier
+from backend.tests.harness import verify_gateway_e2e as verifier
 
 
 @pytest.mark.parametrize("email,token", [("", "synthetic-oauth"), ("synthetic@example.com", ""), ("synthetic@example.com", "synthetic token")])

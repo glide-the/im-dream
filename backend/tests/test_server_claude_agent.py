@@ -3,6 +3,7 @@
 #          factory is initialised, request/response models are correct, and
 #          authentication is enforced.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-16: assert Admin HTTP owner ordering after removing Dream PostgreSQL lifecycle.
 # [Sync] 2026-09-13: expect the package-root Runtime 0.1.9 identity in startup diagnostics.
 # [Sync] 2026-05-22: initial — smoke tests for /api/claude-agent/* routes in server.py.
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
@@ -2611,7 +2612,7 @@ class TestFactoryLifecycle(unittest.TestCase):
         startup_names = [h.__name__ for h in self.srv.app.router.on_startup]
         shutdown_names = [h.__name__ for h in self.srv.app.router.on_shutdown]
         self.assertLess(
-            startup_names.index("startup_database"),
+            startup_names.index("startup_admin_request_auth"),
             startup_names.index(
                 "story_workspace_startup_dream_confirmation_coordinator"
             ),
@@ -2652,7 +2653,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "either 'memory' or 'redis'"):
                 asyncio.run(self.srv.startup_validate_claude_agent_event_bus())
 
-    def test_shutdown_awaits_business_owners_and_factory_before_database(self):
+    def test_shutdown_awaits_business_owners_and_factory(self):
         calls: list[str] = []
         confirmation = unittest.mock.Mock()
         confirmation.stop = unittest.mock.AsyncMock(
@@ -2704,16 +2705,10 @@ class TestFactoryLifecycle(unittest.TestCase):
                 "aclose",
                 new=unittest.mock.AsyncMock(side_effect=close_redis),
             ) as close_event_bus,
-            unittest.mock.patch.object(
-                self.srv.database,
-                "close_db",
-                side_effect=lambda: calls.append("database"),
-            ),
         ):
             async def exercise():
                 await self.srv.story_workspace_shutdown_dream_confirmation_coordinator()
                 await self.srv.shutdown_claude_agent()
-                await self.srv.shutdown_database()
 
             asyncio.run(exercise())
 
@@ -2727,7 +2722,6 @@ class TestFactoryLifecycle(unittest.TestCase):
                 "sampler",
                 "factory",
                 "redis",
-                "database",
             ],
         )
         close_event_bus.assert_awaited_once_with()

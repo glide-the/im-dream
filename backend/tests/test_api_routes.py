@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: include four fail-closed Remote Marketplace error codes.
 [Sync] 2026-09-16: retire the pre-Admin Story gateway fixture; focused DTO suites own those routes.
 [Sync] 2026-09-16: update Deck Plugin route fakes for current OAuth actor and Registry170-174 scope.
+[Sync] 2026-09-16: include the registered unknown-result Claude Plugin error contract.
 """
 
 from __future__ import annotations
@@ -241,7 +242,7 @@ class ErrorRegistryTests(unittest.TestCase):
         # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04)
         # + 4 Remote Marketplace fail-closed codes (2026-08-19).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 56)
+        self.assertEqual(len(ERROR_REGISTRY), 57)
         story_index_codes = {
             "story_index_row_missing",
             "story_index_schema_unavailable",

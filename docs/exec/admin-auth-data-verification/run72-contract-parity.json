@@ -1,0 +1,42 @@
+{
+  "result": "PASS",
+  "operations": 72,
+  "prior_70_full_descriptors_unchanged": true,
+  "original_preflight_receipt_bytes_unchanged": true,
+  "special_delegation_artifact_bytes_unchanged": true,
+  "new_operations": [
+    {
+      "name": "workflow-run.create",
+      "contract_sha256": "531d41a45a7a745b120a83c57a88bdb0cf40ffcdc52d245d56bc0d372342eb08",
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        }
+      ]
+    },
+    {
+      "name": "workflow-run.retry",
+      "contract_sha256": "01c72910ed713ce10c86e03c426f98549c81d1991cbaf05415b6bbcdbb8e9bd7",
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        }
+      ]
+    }
+  ],
+  "public_creation_retry": "pending primary-owned isolated public validation"
+}

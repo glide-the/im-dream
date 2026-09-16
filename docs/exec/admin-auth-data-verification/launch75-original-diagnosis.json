@@ -1,0 +1,220 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "reached": [
+    {
+      "label": "source-new-null",
+      "committed": true
+    },
+    {
+      "label": "source-new-agent",
+      "committed": false
+    },
+    {
+      "label": "source-existing-thread",
+      "committed": false
+    },
+    {
+      "label": "claim-null-first",
+      "committed": false
+    },
+    {
+      "label": "finish-null-pending",
+      "committed": false
+    },
+    {
+      "label": "claim-null-next",
+      "committed": false
+    },
+    {
+      "label": "finish-null-dispatched",
+      "committed": false
+    },
+    {
+      "label": "claim-agent-first",
+      "committed": false
+    },
+    {
+      "label": "claim-agent-fresh-none",
+      "committed": false
+    },
+    {
+      "label": "finish-stale-id",
+      "committed": false
+    },
+    {
+      "label": "finish-agent-dispatched",
+      "committed": false
+    },
+    {
+      "label": "claim-agent-dispatched-none",
+      "committed": false
+    },
+    {
+      "label": "claim-expired-replacement",
+      "committed": false
+    },
+    {
+      "label": "claim-invalid-replacement",
+      "committed": false
+    },
+    {
+      "label": "source-existing-after-dispatch",
+      "committed": false
+    },
+    {
+      "label": "source-none",
+      "committed": false
+    },
+    {
+      "label": "source-read_only",
+      "committed": false
+    },
+    {
+      "label": "source-thread",
+      "committed": false
+    },
+    {
+      "label": "source-other",
+      "committed": false
+    },
+    {
+      "label": "source-selector-actor_id",
+      "committed": false
+    },
+    {
+      "label": "source-selector-metadata",
+      "committed": false
+    },
+    {
+      "label": "source-selector-context",
+      "committed": false
+    },
+    {
+      "label": "source-selector-source_thread_id",
+      "committed": false
+    },
+    {
+      "label": "source-key-conflict",
+      "committed": false
+    },
+    {
+      "label": "source-agent-conflict",
+      "committed": false
+    },
+    {
+      "label": "source-disabled-deck",
+      "committed": false
+    },
+    {
+      "label": "source-missing-workspace",
+      "committed": false
+    },
+    {
+      "label": "source-bad-role",
+      "committed": false
+    },
+    {
+      "label": "source-key-format",
+      "committed": false
+    },
+    {
+      "label": "claim-other-owner",
+      "committed": false
+    },
+    {
+      "label": "claim-entity",
+      "committed": false
+    },
+    {
+      "label": "claim-readonly",
+      "committed": false
+    },
+    {
+      "label": "claim-context-selector",
+      "committed": false
+    },
+    {
+      "label": "claim-missing-run",
+      "committed": false
+    },
+    {
+      "label": "finish-other-owner",
+      "committed": false
+    },
+    {
+      "label": "finish-entity",
+      "committed": false
+    },
+    {
+      "label": "finish-readonly",
+      "committed": false
+    },
+    {
+      "label": "finish-actor-selector",
+      "committed": false
+    }
+  ],
+  "checks": [
+    {
+      "after_label": "source-new-null",
+      "operation": "dream-launch-source.ensure",
+      "token": "user",
+      "extra_query": false,
+      "expected_status": 200,
+      "actual_status": 200,
+      "expected_code": null,
+      "actual_code": null,
+      "expected_state": "committed",
+      "actual_state": "committed"
+    },
+    {
+      "after_label": "source-new-null",
+      "operation": "dream-launch-source.ensure",
+      "token": "other",
+      "extra_query": false,
+      "expected_status": 200,
+      "actual_status": 200,
+      "expected_code": null,
+      "actual_code": null,
+      "expected_state": "absent",
+      "actual_state": "absent"
+    },
+    {
+      "after_label": "source-new-null",
+      "operation": "dream-launch-source.ensure",
+      "token": "read_only",
+      "extra_query": false,
+      "expected_status": 403,
+      "actual_status": 403,
+      "expected_code": "ACCESS_SCOPE_REQUIRED",
+      "actual_code": "ACCESS_SCOPE_REQUIRED",
+      "expected_state": null,
+      "actual_state": null
+    },
+    {
+      "after_label": "source-new-null",
+      "operation": "dream-launch-source.ensure",
+      "token": "thread",
+      "extra_query": false,
+      "expected_status": 403,
+      "actual_status": 403,
+      "expected_code": "DELEGATION_PURPOSE_DENIED",
+      "actual_code": "DELEGATION_PURPOSE_DENIED",
+      "expected_state": null,
+      "actual_state": null
+    },
+    {
+      "after_label": "source-new-null",
+      "operation": "dream-launch-source.ensure",
+      "token": "user",
+      "extra_query": true,
+      "expected_status": 404,
+      "actual_status": 400,
+      "expected_code": "OPERATION_UNAVAILABLE",
+      "actual_code": "USER_OVERRIDE_FORBIDDEN",
+      "expected_state": null,
+      "actual_state": null
+    }
+  ],
+  "scope": "new technical JWK only; business SELECT and public GET; original records and fixtures untouched"
+}

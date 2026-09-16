@@ -26,7 +26,7 @@ import pytest
 from psycopg.pq import TransactionStatus
 
 import database
-from persistence.config import require_test_database_url
+from tests.legacy_persistence.config import require_test_database_url
 
 
 class _RollbackOnlyLease:

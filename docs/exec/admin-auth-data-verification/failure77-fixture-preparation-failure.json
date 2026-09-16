@@ -1,0 +1,9 @@
+{
+  "result": "FAIL",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "step": "new-technical-identity-graph",
+  "sqlstate": "ERR_ASSERTION",
+  "setup_assertions": 5,
+  "private_diagnostics": "not exported",
+  "normal_database": "untouched"
+}

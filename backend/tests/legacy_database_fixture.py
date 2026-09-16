@@ -15,7 +15,7 @@ import sys
 from types import ModuleType
 from unittest.mock import patch
 
-from backend.schema import legacy_main_sqlite
+from backend.tests.legacy_schema import legacy_main_sqlite
 
 
 class LegacyDatabaseModuleFixture:

@@ -1,0 +1,23 @@
+{
+  "database": "ink_auth_data_codex_test_792494523a17_acl56",
+  "receipts": [
+    {
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "command": "node drizzle/data/auth-access-policy.mjs",
+      "exit_code": 0,
+      "output": "{\"mode\":\"dry-run\",\"database\":\"ink_auth_data_codex_test_792494523a17_acl56\",\"policy_sha256\":\"dd41d81f31335ff1352fe7fc70a5cf76d678c3d3dc40ec908ad34d3c4fee74d7\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    },
+    {
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "command": "node drizzle/data/auth-access-policy.mjs --apply",
+      "exit_code": 0,
+      "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_acl56\",\"policy_sha256\":\"dd41d81f31335ff1352fe7fc70a5cf76d678c3d3dc40ec908ad34d3c4fee74d7\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    },
+    {
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "command": "node drizzle/data/auth-access-policy.mjs --apply",
+      "exit_code": 0,
+      "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_acl56\",\"policy_sha256\":\"dd41d81f31335ff1352fe7fc70a5cf76d678c3d3dc40ec908ad34d3c4fee74d7\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    }
+  ]
+}

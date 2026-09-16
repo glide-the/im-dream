@@ -594,7 +594,6 @@ dependencies = [
     { name = "itsdangerous" },
     { name = "json-repair" },
     { name = "mcp" },
-    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
@@ -606,6 +605,11 @@ dependencies = [
     { name = "tqdm" },
     { name = "uvicorn" },
     { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "psycopg", extra = ["binary", "pool"] },
 ]
 
 [package.metadata]
@@ -621,7 +625,6 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.5,<3" },
     { name = "pyjwt", specifier = ">=2,<3" },
     { name = "python-dotenv", specifier = ">=1,<2" },
@@ -634,6 +637,9 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.22,<1" },
     { name = "websockets", specifier = ">=12,<14" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2,<4" }]
 
 [[package]]
 name = "ink-claude-dream-agent-sdk"

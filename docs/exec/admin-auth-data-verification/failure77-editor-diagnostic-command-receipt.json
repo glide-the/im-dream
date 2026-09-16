@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/failure77-editor-diagnostic.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"target\":\"[REDACTED]\",\"case_label\":\"editor\",\"status\":403,\"actual_code\":\"DELEGATION_ENTITY_DENIED\",\"original_fixture_expected_code\":\"ACCESS_SCOPE_REQUIRED\",\"classification\":\"fixture error-code precedence mismatch; production shared binding-first boundary retained\",\"assertions\":6,\"protected_tables\":17,\"accepted_success_post_replays\":0,\"normal_database\":\"untouched\"}\n",
+  "scope": "one denied public editor request with before/after17 exact, no success replay"
+}

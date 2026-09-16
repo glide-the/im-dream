@@ -1,0 +1,351 @@
+{
+  "result": "PASS",
+  "scope": "Named public candidates only; private payloads read locally for exact/JSON-escaped/URL-encoded/base64 secret matching; values never emitted",
+  "private_sources_read": 65,
+  "distinct_known_secret_values": 112,
+  "validated_token_selector_references": 161,
+  "selector_source": "actual Admin Preflight and Run72 harness closed token selector enum; actual tokens.* values all scanned",
+  "candidate_count": 41,
+  "pattern_categories": [
+    "postgres_connection",
+    "github_credential",
+    "provider_key",
+    "aws_key",
+    "private_pem",
+    "bearer_literal",
+    "jwt_literal",
+    "delegation_literal",
+    "secret_assignment"
+  ],
+  "hits": [],
+  "files": [
+    {
+      "destination": "run72-atomic-recovery-cleanup-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-atomic-recovery-cleanup-command-receipt.json",
+      "sha256": "a3c552dd1168270c6c95559aa3356cc7e7b4a89adc881eb4da4ff31b065023bd",
+      "bytes": 832,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-atomic-recovery-cleanup-diagnosis.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-atomic-recovery-cleanup-diagnosis.json",
+      "sha256": "332c138edb768a36eacb95aa89277b827d5eb501443cd48a5dc607bf8e35ab14",
+      "bytes": 425,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-atomic-recovery-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-atomic-recovery-cleanup-proof.json",
+      "sha256": "9629b088fcc34ec808d44d6c9175786302c9b5e9850ecc2ac23bb86547fca3ce",
+      "bytes": 484,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-atomic-recovery-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-atomic-recovery-command-receipt.json",
+      "sha256": "fa1e45c9eb24080cc3418966558c383e49cb074b0d333fa09175c98933f1622e",
+      "bytes": 3623,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-atomic-recovery-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-atomic-recovery-proof.json",
+      "sha256": "c20d8ffc5e8a2f879d08395a0d0ff9bdbcbcbedfa4e807bef8d84b7e7e0b2fa7",
+      "bytes": 2836,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-denied-diagnostic-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-denied-diagnostic-proof.json",
+      "sha256": "9a0bf714359001e9dc70b6913704600f81e97ac33df90eba72d8672fa2665a21",
+      "bytes": 457,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-binding-lock-column-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-binding-lock-column-original.json",
+      "sha256": "7da4e3dc4eb83abd5af540a040a06456a5dff10b9a0338d83f4acd3a0890eaae",
+      "bytes": 428,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-negative-unique-fingerprint-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-negative-unique-fingerprint-original.json",
+      "sha256": "c472ba58eca5c07ccccc926dcb41b34773987f56286b0b7f691fe704fa3ba7c7",
+      "bytes": 442,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-preflight-clone-columns-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-preflight-clone-columns-original.json",
+      "sha256": "c17c340c10ebbe0c2915f1cee1f7fe02e7f8cffbcb3da99c2b65b8a662d5d03f",
+      "bytes": 430,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-route-name-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-route-name-original.json",
+      "sha256": "d21b894cecd4b34bbc118918b03d488dedf5f51a0ee093cc092de7c4aa4e5674",
+      "bytes": 441,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-source-date-serialization-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-source-date-serialization-original.json",
+      "sha256": "a6d1ce47832b0414649cafa4c476e67831db9fe49e1aa0185ff50e6f03e6b780",
+      "bytes": 443,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-source-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-source-original.json",
+      "sha256": "d21b894cecd4b34bbc118918b03d488dedf5f51a0ee093cc092de7c4aa4e5674",
+      "bytes": 441,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-thread-grant-context-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-thread-grant-context-original.json",
+      "sha256": "92e000a983adf5cb9f411b525c182affa09cd67cbff678ab7a0502073a588f3d",
+      "bytes": 438,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt-wrong-hash-unique-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt-wrong-hash-unique-original.json",
+      "sha256": "46bde51b16d785142724e68c490b1d35b5d360957802a1a7201b42dbbd078cb0",
+      "bytes": 439,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-command-receipt.json",
+      "sha256": "3e4643da40ce2e2c781de3555a9792ce8c5f9f71ce2acf1d57f65e74fee17462",
+      "bytes": 3771,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-binding-lock-column-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-binding-lock-column-original.json",
+      "sha256": "4d78537ec8171fd395b74670cff8d9488b1e4528494e0ef8ef1d8d7ecfbda813",
+      "bytes": 640,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-negative-unique-fingerprint-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-negative-unique-fingerprint-original.json",
+      "sha256": "2182ddf9bc2fd9c407da0e9a4f52f181582481bc71c74c92f5590454d1772bae",
+      "bytes": 2501,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-preflight-clone-columns-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-preflight-clone-columns-original.json",
+      "sha256": "3176df104200cea95ae8e448bb924a673cd78465fb3e19c6d8c6d3b472b1d71a",
+      "bytes": 1385,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-route-name-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-route-name-original.json",
+      "sha256": "caaae5d076552cbeb2a36cfaf206851470d7373ead53575e3d23f144794851e7",
+      "bytes": 287,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-source-date-serialization-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-source-date-serialization-original.json",
+      "sha256": "60feb7e96cbc16f75bfecb313f410d66e8548c6682b4b4314e7e1c96feb875e8",
+      "bytes": 1643,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-source-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-source-original.json",
+      "sha256": "caaae5d076552cbeb2a36cfaf206851470d7373ead53575e3d23f144794851e7",
+      "bytes": 287,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-thread-grant-context-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-thread-grant-context-original.json",
+      "sha256": "8377081424b8d4a294eb2c61b0bc96179d84e2ebbae8b182ce4834dcff668657",
+      "bytes": 2875,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure-wrong-hash-unique-original.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure-wrong-hash-unique-original.json",
+      "sha256": "87ad87a19f58f132123d429bcf9be1de16469a98cbca0ea1bdde38915a7187a6",
+      "bytes": 2750,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-failure.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-failure.json",
+      "sha256": "87ad87a19f58f132123d429bcf9be1de16469a98cbca0ea1bdde38915a7187a6",
+      "bytes": 2750,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-fixture-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-fixture-preparation-proof.json",
+      "sha256": "48164fe827708868e684c3df06e064c690c60b06b661518cf3b1b4ef45d014ac",
+      "bytes": 3068,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-post-remaining-preservation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-post-remaining-preservation-proof.json",
+      "sha256": "158262fe1f88d9587a28495e4f92fcc58d7dcca8837dcef22b48a060fee0eab7",
+      "bytes": 851,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-prior-accepted-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-prior-accepted-proof.json",
+      "sha256": "61c01ce76dfd396639e33ac1ad4c0a71e752d8ae99bd132e07ac2de6a5b84b2b",
+      "bytes": 1489,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-public-command-receipt.json",
+      "sha256": "f0c1fcb69af031310bd94dbfa01d27d4e44b77a8cc4d9bd72485fb6e55d77e4c",
+      "bytes": 1124,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-remaining-preparation-command-receipt.json",
+      "sha256": "659abf8216ce8e2c1c762120e0dc3f6f917350780ba52bc7587660c41e25a14a",
+      "bytes": 1680,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-remaining-preparation-proof.json",
+      "sha256": "a51f7093ec844ff39e658979d0cb768ab7a5e149a8e88a65740abeb85f8fe062",
+      "bytes": 1265,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-remaining-public-command-receipt.json",
+      "sha256": "400525d703fc600663cd017eabcd6a944694044a9234ebd923f33ebb258d9f63",
+      "bytes": 811,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-target-acl-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-target-acl-command-receipt.json",
+      "sha256": "f582da094e6e4d4b8aef2959155c87037fdbefb69975186bb2884f5051440caf",
+      "bytes": 612,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-target-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/run72-target-proof.json",
+      "sha256": "0488de7824830f0ffb841efc1f7f430a539d73000f660c6e461260102b02bf31",
+      "bytes": 684,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-public-harness-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-public-harness-static-gate.md",
+      "sha256": "37ed6aff7f1b856dec7210c52386783132bce0cfa9743737ca7236ff0991cbe7",
+      "bytes": 2229,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-public-harness-supplement-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-public-harness-supplement-gate.md",
+      "sha256": "f7ca757fc92092dbd36d98675cc061e49b6bcfe343be06c273486fdde9ac6279",
+      "bytes": 1399,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-public-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-public-luna-receipt.md",
+      "sha256": "e2720ecd817eaa265be866e8c293cf516f1bf6d194d2f4dc1d2cc79d2e23bafd",
+      "bytes": 2140,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-registration-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-registration-first-gate.md",
+      "sha256": "1b479f556a4ceae80c6540a6f59cc1afae5d66eb375d7980e6797da3c17b88eb",
+      "bytes": 4880,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-denied-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-remaining-denied-static-gate.md",
+      "sha256": "9247b55d6b268075186d33b11a8634a2395f6a23aefa3ebbe2c2798d22036112",
+      "bytes": 2092,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-denied-type-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-remaining-denied-type-correction-gate.md",
+      "sha256": "5171ead432fa57cb8a411c5358d771d6739aa5174278d08223d47cd0e001d35a",
+      "bytes": 589,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-remaining-public-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-remaining-public-luna-receipt.md",
+      "sha256": "c4fd70f4399eb2a48614a2385d74f8980eb3c80567e03b4055f7c865c0fd7961",
+      "bytes": 1850,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "run72-contract-parity.json",
+      "source": "/private/tmp/ink-workflow-read-validation/run72-contract-parity.json",
+      "sha256": "f1e036d90d458cfaea3b70789b154ee04bab13f20e32c4524cf772aaa1400fa5",
+      "bytes": 1415,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    }
+  ]
+}

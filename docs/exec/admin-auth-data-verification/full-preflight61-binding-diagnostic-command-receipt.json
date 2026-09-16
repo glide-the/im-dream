@@ -1,0 +1,6 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/diagnose-preflight61-binding.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"fixture_manifest\": {\n    \"accepted\": true\n  },\n  \"fixture_lock\": {\n    \"accepted\": true\n  },\n  \"access\": \"actual restricted DATA role; existing binding SELECT/rowlocks only; no writes or authority bypass\",\n  \"actual_binding\": \"PASS\"\n}\n"
+}

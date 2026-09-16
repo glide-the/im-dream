@@ -1,0 +1,7 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/failure77-partial-public-diagnose.py diagnose",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 1,
+  "output": "Traceback (most recent call last):\n  File \"/private/tmp/ink-auth-migration-validation/failure77-partial-public-diagnose.py\", line 23, in <module>\n    assert json.loads(query(\"SELECT json_build_array(current_database(),current_user,host(inet_server_addr()),inet_server_port(),current_setting('data_directory'))\"))==[o['database'],o['user'],'127.0.0.1',o['port'],o['data_directory']];checks+=1\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/tmp/ink-auth-migration-validation/failure77-partial-public-diagnose.py\", line 15, in query\n    assert r.returncode==0,'Private SELECT diagnostic omitted'\n           ^^^^^^^^^^^^^^^\nAssertionError: Private SELECT diagnostic omitted\n",
+  "scope": "primary SELECT-only partial checkpoint plus actual entire source oracle, no public success replay"
+}

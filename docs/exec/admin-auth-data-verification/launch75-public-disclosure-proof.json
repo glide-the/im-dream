@@ -1,0 +1,359 @@
+{
+  "result": "PASS",
+  "scope": "Named public candidates only; private payloads read locally for exact/JSON-escaped/URL-encoded/base64 secret matching; values never emitted",
+  "private_sources_read": 74,
+  "distinct_known_secret_values": 121,
+  "validated_token_selector_references": 296,
+  "selector_source": "actual Admin Preflight/Run72/launch75 cases and receipts closed token selector enum; actual tokens.* values all scanned",
+  "candidate_count": 42,
+  "pattern_categories": [
+    "postgres_connection",
+    "github_credential",
+    "provider_key",
+    "aws_key",
+    "private_pem",
+    "bearer_literal",
+    "jwt_literal",
+    "delegation_literal",
+    "secret_assignment"
+  ],
+  "hits": [],
+  "files": [
+    {
+      "destination": "launch75-continuation-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-continuation-first-gate.md",
+      "sha256": "8768a736506e790bd652b5b46b03935a9fffa0bd809e8139402bba8876f1d720",
+      "bytes": 2022,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-registration-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-registration-first-gate.md",
+      "sha256": "2919a55e06d8890c5abd610b221e5cd1b1ca9cc8584823275b8fe5ba5d06ab52",
+      "bytes": 1606,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-continuation-typing-supplement-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-continuation-typing-supplement-gate.md",
+      "sha256": "564daaf36093f0dc3fec1ee6d81035893932e0a8033925ab54bad4b902899bec",
+      "bytes": 926,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-concurrency-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-public-concurrency-correction-gate.md",
+      "sha256": "4423b1960081032daadc2835e5d641582c0d991a13dbe5d1fdb6d254a981d43c",
+      "bytes": 908,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-contract-parity.json",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-contract-parity.json",
+      "sha256": "9fe9f24d81efefefb75963907b94fe3981da1d0f7f58768df3e5b4522ec2910e",
+      "bytes": 2057,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-primary-harness-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-primary-harness-static-gate.md",
+      "sha256": "3d57189f973df3b7110c916d1d8586c151dde07b1b3322087e6d34be022c1a37",
+      "bytes": 2062,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-application-source-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-application-source-correction-gate.md",
+      "sha256": "1271f8aef4ee33583d3ee3951db6db63efa5626f9b0ca4e17154e15e292a81f7",
+      "bytes": 2537,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-dispatch-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-dispatch-first-gate.md",
+      "sha256": "ae9ca2240caf6267f13d0851ea56307b6252a1693d4909b4a079e7b7faaaa470",
+      "bytes": 2244,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace-default-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace-default-first-gate.md",
+      "sha256": "e429bc2a17e0c7dfc116ab9414583b8c08a8acddae03d62f3c297f2e1601c5d7",
+      "bytes": 3168,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-failure-source-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-failure-source-first-gate.md",
+      "sha256": "5acbe52417af0d04c069d333e64c81e6809e709e2bb0fe48bf3c2c47dd10bb02",
+      "bytes": 1931,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-original-receipt-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-original-receipt-first-gate.md",
+      "sha256": "92fb0c6532883ea8bec89fe605b5c648f0cd6c0b07ff5ba8284fdd15795020ee",
+      "bytes": 2479,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-continuation-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-continuation-correction-gate.md",
+      "sha256": "fc56da0e5624d397f0046dd5fad526812644f650c2838f80d4e52dfd58ec11bb",
+      "bytes": 1851,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-failure-domain-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-failure-domain-first-gate.md",
+      "sha256": "1e0a4c2bc4384802768d1276ec4e3e3dc5eb6d12086d613d880dcd4cc8f96f0c",
+      "bytes": 1408,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-source-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-source-first-gate.md",
+      "sha256": "80760aecc8360a039d349dfa9d535ec0cec61b71f039420b1582ce86c260f7ae",
+      "bytes": 2809,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-public-luna-receipt.md",
+      "sha256": "5ac156571f42aba5f883387424eb7d4c652f54cd80c9588658de5965fd449a0c",
+      "bytes": 1989,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-source-ingress-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-source-ingress-gate.md",
+      "sha256": "453978f7a64a95d3d20ba9b0f0572c30643b8fc2f39889f09b4aa37df15cd0e6",
+      "bytes": 1291,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-document-inventory-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-document-inventory-first-gate.md",
+      "sha256": "72427bb98315bcf8a62878b32b76b41e1035e438589883a9d11462acd723a786",
+      "bytes": 737,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-source-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-source-correction-gate.md",
+      "sha256": "009a3d152c9e7258eaab3d70061894e8b36c50bb34e50ddf9bd5d4f58cdd202e",
+      "bytes": 1646,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-application-source-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-application-source-first-gate.md",
+      "sha256": "3fdd90697dd24bdb9141c8f9766b8afd791166d4d49f71dd455e051923ac1244",
+      "bytes": 1573,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-harness-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-public-harness-first-gate.md",
+      "sha256": "af47c59dd3542b7085c741cf7a2eb431413835a7c33402da4f37247f4bdf752c",
+      "bytes": 906,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "dream-launch-failure-original-recovery-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/dream-launch-failure-original-recovery-first-gate.md",
+      "sha256": "f33eccf4c2e9d509b2fd6a807f2f615212dd402aa717118449887bb09155fda6",
+      "bytes": 1683,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-continuation-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/launch75-public-continuation-luna-receipt.md",
+      "sha256": "6be660ebc629303dc1bb18082d667604b877eb9aba6488c1236b8e90cde45489",
+      "bytes": 1947,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-original-diagnosis.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-original-diagnosis.json",
+      "sha256": "f281ed43849511570b20ecf5495468cb49d2e6342ec2b545616e8b90badf1d17",
+      "bytes": 4878,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-target-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-target-proof.json",
+      "sha256": "3a9c0a01881bce5b430b8019074bbb8a182b420f84634ac5c964ba58312dadc3",
+      "bytes": 681,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-prior-checkpoint-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-prior-checkpoint-command-receipt.json",
+      "sha256": "6017883afe12bfed40a123771ad7f8727b9cf3c16559bd4b816165d7b036e9e7",
+      "bytes": 681,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-fixture-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-fixture-preparation-proof.json",
+      "sha256": "e3b51dc70af73e436cae4ccc188ab5e7237ca91fd1f41ce92f2340e788aa0a8d",
+      "bytes": 1520,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-prior-accepted-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-prior-accepted-proof.json",
+      "sha256": "a46dab8b7b3570c2cf7c5239f39543c69730b0c1ac7ed05ce0b8bd1ae33132fa",
+      "bytes": 434,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-fixture-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-fixture-preparation-command-receipt.json",
+      "sha256": "c1ec63532e6811be1d6c4f2b20c42ab1b0db51794e698a74ab4e6569611908be",
+      "bytes": 2045,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-target-acl-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-target-acl-command-receipt.json",
+      "sha256": "030524269a911a9b58f3508fe2ede9a921360946ec876a2e86a521cbe02aa142",
+      "bytes": 618,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-public-command-receipt.json",
+      "sha256": "7adde49262d1dc683861aaec892a203e9cd0ea71bd2eadb914fb94bf081b9f0d",
+      "bytes": 1135,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-original-diagnosis-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-original-diagnosis-command-receipt.json",
+      "sha256": "aac331a299eb400417af075f6416e0daa7267ec046f416b28a4ba6a6bb720119",
+      "bytes": 5697,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-target-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-target-command-receipt.json",
+      "sha256": "45e27f0342bc587cbafe628fe938bf06aa87a8622cc5e7d6b31198b69e38a87b",
+      "bytes": 1045,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-continuation-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-continuation-preparation-proof.json",
+      "sha256": "24575e3c7492f4c4d5576010623be0a440421894c4985aa73a0d9ce22e631910",
+      "bytes": 626,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-continuation-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-continuation-preparation-command-receipt.json",
+      "sha256": "19a6082c767f823555d2bd894e7c784eca41709f465f1f0c46ee4c4b7b1d7b46",
+      "bytes": 894,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-public-continuation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-public-continuation-command-receipt.json",
+      "sha256": "21e834af4ed3f073d8e6b8736a850ae005391e057f881915235fbf36176ee05b",
+      "bytes": 786,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-atomic-recovery-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-atomic-recovery-command-receipt.json",
+      "sha256": "37c7346373087fdee0e32a89467d3857aee39aee8a1e2c879f9d34c178e40383",
+      "bytes": 5025,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-atomic-recovery-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-atomic-recovery-proof.json",
+      "sha256": "94535a4f9f3c9527267ea6fa6f0f874b006a29cc4d6e42e379a67e721f4a2231",
+      "bytes": 4284,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-atomic-recovery-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-atomic-recovery-cleanup-proof.json",
+      "sha256": "e1cbfef74bc015462256b5e005606cf09c6f28ef566d5bf9f9f44f06f1cd5a0c",
+      "bytes": 1205,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-post-validation-preservation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-post-validation-preservation-command-receipt.json",
+      "sha256": "988367662182686cbe8aa227687ad819cd43f3e03c369870a713eef221125051",
+      "bytes": 707,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-post-validation-preservation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/launch75-post-validation-preservation-proof.json",
+      "sha256": "4ad40e7814a4fd4c7b9b5c8a9229326aa0a65d1dca06173a711a72a6c48362e6",
+      "bytes": 458,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch-workspace-docs-review.md",
+      "source": "/private/tmp/ink-coordination-docs-validation/launch-workspace-docs-review.md",
+      "sha256": "7e58fb3169c70f72b427139ef391084f4c6453f0449d63ee3d8d3fd5d6fe41d1",
+      "bytes": 737,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "launch75-plan-workspace-sync-receipt.json",
+      "source": "/private/tmp/ink-own-launch-workspace-doc-sync-receipt.json",
+      "sha256": "159ce27970cee53fb091e994843175d5f10a262009c8242b7296c91b58d8649f",
+      "bytes": 726,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    }
+  ]
+}

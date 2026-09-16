@@ -47,9 +47,9 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 
 # Ink & Memory
 
-<!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
+<!-- [Sync] 2026-09-16: record the Admin-only production database boundary and retain the incremental migration journal as history. -->
 
-Admin authentication/data-service migration is in progress on this implementation branch. The current startup commands below still describe the baseline direct-PostgreSQL path; they are not migration acceptance evidence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md) and [execution/dependency gates](docs/exec/dream-admin-auth-data-plan.md). New Admin DTOs are strictly validated, and unpublished operations remain unavailable. The private BFF foundation requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. The actual start/callback/session/logout Route Handlers and Browser session requests now use this boundary. Login, registration and Google authentication run in Admin; Browser state receives only public user fields and in-memory CSRF. REST/SSE/file requests use the Next origin; explicit speech WebSocket selection is retained while the backend speech feature remains disabled.
+Admin is the authentication center and the only production database access service. Dream startup receives no PostgreSQL credential or pool; strict DTO clients call named Admin operations, where Services and typed Drizzle Repositories own authorization, locks, transactions and persistence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md), [database authority](docs/design/database-schema-authority.md) and [execution gates](docs/exec/dream-admin-auth-data-plan.md). The private BFF requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. Login, registration and Google authentication run in Admin. Dream retains product routes, Agent Runtime, SSE and shared filesystem operations.
 
 The server consumer also requires explicit `INK_ADMIN_DREAM_BASE_URL`, its exact `INK_ADMIN_AUTH_ISSUER`, `INK_DREAM_API_RESOURCE`, and independent `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`. Configure the same registered public origin/callback and resource in Admin. Service credentials stay in the BFF/backend; public Runtime renewal receives only its purpose delegation.
 
@@ -66,6 +66,14 @@ The server consumer also requires explicit `INK_ADMIN_DREAM_BASE_URL`, its exact
 Ink & Memory is a workspace for writing with AI. You can keep long-running conversations, organize reusable Decks and Agents, connect external tools such as Notion or MCP Servers, and turn ideas into structured Dream workflows and creative assets.
 
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
+
+## Current runtime boundary
+
+Dream production modules contain no PostgreSQL driver or legacy database import. `server.py` does not load a database URL or start a pool. Historical SQL/schema/persistence helpers live under `backend/tests/**` for isolated parity and migration rehearsal only. Runtime, turn/resume/cancel, resource-policy LKG, shared workspace paths and `CLAUDE_CODE_TMPDIR` semantics remain unchanged. Source and deterministic checks do not replace real-account Google/model/business acceptance.
+
+## Migration journal (historical phases)
+
+The dated paragraphs below preserve the incremental cutover record. Statements that a later domain “still requires migration” describe that historical phase; the current boundary is the section above and the linked architecture documents.
 
 Resource reads/observer writes, shared request identity/profile, Chat CRUD/history/ownership, initial user-message reservation, Editor persistence, and user/Thread SystemConfig now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks. The server user-turn grant follows the existing Factory lifecycle; Gateway CLI credentials, internal dispatch wiring, and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
 
@@ -190,7 +198,7 @@ The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must re
 
 ### 4. Configure Dream
 
-Create `backend/.env` from the example and point it at the Admin environment and your workspace root:
+Create `backend/.env` from the example and configure the Admin API and your workspace root:
 
 ```bash
 cd ../backend
@@ -198,12 +206,9 @@ test -f .env || cp .env.example .env
 ```
 
 ```dotenv
-DATABASE_URL=
-INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
-INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
-
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
+INK_ADMIN_DREAM_BASE_URL=http://127.0.0.1:3000
 
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
 INK_AGENT_SANDBOX_ENABLED=true
@@ -321,7 +326,7 @@ The complete engineering flow—connection discovery, model tool call, call-ID a
 | Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.9`; registry `latest` is `0.1.9` as of 2026-09-13 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
-| Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
+| PostgreSQL schema and access, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
 | Dream Web, Thread/Run/Workspace integration | This repository |
 
 Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
@@ -384,6 +389,8 @@ Focused MCP Apps commands and the current provider-free evidence are listed in [
 For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported. An Alibaba edge that relays the existing public domains to explicit NATAPP Dream/Admin origins uses the recoverable [edge-relay procedure](docs/deploy/natapp-edge-relay.md), not an inferred Compose upstream.
 
 ## Troubleshooting
+
+Plugin installation requires a qualified Runtime with `plugin` management commands, not just a successful `--version`. Dream now reuses its Agent Runtime resolver by default and checks `plugin --help` before installing; it does not fall back to ambient `claude`. `INK_CLAUDE_CLI_PATH` remains an explicit plugin-only absolute executable override. Published Runtime `0.1.9` is known to lack this command entry; a source repair is not an installed upgrade and must be delivered as a new qualified version. See the [plugin management contract](docs/design/deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同).
 
 If Next reports `Could not find the module ... in the React Client Manifest`, check its compilation root and cache before changing application modules. `frontend/next.config.js` derives `turbopack.root` from its own file location, not the launch working directory or ancestor lockfiles. Stop the frontend, confirm `.next/dev/lock` has no active owner, move only `frontend/.next` to an independent backup, then restart to rebuild. Do not delete parent lockfiles, reinstall unrelated dependencies, move environment/database files, or weaken the client boundary. Configuration regression: `corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line` (no browser or service required).
 

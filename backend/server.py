@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume backend/.env, HTTP requests, database/auth/config modules.
+# [Input] Consume backend/.env, HTTP requests, Admin auth/data clients, and runtime config.
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
@@ -20,9 +20,6 @@
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
 # [Sync] 2026-08-14: the mounted Deck router includes explicit default-plugin reconciliation.
-# [Sync] 2026-08-22: prefer the explicitly configured Admin database env file
-#                    over a stale backend/.env DATABASE_URL while preserving
-#                    process-injected deployment configuration.
 # [Sync] 2026-08-22: mount the fail-closed Claude MCP Resources router restored
 #                    onto the current develop application graph.
 # [Sync] 2026-08-22: preserve the centralized Claude Agent concurrency and
@@ -35,11 +32,13 @@
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
-# [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains; PG startup remains pending migration.
+# [Sync] 2026-09-16: remove Dream PostgreSQL bootstrap/shutdown; Admin APIs own
+#                    every runtime database capability and transaction.
+# [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains.
 # [Sync] 2026-09-15: compose the Registry99 frozen Reflections operations into the sole Admin request owner.
 # [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
-#                    PostgreSQL sink, and publisher lifecycle around the database.
+#                    Admin API sink, and publisher lifecycle.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
 #                    capability through startup Agent-env cleanup.
 # [Sync] 2026-08-31: retire the PolyCLI get_writing_suggestion session; Writing
@@ -59,16 +58,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
-_DATABASE_URL_WAS_INHERITED = bool(os.environ.get("DATABASE_URL", "").strip())
 load_dotenv(_BACKEND_ENV_FILE, override=False)
-
-try:
-    from persistence.config import load_database_url_from_env_file
-except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.persistence.config import load_database_url_from_env_file
-
-if os.environ.get("INK_LOAD_DATABASE_URL_FROM_ENV_FILE") == "1":
-    load_database_url_from_env_file(override=not _DATABASE_URL_WAS_INHERITED)
 
 
 def _drop_unsupported_agent_env() -> None:
@@ -124,9 +114,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.sessions import SessionMiddleware
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from typing import Any
-
-# Import database module
-import database
 
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
 PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
@@ -209,12 +196,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-New-Access-Token", "ETag"],
 )
-
-@app.on_event("startup")
-async def startup_database():
-    """Open PostgreSQL and verify the required Admin/Drizzle capabilities."""
-    database.init_db()
-
 
 # ========== Claude Agent Factory ==========
 
@@ -479,13 +460,6 @@ async def shutdown_claude_agent():
     except Exception:
         logging.getLogger(__name__).exception("Agent Redis EventBus close failed")
     print("✅ Claude Agent factory closed\n")
-
-
-@app.on_event("shutdown")
-async def shutdown_database():
-    """Close PostgreSQL only after every Agent/business owner has settled."""
-
-    database.close_db()
 
 
 @app.on_event("shutdown")

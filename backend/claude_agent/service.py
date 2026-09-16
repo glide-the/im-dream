@@ -200,6 +200,7 @@
 #                    settings.json filesystem.allowWrite gains the user's extra
 #                    writable paths (mirrors the sandbox_network_allowed_domains
 #                    plumbing pattern).
+# [Sync] 2026-09-16: bind Dream Artifact persistence to Registry185-191 turn provider.
 # [Sync] 2026-08-13: assemble a server-scoped DreamArtifactTurnTicket and invoke
 #                    the named after-turn Hook only after a successful root turn;
 #                    runner/session/SSE entry points remain unchanged.
@@ -304,6 +305,9 @@ from services.admin_data.workflow_runtime_activation_data import (
 )
 from services.admin_data.story_workspace_output_data import (
     AdminStoryWorkspaceOutputProvider,
+)
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactProvider,
 )
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.errors import AdminDataError, configuration_invalid
@@ -2274,11 +2278,18 @@ class ClaudeAgentService:
                     else None
                 ),
             )
+            artifact_provider = request.admin_turn_persistence
+            if not isinstance(
+                artifact_provider,
+                AdminStoryWorkspaceArtifactProvider,
+            ):
+                raise configuration_invalid()
             dream_artifact_turn_ticket = (
                 self._dream_artifact_turn_hook.before_main_turn(
                     context=dream_context,
                     actor_id=request.user_id,
                     cwd=cwd,
+                    artifact_provider=artifact_provider,
                 )
             )
             if dream_auto_repair_metadata_is_valid(request.message_metadata):

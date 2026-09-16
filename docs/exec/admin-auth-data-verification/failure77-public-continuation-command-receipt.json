@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminDreamLaunchFailureContinuation.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 1,
+  "output": "{\"result\":\"FAIL\",\"label\":\"preflight\",\"status\":null,\"code\":null}\n",
+  "scope": "prepared nondestructive16 denied POST/27 GET/six stored-source originals/0positivePOST; no normal business"
+}

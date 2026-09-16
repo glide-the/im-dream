@@ -1,0 +1,24 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/prepare-workspace76-target.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "underlying_exec_session_id": 4939,
+  "exec_chunk_id": "168e1a",
+  "key_output": {
+    "result": "PASS",
+    "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+    "source": "ink_auth_data_codex_test_792494523a17_launch75",
+    "source_type": "owned disposable provider-free technical fixture, not normal database",
+    "host": "127.0.0.1",
+    "port": 51534,
+    "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+    "ledger": 61,
+    "migration_replayed": false,
+    "acl_exit_code": 0,
+    "source_table_count": 125,
+    "source_fingerprint_sha256": "b8b3880bffc95b2f02cd94aff95cf1db2f5be917d45f95ec796c64d2f797f412",
+    "source_before_after": "exactly unchanged",
+    "business_seeds": "not yet executed",
+    "normal_database": "untouched"
+  }
+}

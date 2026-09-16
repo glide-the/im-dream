@@ -1,0 +1,43 @@
+{
+  "result": "DIAGNOSTIC",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "access": "SELECT and actual source methods only; no retry/reset/credential change",
+  "executed_mappings": [
+    {
+      "case": "fresh-passed",
+      "request_id": "pf_request_e978d00fa84c4d54bb23ebbb6b977eb4",
+      "status": "failed",
+      "failed_check": "binding_release",
+      "error_code": "DECK_PLUGIN_UNAVAILABLE",
+      "execution_owner": true,
+      "counts": {
+        "stages": 1,
+        "audits": 1
+      },
+      "static_diff_paths": [
+        ".status",
+        ".runtime_plugin_lock_id",
+        ".deck_plugin_id",
+        ".failed_check",
+        ".deck_runtime_profile_id",
+        ".deck_plugin_version",
+        ".error_code",
+        ".deck_runtime_snapshot_summary_hash"
+      ]
+    },
+    {
+      "case": "original-checking-no-resume",
+      "request_id": "pf_request_ec739c2a4bd948fc870ac22041053e88",
+      "status": "checking",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": true,
+      "counts": {
+        "stages": 0,
+        "audits": 0
+      },
+      "static_diff_paths": []
+    }
+  ],
+  "normal_database": "untouched"
+}

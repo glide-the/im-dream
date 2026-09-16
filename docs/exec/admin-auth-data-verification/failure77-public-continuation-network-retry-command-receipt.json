@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminDreamLaunchFailureContinuation.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"scope\":\"provider-free independent failure77 continuation\",\"recovered_originals\":6,\"denied_cases\":16,\"original_gets\":27,\"positive_post_calls\":0,\"assertions\":556,\"protected_tables\":17,\"first_public_exit\":1,\"partial_assertions\":287,\"editor_probe_assertions\":6,\"actual_entire_failure_recorder_already_failed\":true,\"prior_failed_run_preserved\":true,\"new_failed_transition_runtime_provider_filesystem\":\"not executed\"}\n",
+  "scope": "network-authorized provider-free16 denied POST/27 GET/six stored originals/0positivePOST; no normal business"
+}

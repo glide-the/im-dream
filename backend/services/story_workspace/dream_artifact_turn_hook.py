@@ -5,6 +5,7 @@
 #          PostgreSQL Story projection consumed by the Execution page.
 # [Pos] Dream post-turn business Hook above ClaudeAgentService; not an Agent
 #       runtime, Observer, SSE adapter, or SDK entry point.
+# [Sync] 2026-09-16: move Run/launch/lifecycle/Story-index persistence to Admin Registry185-191.
 # [Sync] 2026-08-13: added host-owned automatic workbench synchronization.
 # [Sync] 2026-08-13: reconcile all three stages as complete file facts,
 #                    including deletion when a Skill removes every source.
@@ -35,7 +36,6 @@ derived only after a successful root turn and remain actor/thread/run scoped.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from enum import Enum
 import fcntl
@@ -51,8 +51,13 @@ from uuid import uuid4
 import yaml
 
 try:
-    import database
-    from models.workflow_run import AuthenticatedActorContext, WorkflowRun
+    from models.workflow_run import WorkflowRun
+    from services.admin_data.errors import AdminDataError
+    from services.admin_data.story_workspace_artifact_data import (
+        AdminStoryWorkspaceArtifactProvider,
+        StoryWorkspaceArtifactAuthorityDTO,
+        StoryWorkspaceArtifactProjectionDTO,
+    )
     from services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamFileReader,
@@ -68,19 +73,10 @@ try:
         StoryWorkspaceEpisodeArtifactError,
         StoryWorkspaceEpisodeArtifactService,
     )
-    from services.story_workspace.artifact_story_index_service import (
-        ArtifactStoryIndexService,
+    from services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryIndexProjector,
+        ArtifactStoryProjectionError,
     )
-    from services.story_workspace.dream_workflow_lifecycle_service import (
-        StoryWorkspaceDreamWorkflowLifecycleService,
-    )
-    from services.story_workspace.canonical_project_instruction import (
-        story_workspace_canonical_project_fallback_slug,
-    )
-    from services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
-    from services.workflow.run_service import WorkflowRunService
     from story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_ITEMS_MAX,
         STORY_WORKSPACE_DREAM_RELATIONS_MAX,
@@ -91,8 +87,13 @@ try:
         StoryWorkspaceDreamStageItem,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
-    from backend import database
-    from backend.models.workflow_run import AuthenticatedActorContext, WorkflowRun
+    from backend.models.workflow_run import WorkflowRun
+    from backend.services.admin_data.errors import AdminDataError
+    from backend.services.admin_data.story_workspace_artifact_data import (
+        AdminStoryWorkspaceArtifactProvider,
+        StoryWorkspaceArtifactAuthorityDTO,
+        StoryWorkspaceArtifactProjectionDTO,
+    )
     from backend.services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamFileReader,
@@ -108,19 +109,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeArtifactError,
         StoryWorkspaceEpisodeArtifactService,
     )
-    from backend.services.story_workspace.artifact_story_index_service import (
-        ArtifactStoryIndexService,
+    from backend.services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryIndexProjector,
+        ArtifactStoryProjectionError,
     )
-    from backend.services.story_workspace.dream_workflow_lifecycle_service import (
-        StoryWorkspaceDreamWorkflowLifecycleService,
-    )
-    from backend.services.story_workspace.canonical_project_instruction import (
-        story_workspace_canonical_project_fallback_slug,
-    )
-    from backend.services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
-    from backend.services.workflow.run_service import WorkflowRunService
     from backend.story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_ITEMS_MAX,
         STORY_WORKSPACE_DREAM_RELATIONS_MAX,
@@ -271,6 +263,7 @@ class DreamArtifactTurnTicket:
     actor_id: str
     workspace_root: Path
     baseline_files: tuple[tuple[str, str], ...]
+    artifact_provider: AdminStoryWorkspaceArtifactProvider
 
 
 @dataclass(frozen=True)
@@ -294,12 +287,10 @@ class _StageProjection:
 
 @dataclass(frozen=True)
 class _DreamLaunchAuthority:
-    """Pinned launch metadata used by binding and auto-repair authorization."""
+    """Admin-validated launch metadata used by local file authorization."""
 
-    source_message_id: str
-    raw_metadata: object
-    metadata: dict[str, Any]
     trusted_story_slug: str
+    episode_authority: StoryWorkspaceEpisodeAuthority | None
 
 
 class StoryWorkspaceDreamArtifactPublisher:
@@ -563,6 +554,7 @@ class DreamArtifactTurnHook:
         context: StoryWorkspaceDreamRunContext,
         actor_id: str | int,
         cwd: str,
+        artifact_provider: AdminStoryWorkspaceArtifactProvider,
     ) -> DreamArtifactTurnTicket:
         try:
             workspace = Path(cwd).resolve(strict=True)
@@ -580,13 +572,15 @@ class DreamArtifactTurnHook:
             actor_id=str(actor_id),
             workspace_root=workspace,
             baseline_files=self._canonical_source_snapshot(workspace),
+            artifact_provider=artifact_provider,
         )
 
     def after_main_turn(
         self,
         ticket: DreamArtifactTurnTicket,
     ) -> DreamArtifactTurnResult:
-        workflow_run = self._load_authoritative_run(ticket)
+        authority = self._load_artifact_authority(ticket)
+        workflow_run = authority.workflow_run()
 
         # Validate every Agent-owned workspace collection before writing any
         # Run-private projection.  In particular, a slug repair must move or
@@ -597,6 +591,7 @@ class DreamArtifactTurnHook:
         episode_authority = self._synchronize_episode_registry(
             ticket,
             workflow_run,
+            launch_authority=authority,
             private_files=private_files,
         )
 
@@ -715,10 +710,8 @@ class DreamArtifactTurnHook:
                 "Dream Episode projection cannot be read"
             ) from exc
 
-        db = database.get_db()
         try:
-            result = ArtifactStoryIndexService().materialize(
-                db=db,
+            projection = ArtifactStoryIndexProjector().project(
                 workspace_root=ticket.workspace_root,
                 workflow_run=workflow_run,
                 actor_id=ticket.actor_id,
@@ -726,152 +719,88 @@ class DreamArtifactTurnHook:
                 episode_authority=episode_authority,
                 refreshed_surface=surface,
             )
-        finally:
-            db.close()
-
-        status = str(result.get("status") or "failed")
+        except ArtifactStoryProjectionError as exc:
+            if exc.code == "artifact_missing":
+                return "not_ready"
+            raise DreamArtifactTurnHookError(
+                f"Dream Story projection failed: {exc.code}"
+            ) from exc
+        try:
+            result = ticket.artifact_provider.materialize_story_workspace_artifact_index(
+                actor_id=ticket.actor_id,
+                thread_id=ticket.context.thread_id,
+                workflow_run_id=ticket.context.workflow_run_id,
+                projection=StoryWorkspaceArtifactProjectionDTO(
+                    source_project_id=projection.source_project_id,
+                    title=projection.title,
+                    episode_count=projection.episode_count,
+                    artifact_manifest_revision=projection.artifact_manifest_revision,
+                    script_revision=projection.script_revision,
+                    script_size_bytes=projection.script_size_bytes,
+                    artifact_status="available",
+                ),
+            )
+        except AdminDataError as exc:
+            if exc.code == "STORY_INDEX_INVALID_ARTIFACT":
+                raise DreamArtifactTurnHookError(
+                    "Dream Story projection failed: story_index_invalid_artifact"
+                ) from exc
+            raise DreamArtifactTurnHookError(
+                f"Dream Story projection failed: {exc.code}"
+            ) from exc
+        status = result.write_status
         if status in {"created", "updated", "same_revision"}:
             return status
-        error_code = str(result.get("errorCode") or "story_index_write_failed")
-        if error_code == "artifact_missing":
+        if result.observation.error_code == "story_index_row_missing":
             return "not_ready"
         raise DreamArtifactTurnHookError(
-            f"Dream Story projection failed: {error_code}"
+            "Dream Story projection failed: story_index_write_failed"
         )
 
     @staticmethod
     def _record_output_ready(
         ticket: DreamArtifactTurnTicket,
-        workflow_run: WorkflowRun,
+        _workflow_run: WorkflowRun,
     ) -> None:
-        db = database.get_db()
         try:
-            asyncio.run(
-                StoryWorkspaceDreamWorkflowLifecycleService(
-                    db,
-                    token_secret=story_workspace_workflow_token_secret(),
-                ).record_output_ready(
-                    ticket.context.workflow_run_id,
-                    AuthenticatedActorContext(
-                        actor_id=ticket.actor_id,
-                        workspace_id=workflow_run.workspace_id,
-                    ),
-                    normalized_result_ready=True,
-                )
+            ticket.artifact_provider.mark_story_workspace_artifact_output_ready(
+                actor_id=ticket.actor_id,
+                thread_id=ticket.context.thread_id,
+                workflow_run_id=ticket.context.workflow_run_id,
             )
-        finally:
-            db.close()
-
-    @staticmethod
-    def _decode_source_metadata(raw: object) -> dict[str, Any]:
-        if isinstance(raw, dict):
-            return dict(raw)
-        if not isinstance(raw, str):
+        except AdminDataError as exc:
             raise DreamArtifactTurnHookError(
-                "Dream launch metadata is unavailable",
-                issue=_launch_authority_issue(),
-            )
-        try:
-            value = json.loads(raw)
-        except (TypeError, ValueError) as exc:
-            raise DreamArtifactTurnHookError(
-                "Dream launch metadata is unavailable",
-                issue=_launch_authority_issue(),
+                f"Dream output-ready persistence failed: {exc.code}"
             ) from exc
-        if not isinstance(value, dict):
-            raise DreamArtifactTurnHookError(
-                "Dream launch metadata is unavailable",
-                issue=_launch_authority_issue(),
-            )
-        return value
 
     @classmethod
     def _load_launch_authority(
         cls,
-        db: Any,
         ticket: DreamArtifactTurnTicket,
         workflow_run: WorkflowRun,
+        authority: StoryWorkspaceArtifactAuthorityDTO | None = None,
     ) -> _DreamLaunchAuthority:
-        """Load and validate the immutable launch facts for this exact Run."""
+        """Validate the Admin-derived launch facts against this exact ticket."""
 
-        source_message_id = workflow_run.source_message_id
-        if not isinstance(source_message_id, str) or not source_message_id:
-            raise DreamArtifactTurnHookError(
-                "Dream launch source is unavailable",
-                issue=_launch_authority_issue(),
-            )
-        row = db.execute(
-            "SELECT metadata FROM chat_message WHERE id = %s "
-            "AND thread_id = %s LIMIT 1",
-            (source_message_id, ticket.context.thread_id),
-        ).fetchone()
-        if db.in_transaction:
-            db.rollback()
-        if row is None:
-            raise DreamArtifactTurnHookError(
-                "Dream launch source is unavailable",
-                issue=_launch_authority_issue(),
-            )
-        raw_metadata = row["metadata"]
-        metadata = cls._decode_source_metadata(raw_metadata)
-        dream_context = metadata.get("dreamContext")
-        goal = metadata.get("goal")
-        launch_agent_id = metadata.get("agentId")
-        trusted_story_slug = metadata.get("projectStorySlug")
-        if trusted_story_slug is None and isinstance(goal, str) and goal:
-            trusted_story_slug = story_workspace_canonical_project_fallback_slug(
-                goal
-            )
-            metadata["projectStorySlug"] = trusted_story_slug
-        launch_authority_is_valid = (
-            metadata.get("kind") == "story-workspace-dream-launch"
-            and metadata.get("schemaVersion")
-            == "story-workspace-dream-launch/v1"
-            and str(metadata.get("actorId")) == ticket.actor_id
-            and metadata.get("workspaceId") == workflow_run.workspace_id
-            and metadata.get("deckId") == ticket.context.deck_id
-            and metadata.get("workflowRunId")
-            == ticket.context.workflow_run_id
-            and metadata.get("threadId") == ticket.context.thread_id
-            and isinstance(dream_context, dict)
-            and (
-                launch_agent_id is None
-                or (
-                    isinstance(launch_agent_id, str)
-                    and bool(launch_agent_id)
-                    and launch_agent_id == launch_agent_id.strip()
-                )
-            )
-            and dream_context.get("workflow_run_id")
-            == ticket.context.workflow_run_id
-            and dream_context.get("thread_id") == ticket.context.thread_id
-            and dream_context.get("deck_id") == ticket.context.deck_id
-            and dream_context.get("agent_id") == launch_agent_id
-            and dream_context.get("deck_plugin_id")
-            == ticket.context.deck_plugin_id
-            and dream_context.get("deck_plugin_version")
-            == ticket.context.deck_plugin_version
-            and dream_context.get("deck_plugin_binding_id")
-            == ticket.context.deck_plugin_binding_id
-            and dream_context.get("binding_revision")
-            == ticket.context.binding_revision
-            and dream_context.get("deck_runtime_snapshot_id")
-            == ticket.context.deck_runtime_snapshot_id
-            and dream_context.get("runtime_plugin_lock_id")
-            == ticket.context.runtime_plugin_lock_id
-            and isinstance(trusted_story_slug, str)
-            and _STORY_SLUG.fullmatch(trusted_story_slug) is not None
-        )
-        if not launch_authority_is_valid:
+        authority = authority or cls._load_artifact_authority(ticket)
+        if authority.workflow_run() != workflow_run:
             raise DreamArtifactTurnHookError(
                 "Dream launch authority changed",
                 issue=_launch_authority_issue(),
             )
+        episode = authority.episode_authority
         return _DreamLaunchAuthority(
-            source_message_id=source_message_id,
-            raw_metadata=raw_metadata,
-            metadata=metadata,
-            trusted_story_slug=trusted_story_slug,
+            trusted_story_slug=authority.project_story_slug,
+            episode_authority=(
+                StoryWorkspaceEpisodeAuthority(
+                    workflow_run_id=episode.workflow_run_id,
+                    episode_uid=episode.episode_uid,
+                    story_slug=episode.story_slug,
+                    episode_code=episode.episode_code,
+                )
+                if episode is not None
+                else None
+            ),
         )
 
     @classmethod
@@ -947,12 +876,13 @@ class DreamArtifactTurnHook:
 
         if validation_code not in _PROJECT_ROOT_CLEANUP_VALIDATION_CODES:
             return None
-        workflow_run = self._load_authoritative_run(ticket)
-        db = database.get_db()
-        try:
-            launch = self._load_launch_authority(db, ticket, workflow_run)
-        finally:
-            db.close()
+        authority = self._load_artifact_authority(ticket)
+        workflow_run = authority.workflow_run()
+        launch = self._load_launch_authority(
+            ticket,
+            workflow_run,
+            authority,
+        )
         candidates = self._canonical_project_slugs_for_repair(
             ticket.workspace_root
         )
@@ -969,6 +899,7 @@ class DreamArtifactTurnHook:
         ticket: DreamArtifactTurnTicket,
         workflow_run: WorkflowRun,
         *,
+        launch_authority: StoryWorkspaceArtifactAuthorityDTO,
         private_files: Mapping[str, bytes],
     ) -> StoryWorkspaceEpisodeAuthority | None:
         """Bootstrap canonical Episode authority and select one Episode fact.
@@ -1007,90 +938,40 @@ class DreamArtifactTurnHook:
                 "canonical Episode roots must form a contiguous sequence"
             )
         canonical_launch_episode_code = next(iter(episode_codes))
-        db = database.get_db()
-        try:
-            launch = cls._load_launch_authority(db, ticket, workflow_run)
-            source_message_id = launch.source_message_id
-            raw_metadata = launch.raw_metadata
-            metadata = launch.metadata
-            trusted_story_slug = launch.trusted_story_slug
-            if trusted_story_slug != story_slug:
-                raise DreamArtifactTurnHookError(
-                    "Dream workspace project slug does not match launch authority",
-                    issue=_project_story_slug_mismatch_issue(
-                        expected=trusted_story_slug,
-                        actual=story_slug,
-                    ),
-                )
-
-            authority_value = metadata.get("story_workspace_episode_identity")
-            authority = StoryWorkspaceEpisodeAuthority.parse(
-                authority_value,
-                expected_run_id=ticket.context.workflow_run_id,
+        launch = cls._load_launch_authority(
+            ticket,
+            workflow_run,
+            launch_authority,
+        )
+        trusted_story_slug = launch.trusted_story_slug
+        if trusted_story_slug != story_slug:
+            raise DreamArtifactTurnHookError(
+                "Dream workspace project slug does not match launch authority",
+                issue=_project_story_slug_mismatch_issue(
+                    expected=trusted_story_slug,
+                    actual=story_slug,
+                ),
             )
-            if authority is None:
-                if authority_value is not None:
-                    raise DreamArtifactTurnHookError(
-                        "Dream Episode authority is malformed",
-                        issue=_launch_authority_issue(),
-                    )
-                episode_uid = uuid4().hex
-                metadata["story_workspace_episode_identity"] = {
-                    "schema": "story-workspace-episode-authority/v1",
-                    "workflow_run_id": ticket.context.workflow_run_id,
-                    "episode_uid": episode_uid,
-                    "story_slug": story_slug,
-                    "episode_code": canonical_launch_episode_code,
-                }
-                encoded = json.dumps(
-                    metadata,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-                updated = db.execute(
-                    "UPDATE chat_message SET metadata = %s WHERE id = %s "
-                    "AND metadata = %s",
-                    (encoded, source_message_id, raw_metadata),
-                )
-                if updated.rowcount != 1:
-                    db.rollback()
-                    raise DreamArtifactTurnHookError(
-                        "Dream Episode authority CAS failed"
-                    )
-                db.commit()
-            else:
-                episode_uid = authority.episode_uid
-                if (
-                    authority.story_slug != story_slug
-                    or authority.episode_code != canonical_launch_episode_code
-                ):
-                    raise DreamArtifactTurnHookError(
-                        "Dream Episode authority conflicts with canonical project"
-                    )
-                if metadata.get("projectStorySlug") != trusted_story_slug:
-                    metadata["projectStorySlug"] = trusted_story_slug
-                    encoded = json.dumps(
-                        metadata,
-                        ensure_ascii=False,
-                        allow_nan=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
-                    updated = db.execute(
-                        "UPDATE chat_message SET metadata = %s WHERE id = %s "
-                        "AND metadata = %s",
-                        (encoded, source_message_id, raw_metadata),
-                    )
-                    if updated.rowcount != 1:
-                        db.rollback()
-                        raise DreamArtifactTurnHookError(
-                            "Dream project authority CAS failed"
-                        )
-                    db.commit()
-        finally:
-            db.close()
+        try:
+            ensured = ticket.artifact_provider.ensure_story_workspace_episode_authority(
+                actor_id=ticket.actor_id,
+                thread_id=ticket.context.thread_id,
+                workflow_run_id=ticket.context.workflow_run_id,
+                story_slug=story_slug,
+                episode_code=canonical_launch_episode_code,
+            )
+        except AdminDataError as exc:
+            raise DreamArtifactTurnHookError(
+                f"Dream Episode authority persistence failed: {exc.code}",
+                issue=_launch_authority_issue(),
+            ) from exc
+        authority = StoryWorkspaceEpisodeAuthority(
+            workflow_run_id=ensured.authority.workflow_run_id,
+            episode_uid=ensured.authority.episode_uid,
+            story_slug=ensured.authority.story_slug,
+            episode_code=ensured.authority.episode_code,
+        )
+        episode_uid = authority.episode_uid
 
         binding_context = StoryWorkspaceEpisodeBindingContext(
             workflow_run_id=ticket.context.workflow_run_id,
@@ -1185,36 +1066,21 @@ class DreamArtifactTurnHook:
         )
 
     @staticmethod
-    def _load_authoritative_run(ticket: DreamArtifactTurnTicket) -> WorkflowRun:
-        db = database.get_db()
+    def _load_artifact_authority(
+        ticket: DreamArtifactTurnTicket,
+    ) -> StoryWorkspaceArtifactAuthorityDTO:
         try:
-            row = db.execute(
-                "SELECT workspace_id FROM workflow_runs "
-                "WHERE id = %s AND created_by = %s "
-                "AND source_voice_thread_id = %s LIMIT 1",
-                (
-                    ticket.context.workflow_run_id,
-                    ticket.actor_id,
-                    ticket.context.thread_id,
-                ),
-            ).fetchone()
-            if row is None:
-                raise DreamArtifactTurnHookError(
-                    "Dream Run authority is unavailable",
-                    issue=_launch_authority_issue(),
-                )
-            run = WorkflowRunService(
-                db,
-                token_secret=story_workspace_workflow_token_secret(),
-            ).read_run(
-                ticket.context.workflow_run_id,
-                AuthenticatedActorContext(
-                    actor_id=ticket.actor_id,
-                    workspace_id=str(row["workspace_id"]),
-                ),
+            authority = ticket.artifact_provider.story_workspace_artifact_authority(
+                actor_id=ticket.actor_id,
+                thread_id=ticket.context.thread_id,
+                workflow_run_id=ticket.context.workflow_run_id,
             )
-        finally:
-            db.close()
+        except AdminDataError as exc:
+            raise DreamArtifactTurnHookError(
+                f"Dream Run authority is unavailable: {exc.code}",
+                issue=_launch_authority_issue(),
+            ) from exc
+        run = authority.workflow_run()
         frozen = (
             run.source_voice_thread_id,
             run.deck_plugin_id,
@@ -1238,7 +1104,17 @@ class DreamArtifactTurnHook:
                 "Dream Run frozen authority changed",
                 issue=_launch_authority_issue(),
             )
-        return run
+        if (
+            run.created_by != ticket.actor_id
+            or authority.thread_id != ticket.context.thread_id
+            or authority.run.workflow_run_id != ticket.context.workflow_run_id
+            or authority.deck_id != ticket.context.deck_id
+        ):
+            raise DreamArtifactTurnHookError(
+                "Dream Run authority changed",
+                issue=_launch_authority_issue(),
+            )
+        return authority
 
     @classmethod
     def _safe_file(cls, workspace: Path, relative_path: str) -> bytes:

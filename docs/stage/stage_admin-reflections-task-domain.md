@@ -1,7 +1,7 @@
 <!-- [Input] Verified Reflections Registry83 provider, Dream request consumer commits and remaining background database call graph. -->
 <!-- [Output] Prompt-architect execution plan for moving Reflections task/result/event persistence to Admin business APIs. -->
 <!-- [Pos] Cross-project background Reflections persistence stage; Dream retains Agent execution, EventBus, SSE and shared files. -->
-<!-- [Sync] 2026-09-15: implement the frozen sixteen-operation Dream consumer and preserve real-business acceptance as a separate gate. -->
+<!-- [Sync] 2026-09-15: freeze sixteen-operation candidate including recoverable task-section child authority. -->
 
 # Reflections 后台任务数据聚合阶段
 
@@ -44,15 +44,3 @@ Implement Admin contracts and provider first, publish exact capability hashes wi
 launch snapshot 只保存 Admin 生成且有大小门禁的本次 Session 内容/统计和三个 section 自定义配置，不进入 OAuth task DTO、日志、receipt 或 audit 正文。Dream 继续合并静态默认并写共享 workspace。终态 task 的 `report.ensure` 必须可由显式 start/recovery 路径补偿；latest 增稳定 ID tie-break，event 保持 observer 失败隔离和未知 Last-Event-ID 全量回放。
 
 候选评审补充三项实现 gate。第一，Admin 创建 child Thread 后必须给 Dream server owner 一个 task、section、child Thread 三重绑定且可到期/续期/撤销的 Runtime persistence authority；它覆盖该内部 Agent 的 user/assistant message、Claude Session 和所需配置读取，凭据不得进入 CLI、MCP、workspace 或日志。第二，`advance` 必须包含从 CREATED/ASSEMBLING/QUEUED/RUNNING 到 FAILED 的 `fatal-fail` CAS，使 worker-load、共享 workspace 准备或 Runtime 启动前失败可持久化并结束未完成 sections。第三，Dream 创建的共享 workspace locator 必须按双方配置的根与 task ID 进行规范化验证后写入原 `workspace_path` 元数据，不能接受任意绝对路径，也不能让公开 task DTO长期返回空值。Session tool 使用另一个阶段定义的私有 projection broker，Reflections provider只读 worker-load snapshot。
-
-## 实施状态
-
-Admin foundation固定为`9111d6bc4f6c8d60add1dd2157cb76ab6ea8eb33`。最终Reflections provider提交为`16a3d9b2796254fa525a966ca851de96d4373445`，tree为`4ea27088b777163b0e615f963d4e63c32785d69f`。Dream已固定16项operation hash、identity/unified/reflection-persistence三项schema hash和artifact SHA-256 `2af7477c424a92c39a1d323b301ef698da147dfa4f1aeb4e8a2166f146981365`，并由生产`AdminRequestAuth`注册。
-
-Dream公开task/event/result/report入口已使用OAuth typed consumer；后台worker只以`reflections:execute` service identity读取worker-load并提交task-scoped操作。section执行使用task/section/child Thread绑定的RTA接入原ThreadFactory与Service，RTA不投影到Runtime或文件。Session tool只访问launch snapshot loopback broker。EventBus从Admin high-water恢复，必需event append完成后才推进sequence和fan-out；SSE先订阅live再读取Admin历史并按sequence去重。
-
-工作区继续由Dream写入，但只允许规范化后与`AGENT_CWD`一致的root。task和child Thread locator必须精确为`{AGENT_CWD}/{id}/memory`；既有符号链接组件被拒绝，Thread根修复为`0700`，缺少配置时不使用临时目录。Admin响应未知时只查询原request receipt，无法确认则阻止后续写入。
-
-本阶段完成的是Dream provider-free消费端与运行时技术迁移。正常Dream/Admin/PostgreSQL、现有真实账户、Admin后台可见记录与真实模型结果尚未执行，因此不把技术回归描述为真实业务验收。
-
-聚焦Reflections/边界套件实际为97 passed；扩大到相关Admin request auth、turn persistence、Claude service和Chat route后为267 passed、9 subtests passed。Python compile、三生产文件无database/旧helper AST闭包、11个Markdown链接/文件存在性与`git diff --check`均exit 0。另一次加入陈旧`test_server_claude_agent.py`的扩展命令有27项与Reflections无关的旧Chat dependency-injection失败，未通过恢复数据库兼容入口处理。

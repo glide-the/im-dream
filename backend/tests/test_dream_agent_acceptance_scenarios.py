@@ -899,7 +899,7 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
             2,
             "oauth",
         )
-        confirmation_data = mock.Mock()
+        artifact_data = mock.Mock()
         current_user = {
             "user_id": int(ACTOR_ID),
             "_admin_actor": request_actor,
@@ -908,22 +908,25 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
         listed = await route_module.story_workspace_list_dream_runs(
             current_user=current_user,
             service=gateway,
+            artifact_data=artifact_data,
         )
         files = await route_module.story_workspace_get_workflow_run_dream_files(
             RUN_ID,
             current_user=current_user,
             service=gateway,
-            confirmation_data=confirmation_data,
+            artifact_data=artifact_data,
         )
         self.assertEqual(listed, [])
         self.assertEqual(files["threadId"], THREAD_ID)
         gateway.list_dream_runs.assert_awaited_once_with(
-            actor={"actor_id": ACTOR_ID}
+            actor={"actor_id": ACTOR_ID},
+            artifact_data=artifact_data,
+            access_token="oauth",
         )
         gateway.get_dream_files.assert_awaited_once_with(
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
-            confirmation_data=confirmation_data,
+            artifact_data=artifact_data,
             access_token="oauth",
         )
 

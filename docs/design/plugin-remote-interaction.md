@@ -1,4 +1,11 @@
+<!-- [Input] Original plugin source research and the current Dream Remote Marketplace installation contract. -->
+<!-- [Output] Source research retained with explicit current business applicability. -->
+<!-- [Pos] Plugin interaction research; deployed install rules belong to deck-plugin/claude-plugin-remote-marketplace.md. -->
+<!-- [Sync] 2026-09-15: preserve original research and distinguish actual CLI install from SDK reload/loading. -->
+
 # Plugin 远程指令交互方案设计稿
+
+> 当前 Dream 安装合同见 [Remote Marketplace 设计](deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同)。以下保留 2026-07-31 原始源码调研，不表示 Dream 当前使用 settings/reconcile 代替安装 CLI；当前 `PluginInstallService` 执行管理命令，SDK `--plugin-dir` 负责会话加载，二者分别验收。
 
 > 调研对象:`/Users/dmeck/project/claude-code-sourcemap/restored-src`(Claude Code sourcemap 还原源码,只读分析)
 > 问题:`/plugin install superpowers@claude-plugins-official` 在 SDK 中通过什么方式交互?能否远程指令交互?

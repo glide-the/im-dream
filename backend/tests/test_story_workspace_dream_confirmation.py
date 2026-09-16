@@ -362,10 +362,6 @@ async def test_application_reads_projection_twice_then_uses_admin_submit(
             "services.deck.story_workflow_application.StoryWorkspaceDreamFileReader",
             return_value=reader,
         ),
-        patch(
-            "services.deck.story_workflow_application.database.get_db",
-            side_effect=AssertionError("confirmation path must not access PostgreSQL"),
-        ),
     ):
         accepted = await service.submit_dream_confirmation(
             RUN_ID,

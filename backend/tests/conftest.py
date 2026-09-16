@@ -12,9 +12,19 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import sys
 from typing import Any
 
 from psycopg import IntegrityError as PostgresIntegrityError
+
+
+# Historical database/schema fixtures are importable only inside pytest.
+from tests import legacy_persistence as _legacy_persistence
+from tests import legacy_schema as _legacy_schema
+sys.modules.setdefault("persistence", _legacy_persistence)
+sys.modules.setdefault("schema", _legacy_schema)
+from tests import legacy_database as _legacy_database
+sys.modules.setdefault("database", _legacy_database)
 
 
 # Never let importing backend/server.py inherit the developer's runtime DSN.

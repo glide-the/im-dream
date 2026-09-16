@@ -2,6 +2,7 @@
 // [Output] Reusable public authorization entry with full-page PKCE return.
 // [Pos] RegisterForm import boundary; email/signup/Google choices remain on Admin.
 // [Sync] 2026-09-14: delegate the sole auth UI without collecting credentials in Dream.
+// [Sync] 2026-09-16: retain the callback-compatible props without an unused binding.
 import AuthEntry from './AuthEntry';
 
 interface RegisterFormProps {
@@ -10,4 +11,7 @@ interface RegisterFormProps {
   onSuccess: () => void;
   onSwitchToLogin: () => void;
 }
-export default function RegisterForm(_props: RegisterFormProps) { return <AuthEntry />; }
+export default function RegisterForm(props: RegisterFormProps) {
+  void props;
+  return <AuthEntry />;
+}

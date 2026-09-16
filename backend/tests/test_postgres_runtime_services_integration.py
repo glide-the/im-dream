@@ -21,7 +21,7 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 
-from backend.persistence.config import require_test_database_target
+from backend.tests.legacy_persistence.config import require_test_database_target
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )

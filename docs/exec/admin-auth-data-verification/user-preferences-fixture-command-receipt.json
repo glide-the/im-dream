@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-user-preferences-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "Preferences public2 fixture prepared; prior actors, first-login/system sentinel, other absent, precise raw objects, fresh public OAuth/grant; normal DB untouched\n",
+  "classification": "primary named preference fixture only"
+}

@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "mode": "compatibility",
+  "public_operation": "workflow-preflight.execute",
+  "assertions": 22,
+  "request_id": "pf_fault_5819965b69ee45b2a2f6fa7aa96561a3",
+  "status": "failed",
+  "failed_check": "host_agent_runtime_compatibility",
+  "error_code": "CLAUDE_AGENT_INCOMPATIBLE",
+  "audit": {
+    "stages": 2,
+    "audits": 1
+  },
+  "source_full_projection": "equal",
+  "snapshot_delta": 0,
+  "run_session_delta": 0,
+  "normal_database": "untouched",
+  "private_keys_exported": false
+}

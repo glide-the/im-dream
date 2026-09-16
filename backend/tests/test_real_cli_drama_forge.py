@@ -37,7 +37,7 @@ if str(BACKEND_ROOT) not in sys.path:
 REPO_ROOT = BACKEND_ROOT.parent
 
 import database
-from backend.schema import legacy_main_sqlite
+from backend.tests.legacy_schema import legacy_main_sqlite
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin.install_service import (
     PluginInstallError,

@@ -1,0 +1,81 @@
+{
+  "result": "failed",
+  "completed_queries": [
+    {
+      "role": "data",
+      "label": "immutable PF binding read",
+      "result": "allowed"
+    },
+    {
+      "role": "data",
+      "label": "immutable PF binding INSERT",
+      "result": "allowed"
+    },
+    {
+      "role": "data",
+      "label": "data denied UPDATE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied DELETE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied TRUNCATE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied guard function EXECUTE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "auth",
+      "label": "other role denied request read",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "auth",
+      "label": "other role denied request insert",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "control",
+      "label": "other role denied request read",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "control",
+      "label": "other role denied request insert",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "Admin model permission denied INSERT",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    }
+  ],
+  "sqlstate": "ERR_ASSERTION",
+  "assertion": "SQL diagnostic omitted",
+  "normal_database": "untouched"
+}

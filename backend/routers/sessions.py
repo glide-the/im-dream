@@ -2,6 +2,7 @@
 # [Input] Consume typed Admin Session APIs, edit-session events, and shared explicit actor/date helpers.
 # [Output] Register /api/sessions* endpoints and session event stream.
 # [Pos] session route node in backend/routers
+# [Sync] 2026-09-16: preserve explicit import timestamps through the Session DTO contract.
 # [Sync] 2026-09-15: route all public Session storage through Admin; publish edit events only after confirmed writes.
 # [Sync] 2026-05-25: extracted session storage routes from backend/server.py.
 # [Sync] 2026-06-14: publish Edit Session update/delete events and expose
@@ -66,6 +67,7 @@ async def save_session(request: dict, current_user: dict = Depends(get_current_u
     editor_state = request.get("editor_state")
     name = request.get("name")
     labels = request.get("labels")
+    created_at = request.get("created_at")
 
     if not session_id or not editor_state:
         raise HTTPException(
@@ -73,7 +75,7 @@ async def save_session(request: dict, current_user: dict = Depends(get_current_u
         )
 
     input_dto = _session_input(dto.SessionSaveInputDTO, session_id=session_id,
-        editor_state=editor_state, name=name, labels=labels, created_at=None)
+        editor_state=editor_state, name=name, labels=labels, created_at=created_at)
     await invoke_admin_operation(current_user, sessions.save, input_dto)
     asyncio.create_task(
         session_event_bus.publish(

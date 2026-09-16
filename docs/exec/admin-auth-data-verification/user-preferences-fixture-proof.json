@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 60,
+  "setup_assertions": 7,
+  "existing_actors": 2,
+  "fixtures": "one first-login/server-owned sentinel preference; other absent for concurrent first insertion",
+  "public_grant": "actual owned Thread no Run only to prove user-level OAuth-only boundary",
+  "roles": "restricted AUTH/DATA; owner fixture/SELECT only",
+  "private_key": "never exported",
+  "prior_runs_context": "untouched",
+  "normal_database": "untouched",
+  "provider_model_runtime": "none"
+}

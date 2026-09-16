@@ -1,0 +1,613 @@
+[
+  {
+    "name": "friend-invite.generate",
+    "kind": "write",
+    "user_scope": "dream:write",
+    "contract_sha256": "9d23284d2f485948649df4651b40a28974c14d70233b83f3c111fd958b8ffb95",
+    "contract": {
+      "name": "friend-invite.generate",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "code",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "friend-invite.use",
+    "kind": "write",
+    "user_scope": "dream:write",
+    "contract_sha256": "ecabd9cd9114d6e1e0933ef44a35f90b148eb9495aaab3fbc8de9f621f266268",
+    "contract": {
+      "name": "friend-invite.use",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": true
+              },
+              "friend_request_id": {
+                "type": "string",
+                "pattern": "^[1-9]\\d{0,18}$"
+              },
+              "inviter_id": {
+                "type": "string",
+                "pattern": "^[1-9]\\d{0,18}$"
+              },
+              "inviter_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "success",
+              "friend_request_id",
+              "inviter_id",
+              "inviter_name"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": false
+              },
+              "error": {
+                "type": "string",
+                "enum": [
+                  "Invalid invite code",
+                  "Invite code already used",
+                  "Invite code expired",
+                  "Cannot add yourself as friend",
+                  "Already friends",
+                  "Friend request already pending",
+                  "Request not found",
+                  "Permission denied",
+                  "Request already accepted",
+                  "Request already rejected",
+                  "Friendship not found"
+                ]
+              }
+            },
+            "required": [
+              "success",
+              "error"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "friend-request.list",
+    "kind": "read",
+    "user_scope": "dream:read",
+    "contract_sha256": "144c8d5c963e1d35113d071d7e20e9aff228540eeecbb16993924a1afbe1ed77",
+    "contract": {
+      "name": "friend-request.list",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[1-9]\\d{0,18}$"
+                },
+                "requester_id": {
+                  "type": "string",
+                  "pattern": "^[1-9]\\d{0,18}$"
+                },
+                "requester_name": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "requester_id",
+                "requester_name",
+                "created_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "requests"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "friend-request.accept",
+    "kind": "write",
+    "user_scope": "dream:write",
+    "contract_sha256": "0284fd791b8e4866115f07dace29edf5223290a553db459dfbc0fc8d9b232925",
+    "contract": {
+      "name": "friend-request.accept",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,18}$"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": [
+              "success"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": false
+              },
+              "error": {
+                "type": "string",
+                "enum": [
+                  "Invalid invite code",
+                  "Invite code already used",
+                  "Invite code expired",
+                  "Cannot add yourself as friend",
+                  "Already friends",
+                  "Friend request already pending",
+                  "Request not found",
+                  "Permission denied",
+                  "Request already accepted",
+                  "Request already rejected",
+                  "Friendship not found"
+                ]
+              }
+            },
+            "required": [
+              "success",
+              "error"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "friend-request.reject",
+    "kind": "write",
+    "user_scope": "dream:write",
+    "contract_sha256": "0b5e94c71120e458087b1ead0e0be729632401a7ab1199788388b8ce78d51f79",
+    "contract": {
+      "name": "friend-request.reject",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,18}$"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": [
+              "success"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": false
+              },
+              "error": {
+                "type": "string",
+                "enum": [
+                  "Invalid invite code",
+                  "Invite code already used",
+                  "Invite code expired",
+                  "Cannot add yourself as friend",
+                  "Already friends",
+                  "Friend request already pending",
+                  "Request not found",
+                  "Permission denied",
+                  "Request already accepted",
+                  "Request already rejected",
+                  "Friendship not found"
+                ]
+              }
+            },
+            "required": [
+              "success",
+              "error"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "friendship.list",
+    "kind": "read",
+    "user_scope": "dream:read",
+    "contract_sha256": "2591c795cdbe36e7edaef2241f7c81c755df17acbc8b9d577631d936cc4fb5f4",
+    "contract": {
+      "name": "friendship.list",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "friends": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "friend_id": {
+                  "type": "string",
+                  "pattern": "^[1-9]\\d{0,18}$"
+                },
+                "friend_name": {
+                  "type": "string"
+                },
+                "friend_email": {
+                  "type": "string"
+                },
+                "since": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "friend_id",
+                "friend_name",
+                "friend_email",
+                "since"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "friends"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "friendship.remove",
+    "kind": "write",
+    "user_scope": "dream:write",
+    "contract_sha256": "1c2c37ee6116297d7fb1ee69121c2497dac0e82602be749ce9c9e28a0579a195",
+    "contract": {
+      "name": "friendship.remove",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "friend_id": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,18}$"
+          }
+        },
+        "required": [
+          "friend_id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": [
+              "success"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean",
+                "const": false
+              },
+              "error": {
+                "type": "string",
+                "enum": [
+                  "Invalid invite code",
+                  "Invite code already used",
+                  "Invite code expired",
+                  "Cannot add yourself as friend",
+                  "Already friends",
+                  "Friend request already pending",
+                  "Request not found",
+                  "Permission denied",
+                  "Request already accepted",
+                  "Request already rejected",
+                  "Friendship not found"
+                ]
+              }
+            },
+            "required": [
+              "success",
+              "error"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "friendship.timeline",
+    "kind": "read",
+    "user_scope": "dream:read",
+    "contract_sha256": "22b42c3c6fef35994f3ea3467e287e6bf9032888f53356602c1ea904652f41dd",
+    "contract": {
+      "name": "friendship.timeline",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "friend_id": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,18}$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "friend_id",
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "pictures": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string"
+                    },
+                    "base64": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "created_at": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "base64",
+                    "prompt",
+                    "created_at"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pictures"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "friendship.picture-full",
+    "kind": "read",
+    "user_scope": "dream:read",
+    "contract_sha256": "59af48f8e48b59ffaee5bff2eabaea87d07659c2785dda40d2eabeda107987fe",
+    "contract": {
+      "name": "friendship.picture-full",
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "friend_id": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,18}$"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "friend_id",
+          "date"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "image_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "image_base64"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]

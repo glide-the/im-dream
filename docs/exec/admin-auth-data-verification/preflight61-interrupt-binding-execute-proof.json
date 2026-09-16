@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "role": "execute",
+  "mode": "binding",
+  "stage_audits": 2,
+  "assertions": 7,
+  "own_child_pid": 13889,
+  "snapshot_delta": 0,
+  "termination": "Own SIGKILL immediately after actual selected COMMIT",
+  "normal_database": "untouched"
+}

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry185-191 Story Workspace Artifact operations.
 # [Sync] 2026-09-16: register Registry175-184 including service-only builtin reconciliation.
 # [Sync] 2026-09-16: register Registry170-174 Deck Plugin control operations.
 # [Sync] 2026-09-16: register Registry169 automatic-repair settlement.
@@ -84,6 +85,7 @@ from .managed_mcp_data import MANAGED_MCP_OPERATIONS
 from .notion_connector_data import NOTION_CONNECTOR_OPERATIONS
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
+from .story_workspace_artifact_data import STORY_WORKSPACE_ARTIFACT_OPERATIONS
 from .dream_auto_repair_data import DREAM_AUTO_REPAIR_OPERATIONS
 from .story_workspace_review_data import STORY_WORKSPACE_REVIEW_OPERATIONS
 from .story_workspace_catalog_data import STORY_WORKSPACE_CATALOG_OPERATIONS
@@ -155,6 +157,7 @@ class AdminRequestAuth:
                 *NOTION_CONNECTOR_OPERATIONS,
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *STORY_WORKSPACE_OUTPUT_OPERATIONS,
+                *STORY_WORKSPACE_ARTIFACT_OPERATIONS,
                 *DREAM_AUTO_REPAIR_OPERATIONS,
                 *STORY_WORKSPACE_REVIEW_OPERATIONS,
                 *STORY_WORKSPACE_CATALOG_OPERATIONS,

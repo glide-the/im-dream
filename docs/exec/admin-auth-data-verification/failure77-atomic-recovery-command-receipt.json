@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/failure77-atomic-recovery.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"target\":\"[REDACTED]\",\"assertions\":126,\"selected_faults\":[{\"point\":\"source_update\",\"status\":503,\"code\":\"AUTH_SERVICE_UNAVAILABLE\",\"protected_tables\":17,\"rollback\":\"full byte exact; prior failed Run preserved\",\"cleanup\":\"PASS\"},{\"point\":\"receipt_insert\",\"status\":503,\"code\":\"AUTH_SERVICE_UNAVAILABLE\",\"protected_tables\":17,\"rollback\":\"full byte exact; prior failed Run preserved\",\"cleanup\":\"PASS\"},{\"point\":\"audit_insert\",\"status\":503,\"code\":\"AUTH_SERVICE_UNAVAILABLE\",\"protected_tables\":17,\"rollback\":\"full byte exact; prior failed Run preserved\",\"cleanup\":\"PASS\"}],\"commit_loss\":{\"actual_final_commit\":true,\"injections\":1,\"initial_status\":503,\"original_get_status\":200,\"replay_status\":200,\"source_metadata_effects\":1,\"receipts\":1,\"audits\":1,\"actual_entire_original_recorder\":true,\"prior_failed_run_full_preserved\":true,\"protected_tables\":17},\"technical_seed\":\"four independent new Run/source/PF/history operands from only owned disposable target; not normal runtime\",\"normal_database\":\"untouched\",\"provider_model_runtime_filesystem\":\"not executed\",\"private_key_exported\":false}\n",
+  "scope": "primary isolated new fixtures; no normal account/provider/model"
+}

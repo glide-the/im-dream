@@ -1,0 +1,6 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/checkpoint-launch75-prior.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_launch75\",\n  \"protected_tables\": 17,\n  \"protected_state_sha256\": \"b5d5f6c977963f406656261b8e0f21e98862a7870f3571cd71cf5eec39d8d4b1\",\n  \"prior_accepted_cases\": 1,\n  \"prior_accepted_label\": \"source-new-null\",\n  \"correlated_audits\": 1,\n  \"remaining_cases\": 37,\n  \"scope\": \"SELECT-only; fixed relation inventory; original complete fixture and prior rows retained\"\n}\n"
+}

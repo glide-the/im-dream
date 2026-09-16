@@ -1,6 +1,7 @@
 # [Input] Actual Session public HTTP routes, strict Editor/Session DTOs and named fake-provider fixture.
 # [Output] Ownership/shape/timezone/metrics/unknown-write contracts with all Dream DB session access fenced.
 # [Pos] Provider-free public Session validation; real business acceptance remains separate.
+# [Sync] 2026-09-16: preserve explicit import timestamps in the Admin Session DTO.
 # [Sync] 2026-09-15: cover all six domain operations, unchanged public projections and no side effects on failed writes.
 from __future__ import annotations
 
@@ -84,6 +85,23 @@ def test_save_omits_optional_state_fields_and_keeps_null_name_labels(boundary):
     assert response.status_code == 200 and response.json() == {"success": True}
     assert calls[-1][1] == {"session_id": "session-1", "editor_state": state, "name": None, "labels": None, "created_at": None}
     assert request(client, "DELETE", "/api/sessions/session-1").json() == {"success": True}
+
+
+def test_save_forwards_explicit_import_timestamp(boundary):
+    client, calls, _ = boundary
+    created_at = "2026-05-17T01:00:00Z"
+    response = request(
+        client,
+        "POST",
+        "/api/sessions",
+        json={
+            "session_id": "session-1",
+            "editor_state": editor_state(),
+            "created_at": created_at,
+        },
+    )
+    assert response.status_code == 200
+    assert calls[-1][1]["created_at"] == created_at
 
 
 @pytest.mark.parametrize("method,path,event_type", [("POST", "/api/sessions", "session_updated"), ("DELETE", "/api/sessions/session-1", "session_deleted")])

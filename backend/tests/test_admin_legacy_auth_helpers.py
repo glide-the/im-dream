@@ -1,6 +1,7 @@
 # [Input] Retired authentication helpers and named script contracts with synthetic credentials.
 # [Output] Provider-free refusal/account-binding evidence; no local credentials or persistent actions.
 # [Pos] Legacy authority retirement regression tests.
+# [Sync] 2026-09-16: diary import fails before public API I/O and has no database module.
 # [Sync] 2026-09-15: verify helpers refuse local authority and import labels fail before I/O.
 from __future__ import annotations
 
@@ -34,12 +35,11 @@ def test_legacy_hmac_token_is_rejected_even_with_matching_environment(monkeypatc
     assert auth.maybe_renew_access_token({"user_id": 1, "exp": 0}) is None
 
 
-def test_import_agent_missing_credential_stops_before_files_or_database(monkeypatch):
+def test_import_agent_missing_credential_stops_before_files_or_network(monkeypatch):
     monkeypatch.setattr(importer, "parse_args", lambda: SimpleNamespace(label_mode="agent", api_token=None))
     def forbidden(*args, **kwargs):
-        pytest.fail("Missing OAuth must stop before files/database/network")
+        pytest.fail("Missing OAuth must stop before files/network")
     monkeypatch.setattr(importer, "resolve_source_dir", forbidden)
-    monkeypatch.setattr(importer.database, "get_db", forbidden)
     with pytest.raises(SystemExit, match="explicit --api-token"):
         importer.main()
     with pytest.raises(SystemExit, match="explicit --api-token"):

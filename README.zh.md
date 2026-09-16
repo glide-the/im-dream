@@ -46,9 +46,9 @@
 <!-- [Sync] 2026-09-15: 同步Chat Session工具broker与其余后台领域依赖。 -->
 <!-- [Sync] 2026-09-15: 同步公开Session的Admin消费端与独立后台授权依赖。 -->
 <!-- [Sync] 2026-09-15: 同步原子用户预留和Factory管理的服务器持久化委托生命周期。 -->
-<!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
+<!-- [Sync] 2026-09-16: record the Admin-only production database boundary and retain the incremental migration journal as history. -->
 
-本实现分支正在迁移至 Admin 认证与数据服务。下方当前启动命令仍描述 baseline PostgreSQL 直连路径，不能作为迁移验收证据。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)与[执行/依赖门槛](docs/exec/dream-admin-auth-data-plan.md)。新 Admin DTO 严格校验，未发布操作保持不可用。 私有 BFF 基础要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。实际 start/callback/session/logout Route Handler 与 Browser session 请求已接入该边界。登录、注册与 Google 认证由 Admin 执行；Browser 状态只接收公开用户字段与内存 CSRF。REST/SSE/文件请求使用 Next 同源地址；保留显式语音 WebSocket 选址，后端语音功能继续关闭。
+Admin 是统一认证中心和唯一生产数据库访问服务。Dream 启动不接收 PostgreSQL 凭据或连接池；严格 DTO client 调用具名 Admin operation，由 Service 与 typed Drizzle Repository 执行权限、锁、事务和持久化。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)、[数据库权威](docs/design/database-schema-authority.md)与[执行门槛](docs/exec/dream-admin-auth-data-plan.md)。私有 BFF 要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。登录、注册与 Google 认证由 Admin 执行。Dream 保留产品路由、Agent Runtime、SSE 与共享文件系统操作。
 
 服务端 consumer 还要求显式 `INK_ADMIN_DREAM_BASE_URL`、其精确 `INK_ADMIN_AUTH_ISSUER`、`INK_DREAM_API_RESOURCE` 与独立 `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`。在 Admin 中配置同一已注册 public origin/callback 与 resource。Service 凭据只在 BFF/backend 持有；公开 Runtime 续期只接收自身 purpose 委托。
 
@@ -65,6 +65,14 @@
 Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话，用 Deck 和 Agent 组织可复用能力，连接 Notion 或 MCP Server 等外部工具，并把想法发展成结构化 Dream 工作流和创作资产。
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
+
+## 当前运行边界
+
+Dream 生产模块不包含 PostgreSQL driver 或旧 database import；`server.py` 不加载数据库 URL，也不启动 pool。历史 SQL/schema/persistence helper 仅位于 `backend/tests/**`，用于隔离 parity 与 migration rehearsal。Runtime、turn/resume/cancel、资源策略 LKG、共享工作区路径和 `CLAUDE_CODE_TMPDIR` 语义保持不变。源码与确定性验证不能替代真实账户 Google/模型/业务验收。
+
+## 迁移记录（历史阶段）
+
+下方按日期保留增量迁移过程。段落中的“仍需迁移”描述对应历史阶段；现行边界以本节和关联架构文档为准。
 
 资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership、初始 user-message 预留、Editor 持久化及用户/Thread SystemConfig 已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；服务器 user-turn 委托沿用既有 Factory 生命周期；Gateway CLI 凭据、内部 dispatcher 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
@@ -189,7 +197,7 @@ Runtime 必须输出 `2.1.241 (Claude Code)`。两个 npm 命令 alias 都必须
 
 ### 4. 配置 Dream
 
-从示例创建 `backend/.env`，并指向 Admin 环境文件和你的工作区根目录：
+从示例创建 `backend/.env`，并配置 Admin API 和你的工作区根目录：
 
 ```bash
 cd ../backend
@@ -197,12 +205,9 @@ test -f .env || cp .env.example .env
 ```
 
 ```dotenv
-DATABASE_URL=
-INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
-INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
-
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
+INK_ADMIN_DREAM_BASE_URL=http://127.0.0.1:3000
 
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
 INK_AGENT_SANDBOX_ENABLED=true
@@ -315,7 +320,7 @@ Dream 会将原 Runtime 的 SDK MCP 文本、content 数组和 metadata envelope
 | 原生 Runtime | 已发布 `@glide-the/ink-claude-code-dream@0.1.9`；截至 2026-09-13 registry `latest` 为 `0.1.9` |
 | Runtime 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
-| 共享 PostgreSQL schema、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
+| PostgreSQL schema 与数据访问、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
 | Dream Web、Thread/Run/Workspace 集成 | 本仓库 |
 
 包所有权是明确分开的：`uv` 管理 Dream Python 环境，npm 发布原生 Runtime 和 Notion CLI，pnpm 管理 `frontend/`。`uv sync` 不会安装或升级原生 Runtime。
@@ -378,6 +383,8 @@ MCP Apps 聚焦命令与当前 provider-free 证据请见 [MCP Apps 验收回执
 部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。阿里云边缘把现有公开域名转发到显式 NATAPP Dream/Admin origins 时，应使用可恢复的[边缘转发流程](docs/deploy/natapp-edge-relay.md)，不得从 Compose 或历史端口猜测上游。
 
 ## 故障排查
+
+插件安装需要支持 `plugin` 管理命令的合格 Runtime，不能只看 `--version` 成功。Dream 默认复用 Agent 的 Runtime resolver，并在安装前检查 `plugin --help`，不会回退到 ambient `claude`。`INK_CLAUDE_CLI_PATH` 仍是 plugin-only 显式绝对可执行路径。公开 Runtime `0.1.9` 已确认缺少该入口；源码修复不等于安装升级，必须以新的合格版本交付。见 [插件管理合同](docs/design/deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同)。
 
 如果 Next 报 `Could not find the module ... in the React Client Manifest`，先检查编译根目录与缓存，不要直接改业务模块。`frontend/next.config.js` 从自身文件位置确定 `turbopack.root`，不依赖启动 cwd 或祖先锁文件。停止前端，确认 `.next/dev/lock` 没有活跃进程，再仅将 `frontend/.next` 移到独立备份目录，重新启动生成缓存。不要删除父目录锁文件、重装无关依赖、移动环境/数据库文件或降低 client boundary。配置回归：`corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line`（无需浏览器或服务）。
 

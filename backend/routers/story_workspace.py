@@ -3,6 +3,7 @@
 # [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
 # [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
 # [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
+# [Sync] 2026-09-16: route Story Workspace Artifact authority/index access through Registry185-191 DTOs.
 # [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
 # [Output] Publish user-scoped Story Workspace product, workflow, artifact, review, and catalog routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
@@ -73,6 +74,9 @@ from services.admin_data.story_workspace_guidance_data import (
 )
 from services.admin_data.story_workspace_confirmation_data import (
     AdminStoryWorkspaceConfirmationData,
+)
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactData,
 )
 from services.admin_data.deck_plugin_binding_data import AdminDeckPluginBindingData
 from services.story_workspace.guidance_service import (
@@ -192,7 +196,7 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
-        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        artifact_data: AdminStoryWorkspaceArtifactData,
         access_token: str,
     ) -> Any: ...
 
@@ -201,6 +205,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
         episode_id: str | None = None,
     ) -> Any: ...
 
@@ -209,6 +215,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
     async def get_story_index(
@@ -216,6 +224,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
     async def reconcile_story_index(
@@ -224,6 +234,8 @@ class DreamArtifactService(Protocol):
         request: StoryWorkspaceStoryIndexReconcileCommand,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
         if_match: str,
     ) -> Any: ...
 
@@ -231,6 +243,8 @@ class DreamArtifactService(Protocol):
         self,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
 
@@ -895,22 +909,46 @@ async def story_workspace_start_dream_run(
     return await _workflow_call(accepted_response(), by_alias=True)
 
 
+def _artifact_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceArtifactData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceArtifactData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
+
+
 @router.get("/dream-runs")
 async def story_workspace_list_dream_runs(
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ) -> Any:
     """List only durable Dream runs visible to the authenticated actor."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
+    return await _workflow_call(
+        service.list_dream_runs(
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        ),
+        by_alias=True,
+    )
 
 
 def _preflight_read_error(exc: AdminDataError, request_id: str):
@@ -1062,7 +1100,7 @@ async def story_workspace_get_workflow_run_dream_files(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
-    confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     try:
         actor = {"actor_id": str(current_user["user_id"])}
@@ -1079,7 +1117,7 @@ async def story_workspace_get_workflow_run_dream_files(
         service.get_dream_files(
             workflow_run_id,
             actor=actor,
-            confirmation_data=confirmation_data,
+            artifact_data=artifact_data,
             access_token=request_actor.access_token,
         ),
         by_alias=True,
@@ -1097,11 +1135,15 @@ async def story_workspace_get_workflow_run_episode_artifacts(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Return one registry-owned Episode surface; no browser path is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1112,6 +1154,8 @@ async def story_workspace_get_workflow_run_episode_artifacts(
         service.get_episode_artifacts(
             workflow_run_id,
             actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
             episode_id=episode_id,
         ),
         by_alias=True,
@@ -1134,11 +1178,15 @@ async def story_workspace_get_workflow_run_episodes(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Return registry identity and bounded availability facts without bodies."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1146,7 +1194,12 @@ async def story_workspace_get_workflow_run_episodes(
             content=build_error_payload(exc.code),
         )
     result = await _workflow_call(
-        service.get_episode_index(workflow_run_id, actor=actor),
+        service.get_episode_index(
+            workflow_run_id,
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        ),
         by_alias=True,
     )
     if isinstance(result, JSONResponse):
@@ -1167,18 +1220,27 @@ async def story_workspace_get_workflow_run_story_index(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Compare server-bound Artifact revisions with PostgreSQL without writing."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         return JSONResponse(
             status_code=403,
             content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
     result = await _story_index_call(
-        service.get_story_index(workflow_run_id, actor=actor)
+        service.get_story_index(
+            workflow_run_id,
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        )
     )
     if isinstance(result, JSONResponse):
         return result
@@ -1204,11 +1266,15 @@ async def story_workspace_reconcile_workflow_run_story_index(
     ),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Retry one revision-guarded materialization; no locator input is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         return JSONResponse(
             status_code=403,
@@ -1219,6 +1285,8 @@ async def story_workspace_reconcile_workflow_run_story_index(
             workflow_run_id,
             request,
             actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
             if_match=if_match,
         )
     )

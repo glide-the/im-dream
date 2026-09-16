@@ -1,0 +1,8 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_deck59",
+  "port": 51534,
+  "ledger": 60,
+  "roles": "restricted AUTH/DATA; owner fixture/verification only",
+  "scope": "system/private source Deck/Voice and ready plugin metadata; no artifact loading/runtime/provider/model",
+  "normal_database": "untouched"
+}

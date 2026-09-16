@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "assertions": 12,
+  "source": "actual original WorkflowRunService._row_to_run/_row_to_transition/_parse_datetime astimezone(UTC)",
+  "precision": "UTC zero-offset, original 123456/123457 microseconds and nullable lifecycle fields preserved",
+  "writes": "none",
+  "normal_database": "untouched"
+}

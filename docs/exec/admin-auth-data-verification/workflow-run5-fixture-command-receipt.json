@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-workflow-run-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "Full WorkflowRun fixture prepared: 4 complete Runs, 21 cases, actual strict-model oracle and public Run grants; provider-free only\n",
+  "classification": "primary named full Run fixture only, no normal/provider/runtime/model"
+}

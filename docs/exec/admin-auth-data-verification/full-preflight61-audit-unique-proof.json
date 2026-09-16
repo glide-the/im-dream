@@ -1,0 +1,28 @@
+{
+  "result": "PROVEN_EXISTING_STAGE_KEY_COLLISION",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "index": [
+    {
+      "indexname": "admin_audit_logs_request_action_uidx",
+      "indexdef": "CREATE UNIQUE INDEX admin_audit_logs_request_action_uidx ON public.admin_audit_logs USING btree (request_id, action, resource_type, resource_id)"
+    }
+  ],
+  "initial_request": "pf_request_e978d00fa84c4d54bb23ebbb6b977eb4",
+  "persisted_safe_audit_keys": [
+    {
+      "action": "dream.workflow-preflight.stage",
+      "resource_type": "dream_operation",
+      "resource_id": "238374a66746e1e8936d845dd377b8d201cdf670f4a9a21f673857494e6eb7a5",
+      "stage": "checking"
+    },
+    {
+      "action": "dream.workflow-preflight.execute",
+      "resource_type": "dream_operation",
+      "resource_id": "238374a66746e1e8936d845dd377b8d201cdf670f4a9a21f673857494e6eb7a5",
+      "stage": null
+    }
+  ],
+  "code_rule": "ExecutionRepository.audit currently uses identical request_id/action/resource_type/resource_id for checking/binding/snapshot/snapshot_binding; only metadata.stage changes, which is not part of unique index",
+  "access": "SELECT only; no schema/index/audit/receipt changes",
+  "normal_database": "untouched"
+}

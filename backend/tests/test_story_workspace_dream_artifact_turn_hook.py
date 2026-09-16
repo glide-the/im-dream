@@ -1,4 +1,4 @@
-# [Input] Canonical Dream workbench fixtures, trusted launch metadata, and the post-turn Hook.
+# [Input] Canonical Dream workbench fixtures, Admin authority DTOs, and the post-turn Hook.
 # [Output] Verify deterministic artifact sync plus repairable/non-repairable validation classification.
 # [Pos] Story Workspace post-turn Hook contract test in backend/tests.
 # [Sync] 2026-09-01: cover allowlisted project-slug repair and fail-closed launch authority.
@@ -9,6 +9,8 @@
 #                    run-private reader and PostgreSQL materializer seam.
 # [Sync] 2026-09-06: prove a current same-Deck Agent switch still publishes
 #                    canonical character changes while launch provenance stays frozen.
+# [Sync] 2026-09-16: replace Dream database mocks with the Registry185-191
+#                    authority and artifact persistence provider contract.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -20,6 +22,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import yaml
@@ -29,6 +32,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from models.workflow_run import RunStatus, WorkflowRun
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactProvider,
+    StoryWorkspaceArtifactAuthorityDTO,
+    StoryWorkspaceEpisodeAuthorityDTO,
+)
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
     DreamArtifactTurnHook,
@@ -108,25 +116,76 @@ def launched_run() -> WorkflowRun:
     })
 
 
-def launch_metadata(
+def artifact_authority(
     *,
+    run: WorkflowRun | None = None,
     project_story_slug: str = "demo-project",
     agent_id: str | None = None,
-) -> dict:
-    selected_context = context(agent_id=agent_id)
-    return {
-        "kind": "story-workspace-dream-launch",
-        "schemaVersion": "story-workspace-dream-launch/v1",
-        "actorId": "actor-1",
-        "workspaceId": "workspace-1",
-        "deckId": "deck-1",
-        "agentId": agent_id,
-        "workflowRunId": RUN_ID,
-        "threadId": THREAD_ID,
-        "goal": "雨夜归途",
-        "projectStorySlug": project_story_slug,
-        "dreamContext": selected_context.model_dump(mode="json"),
-    }
+) -> StoryWorkspaceArtifactAuthorityDTO:
+    selected_run = run or authoritative_run()
+    return StoryWorkspaceArtifactAuthorityDTO(
+        run=selected_run.model_dump(mode="json"),
+        thread_id=selected_run.source_voice_thread_id or THREAD_ID,
+        thread_updated_at="2026-08-13T00:00:00Z",
+        deck_id="deck-1",
+        deck_display_name="Dream Deck",
+        launch_agent_id=agent_id,
+        goal="雨夜归途",
+        project_story_slug=project_story_slug,
+        episode_authority=None,
+        project_title="雨夜归途",
+        confirmation_accepted=False,
+        confirmation_dispatched=False,
+    )
+
+
+class _ArtifactProvider(AdminStoryWorkspaceArtifactProvider):
+    """In-memory Admin provider; file behavior remains the production path."""
+
+    def __init__(
+        self,
+        authority: StoryWorkspaceArtifactAuthorityDTO | None = None,
+    ) -> None:
+        self.authority = authority or artifact_authority()
+        self.authority_calls: list[dict] = []
+        self.ensure_calls: list[dict] = []
+        self.story_workspace_artifact_authority = MagicMock(
+            side_effect=self._authority
+        )
+        self.ensure_story_workspace_episode_authority = MagicMock(
+            side_effect=self._ensure
+        )
+        self.mark_story_workspace_artifact_output_ready = MagicMock(
+            return_value=SimpleNamespace(
+                workflow_run_id=RUN_ID,
+                status="pending_review",
+                status_version=1,
+                replayed=False,
+            )
+        )
+        self.materialize_story_workspace_artifact_index = MagicMock(
+            return_value=SimpleNamespace(
+                write_status="same_revision",
+                observation=SimpleNamespace(error_code=None),
+            )
+        )
+
+    def _authority(self, **kwargs):
+        self.authority_calls.append(kwargs)
+        return self.authority
+
+    def _ensure(self, **kwargs):
+        self.ensure_calls.append(kwargs)
+        return SimpleNamespace(
+            authority=StoryWorkspaceEpisodeAuthorityDTO(
+                schema="story-workspace-episode-authority/v1",
+                workflow_run_id=kwargs["workflow_run_id"],
+                episode_uid="5" * 32,
+                story_slug=kwargs["story_slug"],
+                episode_code=kwargs["episode_code"],
+            ),
+            replayed=False,
+        )
 
 
 class DreamArtifactTurnHookTest(unittest.TestCase):
@@ -138,6 +197,7 @@ class DreamArtifactTurnHookTest(unittest.TestCase):
         )
         self.story_index_materialize_mock = self.story_index_materialize.start()
         self.addCleanup(self.story_index_materialize.stop)
+        self.artifact_provider = _ArtifactProvider()
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.workspace = Path(self.temporary_directory.name) / THREAD_ID
         self.workspace.mkdir()
@@ -206,38 +266,32 @@ shots:
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def _binding_error(self, metadata: dict) -> DreamArtifactTurnHookError:
+    def _binding_error(
+        self,
+        authority: StoryWorkspaceArtifactAuthorityDTO,
+    ) -> DreamArtifactTurnHookError:
         hook = DreamArtifactTurnHook()
+        provider = _ArtifactProvider(authority)
         ticket = hook.before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=provider,
         )
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(metadata),
-        }
-        with (
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
-            self.assertRaises(DreamArtifactTurnHookError) as raised,
-        ):
+        with self.assertRaises(DreamArtifactTurnHookError) as raised:
             hook._synchronize_episode_registry(
                 ticket,
-                launched_run(),
+                authority.workflow_run(),
+                launch_authority=authority,
                 private_files={
                     "stories/demo-project/episodes/EP01/script.md": b"# EP01\n",
                 },
             )
-        db.close.assert_called_once_with()
         return raised.exception
 
     def test_project_story_slug_mismatch_is_agent_repairable(self) -> None:
         error = self._binding_error(
-            launch_metadata(project_story_slug="server-project")
+            artifact_authority(project_story_slug="server-project")
         )
 
         self.assertEqual(error.code, "PROJECT_STORY_SLUG_MISMATCH")
@@ -250,10 +304,13 @@ shots:
 
     def test_successful_ep02_change_extends_registry_and_activates_ep02(self) -> None:
         hook = DreamArtifactTurnHook()
+        authority_dto = artifact_authority()
+        provider = _ArtifactProvider(authority_dto)
         ticket = hook.before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=provider,
         )
         binding_service = StoryWorkspaceEpisodeBindingService(self.workspace)
         binding_context = StoryWorkspaceEpisodeBindingContext(
@@ -264,42 +321,29 @@ shots:
             episode_uid="5" * 32,
         )
         binding_service.bind_first_episode(binding_context)
-        metadata = launch_metadata()
-        metadata["story_workspace_episode_identity"] = {
-            "schema": "story-workspace-episode-authority/v1",
-            "workflow_run_id": RUN_ID,
-            "episode_uid": "5" * 32,
-            "story_slug": "demo-project",
-            "episode_code": "EP01",
-        }
         ep02 = self.workspace / "stories" / "demo-project" / "episodes" / "EP02"
         ep02.mkdir()
         (ep02 / "script.md").write_text(
             "# EP02 剧本\n\n只属于 EP02 的内容。\n",
             encoding="utf-8",
         )
-        private_files = hook._collect_private_artifact_files(ticket.workspace_root)
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(metadata),
-        }
 
-        with patch(
-            "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-            return_value=db,
-        ):
-            authority = hook._synchronize_episode_registry(
-                ticket,
-                launched_run(),
-                private_files=private_files,
-            )
+        selected = hook._synchronize_episode_registry(
+            ticket,
+            authority_dto.workflow_run(),
+            launch_authority=authority_dto,
+            private_files=hook._collect_private_artifact_files(ticket.workspace_root),
+        )
 
         registry = binding_service.read_episode_registry(binding_context)
-        self.assertIsNotNone(authority)
-        self.assertEqual(authority.episode_code, "EP02")
-        self.assertEqual([item.episode_code for item in registry.episodes], ["EP01", "EP02"])
-        self.assertEqual(registry.active_episode_uid, authority.episode_uid)
+        self.assertIsNotNone(selected)
+        assert selected is not None
+        self.assertEqual(selected.episode_code, "EP02")
+        self.assertEqual(
+            [item.episode_code for item in registry.episodes],
+            ["EP01", "EP02"],
+        )
+        self.assertEqual(registry.active_episode_uid, selected.episode_uid)
 
     def test_single_preexisting_unregistered_ep02_becomes_active(self) -> None:
         binding_service = StoryWorkspaceEpisodeBindingService(self.workspace)
@@ -318,66 +362,75 @@ shots:
             encoding="utf-8",
         )
         hook = DreamArtifactTurnHook()
+        authority_dto = artifact_authority()
+        provider = _ArtifactProvider(authority_dto)
         ticket = hook.before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=provider,
         )
-        metadata = launch_metadata()
-        metadata["story_workspace_episode_identity"] = {
-            "schema": "story-workspace-episode-authority/v1",
-            "workflow_run_id": RUN_ID,
-            "episode_uid": first.episode_uid,
-            "story_slug": "demo-project",
-            "episode_code": "EP01",
-        }
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(metadata),
-        }
 
-        with patch(
-            "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-            return_value=db,
-        ):
-            authority = hook._synchronize_episode_registry(
-                ticket,
-                launched_run(),
-                private_files=hook._collect_private_artifact_files(
-                    ticket.workspace_root
-                ),
-            )
+        selected = hook._synchronize_episode_registry(
+            ticket,
+            authority_dto.workflow_run(),
+            launch_authority=authority_dto,
+            private_files=hook._collect_private_artifact_files(ticket.workspace_root),
+        )
 
         registry = binding_service.read_episode_registry(binding_context)
-        self.assertIsNotNone(authority)
-        self.assertEqual([item.episode_code for item in registry.episodes], ["EP01", "EP02"])
+        self.assertIsNotNone(selected)
+        assert selected is not None
+        self.assertEqual(
+            [item.episode_code for item in registry.episodes],
+            ["EP01", "EP02"],
+        )
         self.assertEqual(registry.revision, 3)
         self.assertEqual(registry.episodes[0].episode_uid, first.episode_uid)
-        self.assertEqual(authority.episode_code, "EP02")
-        self.assertEqual(registry.active_episode_uid, authority.episode_uid)
+        self.assertEqual(selected.episode_code, "EP02")
+        self.assertEqual(registry.active_episode_uid, selected.episode_uid)
 
-    def test_launch_actor_thread_run_deck_and_plugin_authority_are_not_repairable(self) -> None:
-        mutations = {
-            "actor": lambda value: value.update(actorId="actor-forged"),
-            "run": lambda value: value.update(workflowRunId="run_" + "f" * 32),
-            "thread": lambda value: value.update(threadId="thread-forged"),
-            "deck": lambda value: value.update(deckId="deck-forged"),
-            "launch_agent_provenance": lambda value: value.update(
-                agentId="voice-forged"
+    def test_actor_thread_run_deck_and_plugin_authority_are_not_repairable(self) -> None:
+        cases = {
+            "actor": artifact_authority(
+                run=launched_run().model_copy(update={"created_by": "actor-forged"})
             ),
-            "plugin_lock": lambda value: value["dreamContext"].update(
-                runtime_plugin_lock_id="lock-forged"
+            "run": artifact_authority(
+                run=launched_run().model_copy(
+                    update={"workflow_run_id": "run_" + "f" * 32}
+                )
+            ),
+            "thread": artifact_authority(
+                run=launched_run().model_copy(
+                    update={"source_voice_thread_id": "thread-forged"}
+                )
+            ),
+            "deck": artifact_authority().model_copy(
+                update={"deck_id": "deck-forged"}
+            ),
+            "plugin_lock": artifact_authority(
+                run=launched_run().model_copy(
+                    update={"runtime_plugin_lock_id": "lock-forged"}
+                )
             ),
         }
-        for label, mutate in mutations.items():
+        for label, authority_dto in cases.items():
             with self.subTest(authority=label):
-                metadata = launch_metadata()
-                mutate(metadata)
-                error = self._binding_error(metadata)
-                self.assertEqual(error.code, "DREAM_LAUNCH_AUTHORITY_INVALID")
+                provider = _ArtifactProvider(authority_dto)
+                ticket = DreamArtifactTurnHook().before_main_turn(
+                    context=context(),
+                    actor_id="actor-1",
+                    cwd=str(self.workspace),
+                    artifact_provider=provider,
+                )
+                with self.assertRaises(DreamArtifactTurnHookError) as raised:
+                    DreamArtifactTurnHook._load_artifact_authority(ticket)
+                self.assertEqual(
+                    raised.exception.code,
+                    "DREAM_LAUNCH_AUTHORITY_INVALID",
+                )
                 self.assertIs(
-                    error.issue.repairability,
+                    raised.exception.issue.repairability,
                     DreamArtifactRepairability.NON_REPAIRABLE,
                 )
 
@@ -398,33 +451,17 @@ personality:
             encoding="utf-8",
         )
         hook = DreamArtifactTurnHook()
+        provider = _ArtifactProvider(
+            artifact_authority(run=launched_run(), agent_id="voice-screenwriter")
+        )
         ticket = hook.before_main_turn(
             context=context(agent_id="voice-character-designer"),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=provider,
         )
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(
-                launch_metadata(agent_id="voice-screenwriter")
-            ),
-        }
-        db.execute.return_value.rowcount = 1
 
-        with (
-            patch.object(
-                hook,
-                "_load_authoritative_run",
-                return_value=launched_run(),
-            ),
-            patch.object(hook, "_record_output_ready"),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
-        ):
-            result = hook.after_main_turn(ticket)
+        result = hook.after_main_turn(ticket)
 
         self.assertIn("characters", result.changed_stages)
         stage = StoryWorkspaceDreamFileReader(self.workspace).read_stage(
@@ -432,6 +469,7 @@ personality:
             stage=StoryWorkspaceDreamStage.CHARACTERS,
         )
         self.assertIsNotNone(stage)
+        assert stage is not None
         self.assertEqual(stage.revision, 1)
         self.assertIn("清明内求", stage.items[0].content or "")
 
@@ -457,10 +495,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
 
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_synchronize_episode_registry") as bind,
             self.assertRaises(DreamArtifactTurnHookError) as raised,
         ):
@@ -485,7 +523,7 @@ personality:
         )
         self.assertFalse(run_file.exists())
 
-    def test_auto_repair_cleanup_scope_uses_fresh_trusted_launch_authority(self) -> None:
+    def test_auto_repair_cleanup_scope_uses_fresh_admin_authority(self) -> None:
         stale = self.workspace / "stories" / "stale-project"
         stale.mkdir(parents=True)
         (stale / "project.yaml").write_text(
@@ -497,57 +535,44 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(launch_metadata()),
-        }
 
-        with (
-            patch.object(hook, "_load_authoritative_run", return_value=launched_run()),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
-        ):
-            cleanup = hook.resolve_auto_repair_project_cleanup_scope(
-                ticket,
-                validation_code="DREAM_CANONICAL_PROJECT_AMBIGUOUS",
-            )
+        cleanup = hook.resolve_auto_repair_project_cleanup_scope(
+            ticket,
+            validation_code="DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        )
 
         self.assertEqual(cleanup, ("demo-project", ("stale-project",)))
-        db.close.assert_called_once_with()
+        self.artifact_provider.story_workspace_artifact_authority.assert_called_once_with(
+            actor_id="actor-1",
+            thread_id=THREAD_ID,
+            workflow_run_id=RUN_ID,
+        )
 
-    def test_auto_repair_cleanup_scope_rejects_changed_launch_authority(self) -> None:
+    def test_auto_repair_cleanup_scope_rejects_changed_admin_authority(self) -> None:
         stale = self.workspace / "stories" / "stale-project"
         stale.mkdir(parents=True)
         (stale / "project.yaml").write_text(
             "project_id: stale-project\nproject_slug: stale-project\n",
             encoding="utf-8",
         )
+        provider = _ArtifactProvider(
+            artifact_authority(
+                run=launched_run().model_copy(
+                    update={"created_by": "actor-forged"}
+                )
+            )
+        )
         hook = DreamArtifactTurnHook()
         ticket = hook.before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=provider,
         )
-        changed = launch_metadata()
-        changed["actorId"] = "actor-forged"
-        db = MagicMock()
-        db.in_transaction = False
-        db.execute.return_value.fetchone.return_value = {
-            "metadata": json.dumps(changed),
-        }
 
-        with (
-            patch.object(hook, "_load_authoritative_run", return_value=launched_run()),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
-            self.assertRaises(DreamArtifactTurnHookError) as raised,
-        ):
+        with self.assertRaises(DreamArtifactTurnHookError) as raised:
             hook.resolve_auto_repair_project_cleanup_scope(
                 ticket,
                 validation_code="PROJECT_STORY_SLUG_MISMATCH",
@@ -612,9 +637,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -663,9 +689,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -681,7 +708,7 @@ personality:
         script = self.workspace / "stories" / "demo-project" / "episodes" / "EP01" / "script.md"
         script.write_text("# EP01 剧本\n\n林夏：继续。\n", encoding="utf-8")
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -713,9 +740,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         patches = (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         )
@@ -725,7 +753,7 @@ personality:
         character = self.workspace / "assets" / "characters" / "lead.md"
         character.unlink()
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -740,7 +768,7 @@ personality:
             encoding="utf-8",
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -760,14 +788,15 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
 
         def synchronize():
             with (
                 patch.object(
                     hook,
-                    "_load_authoritative_run",
-                    return_value=authoritative_run(),
+                    "_load_artifact_authority",
+                    return_value=artifact_authority(run=authoritative_run()),
                 ),
                 patch.object(hook, "_record_output_ready"),
                 patch.object(
@@ -929,9 +958,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -943,7 +973,7 @@ personality:
             encoding="utf-8",
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
@@ -973,9 +1003,10 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_load_artifact_authority", return_value=artifact_authority(run=authoritative_run())),
             patch.object(hook, "_record_output_ready"),
             patch.object(hook, "_synchronize_episode_registry", return_value=True) as bind,
         ):
@@ -993,15 +1024,23 @@ personality:
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
         surface = object()
-        db = unittest.mock.MagicMock()
-        story_index = unittest.mock.MagicMock()
-        story_index.materialize.return_value = {
-            "status": "updated",
-            "storyId": "story-1",
-            "errorCode": None,
-        }
+        projected = SimpleNamespace(
+            source_project_id="demo-project",
+            title="雨夜归途",
+            episode_count=1,
+            artifact_manifest_revision="sha256:" + "1" * 64,
+            script_revision="sha256:" + "2" * 64,
+            script_size_bytes=20,
+        )
+        self.artifact_provider.materialize_story_workspace_artifact_index.return_value = (
+            SimpleNamespace(
+                write_status="updated",
+                observation=SimpleNamespace(error_code=None),
+            )
+        )
         with (
             patch(
                 "services.story_workspace.dream_artifact_turn_hook."
@@ -1009,15 +1048,11 @@ personality:
             ) as artifact_service,
             patch(
                 "services.story_workspace.dream_artifact_turn_hook."
-                "ArtifactStoryIndexService",
-                return_value=story_index,
-            ),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
+                "ArtifactStoryIndexProjector"
+            ) as projector,
         ):
             artifact_service.return_value.read_surface.return_value = surface
+            projector.return_value.project.return_value = projected
             status = ORIGINAL_MATERIALIZE_STORY_INDEX(
                 ticket,
                 authoritative_run(),
@@ -1029,8 +1064,7 @@ personality:
             RUN_ID,
             episode_authority=episode_authority(),
         )
-        story_index.materialize.assert_called_once_with(
-            db=db,
+        projector.return_value.project.assert_called_once_with(
             workspace_root=self.workspace.resolve(),
             workflow_run=authoritative_run(),
             actor_id="actor-1",
@@ -1038,21 +1072,30 @@ personality:
             episode_authority=episode_authority(),
             refreshed_surface=surface,
         )
-        db.close.assert_called_once_with()
+        call = (
+            self.artifact_provider
+            .materialize_story_workspace_artifact_index.call_args
+        )
+        self.assertEqual(call.kwargs["actor_id"], "actor-1")
+        self.assertEqual(call.kwargs["thread_id"], THREAD_ID)
+        self.assertEqual(call.kwargs["workflow_run_id"], RUN_ID)
+        self.assertEqual(
+            call.kwargs["projection"].artifact_manifest_revision,
+            "sha256:" + "1" * 64,
+        )
 
-    def test_story_index_waits_for_script_without_failing_partial_workspace(self) -> None:
+    def test_story_index_waits_for_script_without_calling_admin_write(self) -> None:
+        from services.story_workspace.artifact_story_index_projector import (
+            ArtifactStoryProjectionError,
+        )
+
         ticket = DreamArtifactTurnHook().before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
+            artifact_provider=self.artifact_provider,
         )
-        db = unittest.mock.MagicMock()
-        story_index = unittest.mock.MagicMock()
-        story_index.materialize.return_value = {
-            "status": "failed",
-            "errorCode": "artifact_missing",
-            "retryable": True,
-        }
+        self.artifact_provider.materialize_story_workspace_artifact_index.reset_mock()
         with (
             patch(
                 "services.story_workspace.dream_artifact_turn_hook."
@@ -1060,15 +1103,14 @@ personality:
             ) as artifact_service,
             patch(
                 "services.story_workspace.dream_artifact_turn_hook."
-                "ArtifactStoryIndexService",
-                return_value=story_index,
-            ),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
-                return_value=db,
-            ),
+                "ArtifactStoryIndexProjector"
+            ) as projector,
         ):
             artifact_service.return_value.read_surface.return_value = object()
+            projector.return_value.project.side_effect = ArtifactStoryProjectionError(
+                "artifact_missing",
+                retryable=True,
+            )
             status = ORIGINAL_MATERIALIZE_STORY_INDEX(
                 ticket,
                 authoritative_run(),
@@ -1076,6 +1118,7 @@ personality:
             )
 
         self.assertEqual(status, "not_ready")
+        self.artifact_provider.materialize_story_workspace_artifact_index.assert_not_called()
 
     def test_historical_unicode_and_header_only_assets_form_page_projection(self) -> None:
         (self.workspace / "assets" / "characters" / "凌波.yaml").write_text(

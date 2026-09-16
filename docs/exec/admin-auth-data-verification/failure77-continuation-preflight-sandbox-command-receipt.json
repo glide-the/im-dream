@@ -1,0 +1,16 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/failure77-continuation-preflight-diagnose.py sandbox",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 1,
+  "proof": {
+    "result": "FAIL",
+    "stage": "verification.target_role",
+    "classification": "loopback_permission_denied",
+    "assertions": 0,
+    "target": "ink_auth_data_codex_test_792494523a17_failure77",
+    "protected_tables": 17,
+    "business_mutation": false,
+    "public_cases_executed": 0,
+    "normal_database": "untouched"
+  }
+}

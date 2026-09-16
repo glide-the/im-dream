@@ -1,0 +1,26 @@
+{
+  "result": "FAIL",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "step": "preflight-source",
+  "setup_assertions": 4,
+  "sqlstate": "42703",
+  "exception": "DatabaseError",
+  "message": "Private diagnostic omitted",
+  "completed_public_seed_commands": [
+    {
+      "operation": "chat-thread.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "chat-message.persist",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    }
+  ]
+}

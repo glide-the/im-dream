@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.script.bootstrap_postgres_roles import RoleNames, _dream_tables
+from backend.tests.harness.bootstrap_postgres_roles import RoleNames, _dream_tables
 
 
 def test_role_names_are_non_login_and_domain_specific() -> None:

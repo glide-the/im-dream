@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "primary_fault": "one explicit old-key duplicate audit INSERT attempt in owned disposable target; expected error, transaction rolled back",
+  "sqlstate": "23505",
+  "constraint": "admin_audit_logs_request_action_uidx",
+  "original_request": "pf_request_e978d00fa84c4d54bb23ebbb6b977eb4",
+  "old_audits_before_after": "exactly unchanged; no PF/receipt/map write",
+  "normal_database": "untouched"
+}

@@ -2,6 +2,7 @@
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
 // [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
+// [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 
 import {
   createCipheriv, createDecipheriv, createHash, createHmac,
@@ -27,6 +28,14 @@ export type LoginTransaction = Readonly<{
   expires_at: number;
 }>;
 
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
 function exactOrigin(value: string): string {
   try {
     const url = new URL(value);
@@ -46,7 +55,7 @@ export function relativeReturnLocation(raw: string): string {
   // Decoding strictly reduces the number of escaped bytes; this finite loop
   // also rejects nested encodings instead of guessing an arbitrary depth.
   for (;;) {
-    if (!decoded.startsWith('/') || decoded.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(decoded)) {
+    if (!decoded.startsWith('/') || decoded.startsWith('//') || decoded.includes('\\') || hasControlCharacter(decoded)) {
       throw new BffBoundaryError('BFF_RETURN_LOCATION_INVALID', 400);
     }
     let next: string;
@@ -87,7 +96,7 @@ export class BffLoginBoundary {
       if (callback.origin !== this.publicOrigin || callback.username || callback.password || callback.search || callback.hash || callback.href !== config.callbackUri) throw new Error();
       this.callbackUri = config.callbackUri;
     } catch { throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503); }
-    if (Buffer.byteLength(config.cookieSecret) < 32 || /[\u0000-\u001f\u007f]/.test(config.cookieSecret)) {
+    if (Buffer.byteLength(config.cookieSecret) < 32 || hasControlCharacter(config.cookieSecret)) {
       throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
     }
     this.#transactionLifetime = config.transactionLifetimeSeconds ?? 600;

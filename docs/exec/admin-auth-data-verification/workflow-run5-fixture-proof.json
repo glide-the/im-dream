@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 60,
+  "full_runs": 4,
+  "cases": 21,
+  "setup_assertions": 24,
+  "oracle": "original strict WorkflowRun/Transition/DeckRuntimePluginLock/RuntimeLoadReceipt/AgentSession; original canonical/hash/request-key functions",
+  "binding": "new pf/run/as/wrt/rlr identities, complete hidden source provenance, readiness entries, exact placement/lock/settings/session lease and initial history",
+  "public_grants": 2,
+  "roles": "restricted AUTH/DATA; owner fixture/verification only",
+  "prior_context_cases": "untouched",
+  "normal_database": "untouched",
+  "provider_runtime_model": "none; authenticated persistence contract only"
+}
