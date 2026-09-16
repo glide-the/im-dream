@@ -6,6 +6,7 @@
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
 # [Sync] 2026-09-15: validate Registry108 activation provider and Dream PostgreSQL fence.
+# [Sync] 2026-09-16: retire the zero-caller local activation transaction and keep Registry108 as the only writer.
 # [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
 #         service callback factories, and ToolEventPayload.
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
@@ -964,16 +965,23 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(hasattr(service, "_make_dream_runtime_init_cb"))
 
-    def test_dream_runtime_has_no_deployment_environment_gate(self):
-        from services.story_workspace.dream_runtime_activation_service import (
-            StoryWorkspaceDreamRuntimeActivationService,
-        )
+    def test_dream_runtime_activation_contract_has_no_local_persistence_service(self):
+        from services.story_workspace import dream_runtime_activation_service
 
-        parameters = inspect.signature(
-            StoryWorkspaceDreamRuntimeActivationService
-        ).parameters
-        self.assertNotIn("environment_id", parameters)
-        self.assertNotIn("deployment_tier", parameters)
+        source = inspect.getsource(dream_runtime_activation_service)
+        self.assertFalse(
+            hasattr(
+                dream_runtime_activation_service,
+                "StoryWorkspaceDreamRuntimeActivationService",
+            )
+        )
+        for forbidden in (
+            "WorkflowRunService",
+            "SessionManager",
+            "ReconcileService",
+            ".execute(",
+        ):
+            self.assertNotIn(forbidden, source)
 
     async def test_dream_sdk_init_uses_admin_activation_after_local_manifest_verification(self):
         from services.admin_data.workflow_runtime_activation_data import (
