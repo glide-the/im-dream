@@ -1,7 +1,7 @@
 <!-- [Input] Actual Git/GitHub/tool receipts from the cross-project coordinator. -->
 <!-- [Output] Durable baseline, task, evidence and unresolved dependency record. -->
 <!-- [Pos] Execution evidence for stage_admin-auth-data-coordination.md; not an implementation completion claim. -->
-<!-- [Sync] 2026-09-16: record current PR/CI state, guarded normal-database activation and complete Dream source closure gate. -->
+<!-- [Sync] 2026-09-16: record final source/PR/CI state, v2 exact-release binding, physical-backup rehearsal and the still-unapplied normal cutover. -->
 <!-- [Sync] 2026-09-15: retain launch75 first failures,974 continuation/308 recovery/19 preservation and active goals. -->
 
 # Admin 认证与 Dream 数据访问迁移协调回执
@@ -307,9 +307,9 @@ corrected source-only扫描读取543模块，得到79个production entry、50个
 
 ## 当前源码关闭与发布门禁复核（2026-09-16）
 
-Admin 分支 `codex/admin-auth-data-provider` 已推送 `6ce3898742b59b76b2e74fecc585eda7e2556b6b`；[Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) 为 CLEAN。当前 head 的 [Test Suite](https://github.com/glide-the/dream-im-platform/actions/runs/35067927623) exit 0：Deterministic checks 4m31s，deployment projections、2074 项 provider-free tests、ESLint、TypeScript 与 Next.js production build 全通过；Drizzle migration journal 1m0s，63 migrations、immutable journal、8 capabilities 与 repeat no-op 全通过。最新提交同时把 Admin 的 Deck chat-context source oracle 切换到 Dream 的 DTO-only `DeckChatContextAssembler`，不再引用已退役的 SQL-backed service。
+Admin 分支 `codex/admin-auth-data-provider` 已推送 `0316e8742ad999aea0b2460517da3a4f0c9cc9eb`；[Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) 为 CLEAN。实现快照 `894c8221ae4f96109f01570a6145a715197712e7` 的 [Test Suite](https://github.com/glide-the/dream-im-platform/actions/runs/35080308352) exit 0：Deterministic checks 3m41s，13 项配置测试、274 files / 2074 tests、ESLint、TypeScript 与 Next.js 16.1.6 production build 全通过；Drizzle migration journal 50s，63 migrations、immutable journal、8 capabilities 与 repeat no-op 全通过。当前 head 只补齐 README 与根目录契约中的 v2 双仓 release binding 操作说明，并由 [最终 Test Suite](https://github.com/glide-the/dream-im-platform/actions/runs/35081626652) 对同一实现和文档状态重新验证。
 
-Dream 源码门禁验证 head 为 `ee71c0f4b5f76fa691f0f54e5b0deb8e6d77bab5`；[Draft PR #63](https://github.com/glide-the/im-dream/pull/63) 为 CLEAN，[Backend CI](https://github.com/glide-the/im-dream/actions/runs/35067188694/job/104700038811) 5m26s、[Frontend CI](https://github.com/glide-the/im-dream/actions/runs/35067188672/job/104700038818) 1m7s，均成功。该提交把静态门禁扩大到完整 backend 生产 Python 图及 Next `app/packages` 生产脚本；本节状态回执的后续文档提交不改变该源码门禁实现。
+Dream 源码与发布证据快照为 `6478b791b84a1f136a5b5a426b127ee036445315`；[Draft PR #63](https://github.com/glide-the/im-dream/pull/63) 为 CLEAN，[Backend CI](https://github.com/glide-the/im-dream/actions/runs/35080768825/job/104743956425) 4m20s、[Frontend CI](https://github.com/glide-the/im-dream/actions/runs/35080768841/job/104743956653) 1m18s，均成功。该快照包含完整 backend 生产 Python 图与 Next `app/packages` 生产脚本的数据库关闭门禁，以及隔离恢复演练回执；本节及后续状态文档提交不改变该源码门禁实现。
 
 | cwd | 实际命令 | exit | 关键输出与适用范围 |
 | --- | --- | ---: | --- |
@@ -319,6 +319,8 @@ Dream 源码门禁验证 head 为 `ee71c0f4b5f76fa691f0f54e5b0deb8e6d77bab5`；[
 
 门禁排除范围只有 tests/e2e、虚拟环境、构建产物和缓存目录；明确命名的历史数据库实现、SQL oracle、migration/故障注入与 clone harness 继续位于测试或脚本边界。它们不进入 Dream 应用启动、HTTP/SSE、后台 worker 或 Agent turn 模块图。运行代码使用严格 Pydantic DTO → Admin Zod DTO → domain Service → typed Repository → Drizzle，Admin 不可用时失败，不回退 Dream PostgreSQL。
 
-正常数据库仍有 54 条 migration receipt（through 0053）；0054–0062、四角色与 ACL 尚未应用，正常 Admin/Dream/Gateway 服务仍停止。受控 runner `pnpm auth-data-access:activate` 默认 dry-run；提交必须同时提供 `--apply --production-approval`，并核验 0600 manifest、停机备份 SHA、精确 database/port/data directory、63 receipts、8 capabilities、active canonical Gateway binding 与完整角色 credential。私有候选已绑定 Admin `6ce38987...`，`activation.json` SHA-256 为 `f1bd0323b57787fccd101e05d4d2c1e6d6da6ede3c41eb21a4a42f85698d7677`，candidate environment check 通过；`normal_database_mutation` 仍为 `not_authorized-not_executed`。
+正常数据库仍有 54 条 migration receipt（through 0053）；0054–0062、四角色与 ACL 尚未应用，正常 Admin/Dream/Gateway 服务仍停止。受控 runner `pnpm auth-data-access:activate` 默认 dry-run；提交必须同时提供 `--apply --production-approval`。v2 manifest 额外绑定精确的 Admin/Dream commit；runner 在备份验证或数据库连接前要求两个 release checkout 都位于指定 commit 且 tracked-clean，再核验 0600 manifest、停机备份 SHA、精确 database/port/data directory、63 receipts、8 capabilities、active canonical Gateway binding 与完整角色 credential。私有候选与只读回执在每次文档 head 固定后重新生成，`normal_database_mutation` 保持 `not_authorized-not-executed`，不把私有摘要写回会再次改变 Dream commit 的文档。
 
-本节证明源码关闭和隔离技术门禁，不把它解释为正常数据库已经切换或真实业务已经验收。后续只有取得独立授权，才能执行正常库 migration/role/ACL、激活配置、启动服务并通过公开生产入口完成真实 Google、Device Flow、Run/Thread/SSE/文件、Gateway/账本与真实模型验收。
+正常停机物理备份已在本轮自有 PostgreSQL 18.1、端口 `55493` 的隔离恢复环境完整演练：初始 54 receipts 和 `35/1408/10` 三组业务计数得到确认；0054–0062 前向迁移后达到 63/63 与 8 capabilities；v2 activation 首次 apply、dry-run 和重复 apply 均 exit 0，142 项 ACL、实际角色 credential probes、Dream `NOLOGIN`/`CONNECT` deny 和数据计数保持均通过。隔离服务器已停止且自有 data directory 已删除，正常端口 `54329` 全程关闭；脱敏回执 SHA-256 为 `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`。
+
+本节证明源码关闭、精确发布绑定和隔离技术门禁，不表示正常数据库已经切换或真实业务已经验收。后续只有取得独立授权，才能执行正常库 migration/role/ACL、激活配置、启动服务并通过公开生产入口完成真实 Google、Device Flow、Run/Thread/SSE/文件、Gateway/账本与真实模型验收。
