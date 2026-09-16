@@ -2,6 +2,7 @@
 <!-- [Output] Cross-project impact matrix and separate technical/real-business acceptance gates. -->
 <!-- [Pos] Coordinator acceptance plan; test receipts belong in exec_admin-auth-data-coordination.md and project reports. -->
 <!-- [Sync] 2026-09-16: record runtime configuration projection, build evidence and the remaining normal-database capability gate. -->
+<!-- [Sync] 2026-09-17: record real Codex stream diagnosis, Admin compatibility fix and the remaining allowance gate. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -72,6 +73,8 @@ Re-test complete affected business flows after the cross-project migration, foll
 静态候选需逐项标识生产可达、显式 importer/维护或非 DB 同名调用，不能把 false positive 数量包装为已迁移数量。
 schema 分离需 catalog/ACL 和 Drizzle 前向 migration 实证；新 `dream.operation_receipts` 一张表不等于全部 Dream 数据分离。
 真实回执必须在正常 Admin 可查询 Run/Thread/Gateway request/Token settlement，clone-only 结果不采纳。
+
+2026-09-17 正常Dream公开Agent链已验证到托管Codex：credential按Admin broker规范刷新后，上游返回HTTP 200和合法Responses SSE body，但缺少`Content-Type`。旧Gateway在parser之前返回502并留下Admin可见`settlement_failed/usageUnknown`。Admin已实现仅限Codex adapter、body存在、类型头为空的兼容规则；其他Provider仍fail closed，完整Admin回归2095 tests、类型、lint与build通过。该正常失败请求预留75,006 Token，当前周期剩余24,994，不足以启动同样完整turn；系统没有人工改usage或释放未知用量预留的接口，本轮未改订阅、Allowance或账本。新的真实模型回复、continue/cancel和SSE终态仍待正常额度条件满足后执行，技术修复不能替代该回执。
 2026-09-16 初始启动检查确认 `3000`、`5173`、`8765` 与正常 `54329` 均未监听；随后本轮拥有的 Admin `pnpm dev` 启动 `3000` 与正常内嵌 PostgreSQL `54329`，用于只读状态探测。Docker daemon 未运行，但 Compose `config --quiet` 不依赖 daemon 且已用于配置渲染。Admin 主仓库配置将 `/Users/dmeck/project/ink-admin-memory/.ink-memory/postgres` 定义为正常数据目录。监听于 `51534` 的数据库是此前具名隔离 migration harness，不能用于真实验收，也不属于本轮清理范围。
 
 ### 真实业务执行概念与影响简报（2026-09-16）
