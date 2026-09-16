@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# deploy/setup-env.sh — Initialize Cloud Run environment variables for the backend.
+# deploy/setup-env.sh — Initialize scoped backend and frontend Cloud Run configuration.
 # [Sync] 2026-06-12: point follow-up release guidance to deploy/google-cloud/deploy.sh.
 # [Sync] 2026-09-16: exclude retired Dream database configuration from Cloud Run env projection.
-# [Sync] 2026-06-23: store Google OAuth, JWT, and session secrets in Secret Manager.
+# [Sync] 2026-09-16: split Admin service and Next BFF secrets into backend/frontend Cloud Run refs.
+# [Sync] 2026-09-16: stop creating or projecting retired Dream Google/JWT/session/OAuth secrets.
+# [Historical Sync] 2026-06-23: stored Dream Google/JWT/session secrets before Admin became the auth owner.
 #
 # Behavior:
 #   - Prompts to confirm selected Secret Manager keys
@@ -11,6 +13,8 @@
 #
 # Usage:
 #   export GCP_PROJECT_ID=your-project-id
+#   export INK_ADMIN_DREAM_SERVICE_SECRET_NAME=ink-admin-dream-service-secret
+#   export INK_DREAM_BFF_COOKIE_SECRET_NAME=ink-dream-bff-cookie-secret
 #   ./deploy/setup-env.sh
 #
 set -euo pipefail
@@ -21,6 +25,8 @@ DOTENV="${REPO_ROOT}/backend/.env"
 CLOUD_ENV="${REPO_ROOT}/.cloud-env"
 
 PROJECT_ID="${GCP_PROJECT_ID:?ERROR: GCP_PROJECT_ID is not set. Run: export GCP_PROJECT_ID=your-project-id}"
+ADMIN_SERVICE_SECRET_NAME="${INK_ADMIN_DREAM_SERVICE_SECRET_NAME:-ink-admin-dream-service-secret}"
+BFF_COOKIE_SECRET_NAME="${INK_DREAM_BFF_COOKIE_SECRET_NAME:-ink-dream-bff-cookie-secret}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()   { echo -e "${GREEN}[setup-env]${NC} $*"; }
@@ -45,10 +51,8 @@ ANTHROPIC_DEFAULT_SONNET_MODEL ink-anthropic-sonnet-model
 ANTHROPIC_DEFAULT_OPUS_MODEL   ink-anthropic-opus-model
 AGENT_CWD                      ink-agent-cwd
 FILE_STORAGE_LOCAL_DIR         ink-file-storage-dir
-GOOGLE_CLIENT_SECRET           ink-google-client-secret
-JWT_SECRET                     ink-jwt-secret
-SESSION_SECRET_KEY             ink-session-secret-key
-OAUTH_TOKEN_ENCRYPTION_KEY     ink-oauth-token-encryption-key
+INK_ADMIN_DREAM_SERVICE_SECRET ${ADMIN_SERVICE_SECRET_NAME}
+INK_DREAM_BFF_COOKIE_SECRET    ${BFF_COOKIE_SECRET_NAME}
 "
 
 # Cloud Run defaults for path keys (ignore local .env values)
@@ -57,7 +61,8 @@ _DEFAULT_FILE_STORAGE="/app/data/file-storage"
 
 # ── Load backend/.env ─────────────────────────────────────────────────────────
 DEFAULTS_FILE="$(mktemp)"
-trap 'rm -f "${DEFAULTS_FILE}"' EXIT
+FRONTEND_DEFAULTS_FILE="$(mktemp)"
+trap 'rm -f "${DEFAULTS_FILE}" "${FRONTEND_DEFAULTS_FILE}"' EXIT
 
 if [[ -f "${DOTENV}" ]]; then
   log "Reading backend/.env..."
@@ -73,7 +78,20 @@ else
   warn "backend/.env not found — only prompted keys will be set."
 fi
 
+if [[ -f "${REPO_ROOT}/frontend/.env.local" ]]; then
+  log "Reading frontend/.env.local for Next-only secrets..."
+  while IFS= read -r line; do
+    [[ "${line}" =~ ^[[:space:]]*# || -z "${line// /}" ]] && continue
+    key="${line%%=*}" ; value="${line#*=}"
+    key="${key// /}"
+    value="${value%\"}" ; value="${value#\"}"
+    value="${value%\'}" ; value="${value#\'}"
+    [[ -n "${key}" ]] && printf '%s=%s\n' "${key}" "${value}" >> "${FRONTEND_DEFAULTS_FILE}"
+  done < "${REPO_ROOT}/frontend/.env.local"
+fi
+
 get_default() { grep "^${1}=" "${DEFAULTS_FILE}" 2>/dev/null | head -1 | cut -d= -f2-; }
+get_frontend_default() { grep "^${1}=" "${FRONTEND_DEFAULTS_FILE}" 2>/dev/null | head -1 | cut -d= -f2-; }
 
 # ── Build the set of keys that will go to Secret Manager ─────────────────────
 # (used to exclude them from plain ENV_VARS)
@@ -97,7 +115,7 @@ echo ""
 
 # Temp file to store confirmed secret values: KEY=VALUE
 CONFIRMED_FILE="$(mktemp)"
-trap 'rm -f "${DEFAULTS_FILE}" "${CONFIRMED_FILE}"' EXIT
+trap 'rm -f "${DEFAULTS_FILE}" "${FRONTEND_DEFAULTS_FILE}" "${CONFIRMED_FILE}"' EXIT
 
 while read -r env_key secret_name; do
   [[ -z "${env_key}" ]] && continue
@@ -106,7 +124,10 @@ while read -r env_key secret_name; do
   case "${env_key}" in
     AGENT_CWD)             default="${_DEFAULT_AGENT_CWD}" ;;
     FILE_STORAGE_LOCAL_DIR) default="${_DEFAULT_FILE_STORAGE}" ;;
-    ANTHROPIC_AUTH_TOKEN|GOOGLE_CLIENT_SECRET|JWT_SECRET|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY)
+    INK_DREAM_BFF_COOKIE_SECRET)
+                           default="$(get_frontend_default "${env_key}")"
+                           display="${default:+(set)}" ;;
+    ANTHROPIC_AUTH_TOKEN|INK_ADMIN_DREAM_SERVICE_SECRET)
                            default="$(get_default "${env_key}")"
                            display="${default:+(set)}" ;;
     *)                     default="$(get_default "${env_key}")"
@@ -115,7 +136,7 @@ while read -r env_key secret_name; do
 
   # For auth token use masked display, others show actual value
   case "${env_key}" in
-    ANTHROPIC_AUTH_TOKEN|GOOGLE_CLIENT_SECRET|JWT_SECRET|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY)
+    ANTHROPIC_AUTH_TOKEN|INK_ADMIN_DREAM_SERVICE_SECRET|INK_DREAM_BFF_COOKIE_SECRET)
                          display="${default:+(set)}" ;;
     *)                    display="${default:-empty}" ;;
   esac
@@ -132,6 +153,7 @@ done < <(echo "${SECRET_KEYS}" | awk 'NF>=2{print $1, $2}')
 # ════════════════════════════════════════════════════════
 ENV_VARS="TZ=UTC"
 SECRET_REFS=""
+FRONTEND_SECRET_REFS=""
 
 # Pass through all .env keys not in the secret list
 while IFS='=' read -r key value; do
@@ -141,7 +163,8 @@ while IFS='=' read -r key value; do
     # Owned by deploy/google-cloud/deploy.sh so localhost values from
     # backend/.env never leak into the production Cloud Run revision.
     DATABASE_URL|INK_LOAD_DATABASE_URL_FROM_ENV_FILE|INK_DATABASE_ENV_FILE) continue ;;
-    WEBUI_URL|API_BASE_URL|COOKIE_SECURE|COOKIE_SAMESITE|INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS|INK_PUBLIC_BASE_URL|INK_BACKEND_PUBLIC_BASE_URL) continue ;;
+    GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE|INK_DREAM_BFF_COOKIE_SECRET) continue ;;
+    WEBUI_URL|API_BASE_URL|INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS|INK_PUBLIC_BASE_URL|INK_BACKEND_PUBLIC_BASE_URL) continue ;;
   esac
   ENV_VARS+=",${key}=${value}"
 done < "${DEFAULTS_FILE}"
@@ -150,14 +173,28 @@ done < "${DEFAULTS_FILE}"
 while read -r env_key secret_name; do
   [[ -z "${env_key}" ]] && continue
   confirmed_val="$(grep "^${env_key}=" "${CONFIRMED_FILE}" | head -1 | cut -d= -f2-)"
-  [[ -n "${confirmed_val}" ]] && SECRET_REFS+="${env_key}=${secret_name}:latest,"
+  [[ -n "${confirmed_val}" ]] || continue
+  case "${env_key}" in
+    INK_DREAM_BFF_COOKIE_SECRET)
+      FRONTEND_SECRET_REFS+="${env_key}=${secret_name}:latest,"
+      ;;
+    INK_ADMIN_DREAM_SERVICE_SECRET)
+      SECRET_REFS+="${env_key}=${secret_name}:latest,"
+      FRONTEND_SECRET_REFS+="${env_key}=${secret_name}:latest,"
+      ;;
+    *)
+      SECRET_REFS+="${env_key}=${secret_name}:latest,"
+      ;;
+  esac
 done < <(echo "${SECRET_KEYS}" | awk 'NF>=2{print $1, $2}')
 SECRET_REFS="${SECRET_REFS%,}"
+FRONTEND_SECRET_REFS="${FRONTEND_SECRET_REFS%,}"
 
 cat > "${CLOUD_ENV}" <<EOF
 # Auto-generated by deploy/setup-env.sh — do NOT commit this file.
 CLOUD_ENV_VARS=${ENV_VARS}
 CLOUD_SECRET_REFS=${SECRET_REFS}
+CLOUD_FRONTEND_SECRET_REFS=${FRONTEND_SECRET_REFS}
 EOF
 log "Saved ${CLOUD_ENV}"
 
@@ -189,18 +226,58 @@ while read -r env_key secret_name; do
 done < <(echo "${SECRET_KEYS}" | awk 'NF>=2{print $1, $2}')
 
 STORAGE_ENV="${REPO_ROOT}/.storage-env"
-if [[ -f "${STORAGE_ENV}" ]]; then
-  # shellcheck source=/dev/null
-  source "${STORAGE_ENV}"
-  if [[ -n "${SA_EMAIL:-}" && -n "${SECRET_REFS}" ]]; then
-    log "Granting Secret Manager Secret Accessor to ${SA_EMAIL}..."
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-      --member="serviceAccount:${SA_EMAIL}" \
+[[ -f "${STORAGE_ENV}" ]] || err "Missing .storage-env. Run ./deploy/google-cloud/deploy.sh setup-storage first."
+# shellcheck source=/dev/null
+source "${STORAGE_ENV}"
+[[ -n "${SA_EMAIL:-}" ]] || err "SA_EMAIL is missing from .storage-env."
+[[ -n "${FRONTEND_SA_EMAIL:-}" ]] || err "FRONTEND_SA_EMAIL is missing from .storage-env; rerun setup-storage."
+
+grant_secret_access() {
+  local secret_name="$1" service_account="$2"
+  gcloud secrets add-iam-policy-binding "${secret_name}" \
+    --member="serviceAccount:${service_account}" \
+    --role="roles/secretmanager.secretAccessor" \
+    --condition=None \
+    --project="${PROJECT_ID}" \
+    --quiet
+}
+
+log "Granting secret-level access to the backend and frontend service accounts..."
+while read -r env_key secret_name; do
+  [[ -z "${env_key}" ]] && continue
+  val="$(grep "^${env_key}=" "${CONFIRMED_FILE}" | head -1 | cut -d= -f2-)"
+  [[ -n "${val}" ]] || continue
+  case "${env_key}" in
+    INK_DREAM_BFF_COOKIE_SECRET)
+      grant_secret_access "${secret_name}" "${FRONTEND_SA_EMAIL}"
+      ;;
+    INK_ADMIN_DREAM_SERVICE_SECRET)
+      grant_secret_access "${secret_name}" "${SA_EMAIL}"
+      grant_secret_access "${secret_name}" "${FRONTEND_SA_EMAIL}"
+      ;;
+    *)
+      grant_secret_access "${secret_name}" "${SA_EMAIL}"
+      ;;
+  esac
+done < <(echo "${SECRET_KEYS}" | awk 'NF>=2{print $1, $2}')
+
+remove_project_secret_accessor() {
+  local service_account="$1"
+  if gcloud projects get-iam-policy "${PROJECT_ID}" \
+      --flatten='bindings[].members' \
+      --filter="bindings.role=roles/secretmanager.secretAccessor AND bindings.members=serviceAccount:${service_account}" \
+      --format='value(bindings.role)' | grep -q .; then
+    log "Removing obsolete project-wide Secret Accessor from ${service_account}..."
+    gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+      --member="serviceAccount:${service_account}" \
       --role="roles/secretmanager.secretAccessor" \
       --condition=None \
       --quiet
   fi
-fi
+}
+
+remove_project_secret_accessor "${SA_EMAIL}"
+remove_project_secret_accessor "${FRONTEND_SA_EMAIL}"
 
 echo ""
 info "════════════════════════════════════════════════════════"

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# [Input] Local backend/data, Remote SSH connection env, and REMOTE_APP_DIR.
-# [Output] Backs up, uploads, or downloads Remote SSH backend data files over rsync.
+# [Input] Local non-database backend/data files, Remote SSH connection env, and REMOTE_APP_DIR.
+# [Output] Backs up, uploads, or downloads Remote SSH non-database runtime files over rsync.
 # [Pos] data sync companion script in deploy/remote-ssh/
 # [Sync] 2026-06-12: add Remote SSH data backup/upload/download workflow for Docker Compose deployments.
 # [Sync] 2026-06-16: restrict commands to backup/upload/download and force-recreate Compose services after upload.
-# [Sync] 2026-06-23: preserve production OAuth/cookie env vars during data-sync restarts.
+# [Historical Sync] 2026-06-23: preserved Dream OAuth/cookie env before the Admin-auth cutover.
+# [Sync] 2026-09-16: stop forwarding retired FastAPI session-cookie policy during data maintenance.
+# [Sync] 2026-09-16: reject retired SQLite artifacts before upload; business persistence is Admin API-only.
 # [Sync] 2026-06-23: preserve Mihomo TUN env during data-sync restarts.
 # [Sync] 2026-08-21: preserve optional Compose override/env files and the shared
 #                    platform network during Alibaba Cloud data maintenance.
@@ -49,8 +51,6 @@ REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
 REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN}}"
 REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
-REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
-REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
 REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE:-../../deploy/clash/config.yaml}"
 REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE:-metacubex/mihomo:latest}"
 REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER:-tun-proxy}"
@@ -137,7 +137,6 @@ remote_env_prefix() {
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
-    REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
     REMOTE_CLASH_CONFIG_FILE REMOTE_CLASH_IMAGE
     REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
     REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
@@ -249,7 +248,9 @@ backup_local() {
 
 upload_local() {
   local target remote_path rsync_args
-  [[ -f "${LOCAL_DATA_DIR}/ink-and-memory.db" ]] || warn "Local SQLite DB not found at ${LOCAL_DATA_DIR}/ink-and-memory.db; syncing directory contents anyway."
+  if find "${LOCAL_DATA_DIR}" -maxdepth 1 -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' -o -name '*-wal' -o -name '*-shm' \) -print -quit | grep -q .; then
+    err "Refusing to upload SQLite artifacts from backend/data; Dream business persistence is Admin API-only."
+  fi
   backup_remote
 
   remote_path="$(remote_data_dir)/"

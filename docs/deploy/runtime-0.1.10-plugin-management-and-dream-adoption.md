@@ -2,6 +2,7 @@
 <!-- [Output] Version, publication, adoption, validation, failure and rollback evidence for the plugin-management repair. -->
 <!-- [Pos] Current Runtime 0.1.10 release and local Dream adoption receipt; 0.1.9 remains immutable history. -->
 <!-- [Sync] 2026-09-15: record completed Runtime publication, Dream merge, CI and plugin-management adoption. -->
+<!-- [Sync] 2026-09-16: update the current plugin persistence owner to Admin DTO operations; retain the 2026-09-15 receipt as history. -->
 
 # Runtime 0.1.10 插件管理修复与 Dream 接入
 
@@ -57,14 +58,14 @@ HTTP 控制通道或 Agent turn 状态机。
 ## 本机业务验收合同
 
 本轮只通过现有 Dream 设置页重试已登记的
-`screenwriting@screenwriting-skills`。操作由 Dream plugin service 写入正常
-PostgreSQL operation/installation 记录，并由同一页面消费状态；不创建 Agent
+`screenwriting@screenwriting-skills`。操作由Dream plugin service通过Admin DTO写入正常
+operation/installation记录，并由同一页面消费状态；不创建Agent
 turn，也不改写故事资产。
 
 | 概念/事实 | Source of truth | 写入或同步模块 | 可见消费者 | 预期影响 |
 | --- | --- | --- | --- | --- |
 | Admin approved plugin entry、revision 与 digest | 现有 Admin PostgreSQL 记录 | Admin 已完成登记；Dream 只读取并校验 | Dream Plugins 选择与安装步骤 | 保持不变 |
-| Marketplace 同步与 plugin install operation | Dream PostgreSQL operation/installation | Dream plugin service 调用 manifest-qualified Runtime CLI | Dream Plugins operation 与 installation 状态 | 由旧 error 创建一次新的 retry，并到达 ready |
+| Marketplace同步与plugin install operation | Admin PostgreSQL operation/installation | Dream plugin service调用Admin DTO和manifest-qualified Runtime CLI | Dream Plugins operation与installation状态 | 由旧error创建一次新的retry，并到达ready |
 | Deck/plugin selection | Dream Deck plugin 配置 | Dream 设置页在 ready 后选择 | Dream Work > Plugins | 本轮不改变；只证明插件可安装 |
 | Project、Episode 与 canonical artifacts | 现有 story workspace 文件及投影 | Agent 与 after-turn Hook | Story、Episode、Execution 页面 | 不在范围 |
 | Run-private `.dream` publication 与 shared conversation | 现有 Run/Thread 状态 | host Hook 与 ClaudeAgentService | Dream 文件 API 与 Chat/Dream 历史 | 不在范围 |
@@ -85,7 +86,7 @@ backend 日志确认进程使用 Runtime `0.1.10`。旧 error operation 保留�
 
 Provider-free 测试覆盖 resolver、非法 override、版本成功但管理命令失败、实际
 本地 Marketplace install、artifact、Deck pack、SDK launch 与 uninstall。
-本机业务验收通过现有 Dream/Admin/PostgreSQL 路径选择
+2026-09-15历史本机业务验收通过当时的Dream/Admin/PostgreSQL路径选择
 `screenwriting@screenwriting-skills`，保留正常 operation/installation 供 Admin
 复核。该业务验收不读取或公开凭据、Workspace 正文或模型对话。
 

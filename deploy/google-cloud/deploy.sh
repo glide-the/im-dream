@@ -8,7 +8,8 @@
 # [Sync] 2026-06-12: call setup-storage/sync-data implementations from deploy/google-cloud instead of deploy/ root.
 # [Sync] 2026-06-14: build frontend with public SEO URL and update backend SEO public URL envs.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from Cloud Run public URLs.
-# [Sync] 2026-06-23: deploy production OAuth/cookie/session env defaults for split frontend/backend domains.
+# [Historical Sync] 2026-06-23: projected Dream OAuth/cookie/session defaults before the Admin-auth cutover.
+# [Sync] 2026-09-16: remove retired FastAPI session-cookie policy and secret bindings from Cloud Run revisions.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,8 +45,8 @@ Commands:
   setup-env      Run legacy deploy/setup-env.sh.
   deploy         Build images, push to Artifact Registry, deploy Cloud Run services, and update backend CORS.
   release        Alias for deploy.
-  sync-data      Run deploy/google-cloud/sync-data.sh.
-  backup-data    Download cloud SQLite files into backend/data/bak_<date>/ without upload or restart.
+  sync-data      Fail closed: Dream SQLite synchronization is retired.
+  backup-data    Fail closed: Dream SQLite backup is retired.
   verify         Read Cloud Run frontend/backend service URLs.
   rollback       Route traffic to BACKEND_REVISION and/or FRONTEND_REVISION.
   clean          Print cleanup guidance; does not delete cloud resources.
@@ -63,8 +64,13 @@ Environment overrides:
   WS_BASE_URL                 optional explicit browser WebSocket origin
   BACKEND_CORS_ALLOW_ORIGINS  default: FRONTEND_PUBLIC_ORIGIN
   INK_CORS_ALLOW_CREDENTIALS  default: true
-  BACKEND_COOKIE_SECURE       default: true
-  BACKEND_COOKIE_SAMESITE     default: none
+  INK_ADMIN_DREAM_BASE_URL    required Admin auth/data service origin
+  INK_ADMIN_AUTH_ISSUER       required Admin OAuth/JWT issuer
+  INK_DREAM_API_RESOURCE      required Dream API resource identifier
+  INK_ADMIN_DREAM_SERVICE_CLIENT_ID required registered Dream service client
+  CLOUD_FRONTEND_SECRET_REFS  required Secret Manager refs for
+                              INK_ADMIN_DREAM_SERVICE_SECRET and
+                              INK_DREAM_BFF_COOKIE_SECRET
   BACKEND_REVISION            required for backend rollback
   FRONTEND_REVISION           required for frontend rollback
 
@@ -168,6 +174,90 @@ env_vars_to_delimited() {
   printf '%s\n' "${result}"
 }
 
+env_var_value() {
+  local raw="$1" wanted="$2" item
+  local -a entries
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    if [[ "${item%%=*}" == "${wanted}" ]]; then
+      printf '%s\n' "${item#*=}"
+      return 0
+    fi
+  done
+}
+
+csv_keys() {
+  local raw="$1" item key result=""
+  local -a entries
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    [[ -z "${item}" ]] && continue
+    key="${item%%=*}"
+    if [[ -n "${result}" ]]; then
+      result+=",${key}"
+    else
+      result="${key}"
+    fi
+  done
+  printf '%s\n' "${result}"
+}
+
+sanitize_secret_refs() {
+  local raw="$1"
+  local result="" item key
+  local -a entries
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    [[ -z "${item}" ]] && continue
+    key="${item%%=*}"
+    case "${key}" in
+      GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|INK_DREAM_BFF_COOKIE_SECRET)
+        continue
+        ;;
+    esac
+    if [[ -n "${result}" ]]; then
+      result+=",${item}"
+    else
+      result="${item}"
+    fi
+  done
+  printf '%s\n' "${result}"
+}
+
+validate_frontend_secret_refs() {
+  local raw="$1" item key value result=""
+  local service_secret_seen=0 cookie_secret_seen=0
+  local -a entries
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    [[ -z "${item}" ]] && continue
+    key="${item%%=*}"
+    value="${item#*=}"
+    [[ "${item}" == *=* && -n "${value}" ]] || err "CLOUD_FRONTEND_SECRET_REFS contains an invalid Secret Manager reference."
+    case "${key}" in
+      INK_ADMIN_DREAM_SERVICE_SECRET)
+        [[ "${service_secret_seen}" == "0" ]] || err "CLOUD_FRONTEND_SECRET_REFS repeats INK_ADMIN_DREAM_SERVICE_SECRET."
+        service_secret_seen=1
+        ;;
+      INK_DREAM_BFF_COOKIE_SECRET)
+        [[ "${cookie_secret_seen}" == "0" ]] || err "CLOUD_FRONTEND_SECRET_REFS repeats INK_DREAM_BFF_COOKIE_SECRET."
+        cookie_secret_seen=1
+        ;;
+      *)
+        err "CLOUD_FRONTEND_SECRET_REFS contains unsupported key: ${key}."
+        ;;
+    esac
+    if [[ -n "${result}" ]]; then
+      result+=",${item}"
+    else
+      result="${item}"
+    fi
+  done
+  [[ "${service_secret_seen}" == "1" ]] || err "CLOUD_FRONTEND_SECRET_REFS must bind INK_ADMIN_DREAM_SERVICE_SECRET."
+  [[ "${cookie_secret_seen}" == "1" ]] || err "CLOUD_FRONTEND_SECRET_REFS must bind INK_DREAM_BFF_COOKIE_SECRET."
+  printf '%s\n' "${result}"
+}
+
 require_command() {
   local name="$1"
   if [[ "${DRY_RUN}" == "1" ]]; then
@@ -221,8 +311,8 @@ check_base() {
     log "Would check GCP_PROJECT_ID."
   fi
   if [[ "${DRY_RUN}" != "1" ]]; then
-    [[ -f "${STORAGE_ENV}" ]] || warn ".storage-env is missing; run setup-storage before deploy or sync-data."
-    [[ -f "${CLOUD_ENV}" ]] || warn ".cloud-env is missing; run setup-env before deploy or sync-data."
+    [[ -f "${STORAGE_ENV}" ]] || warn ".storage-env is missing; run setup-storage before deploy."
+    [[ -f "${CLOUD_ENV}" ]] || warn ".cloud-env is missing; run setup-env before deploy."
   else
     log "Would check generated files: ${STORAGE_ENV}, ${CLOUD_ENV}"
   fi
@@ -247,6 +337,7 @@ load_generated_env() {
     else
       CLOUD_ENV_VARS="${CLOUD_ENV_VARS:-TZ=UTC}"
       CLOUD_SECRET_REFS="${CLOUD_SECRET_REFS:-}"
+      CLOUD_FRONTEND_SECRET_REFS="${CLOUD_FRONTEND_SECRET_REFS:-}"
     fi
     return 0
   fi
@@ -279,10 +370,8 @@ Secrets or env changed:
   ./deploy/google-cloud/deploy.sh setup-env
   ./deploy/google-cloud/deploy.sh deploy
 
-Data upload:
+Retired database commands (both fail closed):
   ./deploy/google-cloud/deploy.sh sync-data
-
-Emergency cloud DB backup before maintenance:
   ./deploy/google-cloud/deploy.sh backup-data
 EOF
 }
@@ -340,6 +429,11 @@ command_deploy() {
   check_base
   load_generated_env
 
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    FRONTEND_SA_EMAIL="${FRONTEND_SA_EMAIL:-ink-frontend-sa@$(effective_project_id).iam.gserviceaccount.com}"
+  fi
+  [[ -n "${FRONTEND_SA_EMAIL:-}" ]] || err "FRONTEND_SA_EMAIL is missing from .storage-env; rerun setup-storage."
+
   local project_id registry backend_image frontend_image frontend_public_origin frontend_public_site_url
   project_id="$(effective_project_id)"
   registry="${REGION}-docker.pkg.dev/${project_id}/${REPO_NAME}"
@@ -347,22 +441,46 @@ command_deploy() {
   frontend_image="${registry}/ink-frontend:${IMAGE_TAG}"
   frontend_public_origin="$(normalize_origin_list "${FRONTEND_PUBLIC_ORIGIN}")"
   frontend_public_site_url="${frontend_public_origin%/}/"
-  local backend_public_origin frontend_api_base_url cors_origins cors_credentials backend_cookie_secure backend_cookie_samesite
+  local backend_public_origin frontend_api_base_url cors_origins cors_credentials
   backend_public_origin="$(normalize_origin_list "${BACKEND_PUBLIC_ORIGIN}")"
   frontend_api_base_url="${FRONTEND_API_BASE_URL:-${backend_public_origin}}"
   cors_origins="$(normalize_origin_list "${BACKEND_CORS_ALLOW_ORIGINS:-${frontend_public_origin}}")"
   cors_credentials="${INK_CORS_ALLOW_CREDENTIALS:-true}"
-  backend_cookie_secure="${BACKEND_COOKIE_SECURE:-true}"
-  backend_cookie_samesite="${BACKEND_COOKIE_SAMESITE:-none}"
+
+  local admin_dream_base_url admin_auth_issuer dream_api_resource dream_service_client_id
+  local dream_public_origin dream_bff_redirect_uri frontend_secret_refs
+  admin_dream_base_url="${INK_ADMIN_DREAM_BASE_URL:-$(env_var_value "${CLOUD_ENV_VARS:-}" INK_ADMIN_DREAM_BASE_URL)}"
+  admin_auth_issuer="${INK_ADMIN_AUTH_ISSUER:-$(env_var_value "${CLOUD_ENV_VARS:-}" INK_ADMIN_AUTH_ISSUER)}"
+  dream_api_resource="${INK_DREAM_API_RESOURCE:-$(env_var_value "${CLOUD_ENV_VARS:-}" INK_DREAM_API_RESOURCE)}"
+  dream_service_client_id="${INK_ADMIN_DREAM_SERVICE_CLIENT_ID:-$(env_var_value "${CLOUD_ENV_VARS:-}" INK_ADMIN_DREAM_SERVICE_CLIENT_ID)}"
+  dream_public_origin="${INK_DREAM_PUBLIC_ORIGIN:-${frontend_public_origin}}"
+  dream_bff_redirect_uri="${INK_DREAM_BFF_REDIRECT_URI:-${dream_public_origin%/}/auth/callback}"
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    admin_dream_base_url="${admin_dream_base_url:-https://admin.example.test}"
+    admin_auth_issuer="${admin_auth_issuer:-https://admin.example.test/api/auth}"
+    dream_api_resource="${dream_api_resource:-https://dream.example.test/api}"
+    dream_service_client_id="${dream_service_client_id:-dream-service}"
+    CLOUD_FRONTEND_SECRET_REFS="${CLOUD_FRONTEND_SECRET_REFS:-INK_ADMIN_DREAM_SERVICE_SECRET=admin-dream-service:latest,INK_DREAM_BFF_COOKIE_SECRET=dream-bff-cookie:latest}"
+  fi
+  [[ -n "${admin_dream_base_url}" ]] || err "INK_ADMIN_DREAM_BASE_URL is required for the Cloud Run Next BFF."
+  [[ -n "${admin_auth_issuer}" ]] || err "INK_ADMIN_AUTH_ISSUER is required for the Cloud Run Next BFF."
+  [[ -n "${dream_api_resource}" ]] || err "INK_DREAM_API_RESOURCE is required for the Cloud Run Next BFF."
+  [[ -n "${dream_service_client_id}" ]] || err "INK_ADMIN_DREAM_SERVICE_CLIENT_ID is required for the Cloud Run Next BFF."
+  frontend_secret_refs="$(validate_frontend_secret_refs "${CLOUD_FRONTEND_SECRET_REFS:-}")"
 
   local backend_env_vars_delimited backend_runtime_env_vars
   local -a deploy_owned_keys=(
-    WEBUI_URL API_BASE_URL COOKIE_SECURE COOKIE_SAMESITE
+    WEBUI_URL API_BASE_URL
+    GOOGLE_CLIENT_SECRET JWT_SECRET JWT_SECRET_KEY SESSION_SECRET_KEY
+    OAUTH_TOKEN_ENCRYPTION_KEY AUTH_TOKEN_ENCRYPTION_KEY
+    COOKIE_SECURE COOKIE_SAMESITE INK_ADMIN_DREAM_SERVICE_SECRET INK_DREAM_BFF_COOKIE_SECRET
     INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS
     INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL
   )
   backend_env_vars_delimited="$(env_vars_to_delimited "${CLOUD_ENV_VARS:-TZ=UTC}" "${deploy_owned_keys[@]}")"
-  backend_runtime_env_vars="WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|COOKIE_SECURE=${backend_cookie_secure}|COOKIE_SAMESITE=${backend_cookie_samesite}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}"
+  local sanitized_secret_refs
+  sanitized_secret_refs="$(sanitize_secret_refs "${CLOUD_SECRET_REFS:-}")"
+  backend_runtime_env_vars="WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}"
   if [[ -n "${backend_env_vars_delimited}" ]]; then
     backend_env_vars_delimited+="|${backend_runtime_env_vars}"
   else
@@ -370,9 +488,9 @@ command_deploy() {
   fi
 
   log "Storage  : bucket=${GCS_BUCKET}, sa=${SA_EMAIL}"
-  log "Env vars : ${CLOUD_ENV_VARS}"
-  log "Secrets  : ${CLOUD_SECRET_REFS:-}"
-  log "Runtime  : WEBUI_URL=${frontend_public_origin}, API_BASE_URL=${backend_public_origin}, COOKIE_SECURE=${backend_cookie_secure}, COOKIE_SAMESITE=${backend_cookie_samesite}"
+  log "Env keys  : $(csv_keys "${CLOUD_ENV_VARS:-}")"
+  log "Secret keys: $(csv_keys "${sanitized_secret_refs}")"
+  log "Runtime  : WEBUI_URL=${frontend_public_origin}, API_BASE_URL=${backend_public_origin}, CORS=${cors_origins}"
 
   log "Setting GCP project to: ${project_id}"
   run gcloud config set project "${project_id}"
@@ -417,7 +535,11 @@ command_deploy() {
     --set-env-vars="^|^${backend_env_vars_delimited}"
     --project="${project_id}"
   )
-  [[ -n "${CLOUD_SECRET_REFS:-}" ]] && backend_flags+=(--set-secrets="${CLOUD_SECRET_REFS}")
+  if [[ -n "${sanitized_secret_refs}" ]]; then
+    backend_flags+=(--set-secrets="${sanitized_secret_refs}")
+  else
+    backend_flags+=(--clear-secrets)
+  fi
   run gcloud run deploy "${BACKEND_SERVICE}" "${backend_flags[@]}"
 
   local backend_url
@@ -426,7 +548,7 @@ command_deploy() {
 
   log "Deploying frontend service to Cloud Run (${REGION})..."
   local frontend_env_vars
-  frontend_env_vars="BACKEND_URL=${backend_url},API_BASE_URL=${frontend_api_base_url}"
+  frontend_env_vars="BACKEND_URL=${backend_url},API_BASE_URL=${frontend_api_base_url},INK_ADMIN_DREAM_BASE_URL=${admin_dream_base_url},INK_ADMIN_AUTH_ISSUER=${admin_auth_issuer},INK_DREAM_API_RESOURCE=${dream_api_resource},INK_ADMIN_DREAM_SERVICE_CLIENT_ID=${dream_service_client_id},INK_DREAM_PUBLIC_ORIGIN=${dream_public_origin},INK_DREAM_BFF_REDIRECT_URI=${dream_bff_redirect_uri}"
   [[ -n "${WS_BASE_URL:-}" ]] && frontend_env_vars+=",WS_BASE_URL=${WS_BASE_URL}"
 
   run gcloud run deploy "${FRONTEND_SERVICE}" \
@@ -439,20 +561,22 @@ command_deploy() {
     --cpu=1 \
     --min-instances=0 \
     --max-instances=10 \
+    --service-account="${FRONTEND_SA_EMAIL}" \
     --set-env-vars="${frontend_env_vars}" \
+    --set-secrets="${frontend_secret_refs}" \
     --project="${project_id}"
 
   local frontend_url
   frontend_url="$(describe_service_url "${FRONTEND_SERVICE}" "${project_id}" "https://${FRONTEND_SERVICE}-example.run.app")"
 
   log "Updating backend CORS origin to: ${cors_origins}"
-  log "Updating backend OAuth public URLs and cookie policy."
+  log "Updating backend public URLs and CORS policy."
   log "Updating backend public SEO app URL to: ${frontend_public_site_url}"
   log "Updating backend public SEO API origin to: ${backend_public_origin}"
   run gcloud run services update "${BACKEND_SERVICE}" \
     --region="${REGION}" \
     --project="${project_id}" \
-    --update-env-vars="^|^WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|COOKIE_SECURE=${backend_cookie_secure}|COOKIE_SAMESITE=${backend_cookie_samesite}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}" \
+    --update-env-vars="^|^WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}" \
     --quiet
 
   echo ""

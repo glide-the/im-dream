@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: audit final authentication ownership and remove obsolete Dream SessionMiddleware/deployment cookie authority. -->
 <!-- [Sync] 2026-09-15: inspect Workspace76 component receipts and prepare registered public Run cancel consumption. -->
 <!-- [Sync] 2026-09-15: prepare actual77 fail/envelope types and preserve production launch owner gaps. -->
 <!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
@@ -1110,3 +1111,25 @@ Runner的user stdio配置只选择五个broker字段和两个既有retrieval pol
 Primary最终焦点套件[回执](/private/tmp/dream-admin-stage43-session-tool-broker/primary/command-receipt.json) **exit0，370passed/1skipped/13.63s**。Mandatory Luna初次在sandbox内因loopback bind权限得到21fail、349pass、1skip，判定为harness失败；允许明确命名的`127.0.0.1`临时端口后对最终代码以相同argv fresh执行，[回执](/private/tmp/dream-admin-stage43-session-tool-broker/luna/command-receipt.json) **exit0，370passed/1skipped/13.55s**。Luna额外执行`git diff --check` exit0和八production Python文件compile exit0，且未编辑仓库。
 
 [Source gate](/private/tmp/dream-admin-stage43-session-tool-broker/source/command-receipt.json) **exit0/PASS**：Session tool blocked import与legacy helper mention均为0，neutral protocol无Admin/DB import，stdio clear在运行前，Runner使用exact allowlist+tombstones。[Current AST scanner](/private/tmp/dream-admin-stage43-session-tool-broker/scanner/command-receipt.json) **exit0/PASS**：514 Python modules、80 production entries、52 SQL modules、496 SQL literals、37 driver/database import modules、94 legacy helper calls、457 transaction/connection calls、24 Admin data modules、88 operation names、104 nonproduction entries、166 schema literals、`parse_errors=[]`。相对Stage42冻结baseline，新增三个无DB模块，production entry、driver/database import module、legacy helper call各减少1；全域生产可达SQL和正常业务验收仍保持active/pending。
+
+## 阶段44：最终认证所有权与部署投影审计
+
+### Optimized Prompt
+
+作为跨项目认证与发布边界审计负责人，以当前 Admin `6ce3898742b59b76b2e74fecc585eda7e2556b6b`、Dream `b8b210e6da3f8148b5131770b9517e3a1f3b433b`、两条 CLEAN Draft PR、当前 CI 和正常库 54/63 状态为证据，逐项复核“Admin 是唯一认证中心、Dream 只消费认证能力”的生产代码与部署配置。读取 Dream `server.py`、认证退役路由、Next BFF、local/Docker/Remote SSH/AutoDL/Google Cloud 配置脚本、受影响目录合同和现行认证/交互文档；搜索 Dream 中 JWT/Session/Authlib/Google/Device secret、cookie middleware、旧登录广告和所有部署投影。区分允许的 Admin OAuth access-token 校验、Gateway/Product 服务令牌、标准外部 MCP OAuth client，与不再允许的 Dream 用户 Session/JWT/Google/Device authority。
+
+本轮修正仅删除已经没有调用者的 FastAPI `SessionMiddleware`、`SESSION_SECRET_KEY`/`JWT_SECRET` fallback、旧 Dream `GOOGLE_CLIENT_SECRET`/`JWT_SECRET`/`OAUTH_TOKEN_ENCRYPTION_KEY` Secret Manager投影和 `COOKIE_SECURE`/`COOKIE_SAMESITE` 部署投影；未使用的 Workflow helper也不得回退通用JWT secret。Next BFF 的独立 `INK_DREAM_BFF_COOKIE_SECRET`、HttpOnly handle、PKCE/state/CSRF、Admin Better Auth Session、Admin OAuth access/refresh token、CORS、Runtime/SSE/共享文件系统全部保持。旧 `/api/register`、`/api/login`、Google/Device/token FastAPI 路由继续返回既有 410 迁移响应，不恢复本地签发，也不删除历史文档。控制台不再把退役入口宣传为可用登录接口。
+
+更新受影响源码头、`backend/.folder.md`、部署目录合同和当前部署文档；现行 Admin 契约中“全部待验证”的旧标题改为真实状态，历史增量回执保留。验证包括：生产源码无 `SessionMiddleware` 与三个旧cookie/session键；各部署投影无这些键且继续要求 BFF cookie secret；认证退役路径仍为 410/no-store/不写Cookie；Admin JWT/JWKS、BFF与完整数据库关闭门禁不回归；shell语法、Remote/AutoDL投影测试、Markdown本地引用、`git diff --check`通过。正常数据库、服务、真实Google/Device/模型不在本轮启动或修改；其验收仍等待独立正常库切换授权。
+
+### 阶段44实现与验证回执
+
+FastAPI已删除无调用者的Starlette `SessionMiddleware`、本地Session/JWT fallback和旧Cookie策略，并在导入业务模块前移除Admin-owned旧认证键及Next-only BFF cookie key；Story Workspace workflow helper只接受独立`INK_WORKFLOW_TOKEN_SECRET`。`itsdangerous`从生产manifest、uv lock和hash requirements移除。local/Docker/Remote/AutoDL投影会拒绝、过滤或tombstone旧Dream Google/JWT/Session/OAuth secret；Remote文件同步在上传前拒绝SQLite/WAL/SHM。Google Cloud旧SQLite/GCS同步入口除help外全部fail closed，不再执行数据库、GCS或Cloud Run动作。
+
+Cloud Run投影进一步按运行职责拆分：backend与frontend使用独立service account，Secret Manager按单个secret授权；注册Dream service secret按实际调用方绑定，BFF cookie secret只绑定Next。旧`.cloud-env`认证引用被过滤，无合法backend引用时发布显式`--clear-secrets`；Next缺Admin origin/issuer/resource/service client、service secret或BFF cookie secret时在镜像构建前拒绝。`setup-env`只从`frontend/.env.local`读取BFF secret作为masked交互默认，不把它复制到backend或明文配置；旧project-wide Secret Accessor在逐secret授权完成后移除。Cloud资源未在本阶段创建或修改，以上通过synthetic dry-run验证。
+
+- Dream全量backend：`PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests`，**exit0，3527 passed / 24 skipped / 615 subtests passed，169.63s**；skip与warning均为既有provider条件、SDK提示和FastAPI lifespan deprecation，无失败。
+- 最终认证/数据库关闭焦点：三文件pytest **exit0，42 passed / 4.36s**；FastAPI synthetic legacy-env import、`uv lock --check`、requirements export内容一致性、生产auth/SQLite source scan全部exit0。
+- 部署投影：全部changed shell `bash -n`、AutoDL topology、Remote env projection、Google Cloud synthetic dry-run、retired sync help/refusal均exit0；实际Google Cloud、正常服务和正常数据库未访问。
+- 前端未改业务源码，但对最终工作树执行`corepack pnpm lint && corepack pnpm build`，**exit0**；lint保留17个既有Hook warning、0 error，Next 16.1.6 production build与TypeScript通过。
+- 文档与工作树：Dream 17份changed Markdown、123个本地目标0缺失；Admin 2份changed Markdown、13个本地目标0缺失；两仓`git diff --check`均exit0。正常数据库仍为54/63，migration、role ACL、配置启用、服务重启及真实Google/Device/模型/业务旅程均未执行。

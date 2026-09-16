@@ -3,6 +3,7 @@
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
+# [Sync] 2026-09-16: isolate FastAPI from retired auth secrets and the Next-only BFF cookie key.
 # [Sync] 2026-09-16: seed builtin Claude Plugins through Registry183-184 without Dream database access.
 # [Sync] 2026-09-16: bind the Registry121 claim-turn owner before confirmation reconciliation.
 # [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
@@ -13,9 +14,8 @@
 # [Sync] 2026-06-12: make CORS origin/credential policy environment-driven for cross-origin deployments.
 # [Sync] 2026-06-14: expose robots.txt, sitemap.xml, and llms.txt from shared SEO content generators.
 # [Sync] 2026-06-14: separate frontend public app URL from backend public API origin for SEO files.
-# [Sync] 2026-06-23: register Google OAuth and Device Flow routers, initialize
-#                    auth tables at startup, and add SessionMiddleware for
-#                    Authlib OAuth state.
+# [Historical Sync] 2026-06-23: registered the retired Dream Google/Device
+#                    authority and its local SessionMiddleware.
 # [Sync] 2026-07-04: register the Notion resource connector router so connector
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
@@ -61,6 +61,25 @@ from dotenv import load_dotenv
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(_BACKEND_ENV_FILE, override=False)
 
+_AUTH_ENV_KEYS_NOT_OWNED_BY_FASTAPI = (
+    "GOOGLE_CLIENT_SECRET",
+    "JWT_SECRET",
+    "JWT_SECRET_KEY",
+    "SESSION_SECRET_KEY",
+    "OAUTH_TOKEN_ENCRYPTION_KEY",
+    "AUTH_TOKEN_ENCRYPTION_KEY",
+    "COOKIE_SECURE",
+    "COOKIE_SAMESITE",
+    "INK_DREAM_BFF_COOKIE_SECRET",
+)
+
+
+def _isolate_fastapi_auth_environment() -> None:
+    """Keep Admin-owned and Next-only auth secrets out of FastAPI and its children."""
+
+    for key in _AUTH_ENV_KEYS_NOT_OWNED_BY_FASTAPI:
+        os.environ.pop(key, None)
+
 
 def _drop_unsupported_agent_env() -> None:
     """Remove stale Agent env aliases that are outside this project's contract."""
@@ -97,6 +116,7 @@ def _drop_unsupported_agent_env() -> None:
             os.environ.pop(key, None)
 
 
+_isolate_fastapi_auth_environment()
 _drop_unsupported_agent_env()
 
 os.environ.setdefault("TZ", "UTC")
@@ -112,7 +132,6 @@ from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from starlette.middleware.sessions import SessionMiddleware
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from typing import Any
 
@@ -144,16 +163,6 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
 )
 CORS_ALLOW_ORIGINS = _split_csv_env("INK_CORS_ALLOW_ORIGINS", DEFAULT_CORS_ALLOW_ORIGINS)
 CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
-SESSION_SECRET_KEY = (
-    os.environ.get("SESSION_SECRET_KEY")
-    or os.environ.get("JWT_SECRET")
-    or os.environ.get("JWT_SECRET_KEY")
-    or "dev-session-secret-change-in-production"
-)
-COOKIE_SECURE = _bool_env("COOKIE_SECURE", False)
-COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
-if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
-    COOKIE_SAMESITE = "lax"
 
 
 # ========== FastAPI Application ==========
@@ -180,13 +189,6 @@ async def startup_admin_request_auth():
 
 
 print(f"🧾 Backend version: {BACKEND_VERSION}")
-
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET_KEY,
-    same_site=COOKIE_SAMESITE,
-    https_only=COOKIE_SECURE,
-)
 
 # Add CORS middleware
 app.add_middleware(
@@ -571,9 +573,7 @@ if __name__ == "__main__":
     print("\n📚 API Endpoints:")
     print("    GET  /api/health         - Health check")
     print("  Auth & User:")
-    print("    POST /api/register        - Register new user")
-    print("    POST /api/login           - Login")
-    print("    GET  /api/me              - Get current user")
+    print("    GET  /api/me              - Get Admin-authenticated current user")
     print("  Data Storage:")
     print("    POST /api/sessions        - Save session")
     print("    GET  /api/sessions        - List sessions")

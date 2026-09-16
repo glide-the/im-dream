@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: FastAPI retires SessionMiddleware and scrubs legacy Dream auth/session secrets; Next BFF remains the only Dream browser-session owner. -->
 <!-- [Sync] 2026-09-16: Agent-type clear/Runtime plan/prepare use current Admin OAuth and Registry127-129. -->
 <!-- [Sync] 2026-09-16: confirmation Runtime uses Registry121 claim-bound Admin persistence authority. -->
 <!-- [Sync] 2026-09-15: localStorage import and first-login completion use Admin Registry101 with no Dream DB fallback. -->
@@ -29,7 +30,7 @@
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
 
 
-五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../design/deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../design/deck-mutations-current.md)为准；相关读写、default与安装metadata均已使用发布的Admin operation，正常环境切换与真实业务验收仍待执行。
 
 # Dream 接入 Admin 认证
 
@@ -44,6 +45,8 @@ baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/o
 ## 目标与边界
 
 Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS与账户映射。Dream Next 是同源 BFF；FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token或维护另一套 session/refresh/device authority。Admin管理和Dream访问权限独立，同主体登录Dream不获得Admin管理。
+
+当前源码中FastAPI不安装`SessionMiddleware`，不读取或继承Dream旧`GOOGLE_CLIENT_SECRET`、通用`JWT_SECRET`、Session/OAuth加密secret及旧Cookie策略；进程入口在导入业务模块前移除这些遗留环境变量和Next-only `INK_DREAM_BFF_COOKIE_SECRET`。浏览器状态只由Next BFF用该key签发host-only HttpOnly handle。Admin的Google/Better Auth/OAuth secrets、Dream注册service credential、Gateway/Product服务令牌和独立Workflow token各自按用途配置，互不回退。Cloud Run使用独立backend/frontend service account及逐secret IAM；BFF cookie secret只绑定Next，缺少Next service credential或cookie secret时发布在构建前fail closed。
 
 Deck Plugin binding 的 current/history/options/validate/runtime-plan 使用当前 OAuth `dream:read`，save/clear/runtime-prepare 使用 `dream:write`。Dream 从已校验主体解析 default Workspace 后只提交业务定位字段和本地不可变 artifact 证据；Admin 仍重新派生 canonical actor 并检查 Deck/Workspace owner。Google token、Session token、任意用户 ID header、Runtime purpose grant 或 Admin RBAC 身份都不能替代该产品 OAuth access token。
 
@@ -109,15 +112,15 @@ Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实�
 
 `/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Browser由Next `/auth/start/callback/session/logout`执行既有PKCE/handle流程，密码、注册和Google功能在Admin唯一UI。
 
-Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway verifier的旧subject helper仍需purpose迁移。
+Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway与Editor purpose grant已经使用各自的显式服务用途，不恢复旧subject登录authority。
 
 `/api/import-local-data`与`/api/import-calendar-recovery`先在Dream按localStorage字段独立解析，转成闭合Session/Picture/Preferences/Report raw-JSON DTO，再以当前OAuth调用同一个`local-data.import`。某字段解析失败只排除对应类别；合法旧Report缺少`timestamp`时使用一次请求内相同UTC时间，已有安全整数毫秒转换为RFC3339，显式非法时间排除整个Report类别。Admin在单一UOW内完成owner检查、四类写入、receipt与audit，回复计数是公开结果；未知提交只读原request ID回执。`/api/mark-first-login-completed`独立调用幂等`first-login.complete`，公开回复仍为`{success:true}`。三入口无Dream数据库fallback，Admin 401/403/capability/transport/DTO失败保持失败，正文、图片、Token与原异常不进入日志。
 
-公开Chat以当前OAuth读取Admin唯一Workflow上下文，在message/SSE前拒绝权限、绑定、capability或DTO失败；immutable snapshot只带已认证actor/thread和原上下文，不含credential，不向Browser/SDK投影。Service包括普通null均复用该snapshot。confirmation dispatcher 已通过 Registry121 从当前 durable claim 派生 typed 服务身份；launch 等其余后台路径仍须逐项迁移，不能据此声明全部后台 long-turn 授权已完成。
+公开Chat以当前OAuth读取Admin唯一Workflow上下文，在message/SSE前拒绝权限、绑定、capability或DTO失败；immutable snapshot只带已认证actor/thread和原上下文，不含credential，不向Browser/SDK投影。Service包括普通null均复用该snapshot。confirmation dispatcher通过Registry121从当前durable claim派生typed服务身份；launch、后台turn和持久化owner均使用已注册的限定委托，源码关闭门禁证明不存在旧登录authority或数据库fallback。正常服务切换和真实long-turn验收仍单独记录。
 
 公开Agent的Thread resume读取、SDK init/final/repair Session回写和assistant完整/部分消息复用该exact Thread/Run server-persistence grant。confirmation dispatcher 也把 Registry121 返回的 claim-bound grant 组合成同一 `AdminTurnPersistence`，并在 Runtime 前注入 Workflow/Deck snapshots。`AdminTurnPersistence`校验reply Thread/canonical actor，未知user/session/assistant写共用原operation/input/UUID恢复；最近一次确认Session才可复用，A→B→A必须重新写。SDK init失败继续原日志处理，已经运行的turn/cancel保持原语义；其他尚未迁移的内部路径不属于此owner，不能据此宣称全域未知写屏障。
 
-公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。成功assistant与cancel/error partial在同一owner内调用既有Chat消息operation，先检查四项exact schema，再提交原parts/metadata/history字段。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。confirmation dispatcher 通过 Registry121 使用相同 owner；首次或Settings prompt重建时，同一owner以精确授权调用Admin `session.list`取得近期Session投影。401/403/503、能力缺失、超时或坏DTO在Workspace/Runtime/SSE前传播，成功空列表才显示empty block。凭据不进入Browser、CLI或Editor；未迁移后台路径、Reflections其他上下文和其它数据库领域继续逐项迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
+公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。成功assistant与cancel/error partial在同一owner内调用既有Chat消息operation，先检查四项exact schema，再提交原parts/metadata/history字段。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。confirmation dispatcher通过Registry121使用相同owner；首次或Settings prompt重建时，同一owner以精确授权调用Admin `session.list`取得近期Session投影。401/403/503、能力缺失、超时或坏DTO在Workspace/Runtime/SSE前传播，成功空列表才显示empty block。凭据不进入Browser、CLI或Editor；Reflections、后台输出和其它数据库领域已逐项绑定Admin operation，Gateway/Editor继续使用独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
 
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。
 
@@ -133,15 +136,15 @@ GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dre
 
 GET /api/story-workspace/workflow-preflights/{preflight_id} 独立消费 workflow-preflight.read/current OAuth/dream:read 与 identity/unified exact schemas/hash，响应匹配 canonical actor 和 ID，复用原 17 字段状态/微秒与 datetime JSON。移除该读取无关 default Workspace 初始化；原坏 ID/owner/missing 404 保留，其他安全错误带原 UUID 无重试。POST 使用 OAuth/dream:write、三项 exact schemas 与 workflow-preflight.execute，input_json沿原 canonical 参数编码，reply actor/Deck/revision匹配，保留202/17字段。独立服务器 receipt reader支持原 absent/in_progress/committed，不自动resume或重发；通用两态receipt保持。详见[现行消费设计](../design/workflow-preflight-read-current.md)；POST default Workspace已由注册76的OAuth-write ensure承担，隐藏 source 持久化仍为后续入口。
 
-Run read/create/retry使用当前OAuth read/write、identity/unified两项exact schemas与已发布hash，原200/201和完整28字段/lifecycle/微秒JSON保持。Reply匹配actor/Workspace，read ID、write key/retry_of及Create source；相同key可保留原同语义PF ID。未知提交保留原UUID/unknown，显式generic两态receipt，不重发；原业务errors仅按实际code/status匹配投影。三个入口的default依赖已使用注册76的OAuth-write ensure；服务器尚无workspace_id的Run GET也要求write，read-only403且停止。其它生命周期/内部default持久化仍待迁移。详见[现行Run消费](../design/workflow-run-admin-consumer-current.md)。
+Run read/create/retry使用当前OAuth read/write、identity/unified两项exact schemas与已发布hash，原200/201和完整28字段/lifecycle/微秒JSON保持。Reply匹配actor/Workspace，read ID、write key/retry_of及Create source；相同key可保留原同语义PF ID。未知提交保留原UUID/unknown，显式generic两态receipt，不重发；原业务errors仅按实际code/status匹配投影。三个入口的default依赖已使用注册76的OAuth-write ensure；服务器尚无workspace_id的Run GET也要求write，read-only403且停止。其余生命周期与内部default持久化已由对应Admin operation接管。详见[现行Run消费](../design/workflow-run-admin-consumer-current.md)。
 
 生产 launch endpoint 把同一个服务端 `AdminRequestActor` 与 `AdminDataClient` 传给 source、Preflight、Run、dispatch 和 failure 适配器。Registry133 `dream-launch-replay.lookup` 在 current actor 的 owned Workspace/Deck 范围内恢复原 Run/Preflight/source identity；无 replay 才解析当前模型并执行 Registry130-132 Runtime 准备。source/Preflight/Run 写入、claim/finish、Run fail 与 failure envelope 都使用严格 Pydantic DTO，对应 Admin Zod DTO → Service → typed Drizzle Repository；未知写只读取原 request receipt，不重发，也不回退 Dream PostgreSQL。Voice system prompt 通过 `deck.detail` 读取，Agent Runtime、EventBus、SSE 与共享文件仍在 Dream。详见[launch 现行设计](../design/dream-launch-admin-metadata-current.md)。
 
-Workspace content/download 的 current OAuth 身份继续共用 get_current_user；Thread ownership 改为 chat-thread.get 与原 strict DTO/four exact schema/hash，reply ID/actor 匹配后才执行原 Mode/path/existing filesystem。metadata 错配/不可用固定503/null404，无自动重试或PG fallback；原 ZIP/symlink/no-create/header保持。SystemConfig读取与其他文件管理metadata仍pending，技术测试不代表普通共享文件/真实Bash验收。
+Workspace content/download 的 current OAuth 身份继续共用 get_current_user；Thread ownership 改为 chat-thread.get 与原 strict DTO/four exact schema/hash，reply ID/actor 匹配后才执行原 Mode/path/existing filesystem。metadata 错配/不可用固定503/null404，无自动重试或PG fallback；原 ZIP/symlink/no-create/header保持。SystemConfig与其它文件metadata通过Admin DTO读取；普通共享文件和真实Bash仍需在正常服务切换后的业务验收中确认。
 
 公开Run cancel复用OAuth-write/default ensure、原reason编码和两项exact schemas，调用workflow-run.cancel并返回绑定actor/Workspace/Run/cancelled的原28字段模型/200。Unknown使用原UUID/显式generic两态receipt/no resend；原业务error映射/scoped安全422与微秒保持。Agent cancel和其它生命周期生产入口不改，见[现行Run规则](../design/workflow-run-admin-consumer-current.md#公开-run-cancel)。
 
-三个公开默认resolver已共用routers.deps.resolve_admin_default_workspace，服务器workspace_id非空复用，否则OAuth-write/empty ensure/two exact schemas/原text ID/default-before-domain，unknown原UUID且不自动重发。Deck Plugin已有服务器role非空保持；缺role时复用AdminRequestAuth.current_profile，OAuth dream:read/identity v1/原profile hash及canonical ID匹配后取raw role，unavailable/timeout/错配不使用user fallback。原permission/scope/DTO判断不变，只有write且需profile的POST按已发布readscope403。三resolver均无default/role SQL；其它binding/control-plane provider及internal/background输出DB另行迁移。详见[共享默认规则](../design/workflow-preflight-read-current.md#三个公开-current-user-resolver)。
+三个公开默认resolver已共用routers.deps.resolve_admin_default_workspace，服务器workspace_id非空复用，否则OAuth-write/empty ensure/two exact schemas/原text ID/default-before-domain，unknown原UUID且不自动重发。Deck Plugin已有服务器role非空保持；缺role时复用AdminRequestAuth.current_profile，OAuth dream:read/identity v1/原profile hash及canonical ID匹配后取raw role，unavailable/timeout/错配不使用user fallback。原permission/scope/DTO判断不变，只有write且需profile的POST按已发布readscope403。三resolver、binding/control-plane provider和internal/background输出均无Dream SQL或数据库fallback。详见[共享默认规则](../design/workflow-preflight-read-current.md#三个公开-current-user-resolver)。
 ### Launch 失败持久化
 
 Request owner 注册 `workflow-run.fail` 与 `dream-launch-failure.envelope` 并由生产 `DreamLaunchFailureRecorder` 消费。Run fail 只检查 current actor/Workspace/Run/failed 完整模型，保留同 failed 重放的历史详情；envelope 匹配服务器 source IDs 与原始 error，不接受 caller metadata/codec。

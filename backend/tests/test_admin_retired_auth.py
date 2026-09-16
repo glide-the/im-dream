@@ -1,7 +1,11 @@
 # [Input] Actual retired FastAPI paths with synthetic sensitive bodies and explicit authority config.
 # [Output] 410 endpoint migration, no signing/DB/HTTP/cookie action and safe invalid-config failure.
 # [Pos] Provider-free public issuer-retirement contracts; actual Admin OAuth remains separately owned.
+# [Sync] 2026-09-16: fence the FastAPI application and deploy projections from obsolete Dream session-cookie authority.
 # [Sync] 2026-09-14: test legacy paths through production routers without forwarding credentials.
+
+import re
+from pathlib import Path
 
 import httpx
 import pytest
@@ -74,3 +78,83 @@ def test_migration_owner_reads_only_public_authority_configuration():
             assert key in CONFIG
             return super().get(key, default)
     assert retired_authentication(PublicConfig(CONFIG)).status_code == 410
+
+
+def test_fastapi_and_current_deployments_have_no_local_session_cookie_authority():
+    root = Path(__file__).resolve().parents[2]
+    retired_secrets = (
+        "GOOGLE_CLIENT_SECRET",
+        "JWT_SECRET",
+        "JWT_SECRET_KEY",
+        "SESSION_SECRET_KEY",
+        "OAUTH_TOKEN_ENCRYPTION_KEY",
+        "AUTH_TOKEN_ENCRYPTION_KEY",
+    )
+    retired_cookie_policy = ("COOKIE_SECURE", "COOKIE_SAMESITE")
+    next_only = ("INK_DREAM_BFF_COOKIE_SECRET",)
+
+    server = (root / "backend/server.py").read_text(encoding="utf-8")
+    assert "from starlette.middleware.sessions import SessionMiddleware" not in server
+    assert re.search(r"app\.add_middleware\(\s*SessionMiddleware", server) is None
+    for name in (*retired_secrets, *retired_cookie_policy, *next_only):
+        assert f'"{name}"' in server
+        assert f'os.environ.get("{name}")' not in server
+    assert "os.environ.pop(key, None)" in server
+
+    workflow_security = (
+        root / "backend/services/story_workspace/workflow_security.py"
+    ).read_text(encoding="utf-8")
+    assert 'os.getenv("JWT_SECRET")' not in workflow_security
+
+    for path in (
+        root / "docker-compose.yml",
+        root / "deploy/remote-ssh/docker-compose.yml",
+    ):
+        text = path.read_text(encoding="utf-8")
+        for name in (*retired_secrets, *retired_cookie_policy, *next_only):
+            assert re.search(rf"^\s+{name}: \"\"$", text, re.MULTILINE), path
+
+    setup_env = (root / "deploy/setup-env.sh").read_text(encoding="utf-8")
+    for name in retired_secrets:
+        assert not re.search(rf"^{name}\s+ink-", setup_env, re.MULTILINE)
+    assert re.search(
+        r"^INK_ADMIN_DREAM_SERVICE_SECRET\s+\$\{ADMIN_SERVICE_SECRET_NAME\}$",
+        setup_env,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^INK_DREAM_BFF_COOKIE_SECRET\s+\$\{BFF_COOKIE_SECRET_NAME\}$",
+        setup_env,
+        re.MULTILINE,
+    )
+    assert "CLOUD_FRONTEND_SECRET_REFS=${FRONTEND_SECRET_REFS}" in setup_env
+    assert "gcloud secrets add-iam-policy-binding" in setup_env
+    assert "gcloud projects add-iam-policy-binding" not in setup_env
+
+    for path in (root / "deploy/google-cloud/deploy.sh",):
+        text = path.read_text(encoding="utf-8")
+        assert "BACKEND_COOKIE_SECURE" not in text
+        assert "BACKEND_COOKIE_SAMESITE" not in text
+        assert "sanitize_secret_refs" in text
+        assert "validate_frontend_secret_refs" in text
+        assert "--clear-secrets" in text
+        assert '--set-secrets="${frontend_secret_refs}"' in text
+        assert '--service-account="${FRONTEND_SA_EMAIL}"' in text
+        for name in (*retired_secrets, *next_only):
+            assert name in text
+
+    retired_cloud_sync = (
+        root / "deploy/google-cloud/sync-data.sh"
+    ).read_text(encoding="utf-8")
+    assert "retired Dream SQLite command refused" in retired_cloud_sync
+    assert "gsutil" not in retired_cloud_sync
+    assert "gcloud run" not in retired_cloud_sync
+    assert "sqlite3" not in retired_cloud_sync
+    assert "ink-and-memory.db" not in retired_cloud_sync
+
+    assert "INK_DREAM_BFF_COOKIE_SECRET" in (
+        root / "deploy/autodl-ssh/prepare-env.sh"
+    ).read_text(encoding="utf-8")
+    assert "DREAM_BFF_COOKIE_SECRET" in (
+        root / "deploy/remote-ssh/prepare-env.sh"
+    ).read_text(encoding="utf-8")

@@ -591,7 +591,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx", extra = ["socks"] },
     { name = "ink-claude-dream-agent-sdk" },
-    { name = "itsdangerous" },
     { name = "json-repair" },
     { name = "mcp" },
     { name = "pydantic" },
@@ -622,7 +621,6 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
     { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.145" },
-    { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
     { name = "pydantic", specifier = ">=2.5,<3" },
@@ -654,15 +652,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/88/0b/4b8d9a2a77027b014463ead0c427cd1418210598afe9137fbc64796f2f94/ink_claude_dream_agent_sdk-0.2.145.tar.gz", hash = "sha256:09251798ca9648678ad85c1c3d90248f6e05eeed78a4a3e82c6fa8ea62b65eb8", size = 373283, upload-time = "2026-09-11T14:41:06.039Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/05/083bec154a60c1c5493310c238986fd378ac7c9adb1f41bbb05206384e7e/ink_claude_dream_agent_sdk-0.2.145-py3-none-any.whl", hash = "sha256:9e16643718e4c2eb62ba2bef43a79b83a683f0291e083a61ccb027e47516a34e", size = 151706, upload-time = "2026-09-11T14:41:04.306Z" },
-]
-
-[[package]]
-name = "itsdangerous"
-version = "2.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9c/cb/8ac0172223afbccb63986cc25049b154ecfb5e85932587206f42317be31d/itsdangerous-2.2.0.tar.gz", hash = "sha256:e0050c0b7da1eea53ffaf149c0cfbb5c6e2e2b69c4bef22c81fa6eb73e5f6173", size = 54410, upload-time = "2024-04-16T21:28:15.614Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/96/92447566d16df59b2a776c0fb82dbc4d9e07cd95062562af01e408583fc4/itsdangerous-2.2.0-py3-none-any.whl", hash = "sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef", size = 16234, upload-time = "2024-04-16T21:28:14.499Z" },
 ]
 
 [[package]]

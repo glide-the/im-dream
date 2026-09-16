@@ -6,6 +6,7 @@
 # [Sync] 2026-08-07: expose the frontend dev server on all network interfaces by default.
 # [Sync] 2026-09-16: require explicit Next BFF config and reject legacy Dream database credentials.
 # [Sync] 2026-09-16: remove Admin env-file/DSN loading; Dream uses Admin auth/data APIs.
+# [Sync] 2026-09-16: reject retired Dream auth/session secrets before production-path startup.
 # [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 # [Sync] 2026-09-05: select the Next compatibility shell by default with an explicit Vite rollback runtime.
 # [Sync] 2026-09-05: remove source-built Vite rollback; only an explicitly named image may be selected.
@@ -152,6 +153,10 @@ check_prereqs() {
   require_file "${FRONTEND_DIR}/.env.local" || { warn "Missing frontend/.env.local. Copy frontend/.env.example and configure the Admin BFF client."; failed=1; }
   if [[ -f "${BACKEND_DIR}/.env" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${BACKEND_DIR}/.env"; then
     warn "backend/.env still contains a Dream database credential; remove it before local production-path startup."
+    failed=1
+  fi
+  if [[ -f "${BACKEND_DIR}/.env" ]] && grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE|INK_DREAM_BFF_COOKIE_SECRET)=[^[:space:]]+' "${BACKEND_DIR}/.env"; then
+    warn "backend/.env contains authentication authority not owned by FastAPI; move Admin secrets to Admin and the BFF cookie key to frontend/.env.local."
     failed=1
   fi
   if [[ -f "${FRONTEND_DIR}/.env.local" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${FRONTEND_DIR}/.env.local"; then

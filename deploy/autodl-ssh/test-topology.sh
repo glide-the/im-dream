@@ -8,6 +8,7 @@
 # [Sync] 2026-09-06: require the Next.js/pnpm standalone release, Node MCP
 #                    Apps projection, and removal of Vite/npm/dist assumptions.
 # [Sync] 2026-09-16: assert exact Admin issuer/resource/BFF projection and no PostgreSQL credential.
+# [Sync] 2026-09-16: prove retired Dream auth/session secrets never enter the projected runtime.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +44,13 @@ fi
 
 cat >"${SOURCE_ENV}" <<'EOF'
 SESSION_SECRET_KEY=test-session-secret
+GOOGLE_CLIENT_SECRET=test-google-secret
+JWT_SECRET=test-jwt-secret
+JWT_SECRET_KEY=test-jwt-secret-key
+OAUTH_TOKEN_ENCRYPTION_KEY=test-oauth-encryption-key
+AUTH_TOKEN_ENCRYPTION_KEY=test-auth-encryption-key
+COOKIE_SECURE=true
+COOKIE_SAMESITE=none
 INK_GATEWAY_SERVICE_KEY=test-gateway-key
 INK_ADMIN_PRODUCT_JWT_SECRET=test-product-secret
 AGENT_CWD=/tmp/stale
@@ -99,6 +107,10 @@ grep -Fx "INK_MCP_APPS_SANDBOX_URL=https://sandbox.example.test/mcp-apps-sandbox
 grep -Fx "INK_MCP_APPS_PARENT_ORIGINS=https://dream.example.test" "${OUTPUT_ENV}"
 if grep -Eq '^(DATABASE_URL|INK_LOAD_DATABASE_URL_FROM_ENV_FILE|INK_DATABASE_ENV_FILE)=' "${OUTPUT_ENV}"; then
   printf 'Dream runtime retained a PostgreSQL configuration key\n' >&2
+  exit 1
+fi
+if grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE)=' "${OUTPUT_ENV}"; then
+  printf 'Dream runtime retained retired authentication authority\n' >&2
   exit 1
 fi
 if AUTODL_DREAM_SOURCE_ENV_FILE="${SOURCE_ENV}" AUTODL_MCP_APPS_ENV_FILE="${MCP_APPS_ENV}" \

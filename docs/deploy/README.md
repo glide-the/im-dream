@@ -14,6 +14,7 @@
 [Sync] 2026-09-06: migrate AutoDL to the sole Next.js 16 + pnpm workspace and Node MCP Apps runtime; Cloud SQLite and ignored VITE build-arg gaps remain elsewhere.
 [Sync] 2026-09-12: add the explicit NATAPP edge-relay switch, verification, and rollback contract without changing application or data ownership.
 [Sync] 2026-09-16: remove Dream PostgreSQL credentials from local, AutoDL and Alibaba deployment contracts.
+[Sync] 2026-09-16: move Google/Session/JWT secret ownership to Admin, retire Google Cloud SQLite sync, and retain only the server-only Next BFF handle secret in Dream.
 -->
 
 ## 定位
@@ -28,14 +29,14 @@
 | Docker 发布 | [`../../deploy/docker/deploy.sh`](../../deploy/docker/deploy.sh) | 包装根目录 Compose 构建、启动、验证和清理；backend 出站默认通过 Mihomo TUN |
 | Remote SSH 发布（含阿里云 ECS） | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh) | Dream-only Compose；overlay只通过Admin HTTPS origin访问Gateway/Product API，不连接PostgreSQL network，并从mode-0600 topology配置backend block-device read budget |
 | NATAPP 边缘转发 | [`../../deploy/remote-ssh/switch-edge-relay.sh`](../../deploy/remote-ssh/switch-edge-relay.sh) | 仅更新现有 Dream/Admin nginx 公开入口，要求显式 relay origins，自动备份、测试、reload 与可验证回滚 |
-| Google Cloud 发布 | [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh) | 前端可构建 Next standalone，但 SQLite/GCS 数据合同未迁移；当前阻塞，不是可支持的 Dream 生产入口 |
+| Google Cloud 发布 | [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh) | 前端可构建Next standalone，旧SQLite/GCS同步已fail closed；仍需修正公开元数据投影并完成整体验收，当前不是已支持的Dream生产入口 |
 | AutoDL 直宿主 | [`../../deploy/autodl-ssh/deploy.sh`](../../deploy/autodl-ssh/deploy.sh) | frozen pnpm构建standalone Next.js，运行Node MCP Apps与FastAPI；Dream env不含PostgreSQL配置 |
 
 ## 现有文档
 
 | 文档 | 作用 | 当前状态 |
 |------|------|----------|
-| [`overview.md`](overview.md) | Cloud Run 历史操作文档 | 前端镜像已走 Next standalone，但 Cloud 数据路径仍依赖旧 SQLite/GCS 合同，当前不是可支持的 Dream 生产入口 |
+| [`overview.md`](overview.md) | Cloud Run 历史操作文档 | 前端镜像已走Next standalone，旧SQLite/GCS同步已退役；剩余配置漂移与发布验收尚未关闭 |
 | [`data-sync.md`](data-sync.md) | 历史 SQLite/GCS 回执说明 | 仅用于识别旧脚本行为；共享业务数据由 Admin PostgreSQL/Drizzle 管理，不得执行该 SQLite 同步作为当前发布步骤 |
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径；旧 SQLite 数据维护命令不属于当前业务数据合同 |
 | [`natapp-edge-relay.md`](natapp-edge-relay.md) | NATAPP 边缘转发文档 | 说明现有公开域名到显式 Dream/Admin relay origins 的原子切换、验证、上游降级识别与回滚 |
@@ -74,13 +75,13 @@ flowchart TD
   B -->|"单机容器或本地验收"| D["Docker 发布：docker compose"]
   B -->|"已有 Docker 的远程服务器 / 阿里云 ECS"| R["Remote SSH 发布：阿里云先 Admin 数据平台，再 Dream 应用"]
   B -->|"AutoDL / SeetaCloud 直宿主"| U["AutoDL：Next.js 6006 + FastAPI 8765"]
-  B -->|"公网云服务"| E["Google Cloud：当前因 SQLite/GCS 数据合同未迁移而阻塞"]
+  B -->|"公网云服务"| E["Google Cloud：SQLite同步已退役，整体验收仍待执行"]
   C --> F["入口：deploy/local/deploy.sh；Dream配置来自backend/.env，数据经Admin API"]
   D --> G["入口：deploy/docker/deploy.sh；配置来源：docker-compose.yml、backend/.env、backend/data、deploy/clash/config.yaml"]
   R --> I["入口：deploy/remote-ssh/deploy.sh；配置来源：REMOTE_* 环境变量、backend/.env、deploy/clash/config.yaml、远端 backend/data"]
   R --> J["阿里云入口：两仓库 deploy/remote-ssh/deploy.sh；Admin 拥有 embedded PostgreSQL/migration，Dream 只拥有 frontend/backend"]
   U --> K["入口：deploy/autodl-ssh/deploy.sh；Admin 先发布，Dream 不执行 migration/DDL"]
-  E --> H["迁移目标：保留 Next standalone，移除旧数据同步并对齐 Admin-owned PostgreSQL 后再验收"]
+  E --> H["当前门禁：Admin DTO数据路径，修正公开元数据投影后再验收"]
 ```
 
 ## 通用四类发布方式对比
@@ -94,9 +95,9 @@ capability）单列在 [AutoDL 手册](autodl.md)，不混入下表的通用容�
 | 使用对象 | 开发者、调试者 | 本地验收、单机自托管维护者 | 有远程 Docker 服务器的维护者 | 线上 Cloud Run 发布维护者 |
 | 运行形态 | 两个本地进程 | 前后端两个容器 | 远端前后端两个容器 | Cloud Run 前后端两个服务 |
 | 配置来源 | `backend/.env`中的Admin API/auth与Dream Runtime配置 | `backend/.env`、`deploy/clash/config.yaml`、Compose env、`API_BASE_URL` | `REMOTE_*`环境变量、`backend/.env`、`deploy/clash/config.yaml` | shell export、`.storage-env`、`.cloud-env`、Secret Manager、`API_BASE_URL` |
-| 业务数据库 | Admin启动PostgreSQL并提供DTO API；Dream无DSN | Admin-owned PostgreSQL；Dream Compose无凭据或migration | Admin-owned PostgreSQL；Dream-only栈只调用Admin API | 旧GCS/SQLite合同未迁移，当前阻塞 |
-| 非数据库运行文件 | 由显式路径配置决定 | `./backend/data:/app/data` 仅承载配置允许的非数据库文件 | 远端 `${REMOTE_APP_DIR}/backend/data` 可承载非数据库文件；不得当作业务数据库同步 | 旧 GCS 文件挂载只作历史记录，不是当前数据发布合同 |
-| API 访问 | Next rewrite 同源 fallback，或 runtime-config 显式 API base | 浏览器直连 `http://127.0.0.1:8765`；`BACKEND_URL` 由容器入口投影为 `INK_BACKEND_INTERNAL_URL` 供 Next rewrite 使用 | 同一 Next rewrite fallback；可用 `REMOTE_API_BASE_URL` 改为跨域直连 | 浏览器跨域直连后端；Cloud Run 整体因数据合同漂移暂不是可支持生产路径 |
+| 业务数据库 | Admin启动PostgreSQL并提供DTO API；Dream无DSN | Admin-owned PostgreSQL；Dream Compose无凭据或migration | Admin-owned PostgreSQL；Dream-only栈只调用Admin API | Admin-owned PostgreSQL；Dream只调用Admin DTO API，SQLite入口fail closed |
+| 非数据库运行文件 | 由显式路径配置决定 | `./backend/data:/app/data` 仅承载配置允许的非数据库文件 | 远端 `${REMOTE_APP_DIR}/backend/data` 可承载非数据库文件；不得当作业务数据库同步 | 共享文件拓扑须独立验收；退役SQLite脚本不承担文件同步 |
+| API 访问 | Next rewrite 同源 fallback，或 runtime-config 显式 API base | 浏览器直连 `http://127.0.0.1:8765`；`BACKEND_URL` 由容器入口投影为 `INK_BACKEND_INTERNAL_URL` 供 Next rewrite 使用 | 同一 Next rewrite fallback；可用 `REMOTE_API_BASE_URL` 改为跨域直连 | 浏览器跨域直连后端；Cloud Run整体仍需配置修正与发布验收 |
 | Claude-agent Bash sandbox | 本机进程使用宿主运行时 | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | Cloud Run 不使用 Docker Compose runtime 权限模型 |
 | 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager；Docker 外层容器是主隔离边界 | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库；Docker 外层容器是主隔离边界 | 不依赖本地端口和本地数据卷 |
 
@@ -106,15 +107,17 @@ capability）单列在 [AutoDL 手册](autodl.md)，不混入下表的通用容�
 
 | 项 | 生产值 |
 |----|--------|
-| `WEBUI_URL` | `https://ink-frontend.suoxya.com` |
-| `API_BASE_URL` | `https://ink-backend.suoxya.com` |
-| `COOKIE_SECURE` | `true` |
-| `COOKIE_SAMESITE` | `none` |
+| `INK_DREAM_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` |
+| `INK_DREAM_BFF_REDIRECT_URI` | `https://ink-frontend.suoxya.com/auth/callback` |
+| `INK_ADMIN_DREAM_BASE_URL` | `https://ink-admin.suoxya.com` |
+| `INK_ADMIN_AUTH_ISSUER` | `https://ink-admin.suoxya.com/api/auth` |
+| `INK_DREAM_API_RESOURCE` | `https://ink-frontend.suoxya.com/api` |
+| `INK_DREAM_BFF_COOKIE_SECRET` | 独立的Dream Next服务器secret，不进入浏览器或FastAPI |
 | `INK_CORS_ALLOW_ORIGINS` | `https://ink-frontend.suoxya.com` |
 | `INK_CORS_ALLOW_CREDENTIALS` | `true` |
-| Google callback | `https://ink-backend.suoxya.com/oauth/google/callback` |
+| Google callback | `https://ink-admin.suoxya.com/api/auth/callback/google`，由Admin Better Auth处理 |
 
-Remote SSH 通过 `deploy/remote-ssh/docker-compose.yml` 的 environment 覆盖本地 `.env`。Google Cloud 脚本会写入这些值，但该事实只证明认证配置步骤存在；在 SQLite/GCS 数据合同迁移和完整发布重验前，不能据此声明 Cloud Run 生产可用。
+Remote SSH通过mode-0600拓扑文件把Admin issuer、Dream resource、注册service credential与BFF cookie secret分别投给FastAPI/Next；backend Compose把旧Dream Google/JWT/Session/OAuth secret和Next-only BFF key置空，frontend仍取得BFF key。AutoDL共用安全env文件时，FastAPI入口会在导入业务模块前移除BFF key。Google Cloud使用独立backend/frontend service account和逐secret IAM：服务凭据按调用方绑定，BFF cookie secret只绑定Next；旧FastAPI认证绑定会被清除。完整Cloud Run发布重验尚未执行。
 
 ## Docker TUN 出站
 
@@ -132,11 +135,11 @@ Docker 和 Remote SSH Compose 默认包含 `tun-proxy` 服务，使用
 - `deploy/autodl-ssh/**` 已迁移到根 Next.js/pnpm workspace：构建 standalone server、验证 Node MCP Apps routes，并用独立 supervisor 运行 Next/FastAPI；[AutoDL 文档](autodl.md) 是当前操作合同。
 - 根 Compose、Remote SSH Compose 和 Google Cloud 脚本会传入 `VITE_PUBLIC_SITE_URL`，但当前 `frontend/Dockerfile` 不声明也不消费该 build arg；根 Compose 还保留“nginx serving Vite”与 nginx fallback 注释。这些都是待修正的配置/注释漂移，不得当作 Next metadata 已注入的证据。
 - `deploy/docker/deploy.sh` 与 `deploy/remote-ssh/deploy.sh` 仍将 `frontend/nginx.conf.template` 列为 preflight 文件，但当前 Next 镜像不消费该模板；只能视为历史兼容检查。
-- `deploy/google-cloud/sync-data.sh` 仍实施 SQLite/GCS 上传与备份，与 Admin-owned PostgreSQL/Drizzle 合同冲突。在脚本迁移并用当前数据合同重验前，不得把 Google Cloud 数据同步或整体发布报告为当前 Dream 生产验收。
+- `deploy/google-cloud/sync-data.sh` 已退役：除 `--help` 外全部 fail closed，不再执行 SQLite/GCS 上传、备份或 Cloud Run 重启。共享文件维护使用独立文件系统拓扑；业务数据只经 Admin DTO API 与 PostgreSQL/Drizzle 路径处理。
 
-### Dream 回合同步发布后检查
+### 历史：Dream 回合同步发布后检查
 
-本修复没有 PostgreSQL migration、runtime DDL、环境变量或部署拓扑变更。发布 Dream frontend/backend 后，使用已有测试 Run 与授权账号执行一轮可写人物/场景的正常 Dream Turn，并按同一业务链确认：
+该段记录先前回合同步修复；当时没有PostgreSQL migration、runtime DDL、环境变量或部署拓扑变更。对应版本发布Dream frontend/backend后，使用已有测试Run与授权账号执行一轮可写人物/场景的正常Dream Turn，并按同一业务链确认：
 
 1. assistant 正文进入同一 Thread 历史；canonical `assets/characters` / `assets/scenes` 的变更由 after-turn Hook 发布到对应 Run-private artifact；
 2. authenticated `dream-files` 与 Story/Episode API 返回新 revision，Execution“故事资产”无需整页刷新即可出现人物/场景；

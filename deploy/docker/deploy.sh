@@ -6,6 +6,7 @@
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from verification URL.
 # [Sync] 2026-06-23: require Mihomo TUN config for the default backend proxy namespace.
 # [Sync] 2026-09-16: require private Next BFF config and reject non-empty Dream database credentials.
+# [Sync] 2026-09-16: reject retired Dream auth/session secrets before Docker startup.
 # [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 set -euo pipefail
 
@@ -110,6 +111,10 @@ check_prereqs() {
   require_file "${REPO_ROOT}/frontend/.env.local" || { warn "Missing frontend/.env.local. Copy frontend/.env.example and configure the Admin BFF client."; failed=1; }
   if [[ -f "${REPO_ROOT}/backend/.env" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${REPO_ROOT}/backend/.env"; then
     warn "backend/.env still contains a Dream database credential; remove it before Docker deployment."
+    failed=1
+  fi
+  if [[ -f "${REPO_ROOT}/backend/.env" ]] && grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE|INK_DREAM_BFF_COOKIE_SECRET)=[^[:space:]]+' "${REPO_ROOT}/backend/.env"; then
+    warn "backend/.env contains authentication authority not owned by FastAPI; move Admin secrets to Admin and the BFF cookie key to frontend/.env.local."
     failed=1
   fi
   if [[ -f "${REPO_ROOT}/frontend/.env.local" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${REPO_ROOT}/frontend/.env.local"; then
