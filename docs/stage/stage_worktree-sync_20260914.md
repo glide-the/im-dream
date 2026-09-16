@@ -1,7 +1,7 @@
 <!-- [Input] User-authorized synchronization of current Dream/Admin source checkout changes into the two active task worktrees. -->
 <!-- [Output] Reviewed synchronization scope, exact source commits, protected snapshots and verified merge results. -->
 <!-- [Pos] Technical execution plan; original source checkout changes remain intact. -->
-<!-- [Sync] 2026-09-15: append reviewed coordination-document deltas after Session Context evidence refresh. -->
+<!-- [Sync] 2026-09-16: append the final original-checkout comparison and named Admin task commit audit. -->
 
 # 本轮原仓库与任务 worktree 同步
 
@@ -44,3 +44,9 @@ Session Context 提交后的当前源码扫描和 Reflections 16-operation 评�
 `stage_admin-reflections-section-config-registration.md` 的源目录新验证结论已逐字节同步，SHA-256 `3c15fe82038ff68651f84a5ca4ed2b448465b7622b6005db1aec525b8e73116b`。目标 `stage_dream-agent-session-context.md` 和 `stage_dream-agent-session-tool-broker.md` 含更晚的实现与测试事实，已回写协调目录；`docs/exec/.folder.md` 保留目标认证清单的严格超集。Session broker 最终提交为 `999707909c7bfce3a1af250a55a90f2b8a483f89`；并发同步进入其初版提交的两段 Plugin troubleshooting 已从提交中拆出并恢复为未暂存内容。
 
 Session broker 提交后，`backend/tests/.folder.md` 以精确锚点加入两行 Plugin 测试和一段范围说明，同时完整保留 Session broker 测试索引，源/目标 SHA-256 均为 `8aee4087b8d2129424962f8b464534e15ad8f16a631f5a7799468ab3e5438f1c`。同步的两份 Plugin 测试实际执行为 exit 0、5 passed、1 skipped；9份合并 Markdown 的相对链接检查为 missing 0，所有同步文件 `git diff --check` exit 0。最终复查399个源目录 Git 可见改动，目标 missing 0；6个 byte mismatch 均因目标保留了已提交认证/Session 内容，其中5个由三方重算证明 `target_is_merged=true`，`docs/exec/.folder.md` 的源版本是目标版本删6行后的严格子集。
+
+## 2026-09-16 最终同步审计
+
+指定 Codex 任务 `01a0a183-883a-7062-b88b-ca441ebafa26` 的 Admin 结果 commit 为 `7a6e6c966561beeac7724fd77828a9f4ce3b26ec`。Admin 目标执行 `git merge-base --is-ancestor 7a6e6c9 HEAD` exit `0`；该 commit 已通过 merge commit `151774c87d3a62bd3572343a78dbfc45e284fae2` 进入工作分支，无需再次 cherry-pick。
+
+Dream 原目录最终仍有399个 Git 可见路径：383个与目标逐字节相同，0个缺失，16个不同。三方重算证明其中3个目标已完整吸收源改动；其余13个逐行审查只含 Runtime 0.1.9、Dream数据库配置、已退出生产图的测试import、旧相对链接和迁移中间态。目标内容是后续 Runtime 0.1.10、Admin-only数据库边界和最终技术回执。为避免回退已验证实现，本轮未再次复制这些旧版本。原目录保持未暂存状态，目标既有 `.pnpm-store/` 未读取或修改。详见[最终同步审计](../exec/admin-auth-data-verification/worktree-sync-final-audit.md)。
