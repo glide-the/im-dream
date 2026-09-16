@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: close the pre-business-change identity-domain design gate against current source and keep business mutations separate. -->
 <!-- [Sync] 2026-09-17: record the real model-reservation and Workflow-binding completion gates. -->
 <!-- [Sync] 2026-09-17: add the pre-business-change OAuth role and user-domain design audit stage. -->
 <!-- [Sync] 2026-09-16: audit final authentication ownership and remove obsolete Dream SessionMiddleware/deployment cookie authority. -->
@@ -1193,3 +1194,19 @@ Workflow验收不得修改用户已有Deck。先核对公开产品流程是否�
 只读正常库按公开Allowance事实定位到同一active Subscription：100,000 granted、75,006 reserved、16 consumed。其当前Plan Version只有一个旧`deepseek-v4-flash` Entitlement；最新Round 67已明确取消“Plan Entitlement是模型白名单”，Gateway允许任意`enabled`且Provider/Pricing/Subscription/Allowance/显式Permission满足的模型，并把缺Entitlement请求记录为`entitlementSource=allowance-only`。因此Gateway的9项included与Product context的空权益/空Product model catalog是两个产品视角，不是OAuth主体漂移。Product catalog继续表达当前Plan权益；设置与Runtime使用Gateway目录。本轮不修改业务代码。
 
 Workflow release详情公开读取200并包含受控source；Workspace installation列表和runtime-readiness对当前Dream用户均返回403 `WORKFLOW_PERMISSION_DENIED`，说明用户没有`plugin:read/plugin:admin`管理权限。普通用户无法通过正常入口安装该release，独立Admin operator也不能冒充Dream Workspace主体；本轮未提交install、enable、binding、Preflight或Run写请求。当前成功Workflow验收需由产品管理流程先为该Workspace或instance建立ready installation，再由Dream用户从公开options选择。
+
+## 阶段49：业务修改前的身份域设计门禁
+
+### Optimized Prompt
+
+作为跨项目认证架构评审人，在任何账户、角色、Token、Workflow installation、Deck、Run或账本写入前，复核Admin与Dream现行认证设计、ER图、OAuth角色、DTO/ORM边界和实际生产代码。Admin operator必须只属于`admin_users/admin_sessions/Admin RBAC`管理域；Dream user必须保留`identity.user → identity.subject_links → public.users`产品主体链，拥有自己的密码、状态、产品角色和实体关系。相同邮箱不得创建Admin/Dream业务关系、复制密码或互相授予权限。Better Auth/OAuth Provider是Dream的Authorization Server；Dream browser、device和server应用是OAuth client；Dream user是用户委托subject/resource owner，不得为每个用户注册`client_credentials` client。Dream server confidential client只为具名无用户后台操作取得service token；用户数据调用必须同时保留user bearer与server-only service bearer，并由Admin从user token的`sub`派生canonical user。
+
+逐项对照Admin独立登录/guard、legacy adoption、subject repository、service identity、Dream BFF/Python service-token transport和Deck Plugin权限入口。确认`identity.admin_subject_links`只保留迁移历史/冲突检测，不参加管理登录或RBAC；确认Dream请求不接受caller-selected user ID、SQL、表列或事务，持久化继续遵从Pydantic DTO → Zod DTO → Domain Service → typed Repository → Drizzle/UOW。扫描现行总览、认证设计、Device稿和验证矩阵中的旧说法；发现设计文档冲突先校正权威说明和索引，发现代码偏离才做最小业务修复。保持Runtime、SSE、EventBus、资源策略LKG、共享文件系统和`.claude-tmp`协议不变。
+
+验收要求：ER与流程图明确两套用户域、三类Dream OAuth client及两个Bearer；Admin登录不读取Dream subject/canonical user；Dream登录/Google/Device不创建Admin Session；service token不能取得用户实体或Admin RBAC；当前Dream用户缺`plugin:admin`时继续403，不能用Admin operator冒充。执行focused认证/边界测试、Markdown引用检查和`git diff --check`。设计门禁通过后，只处理仍存在的真实业务缺口；若实现已经一致，不为增加代码量改写认证业务。
+
+### 阶段49评审结果
+
+权威设计与当前实现一致。Admin `adminAuthService/adminSessionRepository`只读取`admin_users/admin_sessions/Admin RBAC`；Dream `subjectRepository`只处理`identity.subject_links → public.users/platform_users`。`identity.admin_subject_links`在生产源码中仅由legacy adoption repository锁定后用于检测旧实验冲突，不创建、不参与Admin登录或权限计算。Dream Next与Python服务端使用注册的confidential client执行`client_credentials`并缓存短期service token；用户operation把Dream user bearer放在`Authorization`，另用私有service bearer证明调用应用，输入DTO不携带actor/user ID。Browser/device仍是public client，Dream user仍是delegated subject。
+
+本轮冲突扫描只发现Admin根README仍把Better Auth写成笼统的唯一password/Session authority，已在Admin仓库校正为Dream协议认证与Admin operator独立认证两条边界。认证业务代码无需修改。Workflow 403继续表示当前Dream产品用户没有`plugin:read/plugin:admin`，不能用同邮箱Admin operator Session绕过；后续若执行产品角色或安装变更，必须保持在Dream业务域并走公开DTO、权限、幂等与审计流程。
