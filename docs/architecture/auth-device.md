@@ -1,6 +1,7 @@
 <!-- [Input] Admin OAuth Device Token contract and Dream navigation consumers. -->
 <!-- [Output] Device interaction, state/failure rules and acceptance gates. -->
 <!-- [Pos] Dream Device consumer; Admin owns device/refresh authority and persistence. -->
+<!-- [Sync] 2026-09-17: reconcile completed approve/deny/exchange/refresh validation and the settled Gateway canary. -->
 <!-- [Sync] 2026-09-16: record normal-service RFC 8628 pending/slow_down and input-boundary evidence separately from user approval. -->
 <!-- [Sync] 2026-09-14: record retired Dream Device paths and actual Admin standard endpoints; preserve history. -->
 
@@ -41,6 +42,8 @@ pending继续等待；slow_down按返回interval退避；deny终止；expire重�
 
 Dream旧`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token`返回明确410与server配置解析出的Admin标准端点；不创建/批准/消费短码、不签token或修改refresh状态。CLI直接使用Admin issuer的`/device/code`和`/oauth2/token`，verification URI为Admin `/auth/device`。Browser旧验证页通过Next `/auth/device`导航到Admin授权页，user_code只用于恢复短码上下文，不作为身份。缺合法Admin公开authority返回503；旧凭据不会被转发。
 
-正常本机服务已经由公开Admin入口验证注册device client/resource/scope、RFC 8628字段、`authorization_pending`、`slow_down`，以及`invalid_client`、`invalid_target`、外部`user_id`拒绝和`invalid_scope`；所有响应均`no-store`，code未进入回执。上述结果仍不证明真实Device approve/deny、OAuth token兑换、refresh/revoke已验收；这些步骤需要有效的Better Auth主体和可见授权页后继续。
+正常本机Admin/Dream服务已经由公开入口验证注册device client/resource/scope、RFC 8628六字段、`authorization_pending`、`slow_down`、approve、deny、过期、重复与并发决定、OAuth token兑换、refresh rotation/replay、refresh revoke、access expiry、`invalid_client`、`invalid_target`、外部`user_id`拒绝和`invalid_scope`；所有响应均`no-store`，code/token未进入回执。
+
+2026-09-17的真实Gateway canary使用现有Dream用户Session批准public device client，只申请`messages:create`和Dream resource。设备兑换得到无refresh的300秒用户access token，并与已轮换的Dream canonical-subject service key共同调用公开`/v1/messages`；请求`req_b912a4968bbc464fb66bf4b656a7aa6d`返回200，公开Product usage记录11 input/5 output、`completed/settled`、reserved85/consumed16/released69。该回执证明用户委托主体与服务client分离，且没有创建Admin管理Session。该access token调用revoke返回400并按最长300秒自然失效；此前独立refresh rotation/replay和refresh grant revoke回执仍有效，不能据此声称离线JWT可即时撤销。完整Thread/Run/continue/cancel/SSE仍属于正常业务旅程，小额canary不能替代。
 
 Next保留同名旧Device/token410薄路径；actual `/auth/device`仍用于导航到Admin验证页。旧path不会先触发generic API认证或转发body。

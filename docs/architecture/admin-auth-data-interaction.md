@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity. -->
 <!-- [Sync] 2026-09-16: require an actor/Thread/Run-bound Admin owner for every production Agent turn and remove Service DB fallbacks. -->
 <!-- [Sync] 2026-09-16: consume Registry133 and close production launch persistence through Admin DTO/ORM operations. -->
 <!-- [Sync] 2026-09-16: consume Registry130-132 launch Runtime operations and delete Dream provisioning SQL. -->
@@ -456,7 +457,7 @@ GET null row仍{}；rawconfig还原原voice_configs/state_config对象，firstlo
 
 list/prepare/replace经当前OAuth与exactidentity/unified，拒绝全部entitygrant管理。prepared闭集installation无path，selectedIDs exact/unique/ready后由Dream原staticmethod验证制品摘要与CLI SemVer；body不接受package/digest/compat/actor。Admin按source evidence锁与重检当前ready/package/version/digest/rawcompat，在单TX refs/semanticdraft/receipt/audit，no-op/reorder不推进。Dream只校验replyDeck/IDs与原enabled0/1/ISO投影，unknown保留原UUID/no retry。共同scoped validation复用原偏好wrapper，固定422不回显正文；global install/catalog/runtime/Voice仍在清单开放。完整规则见[现行refs稿](../design/deck/deck-claude-plugin-refs-current.md)。
 
-公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream pure projector保留empty text、解析合法JSON并把非法非空JSON映射为null，读取不heal或写库。无read retry或DB fallback。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
 
 ### 尚未发布的Run创建/重试与隐藏来源
 
