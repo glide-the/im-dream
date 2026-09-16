@@ -1,6 +1,7 @@
 <!-- [Sync] 2026-09-16: require an actor/Thread/Run-bound Admin owner for every production Agent turn and remove Service DB fallbacks. -->
 <!-- [Sync] 2026-09-16: consume Registry133 and close production launch persistence through Admin DTO/ORM operations. -->
 <!-- [Sync] 2026-09-16: consume Registry130-132 launch Runtime operations and delete Dream provisioning SQL. -->
+<!-- [Sync] 2026-09-16: state the final Admin-only database boundary and classify dated Registry progress notes as history. -->
 <!-- [Sync] 2026-09-16: consume Registry127-129 Agent-type operations with local artifact verification and no Dream database fallback. -->
 <!-- [Sync] 2026-09-16: consume Registry121 claim-turn and inject claim-bound AdminTurnPersistence into confirmation Runtime. -->
 <!-- [Sync] 2026-09-16: consume Registry120 Story confirmation DTOs and remove its production PostgreSQL state machine. -->
@@ -38,6 +39,12 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+## 现行实现边界（2026-09-16）
+
+Admin 是唯一认证中心和生产数据库访问服务。Dream 的生产启动、请求处理、后台 worker 与 Agent turn 不读取 PostgreSQL DSN，不创建 pool/UOW，也不执行 SQL、ORM、DDL 或 runtime schema fallback；所有持久化和权限过滤均通过严格 Pydantic DTO 调用 Admin 具名 operation，由 Admin 的 Zod DTO、domain Service、typed Repository 与 Drizzle ORM 完成。Dream 保留页面、业务编排、Runtime、EventBus、SSE、共享文件系统与 `.claude-tmp` 协议。
+
+本文中的 Registry 小节按实施日期保留阶段证据。早期小节出现的“仍需迁移”“pending”只描述当时的增量状态，不是现行数据库边界；当前关闭证据以[数据库入口清单](../exec/dream-admin-data-inventory.md)、[数据库权威](../design/database-schema-authority.md)和本节为准。正常本机 Google、Device OAuth、真实模型与完整业务验收仍受部署配置和正常数据库 capability 门禁约束；它们未执行不等于 Dream 可以恢复数据库直连。
 
 ## Dream Launch 数据与 Runtime（Registry130–133）
 
@@ -150,7 +157,7 @@ Story Workspace七个单项审核入口与一个批量入口现绑定Admin Regis
 
 Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。阶段40已把用户与Thread SystemConfig生产读取/写入改为三个Admin operation；其后fresh closure scanner数字记录在[清单](../exec/dream-admin-data-inventory.md)。源码候选不等于生产可达SQL证明，仍需结合[事务图](../exec/dream-admin-transaction-boundaries.json)与入口调用链复查。
 
-本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile、Chat CRUD/history/ownership/初始message预留以及SystemConfig；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接Chat、Reflections、launch、confirmation与Guidance生产turn，覆盖user/assistant消息、Thread/Session、workspace plugin、managed MCP scope、Runtime activation及Factory生命周期；Editor exact Session purpose已接公开Agent turn。旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
+本稿包含目标、评审、阶段历史与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已覆盖生产数据入口；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接Chat、Reflections、launch、confirmation与Guidance生产turn，覆盖user/assistant消息、Thread/Session、workspace plugin、managed MCP scope、Runtime activation及Factory生命周期；Editor exact Session purpose已接公开Agent turn。旧Dream issuer和生产数据库访问路径均已退役。正常本机真实业务验收仍未完成；源码扫描、provider-free与隔离数据库结果不能代替正常部署能力。
 
 ## 目标与边界
 

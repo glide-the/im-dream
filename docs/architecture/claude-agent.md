@@ -16,6 +16,7 @@
 [Sync] 2026-09-15: atomic user reservation uses a server-only purpose grant; Factory owns renewal and terminal/cancel cleanup.
 [Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
 [Sync] 2026-09-16: Story Workspace stdio reads the current WorkflowRun through the turn-owned Admin DTO broker and retains only filesystem writes.
+[Sync] 2026-09-16: all production Agent persistence now uses Admin DTO/ORM operations; the prior remaining-DB note is implementation history, while real account/model acceptance remains separate.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
 [Sync] 2026-09-14: resource policy/observer composition consumes strict Admin APIs; LKG and runtime semantics remain unchanged.
 [Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
