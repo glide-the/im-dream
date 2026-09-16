@@ -1,6 +1,7 @@
 // [Input] Real BFF boundary functions with explicit test-owned origin/secret/clock.
 // [Output] Deterministic cookie/PKCE/callback/return/origin/CSRF validation without services or browser.
 // [Pos] Provider-free Node contracts for Next BFF login security.
+// [Sync] 2026-09-16: cover exact public Host recovery from Next's normalized internal request URL.
 // [Sync] 2026-09-14: verify the production helper; no alternative OAuth/session implementation.
 
 import assert from 'node:assert/strict';
@@ -55,6 +56,20 @@ test('OAuth callback requires exact state/issuer and one code', () => {
   }
   assert.throws(() => bff.validateCallback(callback(params + '&code=duplicate'), 'https://admin.example/api/auth'), BffBoundaryError);
   assert.throws(() => bff.validateCallback(new Request('https://dream.example/wrong-callback?' + params, { headers: { cookie } }), 'https://admin.example/api/auth'), BffBoundaryError);
+});
+
+test('exact public Host preserves login and callback when Next normalizes the internal request URL', () => {
+  const bff = boundary(); const tx = bff.createTransaction('/story');
+  const cookie = cookieHeader(bff.transactionCookie(tx));
+  const params = new URLSearchParams({ code: 'private-code', state: tx.state, iss: 'https://admin.example/api/auth' });
+  const normalized = new Request('http://localhost:3000/auth/callback?' + params, {
+    headers: { cookie, host: 'dream.example' },
+  });
+  assert.deepEqual(bff.readTransaction(normalized), tx);
+  assert.deepEqual(bff.validateCallback(normalized, 'https://admin.example/api/auth'), tx);
+  assert.throws(() => bff.readTransaction(new Request(normalized.url, {
+    headers: { cookie, host: 'attacker.example' },
+  })), BffBoundaryError);
 });
 
 test('return locations preserve ordinary pages and reject open redirect and nested encoding', () => {

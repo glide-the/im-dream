@@ -1,6 +1,7 @@
 <!-- [Input] Admin OAuth Device Token contract and Dream navigation consumers. -->
 <!-- [Output] Device interaction, state/failure rules and acceptance gates. -->
 <!-- [Pos] Dream Device consumer; Admin owns device/refresh authority and persistence. -->
+<!-- [Sync] 2026-09-16: record normal-service RFC 8628 pending/slow_down and input-boundary evidence separately from user approval. -->
 <!-- [Sync] 2026-09-14: record retired Dream Device paths and actual Admin standard endpoints; preserve history. -->
 
 # Dream Device OAuth 接入
@@ -40,6 +41,6 @@ pending继续等待；slow_down按返回interval退避；deny终止；expire重�
 
 Dream旧`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token`返回明确410与server配置解析出的Admin标准端点；不创建/批准/消费短码、不签token或修改refresh状态。CLI直接使用Admin issuer的`/device/code`和`/oauth2/token`，verification URI为Admin `/auth/device`。Browser旧验证页通过Next `/auth/device`导航到Admin授权页，user_code只用于恢复短码上下文，不作为身份。缺合法Admin公开authority返回503；旧凭据不会被转发。
 
-上述源码与技术fixture不证明真实Device approve/deny/refresh已验收；正常本机Admin账号、注册client/scope/resource、可见Run/账本回执仍由协调真实业务阶段验证。
+正常本机服务已经由公开Admin入口验证注册device client/resource/scope、RFC 8628字段、`authorization_pending`、`slow_down`，以及`invalid_client`、`invalid_target`、外部`user_id`拒绝和`invalid_scope`；所有响应均`no-store`，code未进入回执。上述结果仍不证明真实Device approve/deny、OAuth token兑换、refresh/revoke已验收；这些步骤需要有效的Better Auth主体和可见授权页后继续。
 
 Next保留同名旧Device/token410薄路径；actual `/auth/device`仍用于导航到Admin验证页。旧path不会先触发generic API认证或转发body。

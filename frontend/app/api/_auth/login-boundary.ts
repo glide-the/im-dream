@@ -1,6 +1,7 @@
 // [Input] Explicit Dream public origin/cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
+// [Sync] 2026-09-16: accept an exact configured Host when Next normalizes the server-internal request URL.
 // [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 
@@ -168,7 +169,7 @@ export class BffLoginBoundary {
   validateCallback(request: Request, expectedIssuer: string): LoginTransaction {
     const transaction = this.readTransaction(request);
     const url = new URL(request.url); const query = url.searchParams;
-    if (url.origin + url.pathname !== this.callbackUri || query.getAll('state').length !== 1 || query.getAll('iss').length !== 1 || query.getAll('code').length !== 1
+    if (this.#requestOrigin(request) + url.pathname !== this.callbackUri || query.getAll('state').length !== 1 || query.getAll('iss').length !== 1 || query.getAll('code').length !== 1
       || !constantEqual(query.get('state') ?? '', transaction.state) || query.get('iss') !== expectedIssuer || !query.get('code') || query.has('error')) {
       throw new BffBoundaryError('BFF_OAUTH_CALLBACK_INVALID', 400);
     }
@@ -200,7 +201,7 @@ export class BffLoginBoundary {
   }
 
   requireRequestOrigin(request: Request): void {
-    if (new URL(request.url).origin !== this.publicOrigin) throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+    this.#requestOrigin(request);
   }
 
   requireMutation(request: Request): string {
@@ -215,6 +216,13 @@ export class BffLoginBoundary {
 
   clearTransactionCookie(): string { return this.#cookie(this.transactionCookieName, '', 0); }
   clearHandleCookie(): string { return this.#cookie(this.handleCookieName, '', 0); }
+
+  #requestOrigin(request: Request): string {
+    if (new URL(request.url).origin === this.publicOrigin) return this.publicOrigin;
+    const host = request.headers.get('host');
+    if (host && host.toLowerCase() === new URL(this.publicOrigin).host.toLowerCase()) return this.publicOrigin;
+    throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+  }
 
   #cookie(name: string, value: string, maxAge: number): string {
     return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.#secure ? '; Secure' : ''}`;

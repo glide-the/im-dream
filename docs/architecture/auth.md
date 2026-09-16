@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: select localhost as the single local Dream/Admin browser auth topology and Google callback origin. -->
 <!-- [Sync] 2026-09-16: FastAPI retires SessionMiddleware and scrubs legacy Dream auth/session secrets; Next BFF remains the only Dream browser-session owner. -->
 <!-- [Sync] 2026-09-16: Agent-type clear/Runtime plan/prepare use current Admin OAuth and Registry127-129. -->
 <!-- [Sync] 2026-09-16: confirmation Runtime uses Registry121 claim-bound Admin persistence authority. -->
@@ -33,6 +34,8 @@
 五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../design/deck-mutations-current.md)为准；相关读写、default与安装metadata均已使用发布的Admin operation，正常环境切换与真实业务验收仍待执行。
 
 # Dream 接入 Admin 认证
+
+认证表关系、旧用户冲突处理、Dream/Admin 权限隔离及浏览器、Google、Admin、Device 完整流程见[登录认证体系：数据 ER 图与流程](./auth-identity-er-and-flows.md)。
 
 统一Client的catalog refresh/readiness与广告检查共享同步边界。正在加载时其它已验证调用等待完整结果；失败清空ready/广告并由后续认证重新加载，不能沿用旧广告。领域HTTP保持并发、显式per-request token/DTO/UUID，认证校验、scope与原receipt语义不变。
 
@@ -70,7 +73,7 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 
 server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin，不相信任意forwarded header。BFF mutation校验origin/CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
-当前本机事实由协调只读确认：Web配置同时出现`127.0.0.1:5173`与`localhost:5173`，Python为8765、Admin/Gateway为3000，Admin allowlist未覆盖所有Dream origin；这不是最终一致拓扑。实施必须选定一个显式Dream origin并对齐OAuth注册、Google callback、代理、Cookie/CORS/CSRF。gitignored用户环境不进commit。
+当前本机浏览器主路径固定为 Dream `http://localhost:5173`、Admin issuer `http://localhost:3000/api/auth`、Google callback `http://localhost:3000/api/auth/callback/google`、Dream callback `http://localhost:5173/auth/callback` 和 resource `http://localhost:5173/api`。内部 FastAPI 继续使用明确的私有地址；`127.0.0.1` 不参与浏览器 OAuth issuer、redirect、Cookie 或 CSRF origin 比较。部署环境按同一规则提供各自 HTTPS 精确值，gitignored 用户环境不进 commit。
 
 当前speech recognition按现行业务设计关闭，Python `/ws/speech-recognition` 返回1008。保留显式WS选址，但本迁移不启用语音、不新增WS授权scope或upgrade通道。未来恢复语音能力须另按实际业务/API合同校验origin与用户身份，不能用旧query token或opaque handle冒充OAuth token。
 
