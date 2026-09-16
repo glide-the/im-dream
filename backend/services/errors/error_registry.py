@@ -5,6 +5,7 @@
 [Pos] Shared error vocabulary; raw provider, Git, path, and database details stay server-side.
 [Sync] 2026-08-19: add Remote Marketplace capability, entry, and drift recovery contracts.
 [Sync] 2026-09-15: share the original Run business error projection with Admin consumers.
+[Sync] 2026-09-16: add a safe unknown-result state for Admin-owned Claude Plugin writes.
 """
 
 from __future__ import annotations
@@ -199,6 +200,11 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
         "phase": "install",
         "meaning": "The real claude plugin install execution failed.",
         "recovery": "Inspect the operation evidence and retry.",
+    },
+    "CLAUDE_PLUGIN_OPERATION_RESULT_UNKNOWN": {
+        "phase": "persistence",
+        "meaning": "The plugin operation result could not be confirmed.",
+        "recovery": "Refresh the operation status before deciding whether to retry.",
     },
     "CLAUDE_PLUGIN_REGISTRY_MISMATCH": {
         "phase": "install",

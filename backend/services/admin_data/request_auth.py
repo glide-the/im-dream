@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry175-182 Claude Plugin data operations.
 # [Sync] 2026-09-16: register Registry170-174 Deck Plugin control operations.
 # [Sync] 2026-09-16: register Registry169 automatic-repair settlement.
 # [Sync] 2026-09-16: register Registry148-168 Notion connector data operations.
@@ -93,6 +94,7 @@ from .story_workspace_confirmation_data import (
 )
 from .deck_plugin_binding_data import DECK_PLUGIN_BINDING_OPERATIONS
 from .deck_plugin_control_data import DECK_PLUGIN_CONTROL_OPERATIONS
+from .claude_plugin_data import CLAUDE_PLUGIN_OPERATIONS
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -157,6 +159,7 @@ class AdminRequestAuth:
                 *STORY_WORKSPACE_CONFIRMATION_OPERATIONS,
                 *DECK_PLUGIN_BINDING_OPERATIONS,
                 *DECK_PLUGIN_CONTROL_OPERATIONS,
+                *CLAUDE_PLUGIN_OPERATIONS,
                 *DECK_REFS_OPERATIONS,
                 *SOCIAL_OPERATIONS,
                 *VOICE_OPERATIONS,

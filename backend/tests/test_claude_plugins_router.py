@@ -1,229 +1,353 @@
-"""Route-level authorization contracts for shared Claude Code plugins.
-
-[Input] Production FastAPI router with PostgreSQL-shaped services and captured background tasks.
-[Output] Auth, platform-global catalog, entry-ID queue, terminal crash, operation, and Deck-ref route evidence.
-[Pos] Focused public ClaudePlugin API contract tests; no real business database writes.
-[Sync] 2026-08-19: cover identical catalogs, Remote Marketplace queueing, and background error termination.
-[Sync] 2026-09-15: Deck owner refs test uses actual OAuth/DTO/HTTP harness; legacy install/catalog fixtures stay separate.
-"""
-
+# [Input] Public Claude Plugin routes, authenticated actor and typed fake Admin consumer.
+# [Output] Preserved HTTP shapes, actor-free DTO dispatch and background execution handoff evidence.
+# [Pos] Provider-free route contract; Dream PostgreSQL access is fenced.
+# [Sync] 2026-09-16: migrate catalog/install/operation/installation routes to Registry175-182.
 from __future__ import annotations
 
-from pathlib import Path
-import sys
+from datetime import UTC, datetime
 from unittest import mock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-
-from routers import claude_plugins
-from routers.deps import get_current_user
-from services.claude_plugin.marketplace_service import MarketplaceInstallSource
-
-
-class _Cursor:
-    def __init__(self, rows: list[tuple], columns: list[str] | None = None) -> None:
-        self._rows = rows
-        self.description = [(column,) for column in columns] if columns else None
-
-    def fetchall(self) -> list[tuple]:
-        return self._rows
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
+import routers.claude_plugins as claude_plugins
+from services.admin_data.claude_plugin_data import (
+    ClaudePluginInstallPlanDTO,
+    ClaudePluginInstallationDetailDTO,
+    ClaudePluginInstallationDTO,
+    ClaudePluginInstallationsListDTO,
+    ClaudePluginMarketplaceListDTO,
+    ClaudePluginOperationDTO,
+    ClaudePluginOperationsListDTO,
+)
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
 
 
-class _Db:
-    def execute(self, sql: str, _params: object = ()) -> _Cursor:
-        if "INSERT INTO claude_plugin_operations" in sql:
-            return _Cursor([])
-        if "deck_claude_plugin_refs" in sql:
-            return _Cursor([("plugin-1", 2)])
-        if "claude_plugin_operations" in sql:
-            return _Cursor(
-                [("op-1", "install", "demo@market", "ready")],
-                ["id", "operation_kind", "requested_package_spec", "status"],
-            )
-        raise AssertionError(f"Unexpected query: {sql}")
-
-    def close(self) -> None:
-        pass
-
-    def commit(self) -> None:
-        pass
+HEADERS = {"authorization": "Bearer synthetic"}
+NOW = datetime(2026, 9, 16, tzinfo=UTC)
 
 
-class _InstallService:
-    def __init__(self, _db: _Db) -> None:
-        pass
+def operation(**changes) -> ClaudePluginOperationDTO:
+    values = {
+        "id": "cop_operation",
+        "operation_kind": "install",
+        "requested_package_spec": "demo@market",
+        "marketplace_entry_id": None,
+        "status": "queued",
+        "phase": "queued",
+        "progress": 0,
+        "message": "Queued for real claude plugin install",
+        "executable": None,
+        "argv_json": None,
+        "cwd": None,
+        "cli_version": None,
+        "exit_code": None,
+        "evidence_path": None,
+        "installation_id": None,
+        "error_code": None,
+        "error_summary": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+        "finished_at": None,
+    }
+    values.update(changes)
+    return ClaudePluginOperationDTO.model_validate(values)
 
-    def list_installations(self) -> list[dict[str, object]]:
-        return [{"id": "plugin-1", "package_name": "demo"}]
+
+def installation(**changes) -> ClaudePluginInstallationDTO:
+    values = {
+        "id": "cpi_installation",
+        "requested_package_spec": "demo@market",
+        "marketplace_entry_id": None,
+        "package_name": "demo",
+        "marketplace": "market",
+        "requested_version": None,
+        "resolved_version": "1.0.0",
+        "source_type": "marketplace",
+        "artifact_digest": "sha256:" + "a" * 64,
+        "artifact_path": "/shared/plugins/demo",
+        "claude_cli_version": "2.1.220",
+        "cli_git_commit_sha": None,
+        "manifest_json": '{"name":"demo"}',
+        "component_inventory_json": '{"skills":[]}',
+        "compatibility_json": "{}",
+        "status": "ready",
+        "operation_id": "cop_operation",
+        "error_code": None,
+        "error_summary": None,
+        "file_count": 3,
+        "created_at": NOW,
+        "updated_at": NOW,
+        "installed_at": NOW,
+    }
+    values.update(changes)
+    return ClaudePluginInstallationDTO.model_validate(values)
 
 
-class _BackgroundDb(_Db):
+class FakeData:
     def __init__(self) -> None:
-        self.error_update: tuple | None = None
-        self.commits = 0
+        self.calls = []
+        self.error: AdminDataError | None = None
+        self.plan = ClaudePluginInstallPlanDTO(
+            accepted=True,
+            operation_id="cop_operation",
+            package_spec="demo@market",
+            marketplace_entry_id=None,
+            requested_source_type="marketplace",
+            marketplace_source=None,
+        )
 
-    def execute(self, sql: str, params: object = ()) -> _Cursor:
-        if "UPDATE claude_plugin_operations" in sql:
-            self.error_update = tuple(params)  # type: ignore[arg-type]
-            return _Cursor([])
-        return super().execute(sql, params)
+    def _return(self, name, input_dto, request_id, access_token, value):
+        self.calls.append(
+            (name, input_dto.model_dump(mode="json"), request_id, access_token)
+        )
+        if self.error is not None:
+            raise self.error
+        return value
 
-    def commit(self) -> None:
-        self.commits += 1
+    def list_installations(self, input_dto, request_id, *, access_token):
+        item = installation().model_dump()
+        item["deck_ref_count"] = 2
+        return self._return(
+            "list_installations",
+            input_dto,
+            request_id,
+            access_token,
+            ClaudePluginInstallationsListDTO(
+                installations=[item],
+                permissions={"can_manage_shared_plugins": True},
+            ),
+        )
+
+    def list_marketplace(self, input_dto, request_id, *, access_token):
+        return self._return(
+            "list_marketplace",
+            input_dto,
+            request_id,
+            access_token,
+            ClaudePluginMarketplaceListDTO(
+                entries=[],
+                scope="platform-global",
+                permissions={"can_install_shared_plugins": True},
+            ),
+        )
+
+    def prepare(self, input_dto, request_id, *, access_token):
+        return self._return(
+            "prepare", input_dto, request_id, access_token, self.plan
+        )
+
+    def list_operations(self, input_dto, request_id, *, access_token):
+        return self._return(
+            "list_operations",
+            input_dto,
+            request_id,
+            access_token,
+            ClaudePluginOperationsListDTO(operations=[operation()]),
+        )
+
+    def read_operation(self, input_dto, request_id, *, access_token):
+        return self._return(
+            "read_operation",
+            input_dto,
+            request_id,
+            access_token,
+            operation(id=input_dto.operation_id),
+        )
+
+    def read_installation(self, input_dto, request_id, *, access_token):
+        detail = installation(id=input_dto.installation_id).model_dump()
+        detail["deck_refs"] = []
+        return self._return(
+            "read_installation",
+            input_dto,
+            request_id,
+            access_token,
+            ClaudePluginInstallationDetailDTO.model_validate(detail),
+        )
+
+    def uninstall(self, input_dto, request_id, *, access_token):
+        return self._return(
+            "uninstall",
+            input_dto,
+            request_id,
+            access_token,
+            installation(id=input_dto.installation_id, status="uninstalled"),
+        )
 
 
-def _client(current_user: dict[str, object]) -> TestClient:
+def boundary(monkeypatch):
+    import database
+
+    monkeypatch.setattr(
+        database,
+        "get_db",
+        lambda: pytest.fail("Claude Plugin public routes must not use Dream PG"),
+    )
+    actor = AdminRequestActor(
+        subject="opaque-subject",
+        canonical_user_id="42",
+        client_id="dream-browser",
+        scopes=frozenset({"dream:read", "dream:write"}),
+        issued_at=1,
+        expires_at=999,
+        access_token="delegated-oauth",
+    )
+    data = FakeData()
     app = FastAPI()
     app.include_router(claude_plugins.router)
-    app.dependency_overrides[get_current_user] = lambda: current_user
-    return TestClient(app)
-
-
-def test_signed_in_user_can_read_shared_plugins_and_operations() -> None:
-    """The Settings page's initial reads must not require an admin role."""
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=_Db()),
-        mock.patch.object(claude_plugins, "PluginInstallService", _InstallService),
-    ):
-        client = _client({"user_id": 7, "role": "user"})
-        installations = client.get("/api/claude-plugins/installations")
-        operations = client.get("/api/claude-plugins/operations?limit=8")
-
-    assert installations.status_code == 200
-    assert installations.json() == {
-        "installations": [{"id": "plugin-1", "package_name": "demo", "deck_ref_count": 2}],
-        "permissions": {"can_manage_shared_plugins": True},
-    }
-    assert operations.status_code == 200
-    assert operations.json()["operations"] == [
-        {
-            "id": "op-1",
-            "operation_kind": "install",
-            "requested_package_spec": "demo@market",
-            "status": "ready",
-        }
-    ]
-
-
-def test_shared_plugin_manager_capability_is_reported() -> None:
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=_Db()),
-        mock.patch.object(claude_plugins, "PluginInstallService", _InstallService),
-    ):
-        response = _client({"user_id": 1, "permissions": ["plugin:admin"]}).get(
-            "/api/claude-plugins/installations"
-        )
-
-    assert response.status_code == 200
-    assert response.json()["permissions"] == {"can_manage_shared_plugins": True}
-
-
-def test_all_signed_in_users_receive_the_same_platform_global_marketplace() -> None:
-    marketplace = mock.Mock()
-    marketplace.list_entries.return_value = [
-        {"id": "cpme_comfy", "package_spec": "comfy-cloud@comfy-skills"}
-    ]
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=_Db()),
-        mock.patch.object(
-            claude_plugins, "MarketplaceCatalogService", return_value=marketplace
-        ),
-    ):
-        first = _client({"user_id": 1, "role": "user"}).get(
-            "/api/claude-plugins/marketplace"
-        )
-        second = _client({"user_id": 99, "role": "user"}).get(
-            "/api/claude-plugins/marketplace"
-        )
-
-    assert first.status_code == 200
-    assert first.json() == second.json()
-    assert first.json()["scope"] == "platform-global"
-
-
-def test_marketplace_install_accepts_entry_id_and_queues_the_public_pipeline() -> None:
-    source = MarketplaceInstallSource(
-        entry_id="cpme_comfy",
-        package_spec="comfy-cloud@comfy-skills",
-        package_name="comfy-cloud",
-        marketplace_name="comfy-skills",
-        remote_url="https://github.com/Comfy-Org/comfy-skills",
-        requested_ref=None,
-        approved_commit_sha="a" * 40,
-        marketplace_manifest_sha256="b" * 64,
-        plugin_manifest_sha256="c" * 64,
-        approved_plugin_digest="sha256:" + "d" * 64,
-        compatibility={},
+    app.dependency_overrides[claude_plugins.get_current_user] = (
+        actor.current_user_projection
     )
-    marketplace = mock.Mock()
-    marketplace.resolve_install_source.return_value = source
-    run_install = mock.Mock()
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=_Db()),
-        mock.patch.object(
-            claude_plugins, "MarketplaceCatalogService", return_value=marketplace
-        ),
-        mock.patch.object(claude_plugins, "_run_install", run_install),
-    ):
-        response = _client({"user_id": 7, "role": "user"}).post(
-            "/api/claude-plugins/install",
-            json={"marketplace_entry_id": "cpme_comfy"},
-        )
+    app.dependency_overrides[claude_plugins._plugin_data] = lambda: data
+    return TestClient(app), data, actor
+
+
+def test_reads_delegate_closed_dtos_without_authority_selectors(monkeypatch):
+    client, data, _ = boundary(monkeypatch)
+    with client:
+        assert client.get(
+            "/api/claude-plugins/installations", headers=HEADERS
+        ).json()["installations"][0]["deck_ref_count"] == 2
+        assert client.get(
+            "/api/claude-plugins/marketplace", headers=HEADERS
+        ).json()["scope"] == "platform-global"
+        assert len(
+            client.get(
+                "/api/claude-plugins/operations?limit=999", headers=HEADERS
+            ).json()["operations"]
+        ) == 1
+        assert client.get(
+            "/api/claude-plugins/operations/cop_selected", headers=HEADERS
+        ).json()["id"] == "cop_selected"
+        assert client.get(
+            "/api/claude-plugins/installations/cpi_selected", headers=HEADERS
+        ).json()["id"] == "cpi_selected"
+
+    assert [item[0] for item in data.calls] == [
+        "list_installations",
+        "list_marketplace",
+        "list_operations",
+        "read_operation",
+        "read_installation",
+    ]
+    assert data.calls[2][1] == {"limit": 100}
+    assert all(
+        not {"actor_id", "user_id", "sql", "table", "column"} & set(call[1])
+        for call in data.calls
+    )
+    assert all(call[3] == "delegated-oauth" for call in data.calls)
+
+
+def test_install_prepares_in_admin_then_hands_plan_to_dream_executor(monkeypatch):
+    client, data, actor = boundary(monkeypatch)
+    with mock.patch.object(claude_plugins, "_run_install") as run_install:
+        with client:
+            response = client.post(
+                "/api/claude-plugins/install",
+                headers=HEADERS,
+                json={"package_spec": "demo@market"},
+            )
 
     assert response.status_code == 202
-    assert response.json()["package_spec"] == "comfy-cloud@comfy-skills"
-    assert response.json()["marketplace_entry_id"] == "cpme_comfy"
-    run_install.assert_called_once_with(
-        response.json()["operation_id"],
-        "comfy-cloud@comfy-skills",
-        "marketplace",
-        "cpme_comfy",
+    assert response.json() == {
+        "accepted": True,
+        "operation_id": "cop_operation",
+        "package_spec": "demo@market",
+        "marketplace_entry_id": None,
+    }
+    assert data.calls[0][0:2] == (
+        "prepare",
+        {
+            "source_kind": "package",
+            "package_spec": "demo@market",
+            "source_type": None,
+        },
+    )
+    run_install.assert_called_once_with(data.plan, data, actor)
+
+
+def test_marketplace_install_uses_only_entry_id_from_the_browser(monkeypatch):
+    client, data, _ = boundary(monkeypatch)
+    data.plan = data.plan.model_copy(
+        update={
+            "marketplace_entry_id": "cpme_demo",
+            "requested_source_type": "marketplace",
+        }
+    )
+    with mock.patch.object(claude_plugins, "_run_install"):
+        with client:
+            response = client.post(
+                "/api/claude-plugins/install",
+                headers=HEADERS,
+                json={"marketplace_entry_id": "cpme_demo"},
+            )
+    assert response.status_code == 202
+    assert data.calls[0][1] == {
+        "source_kind": "marketplace_entry",
+        "marketplace_entry_id": "cpme_demo",
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"package_spec": "demo@market", "marketplace_entry_id": "cpme_demo"},
+        {"package_spec": "bad"},
+        {"package_spec": "demo@market", "user_id": "42"},
+        {
+            "marketplace_entry_id": "cpme_demo",
+            "source_type": "marketplace",
+        },
+    ],
+)
+def test_invalid_install_inputs_fail_before_admin_dispatch(monkeypatch, body):
+    client, data, _ = boundary(monkeypatch)
+    with client:
+        response = client.post(
+            "/api/claude-plugins/install", headers=HEADERS, json=body
+        )
+    assert response.status_code == 422
+    assert not data.calls
+
+
+def test_uninstall_delegates_one_typed_identifier(monkeypatch):
+    client, data, _ = boundary(monkeypatch)
+    with client:
+        response = client.post(
+            "/api/claude-plugins/installations/cpi_selected/uninstall",
+            headers=HEADERS,
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "uninstalled"
+    assert data.calls[0][0:2] == (
+        "uninstall",
+        {"installation_id": "cpi_selected"},
     )
 
 
-def test_background_crash_finishes_the_public_operation_as_error() -> None:
-    db = _BackgroundDb()
-    service = mock.Mock()
-    service.install.side_effect = RuntimeError("provider exploded")
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=db),
-        mock.patch.object(claude_plugins, "PluginInstallService", return_value=service),
-    ):
-        claude_plugins._run_install(
-            "cop_failed",
-            "demo@market",
-            "marketplace",
-        )
-
-    assert db.error_update is not None
-    assert db.error_update[1] == "CLAUDE_PLUGIN_INSTALL_FAILED"
-    assert "provider exploded" not in db.error_update[2]
-    assert db.error_update[-1] == "cop_failed"
-    assert db.commits == 1
-
-
-def test_deck_owner_can_replace_only_own_deck_plugin_refs(monkeypatch) -> None:
-    """Shared installation is admin-owned, but a Deck owner owns its bindings."""
-    from tests.test_admin_deck_refs_routes import HEADERS, boundary
-
-    client, calls, *_ = boundary(monkeypatch, canonical_user_id="7")
+def test_admin_failures_preserve_safe_status_and_unknown_outcome(monkeypatch):
+    client, data, _ = boundary(monkeypatch)
+    data.error = AdminDataError(
+        "ADMIN_WRITE_RESULT_UNKNOWN", 503, "original-request", True
+    )
     with client:
-        response = client.put(
-            "/api/decks/deck-7/claude-plugins",
+        response = client.post(
+            "/api/claude-plugins/installations/cpi_selected/uninstall",
             headers=HEADERS,
-            json={"refs": [{"plugin_installation_id": "plugin-1", "enabled": True, "order_index": 0}]},
         )
-
-    assert response.status_code == 200
-    assert [name for name, *_ in calls] == ["deck-plugin-refs.prepare", "deck-plugin-refs.replace"]
-    assert calls[1][1]["deck_id"] == "deck-7" and "user_id" not in calls[1][1]
-    assert calls[1][1]["refs"][0]["plugin_installation_id"] == "plugin-1"
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "CLAUDE_PLUGIN_OPERATION_RESULT_UNKNOWN",
+        "phase": "persistence",
+        "message": "The plugin operation result could not be confirmed.",
+        "recovery_action": (
+            "Refresh the operation status before deciding whether to retry."
+        ),
+        "operation_id": "original-request",
+        "request_id": "original-request",
+        "outcome_unknown": True,
+    }
