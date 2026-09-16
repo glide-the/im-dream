@@ -90,6 +90,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 from importlib import metadata as importlib_metadata
@@ -185,6 +186,9 @@ ADMIN_AUTH_SERVER_ONLY_ENV_NAMES = frozenset({
     "INK_ADMIN_DREAM_SERVICE_SECRET", "DREAM_DATA_SERVICE_CLIENTS",
     "BETTER_AUTH_SECRET", "AUTH_TOKEN_ENCRYPTION_KEY", "GOOGLE_CLIENT_SECRET",
     "INK_DREAM_BFF_COOKIE_SECRET", "JWT_SECRET", "JWT_SECRET_KEY",
+    "INK_GATEWAY_SERVICE_KEY", "INK_GATEWAY_SERVICE_CLIENT_ID",
+    "INK_GATEWAY_SUBJECT_JWT_ISSUER", "INK_GATEWAY_SUBJECT_JWT_AUDIENCE",
+    "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS",
 })
 _USER_SDK_ENV_NAMES = frozenset(
     {
@@ -678,12 +682,10 @@ def merge_project_dotenv_env(
     # after the first project/runtime merge. ``SimpleClaudeAgentSDKClient``
     # deliberately reapplies these defaults for direct callers immediately
     # before spawning Claude Code. That second merge must not resurrect a
-    # direct Provider bearer token from backend/.env or the parent process:
-    # Claude Code gives ANTHROPIC_AUTH_TOKEN precedence over apiKeyHelper, so
-    # the canonical Gateway subject JWT would otherwise be replaced and the
-    # request would correctly fail authentication at the Admin boundary. Keep
-    # empty tombstones instead of popping: the Python SDK inherits the entire
-    # parent environment before overlaying this map.
+    # direct Provider bearer token from backend/.env or the parent process.
+    # Preserve only an already-injected Admin ``gateway-cli`` delegation; all
+    # other bearer values remain tombstoned. Empty values are required because
+    # the Python SDK inherits the parent environment before applying this map.
     primary_gateway_flag = str(merged.get("INK_GATEWAY_ENABLED", "")).strip()
     legacy_gateway_flag = str(
         merged.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "")
@@ -692,7 +694,10 @@ def merge_project_dotenv_env(
         primary_gateway_flag or legacy_gateway_flag
     ).lower() in _TRUE_ENV_VALUES
     if gateway_enabled:
+        gateway_delegation = str(merged.get("ANTHROPIC_AUTH_TOKEN", ""))
         apply_gateway_credential_tombstones(merged)
+        if re.fullmatch(r"idg_[A-Za-z0-9_-]{43}", gateway_delegation):
+            merged["ANTHROPIC_AUTH_TOKEN"] = gateway_delegation
     apply_admin_auth_credential_tombstones(merged)
     return merged
 

@@ -3,7 +3,7 @@
 # [Input] Server-owned Admin Product configuration and HTTP client.
 # [Output] One lazy Product BFF service with no Dream database dependency.
 # [Pos] Production Product composition; Admin validates canonical identity and owns persistence.
-# [Sync] 2026-09-16: remove Dream PostgreSQL identity lookup and pool lifecycle.
+# [Sync] 2026-09-16: compose OAuth-forwarding Product service without Dream signing or PostgreSQL.
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .models import (
     PreviewSubscriptionCommand,
     UsageQuery,
 )
-from .service import ProductBff, ProductBffService
+from .service import ProductBff, ProductBffService, ProductSessionActor
 
 
 class LazyProductBffService:
@@ -55,60 +55,60 @@ class LazyProductBffService:
             return service
 
     async def plans(
-        self, session_subject: str, query: PlansQuery, request_id: str
+        self, actor: ProductSessionActor, query: PlansQuery, request_id: str
     ) -> dict[str, Any]:
         return await (await self._delegate()).plans(
-            session_subject, query, request_id
+            actor, query, request_id
         )
 
     async def subscription_context(
-        self, session_subject: str, request_id: str
+        self, actor: ProductSessionActor, request_id: str
     ) -> dict[str, Any]:
         return await (await self._delegate()).subscription_context(
-            session_subject, request_id
+            actor, request_id
         )
 
     async def usage(
-        self, session_subject: str, query: UsageQuery, request_id: str
+        self, actor: ProductSessionActor, query: UsageQuery, request_id: str
     ) -> dict[str, Any]:
         return await (await self._delegate()).usage(
-            session_subject, query, request_id
+            actor, query, request_id
         )
 
     async def model_catalog(
-        self, session_subject: str, request_id: str
+        self, actor: ProductSessionActor, request_id: str
     ) -> dict[str, Any]:
         return await (await self._delegate()).model_catalog(
-            session_subject, request_id
+            actor, request_id
         )
 
     async def subscription_command(
         self,
-        session_subject: str,
+        actor: ProductSessionActor,
         command: PreviewSubscriptionCommand | ExecuteSubscriptionCommand,
         request_id: str,
         idempotency_key: str | None,
     ) -> dict[str, Any]:
         return await (await self._delegate()).subscription_command(
-            session_subject, command, request_id, idempotency_key
+            actor, command, request_id, idempotency_key
         )
 
     async def create_payment_intent(
         self,
-        session_subject: str,
+        actor: ProductSessionActor,
         payment: PaymentIntentCreate,
         request_id: str,
         idempotency_key: str,
     ) -> dict[str, Any]:
         return await (await self._delegate()).create_payment_intent(
-            session_subject, payment, request_id, idempotency_key
+            actor, payment, request_id, idempotency_key
         )
 
     async def payment_intent(
-        self, session_subject: str, payment_intent_id: str, request_id: str
+        self, actor: ProductSessionActor, payment_intent_id: str, request_id: str
     ) -> dict[str, Any]:
         return await (await self._delegate()).payment_intent(
-            session_subject, payment_intent_id, request_id
+            actor, payment_intent_id, request_id
         )
 
     async def aclose(self) -> None:

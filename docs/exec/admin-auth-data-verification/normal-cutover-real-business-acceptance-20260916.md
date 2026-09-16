@@ -2,6 +2,7 @@
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
 <!-- [Sync] 2026-09-16: record real Device approval/exchange, Resource Server access, refresh rotation and replay-family invalidation. -->
+<!-- [Sync] 2026-09-16: record independent refresh revocation, Device denial, Admin 0063 publication, Product OAuth forwarding, Gateway key rotation, Settings search and MCP replacement-auth findings. -->
 <!-- [Sync] 2026-09-16: record exact legacy Google adoption, successful consent/return and the closed Better Auth audience-array repair. -->
 <!-- [Sync] 2026-09-16: record saved Google callbacks, closure of redirect mismatch and the specified email account-not-found result. -->
 <!-- [Sync] 2026-09-16: record real browser login, Google callback, identity-mapping and RFC 8628 pending/slow-down evidence. -->
@@ -130,3 +131,32 @@ Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed D
 文件场景只完成影响边界和本轮纯文本fixture准备。文件选择器出现时Chrome前台已由用户切换到其他页面，自动化立即停止；没有选择或上传文件，也没有创建metadata、Chat消息或Run。本项仍为未执行，不能把fixture存在当作文件业务验收。
 
 主动refresh revoke需要一条未先触发重放保护的新授权链；拒绝流程也需要新的device code。两项将在独立设备授权页完成，避免复用已消费/已失效的授权记录。
+
+### 2026-09-16 Device 独立撤销与拒绝链路
+
+另建两条互不复用的真实 Device authorization。第一条在用户允许、兑换并取得未轮换 refresh token 后，调用公开 revoke endpoint；再次用原 refresh token 请求 token endpoint 返回 `400 invalid_grant` 与 `Cache-Control: no-store`。这条链路没有先触发 replay-family invalidation，因此证明主动 revoke 已生效。第二条在设备授权页选择拒绝；当时连续公开轮询均返回 `400 access_denied` 且不签发 token，超过设备码有效期后的再次复核返回 `400 expired_token`，符合终态随时间推进的实际响应。两条链路均未把 device/user code 或 token 写入回执。
+
+Device 本轮已覆盖：create、`authorization_pending`、`slow_down`、允许、拒绝、兑换、重复兑换、refresh rotation、旧 refresh 重放、独立主动 revoke、真实 access expiry、`invalid_client`、`invalid_target`、`invalid_scope` 和外部主体注入拒绝。未把 Session token 当 OAuth access token，也未把既发 stateless JWT 描述为可即时撤销。
+
+### 2026-09-16 Admin 0063、Product OAuth 与 Gateway 运行身份
+
+Admin 新增 `0063_smiling_microbe`，只为 runtime delegation 增加 nullable Reflections authority source、精确 cascade FK/CHECK，并发布 `identity.runtime-reflection-authority.v1`。具名可删除 PostgreSQL 从 0000 重放至 0063，64 条 migration receipt、列/FK/CHECK/capability 和 repeat apply 全部通过并已清理；正常 `ink-memory` 也以前向方式应用 0063，当前为 64/64 receipts 与 9 项发布门槛 capability。Dream 没有执行 migration、DDL 或临时建表。
+
+Product 路径删除 Dream 本地 HS256 signer。浏览器产品调用只转发 Admin 已验证 OAuth access token，FastAPI 继续用严格 Pydantic DTO，Admin 执行 Zod DTO → Domain Service → Drizzle Repository；缺少 Admin 或 capability 直接失败，不回退本地数据库。聚焦 Product/SystemConfig 回归 `54 passed`；真实页面读取订阅、计划并完成 public renewal preview/execute，结果仍为既有 Free plan、订阅 revision 2、期间结束日 2026-10-09，未产生付费交易。
+
+真实 Agent 首轮由 Gateway 返回 `403 GATEWAY_SCOPE_REQUIRED`。只读核对发现 canonical subject 的 active Gateway key仍含已退休 `chat:create`，缺少 Runtime 必需 `messages:count_tokens`。Admin 新增严格 rotation DTO、Domain Service、Drizzle transaction/audit 和默认 dry-run operator CLI；一次性当前 secret proof 与 target DTO 分离，明文只写 owner-only Dream env，不进入数据库、DTO、receipt 或日志。正式 rotation 把 exact scopes 收敛为 `models:list/messages:create/messages:count_tokens`，受控重启 Dream 后，同一公开 Chat POST 从 403 变为 `200`。
+
+该请求尚未产生 assistant message。Backend 明确返回已启用 OAuth MCP Server 的 managed credential 必须刷新；这是 Runtime connector credential 问题，不是 Gateway scope、模型路由或数据库回退。随后修复 Settings 失败状态无 replacement 入口的问题，并补齐 managed MCP 稳定 AES-GCM key/callback 部署配置。replacement 使用 fresh SDK TokenStorage，旧 envelope 保留到新 token 交换成功；`19 passed` 的 provider-free OAuth/credential/service 测试证明旧 key 不可读时也能开始替换，取消/失败不删除旧记录。目前真实流程已到远端 provider 的最终 consent 页面，尚未提交最终授权，因此模型可见回复、继续和取消仍不得声明通过。
+
+### 2026-09-16 Settings 搜索与 MCP 恢复交互
+
+Settings 搜索原实现只过滤 General、Subscription、Work、AI models、About 五个一级项，导致实际存在的 `settings-resources`、`settings-plugins` 与 MCP/Notion 别名无法命中。现行实现维护七项完整索引：General、Subscription、Work/Deck、Resource links、Plugins、AI models、About；每项覆盖 section id、现行/兼容路由、翻译标签、说明和必要业务别名。非空查询显示精确目标并直接进入 Work 子 tab，空查询保持原五个一级导航。
+
+| 验证 | 工作目录/入口 | 结果 |
+| --- | --- | --- |
+| Settings/MCP 相关 Playwright source tests | Dream `frontend` | Luna stage exit `0`；101 passed |
+| 搜索索引与 OAuth action policy 聚焦 | Dream `frontend` | exit `0`；11 passed，七个导航 key 全部枚举 |
+| TypeScript 与 focused ESLint | Dream `frontend` | exit `0`；无错误 |
+| 真实 Chrome Settings 搜索 | 已登录 Dream 页面 | 输入 `MCP` 后唯一显示 `Resource links`；清空后恢复五个一级导航 |
+| MCP failed credential UI | 已登录 Dream MCP detail | `failed + OAuth + credential_configured` 显示“重新认证”；active/disabled/anonymous 仍不允许启动第二条 OAuth operation |
+| AutoDL/Remote env contracts | Dream repository | exit `0`；AutoDL topology 与 Remote DTO/BFF projection 均通过；退休 Product HS256 secret 不再进入 AutoDL runtime env |

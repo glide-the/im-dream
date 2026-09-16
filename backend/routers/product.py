@@ -1,9 +1,9 @@
 """Same-origin Dream BFF routes for subscription, payment and usage.
 
 [Input] Admin OAuth bearer identity, strict Product DTOs and server-owned Product configuration.
-[Output] Subject-bound Admin Product operations with stable Dream Product error envelopes.
+[Output] Product-scope actor DTO calls with stable Dream Product error envelopes.
 [Pos] Dream Product orchestration boundary; it never reads Product identity or business data from PostgreSQL.
-[Sync] 2026-09-16: consume the shared asynchronous Admin authentication owner and remove local session renewal.
+[Sync] 2026-09-16: require Product OAuth scopes and remove Dream Product token signing.
 """
 
 from __future__ import annotations
@@ -19,7 +19,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, ValidationError
 
-from .deps import get_admin_request_auth, get_current_user, http_bearer
+from starlette.concurrency import run_in_threadpool
+
+from .deps import get_admin_request_auth, http_bearer
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
 from services.admin_product.client import assert_safe_product_payload
 from services.admin_product.config import parse_origin_allowlist
 from services.admin_product.errors import (
@@ -40,7 +44,7 @@ from services.admin_product.runtime import (
     close_default_product_bff_service,
     get_default_product_bff_service,
 )
-from services.admin_product.service import ProductBff
+from services.admin_product.service import ProductBff, ProductSessionActor
 
 
 router = APIRouter(tags=["product-subscription-bff"])
@@ -49,7 +53,6 @@ _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{8,128}$")
 _PAYMENT_INTENT_ID_PATTERN = re.compile(r"^pay_[a-f0-9]{32}$")
 _MAX_BODY_BYTES = 16_384
-_POSTGRES_BIGINT_MAXIMUM = 9_223_372_036_854_775_807
 _IDENTITY_OVERRIDE_HEADERS = (
     "x-user-id",
     "x-canonical-user-id",
@@ -98,37 +101,38 @@ def _assert_write_origin(request: Request) -> None:
         )
 
 
-async def _session_subject(
+async def _session_actor(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None,
-) -> str:
+    required_scope: str,
+) -> ProductSessionActor:
     try:
         owner = get_admin_request_auth(request, credentials)  # type: ignore[arg-type]
-        user = await get_current_user(request, credentials, owner)  # type: ignore[arg-type]
-    except HTTPException:
+        if not credentials or credentials.scheme.lower() != "bearer":
+            raise HTTPException(status_code=401)
+        actor = await run_in_threadpool(
+            owner.authenticate,
+            credentials.credentials,
+            _request_id(request),
+            required_scopes=frozenset({required_scope}),
+        )
+    except (HTTPException, AdminDataError):
         raise ProductBffError(
             code="PRODUCT_AUTH_REQUIRED",
             message="A valid Dream session is required.",
             status_code=401,
         ) from None
-    user_id = user.get("user_id") if isinstance(user, dict) else None
-    if isinstance(user_id, bool) or not isinstance(user_id, (int, str)):
+    if not isinstance(actor, AdminRequestActor):
         raise ProductBffError(
             code="PRODUCT_AUTH_REQUIRED",
             message="A valid Dream session is required.",
             status_code=401,
         )
-    subject = str(user_id)
-    if (
-        not re.fullmatch(r"[1-9]\d{0,18}", subject)
-        or int(subject) > _POSTGRES_BIGINT_MAXIMUM
-    ):
-        raise ProductBffError(
-            code="PRODUCT_AUTH_REQUIRED",
-            message="A valid Dream session is required.",
-            status_code=401,
-        )
-    return subject
+    return ProductSessionActor(
+        canonical_user_id=actor.canonical_user_id,
+        scopes=actor.scopes,
+        access_token=actor.access_token,
+    )
 
 
 def _parse_query(request: Request, model: type[QueryT]) -> QueryT:
@@ -295,9 +299,9 @@ async def _read_route(
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         _parse_query(request, EmptyQuery)
-        payload = await operation(subject, request_id)
+        payload = await operation(actor, request_id)
         return _success(payload, request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
@@ -327,9 +331,9 @@ async def plans(
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         query = _parse_query(request, PlansQuery)
-        return _success(await service.plans(subject, query, request_id), request_id)
+        return _success(await service.plans(actor, query, request_id), request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -345,9 +349,9 @@ async def usage(
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         query = _parse_query(request, UsageQuery)
-        return _success(await service.usage(subject, query, request_id), request_id)
+        return _success(await service.usage(actor, query, request_id), request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -377,11 +381,11 @@ async def subscription_commands(
     try:
         _assert_write_origin(request)
         _assert_no_identity_override(request)
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:write")
         command = await _parse_command(request)
         idempotency_key = _idempotency_key(request, command)
         payload = await service.subscription_command(
-            subject, command, request_id, idempotency_key
+            actor, command, request_id, idempotency_key
         )
         return _success(payload, request_id)
     except ProductBffError as exc:
@@ -400,11 +404,11 @@ async def create_payment_intent(
     try:
         _assert_write_origin(request)
         _assert_no_identity_override(request)
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:write")
         payment = await _parse_payment_intent(request)
         idempotency_key = _required_idempotency_key(request)
         payload = await service.create_payment_intent(
-            subject, payment, request_id, idempotency_key
+            actor, payment, request_id, idempotency_key
         )
         return _success(payload, request_id)
     except ProductBffError as exc:
@@ -425,10 +429,10 @@ async def payment_intent(
         _assert_no_identity_override(request)
         if not _PAYMENT_INTENT_ID_PATTERN.fullmatch(payment_intent_id):
             raise invalid_input(field="paymentIntentId")
-        subject = await _session_subject(request, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         _parse_query(request, EmptyQuery)
         payload = await service.payment_intent(
-            subject, payment_intent_id, request_id
+            actor, payment_intent_id, request_id
         )
         return _success(payload, request_id)
     except ProductBffError as exc:

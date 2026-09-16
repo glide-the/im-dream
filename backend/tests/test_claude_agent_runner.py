@@ -3863,21 +3863,17 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
         warning.assert_not_called()
 
-    def test_server_owned_gateway_api_key_helper_counts_as_auth(self):
+    def test_admin_gateway_delegation_counts_as_auth(self):
         from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
 
         options = _SDK_OPTIONS(env={})
         apply_gateway_sdk_env_to_options(
             options,
-            "205",
+            "idg_" + "d" * 43,
             environment={
                 "INK_GATEWAY_ENABLED": "1",
                 "INK_GATEWAY_BASE_URL": "https://admin.example.test",
                 "INK_GATEWAY_SERVICE_KEY": "gw_" + "k" * 43,
-                "INK_GATEWAY_SUBJECT_JWT_ISSUER": "https://dream.example.test",
-                "INK_GATEWAY_SUBJECT_JWT_AUDIENCE": "ink-memory-gateway",
-                "INK_GATEWAY_SERVICE_CLIENT_ID": "dream-bff",
-                "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS": "240",
             },
         )
 

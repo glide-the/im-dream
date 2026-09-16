@@ -1,6 +1,7 @@
 # [Input] Production special-route consumers/keeper and injected HTTP, clock and request identities.
 # [Output] Purpose isolation, published readiness and unknown-renewal recovery without PG/models.
 # [Pos] Provider-free Runtime authorization contracts; no alternate Agent or authentication path.
+# [Sync] 2026-09-16: verify the Gateway turn owner projects and closes one opaque grant.
 # [Sync] 2026-09-14: verify all four actual special-route DTOs and pre-expiry server renewal.
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from services.admin_data.delegation import (
     DelegationCreateInputDTO, RUNTIME_SCHEMA_REQUIREMENTS, RuntimeGrant, RuntimeHttpConfig,
 )
 from services.admin_data.delegation_keeper import RuntimeGrantKeeper
+from services.admin_data.gateway_runtime import AdminGatewayRuntime
 
 NOW = datetime(2026, 9, 14, 4, tzinfo=timezone.utc)
 TOKEN = "idg_" + "a" * 43
@@ -202,3 +204,34 @@ def test_maximum_expiry_or_closed_keeper_cannot_renew_or_project_other_purpose()
     now[0] += timedelta(seconds=41); keeper.tick()
     with pytest.raises(AdminDataError): keeper.current("gateway-cli")
     keeper.close(); keeper.tick(); assert calls == [] and keeper.diagnostics().stopped
+
+
+def test_gateway_runtime_owns_one_opaque_grant_and_closes_its_http_client():
+    class Client:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    now = datetime.now(timezone.utc)
+    current = RuntimeGrant(
+        TOKEN,
+        "gateway-cli",
+        "thread-1",
+        "run-1",
+        None,
+        ("messages:create", "messages:count_tokens", "models:list"),
+        now + timedelta(minutes=5),
+        now + timedelta(hours=2),
+    )
+    client = Client()
+    runtime = AdminGatewayRuntime(current, client)  # type: ignore[arg-type]
+    assert runtime.access_token() == TOKEN
+    assert TOKEN not in repr(runtime)
+    runtime.start()
+    runtime.close()
+    runtime.close()
+    assert client.closed == 1
+    with pytest.raises(AdminDataError, match="DELEGATION_EXPIRED"):
+        runtime.access_token()

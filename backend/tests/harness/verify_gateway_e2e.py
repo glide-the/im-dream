@@ -34,7 +34,6 @@ load_dotenv(BACKEND_ROOT / ".env")
 
 from tests import legacy_database as database  # noqa: E402
 from services.admin_gateway.config import AdminGatewayConfig  # noqa: E402
-from services.admin_gateway.token import issue_gateway_subject_token  # noqa: E402
 
 
 TEST_EMAIL = os.environ.get("INK_GATEWAY_E2E_EMAIL", "").strip()
@@ -844,11 +843,7 @@ def main() -> int:
         )
 
     gateway = AdminGatewayConfig.from_environment()
-    gateway_subject = issue_gateway_subject_token(
-        gateway,
-        canonical_user_id,
-        scope="models:list",
-    )
+    gateway_subject = auth_headers["authorization"].removeprefix("Bearer ")
     admin_models = requests.get(
         f"{gateway.base_url}/v1/models",
         headers={

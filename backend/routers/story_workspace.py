@@ -1468,7 +1468,7 @@ async def submit_run_guidance(
             ))
         except Exception:
             if turn_owner is not None:
-                await asyncio.to_thread(turn_owner.persistence.close)
+                await asyncio.to_thread(turn_owner.close)
             logger.exception(
                 "Guidance dispatch failed for run_id=%s message_id=%s",
                 workflow_run_id,

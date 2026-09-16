@@ -2,6 +2,7 @@
 # [Output] Admin-backed Reflections task engine, durable ordered events, snapshot workspaces, and child Agent execution.
 # [Pos] Reflections background execution node; Dream performs no Reflections SQL or schema management.
 # [Sync] 2026-09-15: replace Dream database persistence with the sixteen-operation Admin Reflections boundary.
+# [Sync] 2026-09-16: exchange RTA for an Admin source-fenced Gateway grant before each child turn.
 # [Sync] 2026-09-16: keep the six-operation RTA out of MCP by injecting an explicit empty Runtime snapshot.
 """Run Reflections tasks from an immutable Admin worker snapshot."""
 
@@ -44,6 +45,7 @@ from services.admin_data.reflection_task_runtime import (
     write_reflection_workspace_text,
 )
 from services.admin_data.session_projection_broker import SessionProjectionBrokerSettings
+from services.admin_data.delegation import RuntimeHttpConfig
 from services.admin_data.workflow_data import AdminWorkflowResolution
 
 logger = logging.getLogger(__name__)
@@ -423,14 +425,20 @@ class ClaudeAgentReflectionsRunner:
         begin: ReflectionSectionBeginOutputDTO, *, client: AdminDataClient,
         worker: AdminReflectionsWorkerData,
         session_broker_settings: SessionProjectionBrokerSettings,
+        runtime_http_config: RuntimeHttpConfig,
     ) -> list[dict[str, Any]]:
         owner = AdminReflectionSectionPersistence(
             begin, load.launch_snapshot, client, worker,
             session_broker_settings=session_broker_settings,
         )
+        gateway_runtime = None
         try:
             owner.start()
             actor_id = owner.resolve_actor_id()
+            gateway_runtime = owner.gateway_runtime(
+                runtime_http_config,
+                _request_id(),
+            )
             memory_path = _prepare_section_workspace(load, begin)
             cfg = get_section_config(section)
             request = _build_claude_agent_run_request(
@@ -446,12 +454,17 @@ class ClaudeAgentReflectionsRunner:
                 ),
                 admin_workflow_resolution=AdminWorkflowResolution(actor_id, begin.thread_id, None),
                 admin_turn_persistence=owner,
+                admin_gateway_runtime=gateway_runtime,
                 managed_mcp_runtime_snapshot=self._empty_managed_mcp_snapshot(),
             )
             async for _frame in _run_claude_agent_stream(request):
                 pass
         finally:
-            owner.close()
+            try:
+                if gateway_runtime is not None:
+                    gateway_runtime.close()
+            finally:
+                owner.close()
         transcript = await asyncio.to_thread(
             worker.transcript,
             ReflectionSectionTranscriptInputDTO(task_id=load.task.task_id, section=section),
@@ -509,10 +522,12 @@ class ReflectionsTaskEngine:
     def __init__(self, worker: AdminReflectionsWorkerData,
         client: AdminDataClient,
         session_broker_settings: SessionProjectionBrokerSettings,
+        runtime_http_config: RuntimeHttpConfig,
         runner: ClaudeAgentReflectionsRunner | None = None) -> None:
         self.worker = worker
         self.client = client
         self.session_broker_settings = session_broker_settings
+        self.runtime_http_config = runtime_http_config
         self.runner = runner or ClaudeAgentReflectionsRunner()
         self._task_revision: int | None = None
         self._task_terminal = False
@@ -639,6 +654,7 @@ class ReflectionsTaskEngine:
                     client=self.client,
                     worker=self.worker,
                     session_broker_settings=self.session_broker_settings,
+                    runtime_http_config=self.runtime_http_config,
                 )
                 results = self._validate_results(raw, context.load.launch_snapshot)
                 finished = await self._call(
@@ -795,7 +811,8 @@ class ReflectionsTaskEngine:
 
 async def start_reflections_task(task_id: str, *,
     worker: AdminReflectionsWorkerData, client: AdminDataClient,
-    session_broker_settings: SessionProjectionBrokerSettings) -> None:
+    session_broker_settings: SessionProjectionBrokerSettings,
+    runtime_http_config: RuntimeHttpConfig) -> None:
     """Load the Admin snapshot once, then start one local task owner."""
     lock = _TASK_LOCKS.setdefault(task_id, asyncio.Lock())
     async with lock:
@@ -814,7 +831,7 @@ async def start_reflections_task(task_id: str, *,
                 worker=worker,
             )
         engine = ReflectionsTaskEngine(
-            worker, client, session_broker_settings
+            worker, client, session_broker_settings, runtime_http_config
         )
         task = asyncio.create_task(
             engine.run(task_id, load=load), name=f"reflections-task-{task_id}"

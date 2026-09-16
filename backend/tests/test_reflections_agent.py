@@ -1,6 +1,7 @@
 # [Input] Admin-backed Reflections engine, strict DTOs, and section RTA owner.
 # [Output] Event durability, revision recovery, terminal restart, credential isolation, and shutdown tests.
 # [Pos] Reflections runtime unit boundary; no PostgreSQL, HTTP server, or real model.
+# [Sync] 2026-09-16: cover source-fenced Gateway grant composition for Reflections.
 # [Sync] 2026-09-15: replace legacy SQLite flow tests with Admin consumer/runtime invariants.
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from reflections_agent import (
     TaskPersistenceObserver,
 )
 from services.admin_data.errors import AdminDataError
+from services.admin_data.delegation import RuntimeHttpConfig
 from services.admin_data.reflection_section_persistence import (
     AdminReflectionSectionPersistence,
 )
@@ -47,6 +49,10 @@ from services.admin_data.session_projection_broker import (
 TASK_ID = "123e4567-e89b-42d3-a456-426614174000"
 THREAD_ID = "223e4567-e89b-42d3-a456-426614174000"
 RTA = "rta_" + "A" * 43
+
+
+def _runtime_http_config() -> RuntimeHttpConfig:
+    return RuntimeHttpConfig("https://admin.example", 1, 1024 * 1024)
 
 
 def _run(coro):
@@ -184,6 +190,7 @@ class _RouteOwner:
         self.session_broker_settings = SessionProjectionBrokerSettings(
             timeout_seconds=1, max_bytes=1024
         )
+        self.runtime_http_config = _runtime_http_config()
 
     def reflections_data(self):
         return self.data
@@ -323,7 +330,7 @@ class ReflectionsTaskEngineRecoveryTest(unittest.TestCase):
             engine = ReflectionsTaskEngine(
                 worker, object(), SessionProjectionBrokerSettings(
                     timeout_seconds=1, max_bytes=1024
-                )
+                ), _runtime_http_config()
             )
             with patch.dict(os.environ, {
                 "AGENT_CWD": root,
@@ -342,7 +349,7 @@ class ReflectionsTaskEngineRecoveryTest(unittest.TestCase):
             engine = ReflectionsTaskEngine(
                 worker, object(), SessionProjectionBrokerSettings(
                     timeout_seconds=1, max_bytes=1024
-                )
+                ), _runtime_http_config()
             )
             _run(engine.run(TASK_ID, load=_load(root, status="COMPLETED")))
             self.assertEqual(worker.reports, [TASK_ID])
@@ -417,6 +424,37 @@ class ReflectionSectionPersistenceTest(unittest.TestCase):
                 owner.close()
             self.assertNotIn(RTA, "\n".join(captured.output))
             self.assertEqual(worker.revokes, 1)
+
+    def test_gateway_exchange_uses_rta_only_at_admin_dto_boundary(self):
+        owner = self._owner(_OwnerWorker())
+        grant = object()
+        runtime_client = object()
+        gateway_owner = object()
+        with patch(
+            "services.admin_data.reflection_section_persistence.AdminDelegationCreator"
+        ) as creator_type, patch(
+            "services.admin_data.reflection_section_persistence.AdminRuntimeClient",
+            return_value=runtime_client,
+        ), patch(
+            "services.admin_data.reflection_section_persistence.AdminGatewayRuntime",
+            return_value=gateway_owner,
+        ) as gateway_type:
+            creator_type.return_value.create.return_value = grant
+            result = owner.gateway_runtime(_runtime_http_config(), "gateway-request")
+        self.assertIs(result, gateway_owner)
+        request = creator_type.return_value.create.call_args.args[0]
+        self.assertEqual(request.purpose, "gateway-cli")
+        self.assertEqual(request.thread_id, THREAD_ID)
+        self.assertIsNone(request.run_id)
+        self.assertEqual(
+            request.scopes,
+            ["messages:create", "messages:count_tokens", "models:list"],
+        )
+        self.assertEqual(
+            creator_type.return_value.create.call_args.kwargs,
+            {"access_token": RTA, "request_id": "gateway-request"},
+        )
+        gateway_type.assert_called_once_with(grant, runtime_client)
 
     def test_close_failure_still_stops_keeper_and_attempts_revoke(self):
         worker = _OwnerWorker()

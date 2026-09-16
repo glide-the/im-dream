@@ -2,6 +2,7 @@
 # [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
+# [Sync] 2026-09-16: bind Gateway catalog to Admin OAuth and Runtime to an Admin gateway-cli grant.
 # [Sync] 2026-09-16: bind history MCP App projections to the current Admin OAuth authorization.
 # [Sync] 2026-09-15: reuse the shared typed Admin invocation adapter with unchanged Chat error semantics.
 # [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
@@ -675,12 +676,15 @@ async def _resolve_platform_model_alias(
     user_id: int,
     client_model_alias: str | None,
     system_config: Mapping[str, Any],
+    *,
+    access_token: str | None = None,
 ) -> str:
     return (
         await _resolve_platform_model_selection(
             user_id,
             client_model_alias,
             system_config,
+            access_token=access_token,
         )
     ).model_alias
 
@@ -689,13 +693,22 @@ async def _resolve_platform_model_selection(
     user_id: int,
     client_model_alias: str | None,
     system_config: Mapping[str, Any],
+    *,
+    access_token: str | None = None,
 ) -> GatewayModel | str:
     try:
+        catalog_factory = (
+            GatewayModelCatalogClient
+            if access_token is None
+            else lambda _canonical_user_id: GatewayModelCatalogClient(
+                access_token=access_token
+            )
+        )
         return await asyncio.to_thread(
             resolve_platform_model,
             user_id,
             client_model_alias,
-            catalog_client_factory=GatewayModelCatalogClient,
+            catalog_client_factory=catalog_factory,
             system_config_reader=lambda _canonical_user_id: system_config,
         )
     except GatewayInferenceError as exc:
@@ -1078,6 +1091,7 @@ async def claude_agent_stream(
         user_id,
         body.model,
         system_config,
+        access_token=actor.access_token,
     )
     if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
@@ -1199,6 +1213,23 @@ async def claude_agent_stream(
 
     # Construct long-turn owners only after all fallible request preparation.
     # Factory starts active keepers after admission and owns terminal cleanup.
+    gateway_request_id = str(uuid4())
+    try:
+        gateway_runtime = await run_in_threadpool(
+            owner.gateway_runtime,
+            actor,
+            workflow_resolution,
+            gateway_request_id,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or gateway_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
     persistence_request_id = str(uuid4())
     try:
         turn_persistence = await run_in_threadpool(
@@ -1208,6 +1239,7 @@ async def claude_agent_stream(
             persistence_request_id,
         )
     except AdminDataError as exc:
+        await run_in_threadpool(gateway_runtime.close)
         raise HTTPException(
             status_code=exc.status_code,
             detail={
@@ -1227,6 +1259,7 @@ async def claude_agent_stream(
             initial_session_id=editor_session_id,
         )
     except AdminDataError as exc:
+        await run_in_threadpool(gateway_runtime.close)
         await run_in_threadpool(turn_persistence.close)
         raise HTTPException(
             status_code=exc.status_code,
@@ -1250,6 +1283,7 @@ async def claude_agent_stream(
             await run_in_threadpool(turn_persistence.persist_user, actor_id=str(user_id), thread_id=thread_id,
                 parts=resolved_user_parts, message_id=message_id, metadata=message_metadata)
         except AdminDataError as exc:
+            await run_in_threadpool(gateway_runtime.close)
             await run_in_threadpool(turn_persistence.close)
             await run_in_threadpool(editor_runtime.close)
             detail = {"error_code": exc.code, "request_id": exc.request_id, "outcome_unknown": exc.outcome_unknown}
@@ -1266,6 +1300,7 @@ async def claude_agent_stream(
         model_runtime_env=model_runtime_env,
         admin_workflow_resolution=workflow_resolution,
         admin_turn_persistence=turn_persistence,
+        admin_gateway_runtime=gateway_runtime,
         admin_editor_runtime=editor_runtime,
         admin_deck_chat_context=admin_deck_chat_context,
         max_turns=body.max_turns,

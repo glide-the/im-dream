@@ -1,6 +1,7 @@
 # [Input] Public Story guidance route, Registry115 result DTO and exact Admin turn-owner composition.
 # [Output] Preserved 202/error/replay/dispatch behavior plus complete production database fences.
 # [Pos] Provider-free Story Workspace guidance contract test.
+# [Sync] 2026-09-16: require OAuth model selection and gateway-cli owner injection before Runtime scheduling.
 # [Sync] 2026-09-16: require Workflow/Deck/persistence owner injection before Runtime scheduling.
 # [Sync] 2026-09-15: replace the retired SQLite persistence harness with Admin DTO and Dream Runtime seams.
 from __future__ import annotations
@@ -86,7 +87,7 @@ class RecordingDispatcher:
 
     def __call__(self, *args):
         self.calls.append(args)
-        args[0].persistence.close()
+        args[0].close()
         return self.delivered
 
 
@@ -98,9 +99,24 @@ class FakePersistence:
         self.close_calls += 1
 
 
+class FakeGateway:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
 class FakeTurnOwner:
     def __init__(self) -> None:
         self.persistence = FakePersistence()
+        self.gateway = FakeGateway()
+
+    def close(self) -> None:
+        try:
+            self.gateway.close()
+        finally:
+            self.persistence.close()
 
 
 class FakeRequestAuth:
@@ -148,7 +164,9 @@ def exact_turn_owner() -> guidance_service.StoryWorkspaceGuidanceTurnOwner:
     return guidance_service.StoryWorkspaceGuidanceTurnOwner(
         workflow=AdminWorkflowResolution(ACTOR_ID, THREAD_ID, turn_context()),
         persistence=FakePersistence(),  # type: ignore[arg-type]
+        gateway=FakeGateway(),  # type: ignore[arg-type]
         deck=deck_resolution(),
+        model_alias="dream-balanced",
     )
 
 
@@ -317,6 +335,7 @@ def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkey
         def __init__(self):
             self.workflow_calls = []
             self.persistence_calls = []
+            self.gateway_calls = []
 
         def workflow_context(self, actor, thread_id, request_id):
             self.workflow_calls.append((actor, thread_id, request_id))
@@ -325,6 +344,10 @@ def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkey
         def turn_persistence(self, actor, resolution, request_id):
             self.persistence_calls.append((actor, resolution, request_id))
             return persistence
+
+        def gateway_runtime(self, actor, resolution, request_id):
+            self.gateway_calls.append((actor, resolution, request_id))
+            return gateway
 
     class DeckData:
         def __init__(self, client, *, canonical_user_id):
@@ -341,6 +364,7 @@ def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkey
             return deck_resolution()
 
     request_auth = RequestAuth()
+    gateway = FakeGateway()
     actor = AdminRequestActor(
         "subject",
         ACTOR_ID,
@@ -351,6 +375,11 @@ def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkey
         "oauth",
     )
     monkeypatch.setattr(guidance_service, "AdminDeckChatContextData", DeckData)
+    monkeypatch.setattr(
+        guidance_service,
+        "resolve_platform_model_alias",
+        lambda *_args, **_kwargs: "dream-balanced",
+    )
     owner = asyncio.run(guidance_service.prepare_guidance_turn_owner(
         request_auth=request_auth,  # type: ignore[arg-type]
         actor=actor,
@@ -359,9 +388,12 @@ def test_prepare_turn_owner_uses_exact_workflow_deck_and_persistence_dtos(monkey
     ))
     assert owner.workflow is workflow
     assert owner.persistence is persistence
+    assert owner.gateway is gateway
     assert owner.deck == deck_resolution()
+    assert owner.model_alias == "dream-balanced"
     assert request_auth.workflow_calls[0][0:2] == (actor, THREAD_ID)
     assert request_auth.persistence_calls[0][0:2] == (actor, workflow)
+    assert request_auth.gateway_calls[0][0:2] == (actor, workflow)
 
 
 def test_dispatcher_closes_unused_owner_when_thread_is_running(monkeypatch):
@@ -385,6 +417,7 @@ def test_dispatcher_closes_unused_owner_when_thread_is_running(monkeypatch):
     )
     assert delivered is False
     assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+    assert owner.gateway.close_calls == 1  # type: ignore[attr-defined]
 
 
 def test_dispatcher_injects_exact_owner_and_closes_after_the_turn(monkeypatch):
@@ -412,11 +445,6 @@ def test_dispatcher_injects_exact_owner_and_closes_after_the_turn(monkeypatch):
         "agent_factory.claude_agent_thread_factory",
         factory,
     )
-    monkeypatch.setattr(
-        "services.admin_gateway.resolve_platform_model_alias",
-        lambda actor_id: "dream-balanced" if actor_id == ACTOR_ID else None,
-    )
-
     async def scenario():
         delivered = guidance_service.build_thread_turn_dispatcher()(
             owner,
@@ -434,10 +462,12 @@ def test_dispatcher_injects_exact_owner_and_closes_after_the_turn(monkeypatch):
     request = factory.requests[0]
     assert request.admin_workflow_resolution is owner.workflow
     assert request.admin_turn_persistence is owner.persistence
+    assert request.admin_gateway_runtime is owner.gateway
     assert request.admin_deck_chat_context is owner.deck
     assert request.thread_id == THREAD_ID
     assert request.user_id == ACTOR_ID
     assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+    assert owner.gateway.close_calls == 1  # type: ignore[attr-defined]
 
 
 def test_dispatcher_closes_owner_when_runtime_request_setup_fails(monkeypatch):
@@ -448,14 +478,10 @@ def test_dispatcher_closes_owner_when_runtime_request_setup_fails(monkeypatch):
         factory,
     )
 
-    def fail_model(_actor_id):
-        raise RuntimeError("model unavailable")
-
-    monkeypatch.setattr(
-        "services.admin_gateway.resolve_platform_model_alias",
-        fail_model,
+    factory.session_snapshot = lambda _thread_id: (_ for _ in ()).throw(
+        RuntimeError("runtime unavailable")
     )
-    with pytest.raises(RuntimeError, match="model unavailable"):
+    with pytest.raises(RuntimeError, match="runtime unavailable"):
         guidance_service.build_thread_turn_dispatcher()(
             owner,
             RUN_ID,
@@ -464,6 +490,7 @@ def test_dispatcher_closes_owner_when_runtime_request_setup_fails(monkeypatch):
             {"kind": "story-workspace-guidance"},
         )
     assert owner.persistence.close_calls == 1  # type: ignore[attr-defined]
+    assert owner.gateway.close_calls == 1  # type: ignore[attr-defined]
 
 
 def test_turn_owner_rejects_a_different_run_before_runtime():

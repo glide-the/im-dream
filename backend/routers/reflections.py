@@ -310,6 +310,7 @@ async def _start_worker(task_id: str, owner: AdminRequestAuth) -> None:
             worker=_reflections_worker(owner),
             client=owner.client,
             session_broker_settings=owner.session_broker_settings,
+            runtime_http_config=owner.runtime_http_config,
         )
     except AdminDataError as exc:
         raise HTTPException(

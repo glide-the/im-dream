@@ -4,6 +4,7 @@
 # [Output] Provide ClaudeAgentThreadFactory, build_session_id
 #          to HTTP route handlers in server.py.
 # [Pos] factory-entry node in backend/claude_agent
+# [Sync] 2026-09-16: own Admin gateway-cli renewal and cleanup with each turn.
 # [Sync] 2026-09-15: start server-only grant renewal under the existing turn owner and drain its separate Phase 4 cleanup.
 # [Sync] 2026-09-15: start active Editor brokers after admission and drain every turn owner in Phase 4.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/thread_factory.py.
@@ -462,6 +463,8 @@ class ClaudeAgentThreadFactory:
             admission_lease = self._admission.try_acquire(session_id)
             if request.admin_turn_persistence is not None:
                 request.admin_turn_persistence.start()
+            if request.admin_gateway_runtime is not None:
+                request.admin_gateway_runtime.start()
             if request.admin_editor_runtime is not None and (
                 request.editor_state is not None or state.editor_state is not None
             ):
@@ -609,6 +612,12 @@ class ClaudeAgentThreadFactory:
                 cleanup_task = asyncio.create_task(asyncio.to_thread(request.admin_turn_persistence.close),
                     name=f"claude-agent-persistence-close-{session_id}")
                 self._track_owned_task(self._phase4_tasks, cleanup_task)
+            if request.admin_gateway_runtime is not None:
+                gateway_cleanup_task = asyncio.create_task(
+                    asyncio.to_thread(request.admin_gateway_runtime.close),
+                    name=f"claude-agent-gateway-runtime-close-{session_id}",
+                )
+                self._track_owned_task(self._phase4_tasks, gateway_cleanup_task)
             if request.admin_editor_runtime is not None:
                 editor_cleanup_task = asyncio.create_task(
                     asyncio.to_thread(request.admin_editor_runtime.close),

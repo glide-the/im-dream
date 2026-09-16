@@ -226,10 +226,12 @@ class AgentRunOptions:
     # context processing; when a plain string is provided the runner wraps it
     # in a single text block.
     user_message: Union[str, list[dict[str, Any]]]
-    # Canonical PostgreSQL users.id bound by the authenticated Dream session.
-    # Required when the Admin Gateway Claude canary is enabled; never accepted
-    # from a browser header or model payload.
+    # Canonical user ID remains runtime context; it is not a Gateway credential.
     canonical_user_id: Optional[str] = None
+    # Admin-issued opaque grant bound to the exact user, Thread/Run and
+    # gateway-cli scopes. The service key and OAuth access token stay outside
+    # the Claude subprocess.
+    gateway_access_token: Optional[str] = field(default=None, repr=False)
     # Server-derived stable key that correlates one persisted Dream message
     # with exactly one Admin Gateway settlement. Never accept the raw header
     # value from a browser request.

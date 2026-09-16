@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: create Admin-owned gateway-cli grants for public Agent turns.
 # [Sync] 2026-09-16: register Registry185-191 Story Workspace Artifact operations.
 # [Sync] 2026-09-16: register Registry175-184 including service-only builtin reconciliation.
 # [Sync] 2026-09-16: register Registry170-174 Deck Plugin control operations.
@@ -56,6 +57,7 @@ from .jwt_verifier import AdminJWTVerifier
 from .profile_data import AdminProfileData, CURRENT_PROFILE, UserProfileDTO
 from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT
 from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO, RuntimeHttpConfig
+from .gateway_runtime import AdminGatewayRuntime
 from .editor_runtime import AdminEditorRuntime
 from .session_projection_broker import SessionProjectionBrokerSettings
 from .turn_persistence import AdminTurnPersistence
@@ -269,6 +271,43 @@ class AdminRequestAuth:
             session_broker_settings=self._session_broker_settings,
         )
 
+    def gateway_runtime(
+        self,
+        actor: AdminRequestActor,
+        resolution: AdminWorkflowResolution,
+        request_id: str,
+    ) -> AdminGatewayRuntime:
+        """Create one Admin-issued, entity-bound Gateway credential owner."""
+
+        required = {"messages:create", "messages:count_tokens", "models:list"}
+        if not required <= actor.scopes:
+            raise AdminDataError("INSUFFICIENT_SCOPE", 403, request_id)
+        context = resolution.context_for(
+            actor_id=actor.canonical_user_id,
+            thread_id=resolution.thread_id,
+        )
+        requested = DelegationCreateInputDTO(
+            purpose="gateway-cli",
+            thread_id=resolution.thread_id,
+            run_id=context.workflow_run_id if context is not None else None,
+            editor_session_id=None,
+            scopes=["messages:create", "messages:count_tokens", "models:list"],
+        )
+        try:
+            grant = self._delegations.create(
+                requested,
+                access_token=actor.access_token,
+                request_id=request_id,
+            )
+        except AdminDataError:
+            with self._lock:
+                self._capabilities_ready = False
+            raise
+        return AdminGatewayRuntime(
+            grant,
+            AdminRuntimeClient(self._runtime_http_config),
+        )
+
     def reflections_data(self) -> AdminReflectionsData:
         contracts = self._reflection_task_contracts
         if contracts is None:
@@ -284,6 +323,10 @@ class AdminRequestAuth:
     @property
     def session_broker_settings(self) -> SessionProjectionBrokerSettings:
         return self._session_broker_settings
+
+    @property
+    def runtime_http_config(self) -> RuntimeHttpConfig:
+        return self._runtime_http_config
 
     def story_workspace_confirmation_worker(
         self,

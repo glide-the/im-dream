@@ -1,13 +1,14 @@
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Settings route section, existing resource/plugin managers, and the Work-owned Deck management surface.
-// [Output] Existing Settings shell with one Work category plus single-heading Notion and Claude MCP detail surfaces.
+// [Output] Settings shell with route-aware search, one Work category plus single-heading Notion and Claude MCP detail surfaces.
 // [Pos] Canonical Story Workspace Settings page and Work workbench route surface.
 // [Sync] 2026-08-17: localize the complete Settings shell and Work surface; render one locale at a time.
 // [Sync] 2026-08-20: host the actor-owned Claude MCP detail projection beside the Notion detail page.
 // [Sync] 2026-08-29: let the Notion detail own its sole h1 and long-page hierarchy instead of wrapping it in a duplicate SettingsSection header.
 // [Sync] 2026-08-31: constrain connector details to Work / Resources so stale
 //                    detail state cannot override another Settings category.
+// [Sync] 2026-09-16: search the complete Settings route index, including Work tabs and MCP/Notion aliases.
 /* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
@@ -24,6 +25,10 @@ import { API_BASE } from '../../lib/apiBase';
 import type { StoryWorkspaceStaticRoute } from '../../router/storyWorkspacePath';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
 import { StoryWorkspaceSubscriptionPage } from './StoryWorkspaceSubscriptionPage';
+import {
+  filterStoryWorkspaceSettingsNavigation,
+  STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS,
+} from './storyWorkspaceSettingsSearch';
 import './StoryWorkspaceSettingsPage.css';
 
 export type StoryWorkspaceSettingsSection =
@@ -71,6 +76,7 @@ interface SettingsNavItem {
   label: string;
   icon: typeof FaCog;
   path: string;
+  searchKeys: readonly string[];
 }
 
 const THEME_OPTIONS: { mode: ThemeMode; labelKey: string; Icon: typeof IconSun }[] = [
@@ -164,14 +170,6 @@ export function StoryWorkspaceSettingsPage({
 }: StoryWorkspaceSettingsPageProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
-  const navItems = useMemo<SettingsNavItem[]>(() => [
-    { id: 'settings', label: t('settings.workspace.navigation.general'), icon: FaCog, path: '/story-workspace/settings' },
-    { id: 'settings-subscription', label: t('settings.workspace.navigation.subscription'), icon: FaCoins, path: '/story-workspace/subscription' },
-    { id: 'settings-work', label: t('settings.workspace.navigation.work'), icon: FaBriefcase, path: '/story-workspace/settings/work' },
-    { id: 'settings-model', label: t('settings.workspace.navigation.model'), icon: FaRobot, path: '/story-workspace/settings/model' },
-    { id: 'settings-about', label: t('settings.workspace.navigation.about'), icon: FaInfoCircle, path: '/story-workspace/settings/about' },
-  ], [t]);
-  const filteredNavItems = navItems.filter((item) => item.label.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const isWorkSection = activeSection === 'settings-work'
     || activeSection === 'settings-resources'
     || activeSection === 'settings-plugins';
@@ -182,6 +180,53 @@ export function StoryWorkspaceSettingsPage({
     { id: 'resources' as const, label: t('settings.workspace.work.tabs.resources'), icon: FaDatabase },
     { id: 'plugins' as const, label: t('settings.workspace.work.tabs.plugins'), icon: FaPuzzlePiece },
   ];
+  const navItems = useMemo<SettingsNavItem[]>(() => [
+    {
+      id: 'settings', label: t('settings.workspace.navigation.general'), icon: FaCog,
+      path: '/story-workspace/settings',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS.settings, t('settings.workspace.navigation.general'), t('settings.workspace.general.description'), t('settings.workspace.languageLabel'), t('settings.workspace.theme.label'), t('settings.workspace.energy.label')],
+    },
+    {
+      id: 'settings-subscription', label: t('settings.workspace.navigation.subscription'), icon: FaCoins,
+      path: '/story-workspace/subscription',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-subscription'], t('settings.workspace.navigation.subscription')],
+    },
+    {
+      id: 'settings-work', label: t('settings.workspace.navigation.work'), icon: FaBriefcase,
+      path: '/story-workspace/settings/work',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-work'], t('settings.workspace.navigation.work'), t('settings.workspace.work.tabs.deck'), t('settings.workspace.work.description')],
+    },
+    {
+      id: 'settings-model', label: t('settings.workspace.navigation.model'), icon: FaRobot,
+      path: '/story-workspace/settings/model',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-model'], t('settings.workspace.navigation.model'), t('settings.workspace.model.title'), t('settings.workspace.model.description')],
+    },
+    {
+      id: 'settings-about', label: t('settings.workspace.navigation.about'), icon: FaInfoCircle,
+      path: '/story-workspace/settings/about',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-about'], t('settings.workspace.navigation.about'), t('settings.workspace.about.title'), t('settings.workspace.about.description')],
+    },
+  ], [t]);
+  const searchableNavItems = useMemo<SettingsNavItem[]>(() => [
+    ...navItems.map(item => item.id === 'settings-work' ? {
+      ...item,
+      label: `${item.label} · ${t('settings.workspace.work.tabs.deck')}`,
+    } : item),
+    {
+      id: 'settings-resources', label: t('settings.workspace.work.tabs.resources'), icon: FaDatabase,
+      path: '/story-workspace/settings/work?tab=resources',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-resources'], t('settings.workspace.work.tabs.resources')],
+    },
+    {
+      id: 'settings-plugins', label: t('settings.workspace.work.tabs.plugins'), icon: FaPuzzlePiece,
+      path: '/story-workspace/settings/work?tab=plugins',
+      searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-plugins'], t('settings.workspace.work.tabs.plugins')],
+    },
+  ], [navItems, t]);
+  const hasSearch = searchQuery.trim().length > 0;
+  const filteredNavItems = hasSearch
+    ? filterStoryWorkspaceSettingsNavigation(searchableNavItems, searchQuery)
+    : navItems;
 
   const workPanel = workTab === 'resources' ? (
     <ConnectorSettingsSection
@@ -340,7 +385,12 @@ export function StoryWorkspaceSettingsPage({
           <span className="story-workspace-settings__nav-group">{t('settings.workspace.personal')}</span>
           {filteredNavItems.map((item) => {
             const Icon = item.icon;
-            const selected = item.id === activeSection || (item.id === 'settings-work' && isWorkSection);
+            const selected = hasSearch
+              ? item.id === activeSection
+                || (item.id === 'settings-work' && isWorkSection && workTab === 'deck')
+                || (item.id === 'settings-resources' && isWorkSection && workTab === 'resources')
+                || (item.id === 'settings-plugins' && isWorkSection && workTab === 'plugins')
+              : item.id === activeSection || (item.id === 'settings-work' && isWorkSection);
             return (
               <button
                 aria-current={selected ? 'page' : undefined}

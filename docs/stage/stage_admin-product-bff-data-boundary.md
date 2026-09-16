@@ -1,9 +1,14 @@
 <!-- [Input] Current Admin-authenticated Dream Product routes, Product API JWT contract and legacy Dream PostgreSQL identity lookup. -->
 <!-- [Output] Executable plan and receipt for removing Product BFF database access while retaining Admin Product authority. -->
 <!-- [Pos] Cross-project database-access closure stage; Product policy and persistence remain in Admin. -->
-<!-- [Sync] 2026-09-16: plan the Product BFF PostgreSQL closure before implementation. -->
+<!-- [Sync] 2026-09-16: preserve the original PostgreSQL-closure receipt; the later OAuth-forwarding stage supersedes its retained HS256 signer. -->
 
 # Product BFF 数据边界收敛
+
+> 历史阶段说明：本文件保留当时“先关闭 Dream PostgreSQL”的原始计划与回执。
+> 当前认证方案见 `stage_admin-product-oauth-forwarding.md`：Dream 已进一步删除 Product
+> HS256 签发器，Admin OAuth access token 是唯一用户委托凭据。下文“保留 Product JWT”
+> 仅描述该历史阶段，不能作为现行实现规范。
 
 ## Optimized Prompt
 

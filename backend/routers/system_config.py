@@ -57,7 +57,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 
 from services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient
-from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.system_config_data import (
     AdminSystemConfigData,
     SystemConfigGetInputDTO,
@@ -85,9 +85,6 @@ _SERVER_CONTROLLED_ENV_KEYS = frozenset(
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "OPENAI_BASE_URL",
         "INK_ADMIN_PRODUCT_API_BASE_URL",
-        "INK_ADMIN_PRODUCT_JWT_ISSUER",
-        "INK_ADMIN_PRODUCT_JWT_AUDIENCE",
-        "INK_ADMIN_PRODUCT_CLIENT_ID",
         "INK_ADMIN_PRODUCT_ORIGIN",
         "INK_GATEWAY_BASE_URL",
         "INK_GATEWAY_SERVICE_CLIENT_ID",
@@ -284,8 +281,13 @@ async def put_system_config(
         if not _MODEL_ALIAS_PATTERN.fullmatch(model_alias):
             raise HTTPException(status_code=422, detail="Invalid platform model alias")
         try:
+            actor = current_user.get("_admin_actor")
+            if not isinstance(actor, AdminRequestActor):
+                raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
             catalog = await asyncio.to_thread(
-                GatewayModelCatalogClient(user_id).fetch_catalog
+                GatewayModelCatalogClient(
+                    access_token=actor.access_token,
+                ).fetch_catalog
             )
         except GatewayInferenceError as exc:
             raise _gateway_error(exc) from exc

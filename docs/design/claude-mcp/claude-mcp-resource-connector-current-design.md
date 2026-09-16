@@ -5,6 +5,7 @@
 <!-- [同步] 2026-09-13：保留全部现有 MCP 功能，按通用产品设计原则重写；移除过期实现、CLI 管理流程和旧版本结论。 -->
 <!-- [同步] 2026-09-13：修复前端 discovery 元数据字段适配，同步正常/null/错误流程、最小影响范围和技术回归入口。 -->
 <!-- [同步] 2026-09-15：当前 SDK/Runtime 版本事实更新为 0.2.145/0.1.10。 -->
+<!-- [同步] 2026-09-16：失败/过期 OAuth 可直接 replacement；旧 envelope 保留到新 token 交换成功，并补齐部署端稳定加密 key/callback 合同。 -->
 
 # Claude MCP 资源连接器设计
 
@@ -31,7 +32,7 @@
 - 不新增数据库 schema、Agent 状态机、通用任务中心、平行 MCP 客户端协议或另一套宿主。
 - 不把任意命令、env、cwd 或凭据编辑入口开放给浏览器；stdio 只能选择服务端登记的 profile。
 - 不承诺 MCP 连接、OAuth operation 或 stdio 进程跨后端重启恢复；业务 Thread 历史与协议连接生命周期分别处理。
-- 本轮只改设计文档，不升级版本、重启服务、发布制品或启用新的生产权限。
+- 本轮不改变 MCP scope、远端权限集合或 SDK 协议状态机；只补齐终态重新认证入口、replacement 存储语义和必要部署配置。
 
 ## 3. 概念与规则
 
@@ -58,6 +59,7 @@
 - auth_kind 是后端内部派生值，公开创建/修改表单不接受该字段。新连接或 endpoint/transport 变更先重新探测；不得仅因使用 HTTP 或缺少 token 就引导登录。
 - 当前 discovery 将 credential-required 结果映射为 needs_auth；OAuth metadata、PKCE、state、code exchange 和 refresh 使用 SDK 实现，不另写协议状态机。
 - Server DTO 的 credential_configured/auth_state 表示配置与凭据投影；“连接成功”必须依据 discovery 或本次 Runtime 调用结果，不可从字段存在推断。
+- Dream 后端必须由部署配置提供稳定的 32-byte AES-GCM key、正整数 key version 和与前端 origin 对应的精确 `/oauth/callback`。缺项返回独立 503；密钥不得进入浏览器、日志或普通 DTO。
 - 停用保留配置及已有凭据，但后续 Agent/Node 配置查询排除该连接。退出认证删除本地保存的凭据而保留 Server；不宣称已撤销授权服务器上的授权。移除会删除本地连接及关联数据，不删除远端内容。
 
 ### 3.3 能力发现
@@ -107,9 +109,10 @@ App 使用策略集中在同一组，保留三项选择与保存错误；不增�
 
 ### 4.3 登录、恢复和移除
 
-- needs_auth + required 时允许启动 OAuth，显示进度并打开授权页面；callback 在前端 /oauth/callback 自动交付同一 operation，不要求复制/粘贴完整回调 URL。
+- OAuth Server 在 configured、needs_auth、connected、failed 或 logged_out 终态均可启动独立 OAuth operation；有保存凭据时按钮显示“重新认证”，没有凭据时显示“开始认证”。active/disabled/匿名 Server 不提供该动作。callback 在前端 `/oauth/callback` 自动交付同一 operation，不要求复制/粘贴完整回调 URL。
 - 浏览器仅保存非秘密 operation ID 用于页面恢复；后端重新验证 actor。授权 URL 只用于当前操作，不写持久文档、日志或普通缓存。
 - 活跃状态轮询，终态停止；成功后重新加载配置及缓存优先 inventory。取消只终止该操作和它拥有的 SDK session。
+- replacement operation 使用 fresh SDK TokenStorage 视图，不读取旧 token/client metadata；旧加密 envelope 在取消、超时或协议失败时保持不变，只有新 token 交换成功后才由 Admin repository 的一次 upsert 替换。
 - 后端重启导致 operation 不存在时提示重新认证；已经加密保存的有效凭据仍按正常查询使用，不能宣称恢复了旧 operation。
 - 退出认证不移除 Server；移除涉及本地配置和凭据删除，沿用已有确认，不扩大到其他普通操作。失败保留页面和恢复入口。
 
@@ -126,6 +129,7 @@ App 使用策略集中在同一组，保留三项选择与保存错误；不增�
 | OAuth 启动/等待/交换 | auth_starting → waiting_for_user → exchanging_code | 进度与取消；终态由 SDK discovery 结果决定 |
 | OAuth 成功 | connected | 重新加载 Server 与清单，后续 turn 查询新 credential revision |
 | OAuth 超时/取消/协议错误 | failed + 对应安全错误码 | 结束轮询，不继续使用回调，允许新的独立操作 |
+| 已有凭据不可解密或 discovery 失败 | failed，credential_configured 仍为 true | Runtime fail closed；页面提供“重新认证”，成功交换前不删除旧记录 |
 | 退出认证 | logout 返回 logged_out，后续按数据库重新投影 | 保留配置；对需认证 Server 显示需要重新认证 |
 | 发现失败 | discovery failed/cancelled + error | 保留配置、普通失败文本及其他 Server 结果 |
 | App 不可用/无权限/加载失败 | effective unavailable/disabled 或页面错误 | 不开启未授权交互；同一次普通工具结果继续显示 |
@@ -139,7 +143,8 @@ App 使用策略集中在同一组，保留三项选择与保存错误；不增�
 | Resources UI / claudeMcpApi | 页面、严格 DTO、认证请求、operation 恢复和 App 设置自动保存 |
 | backend/routers/claude_mcp.py | actor、输入校验和错误 HTTP 映射；不直接执行 SQL、CLI 或 MCP 协议 |
 | ClaudeMcpService | 配置授权、CRUD、认证分类、发现协调与 App 连接可用性 |
-| repository.py | actor/workspace 校验、CAS、精确 capability、数据库事务与快照 |
+| repository.py | 严格 Admin DTO 映射、actor/workspace authority、CAS、精确 capability 与 unknown-write receipt 恢复；不含 SQL/ORM/连接池 |
+| Admin Product API / Drizzle Repository | 执行 ownership filter、锁、事务、加密凭据和 discovery snapshot 的数据库持久化 |
 | inventory.py / oauth.py | 标准 MCP SDK session、分页、缓存、取消及 OAuth TokenStorage |
 | crypto.py | AES-256-GCM 凭据加解密，绑定 actor/Server/kind/key/schema version 的 AAD |
 | runtime_snapshot.py | 每个 turn 的一致配置与非秘密 App 资源绑定，工作空间覆盖与过期凭据刷新 |
@@ -347,7 +352,7 @@ sequenceDiagram
 
 ## 10. 影响范围与兼容
 
-初次重写只更新设计说明与目录入口；本次字段修复仅改变前端 discovery DTO 声明和 API 适配器，并补充合同/页面回归。直接影响 Resources 详情页的 Server 名称/版本显示，不改变列表、创建/编辑请求、三种 transport、OAuth、权限、缓存、数据库 schema、Runtime/SDK 或版本。MCP Apps 的 Node-only 连接投影和 Host/Chat 结果不消费该页面字段，不需要全项目重命名。当前兼容组合为 Python SDK 0.2.145、Runtime 0.1.10、CLI compatibility 2.1.241；版本事实以 pyproject/lock/resolver/Docker 与对应发布回执为准，不把兼容输出当作产品功能等价。
+本次变更影响 Settings 搜索入口、Resources 列表/详情的 OAuth 动作、Dream OAuth TokenStorage 与部署配置模板；不改变 Server schema、scope、远端权限、三种 transport、Agent turn/resume/cancel 或 MCP Apps policy。数据库操作仍由 Admin DTO → domain service → Drizzle Repository 执行。当前兼容组合为 Python SDK 0.2.145、Runtime 0.1.10、CLI compatibility 2.1.241；版本事实以 pyproject/lock/resolver/Docker 与对应发布回执为准，不把兼容输出当作产品功能等价。
 
 后续功能变更需评估 Resources 列表/详情、新建编辑、所有 transport、认证 operation/refresh、actor/workspace 授权、Chat 新建/继续/停止/确认、持久历史、MCP Apps/Node 连接及 importer。现有一次性 importer、legacy adapters 和测试保留；它们不是正常业务链路，不恢复旧 CLI 管理流程。
 

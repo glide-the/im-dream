@@ -9,6 +9,7 @@
 #                    Apps projection, and removal of Vite/npm/dist assumptions.
 # [Sync] 2026-09-16: assert exact Admin issuer/resource/BFF projection and no PostgreSQL credential.
 # [Sync] 2026-09-16: prove retired Dream auth/session secrets never enter the projected runtime.
+# [Sync] 2026-09-16: prove the retired Product HS256 signer never enters the projected runtime.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,7 +110,7 @@ if grep -Eq '^(DATABASE_URL|INK_LOAD_DATABASE_URL_FROM_ENV_FILE|INK_DATABASE_ENV
   printf 'Dream runtime retained a PostgreSQL configuration key\n' >&2
   exit 1
 fi
-if grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE)=' "${OUTPUT_ENV}"; then
+if grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|INK_ADMIN_PRODUCT_JWT_SECRET|COOKIE_SECURE|COOKIE_SAMESITE)=' "${OUTPUT_ENV}"; then
   printf 'Dream runtime retained retired authentication authority\n' >&2
   exit 1
 fi

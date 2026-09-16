@@ -3882,7 +3882,7 @@ class ClaudeAgentRunner:
         gateway_model_override = gateway_enabled()
         apply_gateway_sdk_env_to_options(
             sdk_options,
-            opts.canonical_user_id,
+            opts.gateway_access_token,
             gateway_idempotency_key=opts.gateway_idempotency_key,
         )
         apply_notion_cli_env_to_options(

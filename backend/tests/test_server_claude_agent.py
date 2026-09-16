@@ -364,6 +364,7 @@ class _FakeRouteOwner:
         self.client = object()
         self._persistence_factory = persistence_factory or _FakeTurnPersistence
         self.persistences: list[_FakeTurnPersistence] = []
+        self.gateways: list[_FakeClosable] = []
         self.editors: list[_FakeClosable] = []
 
     def workflow_context(self, actor, thread_id, _request_id):
@@ -372,6 +373,11 @@ class _FakeRouteOwner:
     def turn_persistence(self, _actor, _resolution, _request_id):
         owner = self._persistence_factory()
         self.persistences.append(owner)
+        return owner
+
+    def gateway_runtime(self, _actor, _resolution, _request_id):
+        owner = _FakeClosable()
+        self.gateways.append(owner)
         return owner
 
     def editor_runtime(self, _actor, _resolution, _request_id, *, initial_session_id):

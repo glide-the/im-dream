@@ -1,6 +1,7 @@
 # [Input] One Admin-persisted Registry115 dispatch plus current OAuth actor and Registry133 DTO clients.
 # [Output] Exact Workflow/Deck/persistence owner composition and same-Thread Agent Runtime scheduling.
 # [Pos] Dream guidance execution seam; Admin owns authorization, delegation, ORM and persistence.
+# [Sync] 2026-09-16: bind Guidance turns to Admin OAuth catalog and gateway-cli runtime grants.
 # [Sync] 2026-09-16: inject a complete Admin turn owner and remove the last Guidance-triggered database fallback.
 """Story Workspace guidance Runtime dispatcher retained by Dream."""
 
@@ -21,6 +22,15 @@ from services.admin_data.errors import invalid_response
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.workflow_data import AdminWorkflowResolution
+from services.admin_data.gateway_runtime import AdminGatewayRuntime
+from services.admin_data.system_config_data import (
+    AdminSystemConfigData,
+    SystemConfigGetInputDTO,
+)
+from services.admin_gateway import (
+    GatewayModelCatalogClient,
+    resolve_platform_model_alias,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +41,9 @@ class StoryWorkspaceGuidanceTurnOwner:
 
     workflow: AdminWorkflowResolution
     persistence: AdminTurnPersistence
+    gateway: AdminGatewayRuntime
     deck: AdminDeckChatContextResolution
+    model_alias: str
 
     def context_for(self, *, workflow_run_id: str):
         context = self.workflow.context_for(
@@ -46,6 +58,12 @@ class StoryWorkspaceGuidanceTurnOwner:
             voice_id=context.agent_id,
         )
         return context
+
+    def close(self) -> None:
+        try:
+            self.gateway.close()
+        finally:
+            self.persistence.close()
 
 
 GuidanceDispatcher = Callable[
@@ -87,21 +105,45 @@ async def prepare_guidance_turn_owner(
         str(uuid4()),
         access_token=actor.access_token,
     )
+    system_config = AdminSystemConfigData(request_auth.client)
+    model_alias = await asyncio.to_thread(
+        resolve_platform_model_alias,
+        actor.canonical_user_id,
+        catalog_client_factory=lambda _actor_id: GatewayModelCatalogClient(
+            access_token=actor.access_token,
+        ),
+        system_config_reader=lambda _actor_id: system_config.get_user(
+            SystemConfigGetInputDTO(),
+            str(uuid4()),
+            access_token=actor.access_token,
+        ),
+    )
     persistence = await asyncio.to_thread(
         request_auth.turn_persistence,
         actor,
         workflow,
         str(uuid4()),
     )
+    gateway = None
     try:
+        gateway = await asyncio.to_thread(
+            request_auth.gateway_runtime,
+            actor,
+            workflow,
+            str(uuid4()),
+        )
         owner = StoryWorkspaceGuidanceTurnOwner(
             workflow=workflow,
             persistence=persistence,
+            gateway=gateway,
             deck=deck,
+            model_alias=model_alias,
         )
         owner.context_for(workflow_run_id=workflow_run_id)
         return owner
     except BaseException:
+        if gateway is not None:
+            await asyncio.to_thread(gateway.close)
         await asyncio.to_thread(persistence.close)
         raise
 
@@ -124,7 +166,6 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
         try:
             from agent_factory import claude_agent_thread_factory
             from claude_agent.service import ClaudeAgentRunRequest
-            from services.admin_gateway import resolve_platform_model_alias
 
             context = owner.context_for(workflow_run_id=workflow_run_id)
             thread_id = context.thread_id
@@ -137,19 +178,20 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
                     thread_id,
                     message_id,
                 )
-                owner.persistence.close()
+                owner.close()
                 return False
 
             request = ClaudeAgentRunRequest(
                 user_id=str(actor_id),
                 thread_id=thread_id,
                 resume=True,
-                model=resolve_platform_model_alias(actor_id),
+                model=owner.model_alias,
                 message_id=message_id,
                 message_parts=parts,
                 message_metadata=metadata,
                 admin_workflow_resolution=owner.workflow,
                 admin_turn_persistence=owner.persistence,
+                admin_gateway_runtime=owner.gateway,
                 admin_deck_chat_context=owner.deck,
             )
 
@@ -164,14 +206,14 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
                         message_id,
                     )
                 finally:
-                    await asyncio.to_thread(owner.persistence.close)
+                    await asyncio.to_thread(owner.close)
 
             asyncio.create_task(
                 _drain(),
                 name=f"story-workspace-guidance-{thread_id}-{message_id}",
             )
         except BaseException:
-            owner.persistence.close()
+            owner.close()
             raise
         return True
 

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: project the Admin gateway-cli grant into each Agent execution.
 # [Sync] 2026-09-16: route automatic-repair insertion and settlement through the bound Admin owner.
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
 # [Sync] 2026-09-16: load managed MCP only through the current Admin grant or reviewed internal snapshot.
@@ -312,6 +313,7 @@ from services.admin_data.story_workspace_artifact_data import (
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.errors import AdminDataError, configuration_invalid
 from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
+from services.admin_data.gateway_runtime import AdminGatewayRuntime
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
     DreamArtifactTurnHook,
@@ -1428,6 +1430,7 @@ class ClaudeAgentRunRequest:
     # ordinary-Chat null. It is absent from the browser DTO and SDK options.
     admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
+    admin_gateway_runtime: AdminGatewayRuntime | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
     # A reviewed internal dispatcher may supply a detached snapshot when its
     # authority intentionally excludes managed-MCP reads. Public DTOs cannot
@@ -2181,10 +2184,21 @@ class ClaudeAgentService:
             **request.model_runtime_env,
             **dict(self._claude_code_runtime_env_provider()),
         }
+        gateway_runtime = request.admin_gateway_runtime
+        if gateway_runtime is not None and not isinstance(
+            gateway_runtime, AdminGatewayRuntime
+        ):
+            raise ValueError("Invalid Admin Gateway runtime owner")
+        gateway_access_token = (
+            gateway_runtime.access_token()
+            if gateway_runtime is not None
+            else None
+        )
         run_options = AgentRunOptions(
             thread_id=claude_session_id_for_agent,
             user_message=user_message_content,
             canonical_user_id=str(request.user_id),
+            gateway_access_token=gateway_access_token,
             gateway_idempotency_key=(
                 "dream-turn-"
                 + hashlib.sha256(

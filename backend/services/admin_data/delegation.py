@@ -1,6 +1,7 @@
 # [Input] Actual Admin purpose DTOs, published identity capabilities and explicit actor credentials.
 # [Output] Immutable entity grants and bearer-only public actions with original-ID receipt recovery.
 # [Pos] Runtime authorization consumer; server creation and public runtime credentials stay separate.
+# [Sync] 2026-09-16: require source-fenced Reflections Gateway delegation capability.
 # [Sync] 2026-09-15: require the published unified Workflow schema in creation/discovery readiness.
 # [Sync] 2026-09-15: let purpose-grant creation require additional exact operation contracts.
 # [Sync] 2026-09-14: consume four frozen special-route contracts without PG or generic-operation emulation.
@@ -52,6 +53,7 @@ RUNTIME_SCHEMA_REQUIREMENTS = (
     SchemaCapabilityDTO(capability="identity.runtime-delegation.v1", version=1, contract_sha256="1a682e29c2fcfa6d870a64c131773f0fa2ce49866fc56b30f334e07040e79a83"),
     SchemaCapabilityDTO(capability="identity.runtime-purpose.v1", version=1, contract_sha256="20f6c9bf727ac1ecc874c96880de12764a9406b5948c4764f0cfc0a107030447"),
     SchemaCapabilityDTO(capability="dream.schema.unified.v1", version=1, contract_sha256="8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"),
+    SchemaCapabilityDTO(capability="identity.runtime-reflection-authority.v1", version=1, contract_sha256="edaab1b52c9a8791270c729ce5f87b01df6a858cfcd25295b7ab3bdff539402d"),
 )
 
 

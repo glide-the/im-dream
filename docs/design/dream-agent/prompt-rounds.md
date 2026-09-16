@@ -5660,3 +5660,40 @@ JSON 而不编辑 `project.yaml`。
 - 后端 Dream 扩大回归 `214 passed, 3 skipped, 76 subtests passed`；前端 Story Workspace
   扩大回归 `146 passed`；目标 ESLint、TypeScript、production build 与 `git diff --check`
   通过。未执行有头、移动端视觉或生产环境验证。
+
+## 第 124 轮——Admin 签发 Gateway Runtime 委托
+
+**当前轮次目标**
+
+修复统一认证切换后的真实 Agent turn：Dream 不再本地签发 Gateway 用户 JWT，模型目录与
+Claude Code Runtime 改为消费 Admin 签发的用户委托身份，同时保留既有 Thread、SSE、
+turn/resume/cancel、资源 admission、共享文件系统和持久化语义。
+
+**优化后的执行提示词**
+
+> 基于已确认的真实 401、Admin `DelegationService`、`runtime_delegations` typed Drizzle
+> Repository 和 Dream strict DTO client，完成 Gateway 身份链闭环。浏览器模型目录请求使用
+> 当前 Admin OAuth access token 与 server-only Gateway key；Agent turn 在解析 Workflow
+> Thread/Run 后通过 `runtime-delegation.create` 创建 `gateway-cli` 委托，并由既有
+> `RuntimeGrantKeeper` 续期。模型目录和 Claude 子进程只使用该 Admin 签发的 `idg_` bearer；
+> 子进程不得接收 Gateway service key、Dream 自签 HS256 token、任意用户 ID header 或数据库
+> 凭据。未知写入必须沿用 request ID/receipt 恢复，失败时在 SSE 前返回明确业务错误，Admin
+> 不可用时禁止回退。更新 DTO、composition root、文件头、目录文档和认证架构；删除退役签发器
+> 及相应配置。运行 focused unit/contract、完整 backend、前端 build 与真实本机账号的模型目录、
+> Thread message、SSE、Admin 持久化和 Gateway 账本验证，并证明 Dream 仍无 PostgreSQL连接。
+
+**本轮检查或修改范围**
+
+- Dream `services/admin_data/delegation.py`、request owner 与 Gateway catalog/SDK adapter；
+- `ClaudeAgentRunRequest`、ThreadFactory 和 runner 的实体委托生命周期；
+- Gateway models、SystemConfig 与 Claude Agent 路由的 OAuth/委托传递；
+- 相关测试、认证架构、当前验收回执和目录文档。
+
+**本轮完成标准**
+
+- Dream 不再导入或调用本地 Gateway HS256 signer；
+- catalog 使用当前用户授权，Runtime 只拿 Admin `gateway-cli` opaque bearer；
+- grant 绑定 canonical subject、OAuth client、Thread、Run、scope 和有效期并由 Admin ORM事务校验；
+- service key 不进入 Claude 子进程，长 turn 续期/终态关闭保持可验证；
+- 真实模型 turn、SSE、消息/请求/结算可在正常 Admin 查询，Dream 仍无 PostgreSQL连接；
+- 聚焦回归、完整 backend、类型/构建、Markdown 引用与 `git diff --check` 通过。

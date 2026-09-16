@@ -1,6 +1,7 @@
 # [Input] Admin section.begin RTA, worker service consumer and immutable launch snapshot.
 # [Output] Server-only child Thread persistence/config owner with snapshot Session broker and renewal.
 # [Pos] Reflections Agent turn authority; RTA never enters CLI, MCP, env, workspace, logs or public DTOs.
+# [Sync] 2026-09-16: exchange the live RTA for a separate source-fenced Gateway runtime grant.
 # [Sync] 2026-09-15: add exact six-operation RTA composition and original-request write recovery.
 # [Sync] 2026-09-15: make shutdown drain each owner and always attempt RTA revocation.
 """Task/section/Thread-bound persistence for one Reflections child Agent turn."""
@@ -25,9 +26,16 @@ from .chat_models import (
     ThreadSessionInputDTO,
 )
 from .client import AdminDataClient, DomainOperation
+from .delegation import (
+    AdminDelegationCreator,
+    AdminRuntimeClient,
+    DelegationCreateInputDTO,
+    RuntimeHttpConfig,
+)
 from .delegation_keeper import RuntimeRenewalSettings
 from .errors import AdminDataError, invalid_response
 from .models import CommittedReceiptDTO, StrictDTO
+from .gateway_runtime import AdminGatewayRuntime
 from .reflection_task_data import AdminReflectionsWorkerData
 from .reflection_task_models import (
     ReflectionAuthorityDTO,
@@ -327,6 +335,29 @@ class AdminReflectionSectionPersistence(AdminAgentTurnPersistence):
 
     def session_projection_child_env(self) -> dict[str, str]:
         return self._session_broker.child_env()
+
+    def gateway_runtime(
+        self,
+        runtime_http_config: RuntimeHttpConfig,
+        request_id: str,
+    ) -> AdminGatewayRuntime:
+        """Exchange the server-only RTA without projecting it into the child."""
+
+        grant = AdminDelegationCreator(self._client).create(
+            DelegationCreateInputDTO(
+                purpose="gateway-cli",
+                thread_id=self.thread_id,
+                run_id=None,
+                editor_session_id=None,
+                scopes=["messages:create", "messages:count_tokens", "models:list"],
+            ),
+            access_token=self._token(),
+            request_id=request_id,
+        )
+        return AdminGatewayRuntime(
+            grant,
+            AdminRuntimeClient(runtime_http_config),
+        )
 
     def persist_user(
         self,
