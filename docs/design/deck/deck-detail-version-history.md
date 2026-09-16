@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
+<!-- [Sync] 2026-09-17: close Admin producer parity for empty/raw legacy Memory text. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Input] Deck/Agent/plugin form APIs, Admin content-version capability, and CozeLoop commit reference. -->
 <!-- [Output] Create/update/draft/explicit-commit and folded immutable history interaction contract. -->
@@ -41,7 +42,7 @@ default来自原Admin policy；desired是保存的Deck草稿配置，effective�
 
 原owner decimalstring投影为int，nullable/空文本/false/zero与ISO微秒保留。Memory raw text仅复用原[纯helper](../../../backend/voice_projection.py)：非空text json.loads，array/scalar/null皆可，emptytext保留，invalid JSON返回None；float/负零/bigint不经JavaScript重编码。公共JSON不能表达非有限值时安全503，不heal/写库。
 
-**Admin待修正差异**：实际voiceRow对所有非null raw执行JSON.parse，emptytext会转为null，而原Dream pure helper保留emptytext。consumer对empty响应的原行为已技术验证，实际producer修正/正常业务回执前不能声明该legacy值验收完成；同样保留producer对非JSON raw的现有规范化事实。
+Admin Repository不解析或修复该列，按原字节返回nullable/raw text；因此empty text、非法JSON和合法array/scalar都由同一个Dream pure helper执行既有兼容投影。该读取不会回写数据，避免把历史空文本改成null，也不会在Admin的JavaScript层重编码数字。
 
 闭集字段、requirednullable、canonical owner、布尔/安全整数/时间和outer/nested实体漂移均安全503，丢弃上游message。读取timeout返回原UUID/outcome_unknown:false，不retry或fallback。影响公开详情路由、RequestAuth注册、typed aggregate与纯helper提取；原database alias/其它函数保持。
 

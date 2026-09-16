@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: close Deck detail empty-Memory parity through raw Admin Repository projection and unchanged Dream compatibility parsing. -->
 <!-- [Sync] 2026-09-16: select localhost as the single local Dream/Admin browser auth topology and Google callback origin. -->
 <!-- [Sync] 2026-09-17: define client-local logout, retained Admin-origin Dream SSO, and independent Admin management sessions. -->
 <!-- [Sync] 2026-09-17: define Dream as OAuth client, Dream users as delegated subjects, and Admin operators as a separate management domain. -->
@@ -140,7 +141,7 @@ Next同名password/Google/Device/token薄adapter也返回410，login/register在
 
 公开user-preferences.get/save只由当前OAuth用户管理；所有Runtime entity grant不能替代该授权。闭集字段不含body actor/firstlogin/systemconfig；identity/unified exact capabilities与Admin principal继续校验。原NULL partial merge/缺行{}保留，后台context/System/first-login与import仍独立。现行[用户偏好设计](../design/user-preferences-current.md)描述状态与失败，不以该领域扩大Runtime授权。
 
-公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream兼容投影继续把合法JSON解析为原值、保留empty text并把非法JSON映射为null，不在读取时回写修复。无read retry或DB fallback。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
 
 GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../design/deck/deck-detail-version-history.md)。
 

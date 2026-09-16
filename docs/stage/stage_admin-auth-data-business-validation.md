@@ -4,6 +4,7 @@
 <!-- [Sync] 2026-09-16: record runtime configuration projection, build evidence and the remaining normal-database capability gate. -->
 <!-- [Sync] 2026-09-17: record real Codex stream diagnosis, Admin compatibility fix and the remaining allowance gate. -->
 <!-- [Sync] 2026-09-17: record the real Device delegated-user plus rotated Dream service-key Gateway canary. -->
+<!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity and record two-sided regression. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -143,3 +144,9 @@ USER REQUIREMENT:
 首次Luna命令均未收集测试：Admin因sandbox无权写worktree `node_modules/.vite-temp` exit1，Dream因frontend未安装Vitest exit254；两项作为harness失败保留。修正只改变执行器：Admin使用`/private/tmp` Vite cache并保留原setup/alias，实际13文件75/75 exit0；Dream测试本身使用`node:test`，通过已安装tsx ESM loader执行，Luna实际5文件40/40、skip0 exit0。Root先行单独运行未重复的`retired-auth.test.ts`实际13/13、skip0 exit0。合计不能写作一次128项门禁；三个通过回执分别保留。
 
 这些结果覆盖确定性的Admin token/subject/service/session/config/delegation/password边界及Dream PKCE/state/issuer/opaque handle/CSRF/refresh/logout/proxy/legacy410。未连接真实Google、RFC8628 token endpoint、正常本机服务或真实账户，不能据此标记真实认证验收完成。
+
+## Deck detail legacy Memory兼容回执（2026-09-17）
+
+Admin `DeckVoiceRepository`已停止在读取时解析或规范化`memory_workspace_config`，严格DTO按原字节携带nullable/raw text；Dream既有`voice_projection._parse_voice_row`保持唯一产品兼容语义：empty text保留、合法JSON解析、非法非空JSON映射为null。该读取无Dream数据库fallback、无read retry、无写入修复，也没有改变Deck/Voice DTO schema或operation capability。
+
+Admin聚焦2 files/18 tests、完整provider-free 278 files/2106 tests、TypeScript、定向ESLint和production build均exit0；Dream公开Deck detail provider-free路由37 tests exit0。文档5 files相对链接0 missing，两个worktree diff check通过。该回执关闭已知empty-Memory兼容差异；真实账户Deck读取仍归入完整正常业务旅程，不由provider-free测试代替。
