@@ -1210,3 +1210,43 @@ Workflow release详情公开读取200并包含受控source；Workspace installat
 权威设计与当前实现一致。Admin `adminAuthService/adminSessionRepository`只读取`admin_users/admin_sessions/Admin RBAC`；Dream `subjectRepository`只处理`identity.subject_links → public.users/platform_users`。`identity.admin_subject_links`在生产源码中仅由legacy adoption repository锁定后用于检测旧实验冲突，不创建、不参与Admin登录或权限计算。Dream Next与Python服务端使用注册的confidential client执行`client_credentials`并缓存短期service token；用户operation把Dream user bearer放在`Authorization`，另用私有service bearer证明调用应用，输入DTO不携带actor/user ID。Browser/device仍是public client，Dream user仍是delegated subject。
 
 本轮冲突扫描只发现Admin根README仍把Better Auth写成笼统的唯一password/Session authority，已在Admin仓库校正为Dream协议认证与Admin operator独立认证两条边界。认证业务代码无需修改。Workflow 403继续表示当前Dream产品用户没有`plugin:read/plugin:admin`，不能用同邮箱Admin operator Session绕过；后续若执行产品角色或安装变更，必须保持在Dream业务域并走公开DTO、权限、幂等与审计流程。
+
+## 阶段50：Dream账户切换、注销事务与产品权限闭环
+
+### Optimized Prompt
+
+作为Admin认证服务、Dream BFF和Dream产品权限领域负责人，在阶段49身份域设计门禁通过后修复并验证真实业务缺口。已有证据：当前Dream Browser Session属于`z2533736852@gmail.com`，用户指定的真实验收主体是`dmeck@suoxya.com`；Dream通过公开`POST /auth/logout`调用Admin Browser Session revoke时约10秒后返回`BFF_ADMIN_UNAVAILABLE`，handle保持有效；Better Auth OAuth Provider 1.7.4的`/oauth2/revoke`支持`token_endpoint_auth_method=none`的public client，当前请求体包含注册browser `client_id`、refresh token和`refresh_token` hint；Admin operator仍通过独立`admin_users/admin_sessions/RBAC`登录，不能参与Dream注销、登录或Workspace权限。
+
+先从Admin `BrowserSessionService`、`BrowserSessionRepository`、Better Auth 1.7.4源码、内部service-auth handler、Drizzle UOW与真实服务请求时序定位超时。必须验证是否由行锁、嵌套协议处理、连接池、refresh/access token撤销或BFF超时导致；不得通过清除浏览器cookie、直改`identity.browser_sessions`或忽略上游撤销伪造注销。修复采用最小DTO/ORM边界：Dream仍只提交严格handle DTO，Admin Domain Service在typed Repository/Drizzle UOW内完成状态转换，OAuth协议请求保持public client语义；重复注销幂等，协议失败保留handle以便重试，成功时撤销服务器记录并清除BFF cookie。增加能够覆盖Better Auth 1.7.4实际revoke路径和超时/失败恢复的测试，更新受影响文件头、folder contract、认证设计和本阶段回执。
+
+注销恢复后，通过本机正常Dream公开登录入口切换到用户指定的`dmeck@suoxya.com`，使用用户已经授权的本机凭据，不记录或输出密码、Token、handle、CSRF或secret。验证`/auth/session`和公开profile映射到该Dream canonical user，且不会创建/关联Admin operator；核对该用户真实Allowance、Dream产品角色、`plugin:read/plugin:admin`和Workspace/instance管理入口。若缺少产品管理能力，先审查现有`public.users.role`、scope/permission投影和Admin公开管理DTO，设计并实现明确的跨域管理动作：Admin operator可以经独立RBAC、严格Zod DTO、Domain Service、typed Repository和Drizzle事务管理Dream产品角色/权限，但不得合并身份、复制密码或让Admin Session直接访问Dream实体。Dream API只消费用户token中的产品授权结果。
+
+正常流程覆盖注销、凭据登录、OAuth consent、返回原页面、profile读取和产品权限；失败流程覆盖撤销超时、重复注销、错误handle、账户禁用、错误client/resource/scope和权限不足。保持Google/Device协议、Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、资源策略LKG、共享文件系统、sandbox和`.claude-tmp`不变。验证命令包括Admin focused Vitest、Dream Next auth tests、Dream Python请求认证与Deck Plugin权限测试、lint/typecheck/build、Markdown引用和`git diff --check`，随后仅通过正常公开入口执行真实账户切换与Workflow权限复核。任何真实Run/模型调用必须在账户和合法Workflow都满足后另行按既有生产状态机执行。
+
+### Optional Enhancers
+
+- 若真实撤销耗时由Provider实现决定，记录安全的分段耗时和事务边界，不记录请求体或任何凭据。
+- 若Dream产品角色管理需要新契约，采用expand → capability/API双版本兼容 → backfill/validate → contract，不在Dream保留数据库回退。
+
+### 阶段50真实登录业务影响简报
+
+| 概念/事实 | Source of truth | 写入/同步责任 | 可见消费者 | 本轮影响 |
+| --- | --- | --- | --- | --- |
+| Dream 产品主体 | `identity.user → identity.subject_links → public.users` | Admin Better Auth 与显式 credential adoption | Dream `/auth/session`、profile、产品页面 | 从无 Better Auth 映射变为关联原 canonical user；不新建业务用户 |
+| Admin operator | `admin_users → admin_sessions → Admin RBAC` | Admin 独立管理认证 | Admin 后台 | 必须保持不变；Dream 登录不得创建 membership/session/RBAC |
+| Project / Episode / canonical artifact | 共享 workspace canonical files | Dream Agent 与成功 Hook | Story/Execution 页面 | out of scope；登录验收不启动 Agent、不改文件 |
+| Run-private publication / shared Thread | `.dream/runtime/runs/**` 与 Chat Thread | Dream Runtime | Agent、SSE、业务页面 | out of scope；不创建 Run/Thread，不调用模型 |
+| OAuth 浏览器客户端 | Admin OAuth Provider registration/grant | Admin 协议端，Dream BFF 消费 | Dream 浏览器 Session | 完成 credential 登录、PKCE/consent/return，并保持 token 不进入浏览器存储 |
+| 产品权限与 Allowance | Admin 数据服务的 actor-scoped DTO | Admin typed Repository/Drizzle | Dream 设置与 Workflow surfaces | 只读核验；不得用 Admin operator 冒充或绕过 Dream 权限 |
+
+正常路径为原登录卡片 → 浏览器精确 Origin 调用 Admin credential ingress → Better Auth Session → Dream `/auth/start` PKCE → consent/redirect → BFF handle → `/auth/session` 与 profile。失败路径保留安全产品错误，不在 URL、日志、页面或测试回执记录密码、Token、cookie、handle、CSRF 或 secret。Project、Episode、Agent Runtime、SSE、资源策略 LKG、共享文件系统和 `.claude-tmp` 均不得发生业务变化。
+
+### 阶段50实现与真实业务回执
+
+Admin已增加发布期 legacy Dream credential adoption：严格私有DTO固定正常数据库物理目标、canonical user ID、用途证据与inspect源指纹；领域服务稳定派生opaque Better Auth IDs，typed Drizzle Repository在同一事务锁定源/目标并创建identity user、credential account、subject link与脱敏audit。调用方不能选择identity/Admin ID、邮箱、SQL、表列或事务；原Dream bcrypt与canonical业务主键保持，`public.users`不修改，`admin_users/admin_sessions/RBAC/admin_subject_links`均不进入采用路径。inspect、dry-run、显式approved apply与重放全部exit0，重放为`already-complete`。正常库只读事务核对canonical/identity/credential/subject各1、Admin link 0，并确认同邮箱Admin operator仍为独立记录。
+
+Dream原登录/注册/Google产品卡片已恢复。页面先从同源`/auth/options`读取由服务端配置投影的两个Admin action；浏览器使用credentialed CORS直接向Admin提交闭集表单，Dream Next/Python不接收密码。Admin只允许精确Dream Origin、相对return和固定字段，调用同一个Better Auth password/social协议后返回安全`next_url`。之后仍走现有Dream BFF PKCE、consent、callback、opaque handle与公开session，不向浏览器投影OAuth token。
+
+Chrome真实旅程从未登录页看到`Welcome Back`、Google、Email、Password、Login与Register，提交指定Dream凭据后到Admin consent，允许后返回`/story-workspace/chat`；用户菜单显示指定Dream账户和既有历史。Dream Next实际记录`/auth/session` 200、多项公开产品读取200；Admin实际记录token、browser-session resolve与`user-profile.current` 200。未启动Agent/模型/Workflow，未改Project/Episode/shared FS。设置搜索已有完整route-derived静态索引，独立Luna复核搜索4/4、Next auth handler10/10、TypeScript exit0；无需重复业务改动。
+
+真实注销在正常服务重启恢复后再次通过公开产品入口执行：Dream `POST /auth/logout` 返回200，Admin `POST /api/internal/dream/v1/browser-sessions/revoke` 在1秒内返回200；随后受保护请求返回401，页面恢复原`Welcome Back`登录卡片。先前约10秒的`BFF_ADMIN_UNAVAILABLE`发生在旧服务/配置切换状态，清洁启动Admin并重启Dream backend后没有复现；本轮没有为掩盖该harness瞬态制造注销业务改动，也没有用清Cookie、直改数据库或忽略撤销替代真实成功。重启后`client_credentials`、capability与领域operation调用均恢复200，Dream注销仍只关闭当前Browser handle/refresh lineage，不影响Admin独立管理Session或中央Better Auth SSO语义。

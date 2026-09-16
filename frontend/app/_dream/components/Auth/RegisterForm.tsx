@@ -1,17 +1,14 @@
-// [Input] Existing Dream authentication surface and Admin-owned login/register flow.
-// [Output] Reusable public authorization entry with full-page PKCE return.
-// [Pos] RegisterForm import boundary; email/signup/Google choices remain on Admin.
-// [Sync] 2026-09-14: delegate the sole auth UI without collecting credentials in Dream.
-// [Sync] 2026-09-16: retain the callback-compatible props without an unused binding.
+// [Input] Existing Dream registration callbacks and the shared Admin-submitting product form.
+// [Output] Restored Dream registration card with optional display name, password and Google choices.
+// [Pos] RegisterForm import boundary; account creation, Session and token authority remain Admin-owned.
+// [Sync] 2026-09-17: restore the original registration interaction on the Admin form-entry contract.
 import AuthEntry from './AuthEntry';
 
 interface RegisterFormProps {
-  // Existing callers retain their navigation callbacks; OAuth completion returns
-  // through BFF and reloads the canonical page rather than invoking local login.
   onSuccess: () => void;
   onSwitchToLogin: () => void;
 }
 export default function RegisterForm(props: RegisterFormProps) {
-  void props;
-  return <AuthEntry />;
+  void props.onSuccess;
+  return <AuthEntry mode="register" onSwitch={props.onSwitchToLogin} />;
 }

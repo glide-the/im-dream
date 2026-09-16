@@ -1,6 +1,8 @@
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
+<!-- [Sync] 2026-09-17: record exact legacy Dream credential adoption and successful canonical-account login without Admin membership. -->
+<!-- [Sync] 2026-09-17: restore the Dream product login card as browser-to-Admin form ingress before PKCE. -->
 <!-- [Sync] 2026-09-17: freeze OAuth roles before further business changes; Dream applications are clients while Dream users remain delegated product subjects. -->
 <!-- [Sync] 2026-09-17: record client-local Dream logout and retained central SSO without Admin-session crossover. -->
 <!-- [Sync] 2026-09-17: separate Admin operator sessions from Dream OAuth subjects and model Dream browser/device/service as OAuth clients. -->
@@ -71,7 +73,7 @@ Dream 访问数据库的接口实现保持 strict Pydantic DTO → Admin Zod DTO
 | Dream/Admin 同邮箱、密码不同 | Dream 登录按自己的 Google/credential 证据处理 | Admin 登录按自己的 scrypt hash 处理；两者可以同时有效 |
 | 任一侧禁用 | 只影响该业务域 | 不传播禁用状态到另一业务域 |
 
-本机指定验收账户在两个业务域中同邮箱、旧 hash 不同。当前 Google adoption 已建立 Better Auth user/account 与 Dream subject link，并且没有修改 Admin member。修正后的验收口令只匹配 Dream canonical user；它提交到 Admin 管理登录时返回 `401` 是预期结果。Admin 是否可登录只取决于独立 Admin 凭据，不需要、也不能通过合并 Dream user 解决。
+本机指定验收账户原先只有 canonical Dream user，没有 legacy Google provider-sub，也没有 Better Auth identity。发布期 credential adoption 已按 canonical ID 和源行指纹建立 Better Auth user、credential account 与 Dream subject link，保留原 Dream bcrypt 和业务主键，并确认没有 Admin subject link 或 membership。该 Dream 凭据只用于 Dream 登录；提交到 Admin 管理登录时返回 `401` 是预期结果。Admin 是否可登录只取决于独立 `admin_users` 凭据，不需要、也不能通过合并 Dream user 解决。
 
 业务修改前的本轮设计审查已通过：Admin 独立登录/guard 不读取 Dream subject link；Dream 登录与 Device Flow 不创建 Admin Session；service token 的 `sub` 是 confidential `client_id`，用户 token 的 `sub` 是 Dream identity subject；用户接口要求双 Bearer；相同邮箱只触发显式采用/冲突检查。后续只有发现实际调用违反这些边界时才修改认证业务，不能为了“客户端模式”把 Dream user 改成 client。
 
@@ -247,12 +249,27 @@ sequenceDiagram
     participant D as Admin Dream DTO API
     participant P as Dream Python Resource Server
 
+    U->>B: 打开原Dream登录卡片
+    B-->>U: /auth/options投影配置的Admin action
+    alt 邮箱密码或注册
+      U->>A: POST /auth/dream/password (exact Origin, relative return)
+      A->>I: Better Auth校验已有credential；新注册才创建Dream identity与canonical主体
+      A->>I: 创建Dream identity Session
+      A-->>U: 303 Dream /auth/start?return_to=/原页面
+    else Google
+      U->>A: POST /auth/dream/google (exact Origin, relative return)
+      A-->>U: Google authorization (prompt=select_account)
+      U->>G: 选择账户并授权外部身份
+      G-->>A: Admin callback code
+      A->>I: 关联account；检查/建立显式主体映射；创建Session
+      A-->>U: 303 Dream /auth/start?return_to=/原页面
+    end
     U->>B: GET /auth/start?return_to=/原页面
     B->>B: 生成 state/nonce/PKCE，保存加密 HttpOnly transaction
     B-->>U: 303 Admin /oauth2/authorize
     U->>A: client_id + redirect_uri + resource + scope + PKCE
     A->>I: ORM读取注册client/resource/redirect/scope
-    alt 未有 Dream identity Session
+    alt Session缺失或失效
       A-->>U: Admin 登录页
       U->>A: 密码登录或 Google
       opt Google
@@ -286,7 +303,7 @@ sequenceDiagram
     end
 ```
 
-浏览器不能读取 access/refresh token。Dream BFF 不签发用户 token；Python 只验证 Admin OAuth access token，也不能把 Google token或 OIDC ID token当作 Dream API 凭据。
+Dream渲染的表单由浏览器handler构造闭集请求并直接发送到Admin；Dream Next/Python不接收或持久化密码。浏览器不能读取 access/refresh token。Dream BFF 不签发用户 token；Python 只验证 Admin OAuth access token，也不能把 Google token或 OIDC ID token当作 Dream API 凭据。
 
 ## 7. Admin 后台独立登录与权限隔离
 

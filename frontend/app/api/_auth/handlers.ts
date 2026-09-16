@@ -1,7 +1,7 @@
 // [Input] Same-origin browser requests, the private login boundary and Admin DTO transport.
-// [Output] Actual PKCE login/session/logout handlers exposing only opaque cookies and public user/CSRF.
+// [Output] Actual PKCE login/session/logout handlers plus configured Admin form actions, exposing no credential or token.
 // [Pos] Server BFF product boundary shared by thin Next auth Route Handlers.
-// [Sync] 2026-09-14: preserve original transaction recovery and keep OAuth credentials server-only.
+// [Sync] 2026-09-17: project Admin form actions while preserving recovery and server-only OAuth credentials.
 import { randomUUID } from 'node:crypto';
 import { AdminBffClient, adminBffConfig } from './admin-client.ts';
 import { BffBoundaryError, BffLoginBoundary } from './login-boundary.ts';
@@ -17,6 +17,15 @@ export function bffFailure(error: unknown): Response {
 
 export function createBffHandlers(boundary: BffLoginBoundary, admin: AdminBffClient) {
   return {
+    async options(request: Request): Promise<Response> {
+      try {
+        boundary.requireRequestOrigin(request);
+        return json({
+          password_action: new URL('/auth/dream/password', admin.origin).href,
+          google_action: new URL('/auth/dream/google', admin.origin).href,
+        });
+      } catch (error) { return bffFailure(error); }
+    },
     async device(request: Request): Promise<Response> {
       try {
         boundary.requireRequestOrigin(request);

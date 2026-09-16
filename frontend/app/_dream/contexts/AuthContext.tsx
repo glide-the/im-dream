@@ -1,7 +1,7 @@
-// [Input] Same-origin BFF session/profile, in-memory CSRF and Admin PKCE login entry.
+// [Input] Same-origin BFF session/profile, in-memory CSRF and Admin-submitting Dream login forms.
 // [Output] React public user/authentication state with success-only logout and safe failure feedback.
 // [Pos] Browser auth context; Admin/Dream servers own all OAuth credentials.
-// [Sync] 2026-09-14: retire local OAuth storage/fragments/renewal and use the sole Admin login/register UI.
+// [Sync] 2026-09-17: let restored Dream forms submit directly to Admin while keeping browser state token-free.
 // [Sync] 2026-09-15: commit only the current Browser owner snapshot after asynchronous session loading.
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -12,7 +12,6 @@ interface AuthContextType {
   user: BrowserUser | null;
   isLoading: boolean;
   authError: string | null;
-  login: () => void;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -37,15 +36,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => abort.abort();
   }, []);
 
-  const login = () => {
-    const returnTo = window.location.pathname + window.location.search;
-    window.location.assign('/auth/start?return_to=' + encodeURIComponent(returnTo));
-  };
   const logout = async () => {
     try { await revokeBrowserSession(); setUser(null); setAuthError(null); }
     catch { setAuthError('Unable to log out. Please try again.'); }
   };
-  return <AuthContext.Provider value={{ user, isLoading, authError, login, logout, isAuthenticated: user !== null }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, isLoading, authError, logout, isAuthenticated: user !== null }}>{children}</AuthContext.Provider>;
 }
 
 // This hook shares the private provider context and exports no credential state.

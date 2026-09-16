@@ -1,7 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
-// [Sync] 2026-09-17: verify confidential-client tokens replace static custom service headers.
+// [Sync] 2026-09-17: verify configured Admin form actions and confidential-client transport.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AdminBffClient, adminBffConfig } from './admin-client.ts';
@@ -58,6 +58,22 @@ test('start discovers exact registered client and creates encrypted original PKC
   assert.equal(calls.length, 1); assert.equal(calls[0].headers.get('authorization'), 'Bearer service.access.token');
   assert.match(response.headers.get('set-cookie')!, /HttpOnly; SameSite=Lax/);
   assert.ok(!response.headers.get('set-cookie')!.includes(transaction.code_verifier));
+});
+
+test('options exposes only configured Admin browser form actions to the exact Dream origin', async () => {
+  const { handlers, calls } = fixture();
+  const response = await handlers.options(new Request(publicOrigin + '/auth/options'));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    password_action: adminOrigin + '/auth/dream/password',
+    google_action: adminOrigin + '/auth/dream/google',
+  });
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(calls.length, 0);
+
+  const denied = await handlers.options(new Request('https://other.example/auth/options'));
+  assert.equal(denied.status, 403);
+  assert.equal(calls.length, 0);
 });
 
 test('callback preserves request/transaction identity and only changes cookies after successful exchange', async () => {

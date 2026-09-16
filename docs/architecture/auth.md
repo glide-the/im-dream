@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-09-17: record exact legacy Dream credential adoption without Admin-user merging. -->
+<!-- [Sync] 2026-09-17: restore the Dream login/register/Google card through direct Admin form actions before PKCE. -->
 <!-- [Sync] 2026-09-17: close Deck detail empty-Memory parity through raw Admin Repository projection and unchanged Dream compatibility parsing. -->
 <!-- [Sync] 2026-09-16: select localhost as the single local Dream/Admin browser auth topology and Google callback origin. -->
 <!-- [Sync] 2026-09-17: define client-local logout, retained Admin-origin Dream SSO, and independent Admin management sessions. -->
@@ -64,10 +66,13 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 | --- | --- | --- |
 | Google身份认证 | Admin Better Auth校验state/code/OIDC与稳定provider subject | 登录页说明失败；Dream不签token |
 | 用户映射 | Admin保留users.id与业务FK，仅显式校验的关联流程绑定已有账户 | 同邮箱不自动合并；冲突返回明确错误 |
-| BFF登录 | Next发起code+PKCE；callback校验一次性state、code、固定redirect URI与PKCE | 拒绝缺失/重放/开放redirect，清该次登录状态 |
+| 产品登录入口 | Dream渲染原邮箱/密码/注册/Google卡片；浏览器按`/auth/options`直接POST Admin exact-origin action，Dream服务端不接收密码 | 未配置、错误Origin/return或Admin不可用时显示安全反馈；不回退旧Dream认证 |
+| BFF登录 | Admin建立Dream identity Session后返回Next `/auth/start`发起code+PKCE；callback校验一次性state、code、固定redirect URI与PKCE | 拒绝缺失/重放/开放redirect，清该次登录状态 |
 | BFF会话 | Dream host-only HttpOnly opaque handle；tokens存服务端；Admin session只属Admin origin | 撤销/过期重新登录；服务故障保留可恢复状态 |
 | Dream API | 成熟JWT/JWKS库验证签名、闭集算法、issuer/audience、时间、subject与scope | 无效/过期/错误资源为401；scope不足403 |
 | Admin领域数据 | 独立service credential+用户access token或限定后台授权；Admin检查实体归属 | service不能凭body/header任意user_id改actor |
+
+本机已有 Dream credential 兼容使用 Admin 发布期专用操作：私有 DTO 固定正常数据库物理目标、canonical Dream user ID、用途证据和 inspect 得到的源行指纹；Admin 服务端派生 Better Auth subject/account ID，在一个 typed Drizzle 事务内原样保存旧 Dream bcrypt 到 `identity.account(providerId='credential')` 并建立 `identity.subject_links`。该操作不修改 `public.users`，不读取或复制 `admin_users` 密码，不创建 `admin_sessions`、RBAC 或 `identity.admin_subject_links`；部分目标、邮箱冲突、Admin link 或源指纹变化全部失败。运行时登录只验证已经建立的 credential，不按邮箱临时合并。
 | Admin管理 | `admin_users/admin_sessions/RBAC`独立管理认证与权限校验 | Dream identity、邮箱、scope和subject link均不授予管理能力 |
 | Dream service client | confidential client使用`client_credentials`取得限定background scope；用户调用继续传用户delegated token | service token不能推导canonical user或访问任意用户数据 |
 
@@ -77,7 +82,7 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 
 ### 浏览器主拓扑与配置
 
-主拓扑：Dream同源BFF + PKCE → Admin OAuth authorization → Admin Google/login → Dream callback。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
+主拓扑：Dream渲染登录卡片 → 浏览器直接提交Admin受限表单 → Admin Better Auth密码/注册或Google callback建立Dream identity Session → 返回Dream同源BFF `/auth/start` → Admin OAuth authorization/code+PKCE → Dream callback。Dream浏览器handler只构造发往Admin的闭集表单请求，Dream Next/Python不接收密码；action只由服务端配置投影，Admin只接受精确Dream Origin和相对return。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
 
 server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin，不相信任意forwarded header。BFF mutation校验origin/CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
@@ -121,7 +126,7 @@ Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实�
 
 ## 当前旧入口与外部协议边界
 
-`/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Browser由Next `/auth/start/callback/session/logout`执行既有PKCE/handle流程，密码、注册和Google功能在Admin唯一UI。
+`/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；这些旧Dream服务入口不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Dream React只渲染表单，浏览器按Next `/auth/options`直接提交Admin `/auth/dream/password|google`；Next `/auth/start/callback/session/logout`继续执行PKCE/handle流程，密码校验、账户创建、Google callback和Session均由Admin唯一承担。
 
 Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway与Editor purpose grant已经使用各自的显式服务用途，不恢复旧subject登录authority。
 
