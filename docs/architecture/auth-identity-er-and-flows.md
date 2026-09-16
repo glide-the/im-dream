@@ -1,6 +1,7 @@
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
+<!-- [Sync] 2026-09-17: record client-local Dream logout and retained central SSO without Admin-session crossover. -->
 <!-- [Sync] 2026-09-17: separate Admin operator sessions from Dream OAuth subjects and model Dream browser/device/service as OAuth clients. -->
 <!-- [Sync] 2026-09-16: document the unified identity model, conflict handling and browser/Admin/device flows. -->
 
@@ -328,6 +329,7 @@ sequenceDiagram
 | Admin 密码错误或 member inactive | Admin 401 | 不查询 Dream user，不创建 Session |
 | OAuth client/redirect/resource/scope 未注册 | 协议错误 | 不签 code/token |
 | handle 过期、撤销或 refresh replay | 401，需要重新登录 | token bundle不返回浏览器 |
+| 当前Dream browser退出 | 撤销该client的refresh grant/lineage与BFF handle，清Dream cookie | 中央Dream SSO、其他client与Admin管理Session不变；再次登录可在中央Session有效时直接返回 |
 | canonical user 或 billing projection disabled | 产品访问拒绝 | 不接受客户端 user ID 绕过 |
 | Admin DTO/数据库不可用 | 明确 503/504 | Dream 不回退 PostgreSQL |
 

@@ -2,6 +2,7 @@
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
 <!-- [Sync] 2026-09-17: record read-only normal desired/effective resource-policy and fresh observer/LKG parity. -->
+<!-- [Sync] 2026-09-17: record real Chrome Dream logout, client-local revocation, same-subject SSO re-entry and Admin-login isolation. -->
 <!-- [Sync] 2026-09-17: preserve the Chrome control preflight failure and focused 27-test logout/session technical receipt. -->
 <!-- [Sync] 2026-09-17: record corrective normal Admin ACL activation and public Notion service-token DTO/ORM validation. -->
 <!-- [Sync] 2026-09-17: record independent Admin-session implementation, confidential service OAuth and current deterministic results. -->
@@ -207,9 +208,11 @@ Notion后台同步候选使用Dream confidential OAuth client的`client_credenti
 
 ### 2026-09-17 Dream退出与Session失效续验
 
-真实浏览器场景先明确Project、Episode、Thread、文件、Runtime和资源策略全部保持不变，只允许撤销当前Dream browser handle并重新建立同一canonical user会话。现有Chrome从Settings公开“Back to app”成功导航到`/story-workspace/dream`，随后浏览器控制通道连续三次在读取页面状态时超时；失败发生在任何退出按钮或`POST /auth/logout`之前，因此没有撤销Session、清除cookie、修改业务数据或触发重新登录。该结果归类为harness前置失败，不是产品缺陷；真实退出、旧handle失效和重新登录仍为未执行。
+真实浏览器场景先明确Project、Episode、Thread、文件、Runtime和资源策略全部保持不变，只允许撤销当前Dream browser handle并重新建立同一canonical user会话。第一次Chrome控制通道在任何退出动作前连续三次超时，未产生会话变更；该harness前置失败保留，不计为产品缺陷。重置控制通道并复用本机Chrome后，正常Story Workspace公开页面显示现有Dream产品主体；打开用户菜单点击`Logout`，页面切换到`Log in or create an account`，受保护历史不再展示，证明当前BFF handle/cookie已关闭。
 
-不依赖浏览器状态的生产代码合同随后重跑：在Dream `frontend`执行`node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts`，exit `0`，27 tests全部通过、0失败、0跳过。覆盖Origin/CSRF、Admin revoke失败时保留handle、严格成功回执后清cookie、401清会话、依赖503保留已确认快照、并发/过期读取不能复活会话，以及confidential service token与用户token分离。该技术回执不能替代真实Chrome退出和重新登录。
+不依赖浏览器状态的生产代码合同随后重跑：在Dream `frontend`执行`node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts`，exit `0`，27 tests全部通过、0失败、0跳过。覆盖Origin/CSRF、Admin revoke失败时保留handle、严格成功回执后清cookie、401清会话、依赖503保留已确认快照、并发/过期读取不能复活会话，以及confidential service token与用户token分离。
+
+退出后从同一公开Dream登录入口点击`Continue`。Admin origin的Dream Better Auth SSO Session仍有效，因此无需再次输入密码或选择Google账户，code/PKCE流程自动返回Story Workspace；用户菜单再次显示与退出前相同的Dream产品主体，原历史恢复可读。该结果确认退出范围是当前Dream browser client的refresh grant/lineage与BFF handle，不是中央SSO或其他客户端的全局退出。随后同一Chrome profile打开`http://localhost:3000/admin`，仍停留在独立“登录运营控制台”页面，没有进入dashboard；Dream SSO与重新登录均未创建Admin `admin_sessions`或授予RBAC。自然等待中央Session或handle TTL到期尚未执行，27项确定性测试已覆盖401/过期/refresh失败后的关闭行为。
 
 ### 2026-09-17 正常资源策略 desired/effective/LKG 只读验收
 

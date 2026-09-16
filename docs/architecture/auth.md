@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-16: select localhost as the single local Dream/Admin browser auth topology and Google callback origin. -->
+<!-- [Sync] 2026-09-17: define client-local logout, retained Admin-origin Dream SSO, and independent Admin management sessions. -->
 <!-- [Sync] 2026-09-17: define Dream as OAuth client, Dream users as delegated subjects, and Admin operators as a separate management domain. -->
 <!-- [Sync] 2026-09-16: FastAPI retires SessionMiddleware and scrubs legacy Dream auth/session secrets; Next BFF remains the only Dream browser-session owner. -->
 <!-- [Sync] 2026-09-16: Agent-type clear/Runtime plan/prepare use current Admin OAuth and Registry127-129. -->
@@ -105,7 +106,7 @@ Next服务端使用Admin OAuth refresh grant，对同handle并发refresh做单�
 
 ## 正常流程、状态与失败反馈
 
-未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout先等Admin成功撤销才清本BFF handle，失败保留会话并提示，不增加重复确认。
+未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout先等Admin成功撤销当前Dream browser client的refresh grant/lineage和BFF handle，成功后清Dream cookie，失败保留会话并提示，不增加重复确认。该动作不结束Admin origin上用于Dream OAuth授权页的Better Auth SSO Session，也不影响其他browser/device client；中央Session仍有效时，再次登录可以直接完成code/PKCE并返回。Admin管理`admin_sessions`始终独立，Dream退出和SSO均不授予或撤销Admin管理权限。
 
 Browser唯一owner保存strict immutable公开session snapshot，并从该snapshot导出内存CSRF。每个session读取取得当前read object identity，fetch/JSON await或catch后检查identity与AbortSignal；aborted/superseded返回null且不修改状态，旧401/失败不能清除新session或覆盖错误。clear与logout开始使已有read失效；logout失败保留已验证snapshot，strict success才清除并使期间pending读取失效。AuthContext在then提交前同时检查未abort与returned snapshot仍属当前owner，避免已返回但随后被clear/新session替换的user被再次显示。该规则只处理Browser异步状态，不修改服务端handle/refresh或MCP OAuth。
 
