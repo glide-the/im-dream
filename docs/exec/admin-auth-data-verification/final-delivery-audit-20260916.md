@@ -1,6 +1,7 @@
 <!-- [Input] Exact Admin/Dream heads, four published baseline releases, current contracts, CI receipts and private cutover preflight state. -->
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
+<!-- [Sync] 2026-09-17: record normal resource-policy desired/effective/revision/LKG and fresh observer parity. -->
 <!-- [Sync] 2026-09-17: record focused logout/session regression and the real-Chrome harness boundary before any logout mutation. -->
 <!-- [Sync] 2026-09-17: bind the audit to Admin f79a099 / Dream 2df9d9b4, the corrective normal ACL activation and the public Notion DTO/ORM read. -->
 <!-- [Sync] 2026-09-17: record independent Admin sessions, confidential service OAuth, complete deterministic suites and the remaining real-acceptance boundary. -->
@@ -14,7 +15,7 @@
 
 ## 结论边界
 
-源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 64 个，受限角色/ACL、9项发布门槛 capability、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。Device允许、拒绝、token兑换、Dream Resource Server调用、refresh rotation、旧refresh重放、独立主动revoke、重复device兑换和真实access expiry已经通过。Product 本地 signer 已退休，Gateway key exact Runtime scopes 已通过 DTO/Service/Drizzle rotation 修复。MCP replacement 已完成并由正常页面复用持久化凭据返回 41/25/10 inventory；两次真实文件上传、授权读取和 Thread workspace 边界通过。认证业务域评审后的代码已把Admin管理登录恢复为独立`admin_users/admin_sessions/RBAC`，并把Dream服务身份改为confidential OAuth client：后台只用`client_credentials`，用户数据请求同时携带服务token和Dream用户委托token，旧静态service头被拒绝。正常ACL已补齐Admin credential、Session、audit与RBAC所需权限，同时继续拒绝Admin角色读取Dream业务表和旧`identity.admin_subject_links`。Notion后台读取也已通过公开`client_credentials`入口验证严格DTO投影。两种页面模型调用均被正常账户的当前周期 Token 额度以 `402` 拒绝，因此可见模型回复、Run/Thread继续/取消和SSE终态仍未完成；Admin真实后台登录还需现有Admin自身有效凭据，退出/Session失效仍待执行。本审计不能用于宣称整项任务完成。
+源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 64 个，受限角色/ACL、9项发布门槛 capability、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。Device允许、拒绝、token兑换、Dream Resource Server调用、refresh rotation、旧refresh重放、独立主动revoke、重复device兑换和真实access expiry已经通过。Product 本地 signer 已退休，Gateway key exact Runtime scopes 已通过 DTO/Service/Drizzle rotation 修复。MCP replacement 已完成并由正常页面复用持久化凭据返回 41/25/10 inventory；两次真实文件上传、授权读取和 Thread workspace 边界通过。认证业务域评审后的代码已把Admin管理登录恢复为独立`admin_users/admin_sessions/RBAC`，并把Dream服务身份改为confidential OAuth client：后台只用`client_credentials`，用户数据请求同时携带服务token和Dream用户委托token，旧静态service头被拒绝。正常ACL已补齐Admin credential、Session、audit与RBAC所需权限，同时继续拒绝Admin角色读取Dream业务表和旧`identity.admin_subject_links`。Notion后台读取也已通过公开`client_credentials`入口验证严格DTO投影；正常资源策略desired与Dream observer effective/revision/effort、新鲜心跳和精确内存组合已只读对齐。两种页面模型调用均被正常账户的当前周期 Token 额度以 `402` 拒绝，因此可见模型回复、Run/Thread继续/取消和SSE终态仍未完成；Admin真实后台登录还需现有Admin自身有效凭据，退出/Session失效仍待执行。本审计不能用于宣称整项任务完成。
 
 实现快照与审查入口：
 
@@ -99,6 +100,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | Admin正常ACL修正与实际角色探针 | Admin `f79a099` + 本机正常 `ink-memory:54329` | exit `0`；物理备份与manifest均`0600`，dry/apply/repeat通过；64 migrations、8个激活门禁 capability、144条策略、Gateway binding与四角色probe通过；AUTH可读credential并写Session/audit，仍不能读Dream表或旧Admin subject link |
 | Notion后台DTO/ORM公开读取 | Admin `f79a099` + 正常OAuth/Data API | exit `0`；Repository/Service 17/17、tsc、ESLint通过；公开`client_credentials` token为`200`，`notion.sync-candidates.list`为`200`并返回1个connector，响应没有`*_json`存储字段 |
 | Dream退出/Session焦点回归 | Dream `frontend` | `node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts` exit `0`；27/27通过，覆盖CSRF、revoke失败保留、成功后清cookie、401/503及并发旧读取不能复活会话；真实Chrome在退出前控制通道超时，未产生会话变更 |
+| 正常资源策略/LKG只读验收 | Dream生产Admin client + 正常Admin/PostgreSQL | exit `0`；公开desired为configured revision 4；最新Observer心跳约0.23秒，applied revision、四项effective、effort与desired一致，required-headroom精确，queue dropped为0；未改desired或触发turn |
 | Dream [Frontend CI 35112741361](https://github.com/glide-the/im-dream/actions/runs/35112741361) | GitHub / Dream `4018aabd` | exit `0`；1m10s，frozen pnpm install与Next production build通过 |
 | Dream [Backend CI 35112741412](https://github.com/glide-the/im-dream/actions/runs/35112741412) | GitHub / Dream `4018aabd` | exit `0`；13m51s，生产 Docker image dry-run通过 |
 | Dream BFF/部署焦点 | 本机 Dream `4018aabd` | exit `0`；BFF boundary、Remote SSH env projection、`git diff --check`通过 |
@@ -133,7 +135,7 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Device批准/拒绝/pending/slow_down/过期/兑换/refresh/revoke | 实际create、pending、slow_down及4类负例通过 | **允许、拒绝、兑换、refresh rotation、旧refresh重放、重复兑换、独立主动revoke与真实access expiry已通过** |
 | JWT签名/issuer/audience/expiry/kid/scope/revoke | scalar与真实Better Auth数组、错误resource/额外audience/签名/issuer/expiry/kid/scope deterministic contracts通过 | **真实设备JWT访问Dream及到期后401已通过；refresh family/revoke不伪装为既发JWT即时失效** |
 | Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过；Gateway exact Runtime scopes已rotation | **历史读取、两条新Thread与用户消息持久化、MCP replacement已通过；两种模型均因额度返回402，assistant输出、继续、取消与SSE终态未通过** |
-| 资源策略与LKG | 单元/集成合同通过 | **未执行** |
+| 资源策略与LKG | 单元/集成合同通过 | **正常公开desired与运行中Observer快照只读对齐：revision 4、四项effective、effort、精确内存组合与新鲜心跳均通过；未修改desired或触发turn** |
 | 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同通过 | **两次上传、登录读取、未登录401、workspace hash/path/symlink与临时目录权限已通过；模型读取结果受额度阻塞，真实metadata故障注入未执行** |
 | Admin不可用/超时/拒绝/capability缺失/unknown write | 故障合同通过 | **未执行正常服务故障注入** |
 | 数据持久化及Admin后台可见性 | 正常数据库/服务已激活，OAuth catalog已持久化 | **两条Thread、用户消息和Gateway失败回执已正常持久化；独立Admin Session实现和正常ACL均已激活，公开登录由原权限500恢复为明确401；成功后台登录仍需有效Admin自身凭据** |
@@ -151,9 +153,9 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Google OAuth、Device Flow、接口、迁移、时序与交互文档 | **已证明源码/文档存在** |
 | Admin 191 operations、Drizzle 64 migrations、9 capabilities | **已证明隔离、CI与正常数据库通过** |
 | Dream 全生产数据库入口关闭 | **已证明静态、测试与当前正常进程运行边界通过** |
-| Runtime/SSE/LKG/共享文件系统语义 | **已证明确定性回归通过** |
+| Runtime/SSE/LKG/共享文件系统语义 | **LKG与共享文件系统已证明正常运行边界；Runtime/SSE状态机确定性回归通过，真实模型终态仍受402阻塞** |
 | 正常数据库 migration/ACL/config/service 切换 | **本机命名正常目标已执行并只读复核；其他部署目标未宣称完成** |
 | 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回、Device完整状态、MCP replacement、文件上传/授权读取/workspace边界及Thread消息持久化通过；模型输出/继续/取消/SSE受额度402阻塞，Admin登录运行路径与ACL已修复但缺有效独立Admin凭据，真实Session退出在任何撤销前受Chrome harness阻塞** |
 | 整项任务完成 | **不成立；保持 active** |
 
-剩余顺序为：取得有效Admin自身凭据后复核独立后台成功登录/退出/Session失效 → 由正常Dream账户补足当前周期 Token 额度 → 真实模型文件读取回复、Run/Thread/SSE继续与取消 → metadata故障恢复和资源策略LKG。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库，也不把Admin与Dream业务用户合并。
+剩余顺序为：恢复Chrome harness后完成Dream真实退出/旧handle失效/重新登录 → 取得有效Admin自身凭据后复核独立后台成功登录/退出/Session失效 → 由正常Dream账户补足当前周期 Token 额度 → 真实模型文件读取回复、Run/Thread/SSE继续与取消 → metadata故障恢复。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库，也不把Admin与Dream业务用户合并。

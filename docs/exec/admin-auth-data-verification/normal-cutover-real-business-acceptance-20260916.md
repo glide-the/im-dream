@@ -1,6 +1,7 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-17: record read-only normal desired/effective resource-policy and fresh observer/LKG parity. -->
 <!-- [Sync] 2026-09-17: preserve the Chrome control preflight failure and focused 27-test logout/session technical receipt. -->
 <!-- [Sync] 2026-09-17: record corrective normal Admin ACL activation and public Notion service-token DTO/ORM validation. -->
 <!-- [Sync] 2026-09-17: record independent Admin-session implementation, confidential service OAuth and current deterministic results. -->
@@ -209,3 +210,9 @@ Notion后台同步候选使用Dream confidential OAuth client的`client_credenti
 真实浏览器场景先明确Project、Episode、Thread、文件、Runtime和资源策略全部保持不变，只允许撤销当前Dream browser handle并重新建立同一canonical user会话。现有Chrome从Settings公开“Back to app”成功导航到`/story-workspace/dream`，随后浏览器控制通道连续三次在读取页面状态时超时；失败发生在任何退出按钮或`POST /auth/logout`之前，因此没有撤销Session、清除cookie、修改业务数据或触发重新登录。该结果归类为harness前置失败，不是产品缺陷；真实退出、旧handle失效和重新登录仍为未执行。
 
 不依赖浏览器状态的生产代码合同随后重跑：在Dream `frontend`执行`node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts`，exit `0`，27 tests全部通过、0失败、0跳过。覆盖Origin/CSRF、Admin revoke失败时保留handle、严格成功回执后清cookie、401清会话、依赖503保留已确认快照、并发/过期读取不能复活会话，以及confidential service token与用户token分离。该技术回执不能替代真实Chrome退出和重新登录。
+
+### 2026-09-17 正常资源策略 desired/effective/LKG 只读验收
+
+使用Dream生产`AdminResourceData`和confidential service OAuth从正常Admin公开`resource-policy.read`读取desired，再用owner只读查询核对正常`claude_agent_resource_snapshots`中运行中Dream进程发布的最新Observer DTO。没有直接修改数据库、desired或运行配置，也没有启动Agent turn。命令在Dream工作分支以`PYTHONPATH=backend backend/.venv/bin/python`执行，exit `0`。
+
+公开operation返回`configured` revision 4；desired四项值为并发2、run memory 416 MiB、reserve 128 MiB、retry 60秒，effort为`low`。最新正常Observer心跳年龄约0.23秒，`policy_status=applied`，revision、四项effective和effort全部与desired一致；`required_headroom_bytes=(416+128)×1,048,576`精确成立，effective version为64字符SHA-256。数据库当前保留41个实例快照；最新pipeline包含历史write error计数，但当前心跳新鲜、queue dropped为0，未使LKG回滚或传播到turn。该结果证明正常后台refresh/observer路径正在运行，且Agent turn主路径没有为本检查新增远程查询。
