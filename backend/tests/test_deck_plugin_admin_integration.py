@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from services.admin_data.deck_plugin_control_data import (
 )
 from services.admin_data.request_auth import AdminRequestActor
 from services.deck.admin_gateway import DeckPluginAdminService
+from services.deck import builtin_plugin as builtin_plugin_module
 from services.deck.builtin_plugin import (
     BUILTIN_CLAUDE_PLUGIN_ID,
     BUILTIN_DECK_PLUGIN_ID,
@@ -124,6 +126,14 @@ def test_gateway_verifies_server_published_bytes_before_admin_apply():
     assert evidence.artifact_digest == plugin_artifact_digest()
     assert evidence.materialized_digest == evidence.artifact_digest
     assert evidence.has_manifest is True
+
+
+def test_builtin_plugin_source_has_no_release_persistence_path():
+    source = Path(builtin_plugin_module.__file__).read_text(encoding="utf-8")
+    assert "db.execute" not in source
+    assert "deck_plugin_releases" not in source
+    assert "deck_runtime_plugin_locks" not in source
+    assert "seed_builtin_deck_plugin" not in source
 
 
 class FakeGateway:
