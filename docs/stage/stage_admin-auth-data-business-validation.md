@@ -91,6 +91,7 @@ schema 分离需 catalog/ACL 和 Drizzle 前向 migration 实证；新 `dream.op
 - Admin worktree使用正常`.env.local`中的受限`DREAM_DATA_DATABASE_URL`执行参数化只读查询，exit0，`public.chat_thread`精确返回1行、ID匹配且标题匹配；命令未打印DSN、用户ID、Token或正文。这是Admin持久化补充证据，业务写入本身只经过公开Dream生产入口。
 - 刷新正常订阅公开页面后仍显示总额100,000、已消费16、当前可用24,978，和已知75,006未知用量预留一致。没有修改Allowance、账本或模型上限。
 - 现有唯一Deck `86512acd-abc9-44d1-af72-ea5a60af225d`的公开plugin-binding读取返回200、revision0、binding null；因此本轮没有修改既有Deck配置来伪造Workflow Run。真实Preflight/Run create/read/cancel仍是独立待验收项。
+- 使用合法格式但不存在的ID调用公开Run GET、Run cancel与Preflight GET均返回404。Run GET/cancel按既有`WORKFLOW_RUN_ROUTE_ERRORS`产品兼容映射返回`AGENT_EXECUTION_FAILED`，Preflight返回`WORKFLOW_PERMISSION_DENIED`；当前源码和回归测试明确冻结该映射，因此不是运行版本漂移。该负向回执证明公开身份/capability/DTO路径启用，但不能替代成功Run。
 2026-09-16 初始启动检查确认 `3000`、`5173`、`8765` 与正常 `54329` 均未监听；随后本轮拥有的 Admin `pnpm dev` 启动 `3000` 与正常内嵌 PostgreSQL `54329`，用于只读状态探测。Docker daemon 未运行，但 Compose `config --quiet` 不依赖 daemon 且已用于配置渲染。Admin 主仓库配置将 `/Users/dmeck/project/ink-admin-memory/.ink-memory/postgres` 定义为正常数据目录。监听于 `51534` 的数据库是此前具名隔离 migration harness，不能用于真实验收，也不属于本轮清理范围。
 
 ### 真实业务执行概念与影响简报（2026-09-16）
