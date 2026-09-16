@@ -1,3 +1,7 @@
+# [Input] Turn-owned Admin Run projection, host-bound actor/thread/run IDs, and strict tool DTOs.
+# [Output] CAS-protected Dream protocol file writes with one bounded public failure.
+# [Pos] Story Workspace stdio child; Admin owns data access and Dream owns shared filesystem writes.
+# [Sync] 2026-09-16: remove the stale re-entry service import so the child cannot load local persistence modules.
 """Controlled MCP handlers for Story Workspace Dream runtime writes.
 
 The Claude Agent supplies only the target run, stage payload, and CAS revision.
@@ -21,9 +25,6 @@ from models.workflow_run import WorkflowRun
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamFileWriter,
     WorkflowRun as DreamFileWorkflowRun,
-)
-from services.story_workspace.dream_reentry_service import (
-    StoryWorkspaceDreamReentryService,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamRunToolInput,

@@ -101,3 +101,5 @@ Dream没有新增SQL、migration或Admin接口；Admin仍用已发布Zod DTO、S
 - Markdown与diff：最终提交范围的9个受影响Markdown检查27个本地链接，**missing=0**；随后`git diff --check` **exit 0**。
 
 当前剩余11个实际生产数据库import文件已在本阶段的源码门禁输出中逐项列明。因此本阶段的Story Workspace stdio入口技术验证完成，但Dream全域数据库关闭和真实账户/模型业务验收仍未完成。
+
+> [Sync] 2026-09-16: 后续全域复查发现 `story_workspace_tool.py` 仍保留一个未使用的 `StoryWorkspaceDreamReentryService` import。它没有参与工具调用，但会在 stdio child 启动时加载旧数据库模块。当前修正删除该 import 并加入文件头；工具继续只通过 turn broker 取得 Admin Run DTO，原有 CAS、路径、文件与失败语义不变。
