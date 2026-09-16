@@ -1,24 +1,59 @@
-"""Deck Agent type capability derivation and binding-history tests.
-
-[Sync 2026-08-16] Assert list DTO decoration includes exact active version facts.
-"""
+# [Input] Published Deck manifest facts and a provider-free binding projection fixture.
+# [Output] Chat/Dream mapping and exact active runtime-version decoration.
+# [Pos] Pure Agent-type policy test; binding CAS/UOW belongs to Admin Registry122-129.
+# [Sync] 2026-09-16: remove dependency on the retired Dream SQLite binding fixture.
+"""Deck Agent-type capability derivation and projection tests."""
 
 from __future__ import annotations
 
-import asyncio
 from copy import deepcopy
-from pathlib import Path
-import sys
 import unittest
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-
-from models.deck_plugin import DeckAgentType
-from services.deck.agent_type import agent_type_from_manifest, decorate_decks_with_agent_type
-from tests.test_deck_plugin_binding import BindingFixture
+from models.deck_plugin import DeckAgentType, DeckPluginManifestV1
+from services.deck.agent_type import (
+    agent_type_from_manifest,
+    decorate_decks_with_agent_type,
+)
 from tests.test_deck_plugin_manifest import valid_manifest_data
+
+
+DECK_ID = "deck-binding-test"
+PLUGIN_ID = "voice-decks.story-dramatize"
+VERSION = "3.1.0"
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _ProjectionDb:
+    """Supplies already-authorized projection rows; never parses or executes SQL."""
+
+    def __init__(self, manifest_json: str) -> None:
+        self.manifest_json = manifest_json
+        self.calls = 0
+
+    def execute(self, _sql, parameters):
+        self.calls += 1
+        assert parameters == (DECK_ID,)
+        if self.calls == 1:
+            return _Rows([{"deck_id": DECK_ID, "binding_revision": 1}])
+        if self.calls == 2:
+            return _Rows(
+                [
+                    {
+                        "deck_id": DECK_ID,
+                        "deck_plugin_id": PLUGIN_ID,
+                        "deck_plugin_version": VERSION,
+                        "manifest_json": self.manifest_json,
+                    }
+                ]
+            )
+        raise AssertionError("unexpected projection read")
 
 
 class DeckAgentTypeTests(unittest.TestCase):
@@ -33,55 +68,20 @@ class DeckAgentTypeTests(unittest.TestCase):
         self.assertEqual(agent_type_from_manifest(dream_manifest), DeckAgentType.DREAM)
         self.assertEqual(agent_type_from_manifest({"invalid": True}), DeckAgentType.CHAT)
 
-    def test_chat_selection_stales_binding_and_keeps_revision_monotonic(self) -> None:
-        async def scenario() -> None:
-            fixture = BindingFixture()
-            try:
-                first = await fixture.binding.save(
-                    deck_id="deck-binding-test",
-                    actor_id="1",
-                    requested_workspace_id="workspace-binding-test",
-                    request=fixture.request(0),
-                )
-                cleared = fixture.binding.clear(
-                    deck_id="deck-binding-test",
-                    actor_id="1",
-                    requested_workspace_id="workspace-binding-test",
-                    expected_binding_revision=first.binding_revision,
-                )
-                self.assertIsNone(cleared.binding)
-                self.assertEqual(cleared.binding_revision, 1)
-                second = await fixture.binding.save(
-                    deck_id="deck-binding-test",
-                    actor_id="1",
-                    requested_workspace_id="workspace-binding-test",
-                    request=fixture.request(1),
-                )
-                self.assertEqual(second.binding_revision, 2)
-            finally:
-                fixture.close()
-
-        asyncio.run(scenario())
-
     def test_deck_list_decoration_exposes_exact_active_runtime_version(self) -> None:
-        async def scenario() -> None:
-            fixture = BindingFixture()
-            try:
-                await fixture.binding.save(
-                    deck_id="deck-binding-test",
-                    actor_id="1",
-                    requested_workspace_id="workspace-binding-test",
-                    request=fixture.request(0),
-                )
-                deck = {"id": "deck-binding-test", "name": "Binding Deck"}
-                decorate_decks_with_agent_type(fixture.db, [deck])
-                self.assertEqual(deck["agent_type_revision"], 1)
-                self.assertEqual(deck["deck_plugin_id"], "voice-decks.story-dramatize")
-                self.assertEqual(deck["deck_plugin_version"], "3.1.0")
-            finally:
-                fixture.close()
+        data = valid_manifest_data()
+        data["capabilities"] = [*data["capabilities"], "story.workspace.propose"]
+        manifest = DeckPluginManifestV1.model_validate(data)
+        db = _ProjectionDb(manifest.model_dump_json())
+        deck = {"id": DECK_ID, "name": "Binding Deck"}
 
-        asyncio.run(scenario())
+        decorate_decks_with_agent_type(db, [deck])
+
+        self.assertEqual(db.calls, 2)
+        self.assertEqual(deck["agent_type"], "dream")
+        self.assertEqual(deck["agent_type_revision"], 1)
+        self.assertEqual(deck["deck_plugin_id"], PLUGIN_ID)
+        self.assertEqual(deck["deck_plugin_version"], VERSION)
 
 
 if __name__ == "__main__":

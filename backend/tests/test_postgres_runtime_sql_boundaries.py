@@ -2,6 +2,7 @@
 # [Output] Reject runtime DDL/SQLite fallbacks and lock the Dream re-entry authorization predicates.
 # [Pos] Static PostgreSQL boundary regression suite.
 # [Sync] 2026-08-31: allow mutable current-Agent selection while keeping launch metadata internally consistent.
+# [Sync] 2026-09-16: drop retired Dream compatibility SQL from the production boundary inventory.
 
 """Regression gates for the PostgreSQL-only Dream runtime SQL boundary."""
 
@@ -17,7 +18,6 @@ import pytest
 from backend.services.deck_plugin.revocation_service import (
     SQLiteRevocationRepository,
 )
-from backend.services.deck_plugin.compatibility_service import CompatibilityService
 from backend.services.deck_plugin.installation_service import InstallationService
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
@@ -29,7 +29,6 @@ _PRODUCTION_SQL_FILES = (
     "backend/services/deck/admin_gateway.py",
     "backend/services/deck/story_workflow_application.py",
     "backend/services/deck_plugin/installation_service.py",
-    "backend/services/deck_plugin/compatibility_service.py",
     "backend/services/deck_plugin/manifest_validator.py",
     "backend/services/deck_plugin/revocation_service.py",
     "backend/services/claude_plugin/workspace_packer.py",
@@ -106,10 +105,7 @@ def test_sqlite_revocation_fixture_fails_closed_without_explicit_opt_in() -> Non
 
 @pytest.mark.parametrize(
     ("service_type", "method_name"),
-    (
-        (InstallationService, "_update_row"),
-        (CompatibilityService, "_update_installation"),
-    ),
+    ((InstallationService, "_update_row"),),
 )
 def test_dynamic_installation_updates_reject_unknown_identifiers(
     service_type: type[object],
@@ -151,10 +147,7 @@ class _RecordingDb:
 
 @pytest.mark.parametrize(
     ("service_type", "method_name"),
-    (
-        (InstallationService, "_update_row"),
-        (CompatibilityService, "_update_installation"),
-    ),
+    ((InstallationService, "_update_row"),),
 )
 def test_dynamic_installation_updates_commit_without_closing_connection(
     service_type: type[object],
