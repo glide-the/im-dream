@@ -1,6 +1,7 @@
 <!-- [Input] Exact Admin/Dream heads, four published baseline releases, current contracts, CI receipts and private cutover preflight state. -->
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
+<!-- [Sync] 2026-09-16: reconcile real Device approval/exchange, Dream resource access, refresh rotation and replay-family invalidation. -->
 <!-- [Sync] 2026-09-16: reconcile exact legacy Google adoption, successful real return and Better Auth audience compatibility repair. -->
 <!-- [Sync] 2026-09-16: reconcile the audit with the applied normal cutover, live no-PostgreSQL proof, OAuth catalog and partial real auth/Device receipts. -->
 <!-- [Sync] 2026-09-16: add exact Admin/Dream release binding and physical-backup isolated cutover rehearsal evidence. -->
@@ -9,7 +10,7 @@
 
 ## 结论边界
 
-源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 63 个，受限角色/ACL、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功，同一主体没有Admin membership。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。完整 Device approve/deny/exchange/refresh/revoke、退出/Session失效、Run/Thread/SSE、共享文件和真实模型验收仍未完成，本审计不能用于宣称整项任务完成。
+源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 63 个，受限角色/ACL、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功，同一主体没有Admin membership。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。Device真实允许、token兑换、Dream Resource Server调用、refresh rotation、旧refresh重放失效和重复device兑换已经通过；独立主动revoke、拒绝、退出/Session失效、Run/Thread写入/SSE、共享文件和真实模型验收仍未完成，本审计不能用于宣称整项任务完成。
 
 实现快照与审查入口：
 
@@ -68,7 +69,7 @@ Admin Better Auth 1.7.4 是唯一应用认证中心；Google 使用 `socialProvi
 
 Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC ID token 已在契约中分开；同一产品身份不会自动取得 Admin RBAC。CLI/设备客户端是 public client，固定 client secret 不进入制品。Admin 正常库已通过 DTO/Drizzle provisioning 注册 Dream API resource、browser public client、device public client和两条resource link；重复 dry-run 全部为 `unchanged`。
 
-公开 Device 请求已实际返回 `device_code/user_code/verification_uri/expires_in/interval`，首次轮询为 `authorization_pending`，过快复轮询为 `slow_down`；unknown client/resource、外部 `user_id` 和越权 scope 分别 fail closed。设备码和 Token 未进入回执。真实Google登录、Session/browser-session/refresh lineage与Dream返回已通过；完整用户批准/拒绝、兑换、refresh/revoke仍待执行。[认证数据 ER 与流程图](../../architecture/auth-identity-er-and-flows.md)明确 `identity.user`、Dream canonical user 和 Admin member 分离；本次精确采用创建Dream subject link而没有Admin link，同邮箱未用于自动合并或授权。
+公开 Device 请求已实际返回 `device_code/user_code/verification_uri/expires_in/interval`，首次轮询为 `authorization_pending`，过快复轮询为 `slow_down`；unknown client/resource、外部 `user_id` 和越权 scope 分别 fail closed。用户在正常授权页点击允许后，device grant兑换返回300秒Bearer JWT和refresh；Dream公开`/api/me`完成JWKS/issuer/audience/scope校验并映射到canonical user `7`。refresh正常轮换，旧refresh重放和重复device兑换均返回`invalid_grant`且不签token。旧refresh重放已使该family失效，随后revoke返回`token not found`，所以独立主动revoke和拒绝仍需新授权链。设备码和Token未进入回执。[认证数据 ER 与流程图](../../architecture/auth-identity-er-and-flows.md)明确 `identity.user`、Dream canonical user 和 Admin member 分离；本次精确采用创建Dream subject link而没有Admin link，同邮箱未用于自动合并或授权。
 
 ## 5. Dream 生产数据库关闭
 
@@ -116,9 +117,9 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | --- | --- | --- |
 | Google登录、新旧主体关联、返回、退出、Session失效 | exact provider-sub adoption、callback、consent、Session/browser-session/refresh与返回通过 | **登录/关联/返回已通过；退出和Session失效待执行** |
 | Dream访问与Admin管理权限隔离 | DTO/RBAC/ACL隔离合同和独立subject-link模型通过 | **Dream历史可读；同一浏览器Admin入口仍为login，已通过** |
-| Device批准/拒绝/pending/slow_down/过期/兑换/refresh/revoke | 实际create、pending、slow_down及4类负例通过 | **批准/拒绝/兑换/refresh/revoke待执行** |
-| JWT签名/issuer/audience/expiry/kid/scope/revoke | scalar与真实Better Auth数组、错误resource/额外audience/签名/issuer/expiry/kid/scope deterministic contracts通过 | **真实登录JWT数组已验证；revoke待Device/退出流程** |
-| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过 | **未执行** |
+| Device批准/拒绝/pending/slow_down/过期/兑换/refresh/revoke | 实际create、pending、slow_down及4类负例通过 | **允许、兑换、refresh rotation、旧refresh重放、重复兑换与真实access expiry已通过；拒绝和独立主动revoke待执行** |
+| JWT签名/issuer/audience/expiry/kid/scope/revoke | scalar与真实Better Auth数组、错误resource/额外audience/签名/issuer/expiry/kid/scope deterministic contracts通过 | **真实设备JWT访问Dream及到期后401已通过；refresh family失效后既发JWT仅在300秒内有效，独立主动revoke待执行** |
+| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过 | **历史列表及既有Thread读取已通过；创建、继续、取消、SSE和模型写入未执行** |
 | 资源策略与LKG | 单元/集成合同通过 | **未执行** |
 | 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同通过 | **未执行** |
 | Admin不可用/超时/拒绝/capability缺失/unknown write | 故障合同通过 | **未执行正常服务故障注入** |
@@ -139,7 +140,7 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Dream 全生产数据库入口关闭 | **已证明静态、测试与当前正常进程运行边界通过** |
 | Runtime/SSE/LKG/共享文件系统语义 | **已证明确定性回归通过** |
 | 正常数据库 migration/ACL/config/service 切换 | **本机命名正常目标已执行并只读复核；其他部署目标未宣称完成** |
-| 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回/RBAC隔离和Device pending/slow-down/负例通过；其余未完成** |
+| 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回/RBAC隔离，Device允许/兑换/refresh/replay/重复兑换，以及历史只读通过；其余未完成** |
 | 整项任务完成 | **不成立；保持 active** |
 
-剩余顺序为：完成真实模型消息的浏览器动作时确认 → Run/Thread/SSE继续/取消与Admin可见回执 → Device approve/deny/exchange/refresh/revoke → 文件流程与故障恢复 → 退出/Session失效。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库。
+剩余顺序为：新Device授权链的主动revoke与拒绝/expiry → 完成真实模型消息的浏览器动作时确认 → Run/Thread/SSE继续/取消与Admin可见回执 → 文件流程与故障恢复 → 退出/Session失效。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库。

@@ -1,6 +1,7 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-16: record real Device approval/exchange, Resource Server access, refresh rotation and replay-family invalidation. -->
 <!-- [Sync] 2026-09-16: record exact legacy Google adoption, successful consent/return and the closed Better Auth audience-array repair. -->
 <!-- [Sync] 2026-09-16: record saved Google callbacks, closure of redirect mismatch and the specified email account-not-found result. -->
 <!-- [Sync] 2026-09-16: record real browser login, Google callback, identity-mapping and RFC 8628 pending/slow-down evidence. -->
@@ -98,3 +99,34 @@ Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed D
 | Admin管理权限隔离 | 同一浏览器`http://localhost:3000/admin` | 重定向/停留于Admin login，没有进入dashboard |
 
 尚未完成的真实项目：模型消息已选择Screenwriter并准备草稿，但实际发送需浏览器动作时确认；Device批准/拒绝/兑换/refresh/revoke、退出/Session失效、文件与故障恢复仍继续验收。本节不把登录成功扩张为这些下游项目已通过。
+
+### 文件验收情境边界
+
+本轮文件场景使用一个无敏感内容、具名且可识别为本轮所有的纯文本附件，通过已登录Dream页面的“Add attachment”公开入口附加到既有Thread。选择文件可以创建附件字节和Admin-owned metadata；在模型发送动作获得单独确认前不提交消息、不启动Run。Project、Episode、Deck、历史消息、资源策略和既有文件必须保持不变。
+
+| 事实 | 真相源 | 所有者 | 本轮预期 |
+| --- | --- | --- | --- |
+| 附件字节 | Dream共享文件系统的规范化Thread路径 | Dream路径/权限/写入边界 | 新增本轮纯文本附件；拒绝越界和符号链接 |
+| 附件metadata | Admin具名文件DTO/Repository/Drizzle事务 | Admin数据服务 | 与当前actor/Thread/文件摘要绑定；失败不能显示成功 |
+| Chat消息与Run | Admin Thread/Run/message记录 | Dream编排、Admin持久化 | 选择附件阶段保持不变；发送后再单独验收 |
+| Project/Episode/资源策略 | canonical artifacts与Admin desired/Dream LKG | 原业务owner | 全部保持不变 |
+
+### 2026-09-16 只读历史与 Device 允许链路
+
+用户在本机正常 Admin 设备授权页检查客户端、目标资源和请求 scope 后点击“允许”。授权动作之前，CLI 风格客户端已通过公开入口取得设备码并验证 `authorization_pending`；设备码、用户码和 token 只保存在 owner-only `0600` 临时文件，未写入文档或公开日志。
+
+| 验证 | 公开入口 | HTTP / 退出结果 | 脱敏证据与结论 |
+| --- | --- | --- | --- |
+| 允许后兑换 | Admin `POST /api/auth/oauth2/token`，RFC 8628 grant、registered public client/resource | `200`、`Cache-Control: no-store` | 返回 Bearer access、refresh、ID token字段；access TTL 300 秒，scope为已批准的`openid profile offline_access dream:read dream:write`；JWT issuer、双audience和`ink-dream-device` client正确 |
+| Dream Resource Server | Dream公开`GET /api/me`，携带设备access token | `200` | 签名/JWKS/issuer/resource audience/scope校验后映射到canonical Dream user `7`，role仍为`user`；profile邮箱保留canonical资料，没有按Google邮箱覆盖或自动合并 |
+| Refresh rotation | Admin token endpoint，public client refresh grant | `200`、`Cache-Control: no-store` | 签发新的access与不同refresh；新access再次访问Dream `/api/me` 为`200` |
+| 旧 refresh 重放 | 对已轮换旧refresh再次调用token endpoint | `400 invalid_grant`、`no-store` | 无新token；当前family随重放失效，随后主动revoke返回`invalid_request: token not found`，因此这一链路只能证明重放失效，不能冒称主动revoke成功 |
+| 重复 device 兑换 | 原device code再次调用token endpoint | `400 invalid_grant`、`no-store` | 无access/refresh，已消费授权不能复活 |
+| 已签发 JWT 的失效范围 | refresh family失效后再次调用Dream `/api/me` | `200`（原JWT仍在300秒有效期内） | 符合文档定义的离线JWT边界；refresh/revoke不会虚报为既发JWT即时失效，expiry仍由Dream验证 |
+| 真实 access expiry | 首个JWT的`exp`经过后再次调用Dream `/api/me` | `401 INVALID_ACCESS_TOKEN` | 不返回profile；Dream真实运行路径执行时间声明与过期拒绝 |
+
+另以已登录Dream页面完成只读历史验收：会话列表、一个既有Thread及其messages/status/plan/todos/subagents/plugin receipt均经公开路由返回`200`，没有发送消息或创建Run。该过程中Dream Python进程无数据库环境键，到正常PostgreSQL `54329` 的连接数为0，证明历史加载也经过Admin接口而非数据库旁路。
+
+文件场景只完成影响边界和本轮纯文本fixture准备。文件选择器出现时Chrome前台已由用户切换到其他页面，自动化立即停止；没有选择或上传文件，也没有创建metadata、Chat消息或Run。本项仍为未执行，不能把fixture存在当作文件业务验收。
+
+主动refresh revoke需要一条未先触发重放保护的新授权链；拒绝流程也需要新的device code。两项将在独立设备授权页完成，避免复用已消费/已失效的授权记录。
