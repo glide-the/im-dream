@@ -73,7 +73,7 @@ Also create tags and corresponding GitHub Releases for glide-the/ink-claude-code
 | 规范契约与数据库决策 | Admin，Dream 反馈 | 完整扫描 | 采用同一database内`identity/public/dream/drizzle`职责与表级ACL；Admin为唯一迁移/数据库访问owner，Dream生产无DSN/driver/fallback |
 | 架构/交互设计评审 | 两项目，协调 | 规范契约 | 已确认Admin operator与Dream user是独立业务域；browser/device/service是OAuth client，`client_credentials`无用户主体，用户数据另需委托token |
 | Admin schema/auth/data | Admin | 设计通过 | 当前`f79a099`：64 migrations、9发布capability、191具名operation、独立Admin Session/RBAC、OAuth Provider/Device/JWKS及正常ACL已激活 |
-| Dream 客户端及入口替换 | Dream | 已核验 Admin 契约 | 当前`2df9d9b4`：Pydantic DTO/Admin clients/BFF/resource verifier已接入，全生产数据库入口关闭，Runtime/SSE/FS保持Dream所有 |
+| Dream 客户端及入口替换 | Dream | 已核验 Admin 契约 | 实现基线`2df9d9b4`：Pydantic DTO/Admin clients/BFF/resource verifier已接入，全生产数据库入口关闭，Runtime/SSE/FS保持Dream所有；后续仅追加验收文档 |
 | 技术验证 | Luna runner，主任务修复 | 相应实现 | Admin 2091 tests、Dream backend 3538 tests、两端type/lint/build及隔离/正常公开协议验证通过；具体回执见最终交付审计 |
 | 完整真实验收 | 协调与项目主任务 | 正常本机服务、指定账户与已有实体/模型 | Google、Device、Thread持久化、MCP replacement与文件边界通过；Admin成功登录缺有效独立凭据，真实模型/Run/SSE受正常账户402额度阻塞 |
 

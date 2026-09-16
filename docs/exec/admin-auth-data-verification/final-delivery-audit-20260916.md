@@ -17,10 +17,10 @@
 
 实现快照与审查入口：
 
-| 项目 | 分支 / HEAD | 审查入口 | 状态 |
+| 项目 | 实现基线 / 审计分支 | 审查入口 | 状态 |
 | --- | --- | --- | --- |
-| Admin | `codex/admin-auth-data-provider` / `f79a0992eead124b1c05ae049c5440b60baee9e2` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地、远端分支与 PR head 一致；DTO → Domain Service → typed Repository → Drizzle 数据边界及正常ACL实际角色探针已落地 |
-| Dream | `codex/dream-admin-auth-data-client` / `2df9d9b423dac3131a0f15494272a821cea8f313` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 本地、远端分支与 PR head 一致；前后端验证通过；仅保留既存未跟踪 `.pnpm-store/` |
+| Admin | `f79a0992eead124b1c05ae049c5440b60baee9e2` / `codex/admin-auth-data-provider` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 实现基线与远端PR一致；DTO → Domain Service → typed Repository → Drizzle 数据边界及正常ACL实际角色探针已落地 |
+| Dream | `2df9d9b423dac3131a0f15494272a821cea8f313` / `codex/dream-admin-auth-data-client` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 该实现基线完成confidential OAuth消费；审计分支在其后只追加本文件等状态文档，前后端验证通过且仅保留既存未跟踪 `.pnpm-store/` |
 
 ## 1. 基线发布
 
