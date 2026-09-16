@@ -248,12 +248,12 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/deck_plugin/installation_service.py](../../backend/services/deck_plugin/installation_service.py) | production / 8 | columns, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/manifest_validator.py](../../backend/services/deck_plugin/manifest_validator.py) | production / 1 | deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | `backend/services/deck_plugin/release_service.py`（历史基线，现已退役） | production / 11 | deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/revocation_service.py](../../backend/services/deck_plugin/revocation_service.py) | production / 30 | IF, revocation_audit_events, revocation_cancel_commands, revocation_impact_manifests, revocation_incidents, revocation_notification_outbox, revocation_quarantined_targets, revocation_runtime_receipts, security_revocations | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | production / 6 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, information_schema.columns | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck_plugin/revocation_service.py`（历史基线，现已退役） | production / 30 | IF, revocation_audit_events, revocation_cancel_commands, revocation_impact_manifests, revocation_incidents, revocation_notification_outbox, revocation_quarantined_targets, revocation_runtime_receipts, security_revocations | 仅测试曾导入，生产 import 图为零 | 无生产调用者 | 退役未接线 SQLite/PostgreSQL 双权威；未创建无调用方 Admin 接口 |
+| `backend/services/deck_plugin/rollback_manager.py`（历史基线，现已退役） | production / 6 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, information_schema.columns | 仅测试曾导入，生产 import 图为零 | 无生产调用者 | 退役未接线回滚 SQL；公开控制面后续随 active Admin gateway 聚合迁移 |
 | `backend/services/deck_plugin/selection_validation_service.py`（历史基线，现已退役） | production / 4 | deck_plugin_installations, deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/errors/error_registry.py](../../backend/services/errors/error_registry.py) | production / 5 | Claude, the | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | `backend/services/events/event_emitter.py`（迁移前基线，现已删除） | production / 3 | events | 详见 JSON 调用线索 | 无生产调用者 | 退役未接线实现；未创建无业务调用方的Admin接口 |
-| [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | production / 5 | runtime_plugin_materializations | L342 MaterializationManager._begin_attempt: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/runtime_plugin/materialization_manager.py`（历史基线，现已退役） | production / 5 | runtime_plugin_materializations | 仅测试曾导入，生产 import 图为零 | 无生产调用者 | 退役未接线 manager；活跃 ReconcileService/receipt/Run guard 保留 |
 | [backend/services/runtime_plugin/reconcile_service.py](../../backend/services/runtime_plugin/reconcile_service.py) | production / 11 | deck_runtime_plugin_locks, runtime_load_receipt_entries, runtime_load_receipts, runtime_plugin_materializations, runtime_plugin_reconcile_attempts, workflow_runs | L277 SqliteCliAuditSink.record: revision; L793 ReconcileService._record_headless_attempt: revision; L820 ReconcileService._record_headless_failure: revision; L849 ReconcileService._persist_receipt: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/agent_integration.py](../../backend/services/story_workspace/agent_integration.py) | production / 25 | story_workspace_characters, story_workspace_scene_characters, story_workspace_scenes, story_workspace_stories, story_workspace_story_characters, story_workspace_workspaces | L106 store_agent_story_output: SAVEPOINT; L137 store_agent_story_output: SAVEPOINT; L350 store_agent_story_output: SAVEPOINT; L353 store_agent_story_output: SAVEPOINT; L354 store_agent_story_output: SAVEPOINT; L356 store_agent_story_output: SAVEPOINT | 79,69,119 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/artifact_story_index_reconcile.py](../../backend/services/story_workspace/artifact_story_index_reconcile.py) | production / 1 | chat_message, chat_thread, story_workspace_workspaces, users, workflow_runs | 详见 JSON 调用线索 | 294 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -359,12 +359,12 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 - `backend/services/deck_plugin/installation_service.py`: InstallationService._required_row, InstallationService._update_row, InstallationService._validated_release, InstallationService.install, InstallationService.uninstall
 - `backend/services/deck_plugin/manifest_validator.py`: _assert_unique
 - `backend/services/deck_plugin/release_service.py`: DeckPluginReleaseService._get_by_id, DeckPluginReleaseService._transition_published_release, DeckPluginReleaseService.create_draft, DeckPluginReleaseService.get_release, DeckPluginReleaseService.get_runtime_plugin_lock, DeckPluginReleaseService.publish_with_lock, DeckPluginReleaseService.validate_release, _with_default_db
-- `backend/services/deck_plugin/revocation_service.py`: SQLiteRevocationRepository._create_tables, SQLiteRevocationRepository._insert_audit, SQLiteRevocationRepository._insert_notification, SQLiteRevocationRepository.append_incident, SQLiteRevocationRepository.append_runtime_receipt, SQLiteRevocationRepository.audit_events, SQLiteRevocationRepository.commands, SQLiteRevocationRepository.commit_revocation, SQLiteRevocationRepository.find_idempotency, SQLiteRevocationRepository.get_record, SQLiteRevocationRepository.incidents, SQLiteRevocationRepository.manifests, SQLiteRevocationRepository.next_sequence, SQLiteRevocationRepository.notifications, SQLiteRevocationRepository.quarantined_targets, SQLiteRevocationRepository.records, SQLiteRevocationRepository.runtime_receipts, SQLiteRevocationRepository.save_notification
-- `backend/services/deck_plugin/rollback_manager.py`: RollbackManager._table_projection, RollbackManager.rollback_installation
+- `backend/services/deck_plugin/revocation_service.py`（历史基线，现已退役）: former SQLiteRevocationRepository and RevocationService SQL paths had no production caller
+- `backend/services/deck_plugin/rollback_manager.py`（历史基线，现已退役）: former RollbackManager SQL paths had no production caller
 - `backend/services/deck_plugin/selection_validation_service.py`: SelectionValidationService._installation_scope, SelectionValidationService.list_options, SelectionValidationService.validate
 - `backend/services/errors/error_registry.py`: <module>
 - `backend/services/events/event_emitter.py`（迁移前基线，现已删除）: EventEmitter._load, EventEmitter.build_envelope, EventEmitter.emit
-- `backend/services/runtime_plugin/materialization_manager.py`: MaterializationManager._begin_attempt, MaterializationManager._perform_materialization, MaterializationManager._select
+- `backend/services/runtime_plugin/materialization_manager.py`（历史基线，现已退役）: former MaterializationManager SQL paths had no production caller
 - `backend/services/runtime_plugin/reconcile_service.py`: ReconcileService._persist_receipt, ReconcileService._record_headless_attempt, ReconcileService._record_headless_failure, ReconcileService.create_load_receipt, ReconcileService.read_receipt, ReconcileService.read_workflow_readiness, SqliteCliAuditSink.record
 - `backend/services/story_workspace/agent_integration.py`: get_or_create_default_workspace, store_agent_story_output
 - `backend/services/story_workspace/artifact_story_index_reconcile.py`: ArtifactStoryIndexReconcileRepository.list_run_candidates, ArtifactStoryIndexReconcileService.dry_run
@@ -408,7 +408,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/database.py](../../backend/database.py) | 144 | 5 |
 | [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 32 | 0 |
 | [backend/services/story_workspace/agent_integration.py](../../backend/services/story_workspace/agent_integration.py) | 23 | 0 |
-| [backend/services/deck_plugin/revocation_service.py](../../backend/services/deck_plugin/revocation_service.py) | 22 | 1 |
+| `backend/services/deck_plugin/revocation_service.py`（历史基线，现已退役） | 22 | 1 |
 | [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 20 | 6 |
 | [backend/services/story_workspace/dream_confirmation_service.py](../../backend/services/story_workspace/dream_confirmation_service.py) | 19 | 0 |
 | [backend/services/claude_agent/session_manager.py](../../backend/services/claude_agent/session_manager.py) | 18 | 0 |
@@ -426,10 +426,10 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 6 | 0 |
 | [backend/schema/capabilities.py](../../backend/schema/capabilities.py) | 6 | 0 |
 | [backend/services/deck/builtin_plugin.py](../../backend/services/deck/builtin_plugin.py) | 6 | 0 |
-| [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | 6 | 0 |
+| `backend/services/deck_plugin/rollback_manager.py`（历史基线，现已退役） | 6 | 0 |
 | `backend/services/deck/runtime_context.py`（历史基线，现已退役） | 5 | 0 |
 | `backend/services/deck_plugin/compatibility_service.py`（历史基线，现已退役） | 5 | 0 |
-| [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | 5 | 0 |
+| `backend/services/runtime_plugin/materialization_manager.py`（历史基线，现已退役） | 5 | 0 |
 | [backend/services/claude_plugin/marketplace_service.py](../../backend/services/claude_plugin/marketplace_service.py) | 4 | 0 |
 | [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 4 | 0 |
 | `backend/services/deck_plugin/selection_validation_service.py`（历史基线，现已退役） | 4 | 0 |
@@ -458,7 +458,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/persistence/postgres.py](../../backend/persistence/postgres.py) | 0 | 0 |
 | [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | 0 | 0 |
 
-重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，Deck binding/content/runtime/Gateway，Editor/stdio、Notion pools与startup。Product pool 已关闭；MCP managed persistence 已由后续 Registry147 阶段关闭。revocation_service仍有sqlite3源码import，必须继续按运行入口及Schema协议清理，不能新建SQLite fallback。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
+重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，active Deck Plugin Admin gateway/installation/reconcile，Editor/stdio、Notion pools与startup。Product pool 与 managed MCP persistence 已关闭；无生产调用的 revocation/rollback/legacy materialization manager 已退役，历史 task/exec 原文保留。退役后的同方法AST回执为296→293生产模块、27→24 SQL模块、422→389 SQL call、0 parse error；这不代表全量迁移完成。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
 
 ### Runtime/共享文件回归与授权依赖
 

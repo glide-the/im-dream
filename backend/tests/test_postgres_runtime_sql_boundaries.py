@@ -2,7 +2,7 @@
 # [Output] Reject runtime DDL/SQLite fallbacks and lock the Dream re-entry authorization predicates.
 # [Pos] Static PostgreSQL boundary regression suite.
 # [Sync] 2026-08-31: allow mutable current-Agent selection while keeping launch metadata internally consistent.
-# [Sync] 2026-09-16: drop retired Dream compatibility SQL from the production boundary inventory.
+# [Sync] 2026-09-16: remove the retired test-only revocation SQLite exception from the production boundary inventory.
 
 """Regression gates for the PostgreSQL-only Dream runtime SQL boundary."""
 
@@ -11,13 +11,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 import re
-import sqlite3
-
 import pytest
 
-from backend.services.deck_plugin.revocation_service import (
-    SQLiteRevocationRepository,
-)
 from backend.services.deck_plugin.installation_service import InstallationService
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
@@ -30,7 +25,6 @@ _PRODUCTION_SQL_FILES = (
     "backend/services/deck/story_workflow_application.py",
     "backend/services/deck_plugin/installation_service.py",
     "backend/services/deck_plugin/manifest_validator.py",
-    "backend/services/deck_plugin/revocation_service.py",
     "backend/services/claude_plugin/workspace_packer.py",
     "backend/services/story_workspace/dream_confirmation_service.py",
     "backend/services/story_workspace/agent_integration.py",
@@ -62,19 +56,11 @@ _FORBIDDEN_PRODUCTION_SQL = {
 
 def _sql_literals(path: Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    excluded_ranges = [
-        (node.lineno, node.end_lineno or node.lineno)
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-        and node.name == "SQLiteRevocationRepository"
-    ]
     literals: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
             continue
         line = getattr(node, "lineno", 0)
-        if any(start <= line <= end for start, end in excluded_ranges):
-            continue
         if _SQL_MARKER.search(node.value):
             literals.append((line, node.value))
     return literals
@@ -89,18 +75,6 @@ def test_production_sql_uses_postgresql_semantics_only() -> None:
                 if pattern.search(sql):
                     failures.append(f"{relative_path}:{line}: {label}")
     assert failures == []
-
-
-def test_sqlite_revocation_fixture_fails_closed_without_explicit_opt_in() -> None:
-    db = sqlite3.connect(":memory:")
-    try:
-        with pytest.raises(
-            RuntimeError,
-            match="restricted to explicit tests",
-        ):
-            SQLiteRevocationRepository(db)
-    finally:
-        db.close()
 
 
 @pytest.mark.parametrize(

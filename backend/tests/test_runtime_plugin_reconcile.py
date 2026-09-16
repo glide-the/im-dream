@@ -1,8 +1,12 @@
-"""Focused task_008 reconcile, materialization, receipt, and guard tests."""
+# [Input] Strict runtime-lock, placement, materialization DTO, reconcile and Run fixtures.
+# [Output] Active reconcile, immutable receipt, CLI policy and Run-start guard evidence.
+# [Pos] Provider-free Runtime plugin boundary; no production materialization persistence owner.
+# [Sync] 2026-09-16: replace the unreachable Dream materialization manager with a strict pre-existing DTO fixture.
+
+"""Focused Runtime plugin reconcile, receipt, and guard tests."""
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
@@ -21,22 +25,18 @@ from backend.models.deck_plugin import DeckRuntimePluginLock, RuntimePluginLockE
 from backend.models.runtime_plugin import (
     ActivationStatus,
     DeclarationStatus,
+    MaterializationResult,
     MaterializationStatus,
     RuntimePlacementContext,
+    RuntimePluginMaterialization,
     compute_artifact_set_hash,
+    compute_materialization_key,
     sha256_digest,
 )
 from backend.models.workflow_run import (
     AuthenticatedActorContext,
     RunStatus,
     RuntimeLoadReceiptReadiness,
-)
-from backend.services.runtime_plugin.materialization_manager import (
-    FileSystemAtomicPublisher,
-    MaterializationError,
-    MaterializationManager,
-    RetentionEvidence,
-    StagedArtifact,
 )
 from backend.services.runtime_plugin.reconcile_service import (
     AllowlistCliSourcePolicy,
@@ -107,32 +107,10 @@ class CollectingAuditSink:
         self.records.append(record)
 
 
-class FakeArtifactProvider:
-    def __init__(self, artifact: StagedArtifact) -> None:
-        self.artifact = artifact
-        self.calls = 0
-
-    async def load_staged(self, **_kwargs) -> StagedArtifact:
-        self.calls += 1
-        await asyncio.sleep(0)
-        return self.artifact
-
-
-class FakeRetentionReader:
-    def __init__(self, evidence: RetentionEvidence | None) -> None:
-        self.evidence = evidence
-        self.calls = 0
-
-    def read(self, **_kwargs) -> RetentionEvidence | None:
-        self.calls += 1
-        return self.evidence
-
-
 class RuntimePluginFixture:
     def __init__(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "runtime-plugin.db"
-        self.cache_root = Path(self.temp_dir.name) / "cache"
         self.db = sqlite3.connect(self.db_path)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -368,35 +346,86 @@ class RuntimePluginFixture:
         )
         return service, headless, cli
 
-    def materialization_manager(
-        self,
-        *,
-        content: bytes = ARTIFACT_BYTES,
-        retention: RetentionEvidence | None = RetentionEvidence(
-            authoritative=True,
-            pinned_or_recoverable=True,
-            evidence_ref="retention://proof-1",
-        ),
-    ) -> tuple[MaterializationManager, FakeArtifactProvider, FakeRetentionReader]:
-        provider = FakeArtifactProvider(
-            StagedArtifact(
-                content=content,
-                artifact_digest=ARTIFACT_DIGEST,
-                verification_status="legacy_unverified",
-                signature_bundle_ref=None,
-                retention_state="pinned",
-                restore_source_ref="restore://staged-1",
-            )
+    def materialization_result(self) -> MaterializationResult:
+        """Build strict pre-existing evidence for the active receipt boundary.
+
+        Production materialization is not owned by this test or by the retired
+        Dream manager.  The fixture persists only the row that ReconcileService
+        updates while creating its immutable load receipt.
+        """
+
+        materialization = RuntimePluginMaterialization(
+            runtime_materialization_id="rm_" + "a" * 32,
+            runtime_environment_id=self.placement.runtime_environment_id,
+            runtime_pool_id=self.placement.runtime_pool_id,
+            runtime_node_id=self.placement.runtime_node_id,
+            claude_code_plugin_id=PLUGIN_ID,
+            resolved_version=PLUGIN_VERSION,
+            artifact_digest=ARTIFACT_DIGEST,
+            materialized_digest=ARTIFACT_DIGEST,
+            artifact_set_hash=self.placement.artifact_set_hash,
+            policy_revision=self.placement.policy_revision,
+            declaration_status=DeclarationStatus.DECLARED,
+            materialization_status=MaterializationStatus.MATERIALIZED,
+            activation_status=ActivationStatus.LOADABLE,
+            materialization_key=compute_materialization_key(
+                self.placement,
+                PLUGIN_ID,
+                PLUGIN_VERSION,
+                ARTIFACT_DIGEST,
+            ),
+            attempt_id="rpa_" + "b" * 32,
+            attempt_count=1,
+            verification_status="legacy_unverified",
+            retention_state="pinned",
+            restore_source_ref="fixture://staged-artifact",
+            cache_ref="fixture://runtime-cache",
+            created_at=NOW,
+            updated_at=NOW,
         )
-        retention_reader = FakeRetentionReader(retention)
-        manager = MaterializationManager(
-            self.db,
-            artifact_provider=provider,
-            retention_evidence_reader=retention_reader,
-            publisher=FileSystemAtomicPublisher(self.cache_root),
-            clock=lambda: NOW,
+        self.db.execute(
+            """
+            INSERT INTO runtime_plugin_materializations (
+                runtime_materialization_id, runtime_environment_id,
+                runtime_pool_id, runtime_node_id, claude_code_plugin_id,
+                resolved_version, artifact_digest, materialized_digest,
+                artifact_set_hash, policy_revision, declaration_status,
+                materialization_status, activation_status,
+                materialization_key, attempt_id, attempt_count,
+                verification_status, signature_bundle_ref, retention_state,
+                restore_source_ref, cache_ref, last_error, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                materialization.runtime_materialization_id,
+                materialization.runtime_environment_id,
+                materialization.runtime_pool_id,
+                materialization.runtime_node_id,
+                materialization.claude_code_plugin_id,
+                materialization.resolved_version,
+                materialization.artifact_digest,
+                materialization.materialized_digest,
+                materialization.artifact_set_hash,
+                materialization.policy_revision,
+                materialization.declaration_status.value,
+                materialization.materialization_status.value,
+                materialization.activation_status.value,
+                materialization.materialization_key,
+                materialization.attempt_id,
+                materialization.attempt_count,
+                materialization.verification_status,
+                materialization.signature_bundle_ref,
+                materialization.retention_state,
+                materialization.restore_source_ref,
+                materialization.cache_ref,
+                materialization.last_error,
+                materialization.created_at.isoformat(),
+                materialization.updated_at.isoformat(),
+            ),
         )
-        return manager, provider, retention_reader
+        self.db.commit()
+        return MaterializationResult(materialization=materialization, reused=False)
 
 
 class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
@@ -536,92 +565,8 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timeout_cli.calls[0][1:], (17, False))
         self.assertEqual(timeout_audit.records[0].result_status, "failed")
 
-    async def test_materialization_is_idempotent_and_keeps_three_dimensions(self) -> None:
-        manager, provider, retention_reader = self.fixture.materialization_manager()
-        first, second = await asyncio.gather(
-            manager.materialize(
-                self.fixture.placement,
-                PLUGIN_ID,
-                PLUGIN_VERSION,
-                ARTIFACT_DIGEST,
-            ),
-            manager.materialize(
-                self.fixture.placement,
-                PLUGIN_ID,
-                PLUGIN_VERSION,
-                ARTIFACT_DIGEST,
-            ),
-        )
-        self.assertEqual({first.reused, second.reused}, {False, True})
-        self.assertEqual(
-            first.materialization.runtime_materialization_id,
-            second.materialization.runtime_materialization_id,
-        )
-        self.assertEqual(provider.calls, 1)
-        self.assertEqual(retention_reader.calls, 1)
-        self.assertEqual(
-            first.materialization.declaration_status,
-            DeclarationStatus.DECLARED,
-        )
-        self.assertEqual(
-            first.materialization.materialization_status,
-            MaterializationStatus.MATERIALIZED,
-        )
-        self.assertEqual(
-            first.materialization.activation_status,
-            ActivationStatus.LOADABLE,
-        )
-        self.assertEqual(first.materialization.materialized_digest, ARTIFACT_DIGEST)
-        self.assertEqual(Path(first.materialization.cache_ref).read_bytes(), ARTIFACT_BYTES)
-
-    async def test_digest_and_retention_evidence_fail_closed(self) -> None:
-        bad_manager, _, _ = self.fixture.materialization_manager(content=b"tampered")
-        with self.assertRaises(MaterializationError) as digest_error:
-            await bad_manager.materialize(
-                self.fixture.placement,
-                PLUGIN_ID,
-                PLUGIN_VERSION,
-                ARTIFACT_DIGEST,
-            )
-        self.assertEqual(digest_error.exception.code, "MATERIALIZATION_DIGEST_MISMATCH")
-
-        placement = RuntimePlacementContext(
-            **{
-                **self.fixture.placement.model_dump(),
-                "policy_revision": "policy-8",
-            }
-        )
-        no_retention, _, _ = self.fixture.materialization_manager(retention=None)
-        with self.assertRaises(MaterializationError) as retention_error:
-            await no_retention.materialize(
-                placement,
-                PLUGIN_ID,
-                PLUGIN_VERSION,
-                ARTIFACT_DIGEST,
-            )
-        self.assertEqual(
-            retention_error.exception.code,
-            "MATERIALIZATION_RETENTION_EVIDENCE_MISSING",
-        )
-        rows = self.fixture.db.execute(
-            """
-            SELECT declaration_status, materialization_status, activation_status,
-                   attempt_count, last_error
-            FROM runtime_plugin_materializations ORDER BY attempt_count
-            """
-        ).fetchall()
-        self.assertTrue(all(row["declaration_status"] == "declared" for row in rows))
-        self.assertTrue(all(row["materialization_status"] == "failed" for row in rows))
-        self.assertTrue(all(row["activation_status"] == "inactive" for row in rows))
-
     async def test_receipt_is_immutable_and_projection_drives_existing_run_guard(self) -> None:
-        manager, _, _ = self.fixture.materialization_manager()
-        materialization = await manager.materialize(
-            self.fixture.placement,
-            PLUGIN_ID,
-            PLUGIN_VERSION,
-            ARTIFACT_DIGEST,
-        )
+        materialization = self.fixture.materialization_result()
         service, _, _ = self.fixture.reconcile_service()
         reconcile = await service.declare_and_reconcile(
             self.fixture.lock,
@@ -634,6 +579,15 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
             materializations=[materialization],
         )
         self.assertTrue(receipt.required_entries_ready)
+        activation = self.fixture.db.execute(
+            """
+            SELECT activation_status
+            FROM runtime_plugin_materializations
+            WHERE runtime_materialization_id = %s
+            """,
+            (materialization.materialization.runtime_materialization_id,),
+        ).fetchone()
+        self.assertEqual(activation["activation_status"], "loaded")
         self.assertEqual(receipt.scope, "session")
         self.assertEqual(receipt.readiness_state, "session_loaded")
         self.assertEqual(receipt.entries[0].verification_status, "legacy_unverified")
@@ -754,13 +708,7 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
             self.fixture.db.rollback()
 
     async def test_receipt_closes_psycopg_validation_reads_before_persisting(self) -> None:
-        manager, _, _ = self.fixture.materialization_manager()
-        materialization = await manager.materialize(
-            self.fixture.placement,
-            PLUGIN_ID,
-            PLUGIN_VERSION,
-            ARTIFACT_DIGEST,
-        )
+        materialization = self.fixture.materialization_result()
         service, _, _ = self.fixture.reconcile_service()
         reconcile = await service.declare_and_reconcile(
             self.fixture.lock,
@@ -802,13 +750,7 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt.required_entries_ready)
 
     async def test_missing_capability_creates_not_ready_receipt(self) -> None:
-        manager, _, _ = self.fixture.materialization_manager()
-        materialization = await manager.materialize(
-            self.fixture.placement,
-            PLUGIN_ID,
-            PLUGIN_VERSION,
-            ARTIFACT_DIGEST,
-        )
+        materialization = self.fixture.materialization_result()
         service, _, _ = self.fixture.reconcile_service(
             headless_payload=self.fixture.headless_payload(
                 capabilities=["deck.render"],
