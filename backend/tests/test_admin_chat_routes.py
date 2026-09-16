@@ -60,7 +60,8 @@ def boundary(monkeypatch):
     monkeypatch.setattr(routes, "claude_agent_thread_factory", factory)
     def forbidden(*args, **kwargs):
         raise AssertionError("Migrated Chat HTTP route must not query Dream PG")
-    for name in ("get_db", "get_chat_thread", "create_chat_thread", "list_chat_threads", "list_chat_threads_for_search", "delete_chat_thread", "list_chat_messages", "list_chat_message_page", "get_latest_chat_message_id", "get_chat_message_process_detail", "get_deck_with_voices", "save_chat_message", "get_system_config"):
+    assert not hasattr(database, "get_deck_with_voices")
+    for name in ("get_db", "get_chat_thread", "create_chat_thread", "list_chat_threads", "list_chat_threads_for_search", "delete_chat_thread", "list_chat_messages", "list_chat_message_page", "get_latest_chat_message_id", "get_chat_message_process_detail", "save_chat_message", "get_system_config"):
         monkeypatch.setattr(database, name, forbidden)
     async def bindings(user_id):
         return {}

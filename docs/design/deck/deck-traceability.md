@@ -1,6 +1,7 @@
 <!-- [Input] Deck design units, Admin capability, Dream implementation, and QA lanes. -->
 <!-- [Output] Requirement-to-code/test/evidence traceability and test matrix. -->
 <!-- [Pos] Deck redesign acceptance ledger. -->
+<!-- [Sync] 2026-09-16: remove the retired Dream Deck/Voice/version SQL authority from current traceability. -->
 <!-- [Sync] 2026-09-15: map public content-version consumers to Admin transaction owners and provider-free HTTP evidence. -->
 <!-- [Sync] 2026-08-17: trace typed preview Demo dispatch to Chat or the dedicated Dream workbench. -->
 
@@ -18,12 +19,12 @@
 | Work 内部三页签 | 同上 §4 | `settings-work` route, Work tablist | route + browser | Deck/resources/plugins query 切换 |
 | Deck 启停移入 Work | 同上 §4.2 | `DeckSettingsPanel`, existing `updateDeck` | browser success/conflict | 主页面零开关；Work 行尾开关持久化 |
 | Deck 相关对话 | 同上 §4.3 | `chatHistoryApi.ts`, `GET /api/claude-agent/threads?deck_id=...`, `DeckSettingsPanel` | API + browser | More 入口、标题/日期预览、分页/加载/空/失败状态 |
-| 先删对话再删 Deck | 同上 §4.3 | Chat DELETE, `database.delete_deck` | backend transaction + browser | 有对话 409；逐条永久删除；清空后 Deck 删除解锁 |
-| 删除冲突不误报 | 同上 §4.3 | `DeckDeletionConflict`, binding cleanup, snapshot guard | backend unit + real read-only diagnosis | 普通 binding 可清理；runtime snapshot 仍 fail closed |
+| 先删对话再删 Deck | 同上 §4.3 | Chat DELETE, Admin `deck.delete` DTO/Service/Repository | Admin contract + browser | 有对话 409；逐条永久删除；清空后 Deck 删除解锁 |
+| 删除冲突不误报 | 同上 §4.3 | Admin structured dependency reason + Dream response mapping | provider-free public route + Admin transaction | 普通 binding 可清理；runtime snapshot 仍 fail closed |
 | 资源链接/插件复用 | 同上 §4.1 | `ConnectorSettingsSection`, `ClaudePluginAdminPage` | browser tab visibility | 无重复状态 owner |
 | 原创建并弹出 | `deck-detail-version-history.md` §1 | `DeckManager.tsx` | POST 返回 ID 后 modal | 请求与弹窗断言 |
 | 新建后继续更新 | 同上 §1–2 | `DeckEditorModal.tsx`, Deck/Voice/ref/binding APIs | create→edit→reopen | 表单持久化与草稿 revision |
-| 所有表单纳入版本 | 同上 §2 | `database.py`, `binding_service.py`, `content_versioning.py` | effective/no-op mutations | revision 只在有效变更推进 |
+| 所有表单纳入版本 | 同上 §2 | Admin Deck/Voice/binding Services + typed Drizzle Repositories | Admin transaction + provider-free consumer | revision 只在有效变更推进 |
 | 首次 v1 / 后续 vN+1 | 同上 §3–4 | `deck_versions.py`, `deckVersionApi.ts`, `useDeckContentVersions.ts`, submit dialog | v1→modify→v2 | immutable rows/history |
 | preview/取消零写 | 同上 §4 | preview API + dialog cancel | row count/request count | 取消无 commit 请求 |
 | 冲突/失败保留 | 同上 §6 | service CAS transaction + hook recovery | stale expected revision | 草稿/旧 vN 不变 |
@@ -39,8 +40,8 @@
 
 | 功能 | Admin Drizzle | Dream 后端 | 前端 |
 |---|---|---|---|
-| 草稿 CAS | `decks.draft_revision` | 所有受管写先锁 aggregate 后 advance | mutation 成功后刷新 state |
-| 当前版本 | `latest_version/published_draft_revision` | list/detail projection | 列表/头部状态 |
+| 草稿 CAS | `decks.draft_revision` | strict DTO调用Admin UOW；Dream不执行SQL | mutation 成功后刷新 state |
+| 当前版本 | `latest_version/published_draft_revision` | Admin list/detail DTO projection | 列表/头部状态 |
 | 不可变 commit | `deck_versions` + no-update/no-delete triggers；Admin Repository canonical snapshot/hash + append TX | five typed consumer/rawsnapshot projection | preview/confirm/history |
 | capability | identity/unified/content-versions/canonical-storage四exact v1 ledger | typed consumer缺失/hash drift时version API503 | 提交禁用、编辑可继续 |
 
@@ -50,7 +51,7 @@
 |---|---|---|
 | 静态/类型/构建 | DTO、API、组件、无禁用入口、响应式 CSS | 技术验证 |
 | Admin schema | columns/table/FK/check/trigger/capability/migration inventory | 隔离技术验证 |
-| 后端单元 | preview 零写、v1/v2、history、hash/no-op、content/binding CAS preservation、same-Deck Agent CAS 与 provenance metadata | provider-free 技术验证 |
+| 后端单元 | strict DTO、public projection、conflict/no-change/unknown receipt、same-Deck Agent provenance；hash/CAS原子性由Admin验证 | provider-free消费者 + Admin隔离技术验证 |
 | API/组件合同 | content state/preview/commit/history，表单刷新，提交确认 | 技术验证 |
 | Playwright | enabled14→Settings→Work→相关对话→逐条删除→空状态；创建→修改→v1→修改→v2→历史；error/390px | mocked production-entry 技术验收 |
 | 真实业务 | 只在用户指定现有真实账户/Deck 且本机完整服务可用时执行 | 单独报告，不以 mock 冒充 |

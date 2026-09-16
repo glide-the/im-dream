@@ -50,13 +50,13 @@ def _forbidden(*_args, **_kwargs):
 def boundary(monkeypatch):
     import database
 
-    for name in (
-        "get_db",
+    monkeypatch.setattr(database, "get_db", _forbidden)
+    for retired in (
         "create_deck",
         "auto_fork_system_decks",
         "reconcile_default_screenplay_deck_plugin_ref",
     ):
-        monkeypatch.setattr(database, name, _forbidden)
+        assert not hasattr(database, retired)
     verifier_calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(
         deck_defaults.PluginInstallService,

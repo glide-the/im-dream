@@ -30,8 +30,8 @@ def list_item():
 @pytest.fixture
 def boundary(monkeypatch):
     import database
-    for name in ["get_db","get_user_decks","get_published_decks"]:
-        monkeypatch.setattr(database,name,lambda *_a,**_kw:pytest.fail("Deck lists must not query Dream PG"))
+    monkeypatch.setattr(database,"get_db",lambda *_a,**_kw:pytest.fail("Deck lists must not query Dream PG"))
+    assert not hasattr(database,"get_user_decks") and not hasattr(database,"get_published_decks")
     config = AdminDataConfig(base_url="https://admin.example",issuer="https://admin.example/api/auth",resource="https://dream.example/api",service_client_id="dream-service",service_secret="s"*32)
     outputs = {"decks":[list_item()]}; calls = []
     schemas = [x.model_dump() for x in DECK_VERSION_SCHEMA_REQUIREMENTS]; operations = [LIST_DECKS.capability.model_dump()]

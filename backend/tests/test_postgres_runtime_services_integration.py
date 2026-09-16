@@ -15,15 +15,12 @@ from dataclasses import dataclass, field
 import os
 import re
 from typing import Any
-from unittest import mock
 
 import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 import pytest
-
-import database as legacy_database
 
 from backend.models.deck_plugin import InstallationStatus
 from backend.services.deck_plugin.installation_service import InstallationService
@@ -250,62 +247,3 @@ def test_dream_reentry_jsonb_queries_execute_on_real_postgres(
         _CORE_EMPTY_TABLES,
         0,
     )
-
-
-def test_legacy_voice_fork_binds_native_postgres_booleans(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(users=1, decks=1, voices=2)
-    postgres_case.db.execute(
-        "INSERT INTO users (id, email, password_hash) VALUES (%s, %s, %s)",
-        (7, "voice-fork-pg@example.test", "test-only"),
-    )
-    postgres_case.db.execute(
-        """
-        INSERT INTO decks (id, name, owner_id, is_system, enabled)
-        VALUES (%s, %s, %s, %s, %s)
-        """,
-        ("deck-pg-voice-fork", "PostgreSQL Voice Fork", 7, False, True),
-    )
-    postgres_case.db.execute(
-        """
-        INSERT INTO voices (
-            id, deck_id, name, system_prompt, is_system, owner_id,
-            enabled, order_index, memory_workspace_config
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            "voice-pg-source",
-            "deck-pg-voice-fork",
-            "Source Voice",
-            "Source prompt",
-            True,
-            7,
-            True,
-            1,
-            "{}",
-        ),
-    )
-
-    postgres_case.db.begin_service_scope()
-    with mock.patch.object(legacy_database, "get_db", return_value=postgres_case.db):
-        forked_voice_id = legacy_database.fork_voice(
-            7,
-            "voice-pg-source",
-            "deck-pg-voice-fork",
-        )
-
-    row = postgres_case.db.execute(
-        """
-        SELECT is_system, enabled, parent_id, owner_id, order_index
-        FROM voices WHERE id = %s
-        """,
-        (forked_voice_id,),
-    ).fetchone()
-    assert row == {
-        "is_system": False,
-        "enabled": True,
-        "parent_id": "voice-pg-source",
-        "owner_id": 7,
-        "order_index": 2,
-    }

@@ -35,7 +35,7 @@ def boundary(monkeypatch):
     import database
     monkeypatch.setattr(database, 'get_db', lambda: pytest.fail('Public Voice must not connect to Dream PG'))
     for name in ('create_voice', 'update_voice', 'delete_voice', 'fork_voice'):
-        monkeypatch.setattr(database, name, lambda *_args, **_kwargs: pytest.fail('Public Voice must use Admin'))
+        assert not hasattr(database, name)
     config = AdminDataConfig(base_url='https://admin.example', issuer='https://admin.example/api/auth',
         resource='https://dream.example/api', service_client_id='dream-service', service_secret='s' * 32)
     outputs = {'voice.create': {'voice_id': 'created-voice'}, 'voice.update': {'changed': True},

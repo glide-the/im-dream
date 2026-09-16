@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: retire zero-caller Dream Deck/Voice/default/version SQL after strict Admin DTO adoption; baseline rows remain historical. -->
 <!-- [Sync] 2026-09-15: close Story Workspace Guidance persistence through Registry115 and record the current source scan. -->
 <!-- [Sync] 2026-09-16: close managed-MCP persistence through Registry134-147 and retain the baseline row as history. -->
 <!-- [Sync] 2026-09-15: close eleven Story Workspace catalog routes through Registry114 and record the corrected current scanner. -->
@@ -97,14 +98,16 @@ Registry114将`story_workspace.py`中的Workspace get/patch、Story/Character/Sc
 | 公开user-turn原子预留 | [user_message_data](../../backend/services/admin_data/user_message_data.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-user-message.persist | server-persistence exact Thread/Run；guard/message/title单Admin事务，known复用/unknown原receipt；Factory renew/cleanup | 原内部dispatcher guard保留，CLI/Editor各purpose与其余后台persist仍未切换 |
 | 公开写作Session CRUD/summary | [sessions router](../../backend/routers/sessions.py)/[session_data](../../backend/services/admin_data/session_data.py)：session.save/get/batch/list/text-list/delete | 路由无Dream DB；原metadata/state/microsecond/timezone/metrics/confirmed edit events；`session.list`另接受精确Thread-bound server-persistence prompt/tool read | Reflections后台仍有原DB入口；其他五项Session operation不接受该purpose |
 | 公开Agent Thread/SDK/Session projection | [Service](../../backend/claude_agent/service.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)/[Session broker](../../backend/services/admin_data/session_projection_broker.py)：chat-thread.get/update-session/thread-system-config.get/session.list | resume、Session回写、fresh SystemConfig、prompt三日投影与Chat工具任意日期/正文候选使用exact server grant；broker close先drain；ContextBuilder及sessions_tool无DB | 缺owner内部dispatcher在配置边界fail closed；Reflections background及其余内部PG独立迁移 |
-| 公开Deck内容版本 | [deck_versions router](../../backend/routers/deck_versions.py)/[deck_version_data](../../backend/services/admin_data/deck_version_data.py)：deck-content.state/preview/commit/history/detail | router无Dream PG；four exact schema、Admin snapshot/hash/CAS/TX，rawsnapshot/creator int/微秒、safe409/unknown原UUID | 其他Deck/Voice14、refs/voice6与FS/CLI evidence/Runtime consumer、内部content_versioning仍待迁移 |
+| 公开Deck内容版本 | [deck_versions router](../../backend/routers/deck_versions.py)/[deck_version_data](../../backend/services/admin_data/deck_version_data.py)：deck-content.state/preview/commit/history/detail | router无Dream PG；four exact schema、Admin snapshot/hash/CAS/TX，rawsnapshot/creator int/微秒、safe409/unknown原UUID；旧Dream content-version service已退役 | refs/FS/CLI evidence/Runtime consumer与其他剩余SQL边界继续单列迁移 |
 | 公开用户偏好 | [preferences router](../../backend/routers/preferences.py)/[preferences_data](../../backend/services/admin_data/preferences_data.py)：user-preferences.get/save | router无Dream DB；OAuth/2schema，requirednullable/rawobject/Python numeric/原NULL merge/{}/微秒、unknown原UUIDno retry | 后台context仍待；default-voices仍本地config，Runtime purpose不管理preferences |
 | 公开本地数据导入与first-login完成 | [auth router](../../backend/routers/auth.py)/[local_data_import](../../backend/services/admin_data/local_data_import.py)：local-data.import/first-login.complete | 三公开入口无Dream DB；Registry101 current OAuth、strict legacy request、四类独立解析、raw JSON、安全整数毫秒、Admin accepted counts；两write未知只查同operation原UUID receipt且不重发 | 正常Admin/PostgreSQL/真实账户导入另行验收；旧database helper定义只保留为未达生产路由的兼容候选 |
 | 当前用户图片历史 | [pictures router](../../backend/routers/pictures.py)/[picture_history_data](../../backend/services/admin_data/picture_history_data.py)：picture-history.list/full | 三公开入口无Dream DB；Registry103 current OAuth、nullable ISO范围、safe limit、原普通/范围prompt差异、nullable精确时间和full原404；无actor/friend/物理selector | 正常Admin/PostgreSQL/真实账户图片读取另行验收；好友timeline/full保持独立授权领域 |
 | 用户/Thread SystemConfig | [system_config_data](../../backend/services/admin_data/system_config_data.py)：user-system-config.get/patch、thread-system-config.get | Settings OAuth读写+fresh read；公开Chat单OAuth snapshot；活动turn exact grant；raw Python JSON、ten-field closed patch、no DB/default fallback；Gateway selector显式reader | ownerless内部dispatcher在配置前拒绝；正常Admin/PG/Gateway/共享FS业务验收仍待 |
 | 公开Reflections分区配置与memory-init | [reflections_config_data](../../backend/services/admin_data/reflections_config_data.py)：reflections-section-config.get/save/delete；[router](../../backend/routers/reflections.py) | current OAuth三operation；save/delete unknown仅原UUID committed typed receipt恢复、单次POST；Dream保留静态default/display/五文件过滤/partial merge；memory-init顺序为Admin Thread owner→Admin custom config→路径与FS | 后台Reflections worker无OAuth或领域grant，旧config read与task/event/result数据库路径保留；正常Admin/PG/共享FS业务验收仍待 |
 
-## 阶段40当前源码扫描与剩余直接helper
+## 阶段40历史基线源码扫描与当时的直接 helper
+
+本节保留 2026-09-14/15 扫描原貌，用于核对迁移差值；其中标记“现已退役”的路径不再是当前源码。当前状态以文末日期化关闭章节和最新 source-only 回执为准。
 
 2026-09-15 fresh scanner覆盖301个production Python模块，排除tests、`backend/script`及四个明确offline schema/import/legacy模块；结果为46个literal SQL-bearing模块、506个literal SQL execute候选、16个driver/import模块、30个legacy database import模块、108个直接legacy helper Call候选，`parse_errors=[]`、exit0。相对阶段39，SystemConfig旧SQL和生产调用被删除；计数变化同时包含并行工作树改动，不能全部归因于本阶段。完整机器结果与command receipt保存在`/private/tmp/dream-admin-stage40-system-config-validation/scanner/`。这些仍是源码候选，不是生产可达性闭环。
 
@@ -228,7 +231,7 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | production / 0 | Admin HTTP composition | 无本地事务 | 不适用 | 已关闭：只创建 Product client，不创建 PostgreSQL pool或fallback |
 | [backend/services/claude_agent/remote_interaction_guard.py](../../backend/services/claude_agent/remote_interaction_guard.py) | production / 2 | agent_sessions, workflow_runs | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_agent/session_manager.py](../../backend/services/claude_agent/session_manager.py) | production / 17 | agent_sessions, deck_runtime_plugin_locks, runtime_load_receipt_entries, runtime_load_receipts, workflow_runs | L709 SessionManager._acquire_attempt: revision | 762,785,798,301,709,353,660 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | production / 3 | claude_plugin_installations, deck_claude_plugin_refs, decks | 详见 JSON 调用线索 | 40 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/claude_plugin/deck_refs_service.py`（历史基线，现已退役） | production / 3 | claude_plugin_installations, deck_claude_plugin_refs, decks | 详见 JSON 调用线索 | 40 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_plugin/install_service.py](../../backend/services/claude_plugin/install_service.py) | production / 16 | claude_plugin_installations, claude_plugin_operations, deck_claude_plugin_refs | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_plugin/marketplace_service.py](../../backend/services/claude_plugin/marketplace_service.py) | production / 4 | LATERAL, claude_plugin_installations, claude_plugin_marketplace_entries, claude_plugin_marketplace_entry_policies, claude_plugin_marketplace_revisions, claude_plugin_marketplaces, drizzle.schema_capabilities | L108 MarketplaceCatalogService.list_entries: revision; L201 MarketplaceCatalogService.resolve_install_source: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/claude_plugin/workspace_packer.py](../../backend/services/claude_plugin/workspace_packer.py) | production / 2 | claude_plugin_installations, deck_claude_plugin_refs | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -236,18 +239,18 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/deck/agent_type.py](../../backend/services/deck/agent_type.py) | production / 2 | deck_plugin_bindings, deck_plugin_releases | L55 agent_type_records_for_decks: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck/builtin_plugin.py](../../backend/services/deck/builtin_plugin.py) | production / 6 | deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck/chat_context.py](../../backend/services/deck/chat_context.py) | production / 2 | decks, voices | 详见 JSON 调用线索 | 67 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck/content_versioning.py](../../backend/services/deck/content_versioning.py) | production / 12 | deck_claude_plugin_refs, deck_plugin_bindings, deck_plugin_releases, deck_versions, decks, drizzle.schema_capabilities, voices | L168 DeckContentVersionService._owned_deck: FOR UPDATE; L101 advance_deck_draft_revision: RETURNING,revision; L418 DeckContentVersionService.commit: revision; L227 DeckContentVersionService._snapshot: revision; L460 DeckContentVersionService.list_versions: revision; L480 DeckContentVersionService.get_version: revision; L170 DeckContentVersionService._owned_deck: revision; L397 DeckContentVersionService.commit: RETURNING,revision | 460,480,170,397 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck/content_versioning.py`（历史基线，现已退役） | production / 12 | deck_claude_plugin_refs, deck_plugin_bindings, deck_plugin_releases, deck_versions, decks, drizzle.schema_capabilities, voices | L168 DeckContentVersionService._owned_deck: FOR UPDATE; L101 advance_deck_draft_revision: RETURNING,revision; L418 DeckContentVersionService.commit: revision; L227 DeckContentVersionService._snapshot: revision; L460 DeckContentVersionService.list_versions: revision; L480 DeckContentVersionService.get_version: revision; L170 DeckContentVersionService._owned_deck: revision; L397 DeckContentVersionService.commit: RETURNING,revision | 460,480,170,397 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck/defaults.py](../../backend/services/deck/defaults.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck/runtime_context.py](../../backend/services/deck/runtime_context.py) | production / 5 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, runtime_plugin_materializations | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck/runtime_context.py`（历史基线，现已退役） | production / 5 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, runtime_plugin_materializations | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | production / 4 | chat_thread, story_workspace_workspaces, workflow_runs | 详见 JSON 调用线索 | 280,365,372,1428 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/binding_service.py](../../backend/services/deck_plugin/binding_service.py) | production / 11 | deck_plugin_bindings, decks, story_workspace_workspaces | L251 BindingService.save: revision; L166 BindingService.list_history: revision; L237 BindingService.save: revision; L313 BindingService.clear: revision; L340 BindingService._lock_owned_deck: FOR UPDATE; L361 BindingService.latest_revision: revision | 91,340,99,107 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/compatibility_service.py](../../backend/services/deck_plugin/compatibility_service.py) | production / 6 | columns, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck_plugin/binding_service.py`（历史基线，现已退役） | production / 11 | deck_plugin_bindings, decks, story_workspace_workspaces | L251 BindingService.save: revision; L166 BindingService.list_history: revision; L237 BindingService.save: revision; L313 BindingService.clear: revision; L340 BindingService._lock_owned_deck: FOR UPDATE; L361 BindingService.latest_revision: revision | 91,340,99,107 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck_plugin/compatibility_service.py`（历史基线，现已退役） | production / 6 | columns, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/installation_service.py](../../backend/services/deck_plugin/installation_service.py) | production / 8 | columns, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/manifest_validator.py](../../backend/services/deck_plugin/manifest_validator.py) | production / 1 | deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | production / 11 | deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck_plugin/release_service.py`（历史基线，现已退役） | production / 11 | deck_plugin_releases, deck_runtime_plugin_locks | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/revocation_service.py](../../backend/services/deck_plugin/revocation_service.py) | production / 30 | IF, revocation_audit_events, revocation_cancel_commands, revocation_impact_manifests, revocation_incidents, revocation_notification_outbox, revocation_quarantined_targets, revocation_runtime_receipts, security_revocations | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | production / 6 | deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, information_schema.columns | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/deck_plugin/selection_validation_service.py](../../backend/services/deck_plugin/selection_validation_service.py) | production / 4 | deck_plugin_installations, deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/deck_plugin/selection_validation_service.py`（历史基线，现已退役） | production / 4 | deck_plugin_installations, deck_plugin_releases | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/errors/error_registry.py](../../backend/services/errors/error_registry.py) | production / 5 | Claude, the | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | `backend/services/events/event_emitter.py`（迁移前基线，现已删除） | production / 3 | events | 详见 JSON 调用线索 | 无生产调用者 | 退役未接线实现；未创建无业务调用方的Admin接口 |
 | [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | production / 5 | runtime_plugin_materializations | L342 MaterializationManager._begin_attempt: revision | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -266,8 +269,8 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/story_workspace/dream_workflow_lifecycle_service.py](../../backend/services/story_workspace/dream_workflow_lifecycle_service.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/episode_binding_service.py](../../backend/services/story_workspace/episode_binding_service.py) | production / 1 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | production / 2 | chat_message, chat_thread | 详见 JSON 调用线索 | 290 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/story_workspace/preflight_builder.py](../../backend/services/story_workspace/preflight_builder.py) | production / 13 | deck_plugin_bindings, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, deck_runtime_snapshots, decks, runtime_plugin_materializations, story_workspace_workspaces, voices | L290 StoryWorkspacePreflightServiceBuilder.ensure_snapshot: revision; L101 StoryWorkspacePreflightServiceBuilder.resolve_binding: revision; L262 StoryWorkspacePreflightServiceBuilder.ensure_snapshot: revision | 83,236 | 等待 Admin 规范；按原 aggregate 事务替换 |
-| [backend/services/workflow/preflight_service.py](../../backend/services/workflow/preflight_service.py) | production / 12 | workflow_preflights | L540 PreflightService._insert_checking: revision | 540,427 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/story_workspace/preflight_builder.py`（历史基线，现已退役） | production / 13 | deck_plugin_bindings, deck_plugin_installations, deck_plugin_releases, deck_runtime_plugin_locks, deck_runtime_snapshots, decks, runtime_plugin_materializations, story_workspace_workspaces, voices | L290 StoryWorkspacePreflightServiceBuilder.ensure_snapshot: revision; L101 StoryWorkspacePreflightServiceBuilder.resolve_binding: revision; L262 StoryWorkspacePreflightServiceBuilder.ensure_snapshot: revision | 83,236 | 等待 Admin 规范；按原 aggregate 事务替换 |
+| `backend/services/workflow/preflight_service.py`（历史基线，现已退役） | production / 12 | workflow_preflights | L540 PreflightService._insert_checking: revision | 540,427 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/services/workflow/run_service.py](../../backend/services/workflow/run_service.py) | production / 16 | agent_sessions, current, deck_plugin_bindings, deck_plugin_releases, deck_runtime_plugin_locks, runtime_load_receipts, workflow_preflights, workflow_run_token_consumptions, workflow_run_transitions, workflow_runs | L511 WorkflowRunService._create_run: revision; L602 WorkflowRunService._load_preflight_context: revision; L797 WorkflowRunService._validate_agent_session_binding: revision | 700,864,511,295,890,460 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/tools/session_inserter.py](../../backend/tools/session_inserter.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | production / 1 | user_sessions | 详见 JSON 调用线索 | 61 | 等待 Admin 规范；按原 aggregate 事务替换 |
@@ -412,29 +415,29 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/workflow/run_service.py](../../backend/services/workflow/run_service.py) | 17 | 0 |
 | [backend/services/story_workspace/artifact_story_index_repository.py](../../backend/services/story_workspace/artifact_story_index_repository.py) | 16 | 1 |
 | [backend/services/claude_plugin/install_service.py](../../backend/services/claude_plugin/install_service.py) | 15 | 0 |
-| [backend/services/deck_plugin/binding_service.py](../../backend/services/deck_plugin/binding_service.py) | 13 | 0 |
-| [backend/services/story_workspace/preflight_builder.py](../../backend/services/story_workspace/preflight_builder.py) | 13 | 0 |
-| [backend/services/workflow/preflight_service.py](../../backend/services/workflow/preflight_service.py) | 13 | 0 |
+| `backend/services/deck_plugin/binding_service.py`（历史基线，现已退役） | 13 | 0 |
+| `backend/services/story_workspace/preflight_builder.py`（历史基线，现已退役） | 13 | 0 |
+| `backend/services/workflow/preflight_service.py`（历史基线，现已退役） | 13 | 0 |
 | [backend/services/deck/admin_gateway.py](../../backend/services/deck/admin_gateway.py) | 12 | 0 |
 | [backend/services/runtime_plugin/reconcile_service.py](../../backend/services/runtime_plugin/reconcile_service.py) | 12 | 0 |
-| [backend/services/deck/content_versioning.py](../../backend/services/deck/content_versioning.py) | 11 | 1 |
-| [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | 11 | 0 |
+| `backend/services/deck/content_versioning.py`（历史基线，现已退役） | 11 | 1 |
+| `backend/services/deck_plugin/release_service.py`（历史基线，现已退役） | 11 | 0 |
 | [backend/services/deck_plugin/installation_service.py](../../backend/services/deck_plugin/installation_service.py) | 7 | 0 |
 | [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 6 | 0 |
 | [backend/schema/capabilities.py](../../backend/schema/capabilities.py) | 6 | 0 |
 | [backend/services/deck/builtin_plugin.py](../../backend/services/deck/builtin_plugin.py) | 6 | 0 |
 | [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | 6 | 0 |
-| [backend/services/deck/runtime_context.py](../../backend/services/deck/runtime_context.py) | 5 | 0 |
-| [backend/services/deck_plugin/compatibility_service.py](../../backend/services/deck_plugin/compatibility_service.py) | 5 | 0 |
+| `backend/services/deck/runtime_context.py`（历史基线，现已退役） | 5 | 0 |
+| `backend/services/deck_plugin/compatibility_service.py`（历史基线，现已退役） | 5 | 0 |
 | [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | 5 | 0 |
 | [backend/services/claude_plugin/marketplace_service.py](../../backend/services/claude_plugin/marketplace_service.py) | 4 | 0 |
 | [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 4 | 0 |
-| [backend/services/deck_plugin/selection_validation_service.py](../../backend/services/deck_plugin/selection_validation_service.py) | 4 | 0 |
+| `backend/services/deck_plugin/selection_validation_service.py`（历史基线，现已退役） | 4 | 0 |
 | `backend/services/events/event_emitter.py`（迁移前基线，现已删除） | 4 | 0 |
 | [backend/services/story_workspace/dream_artifact_turn_hook.py](../../backend/services/story_workspace/dream_artifact_turn_hook.py) | 4 | 0 |
 | [backend/services/story_workspace/dream_auto_repair_service.py](../../backend/services/story_workspace/dream_auto_repair_service.py) | 4 | 0 |
 | [backend/claude_agent/service.py](../../backend/claude_agent/service.py) | 3 | 0 |
-| [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | 3 | 0 |
+| `backend/services/claude_plugin/deck_refs_service.py`（历史基线，现已退役） | 3 | 0 |
 | [backend/services/story_workspace/dream_runtime_activation_service.py](../../backend/services/story_workspace/dream_runtime_activation_service.py) | 3 | 0 |
 | [backend/libs/claude_agent_kit/server/editor_tool.py](../../backend/libs/claude_agent_kit/server/editor_tool.py) | 2 | 0 |
 | [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 2 | 0 |
@@ -470,13 +473,13 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 | [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 1 |
 | [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 1 |
 | [backend/services/deck/admin_gateway.py](../../backend/services/deck/admin_gateway.py) | 1 |
-| [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | 1 |
+| `backend/services/deck_plugin/release_service.py`（历史基线，现已退役） | 1 |
 | [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 9 |
 | [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 14 |
 | [backend/services/story_workspace/dream_artifact_turn_hook.py](../../backend/services/story_workspace/dream_artifact_turn_hook.py) | 5 |
 | [backend/services/story_workspace/dream_auto_repair_service.py](../../backend/services/story_workspace/dream_auto_repair_service.py) | 2 |
 | [backend/claude_agent/service.py](../../backend/claude_agent/service.py) | 12 |
-| [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | 1 |
+| `backend/services/claude_plugin/deck_refs_service.py`（历史基线，现已退役） | 1 |
 | [backend/libs/claude_agent_kit/server/editor_tool.py](../../backend/libs/claude_agent_kit/server/editor_tool.py) | 2 |
 | [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 1 |
 | [backend/server.py](../../backend/server.py) | 4 |
@@ -631,3 +634,24 @@ Admin DTO → Service → typed Drizzle Repository 操作，Dream不得恢复SQL
 database import模块14、legacy helper调用37、transaction/connection调用308、
 Admin operation名168、parse error 0；相对上一回执减少一个无调用者的生产模块、
 一个SQL模块、三个SQL literal和一个driver import模块。
+
+## 2026-09-16 Deck CRUD 与内容版本旧 SQL 退役
+
+公开 Deck list/detail/default/create/update/delete/fork/publish/sync、四项 Voice 写入和
+五项 content-version 路由已经通过 strict Pydantic DTO 调用 Admin 具名业务操作；Admin
+Service 与 typed Drizzle Repository 负责 actor 权限、聚合锁、draft revision、snapshot
+hash、CAS、事务和原 request receipt。Dream 继续负责公开响应投影、共享 artifact/CLI
+校验、Runtime、SSE 与共享文件系统，不保留数据库 fallback。
+
+因此本阶段删除 `database.py` 中 22 个零生产调用者的 Deck/Voice/default helper、两个
+Deck refs helper、显式 fixture seeding helper、`services/deck/content_versioning.py`，并把
+`services/deck/agent_type.py` 收敛为纯 manifest → Chat/Dream 映射。仍被 startup 使用的
+`backfill_builtin_deck_plugin_refs` 保留并继续列入后续迁移，不将本阶段误报为 Dream
+全量无 PostgreSQL。
+
+动态 f-string SQL 感知的 source-only 回执
+[dream-db-closure-after-deck-crud-version-retirement-source-only.json](admin-auth-data-verification/dream-db-closure-after-deck-crud-version-retirement-source-only.json)
+在同一 AST 口径下从 HEAD 的 297 个生产模块/29 个 SQL 模块/480 个 SQL call 变为
+296/27/402，减少 1 个生产模块、2 个 SQL 模块、78 个 SQL call 和 137 个 connection
+call；parse error 为 0。Agent 类型 SQL 为 0，退役 owned symbol 为 0，`database.py`
+仍有 73 个 SQL call，说明全局关闭目标继续进行。

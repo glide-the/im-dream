@@ -33,7 +33,7 @@ def boundary(monkeypatch):
  import database
  monkeypatch.setattr(database,'get_db',lambda:pytest.fail('Public Deck mutations must not use Dream PG'))
  for name in ('update_deck','delete_deck','fork_deck','increment_deck_install_count','get_deck_with_voices','publish_deck','unpublish_deck','sync_deck_with_parent'):
-  monkeypatch.setattr(database,name,lambda *_a,**_kw:pytest.fail('Public Deck mutations must use one Admin operation'))
+  assert not hasattr(database,name)
  config=AdminDataConfig(base_url='https://admin.example',issuer='https://admin.example/api/auth',resource='https://dream.example/api',service_client_id='dream-service',service_secret='s'*32)
  outputs={'deck.update':{'changed':True},'deck.delete':{'changed':True},'deck.toggle-publication':{'published':True},'deck.collect':{'deck_id':'collected-deck'},'deck.sync-parent':{'success':True,'synced_voices':5}}
  schemas=[s.model_dump() for s in DECK_VERSION_SCHEMA_REQUIREMENTS];operations=[s.capability.model_dump() for s in DECK_MUTATION_OPERATIONS]

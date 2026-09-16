@@ -45,7 +45,7 @@ def aggregate():
 def boundary(monkeypatch):
     import database
     monkeypatch.setattr(database, "get_db", lambda: pytest.fail("Public detail must not read Dream PG"))
-    monkeypatch.setattr(database, "get_deck_with_voices", lambda *_a: pytest.fail("Public detail must use Admin"))
+    assert not hasattr(database, "get_deck_with_voices")
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth",
         resource="https://dream.example/api", service_client_id="dream-service", service_secret="s"*32)
     outputs = {"deck": aggregate()}; schemas = [x.model_dump() for x in DECK_VERSION_SCHEMA_REQUIREMENTS]
