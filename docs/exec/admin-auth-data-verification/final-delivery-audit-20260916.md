@@ -1,7 +1,7 @@
 <!-- [Input] Exact Admin/Dream heads, four published baseline releases, current contracts, CI receipts and private cutover preflight state. -->
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
-<!-- [Sync] 2026-09-16: capture source completion and the remaining separately approved normal cutover/acceptance gates. -->
+<!-- [Sync] 2026-09-16: add exact Admin/Dream release binding and physical-backup isolated cutover rehearsal evidence. -->
 
 # Admin 统一认证与数据服务最终交付审计
 
@@ -13,7 +13,7 @@
 
 | 项目 | 分支 / HEAD | 审查入口 | 状态 |
 | --- | --- | --- | --- |
-| Admin | `codex/admin-auth-data-provider` / 实现快照 `f7a182ff56a3b47fec23362d1825c43597b7c21d` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地与远端一致，PR `CLEAN` |
+| Admin | `codex/admin-auth-data-provider` / 实现快照 `894c8221ae4f96109f01570a6145a715197712e7` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地与远端一致，PR `CLEAN`；正常激活已绑定精确、tracked-clean 的 Admin/Dream HEAD |
 | Dream | `codex/dream-admin-auth-data-client` / 实现快照 `dfd380210ccac52b8320b13be0eb63cc9d64f7c1` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 后续提交仅增加或校正最终审计文档；精确审查 HEAD 与检查结果以 PR 为准，仅保留既存未跟踪 `.pnpm-store/` |
 
 ## 1. 基线发布
@@ -84,18 +84,19 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 
 | 命令/运行 | 工作目录或平台 | 结果 |
 | --- | --- | --- |
-| Admin [Test Suite 35075819619](https://github.com/glide-the/dream-im-platform/actions/runs/35075819619) | GitHub / Admin `f7a182f` | exit `0`；63/63 migrations，8 capabilities，repeat no-op |
-| 同一 Admin deterministic job | GitHub / Admin `f7a182f` | exit `0`；274 files / 2074 tests passed，17 files / 36 tests skipped；ESLint、tsc、Next 16.1.6 build通过 |
-| Dream [Frontend CI 35077514688](https://github.com/glide-the/im-dream/actions/runs/35077514688) | GitHub / 首个审计提交 `f5a56432` | exit `0`；1m2s，Next 16.1.6 compile、TypeScript、3/3 static pages |
-| Dream [Backend CI 35077514712](https://github.com/glide-the/im-dream/actions/runs/35077514712) | GitHub / 首个审计提交 `f5a56432` | exit `0`；5m6s，生产 Docker build、Runtime 0.1.10、SDK 0.2.145、Plugin CLI gate通过 |
+| Admin [Test Suite 35080308352](https://github.com/glide-the/dream-im-platform/actions/runs/35080308352) | GitHub / Admin `894c8221` | exit `0`；50s，63/63 migrations，8 capabilities，repeat no-op |
+| 同一 Admin deterministic job | GitHub / Admin `894c8221` | exit `0`；3m41s，13 config tests、274 files / 2074 tests passed，17 files / 36 tests skipped；ESLint、tsc、Next 16.1.6 build通过 |
+| Dream [Frontend CI 35078223026](https://github.com/glide-the/im-dream/actions/runs/35078223026) | GitHub / 审计提交 `271cd601` | exit `0`；1m12s，Next 16.1.6 compile、TypeScript、3/3 static pages |
+| Dream [Backend CI 35078223022](https://github.com/glide-the/im-dream/actions/runs/35078223022) | GitHub / 审计提交 `271cd601` | exit `0`；4m53s，生产 Docker build、Runtime 0.1.10、SDK 0.2.145、Plugin CLI gate通过 |
 | `.venv/bin/python -m pytest -q tests` | Dream `backend`，实现代码最终快照 | exit `0`；3527 passed、24 skipped、615 subtests passed |
+| 正常备份隔离恢复演练 | 本机独占 PostgreSQL 18.1 / `55493` | exit `0`；真实物理备份54→63、8 capabilities、142 ACL、credential/allow/deny、重复apply、`35/1408/10`计数保持；回执SHA `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`，副本已停止并删除 |
 | Markdown local-link checks | 两仓受影响文档 | exit `0`；最终同步3文件0 missing、Admin架构7文件67 links/0 missing、Dream总览2文件15 links/0 missing |
 
 CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action runtime强制到 Node 24；没有项目测试或构建失败。
 
 ## 8. 正常切换候选
 
-私有候选目录和 env/manifest 均为 `0600`。候选通过私有回执绑定 Admin 与 Dream 精确审查 HEAD，并在纯文档提交后刷新 Dream 绑定；状态为 `prepared-not-applied`，停机备份完整性已验证。预检快照记录正常库为 54/63 migrations、AUTH/DATA/CONTROL/Dream角色未创建。正常 `3000`、`5173`、`8765`、`54329` 当前均未监听。
+私有候选目录和 env/manifest 均为 `0600`。v2 manifest 通过实际 Git worktree 校验绑定 Admin 与 Dream 精确审查 HEAD，并拒绝 commit mismatch、tracked修改及旧v1 manifest；状态为 `prepared-not-applied`，停机备份完整性已验证。相同物理备份已在本轮独占 PostgreSQL 18.1 完成54→63、角色/ACL、凭据与allow/deny的apply/dry-run/repeat-apply演练，数据计数保持；隔离进程和目录已清理。预检快照记录正常库仍为54/63 migrations、AUTH/DATA/CONTROL/Dream角色未创建。正常 `3000`、`5173`、`8765`、`54329` 当前均未监听。
 
 执行器默认只预检；实际提交必须同时显式提供 `--apply --production-approval`。本审计未运行 migration、role创建、`ALTER OWNER`、`GRANT/REVOKE`、配置激活或服务启动。
 
