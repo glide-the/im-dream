@@ -1,6 +1,7 @@
 # [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
+# [Sync] 2026-09-16: remove the zero-caller Run SQL application class after Admin DTO route adoption.
 # [Sync] 2026-09-16: move Dream confirmation facts and persistence to Registry120 Admin DTOs.
 # [Sync] 2026-09-16: retire the unreachable Dream SQL Preflight authority after Admin DTO adoption.
 # [Sync] 2026-09-16: remove unused imports of the retired Dream SQL Workflow context resolver.
@@ -38,7 +39,7 @@ try:
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
-    from services.errors.error_registry import ApiRouteError, workflow_run_route_error
+    from services.errors.error_registry import ApiRouteError
     from services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -48,7 +49,7 @@ try:
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
     )
-    from services.workflow.run_service import WorkflowRunError, WorkflowRunService
+    from services.workflow.run_service import WorkflowRunService
     from services.story_workspace.dream_confirmation_service import (
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
@@ -104,7 +105,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
-    from backend.services.errors.error_registry import ApiRouteError, workflow_run_route_error
+    from backend.services.errors.error_registry import ApiRouteError
     from backend.services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -114,7 +115,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamPathError,
         StoryWorkspaceDreamPlatformUnsupported,
     )
-    from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
+    from backend.services.workflow.run_service import WorkflowRunService
     from backend.services.story_workspace.dream_confirmation_service import (
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
@@ -262,13 +263,6 @@ class _StoryWorkspaceApplicationSupport:
     """Shared authorization/error helpers; exposes no application endpoint."""
 
     @staticmethod
-    def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
-        return AuthenticatedActorContext(
-            workspace_id=actor["workspace_id"],
-            actor_id=actor["actor_id"],
-        )
-
-    @staticmethod
     def _run_actor_context(
         db: Any,
         workflow_run_id: str,
@@ -296,10 +290,6 @@ class _StoryWorkspaceApplicationSupport:
             workspace_id=str(row["workspace_id"]),
             actor_id=str(actor_id),
         )
-
-    @staticmethod
-    def _raise_run_error(exc: WorkflowRunError) -> None:
-        raise workflow_run_route_error(exc.code) from exc
 
     @staticmethod
     def _thread_workspace(thread_id: str) -> Path:
@@ -481,86 +471,6 @@ class _StoryWorkspaceApplicationSupport:
         )
 
 
-
-class StoryWorkflowRunApplicationService(_StoryWorkspaceApplicationSupport):
-    """Legacy WorkflowRun command/query application service."""
-
-    async def create_run(self, request: Any, *, actor: dict[str, str]) -> Any:
-        db = database.get_db()
-        try:
-            service = WorkflowRunService(db, token_secret=story_workspace_workflow_token_secret())
-            source_time = (
-                datetime.fromisoformat(request.source_message_time.replace("Z", "+00:00"))
-                if request.source_message_time
-                else None
-            )
-            return await service.create_run(
-                request.workflow_preflight_id,
-                request.preflight_token,
-                request.idempotency_key,
-                request.source_voice_thread_id,
-                self._actor(actor),
-                source_message_id=request.source_message_id,
-                source_message_time=source_time,
-            )
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        finally:
-            db.close()
-
-    async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any:
-        db = database.get_db()
-        try:
-            return WorkflowRunService(db, token_secret=story_workspace_workflow_token_secret()).read_run(
-                workflow_run_id,
-                self._actor(actor),
-            )
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        finally:
-            db.close()
-
-
-    async def retry_run(
-        self,
-        workflow_run_id: str,
-        request: Any,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        db = database.get_db()
-        try:
-            return await WorkflowRunService(db, token_secret=story_workspace_workflow_token_secret()).retry_run(
-                workflow_run_id,
-                self._actor(actor),
-                preflight_id=request.workflow_preflight_id,
-                preflight_token=request.preflight_token,
-                idempotency_key=request.idempotency_key,
-            )
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        finally:
-            db.close()
-
-    async def cancel_run(
-        self,
-        workflow_run_id: str,
-        request: Any,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        db = database.get_db()
-        try:
-            return await WorkflowRunService(db, token_secret=story_workspace_workflow_token_secret()).transition_run(
-                workflow_run_id,
-                RunStatus.CANCELLED,
-                self._actor(actor),
-                reason_code=f"user_cancelled:{request.reason}",
-            )
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
-        finally:
-            db.close()
 
 class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
     """Authorized Dream files, Artifact, re-entry and Story Index service."""
@@ -1507,13 +1417,8 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
 
 
 
-_RUN_APPLICATION_SERVICE = StoryWorkflowRunApplicationService()
 _ARTIFACT_APPLICATION_SERVICE = DreamArtifactApplicationService()
 _CONFIRMATION_APPLICATION_SERVICE = DreamConfirmationApplicationService()
-
-
-def get_story_workflow_run_application_service() -> StoryWorkflowRunApplicationService:
-    return _RUN_APPLICATION_SERVICE
 
 
 def get_dream_artifact_application_service() -> DreamArtifactApplicationService:

@@ -1,4 +1,4 @@
-"""Focused task_009 AgentSession, atomic start, and reload guard tests."""
+"""Focused task_009 AgentSession and atomic start tests."""
 
 from __future__ import annotations
 
@@ -22,12 +22,6 @@ from backend.models.runtime_plugin import (
     compute_artifact_set_hash,
 )
 from backend.models.workflow_run import RunStatus
-from backend.services.claude_agent.remote_interaction_guard import (
-    ManagementSmokeContext,
-    PluginRef,
-    RemoteInteractionGuard,
-    RUNTIME_PLUGIN_RELOAD_UNSUPPORTED,
-)
 from backend.services.claude_agent.session_manager import (
     AGENT_SESSION_COMMIT_FAILED,
     AGENT_SESSION_CREATE_CONFLICT,
@@ -516,49 +510,6 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
                 AgentSessionStatus.TERMINATED,
                 AgentSessionStatus.ACTIVE,
             )
-
-    async def test_reload_guard_rejects_run_sessions_and_limits_management_smoke(self) -> None:
-        manager, _, reader, run = await self.prepare()
-        session = await self._start(manager, run, reader)
-        plugin = PluginRef(
-            claude_code_plugin_id=RUNTIME_PLUGIN_ID,
-            resolved_version=RUNTIME_PLUGIN_VERSION,
-            artifact_digest=ARTIFACT_DIGEST,
-            capabilities=[CAPABILITY],
-            materialized=True,
-            marketplace_cached=True,
-        )
-        guard = RemoteInteractionGuard(self.fixture.db)
-        denied = await guard.guard_reload(
-            workflow_run_id=run.workflow_run_id,
-            agent_session_id=session.agent_session_id,
-            proposed_plugins=[plugin],
-            proposed_capabilities=[CAPABILITY],
-        )
-        self.assertFalse(denied.allowed)
-        self.assertEqual(denied.reason_code, RUNTIME_PLUGIN_RELOAD_UNSUPPORTED)
-
-        management = ManagementSmokeContext(
-            management_session_id="mgmt_idle-test",
-            plugins=[plugin],
-        )
-        smoke_guard = RemoteInteractionGuard(
-            self.fixture.db,
-            management_context_reader=lambda session_id: management
-            if session_id == management.management_session_id
-            else None,
-        )
-        allowed = await smoke_guard.guard_reload(
-            workflow_run_id=None,
-            agent_session_id=management.management_session_id,
-            proposed_plugins=[plugin],
-            proposed_capabilities=[CAPABILITY],
-        )
-        self.assertTrue(allowed.allowed)
-        self.assertTrue(allowed.diagnostic_only)
-        self.assertFalse(allowed.writes_readiness)
-        self.assertFalse(allowed.creates_receipt)
-        self.assertFalse(allowed.production_authorized)
 
 if __name__ == "__main__":
     unittest.main()

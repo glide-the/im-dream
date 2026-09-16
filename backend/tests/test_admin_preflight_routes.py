@@ -47,7 +47,6 @@ def boundary(monkeypatch):
     def no_legacy(*_a, **_kw):
         pytest.fail("Preflight GET must not use Dream SQL/default Workspace/old service")
     monkeypatch.setattr(database, "get_db", no_legacy)
-    monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_legacy)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     state = {"result": {"preflight": preflight()}}
     calls = []

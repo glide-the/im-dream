@@ -66,7 +66,6 @@ def boundary(monkeypatch):
     def no_sql(*_a, **_kw):
         pytest.fail("Run domain must not open Dream SQL or old application service")
     monkeypatch.setattr(database, "get_db", no_sql)
-    monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     state = {"result": {"run": run()}, "receipt": None}
     calls = []

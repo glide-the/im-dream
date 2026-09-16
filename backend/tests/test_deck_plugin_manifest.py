@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import unittest
 
 from pydantic import ValidationError
@@ -87,6 +88,12 @@ def valid_manifest_data() -> dict:
 
 
 class ManifestValidatorTests(unittest.TestCase):
+    def test_validator_has_no_database_uniqueness_hook(self):
+        parameters = inspect.signature(validate_manifest).parameters
+        self.assertNotIn("db", parameters)
+        self.assertNotIn("exclude_release_id", parameters)
+        self.assertNotIn("SELECT", inspect.getsource(validate_manifest))
+
     def test_valid_manifest_covers_v1_contract(self):
         manifest = validate_manifest(
             valid_manifest_data(), source_allowlist=SOURCE_ALLOWLIST

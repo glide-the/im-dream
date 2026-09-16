@@ -39,7 +39,6 @@ def boundary(monkeypatch):
     def no_sql(*_a, **_kw):
         pytest.fail("PF domain execution must not open Dream PG or old service")
     monkeypatch.setattr(database, "get_db", no_sql)
-    monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     state = {"execute": {"request_state": "committed", "preflight": preflight()}, "receipt": None}
     calls = []

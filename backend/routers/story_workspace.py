@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-16: remove the unused legacy Run application factory; public Run routes stay on Admin DTOs.
 # [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
 # [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
 # [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
@@ -85,7 +86,6 @@ try:
     from services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_story_workflow_run_application_service,
     )
     from services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
@@ -95,7 +95,6 @@ except ModuleNotFoundError:
     from backend.services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_story_workflow_run_application_service,
     )
     from backend.services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
@@ -187,41 +186,6 @@ class DreamLaunchEndpoint(Protocol):
     ) -> Any: ...
 
 
-class StoryWorkflowRunService(Protocol):
-    async def create_preflight(
-        self,
-        request: _WorkflowPreflightRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_preflight(self, preflight_id: str, *, actor: dict[str, str]) -> Any: ...
-
-    async def create_run(
-        self,
-        request: _WorkflowRunCreateRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
-
-    async def retry_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunRetryRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def cancel_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunCancelRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
 class DreamArtifactService(Protocol):
     async def get_dream_files(
         self,
@@ -281,10 +245,6 @@ class DreamConfirmationService(Protocol):
         confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
     ) -> Any: ...
-
-
-def get_story_workflow_run_service() -> StoryWorkflowRunService:
-    return get_story_workflow_run_application_service()
 
 
 def get_dream_artifact_service() -> DreamArtifactService:

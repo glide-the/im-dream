@@ -42,8 +42,6 @@ def boundary(monkeypatch):
         pytest.fail("Default-dependent Workflow ingress must not open Dream SQL or old domain service")
 
     monkeypatch.setattr(database, "get_db", no_sql)
-    monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
-    monkeypatch.setattr(module, "get_story_workflow_run_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     registered_operations = (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE, READ_BINDING)
     operations = [item.capability.model_dump() for item in registered_operations]
