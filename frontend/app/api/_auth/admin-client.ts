@@ -1,8 +1,9 @@
-// [Input] Explicit Admin service configuration and canonical v1 browser/principal/profile DTOs.
+// [Input] Explicit Admin confidential-client configuration and canonical v1 browser/principal/profile DTOs.
 // [Output] Bounded, no-retry server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
+// [Sync] 2026-09-17: obtain and cache OAuth client_credentials tokens for every Admin service call.
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -36,6 +37,13 @@ const profileDto = z.strictObject({ user: z.strictObject({
   role: z.string(), created_at: isoTime.nullable(), updated_at: isoTime.nullable(),
   auth_providers: z.array(z.enum(['google', 'credential'])),
 }) });
+const serviceTokenDto = z.strictObject({
+  access_token: z.string().regex(/^[A-Za-z0-9._~-]+$/).max(16_384),
+  token_type: z.literal('Bearer'),
+  expires_in: z.number().int().positive().max(300),
+  expires_at: z.number().int().positive().optional(),
+  scope: z.string().min(1).max(1_000),
+});
 const profileCapability = {
   name: 'user-profile.current', kind: 'read', user_scope: 'dream:read', background_scope: null,
   input_schema_version: 1, output_schema_version: 1,
@@ -47,6 +55,7 @@ export type AdminBffConfig = Readonly<{
   origin: string; issuer: string; resource: string; serviceId: string; serviceSecret: string;
   timeoutMilliseconds: number; maxResponseBytes: number;
 }>;
+export type ServiceTokenProvider = (signal?: AbortSignal) => Promise<string>;
 
 function hasControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -94,21 +103,54 @@ export class AdminBffClient {
   readonly resource: string;
   readonly #config: AdminBffConfig;
   readonly #fetch: typeof fetch;
-  constructor(config: AdminBffConfig, transport: typeof fetch = fetch) {
+  readonly #serviceTokenProvider: ServiceTokenProvider;
+  #serviceTokenCache: { token: string; expiresAt: number } | undefined;
+  #serviceTokenFlight: Promise<string> | undefined;
+  constructor(config: AdminBffConfig, transport: typeof fetch = fetch, serviceTokenProvider?: ServiceTokenProvider) {
     this.#config = config;
     this.origin = config.origin;
     this.issuer = config.issuer;
     this.resource = config.resource;
     this.#fetch = transport;
+    this.#serviceTokenProvider = serviceTokenProvider ?? (signal => this.#clientCredentialsToken(signal));
+  }
+
+  async #clientCredentialsToken(signal?: AbortSignal): Promise<string> {
+    const now = Date.now();
+    if (this.#serviceTokenCache && this.#serviceTokenCache.expiresAt > now + 30_000) return this.#serviceTokenCache.token;
+    if (this.#serviceTokenFlight) return this.#serviceTokenFlight;
+    this.#serviceTokenFlight = (async () => {
+      let response: Response;
+      try {
+        const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
+        const authorization = Buffer.from(`${encodeURIComponent(this.#config.serviceId)}:${encodeURIComponent(this.#config.serviceSecret)}`, 'utf8').toString('base64');
+        response = await this.#fetch(this.issuer + '/oauth2/token', {
+          method: 'POST',
+          headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${authorization}` },
+          body: new URLSearchParams({ grant_type: 'client_credentials', resource: this.resource }),
+          cache: 'no-store', redirect: 'manual', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+      } catch { throw new BffBoundaryError('BFF_ADMIN_UNAVAILABLE', 503); }
+      let payload: unknown;
+      try { payload = await response.json(); } catch { throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503); }
+      if (!response.ok) throw new BffBoundaryError('BFF_SERVICE_AUTH_FAILED', 503);
+      const parsed = serviceTokenDto.safeParse(payload);
+      if (!parsed.success) throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503);
+      this.#serviceTokenCache = { token: parsed.data.access_token, expiresAt: now + parsed.data.expires_in * 1_000 };
+      return parsed.data.access_token;
+    })();
+    try { return await this.#serviceTokenFlight; } finally { this.#serviceTokenFlight = undefined; }
   }
 
   async #request<T>(path: string, requestId: string, schema: z.ZodType<T>, body?: unknown, token?: string, signal?: AbortSignal): Promise<T> {
     identifier.parse(requestId);
     if (token !== undefined && (!token || /\s/.test(token) || hasControlCharacter(token))) throw new BffBoundaryError('BFF_SESSION_INVALID', 401);
-    const headers = new Headers({ accept: 'application/json', 'x-request-id': requestId,
-      'X-Ink-Dream-Service': this.#config.serviceId, 'X-Ink-Dream-Credential': this.#config.serviceSecret });
+    const serviceToken = await this.#serviceTokenProvider(signal);
+    if (!serviceToken || !/^[A-Za-z0-9._~-]+$/.test(serviceToken) || serviceToken.length > 16_384) throw new BffBoundaryError('BFF_SERVICE_AUTH_FAILED', 503);
+    const headers = new Headers({ accept: 'application/json', 'x-request-id': requestId });
     if (body !== undefined) headers.set('content-type', 'application/json');
-    if (token !== undefined) headers.set('authorization', 'Bearer ' + token);
+    headers.set('authorization', 'Bearer ' + (token ?? serviceToken));
+    if (token !== undefined) headers.set('x-ink-dream-service-authorization', 'Bearer ' + serviceToken);
     let response: Response;
     let raw: string;
     try {

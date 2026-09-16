@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual social routes/RequestAuth/DTO client and synthetic relationship/image responses.
 # [Output] Nine public contracts, original errors/IDs/timestamps, scopes and unknown receipt evidence.
 # [Pos] Provider-free social harness; Admin owns locks/state/policy and Dream DB is fenced.
@@ -90,7 +91,8 @@ def boundary(monkeypatch):
             assert set(body) == {'request_id', 'input'} and body['request_id'] == request_id
             assert not {'user_id', 'actor_id', 'subject'} & body['input'].keys()
             assert request.headers['authorization'] in {'Bearer write-token', 'Bearer read-token'}
-            assert request.headers['x-ink-dream-credential'] == 's' * 32 and 'cookie' not in request.headers
+            assert request.headers['x-ink-dream-service-authorization'] == 'Bearer fixture.service.access.token'
+            assert 'x-ink-dream-credential' not in request.headers and 'cookie' not in request.headers
             calls.append((name, body['input'], request_id)); value = outputs[name]
             if isinstance(value, Exception): raise value
         return httpx.Response(200, json={'request_id': request_id, 'data': value})

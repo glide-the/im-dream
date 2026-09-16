@@ -1,56 +1,62 @@
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
+<!-- [Sync] 2026-09-17: separate Admin operator sessions from Dream OAuth subjects and model Dream browser/device/service as OAuth clients. -->
 <!-- [Sync] 2026-09-16: document the unified identity model, conflict handling and browser/Admin/device flows. -->
 
 # 登录认证体系：数据 ER 图与流程
 
 ## 1. 背景与问题
 
-Admin 原有后台用户，Dream 原有业务用户。统一认证不能新建第二套 Dream 业务主体、改变既有业务主键，或把“邮箱相同”当作账户所有权证明。认证成功也不能自动授予 Admin 管理权限。
+Admin 原有后台操作员，Dream 原有产品用户。两者属于不同业务域：Admin operator 管理系统配置和运营数据，Dream user 拥有 Deck、Thread、Run、订阅和文件。统一认证不能把两张用户表合并、共享密码、改变既有业务主键，或把“邮箱相同”当作跨业务域关系证明。
 
-现行方案由 Admin Better Auth 统一产生协议身份、Account、Session 与 OAuth Token；Dream 原 `public.users` 继续作为业务主体真值。Admin 使用显式一对一映射连接协议身份与 Dream 主体，并使用另一条显式一对一映射连接协议身份与 Admin 成员。数据库 schema、约束和映射迁移都由 Admin Drizzle 管理。
+现行目标由 Admin Better Auth/OAuth Provider 产生 Dream 登录所需的协议身份、Account、授权页 Session 与 OAuth token；Dream 原 `public.users` 继续作为产品主体真值。Admin 后台操作员继续使用 `public.admin_users`、`public.admin_sessions` 与 RBAC。Dream browser、device 和 server 是 OAuth client；Dream user 是用户委托 token 的 `sub`，不是 OAuth client。
 
-提供方的完整接口、事务与数据库契约以 [Admin auth/data contract](https://github.com/glide-the/ink-admin-memory/blob/main/docs/architecture/admin-dream-auth-data-contract.md) 为准；本文件是 Dream 产品和评审使用的可视化索引。[认证主设计](./auth.md) 和 [Device Flow](./auth-device.md) 继续定义页面与调用行为。
+提供方的完整接口、事务与数据库契约以 [Admin auth/data contract](https://github.com/glide-the/ink-admin-memory/blob/main/docs/architecture/admin-dream-auth-data-contract.md) 和 [Admin / Dream 认证业务域评审](https://github.com/glide-the/ink-admin-memory/blob/main/docs/architecture/auth-domain-boundaries-review.md) 为准；本文件是 Dream 产品和评审使用的可视化索引。[认证主设计](./auth.md) 和 [Device Flow](./auth-device.md) 继续定义页面与调用行为。
 
 ## 2. 目标与边界
 
-- `identity.user` 是 Better Auth 协议主体；它本身不等于 Dream 业务用户或 Admin 管理员。
+- `identity.user` 是 Dream OAuth 的 Better Auth 协议主体；它本身不等于 Dream 业务用户，也不是 Admin operator。
 - `public.users` 是现有 Dream canonical user；Deck、Thread、Run、订阅及权限继续引用原主键。
-- `public.admin_users` 是 Admin 后台成员；角色与权限单独求值。
-- `identity.subject_links` 和 `identity.admin_subject_links` 分别建立显式一对一关系。一个协议主体可以只有 Dream 关系、只有 Admin 关系，或两者都有。
+- `public.admin_users` 是独立 Admin operator；其密码、Session、状态、角色与权限只在 Admin 业务域求值。
+- `identity.subject_links` 只建立 Dream 协议主体到 canonical user 的显式一对一关系。`identity.admin_subject_links` 是已存在的迁移历史，不参与新登录路径。
 - 相同邮箱只触发冲突检查。旧主体采用必须校验明确源记录、原主键和证据摘要；禁止自动合并。
 - Dream 请求不提交任意 `user_id`。Admin 从已验证 OAuth `sub` 反查 `subject_links`，再在同一事务中执行实体权限过滤。
 - Dream 浏览器只持有 HttpOnly opaque handle；Google token、OAuth access token 和 refresh token 不进入浏览器脚本。
-- Admin 管理路由在 Session 认证之后继续检查 `admin_subject_links`、成员状态、角色和权限。
+- Admin 管理路由只接受独立 Admin Session，在每次请求检查 `admin_users` 状态、角色和权限；Dream Session/token 不参与。
+- 浏览器和设备是 public OAuth client；Dream service 是 confidential client。`client_credentials` 只用于无用户后台 scope，不能代替用户委托 token。
+- 无用户后台调用使用 `Authorization: Bearer <service token>`。用户数据调用使用 `Authorization: Bearer <user token>`，Dream 服务端另加 `X-Ink-Dream-Service-Authorization: Bearer <service token>`；Browser 不能写入或读取第二个头。
+- Admin 对两个 token 分别验证 client、issuer/resource/scope 和 Dream user subject/entity 权限；service token 没有 canonical user，user token 也不能取得 Admin RBAC。
 
 ## 3. 概念与规则
 
 | 概念 | 数据真值 | 用途 | 不能代表 |
 | --- | --- | --- | --- |
-| 协议身份 | `identity.user` | Better Auth 登录主体、`sub` | Dream 实体访问权、Admin 管理权 |
+| Dream 协议身份 | `identity.user` | Better Auth 登录主体、用户 token 的 `sub` | Dream 实体访问权、Admin 管理权 |
 | 外部/密码账户 | `identity.account` | Google subject 或 credential 与协议身份的关系 | 根据相同邮箱自动合并 |
 | 登录 Session | `identity.session` | Admin 登录页和授权页的浏览器会话 | Dream API OAuth access token |
 | Dream 业务主体 | `public.users` | 原业务主键、内容所有权、订阅与历史 | Admin 成员 |
-| Admin 成员 | `public.admin_users` | 后台成员状态、RBAC 起点 | 普通 Dream 产品访问 |
+| Admin operator | `public.admin_users` | 后台成员状态、独立密码、RBAC 起点 | 普通 Dream 产品访问 |
 | Dream 主体映射 | `identity.subject_links` | `auth_user_id → canonical_user_id` | 任意客户端传入的 user ID |
-| Admin 主体映射 | `identity.admin_subject_links` | `auth_user_id → admin_user_id` | 仅凭认证成功获得后台权限 |
-| OAuth client/resource | `identity.oauthClient`、`oauthResource`、`oauthClientResource` | 注册 Dream browser/device public client、resource 与 scope | 动态注册或 client secret 打包 |
+| Admin Session | `public.admin_sessions` | Admin operator 的登录、过期与撤销 | Dream OAuth Session 或 resource token |
+| OAuth client/resource | `identity.oauthClient`、`oauthResource`、`oauthClientResource` | 注册 Dream browser/device public client、service confidential client、resource 与 scope | Dream 用户业务记录 |
 | Dream 浏览器句柄 | `identity.browser_sessions` | Admin 加密持有 token bundle，Dream BFF 使用 opaque handle | 浏览器可读 token |
 
-`subject_links.auth_user_id` 是主键，`canonical_user_id` 也唯一；`admin_subject_links.auth_user_id` 是主键，`admin_user_id` 也唯一。因此同一个 Dream user 或 Admin member 不能被静默绑定给两个 Better Auth 主体。
+`subject_links.auth_user_id` 是主键，`canonical_user_id` 也唯一，因此同一个 Dream user 不能被静默绑定给两个 Better Auth 主体。Admin operator 不通过该映射登录，也不与 Dream user 建立外键。
 
-### 3.1 旧 Dream 用户与 Admin 成员的冲突决策
+Dream 访问数据库的接口实现保持 strict Pydantic DTO → Admin Zod DTO → Domain Service → typed Drizzle Repository → transaction。Dream 不提交 SQL、表列、事务或任意 `user_id`，也不会在 Admin 不可用时回退 PostgreSQL。
 
-| 旧数据事实 | 处理结果 | 登录与权限结果 |
+### 3.1 Dream 用户与 Admin operator 的兼容决策
+
+| 旧数据事实 | Dream 处理 | Admin 处理 |
 | --- | --- | --- |
-| 只有 Dream user | reviewed manifest 固定原 canonical PK/hash，建立 `identity.user + account + subject_links` | 可登录 Dream；没有 `admin_subject_links` 时 Admin 仍为 403 |
-| 只有 Admin member | reviewed manifest 固定原 Admin PK/hash，建立 `identity.user + account + admin_subject_links` | 可登录 Admin 并继续检查 RBAC；没有 `subject_links` 时不能访问 Dream 业务数据 |
-| Dream/Admin 同邮箱，两个旧 hash 可由同一明文凭据验证 | manifest 同时固定两个源记录摘要，选择一个原 hash 作为 Better Auth credential，建立两条映射 | 一个协议主体可进入两种产品；Dream ownership 与 Admin RBAC 仍分别求值 |
-| Dream/Admin 同邮箱，但两个旧 hash 不可由同一凭据验证 | `ADOPTION_CREDENTIAL_CONFLICT`，不建立 identity、account 或映射 | 先完成可证明的 Google 绑定或显式 credential 恢复方案；禁止任选一侧 hash、覆盖另一侧或建立重复 email identity |
-| 两条旧记录邮箱不同 | `ADOPTION_SEPARATE_IDENTITIES_REQUIRED` | 分别建立协议主体，不因角色或业务关系合并 |
+| 只有 Dream user | reviewed manifest 固定原 canonical PK/hash，建立 `identity.user + account + subject_links` | 无 Admin operator，不进入后台 |
+| 只有 Admin operator | 不创建 Dream identity、account 或 subject link | 原 `admin_users` 密码签发 `admin_sessions`，继续检查 RBAC |
+| Dream/Admin 同邮箱、密码相同 | 仍只使用 Dream hash 完成 Dream adoption | 仍只使用 Admin hash 完成 Admin 登录；不复制、不互验 |
+| Dream/Admin 同邮箱、密码不同 | Dream 登录按自己的 Google/credential 证据处理 | Admin 登录按自己的 scrypt hash 处理；两者可以同时有效 |
+| 任一侧禁用 | 只影响该业务域 | 不传播禁用状态到另一业务域 |
 
-本机指定验收账户当前属于“同邮箱、旧 hash 不同且现有口令证明未通过”分支，并且尚无 Better Auth user/account、Dream subject link 或 Admin subject link；因此密码登录返回 401 是预期结果，不是 DTO/ORM 数据接口故障。该账户保持原数据不变，直到具备可验证的关联证据。
+本机指定验收账户在两个业务域中同邮箱、旧 hash 不同。当前 Google adoption 已建立 Better Auth user/account 与 Dream subject link，并且没有修改 Admin member。修正后的验收口令只匹配 Dream canonical user；它提交到 Admin 管理登录时返回 `401` 是预期结果。Admin 是否可登录只取决于独立 Admin 凭据，不需要、也不能通过合并 Dream user 解决。
 
 ## 4. 数据 ER 图
 
@@ -93,9 +99,12 @@ erDiagram
       text email UK
       text status
     }
-    ADMIN_SUBJECT_LINKS {
-      text auth_user_id PK_FK
-      text admin_user_id UK_FK
+    ADMIN_SESSIONS {
+      text id PK
+      text admin_user_id FK
+      text token_hash UK
+      timestamptz expires_at
+      timestamptz revoked_at
     }
     ADMIN_ROLES {
       text id PK
@@ -167,8 +176,7 @@ erDiagram
     IDENTITY_USER ||--o{ IDENTITY_SESSION : has
     IDENTITY_USER ||--o| SUBJECT_LINKS : maps_to_Dream
     DREAM_USERS ||--o| SUBJECT_LINKS : has_protocol_identity
-    IDENTITY_USER ||--o| ADMIN_SUBJECT_LINKS : maps_to_Admin
-    ADMIN_USERS ||--o| ADMIN_SUBJECT_LINKS : has_protocol_identity
+    ADMIN_USERS ||--o{ ADMIN_SESSIONS : opens
     ADMIN_USERS ||--o{ ADMIN_USER_ROLES : receives
     ADMIN_ROLES ||--o{ ADMIN_USER_ROLES : assigned
     ADMIN_ROLES ||--o{ ADMIN_ROLE_PERMISSIONS : grants
@@ -208,7 +216,7 @@ flowchart TD
     O -- 是 --> Q[签发 Session 或 OAuth 授权]
 ```
 
-相同邮箱只用于发现冲突。adoption 清单必须指定协议主体、原 canonical/admin 主键、来源摘要和关联证据；脚本不选择“以哪边为准”。Dream/Admin 既有 credential 不一致时拒绝关联，不覆盖密码哈希。
+相同邮箱只用于 Dream 旧账户冲突检查。Dream adoption 清单只能指定协议主体、原 canonical 主键、来源摘要和 Google/credential 证据；它不读取或修改 Admin member。Admin 登录独立校验自己的密码哈希，不覆盖 Dream 密码。
 
 ## 6. Dream 浏览器登录流程
 
@@ -227,7 +235,7 @@ sequenceDiagram
     B-->>U: 303 Admin /oauth2/authorize
     U->>A: client_id + redirect_uri + resource + scope + PKCE
     A->>I: ORM读取注册client/resource/redirect/scope
-    alt 未有 Admin Session
+    alt 未有 Dream identity Session
       A-->>U: Admin 登录页
       U->>A: 密码登录或 Google
       opt Google
@@ -263,23 +271,23 @@ sequenceDiagram
 
 浏览器不能读取 access/refresh token。Dream BFF 不签发用户 token；Python 只验证 Admin OAuth access token，也不能把 Google token或 OIDC ID token当作 Dream API 凭据。
 
-## 7. Admin 后台登录与权限隔离
+## 7. Admin 后台独立登录与权限隔离
 
 ```mermaid
 flowchart TD
-    A[用户提交 Admin 登录] --> B[Better Auth 校验 credential/Google account]
-    B --> C[创建或读取 identity.session]
-    C --> D[查询 admin_subject_links]
-    D --> E{存在且 admin_users.status=active?}
-    E -- 否 --> F[403 ADMIN_PERMISSION_DENIED]
-    E -- 是 --> G[查询 admin_user_roles]
+    A[Admin operator提交管理邮箱和密码] --> B[按email读取admin_users]
+    B --> C[固定成本校验Admin scrypt hash]
+    C --> D{凭据正确且status=active?}
+    D -- 否 --> E[401 ADMIN_CREDENTIALS_INVALID]
+    D -- 是 --> F[Drizzle事务创建admin_sessions并写login audit]
+    F --> G[后续请求按token hash查询active Session和member]
     G --> H[查询 admin_role_permissions]
     H --> I{具有当前操作权限?}
     I -- 否 --> J[403，Session 仍只表示已认证]
     I -- 是 --> K[执行 Admin 操作并写审计]
 ```
 
-同一个 `identity.user` 可以同时关联 Dream user 和 Admin member，但两条映射及权限求值互不替代。
+Admin 后台不读取 `identity.user`、Dream `subject_links` 或 canonical user。相同邮箱、Dream 登录成功和 Dream token 均不能创建 Admin Session。
 
 ## 8. Device Flow
 
@@ -316,10 +324,11 @@ sequenceDiagram
 | 旧 Dream 邮箱与新 identity 注册冲突 | `LEGACY_SUBJECT_LINK_REQUIRED` | 不创建/覆盖 canonical user，转显式 adoption |
 | adoption 主键、摘要、Google 关系或 credential 冲突 | adoption 失败 | 整个事务回滚，原记录不变 |
 | identity 已登录但没有 active `subject_links` | Dream 访问拒绝 | 不签发可用产品主体 |
-| identity 已登录但没有 active `admin_subject_links` | Admin 403 | 不授予任何角色或权限 |
+| Dream identity 已登录并持有有效 token | Admin 管理入口仍要求独立 Admin Session | 不转换为 Admin operator，不授予角色 |
+| Admin 密码错误或 member inactive | Admin 401 | 不查询 Dream user，不创建 Session |
 | OAuth client/redirect/resource/scope 未注册 | 协议错误 | 不签 code/token |
 | handle 过期、撤销或 refresh replay | 401，需要重新登录 | token bundle不返回浏览器 |
 | canonical user 或 billing projection disabled | 产品访问拒绝 | 不接受客户端 user ID 绕过 |
 | Admin DTO/数据库不可用 | 明确 503/504 | Dream 不回退 PostgreSQL |
 
-评审时应同时检查数据库唯一约束、adoption manifest、Admin RBAC、OAuth client catalog、Dream BFF cookie、Python JWT 验证和 Admin DTO 权限过滤。登录成功不能单独证明 Dream 实体访问、Admin 管理权限或真实业务验收通过。
+评审时应同时检查数据库唯一约束、Dream adoption manifest、Admin Session/RBAC、OAuth public/confidential client catalog、Dream BFF cookie、Python JWT 验证和 Admin DTO 权限过滤。Dream 登录成功、Admin 登录成功和service client认证是三份独立证据，不能互相替代。

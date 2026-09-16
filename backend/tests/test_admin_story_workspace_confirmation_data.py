@@ -1,7 +1,7 @@
 # [Input] Registry121 capability, claim-turn response and claim-bound idg grant.
 # [Output] Strict Pydantic grant recovery plus Workflow/Deck/AdminTurnPersistence composition.
 # [Pos] Provider-free Dream consumer contract; no PostgreSQL, Runtime or shared-file fixture.
-# [Sync] 2026-09-16: prove confirmation worker cannot construct a turn owner without Admin DTOs.
+# [Sync] 2026-09-17: prove confirmation claim uses service OAuth before claim-bound delegation.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -133,7 +133,8 @@ def worker(*, include_claim_capability: bool = True):
                 ],
             }
         elif request.url.path.endswith("story-workspace-confirmation.claim-turn"):
-            assert "authorization" not in request.headers
+            assert request.headers["authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-service-authorization" not in request.headers
             data = {
                 "dispatch": dispatch,
                 "authority": {

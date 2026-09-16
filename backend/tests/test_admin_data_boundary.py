@@ -4,6 +4,7 @@
 # [Sync] 2026-09-14: cover auth/receipt security and exact closed Deck conflict feedback without upstream messages.
 # [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
 # [Sync] 2026-09-16: cover Better Auth scalar and closed resource/userinfo audience-array access tokens.
+# [Sync] 2026-09-17: assert separate user and client_credentials bearer transport.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -52,8 +53,9 @@ def test_separate_service_identity_user_delegation_and_canonical_mapping(config)
     assert result.subject == "ba-opaque-user" and result.canonical_user_id == "42"
     request = requests[0]
     assert str(request.url) == config.base_url + "/api/internal/dream/v1/principal"
-    assert request.headers["X-Ink-Dream-Service"] == "dream-web"
-    assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
+    assert request.headers["authorization"] == "Bearer admin-user-token"
+    assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+    assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
     assert request.headers["authorization"] == "Bearer admin-user-token"
     assert "user_id" not in request.url.query.decode()
 

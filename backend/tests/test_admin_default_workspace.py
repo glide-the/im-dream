@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Sync] 2026-09-15: share current profile/explicit write-only secret scopes with the real Deck resolver harness.
 # [Input] Registered76 DTO/client and actual default-dependent FastAPI Workflow ingress.
 # [Output] Default-before-domain, original text ID, scope/unknown-write and receipt technical evidence.
@@ -63,8 +64,9 @@ def boundary(monkeypatch):
     def handler(request):
         rid = request.headers["x-request-id"]
         UUID(rid)
-        assert request.headers["x-ink-dream-service"] == config.service_client_id
-        assert request.headers["x-ink-dream-credential"] == config.service_secret
+        assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
+        if request.headers["authorization"] != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         assert "cookie" not in request.headers
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": schemas, "operations": operations}

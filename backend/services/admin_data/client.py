@@ -1,4 +1,4 @@
-# [Input] AdminDataConfig and exact Admin Pydantic DTO/registered domain contracts.
+# [Input] AdminDataConfig, confidential service-token source and exact Admin Pydantic DTO contracts.
 # [Output] No-retry HTTP consumer with separate service/user authentication and receipt recovery.
 # [Pos] Sole Admin authentication/data transport; domain adapters register explicit DTO operations.
 # [Sync] 2026-09-14: implement v1 contracts and shared bounded HTTP parsing and closed Deck conflict revisions without SQL/UOW emulation.
@@ -8,10 +8,12 @@
 # [Sync] 2026-09-15: read task-scoped background Reflections receipts with the original task and request IDs.
 # [Sync] 2026-09-16: recover connector-scoped background writes without an OAuth credential.
 # [Sync] 2026-09-16: expose a lock-safe local contract/capability readiness check for managed MCP composition.
+# [Sync] 2026-09-17: authenticate service calls with cached OAuth client_credentials tokens.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import re
 from threading import RLock
@@ -29,6 +31,7 @@ from .models import (
     Identifier, OperationCapabilityDTO, PrincipalDTO, SchemaCapabilityDTO,
     RequestDTO, StrictDTO,
 )
+from .service_token import OAuthClientCredentialsTokenSource
 
 InputT = TypeVar("InputT", bound=StrictDTO)
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -44,10 +47,13 @@ class DomainOperation(Generic[InputT, OutputT]):
 
 
 class AdminDataClient:
-    def __init__(self, config: AdminDataConfig, *, client: httpx.Client | None = None, operations: tuple[DomainOperation, ...] = ()) -> None:
+    def __init__(self, config: AdminDataConfig, *, client: httpx.Client | None = None,
+                 operations: tuple[DomainOperation, ...] = (),
+                 service_token_provider: Callable[[], str] | None = None) -> None:
         self._config = config
         self._owns_client = client is None
         self._http = client or httpx.Client(timeout=config.timeout_seconds, follow_redirects=False, trust_env=False)
+        self._service_token_provider = service_token_provider or OAuthClientCredentialsTokenSource(config, self._http).access_token
         self._operations = {operation.capability.name: operation for operation in operations}
         if len(self._operations) != len(operations) or any(
             re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
@@ -74,13 +80,13 @@ class AdminDataClient:
         RequestDTO(request_id=request_id)
         if access_token is not None and (not access_token or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in access_token)):
             raise AdminDataError("INVALID_ACCESS_TOKEN", 401, request_id)
-        headers = {
-            "accept": "application/json", "x-request-id": request_id,
-            "X-Ink-Dream-Service": self._config.service_client_id,
-            "X-Ink-Dream-Credential": self._config.service_secret,
-        }
+        service_token = self._service_token_provider()
+        if not service_token or len(service_token) > 16_384 or re.fullmatch(r"[A-Za-z0-9._~-]+", service_token) is None:
+            raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503, request_id, write)
+        headers = {"accept": "application/json", "x-request-id": request_id}
+        headers["authorization"] = "Bearer " + (access_token or service_token)
         if access_token is not None:
-            headers["authorization"] = "Bearer " + access_token
+            headers["x-ink-dream-service-authorization"] = "Bearer " + service_token
         return request_admin_dto(self._http, method=method,
             url=self._config.base_url + ADMIN_INTERNAL_PREFIX + path,
             request_id=request_id, output_type=output_type, headers=headers,

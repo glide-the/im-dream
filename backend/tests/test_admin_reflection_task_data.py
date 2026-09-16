@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Frozen Reflections DTO/consumer composition and private snapshot provider.
 # [Output] Deterministic contract-shape, receipt, event-bound and workspace tests without Admin/PG/model.
 # [Pos] Reflections Admin consumer unit boundary; literal pins identify the reviewed Admin source.
@@ -507,8 +508,10 @@ class ReflectionTaskReceiptTransportTest(unittest.TestCase):
                 dict(request.url.params),
                 {"operation": "reflection-event.append", "task_id": TASK_ID},
             )
-            self.assertNotIn("authorization", request.headers)
-            self.assertEqual(request.headers["x-ink-dream-service"], "dream")
+            self.assertEqual(request.headers["authorization"], "Bearer fixture.service.access.token")
+            self.assertNotIn("x-ink-dream-service-authorization", request.headers)
+            self.assertNotIn("x-ink-dream-service", request.headers)
+            self.assertNotIn("x-ink-dream-credential", request.headers)
             return httpx.Response(
                 200,
                 json={

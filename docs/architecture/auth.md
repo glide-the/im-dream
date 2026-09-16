@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-16: select localhost as the single local Dream/Admin browser auth topology and Google callback origin. -->
+<!-- [Sync] 2026-09-17: define Dream as OAuth client, Dream users as delegated subjects, and Admin operators as a separate management domain. -->
 <!-- [Sync] 2026-09-16: FastAPI retires SessionMiddleware and scrubs legacy Dream auth/session secrets; Next BFF remains the only Dream browser-session owner. -->
 <!-- [Sync] 2026-09-16: Agent-type clear/Runtime plan/prepare use current Admin OAuth and Registry127-129. -->
 <!-- [Sync] 2026-09-16: confirmation Runtime uses Registry121 claim-bound Admin persistence authority. -->
@@ -47,7 +48,7 @@ baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/o
 
 ## 目标与边界
 
-Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS与账户映射。Dream Next 是同源 BFF；FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token或维护另一套 session/refresh/device authority。Admin管理和Dream访问权限独立，同主体登录Dream不获得Admin管理。
+Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS 与 Dream 账户映射。Dream Next/browser、device 和 service 是 OAuth client；Dream 产品用户是用户委托 token 的 subject。FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token 或维护另一套 session/refresh/device authority。Admin operator 使用独立 Admin Session 与 RBAC；Dream 登录不读取、合并或创建 Admin member。
 
 当前源码中FastAPI不安装`SessionMiddleware`，不读取或继承Dream旧`GOOGLE_CLIENT_SECRET`、通用`JWT_SECRET`、Session/OAuth加密secret及旧Cookie策略；进程入口在导入业务模块前移除这些遗留环境变量和Next-only `INK_DREAM_BFF_COOKIE_SECRET`。浏览器状态只由Next BFF用该key签发host-only HttpOnly handle。Admin的Google/Better Auth/OAuth secrets、Dream注册service credential、Gateway/Product服务令牌和独立Workflow token各自按用途配置，互不回退。Cloud Run使用独立backend/frontend service account及逐secret IAM；BFF cookie secret只绑定Next，缺少Next service credential或cookie secret时发布在构建前fail closed。
 
@@ -65,7 +66,12 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 | BFF会话 | Dream host-only HttpOnly opaque handle；tokens存服务端；Admin session只属Admin origin | 撤销/过期重新登录；服务故障保留可恢复状态 |
 | Dream API | 成熟JWT/JWKS库验证签名、闭集算法、issuer/audience、时间、subject与scope | 无效/过期/错误资源为401；scope不足403 |
 | Admin领域数据 | 独立service credential+用户access token或限定后台授权；Admin检查实体归属 | service不能凭body/header任意user_id改actor |
-| Admin管理 | 独立管理权限校验 | Dream scope不授予管理能力 |
+| Admin管理 | `admin_users/admin_sessions/RBAC`独立管理认证与权限校验 | Dream identity、邮箱、scope和subject link均不授予管理能力 |
+| Dream service client | confidential client使用`client_credentials`取得限定background scope；用户调用继续传用户delegated token | service token不能推导canonical user或访问任意用户数据 |
+
+内部 Admin 数据调用有两种凭据形态。background operation 把 service access token 放在 `Authorization`；用户 operation 把用户 access token 放在 `Authorization`，Next/Python 服务端另加私有 `X-Ink-Dream-Service-Authorization` service bearer。浏览器 API 代理会剥离该私有头的输入和输出，旧静态 service ID/secret 头不再发送。Admin 分别校验 confidential client 与 Dream 用户主体；任一 token 缺失、scope/resource 不符或映射失败都关闭请求，不回退 Dream PostgreSQL。
+
+业务数据继续遵守 strict Pydantic DTO → Admin Zod DTO → Domain Service → typed Drizzle Repository → transaction。Dream 不携带 SQL、表列、事务或 caller-selected user ID；Admin Repository 执行权限过滤、锁、幂等 receipt 和持久化，Dream 保留 Runtime、SSE、业务编排和共享文件系统。
 
 ### 浏览器主拓扑与配置
 

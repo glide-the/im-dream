@@ -1,7 +1,7 @@
 // [Input] Actual API credential owner/shared stream transport with explicit fake Admin/backend providers.
 // [Output] Cookie precedence, CSRF/origin, header/query isolation, SSE flush and caller-abort contracts.
 // [Pos] Provider-free technical tests; no external HTTP, database, account or model calls.
-// [Sync] 2026-09-14: validate the public API protocol without copying parsers/state machines.
+// [Sync] 2026-09-17: prove Browser traffic cannot inject or receive the private service OAuth bearer.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApiProxy } from './api-proxy.ts';
@@ -19,7 +19,7 @@ function fixture() {
   const calls: { url: string; init: RequestInit }[] = [];
   const transport: typeof fetch = async (url, init) => {
     calls.push({ url: String(url), init: init! });
-    return new Response('body', { headers: { 'content-type': 'text/plain', 'set-cookie': 'private=secret', 'x-new-access-token': 'secret', 'x-ink-dream-credential': 'secret', 'cache-control': 'private, max-age=600', 'content-encoding': 'identity' } });
+    return new Response('body', { headers: { 'content-type': 'text/plain', 'set-cookie': 'private=secret', 'x-new-access-token': 'secret', 'x-ink-dream-credential': 'secret', 'x-ink-dream-service-authorization': 'Bearer leaked', 'cache-control': 'private, max-age=600', 'content-encoding': 'identity' } });
   };
   return { boundary, resolves, calls, admin, proxy: createApiProxy(boundary, admin, new URL('http://backend.example'), transport) };
 }
@@ -28,17 +28,17 @@ test('Browser handle takes precedence and strips credential/actor/proxy headers'
   const { boundary, proxy, calls, resolves } = fixture();
   const response = await proxy(new Request(publicOrigin + '/api/storage/file/key?download=1', { headers: {
     cookie: boundary.handleCookieName + '=' + handle + '; other=private', authorization: 'Bearer attacker',
-    'x-ink-dream-service': 'attacker', 'x-ink-dream-credential': 'secret', 'x-user-id': '7', 'x-auth-user': '7',
+    'x-ink-dream-service': 'attacker', 'x-ink-dream-credential': 'secret', 'x-ink-dream-service-authorization': 'Bearer attacker', 'x-user-id': '7', 'x-auth-user': '7',
     'x-forwarded-host': 'evil.example', connection: 'x-custom-hop', 'x-custom-hop': 'private',
   } }));
   assert.equal(response.status, 200); assert.deepEqual(resolves, [handle]);
   const headers = new Headers(calls[0].init.headers);
   assert.equal(headers.get('authorization'), 'Bearer resolved.admin.token');
-  for (const key of ['cookie', 'x-ink-dream-service', 'x-ink-dream-credential', 'x-user-id', 'x-auth-user', 'x-forwarded-host', 'connection', 'x-custom-hop']) assert.equal(headers.get(key), null);
+  for (const key of ['cookie', 'x-ink-dream-service', 'x-ink-dream-credential', 'x-ink-dream-service-authorization', 'x-user-id', 'x-auth-user', 'x-forwarded-host', 'connection', 'x-custom-hop']) assert.equal(headers.get(key), null);
   assert.equal(headers.get('accept-encoding'), 'identity');
   assert.equal(calls[0].url, 'http://backend.example/api/storage/file/key?download=1');
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  for (const key of ['set-cookie', 'x-new-access-token', 'x-ink-dream-credential', 'content-encoding']) assert.equal(response.headers.get(key), null);
+  for (const key of ['set-cookie', 'x-new-access-token', 'x-ink-dream-credential', 'x-ink-dream-service-authorization', 'content-encoding']) assert.equal(response.headers.get(key), null);
 });
 
 test('invalid, empty and duplicate Browser cookies never fall back to explicit Bearer', async () => {

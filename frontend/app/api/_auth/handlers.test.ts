@@ -1,7 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
-// [Sync] 2026-09-14: verify actual product handlers and token-free Browser responses.
+// [Sync] 2026-09-17: verify confidential-client tokens replace static custom service headers.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AdminBffClient, adminBffConfig } from './admin-client.ts';
@@ -32,14 +32,14 @@ function fixture() {
     const headers = new Headers(init?.headers);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body, headers, init: init! });
-    assert.equal(headers.get('x-ink-dream-service'), 'dream-service');
-    assert.equal(headers.get('x-ink-dream-credential'), 's'.repeat(32));
+    assert.equal(headers.get('x-ink-dream-service'), null);
+    assert.equal(headers.get('x-ink-dream-credential'), null);
     assert.equal(init?.redirect, 'manual'); assert.equal(init?.cache, 'no-store');
     const output = outputs[path];
     if (output instanceof Error) throw output;
     return Response.json({ data: output, request_id: headers.get('x-request-id') });
   };
-  const admin = new AdminBffClient(adminBffConfig(env), transport);
+  const admin = new AdminBffClient(adminBffConfig(env), transport, async () => 'service.access.token');
   return { boundary, calls, outputs, admin, handlers: createBffHandlers(boundary, admin) };
 }
 
@@ -55,7 +55,7 @@ test('start discovers exact registered client and creates encrypted original PKC
   assert.equal(authorize.searchParams.get('code_challenge'), boundary.codeChallenge(transaction));
   assert.equal(authorize.searchParams.get('state'), transaction.state);
   assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(calls.length, 1); assert.equal(calls[0].headers.get('authorization'), null);
+  assert.equal(calls.length, 1); assert.equal(calls[0].headers.get('authorization'), 'Bearer service.access.token');
   assert.match(response.headers.get('set-cookie')!, /HttpOnly; SameSite=Lax/);
   assert.ok(!response.headers.get('set-cookie')!.includes(transaction.code_verifier));
 });
@@ -97,6 +97,7 @@ test('session exposes exact decimal user ID and CSRF without OAuth credentials',
   assert.equal(payload.csrf_token, boundary.csrfToken(browserHandle));
   assert.ok(!text.includes('server.only.token') && !text.includes(browserHandle) && !text.includes('auth_providers'));
   assert.equal(calls.at(-1)?.headers.get('authorization'), 'Bearer server.only.token');
+  assert.equal(calls.at(-1)?.headers.get('x-ink-dream-service-authorization'), 'Bearer service.access.token');
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
@@ -123,9 +124,9 @@ test('logout enforces Origin/CSRF and retains handle on failed revoke', async ()
 
 test('response correlation and response-size bounds fail closed', async () => {
   const config = adminBffConfig({ ...env, INK_ADMIN_DREAM_MAX_RESPONSE_BYTES: '32' });
-  const client = new AdminBffClient(config, async () => new Response('x'.repeat(33)));
+  const client = new AdminBffClient(config, async () => new Response('x'.repeat(33)), async () => 'service.access.token');
   await assert.rejects(client.capabilities('request-1'), { code: 'BFF_ADMIN_RESPONSE_INVALID' });
-  const mismatched = new AdminBffClient(adminBffConfig(env), async () => Response.json({ request_id: 'wrong', data: { handle: browserHandle, expires_at: new Date().toISOString() } }));
+  const mismatched = new AdminBffClient(adminBffConfig(env), async () => Response.json({ request_id: 'wrong', data: { handle: browserHandle, expires_at: new Date().toISOString() } }), async () => 'service.access.token');
   await assert.rejects(mismatched.exchange('request-1', 'code', 'v'.repeat(43), publicOrigin + '/auth/callback'), { code: 'BFF_ADMIN_RESPONSE_INVALID' });
 });
 
@@ -135,4 +136,28 @@ test('device entry preserves only user_code and redirects to the exact Admin UI'
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), adminOrigin + '/auth/device?user_code=ABCD-EFGH');
   assert.equal(calls.length, 1); assert.equal(calls[0].path, '/capabilities');
+});
+
+test('default service token provider performs client_credentials once and caches the short-lived token', async () => {
+  let tokenCalls = 0; let apiCalls = 0;
+  const transport: typeof fetch = async (url, init) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/api/auth/oauth2/token') {
+      tokenCalls++;
+      assert.match(new Headers(init?.headers).get('authorization') ?? '', /^Basic /);
+      assert.equal(String(init?.body), `grant_type=client_credentials&resource=${encodeURIComponent(env.INK_DREAM_API_RESOURCE)}`);
+      return Response.json({ access_token: 'issued.service.token', token_type: 'Bearer', expires_in: 300, expires_at: Math.floor(Date.now() / 1000) + 300, scope: 'capabilities:read' });
+    }
+    apiCalls++;
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('authorization'), 'Bearer issued.service.token');
+    return Response.json({ request_id: headers.get('x-request-id'), data: {
+      version: '1', auth: { issuer: env.INK_ADMIN_AUTH_ISSUER, jwks_uri: env.INK_ADMIN_AUTH_ISSUER + '/jwks', algorithm: 'ES256', resource: env.INK_DREAM_API_RESOURCE,
+        clients: { browser: 'registered-browser', device: 'registered-device' }, scopes: ['openid'], delegations: [] }, schema_capabilities: [], operations: [],
+    } });
+  };
+  const client = new AdminBffClient(adminBffConfig(env), transport);
+  await client.capabilities('request-1');
+  await client.capabilities('request-2');
+  assert.equal(tokenCalls, 1); assert.equal(apiCalls, 2);
 });

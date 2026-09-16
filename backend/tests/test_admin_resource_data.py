@@ -2,7 +2,7 @@
 # [Output] Resource state/LKG, wire identity, capability failure and unknown-write recovery evidence.
 # [Pos] Provider-free resource domain tests; no PG, real account or model access.
 # [Sync] 2026-09-14: exercise actual production adapters after the composition root cutover.
-# [Sync] 2026-09-15: verify active-request drain, irreversible owner close and actual shutdown handler ordering.
+# [Sync] 2026-09-17: verify resource-policy background calls use OAuth client_credentials.
 
 from __future__ import annotations
 
@@ -65,9 +65,10 @@ def test_production_reader_preserves_policy_states_and_exact_wire(config, status
         assert request.url.path.endswith("/operations/resource-policy.read")
         body = json.loads(request.content)
         assert body == {"request_id": request.headers["x-request-id"], "input": {}}
-        assert "authorization" not in request.headers
-        assert request.headers["X-Ink-Dream-Service"] == config.service_client_id
-        assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
+        assert request.headers["authorization"] == "Bearer fixture.service.access.token"
+        assert "x-ink-dream-service" not in request.headers
+        assert "x-ink-dream-credential" not in request.headers
+        assert "x-ink-dream-service-authorization" not in request.headers
         return httpx.Response(200, json={"request_id": body["request_id"], "data": {"status": status, "value": POLICY if status == "configured" else None, "updated_at": "2026-09-14T00:00:00Z" if status == "configured" else None}})
     fallback = AgentAdmissionConfig(2, 640, 192, 90)
     result = ClaudeAgentResourcePolicyProvider(adapter(config, handler).read_policy).load(fallback)

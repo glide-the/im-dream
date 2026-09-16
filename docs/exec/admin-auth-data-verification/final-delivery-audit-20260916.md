@@ -1,6 +1,7 @@
 <!-- [Input] Exact Admin/Dream heads, four published baseline releases, current contracts, CI receipts and private cutover preflight state. -->
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
+<!-- [Sync] 2026-09-17: record independent Admin sessions, confidential service OAuth, complete deterministic suites and the remaining real-acceptance boundary. -->
 <!-- [Sync] 2026-09-16: reconcile real Device approval/exchange, Dream resource access, refresh rotation and replay-family invalidation. -->
 <!-- [Sync] 2026-09-16: reconcile independent revoke/deny, migration 0063, Product OAuth forwarding, Gateway key rotation, complete Settings search and MCP replacement-auth status. -->
 <!-- [Sync] 2026-09-16: reconcile exact legacy Google adoption, successful real return and Better Auth audience compatibility repair. -->
@@ -11,14 +12,14 @@
 
 ## 结论边界
 
-源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 64 个，受限角色/ACL、9项发布门槛 capability、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功，同一主体没有Admin membership。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。Device允许、拒绝、token兑换、Dream Resource Server调用、refresh rotation、旧refresh重放、独立主动revoke、重复device兑换和真实access expiry已经通过。Product 本地 signer 已退休，Gateway key exact Runtime scopes 已通过 DTO/Service/Drizzle rotation 修复。真实 Agent POST 已从403推进到200，但启用的MCP OAuth凭据仍在 replacement consent 阶段；退出/Session失效、可见模型回复、Run/Thread继续/取消/SSE、共享文件仍未完成，本审计不能用于宣称整项任务完成。
+源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。本机命名正常 `ink-memory` 已从 54 个 migration receipt 前向升级到 64 个，受限角色/ACL、9项发布门槛 capability、私有配置、OAuth client/resource catalog 和正常 Admin/Dream 服务已经激活。Google Cloud 已保存本地与生产 Admin callback；精确旧 `provider_sub` 主体采用通过 release-only DTO/Service/Drizzle 事务完成，真实 Google callback、Admin consent和返回Dream成功。真实Better Auth双受众JWT暴露的`INVALID_TOKEN_RESOURCE`也已通过封闭受众规则修复并在浏览器复验。Device允许、拒绝、token兑换、Dream Resource Server调用、refresh rotation、旧refresh重放、独立主动revoke、重复device兑换和真实access expiry已经通过。Product 本地 signer 已退休，Gateway key exact Runtime scopes 已通过 DTO/Service/Drizzle rotation 修复。MCP replacement 已完成并由正常页面复用持久化凭据返回 41/25/10 inventory；两次真实文件上传、授权读取和 Thread workspace 边界通过。认证业务域评审后的代码已把Admin管理登录恢复为独立`admin_users/admin_sessions/RBAC`，并把Dream服务身份改为confidential OAuth client：后台只用`client_credentials`，用户数据请求同时携带服务token和Dream用户委托token，旧静态service头被拒绝。两种页面模型调用均被正常账户的当前周期 Token 额度以 `402` 拒绝，因此可见模型回复、Run/Thread继续/取消和SSE终态仍未完成；Admin真实后台登录还需现有Admin自身凭据，退出/Session失效仍待执行。本审计不能用于宣称整项任务完成。
 
 实现快照与审查入口：
 
 | 项目 | 分支 / HEAD | 审查入口 | 状态 |
 | --- | --- | --- | --- |
-| Admin | `codex/admin-auth-data-provider` / `8d67958759f3afdc5b17dbc219a8602a84ded76d` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地、远端分支与 PR head 一致；最新提交增加 DTO→Drizzle OAuth catalog provisioning |
-| Dream | `codex/dream-admin-auth-data-client` / `960aeb1499201373f2441c9e3b4b3d4585f61f67` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 本地、远端分支与 PR head 一致；前后端 CI 全绿；仅保留既存未跟踪 `.pnpm-store/` |
+| Admin | `codex/admin-auth-data-provider` / `41a2bbf154e53d0e0f3daa24c8bf65596016e2a9` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地、远端分支与 PR head 一致；DTO → Domain Service → typed Repository → Drizzle 数据边界已落地 |
+| Dream | `codex/dream-admin-auth-data-client` / `4018aabd86ae321446f35bc1a7ebbbe2f2483194` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 本地、远端分支与 PR head 一致；前后端 CI 全绿；仅保留既存未跟踪 `.pnpm-store/` |
 
 ## 1. 基线发布
 
@@ -66,7 +67,7 @@ Admin 契约 artifact 当前含 191 个具名 operation。接口不接受任意 
 
 ## 4. 认证和 Device Flow
 
-Admin Better Auth 1.7.4 是唯一应用认证中心；Google 使用 `socialProviders.google`。Admin 负责 callback、Account/User 关联、Session、OAuth Provider、RFC 8628、JWT/JWKS、refresh/revoke 和主体映射。Dream BFF 保存 opaque handle，Dream Resource Server 校验签名、算法、issuer、audience、时间声明、主体和适用 scope；Dream API 不接受 Google token、OIDC ID token或任意用户 ID header。
+Admin Better Auth 1.7.4 是 Dream OAuth 的唯一认证中心；Google 使用 `socialProviders.google`。Admin 负责 Dream callback、Account/User 关联、授权页Session、OAuth Provider、RFC 8628、JWT/JWKS、refresh/revoke 和 Dream 主体映射。Admin operator 另由`admin_users/admin_sessions/RBAC`认证授权，不进入Dream OAuth user体系。Dream BFF 保存 opaque handle，Dream Resource Server 校验签名、算法、issuer、audience、时间声明、主体和适用 scope；Dream API 不接受 Google token、OIDC ID token或任意用户 ID header。
 
 Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC ID token 已在契约中分开；同一产品身份不会自动取得 Admin RBAC。CLI/设备客户端是 public client，固定 client secret 不进入制品。Admin 正常库已通过 DTO/Drizzle provisioning 注册 Dream API resource、browser public client、device public client和两条resource link；重复 dry-run 全部为 `unchanged`。
 
@@ -76,7 +77,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 
 当前 Dream 生产图不包含 PostgreSQL credential、driver、SQL、ORM、UOW、DDL、自动建表或 SQLite runtime fallback。`server.py` 不加载数据库 URL或创建 pool；历史数据库实现仅位于 `backend/tests/**` 的明确 fixture/harness。部署模板清空旧数据库变量并只投影 Admin base、issuer/resource、service identity 和 BFF cookie secret。
 
-静态关闭门禁与当前完整 backend suite 已通过：`3535 passed, 24 skipped, 615 subtests passed`。本轮进一步在正常服务上验证：Dream Next 进程和 Python 进程均没有 `DATABASE_URL`/PostgreSQL/PG credential 环境键；两进程到正常 PostgreSQL `54329` 的实际 TCP 连接数均为 0；Admin、Dream 页面和 Dream health 分别在 `3000/5173/8765` 返回 `200`。该运行证据证明当前启动实例没有 Dream→PostgreSQL 旁路；完整用户持久化业务仍需登录后公开流程验收。
+静态关闭门禁与当前完整 backend suite 已通过：`3538 passed, 24 skipped, 615 subtests passed`。本轮进一步在正常服务上验证：Dream Next 进程和 Python 进程均没有 `DATABASE_URL`/PostgreSQL/PG credential 环境键；两进程到正常 PostgreSQL `54329` 的实际 TCP 连接数均为 0；Admin、Dream 页面和 Dream health 分别在 `3000/5173/8765` 返回 `200`。该运行证据证明当前启动实例没有 Dream→PostgreSQL 旁路；完整用户持久化业务仍需登录后公开流程验收。
 
 ## 6. 保持的业务语义
 
@@ -92,17 +93,18 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | --- | --- | --- |
 | Admin [Test Suite 35080308352](https://github.com/glide-the/dream-im-platform/actions/runs/35080308352) | GitHub / Admin `894c8221` | 历史提交 exit `0`；50s，63/63 migrations，8 capabilities，repeat no-op |
 | 同一 Admin deterministic job | GitHub / Admin `894c8221` | exit `0`；3m41s，13 config tests、274 files / 2074 tests passed，17 files / 36 tests skipped；ESLint、tsc、Next 16.1.6 build通过 |
-| Admin auth/catalog focus + current build | 本机 Admin `8d679587` | exit `0`；Vitest 19/19、setup-env 3/3、env check、TypeScript、focused ESLint、Next production build通过；catalog repeat dry-run全部 `unchanged` |
-| Dream [Frontend CI 35093209489](https://github.com/glide-the/im-dream/actions/runs/35093209489) | GitHub / Dream `960aeb14` | exit `0`；1m4s，frozen pnpm install与Next production build通过 |
-| Dream [Backend CI 35093209484](https://github.com/glide-the/im-dream/actions/runs/35093209484) | GitHub / Dream `960aeb14` | exit `0`；14m52s，生产 Docker image dry-run通过 |
-| Dream BFF/部署焦点 | 本机 Dream `960aeb14` | exit `0`；BFF boundary 7/7、Remote SSH env projection、`git diff --check`通过 |
-| `.venv/bin/python -m pytest -q tests` | Dream `backend`，commit `374b4fca` | exit `0`；3535 passed、24 skipped、615 subtests passed |
+| Admin current deterministic suite | Admin工作分支当前树 | exit `0`；277 files / 2091 tests passed、17 files / 36 tests skipped；ESLint、TypeScript、Next production build通过 |
+| Dream [Frontend CI 35112741361](https://github.com/glide-the/im-dream/actions/runs/35112741361) | GitHub / Dream `4018aabd` | exit `0`；1m10s，frozen pnpm install与Next production build通过 |
+| Dream [Backend CI 35112741412](https://github.com/glide-the/im-dream/actions/runs/35112741412) | GitHub / Dream `4018aabd` | exit `0`；13m51s，生产 Docker image dry-run通过 |
+| Dream BFF/部署焦点 | 本机 Dream `4018aabd` | exit `0`；BFF boundary、Remote SSH env projection、`git diff --check`通过 |
+| `.venv/bin/python -m pytest -q tests` | Dream `backend`工作分支当前树 | exit `0`；3538 passed、24 skipped、615 subtests passed |
 | Dream OAuth audience与产品边界焦点 | Dream `backend`，当前未提交修复 | exit `0`；81项audience/JWKS合同与117项auth/product边界通过；真实浏览器不再显示`INVALID_TOKEN_RESOURCE` |
 | Admin 0063 与 Reflection authority | 本机 Admin 当前树 | exit `0`；具名隔离 PostgreSQL 0000–0063、64 receipts、FK/CHECK/capability/repeat apply通过并清理；正常库64/64、9项发布门槛capability |
 | Gateway key rotation DTO/ORM | 本机 Admin 当前树 + 正常服务 | exit `0`；3项service测试、26项相关测试、tsc/diff通过；default dry-run与正式transaction/audit均脱敏，Dream private env原子更新 |
 | Product OAuth forwarding | 本机 Dream当前树 + 正常页面 | exit `0`；54项Product/SystemConfig回归；subscription/plans与Free renewal preview/execute返回200，无本地HS256 signer |
 | Settings/MCP Luna stage | 本机 Dream `frontend` | exit `0`；101项相关测试、TypeScript、focused ESLint、diff通过；另11项聚焦测试枚举七个Settings入口与OAuth terminal-state policy |
-| MCP replacement OAuth | 本机 Dream `backend` + 正常页面 | exit `0`；19项provider-free OAuth/credential/service测试；失败状态显示“重新认证”，旧envelope保留到新token成功；真实流程到provider consent，尚未提交 |
+| MCP replacement OAuth | 本机 Dream `backend` + 正常页面 | exit `0`；19项provider-free OAuth/credential/service测试；真实 consent/callback 已完成，reload 使用持久化凭据并返回 41 Tools / 25 Resources / 10 Prompts |
+| 文件与真实模型边界 | 正常 Dream Chat、共享 workspace、Gateway | 两次文件上传、登录读取、未登录 `401`、hash/path/symlink 与 `.claude-tmp 0700` 通过；默认模型与 Luna 均因当前周期额度不足返回 `402`，没有 assistant 输出 |
 | 正常备份隔离恢复演练 | 本机独占 PostgreSQL 18.1 / `55493` | 历史切换 exit `0`；真实物理备份54→63、8 capabilities、142 ACL、credential/allow/deny、重复apply、`35/1408/10`计数保持；回执SHA `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`，副本已停止并删除；0063另以具名可删除数据库完整重放 |
 | 正常数据库与运行边界只读复核 | 本机正常 `ink-memory:54329` | exit `0`；64 migration receipts、9/9 exact发布门槛capabilities、3个受限LOGIN/NOINHERIT角色、Dream NOLOGIN，4项denied privilege均false；Dream两个进程0个PG键、0条54329连接 |
 | Markdown local-link checks | 两仓受影响文档 | exit `0`；最终同步3文件0 missing、Admin架构7文件67 links/0 missing、Dream总览2文件15 links/0 missing |
@@ -125,11 +127,11 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Dream访问与Admin管理权限隔离 | DTO/RBAC/ACL隔离合同和独立subject-link模型通过 | **Dream历史可读；同一浏览器Admin入口仍为login，已通过** |
 | Device批准/拒绝/pending/slow_down/过期/兑换/refresh/revoke | 实际create、pending、slow_down及4类负例通过 | **允许、拒绝、兑换、refresh rotation、旧refresh重放、重复兑换、独立主动revoke与真实access expiry已通过** |
 | JWT签名/issuer/audience/expiry/kid/scope/revoke | scalar与真实Better Auth数组、错误resource/额外audience/签名/issuer/expiry/kid/scope deterministic contracts通过 | **真实设备JWT访问Dream及到期后401已通过；refresh family/revoke不伪装为既发JWT即时失效** |
-| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过；Gateway exact Runtime scopes已rotation | **历史列表及既有Thread读取已通过；真实Agent POST为200，但MCP replacement尚未完成，assistant输出、继续、取消与SSE终态未通过** |
+| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过；Gateway exact Runtime scopes已rotation | **历史读取、两条新Thread与用户消息持久化、MCP replacement已通过；两种模型均因额度返回402，assistant输出、继续、取消与SSE终态未通过** |
 | 资源策略与LKG | 单元/集成合同通过 | **未执行** |
-| 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同通过 | **未执行** |
+| 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同通过 | **两次上传、登录读取、未登录401、workspace hash/path/symlink与临时目录权限已通过；模型读取结果受额度阻塞，真实metadata故障注入未执行** |
 | Admin不可用/超时/拒绝/capability缺失/unknown write | 故障合同通过 | **未执行正常服务故障注入** |
-| 数据持久化及Admin后台可见性 | 正常数据库/服务已激活，OAuth catalog已持久化 | **用户Run/Thread/Gateway/settlement正向回执待登录** |
+| 数据持久化及Admin后台可见性 | 正常数据库/服务已激活，OAuth catalog已持久化 | **两条Thread、用户消息和Gateway失败回执已正常持久化；Admin UI需先恢复独立Admin Session实现，再使用Admin自身凭据复核** |
 | Dream运行时无PostgreSQL访问 | 完整源码门禁通过 | **当前正常Next/Python进程0个PG键、0条54329连接，已通过；仍需正向业务流佐证持久化经Admin** |
 
 真实验收使用已指定账户及现有业务实体，只走公开生产入口；本轮产生的 Run、Thread、Gateway request、Token settlement 和失败回执需保留并能在日常 Admin 查询。不得用隔离库、fake provider 或测试账号冒充。
@@ -146,7 +148,7 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Dream 全生产数据库入口关闭 | **已证明静态、测试与当前正常进程运行边界通过** |
 | Runtime/SSE/LKG/共享文件系统语义 | **已证明确定性回归通过** |
 | 正常数据库 migration/ACL/config/service 切换 | **本机命名正常目标已执行并只读复核；其他部署目标未宣称完成** |
-| 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回/RBAC隔离及Device完整状态已通过；历史只读与Agent入口200通过，MCP consent后的模型输出、继续/取消、文件与Session退出仍未完成** |
+| 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回、Device完整状态、MCP replacement、文件上传/授权读取/workspace边界及Thread消息持久化通过；模型输出/继续/取消/SSE受额度402阻塞，Admin UI待独立管理Session修复与Admin凭据复核，Session退出仍未完成** |
 | 整项任务完成 | **不成立；保持 active** |
 
-剩余顺序为：完成当前MCP replacement consent与自动callback → 真实模型可见回复、Run/Thread/SSE继续/取消及Admin可见回执 → 文件流程与故障恢复 → 退出/Session失效。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库。
+剩余顺序为：用 Admin 自身凭据复核独立后台登录回执 → 由正常Dream账户补足当前周期 Token 额度 → 真实模型文件读取回复、Run/Thread/SSE继续与取消 → metadata故障恢复、资源策略LKG和退出/Session失效。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库，也不把Admin与Dream业务用户合并。

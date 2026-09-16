@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual SystemConfig DTO adapter, exact Admin catalog and synthetic HTTP transport.
 # [Output] OAuth/idg separation, raw JSON preservation, closed patches and original receipt recovery evidence.
 # [Pos] Provider-free Admin SystemConfig consumer tests; no PG, model, filesystem or normal service.
@@ -58,8 +59,9 @@ def _boundary(*, raw='{"theme":"dark"}', patch_failure=None, catalog_operations=
 
     def handler(request: httpx.Request):
         request_id = request.headers["x-request-id"]
-        assert request.headers["x-ink-dream-service"] == config.service_client_id
-        assert request.headers["x-ink-dream-credential"] == config.service_secret
+        assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
+        if request.headers["authorization"] != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         if request.url.path.endswith("/capabilities"):
             calls.append(("capabilities", request.headers.get("authorization", ""), None))
             return httpx.Response(200, json={"request_id": request_id, "data": _catalog(config, catalog_operations)})

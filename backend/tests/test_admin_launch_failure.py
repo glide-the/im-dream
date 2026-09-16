@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Registered fail/envelope DTOs, actual shared client and original Run fixture data.
 # [Output] Provider-free full reply, raw text, unknown-write and original receipt evidence.
 # [Pos] Transport contract harness; no production launch wiring or normal model acceptance.
@@ -42,8 +43,9 @@ def boundary(monkeypatch):
             "thread_id": "original-thread", "message_id": "original-message", "error_code": ERROR}}, "receipt": None}
     def handler(request):
         rid = request.headers["x-request-id"]
-        assert request.headers["x-ink-dream-service"] == config.service_client_id
-        assert request.headers["x-ink-dream-credential"] == config.service_secret and "cookie" not in request.headers
+        assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers and "cookie" not in request.headers
+        if request.headers["authorization"] != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri,
                 "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"},

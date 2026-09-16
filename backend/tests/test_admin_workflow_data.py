@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual Workflow DTO/client and Service snapshot seam with synthetic credentials.
 # [Output] Strict contract, capability and public-to-Service provenance checks without PG/model.
 # [Pos] Provider-free Workflow consumer regressions; no duplicate retry/source algorithm.
@@ -43,7 +44,8 @@ def consumer(*, context=None, schemas=None, operation=None):
                 "operations": [operation or RESOLVE_WORKFLOW_CONTEXT.capability.model_dump()]}
         else:
             assert request.headers["authorization"] == "Bearer synthetic-oauth"
-            assert request.headers["x-ink-dream-credential"] == "s" * 32
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-credential" not in request.headers
             assert json.loads(request.content) == {"request_id": request_id, "input": {"thread_id": "thread-1"}}
             data = {"context": context}
         return httpx.Response(200, json={"request_id": request_id, "data": data})

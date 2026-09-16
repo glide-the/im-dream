@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual FastAPI Session router, Admin DTO transport and explicit synthetic OAuth verifier.
 # [Output] Reusable provider-free Session boundary with precise business fixtures and request receipts.
 # [Pos] Named validation fixture; no shadow production entry, database, model or user service.
@@ -64,7 +65,8 @@ def build_session_boundary(*, user_id="42"):
             assert body["request_id"] == request_id and set(body) == {"request_id", "input"}
             assert not {"user_id", "actor_id", "canonical_user_id"} & body["input"].keys()
             assert request.headers["authorization"] == "Bearer write-token" or request.headers["authorization"] == "Bearer read-only"
-            assert request.headers["x-ink-dream-credential"] == "s" * 32 and "cookie" not in request.headers
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-credential" not in request.headers and "cookie" not in request.headers
             calls.append((name, body["input"], request_id))
             value = outputs[name]
             if isinstance(value, Exception):

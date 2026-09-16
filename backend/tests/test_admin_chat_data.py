@@ -2,6 +2,7 @@
 # [Output] Named-wire, microsecond/nullable/JSON/final-projection and original-receipt checks without PG.
 # [Pos] Provider-free technical contracts for the pending Thread/message production cutover.
 # [Sync] 2026-09-14: reuse legacy projection function and validate all 14 typed operation schemas.
+# [Sync] 2026-09-17: require the secondary OAuth service bearer on user-delegated calls.
 
 from __future__ import annotations
 
@@ -60,7 +61,8 @@ def test_all_named_chat_consumers_use_exact_dto_and_explicit_actor(config, opera
         seen.append(request)
         assert request.url.path.endswith("/operations/" + operation.capability.name)
         assert request.headers["authorization"] == "Bearer admin-actor-token"
-        assert request.headers["X-Ink-Dream-Service"] == config.service_client_id
+        assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+        assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
         assert json.loads(request.content) == {"request_id": "chat-request-1", "input": input_value}
         return httpx.Response(200, json={"request_id": "chat-request-1", "data": output})
     consumer = data.AdminChatData(client(config, handler))

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Registry101 contracts, legacy localStorage payloads and the three public Auth routes.
 # [Output] Strict DTO, safe parsing, accepted-count, receipt recovery and Dream-DB fence evidence.
 # [Pos] Provider-free local-data consumer/route harness; no PostgreSQL, browser or real account.
@@ -148,7 +149,8 @@ def boundary(monkeypatch):
                 "column",
             } & body["input"].keys()
             assert request.headers["authorization"] == "Bearer write-token"
-            assert request.headers["x-ink-dream-credential"] == "s" * 32
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-credential" not in request.headers
             assert "cookie" not in request.headers
             state["calls"].append((operation, body["input"], request_id))
             if operation in state["unknown"]:

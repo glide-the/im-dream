@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual refs public router/Auth/client/DTO, synthetic metadata and explicitly owned artifact fixture.
 # [Output] OAuth/schema/evidence/default/read projection/unknown-write and safe validation contract evidence.
 # [Pos] Provider-free refs harness; actual local digest checks with injected CLI version, no shared FS/model/PG acceptance.
@@ -74,7 +75,8 @@ def boundary(monkeypatch, *, local_checks=True, canonical_user_id="42"):
             assert set(body) == {"request_id", "input"} and body["request_id"] == request_id
             assert not {"actor_id", "user_id", "path", "artifact_path"} & body["input"].keys()
             assert request.headers["authorization"] in {"Bearer write-token", "Bearer read-token"}
-            assert request.headers["x-ink-dream-credential"] == "s" * 32 and "cookie" not in request.headers
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-credential" not in request.headers and "cookie" not in request.headers
             calls.append((name, body["input"], request_id)); value = outputs[name]
             if isinstance(value, Exception):
                 raise value

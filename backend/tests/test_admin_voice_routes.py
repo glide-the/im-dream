@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual four Voice/FastAPI/auth/DTO operations and controlled server responses.
 # [Output] Original mutations, optional/null/raw JSON/scopes/errors/unknown receipt evidence.
 # [Pos] Provider-free Voice harness; other Deck routes and internal DB paths remain independent.
@@ -66,7 +67,8 @@ def boundary(monkeypatch):
             assert body['request_id'] == request_id and set(body) == {'request_id', 'input'}
             assert not {'user_id', 'actor_id', 'subject', 'default_plugin_evidence'} & body['input'].keys()
             assert request.headers['authorization'] == 'Bearer write-token' and 'cookie' not in request.headers
-            assert request.headers['x-ink-dream-credential'] == 's' * 32
+            assert request.headers['x-ink-dream-service-authorization'] == 'Bearer fixture.service.access.token'
+            assert 'x-ink-dream-credential' not in request.headers
             calls.append((name, body['input'], request_id)); value = outputs[name]
             if isinstance(value, Exception): raise value
             if isinstance(value, tuple):

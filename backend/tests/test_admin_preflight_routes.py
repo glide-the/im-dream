@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Public Preflight GET/Auth/HTTP and controlled original lifecycle projections.
 # [Output] Full-field, owner, token, microsecond, capability and no-Dream-SQL evidence.
 # [Pos] Provider-free production-entry harness; no real database, model or signing authority.
@@ -60,8 +61,9 @@ def boundary(monkeypatch):
     def handler(request):
         rid = request.headers["x-request-id"]
         UUID(rid)
-        assert request.headers["x-ink-dream-service"] == config.service_client_id
-        assert request.headers["x-ink-dream-credential"] == config.service_secret
+        assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
+        if request.headers["authorization"] != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": schemas, "operations": operations}
         elif request.url.path.endswith("/principal"):

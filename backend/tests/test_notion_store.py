@@ -1,7 +1,7 @@
 # [Input] Admin-backed Notion store, strict DTO transport, and provider-free Admin fixture.
 # [Output] Verify identity binding, resource/snapshot roundtrip, background authority, and source closure.
 # [Pos] Notion Admin DTO adapter contract tests.
-# [Sync] 2026-09-16: replace Dream PostgreSQL repository tests with production DTO-path tests.
+# [Sync] 2026-09-17: verify background store calls carry service OAuth without a user token.
 from __future__ import annotations
 
 import sys
@@ -146,7 +146,9 @@ class TestNotionStore(unittest.TestCase):
             call for call in self.state.calls if call[0].startswith("notion.sync")
         ]
         self.assertTrue(background_calls)
-        self.assertTrue(all(call[2] is None for call in background_calls))
+        self.assertTrue(
+            all(call[2] == "Bearer fixture.service.access.token" for call in background_calls)
+        )
         with self.assertRaises(AdminDataError):
             self.background_store.create_connector(7, "Forbidden")
 

@@ -1,7 +1,7 @@
 <!-- [Input] Actual safe command receipt or preserved validation plan; pinned disclosure scan passed. -->
 <!-- [Output] Executed bounded evidence including original failures and exact outcomes. -->
 <!-- [Pos] Coordinator-owned technical evidence; full migration and real acceptance remain separate. -->
-<!-- [Sync] 2026-09-15: retain Failure77 public/atomic/preservation and Thread SystemConfig candidate gates. -->
+<!-- [Sync] 2026-09-17: replace retired static service secret fixtures with short-lived client_credentials access tokens. -->
 
 # Failure77 private fixture recipe
 
@@ -9,7 +9,7 @@ Provider-free isolated component scope only. Producer reviewed registered77 and 
 
 ## Strict fixture fields
 
-Only these top-level keys: database, port, data_directory, target_verification_url, issuer, service_id, service_secret, auth_role, data_role, verification_role, source_root, oracle_python, source_oracle_secret, operation_contract_sha256, subjects, canonical_ids, tokens, cases, receipts.
+Only these top-level keys: database, port, data_directory, target_verification_url, issuer, service_id, service_access_token, auth_role, data_role, verification_role, source_root, oracle_python, source_oracle_secret, operation_contract_sha256, subjects, canonical_ids, tokens, cases, receipts. `service_access_token`必须由隔离Admin OAuth token端点按`client_credentials`签发，`sub`和`client_id`都等于`service_id`，且scope不超过该服务客户端的后台scope；fixture不保存或传递客户端secret。
 
 Regular owned0600 file; database starts ink_auth_data_codex_test_, port differs from normal5433, directory starts /private/tmp/ink-auth-data-migration-. Every AUTH_DATABASE_URL/DREAM_DATA_DATABASE_URL/target_verification_url names same loopback host/port/database. Actual role/catalog and all five app role privilege flags false verified; only owner verifier reads data_directory. Reuse canonical immutable migration authority, do not replay migrations unnecessarily or broaden ACL. Source root read-only /Users/dmeck/.codex/worktrees/ef6e/ink-dream-memory; actual installed Python /Users/dmeck/project/ink-dream-memory/.venv/bin/python.
 

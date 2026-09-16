@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Registry103 contracts, current-user picture responses and three public read routes.
 # [Output] Exact DTO, projection, validation, capability and Dream-DB fence evidence.
 # [Pos] Provider-free picture-history consumer/route harness; no PostgreSQL or real account.
@@ -138,7 +139,8 @@ def boundary(monkeypatch):
                 "column",
             } & body["input"].keys()
             assert request.headers["authorization"] == "Bearer read-token"
-            assert request.headers["x-ink-dream-credential"] == "s" * 32
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+            assert "x-ink-dream-credential" not in request.headers
             assert "cookie" not in request.headers
             state["calls"].append((operation, body["input"], request_id))
             output = state["outputs"][operation]

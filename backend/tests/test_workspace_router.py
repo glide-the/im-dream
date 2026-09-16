@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Consume backend/routers/workspace.py and workspace file manager APIs.
 # [Output] Validate workspace file/content/download contracts, including Thread ownership and safe directory ZIPs.
 # [Pos] test node in backend/tests
@@ -73,8 +74,10 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         def handler(request):
             rid = request.headers["x-request-id"]
             UUID(rid)
-            self.assertEqual(request.headers["x-ink-dream-service"], config.service_client_id)
-            self.assertEqual(request.headers["x-ink-dream-credential"], config.service_secret)
+            self.assertNotIn("x-ink-dream-service", request.headers)
+            self.assertNotIn("x-ink-dream-credential", request.headers)
+            if request.headers["authorization"] != "Bearer fixture.service.access.token":
+                self.assertEqual(request.headers["x-ink-dream-service-authorization"], "Bearer fixture.service.access.token")
             if request.url.path.endswith("/capabilities"):
                 value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": self._admin_schemas, "operations": self._admin_operations}
             else:

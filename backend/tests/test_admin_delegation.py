@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Production special-route consumers/keeper and injected HTTP, clock and request identities.
 # [Output] Purpose isolation, published readiness and unknown-renewal recovery without PG/models.
 # [Pos] Provider-free Runtime authorization contracts; no alternate Agent or authentication path.
@@ -66,7 +67,9 @@ def test_create_uses_actual_special_route_and_exact_purpose(config, purpose, sco
     calls = []
     def handler(request):
         calls.append(request)
-        assert request.headers["x-ink-dream-credential"] == config.service_secret
+        assert "x-ink-dream-credential" not in request.headers
+        if request.headers["authorization"] != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         if request.url.path.endswith("/capabilities"):
             return reply(request, capabilities(config))
         assert request.url.path == "/api/internal/dream/v1/runtime-delegations"

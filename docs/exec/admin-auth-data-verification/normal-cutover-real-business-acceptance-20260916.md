@@ -1,6 +1,7 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-17: record independent Admin-session implementation, confidential service OAuth and current deterministic results. -->
 <!-- [Sync] 2026-09-16: record real Device approval/exchange, Resource Server access, refresh rotation and replay-family invalidation. -->
 <!-- [Sync] 2026-09-16: record independent refresh revocation, Device denial, Admin 0063 publication, Product OAuth forwarding, Gateway key rotation, Settings search and MCP replacement-auth findings. -->
 <!-- [Sync] 2026-09-16: record exact legacy Google adoption, successful consent/return and the closed Better Auth audience-array repair. -->
@@ -62,7 +63,7 @@ Admin 统一认证、Admin DTO/Service/Repository/Drizzle 数据访问以及 Dre
 
 | 检查 | 入口/命令 | 退出码或 HTTP | 脱敏结果 | 结论 |
 | --- | --- | --- | --- | --- |
-| 既有主体关系 | read-only PostgreSQL probe；只输出主键、状态、映射存在性和口令验证布尔值 | `0` | active canonical user 1 条、active Admin member 1 条；Better Auth user/account、Dream subject link、Admin subject link 均为 0；提供的验收口令与两条旧 hash 均不匹配 | 密码登录 `401` 是正确 fail-closed；不能按同邮箱自动建立映射或覆盖旧 hash |
+| 既有主体关系 | read-only PostgreSQL probe；只输出主键、状态、映射存在性和口令验证布尔值 | `0` | active canonical user 1 条、active Admin member 1 条；Better Auth user/account、Dream subject link、Admin subject link 均为 0；第一轮提供的验收口令与两条旧 hash 均不匹配 | 密码登录 `401` 是正确 fail-closed；不能按同邮箱自动建立映射或覆盖旧 hash |
 | Dream 登录入口 | Chrome `GET http://localhost:5173/auth/start?return_to=/` | Admin authorize `302` → sign-in `200` | callback/resource/client/scope/PKCE 均来自已注册配置，返回上下文保留 | Dream BFF → Admin authorize 主路径成立 |
 | Google 外部身份 | Admin 页面标准 Google social sign-in | Google `400 redirect_uri_mismatch` | 应用已统一请求 `http://localhost:3000/api/auth/callback/google`；Google Cloud 当前未登记该精确 URI | 应用配置问题已关闭；真实 Google callback 仍受外部 OAuth client 配置阻塞，不能声明真实 Google 验收通过 |
 | Device code + polling | `node --input-type=module` 调用公开 `/api/auth/device/code` 与 `/api/auth/oauth2/token` | harness `0`; create `200`; poll `400`, `400` | 必需字段齐全，`expires_in=1800`、`interval=5`；首次 `authorization_pending`，立即复轮询 `slow_down`；全部 `Cache-Control: no-store` | 正常未决和减速状态通过；device/user code 未写入本回执或命令输出 |
@@ -95,7 +96,7 @@ Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed D
 | --- | --- | --- |
 | `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py` | Dream `backend` | exit 0；81 passed |
 | `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py tests/test_admin_request_auth.py tests/test_product_bff_routes.py` | Dream `backend` | exit 0；117 passed，1个既有FastAPI生命周期deprecation warning |
-| `.venv/bin/python -m pytest -q tests` | Dream `backend`，commit `374b4fca` | exit 0；3535 passed、24 skipped、615 subtests passed；只有既有deprecation/SDK提示 |
+| `.venv/bin/python -m pytest -q tests` | Dream `backend`当时树；最终结果见文末审计 | exit 0；当时3535 passed、24 skipped、615 subtests passed；只有既有deprecation/SDK提示 |
 | Dream backend受控重启与浏览器reload | task-owned `127.0.0.1:8765`、现有Chrome登录页 | backend启动完成；Agent选择器不再显示`INVALID_TOKEN_RESOURCE`，历史会话正常加载 |
 | Admin管理权限隔离 | 同一浏览器`http://localhost:3000/admin` | 重定向/停留于Admin login，没有进入dashboard |
 
@@ -160,3 +161,35 @@ Settings 搜索原实现只过滤 General、Subscription、Work、AI models、Ab
 | 真实 Chrome Settings 搜索 | 已登录 Dream 页面 | 输入 `MCP` 后唯一显示 `Resource links`；清空后恢复五个一级导航 |
 | MCP failed credential UI | 已登录 Dream MCP detail | `failed + OAuth + credential_configured` 显示“重新认证”；active/disabled/anonymous 仍不允许启动第二条 OAuth operation |
 | AutoDL/Remote env contracts | Dream repository | exit `0`；AutoDL topology 与 Remote DTO/BFF projection 均通过；退休 Product HS256 secret 不再进入 AutoDL runtime env |
+
+### 2026-09-17 MCP replacement、文件与模型额度边界
+
+用户在远端 provider 页面完成授权后，callback 自动回到 Dream 并完成 token exchange。首次紧接交换的 discovery 返回受控 `CLAUDE_MCP_PROTOCOL_ERROR`；退出详情页再通过正常产品入口加载时，持久化凭据可用，页面显示连接成功，并返回 41 个 Tools、25 个 Resources 和 10 个 Prompts。该结果证明 replacement credential 已提交并被后续请求复用；首次 discovery 失败记录保留为交换完成时的瞬时 provider/runtime 错误，没有通过删除旧数据或数据库旁路掩盖。
+
+随后使用可见 Dream Chat 产品入口创建两条新 Thread，分别在默认模型和用户设置页保存的 `GPT-5.6-Luna` 下上传同一份 87-byte 无敏感内容文本 fixture 并发送正常用户消息。两次上传、消息和失败回执均保留在正常业务数据中，没有自动重试或直接写数据库。
+
+| 检查 | 公开入口/证据 | 结果 | 判定 |
+| --- | --- | --- | --- |
+| MCP replacement callback | 远端同意页 → Dream callback → 正常 MCP 详情页 | callback 成功；reload 后显示已认证连接，inventory 为 41/25/10 | **通过**；凭据已持久化并可发现能力 |
+| 文件上传和读取授权 | Dream Chat attachment、actor-bound 文件 GET | 两次上传成功；登录读取 `200`，未登录读取 `401` | **通过**；未泄露对象键或内部 ID |
+| workspace 文件边界 | 本机正常 `AGENT_CWD` 只读 hash/mode/path 检查 | 2 个副本均位于真实 Thread workspace，普通文件、非符号链接、87 bytes，SHA-256 与 fixture 一致；对应 `.claude-tmp` 均为 `0700` 且非符号链接 | **通过**；共享文件系统协议未改变 |
+| Thread/message 持久化 | 两次可见 Chat send 与正常历史回读 | 2 条新 Thread 和用户消息保留；页面显示失败可恢复状态，没有伪造 assistant 输出 | **通过持久化，模型终态未通过** |
+| 默认模型真实调用 | Dream → Gateway 正常生产入口 | `402 SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED`；当前周期可用额度小于本次 runtime 需求 | **账户额度阻塞**；不是 MCP、文件或数据库接口失败 |
+| Luna 真实调用 | 保存模型设置后新建 Thread，再次走相同入口 | 同样返回 `402`，页面显示消息未处理并提供 reload 恢复 | **账户额度阻塞**；没有继续执行 continue/cancel/SSE 终态 |
+| Admin 管理登录边界 | 正常 Admin 登录 + read-only password-proof 检查 + 认证业务域评审 | 验收口令只匹配 canonical Dream user，不匹配旧 Admin member；现行代码已恢复独立`admin_users/admin_sessions/RBAC`、opaque Admin Session与实时RBAC | Dream密码继续返回`401`是正确隔离；真实成功登录只待现有Admin自身凭据，不能由邮箱、Dream token或subject link替代 |
+
+模型执行需要的 token 数高于当前订阅周期余额，因此不能通过缩短断言、伪造回复或修改 runtime 限额来冒充成功。只有在正常账户补足额度后，才能继续验证 assistant 文件读取结果、Run/SSE 终态、continue 和 cancel。Admin 独立 Session 已按评审完成实现和确定性验证；真实成功登录仍需要现有 Admin member 的原凭据，不能使用 Dream 密码、同邮箱或 subject link 代替。
+
+### 2026-09-17 身份域修正与完整确定性复核
+
+Admin operator 与 Dream user 的代码路径已按设计稿分开。Admin 登录只读取`admin_users`独立密码并把opaque随机值的HMAC摘要写入`admin_sessions`，后续请求实时读取member状态和RBAC；Dream Better Auth user、Google account、canonical user、Dream token和`identity.admin_subject_links`均不参与。Dream browser/device仍为public OAuth client；Dream Next/Python服务为confidential client，后台调用使用`client_credentials` access token，用户调用同时携带该服务token和用户委托token。浏览器输入/输出会剥离私有服务bearer，Admin明确拒绝旧静态service ID/secret头。
+
+| 验证 | 工作目录 | 结果 |
+| --- | --- | --- |
+| `pnpm test:run` | Admin工作分支 | exit `0`；277 files、2091 tests通过，17 files、36 tests按既定条件跳过 |
+| `pnpm exec tsc --noEmit --incremental false`、`pnpm lint`、`pnpm build` | Admin工作分支 | 全部exit `0`；Next生产构建完成 |
+| `PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests` | Dream工作分支 | exit `0`；3538 passed、24 skipped、615 subtests passed |
+| `pnpm exec tsc --noEmit --incremental false`、`pnpm lint`、`pnpm build` | Dream `frontend` | 全部exit `0`；Lint为0 error、17条既存Hook依赖warning；Next生产构建完成 |
+| 生产数据库路径扫描 | Dream `backend`与`frontend`，排除tests/e2e/lockfile | 未发现PostgreSQL驱动、DSN、SQL、连接池或静态service secret发送；测试目录保留的数据库探针不进入运行路径 |
+
+本节是技术验证，不把缺少Admin原凭据的成功后台登录、账户额度阻塞的真实模型回复、Run/Thread继续/取消或SSE终态写成已完成。

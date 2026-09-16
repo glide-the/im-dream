@@ -1,7 +1,7 @@
 # [Input] Public production Chat routes with the real Admin DTO transport and explicit fake auth/runtime providers.
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
-# [Sync] 2026-09-15: gate public streaming on the bound server grant and atomic user reservation before runtime.
+# [Sync] 2026-09-17: carry user OAuth and confidential service OAuth as separate Bearers.
 # [Sync] 2026-09-15: verify exact Editor grant creation and pre-SSE owner cleanup on failure.
 # [Sync] 2026-09-15: verify Admin Workflow read precedes message/SSE and supplies immutable Service snapshot.
 # [Sync] 2026-09-15: read one OAuth SystemConfig snapshot before model and attachment preparation.
@@ -109,8 +109,12 @@ def boundary(monkeypatch):
     calls = []
     def handler(request):
         request_id = request.headers["x-request-id"]
-        assert request.headers["X-Ink-Dream-Service"] == config.service_client_id
-        assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
+        assert "x-ink-dream-service" not in request.headers
+        assert "x-ink-dream-credential" not in request.headers
+        if request.headers.get("authorization") != "Bearer fixture.service.access.token":
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
+        else:
+            assert "x-ink-dream-service-authorization" not in request.headers
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": [item.model_dump() for item in DELEGATION_CAPABILITIES]},
                 "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
