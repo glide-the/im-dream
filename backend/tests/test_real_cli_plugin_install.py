@@ -47,7 +47,9 @@ from services.claude_plugin.install_service import (
     PluginInstallError,
     PluginInstallService,
 )
-from services.claude_plugin.workspace_packer import pack_workspace_plugins
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
+)
 from libs.claude_agent_kit.server.plugin_launcher import (
     apply_plugin_launch_options,
 )

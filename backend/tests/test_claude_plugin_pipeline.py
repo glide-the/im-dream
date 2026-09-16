@@ -28,9 +28,9 @@ from services.claude_plugin.artifact_store import (
     get_artifact,
     import_tree,
 )
-from services.claude_plugin.workspace_packer import (
-    WorkspacePackError,
-    pack_workspace_plugins,
+from services.claude_plugin.workspace_packer import WorkspacePackError
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
 )
 from libs.claude_agent_kit.server.plugin_digest import (
     compute_plugin_digest,

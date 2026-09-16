@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 import claude_agent.service as service_module
+from services.claude_plugin import workspace_packer as workspace_packer_module
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
 from services.admin_data.deck_workspace_plugins_data import (
     AdminDeckWorkspacePluginsResolution,
@@ -175,3 +176,11 @@ def test_frozen_workspace_validates_before_metadata_loader_io():
         )
     assert receipt["frozen"] is True
     loader.assert_not_called()
+
+
+def test_production_workspace_packer_exposes_no_database_compatibility_entry():
+    source = Path(workspace_packer_module.__file__).read_text(encoding="utf-8")
+    assert "def pack_workspace_plugins(" not in source
+    assert "db.execute" not in source
+    assert "claude_plugin_installations" not in source
+    assert "deck_claude_plugin_refs" not in source
