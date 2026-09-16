@@ -2,6 +2,7 @@
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
 <!-- [Sync] 2026-09-17: record normal resource-policy desired/effective/revision/LKG and fresh observer parity. -->
+<!-- [Sync] 2026-09-17: record current Admin head's 277-file/2093-test provider-free pass after strict service-token fixture correction. -->
 <!-- [Sync] 2026-09-17: record real Chrome Dream logout, same-subject SSO re-entry and continued Admin-login isolation. -->
 <!-- [Sync] 2026-09-17: record focused logout/session regression and the real-Chrome harness boundary before any logout mutation. -->
 <!-- [Sync] 2026-09-17: bind the audit to Admin f79a099 / Dream 2df9d9b4, the corrective normal ACL activation and the public Notion DTO/ORM read. -->
@@ -97,7 +98,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | --- | --- | --- |
 | Admin [Test Suite 35080308352](https://github.com/glide-the/dream-im-platform/actions/runs/35080308352) | GitHub / Admin `894c8221` | 历史提交 exit `0`；50s，63/63 migrations，8 capabilities，repeat no-op |
 | 同一 Admin deterministic job | GitHub / Admin `894c8221` | exit `0`；3m41s，13 config tests、274 files / 2074 tests passed，17 files / 36 tests skipped；ESLint、tsc、Next 16.1.6 build通过 |
-| Admin current deterministic suite | Admin工作分支当前树 | exit `0`；277 files / 2091 tests passed、17 files / 36 tests skipped；ESLint、TypeScript、Next production build通过 |
+| Admin current deterministic suite | Admin工作分支当前树 | exit `0`；277 files / 2093 tests passed、17 files / 36 tests skipped；首次当前HEAD全量仅有旧synthetic `service_secret` fixture的6项strict DTO失败，改为`service_access_token`后定向12/12并完整重跑通过；ESLint、TypeScript、Next production build通过 |
 | Admin正常ACL修正与实际角色探针 | Admin `f79a099` + 本机正常 `ink-memory:54329` | exit `0`；物理备份与manifest均`0600`，dry/apply/repeat通过；64 migrations、8个激活门禁 capability、144条策略、Gateway binding与四角色probe通过；AUTH可读credential并写Session/audit，仍不能读Dream表或旧Admin subject link |
 | Notion后台DTO/ORM公开读取 | Admin `f79a099` + 正常OAuth/Data API | exit `0`；Repository/Service 17/17、tsc、ESLint通过；公开`client_credentials` token为`200`，`notion.sync-candidates.list`为`200`并返回1个connector，响应没有`*_json`存储字段 |
 | Dream退出/Session焦点回归 | Dream `frontend` + 本机Chrome | `node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts` exit `0`、27/27；真实Chrome退出后只显示登录入口，再次登录经保留的中央Dream SSO返回同一主体；同profile Admin入口仍为独立登录页；自然TTL到期未等待 |
