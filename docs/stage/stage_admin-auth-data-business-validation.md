@@ -86,6 +86,7 @@ schema 分离需 catalog/ACL 和 Drizzle 前向 migration 实证；新 `dream.op
 
 - 复用本机正常Dream Browser Session调用公开`GET /api/claude-agent/threads?limit=50`返回200，共16个Thread；仅读取ID、时间与消息角色元数据。五个历史Thread存在assistant消息，其中`e6fd4e39-ce5f-4887-b585-1f508933b60a`通过当前Admin DTO消费者读取6条`user/assistant`交替历史，未读取或记录正文。
 - 对该历史终态Thread调用公开`GET .../stream`返回409 `Thread is not running`；调用公开`POST .../stop`返回200、`ok=true`、`stop_requested=false`。这验证终态SSE失败反馈和取消幂等性，不冒充运行中断流或真实运行中取消。
+- 同一历史Thread以`limit=2`遍历三页，三页各返回一组`user/assistant`，共6个不同message ID；前两页`has_more=true`且带cursor，末页`has_more=false/next_cursor=null`，跨页无重复。携带首屏`latest_message_id`重读返回200、空messages、`unchanged=true`；非法cursor返回400，未知Thread的messages与stop均返回404。只记录ID、角色、时间和状态，没有读取正文。
 - 通过公开`POST /api/claude-agent/threads`创建并保留无模型验收Thread `1326f102-0db5-41e6-b8ec-8d0ef874e6cc`，返回200；随后公开列表包含该ID，消息读取200且为0条，状态读取200、`running=false/lifecycle=not_found`，重复stop返回200且`stop_requested=false`。没有发送用户消息、启动Runtime、调用模型、删除Thread或改变历史正文。
 - Admin worktree使用正常`.env.local`中的受限`DREAM_DATA_DATABASE_URL`执行参数化只读查询，exit0，`public.chat_thread`精确返回1行、ID匹配且标题匹配；命令未打印DSN、用户ID、Token或正文。这是Admin持久化补充证据，业务写入本身只经过公开Dream生产入口。
 - 刷新正常订阅公开页面后仍显示总额100,000、已消费16、当前可用24,978，和已知75,006未知用量预留一致。没有修改Allowance、账本或模型上限。
