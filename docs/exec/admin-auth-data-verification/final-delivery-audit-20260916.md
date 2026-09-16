@@ -74,7 +74,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 
 当前 Dream 生产图不包含 PostgreSQL credential、driver、SQL、ORM、UOW、DDL、自动建表或 SQLite runtime fallback。`server.py` 不加载数据库 URL或创建 pool；历史数据库实现仅位于 `backend/tests/**` 的明确 fixture/harness。部署模板清空旧数据库变量并只投影 Admin base、issuer/resource、service identity 和 BFF cookie secret。
 
-静态关闭门禁与完整 backend suite 已通过：`3527 passed, 24 skipped, 615 subtests passed`。本轮进一步在正常服务上验证：Dream Next 进程和 Python 进程均没有 `DATABASE_URL`/PostgreSQL/PG credential 环境键；两进程到正常 PostgreSQL `54329` 的实际 TCP 连接数均为 0；Admin、Dream 页面和 Dream health 分别在 `3000/5173/8765` 返回 `200`。该运行证据证明当前启动实例没有 Dream→PostgreSQL 旁路；完整用户持久化业务仍需登录后公开流程验收。
+静态关闭门禁与当前完整 backend suite 已通过：`3535 passed, 24 skipped, 615 subtests passed`。本轮进一步在正常服务上验证：Dream Next 进程和 Python 进程均没有 `DATABASE_URL`/PostgreSQL/PG credential 环境键；两进程到正常 PostgreSQL `54329` 的实际 TCP 连接数均为 0；Admin、Dream 页面和 Dream health 分别在 `3000/5173/8765` 返回 `200`。该运行证据证明当前启动实例没有 Dream→PostgreSQL 旁路；完整用户持久化业务仍需登录后公开流程验收。
 
 ## 6. 保持的业务语义
 
@@ -94,7 +94,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | Dream [Frontend CI 35093209489](https://github.com/glide-the/im-dream/actions/runs/35093209489) | GitHub / Dream `960aeb14` | exit `0`；1m4s，frozen pnpm install与Next production build通过 |
 | Dream [Backend CI 35093209484](https://github.com/glide-the/im-dream/actions/runs/35093209484) | GitHub / Dream `960aeb14` | exit `0`；14m52s，生产 Docker image dry-run通过 |
 | Dream BFF/部署焦点 | 本机 Dream `960aeb14` | exit `0`；BFF boundary 7/7、Remote SSH env projection、`git diff --check`通过 |
-| `.venv/bin/python -m pytest -q tests` | Dream `backend`，实现代码最终快照 | exit `0`；3527 passed、24 skipped、615 subtests passed |
+| `.venv/bin/python -m pytest -q tests` | Dream `backend`，commit `374b4fca` | exit `0`；3535 passed、24 skipped、615 subtests passed |
 | Dream OAuth audience与产品边界焦点 | Dream `backend`，当前未提交修复 | exit `0`；81项audience/JWKS合同与117项auth/product边界通过；真实浏览器不再显示`INVALID_TOKEN_RESOURCE` |
 | 正常备份隔离恢复演练 | 本机独占 PostgreSQL 18.1 / `55493` | exit `0`；真实物理备份54→63、8 capabilities、142 ACL、credential/allow/deny、重复apply、`35/1408/10`计数保持；回执SHA `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`，副本已停止并删除 |
 | 正常数据库与运行边界只读复核 | 本机正常 `ink-memory:54329` | exit `0`；63 migration receipts、8/8 exact capabilities、3个受限LOGIN/NOINHERIT角色、Dream NOLOGIN，4项denied privilege均false；Dream两个进程0个PG键、0条54329连接 |

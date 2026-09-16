@@ -93,6 +93,7 @@ Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed D
 | --- | --- | --- |
 | `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py` | Dream `backend` | exit 0；81 passed |
 | `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py tests/test_admin_request_auth.py tests/test_product_bff_routes.py` | Dream `backend` | exit 0；117 passed，1个既有FastAPI生命周期deprecation warning |
+| `.venv/bin/python -m pytest -q tests` | Dream `backend`，commit `374b4fca` | exit 0；3535 passed、24 skipped、615 subtests passed；只有既有deprecation/SDK提示 |
 | Dream backend受控重启与浏览器reload | task-owned `127.0.0.1:8765`、现有Chrome登录页 | backend启动完成；Agent选择器不再显示`INVALID_TOKEN_RESOURCE`，历史会话正常加载 |
 | Admin管理权限隔离 | 同一浏览器`http://localhost:3000/admin` | 重定向/停留于Admin login，没有进入dashboard |
 
