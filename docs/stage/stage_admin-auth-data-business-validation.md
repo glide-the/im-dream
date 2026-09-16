@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-17: record real Codex stream diagnosis, Admin compatibility fix and the remaining allowance gate. -->
 <!-- [Sync] 2026-09-17: record the real Device delegated-user plus rotated Dream service-key Gateway canary. -->
 <!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity and record two-sided regression. -->
+<!-- [Sync] 2026-09-17: record a normal-session public Deck list/detail read through the current Admin consumer. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -150,3 +151,5 @@ USER REQUIREMENT:
 Admin `DeckVoiceRepository`已停止在读取时解析或规范化`memory_workspace_config`，严格DTO按原字节携带nullable/raw text；Dream既有`voice_projection._parse_voice_row`保持唯一产品兼容语义：empty text保留、合法JSON解析、非法非空JSON映射为null。该读取无Dream数据库fallback、无read retry、无写入修复，也没有改变Deck/Voice DTO schema或operation capability。
 
 Admin聚焦2 files/18 tests、完整provider-free 278 files/2106 tests、TypeScript、定向ESLint和production build均exit0；Dream公开Deck detail provider-free路由37 tests exit0。文档5 files相对链接0 missing，两个worktree diff check通过。该回执关闭已知empty-Memory兼容差异；真实账户Deck读取仍归入完整正常业务旅程，不由provider-free测试代替。
+
+同日正常公开读取复用现有Dream Browser Session：`GET /api/decks`返回200和1个既有Deck，`GET /api/decks/86512acd-abc9-44d1-af72-ea5a60af225d`返回200、相同外层ID、5个Voice，五项Memory均投影为产品object。该读取只走Dream BFF/API→Admin DTO路径，没有数据库直连、写入、模型调用或正文输出。真实行不包含empty text，因此该canary与55项producer/consumer确定性兼容测试分别证明正常部署路径和边界值，不能互相替代。
