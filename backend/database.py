@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-16: retire builtin Claude Plugin ref backfill after Registry183-184 ownership moved to Admin.
 # [Sync] 2026-09-16: retire zero-caller Deck/Voice/version SQL helpers after public routes adopted Admin DTO operations.
 # [Sync] 2026-09-15: reuse the unchanged pure Voice Memory projection outside the database module.
 # [Sync] 2026-09-15: nine old social helpers refuse before I/O; public friends use Admin DTOs.
@@ -7,9 +8,9 @@
 # [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide remaining persistence helpers for users, sessions, reports,
-#          legacy auth/OAuth state, Claude Agent threads/messages, active built-in
-#          Deck ref backfill and voice partition Memory configs; public Deck/Voice/
-#          version operations are absent and use Admin DTOs.
+#          legacy auth/OAuth state, Claude Agent threads/messages and voice
+#          partition Memory configs; public Deck/Voice/version and builtin Plugin
+#          reconciliation operations are absent and use Admin DTOs.
 # [Pos] database node in backend
 # [Sync] 2026-09-14: reuse the pure Chat final-history validator; remaining SQL is pending Admin migration.
 # [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
@@ -70,7 +71,7 @@ Schema:
 
 import logging
 from collections.abc import Iterator, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from threading import RLock
 from typing import Any, Optional, Union
 import json
@@ -323,51 +324,6 @@ def init_db():
         raise
     else:
         db.close()
-
-
-def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
-                                      package_spec: str, resolved_version: str,
-                                      artifact_digest: str) -> int:
-    """One-time migration: bind decks using the legacy built-in Deck Plugin to
-    the new platform-builtin Claude plugin installation.
-
-    Legacy signal: an active ``deck_plugin_bindings`` row for
-    ``ink.dream.story-workflow``.  Idempotent via an explicit primary-key
-    conflict policy.  Returns the
-    number of refs created.  Old threads and the legacy workflow tables are
-    untouched.
-    """
-    rows = db.execute(
-        """
-        SELECT DISTINCT deck_id FROM deck_plugin_bindings
-        WHERE status = 'active' AND deck_plugin_id = 'ink.dream.story-workflow'
-        """
-    ).fetchall()
-    now = datetime.now(timezone.utc).isoformat()
-    created = 0
-    with db:
-        for row in rows:
-            cursor = db.execute(
-                """
-                INSERT INTO deck_claude_plugin_refs (
-                    deck_id, plugin_installation_id, package_spec,
-                    resolved_version, artifact_digest, enabled, order_index,
-                    created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, 1, 0, %s, %s)
-                ON CONFLICT (deck_id, plugin_installation_id) DO NOTHING
-                """,
-                (
-                    row[0],
-                    builtin_installation_id,
-                    package_spec,
-                    resolved_version,
-                    artifact_digest,
-                    now,
-                    now,
-                ),
-            )
-            created += cursor.rowcount
-    return created
 
 
 # ========== User Management ==========

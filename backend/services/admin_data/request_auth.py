@@ -1,4 +1,4 @@
-# [Sync] 2026-09-16: register Registry175-182 Claude Plugin data operations.
+# [Sync] 2026-09-16: register Registry175-184 including service-only builtin reconciliation.
 # [Sync] 2026-09-16: register Registry170-174 Deck Plugin control operations.
 # [Sync] 2026-09-16: register Registry169 automatic-repair settlement.
 # [Sync] 2026-09-16: register Registry148-168 Notion connector data operations.
@@ -94,7 +94,10 @@ from .story_workspace_confirmation_data import (
 )
 from .deck_plugin_binding_data import DECK_PLUGIN_BINDING_OPERATIONS
 from .deck_plugin_control_data import DECK_PLUGIN_CONTROL_OPERATIONS
-from .claude_plugin_data import CLAUDE_PLUGIN_OPERATIONS
+from .claude_plugin_data import (
+    CLAUDE_PLUGIN_OPERATIONS,
+    AdminClaudePluginBuiltinData,
+)
 from .reflection_task_data import (
     AdminReflectionsData,
     AdminReflectionsWorkerData,
@@ -287,6 +290,9 @@ class AdminRequestAuth:
             runtime_http_config=self._runtime_http_config,
             session_broker_settings=self._session_broker_settings,
         )
+
+    def claude_plugin_builtin_data(self) -> AdminClaudePluginBuiltinData:
+        return AdminClaudePluginBuiltinData(self.client)
 
     def editor_runtime(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution,
         request_id: str, *, initial_session_id: str | None) -> AdminEditorRuntime:

@@ -3,6 +3,7 @@
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
+# [Sync] 2026-09-16: seed builtin Claude Plugins through Registry183-184 without Dream database access.
 # [Sync] 2026-09-16: bind the Registry121 claim-turn owner before confirmation reconciliation.
 # [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
@@ -410,66 +411,23 @@ async def story_workspace_startup_dream_launch_dispatches():
 
 @app.on_event("startup")
 async def startup_claude_plugin_seed():
-    """Seed platform-builtin Claude plugins and backfill Deck references.
+    """Seed platform-builtin Claude plugins through Admin coordination.
 
     Uses the real CLI (``claude plugin validate``) for evidence.  Failure is
     non-fatal: the app starts normally and the operation record carries the
-    error; installs can be retried from Settings → Plugins.
+    error. Database reads, ref derivation and lifecycle transactions remain in
+    Admin; this startup path never falls back to PostgreSQL.
     """
 
     def _seed() -> None:
-        import database as _database
-        from services.claude_plugin.builtin_sources import PLATFORM_BUILTIN_SOURCES
-        from services.claude_plugin.install_service import (
-            PluginInstallError,
-            PluginInstallService,
+        from services.claude_plugin.builtin_reconcile import (
+            reconcile_platform_builtins,
         )
 
-        db = _database.get_db()
-        try:
-            service = PluginInstallService(db)
-            for canonical in PLATFORM_BUILTIN_SOURCES:
-                existing = db.execute(
-                    "SELECT id, resolved_version, artifact_digest FROM "
-                    "claude_plugin_installations WHERE package_name = %s AND "
-                    "marketplace = %s AND status = 'ready' ORDER BY created_at DESC "
-                    "LIMIT 1",
-                    (canonical.split("@")[0], canonical.split("@")[1]),
-                ).fetchone()
-                if existing is None:
-                    try:
-                        service.install(canonical, source_type="platform-builtin")
-                    except PluginInstallError as exc:
-                        logging.getLogger(__name__).warning(
-                            "platform-builtin plugin seed failed for %s: %s",
-                            canonical,
-                            exc,
-                        )
-                        continue
-                    existing = db.execute(
-                        "SELECT id, resolved_version, artifact_digest FROM "
-                        "claude_plugin_installations WHERE package_name = %s AND "
-                        "marketplace = %s AND status = 'ready' ORDER BY created_at "
-                        "DESC LIMIT 1",
-                        (canonical.split("@")[0], canonical.split("@")[1]),
-                    ).fetchone()
-                if existing is None:
-                    continue
-                created = _database.backfill_builtin_deck_plugin_refs(
-                    db,
-                    builtin_installation_id=existing[0],
-                    package_spec=canonical,
-                    resolved_version=existing[1],
-                    artifact_digest=existing[2],
-                )
-                if created:
-                    logging.getLogger(__name__).info(
-                        "backfilled %d deck Claude plugin refs for %s",
-                        created,
-                        canonical,
-                    )
-        finally:
-            db.close()
+        owner = getattr(app.state, "admin_request_auth", None)
+        if owner is None:
+            raise RuntimeError("Admin request/data owner is unavailable")
+        reconcile_platform_builtins(owner.claude_plugin_builtin_data())
 
     try:
         await asyncio.to_thread(_seed)

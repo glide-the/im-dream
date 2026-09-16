@@ -1,7 +1,7 @@
-# [Input] Registry175-182 catalog, current OAuth bearer and closed Claude Plugin lifecycle DTOs.
-# [Output] Strict Pydantic projections plus original-request recovery for Admin-owned persistence.
+# [Input] Registry175-184 catalog, OAuth or service authority and closed Claude Plugin lifecycle DTOs.
+# [Output] Strict Pydantic projections plus user/background original-request recovery.
 # [Pos] Dream wire boundary; Admin owns Marketplace queries, locks, Drizzle writes and transactions.
-# [Sync] 2026-09-16: consume shared Claude Plugin data operations without SQL or actor selectors.
+# [Sync] 2026-09-16: consume service-only builtin reconciliation without SQL, Deck or actor selectors.
 """Typed Admin consumer for shared Claude Plugin catalog and install lifecycle."""
 
 from __future__ import annotations
@@ -284,6 +284,34 @@ class ClaudePluginInstallReportInputDTO(PresentFieldsDTO):
         return self
 
 
+class ClaudePluginBuiltinEnsureInputDTO(ChatStrictDTO):
+    package_spec: PackageSpec
+
+
+class ClaudePluginBuiltinEnsureOutputDTO(PresentFieldsDTO):
+    action: Literal["ready", "install"]
+    package_spec: PackageSpec | None = None
+    installation_id: Identifier | None = None
+    refs_created: int | None = Field(default=None, ge=0)
+    plan: ClaudePluginInstallPlanDTO | None = None
+
+    @model_validator(mode="after")
+    def require_exact_action_fields(self):
+        expected = (
+            {"action", "package_spec", "installation_id", "refs_created"}
+            if self.action == "ready"
+            else {"action", "plan"}
+        )
+        if self.model_fields_set != expected:
+            raise ValueError("Builtin ensure fields do not match action")
+        return self
+
+
+class ClaudePluginBuiltinReportOutputDTO(ChatStrictDTO):
+    operation: ClaudePluginOperationDTO
+    refs_created: int = Field(ge=0)
+
+
 def _operation(name, kind, input_dto, output_dto, hash_value):
     return DomainOperation(
         OperationCapabilityDTO(
@@ -291,6 +319,22 @@ def _operation(name, kind, input_dto, output_dto, hash_value):
             kind=kind,
             user_scope="dream:read" if kind == "read" else "dream:write",
             background_scope=None,
+            input_schema_version=1,
+            output_schema_version=1,
+            contract_sha256=hash_value,
+        ),
+        input_dto,
+        output_dto,
+    )
+
+
+def _background_operation(name, input_dto, output_dto, hash_value):
+    return DomainOperation(
+        OperationCapabilityDTO(
+            name=name,
+            kind="write",
+            user_scope=None,
+            background_scope="plugins:catalog",
             input_schema_version=1,
             output_schema_version=1,
             contract_sha256=hash_value,
@@ -340,6 +384,18 @@ UNINSTALL_CLAUDE_PLUGIN_INSTALLATION = _operation(
     ClaudePluginInstallationReadInputDTO, ClaudePluginInstallationDTO,
     "904b5e2796ac17378facb4b3e8d2afb9e4e9cd72dc79a57dbd0cd74b3947d2a3",
 )
+ENSURE_BUILTIN_CLAUDE_PLUGIN = _background_operation(
+    "claude-plugin.builtin.ensure",
+    ClaudePluginBuiltinEnsureInputDTO,
+    ClaudePluginBuiltinEnsureOutputDTO,
+    "74220704d8852909375ea70015af93b04bfb894e8e11a345ad2d8ef91539b5cf",
+)
+REPORT_BUILTIN_CLAUDE_PLUGIN = _background_operation(
+    "claude-plugin.builtin.report",
+    ClaudePluginInstallReportInputDTO,
+    ClaudePluginBuiltinReportOutputDTO,
+    "77d2c856d3712d4861caff95553db35676539768c82e58d5ab3a29a1dc916aea",
+)
 CLAUDE_PLUGIN_OPERATIONS = (
     LIST_CLAUDE_PLUGIN_INSTALLATIONS,
     LIST_CLAUDE_PLUGIN_MARKETPLACE,
@@ -349,6 +405,8 @@ CLAUDE_PLUGIN_OPERATIONS = (
     READ_CLAUDE_PLUGIN_INSTALLATION,
     REPORT_CLAUDE_PLUGIN_INSTALL,
     UNINSTALL_CLAUDE_PLUGIN_INSTALLATION,
+    ENSURE_BUILTIN_CLAUDE_PLUGIN,
+    REPORT_BUILTIN_CLAUDE_PLUGIN,
 )
 CLAUDE_PLUGIN_SCHEMA_REQUIREMENTS = (
     *WORKFLOW_SCHEMA_REQUIREMENTS,
@@ -473,3 +531,59 @@ class AdminClaudePluginData:
             request_id,
             access_token,
         )
+
+
+class AdminClaudePluginBuiltinData:
+    """Service-owned builtin coordination; no OAuth actor or database fallback."""
+
+    def __init__(self, client: AdminDataClient) -> None:
+        self._client = client
+
+    def _execute(self, operation, input_dto, request_id: str):
+        require_claude_plugin_capabilities(self._client, request_id)
+        result = self._client.execute(operation, input_dto, request_id)
+        if operation is ENSURE_BUILTIN_CLAUDE_PLUGIN:
+            if result.action == "ready":
+                if result.package_spec != input_dto.package_spec:
+                    raise invalid_response(request_id, write=True)
+            elif result.plan is None or result.plan.package_spec != input_dto.package_spec:
+                raise invalid_response(request_id, write=True)
+        elif operation is REPORT_BUILTIN_CLAUDE_PLUGIN and (
+            result.operation.id != input_dto.operation_id
+        ):
+            raise invalid_response(request_id, write=True)
+        return result
+
+    def _write(self, operation, input_dto, request_id: str):
+        try:
+            return self._execute(operation, input_dto, request_id)
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+        try:
+            receipt = self._client.receipt(operation, request_id)
+        except AdminDataError as error:
+            raise AdminDataError(
+                error.code, error.status_code, request_id, True, error.details
+            ) from None
+        if not isinstance(receipt, CommittedReceiptDTO) or not isinstance(
+            receipt.result, operation.output_dto
+        ):
+            raise AdminDataError("ADMIN_WRITE_RESULT_UNKNOWN", 503, request_id, True)
+        result = receipt.result
+        if operation is ENSURE_BUILTIN_CLAUDE_PLUGIN:
+            if result.action == "ready":
+                valid = result.package_spec == input_dto.package_spec
+            else:
+                valid = result.plan is not None and result.plan.package_spec == input_dto.package_spec
+        else:
+            valid = result.operation.id == input_dto.operation_id
+        if not valid:
+            raise invalid_response(request_id, write=True)
+        return result
+
+    def ensure(self, input_dto: ClaudePluginBuiltinEnsureInputDTO, request_id: str):
+        return self._write(ENSURE_BUILTIN_CLAUDE_PLUGIN, input_dto, request_id)
+
+    def report(self, input_dto: ClaudePluginInstallReportInputDTO, request_id: str):
+        return self._write(REPORT_BUILTIN_CLAUDE_PLUGIN, input_dto, request_id)
