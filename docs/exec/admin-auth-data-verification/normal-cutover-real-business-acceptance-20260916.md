@@ -1,6 +1,7 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-17: preserve the Chrome control preflight failure and focused 27-test logout/session technical receipt. -->
 <!-- [Sync] 2026-09-17: record corrective normal Admin ACL activation and public Notion service-token DTO/ORM validation. -->
 <!-- [Sync] 2026-09-17: record independent Admin-session implementation, confidential service OAuth and current deterministic results. -->
 <!-- [Sync] 2026-09-16: record real Device approval/exchange, Resource Server access, refresh rotation and replay-family invalidation. -->
@@ -202,3 +203,9 @@ Admin operator 与 Dream user 的代码路径已按设计稿分开。Admin 登�
 修正后`ink_auth`可读取独立Admin credential列并写入Session/audit，`ink_admin_control`可读取RBAC；两者仍不能读取Dream `chat_thread`或历史`identity.admin_subject_links`，Dream角色仍是`NOLOGIN`且无database `CONNECT`。公开Admin登录由服务错误恢复为明确`401 ADMIN_CREDENTIALS_INVALID`，同一Chrome已有Dream会话访问Admin `/api/admin/auth/me`也保持`401`。这证明运行路径与ACL已修复，同时Dream登录、同邮箱或Dream密码都不会产生Admin Session。成功Admin登录仍需要该独立Admin member的有效凭据；本轮没有复制Dream密码、重置Admin密码、降低密码策略或建立跨域用户映射。
 
 Notion后台同步候选使用Dream confidential OAuth client的`client_credentials`，没有canonical Dream user。Repository先把ORM行的`config_json`、`metadata_json`和`snapshot_json`显式解码投影为严格DTO，再由Service和公开operation返回；DTO没有放宽extra-field策略。定向Repository/Service测试`17/17`、TypeScript和ESLint均通过。正常公开token endpoint返回`200`和300秒Bearer，随后`notion.sync-candidates.list`返回`200`、原request ID与1个connector；响应只含`config`/`metadata`等DTO字段，没有`*_json`存储列。该后台scope没有读取或写入Admin operator，也没有创建、合并或冒充Dream user。
+
+### 2026-09-17 Dream退出与Session失效续验
+
+真实浏览器场景先明确Project、Episode、Thread、文件、Runtime和资源策略全部保持不变，只允许撤销当前Dream browser handle并重新建立同一canonical user会话。现有Chrome从Settings公开“Back to app”成功导航到`/story-workspace/dream`，随后浏览器控制通道连续三次在读取页面状态时超时；失败发生在任何退出按钮或`POST /auth/logout`之前，因此没有撤销Session、清除cookie、修改业务数据或触发重新登录。该结果归类为harness前置失败，不是产品缺陷；真实退出、旧handle失效和重新登录仍为未执行。
+
+不依赖浏览器状态的生产代码合同随后重跑：在Dream `frontend`执行`node --test app/api/_auth/handlers.test.ts app/_dream/lib/browserSession.test.ts`，exit `0`，27 tests全部通过、0失败、0跳过。覆盖Origin/CSRF、Admin revoke失败时保留handle、严格成功回执后清cookie、401清会话、依赖503保留已确认快照、并发/过期读取不能复活会话，以及confidential service token与用户token分离。该技术回执不能替代真实Chrome退出和重新登录。
