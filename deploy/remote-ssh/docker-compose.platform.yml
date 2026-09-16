@@ -1,6 +1,7 @@
 # [Input] deploy/remote-ssh/.env with Admin/Dream origins and runtime budgets.
 # [Output] Alibaba Cloud topology overrides for the Remote SSH Dream stack.
 # [Pos] Dream-only ECS Compose overlay in deploy/remote-ssh/.
+# [Sync] 2026-09-16: inherit the exact unified-auth DTO client projection from the base Dream Compose file.
 # [Sync] 2026-09-16: remove the shared PostgreSQL network and Dream DATABASE_URL.
 # [Sync] 2026-08-22: cap backend block-device reads with deployment-owned
 #                    budgets so one Claude turn cannot saturate the ECS system disk.

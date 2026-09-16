@@ -215,6 +215,15 @@ INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
 ```
 
+Create the private Next BFF configuration separately. Use the same Admin service client ID/secret as the backend, an independent random cookie secret, and the exact callback registered by Admin:
+
+```bash
+cd ../frontend
+test -f .env.local || cp .env.example .env.local
+```
+
+`frontend/.env.local` and `backend/.env` are server-only. Neither file may contain `DATABASE_URL`; Dream has no PostgreSQL credential after the Admin DTO/ORM cutover.
+
 Provider keys stay in Admin; do not copy them into Dream.
 
 ### 5. Run the three services

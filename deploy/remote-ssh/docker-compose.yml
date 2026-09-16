@@ -13,6 +13,7 @@
 # [Sync] 2026-06-23: route backend container egress through a Mihomo TUN proxy namespace.
 # [Sync] 2026-06-24: remove backend extra_hosts because Docker forbids custom
 #                    host mappings with network_mode: service:tun-proxy.
+# [Sync] 2026-09-16: inject the same registered Admin DTO client into FastAPI and the server-only Next BFF.
 # [Sync] 2026-08-31: remove the unused legacy models.json mount.
 # [Sync] 2026-08-21: allow a later Alibaba Cloud override to attach tun-proxy
 #                    to the Admin-owned shared platform network.
@@ -83,6 +84,14 @@ services:
       INK_CORS_ALLOW_CREDENTIALS: ${REMOTE_CORS_ALLOW_CREDENTIALS:-true}
       INK_PUBLIC_BASE_URL: ${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}
       INK_BACKEND_PUBLIC_BASE_URL: ${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}
+      INK_ADMIN_DREAM_BASE_URL: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin origin}
+      INK_ADMIN_AUTH_ISSUER: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin origin}/api/auth
+      INK_DREAM_API_RESOURCE: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}/api
+      INK_ADMIN_DREAM_SERVICE_CLIENT_ID: ${DREAM_ADMIN_SERVICE_CLIENT_ID:?Set the registered Dream service client}
+      INK_ADMIN_DREAM_SERVICE_SECRET: ${DREAM_ADMIN_SERVICE_SECRET:?Set the registered Dream service secret}
+      DATABASE_URL: ""
+      INK_LOAD_DATABASE_URL_FROM_ENV_FILE: "0"
+      INK_DATABASE_ENV_FILE: ""
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8765') + '/api/health')"]
       interval: 30s
@@ -110,6 +119,15 @@ services:
       BACKEND_URL: http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT:-8765}
       API_BASE_URL: ${REMOTE_API_BASE_URL:-https://ink-backend.suoxya.com}
       WS_BASE_URL: ${REMOTE_WS_BASE_URL:-}
+      INK_PUBLIC_SITE_URL: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}
+      INK_DREAM_PUBLIC_ORIGIN: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}
+      INK_DREAM_BFF_REDIRECT_URI: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}/auth/callback
+      INK_DREAM_BFF_COOKIE_SECRET: ${DREAM_BFF_COOKIE_SECRET:?Set the Dream BFF cookie secret}
+      INK_ADMIN_DREAM_BASE_URL: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin origin}
+      INK_ADMIN_AUTH_ISSUER: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin origin}/api/auth
+      INK_DREAM_API_RESOURCE: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}/api
+      INK_ADMIN_DREAM_SERVICE_CLIENT_ID: ${DREAM_ADMIN_SERVICE_CLIENT_ID:?Set the registered Dream service client}
+      INK_ADMIN_DREAM_SERVICE_SECRET: ${DREAM_ADMIN_SERVICE_SECRET:?Set the registered Dream service secret}
     depends_on:
       ink-backend:
         condition: service_healthy

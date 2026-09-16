@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # deploy/setup-env.sh — Initialize Cloud Run environment variables for the backend.
 # [Sync] 2026-06-12: point follow-up release guidance to deploy/google-cloud/deploy.sh.
+# [Sync] 2026-09-16: exclude retired Dream database configuration from Cloud Run env projection.
 # [Sync] 2026-06-23: store Google OAuth, JWT, and session secrets in Secret Manager.
 #
 # Behavior:
@@ -139,6 +140,7 @@ while IFS='=' read -r key value; do
     TZ) continue ;; # already set
     # Owned by deploy/google-cloud/deploy.sh so localhost values from
     # backend/.env never leak into the production Cloud Run revision.
+    DATABASE_URL|INK_LOAD_DATABASE_URL_FROM_ENV_FILE|INK_DATABASE_ENV_FILE) continue ;;
     WEBUI_URL|API_BASE_URL|COOKIE_SECURE|COOKIE_SAMESITE|INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS|INK_PUBLIC_BASE_URL|INK_BACKEND_PUBLIC_BASE_URL) continue ;;
   esac
   ENV_VARS+=",${key}=${value}"

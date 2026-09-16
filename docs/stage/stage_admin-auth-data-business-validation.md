@@ -1,7 +1,7 @@
 <!-- [Input] Actual Dream public routes, Admin contract v0.1, existing harnesses and authorized real account. -->
 <!-- [Output] Cross-project impact matrix and separate technical/real-business acceptance gates. -->
 <!-- [Pos] Coordinator acceptance plan; test receipts belong in exec_admin-auth-data-coordination.md and project reports. -->
-<!-- [Sync] 2026-09-14: assess complete flows before implementing or running cross-project acceptance. -->
+<!-- [Sync] 2026-09-16: record runtime configuration projection, build evidence and the remaining normal-database capability gate. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -72,7 +72,48 @@ Re-test complete affected business flows after the cross-project migration, foll
 静态候选需逐项标识生产可达、显式 importer/维护或非 DB 同名调用，不能把 false positive 数量包装为已迁移数量。
 schema 分离需 catalog/ACL 和 Drizzle 前向 migration 实证；新 `dream.operation_receipts` 一张表不等于全部 Dream 数据分离。
 真实回执必须在正常 Admin 可查询 Run/Thread/Gateway request/Token settlement，clone-only 结果不采纳。
-当前正常 Admin 3000 可达，Dream 5173/8765 未启动；新认证与领域 capability 尚未发布，完整验收待实现。
+2026-09-16 初始启动检查确认 `3000`、`5173`、`8765` 与正常 `54329` 均未监听；随后本轮拥有的 Admin `pnpm dev` 启动 `3000` 与正常内嵌 PostgreSQL `54329`，用于只读状态探测。Docker daemon 未运行，但 Compose `config --quiet` 不依赖 daemon 且已用于配置渲染。Admin 主仓库配置将 `/Users/dmeck/project/ink-admin-memory/.ink-memory/postgres` 定义为正常数据目录。监听于 `51534` 的数据库是此前具名隔离 migration harness，不能用于真实验收，也不属于本轮清理范围。
+
+### 真实业务执行概念与影响简报（2026-09-16）
+
+- **业务对象**：通过已授权账户的公开 Dream 页面/API 读取其已有 Deck、Story Workspace 与 Thread 候选；只为本轮创建新的 Thread/Run/消息和共享文件产物，已有正文、订阅、余额、权限与历史记录保持不变。
+- **执行链**：浏览器登录与会话由 Admin Better Auth 提供；Dream BFF 仅保存 opaque handle。Dream backend 执行 Runtime、SSE、文件操作和业务编排，通过 strict Pydantic DTO 调用 Admin；Admin Zod DTO、Service 与 typed Drizzle Repository 完成权限、锁、事务和 PostgreSQL 持久化。
+- **文件边界**：真实文件仍写入规范化后的共享 workspace，数据库只保存授权后的元数据与业务关系；`.claude-tmp` 保持在线程真实目录内且权限为 `0700`，禁止符号链接和越界路径。
+- **变更影响**：正常数据库只进行普通用户流程产生的业务写入。本轮不运行 migration、backfill、DDL 或破坏性清理；若正常库缺少当前 capability，公开服务必须 fail closed，并把缺少的 migration/capability 作为真实验收部署门禁记录。
+- **回执范围**：保留本轮 Admin 可查询的 Thread/Run、Gateway request、Token settlement 与文件元数据标识；报告仅记录 ID、状态和脱敏计数，不保存口令、Token、Provider secret 或用户正文。
+- **失败恢复**：Admin 不可用、超时、权限拒绝、capability 缺失或 unknown commit 均不得回退 Dream PostgreSQL；幂等写复用原 receipt/request ID，非幂等写不盲目重试。浏览器、backend 或 Runtime 失败时仅停止本轮启动的进程，保留正常数据回执供复核。
+
+工作树运行配置从现有本机配置派生，但必须删除 Dream 的 `DATABASE_URL` 和旧本地认证 authority，仅注入 Admin base URL、issuer/resource、服务身份与正常 workspace 路径。主仓库旧 `backend/.env` 仍含 PostgreSQL 凭据，不能直接传给重构后的 Dream 进程；本轮将以无 PostgreSQL 环境启动并用运行时网络证据复核。
+
+## 运行配置闭环修复规划（2026-09-16）
+
+### Optimized Prompt:
+
+You are the cross-project runtime-configuration owner. Close the discovered gap between the implemented Admin Better Auth/Dream DTO services and the checked-in environment setup contract. Evidence: the committed Admin application now starts through Webpack, but the normal `.env.local` predates unified authentication; public auth/JWKS/capability routes therefore return structured `AUTH_NOT_CONFIGURED`, and the normal database ledger is read-only verified at 0053 while code requires 0054–0062. Update Admin configuration allowlists, examples, render/validation logic and deployment templates so every server-only authentication/data role, BFF service registration, issuer/resource, Google provider, token encryption, device client and delegation policy key is explicit, validated and never printed. Update Dream frontend/backend examples and startup documentation so the same service ID/secret, issuer/resource, BFF callback/cookie and Admin base URL are represented without a PostgreSQL credential. Preserve Admin-only SQL/ORM/transaction ownership, Better Auth as sole authority, Dream Runtime/SSE/shared-filesystem behavior, existing database data and all user secrets. Do not run normal-database migrations, ACL changes, backfill or account adoption in this subtask. Missing Google credentials, limited-role DSNs, gateway binding or physical capability must fail closed with a named error. Validate configuration generation in a disposable directory, run TypeScript/lint/build-focused checks, restart only the owned Admin process, and verify that compile-time 500 is gone while undeployed schema/config remains a truthful 503. Record exact commands and redacted results; never place passwords, tokens, DSNs or OAuth secrets in logs, commits or reports.
+
+USER REQUIREMENT:
+Continue the Admin unified authentication/database API and Dream consumer migration with DTO/ORM layering, production-safe configuration and verifiable business acceptance.
+
+### 范围、依赖与验收
+
+| 项目/责任 | 修改与依赖 | 保持不变 | 验收 |
+| --- | --- | --- | --- |
+| Admin | `.env` allowlist/render/check、示例、部署模板、启动文档；依赖现有 auth/data config parser 与 0054–0062 capability | 不自动迁移、不生成 Google secret、不回显服务 credential，不把 DTO/事务移回 Dream | 临时目录 setup/check；缺配置有具体错误；正常启动进入结构化边界 |
+| Dream | frontend/backend 示例及启动说明；依赖 Admin 注册的 client/origin/callback/resource | 无 `DATABASE_URL`、无本地 Session/Token authority；Runtime/SSE/FS 不变 | 配置键成对、secret 仅服务端、静态 no-PG 与 build/typecheck |
+| 协调 | 记录正常库 ledger、当前端口/进程和真实验收 gate | 不把隔离测试冒充真实业务 | normal schema/config 缺失保持 pending，已通过技术证据独立列出 |
+
+正常流程为 Admin 读取三个显式数据库角色 DSN、构造 Better Auth/OAuth/JWKS、验证 Dream service 与 callback，再由 Dream BFF 获取 opaque handle、backend 用同一服务身份调用 strict DTO API。配置缺失、URL/origin 不匹配、credential 不一致或 schema capability 缺失时，在任何用户业务写入前返回结构化 503；不会回退 Dream PostgreSQL，也不会以默认用户 ID、固定 secret 或测试环境标签绕过。
+
+### 运行配置闭环实际回执（2026-09-16）
+
+- Admin `pnpm test:config` exit `0`：Node 配置合同 `9/9`，Remote SSH env 投影与 AutoDL topology 均通过；覆盖 mode `0600`、外部配置缺失 fail closed、service secret 保留、三个 distinct database role、Dream resource/callback 同源与错误 origin 拒绝。
+- Admin 使用临时、无真实 secret 的 env 执行本地和 Remote SSH `docker compose ... config --quiet`，两项 exit `0`；没有启动容器。`pnpm exec eslint scripts/setup-env.mjs scripts/setup-env.test.mjs`、`pnpm exec tsc --noEmit` 与 `pnpm build` 均 exit `0`，Next.js `16.1.6` Webpack 构建完成。
+- Dream `deploy/remote-ssh/test-env-projection.sh` 与 `deploy/autodl-ssh/test-topology.sh` exit `0`；FastAPI/Next 获得同一注册 service ID/secret、exact Admin `/api/auth` issuer、Dream `/api` resource 与 `/auth/callback`，BFF cookie secret 独立，投影中无 PostgreSQL 配置。
+- Dream 本地和 Remote SSH Compose 使用临时 env 执行 `config --quiet` 均 exit `0`；根/Remote backend 对遗留 DB env 写入空 tombstone，本机/Docker preflight 发现非空 `DATABASE_URL` 时拒绝启动。临时 `backend/.env`、`frontend/.env.local` 与渲染 env 已删除。
+- Dream shell syntax、local/docker dry-run preflight、frontend `pnpm exec tsc --noEmit` 与 `pnpm run build` 均 exit `0`；Next.js `16.1.6` Webpack 构建列出实际 BFF/auth/device/token routes。首次把部署命令误从 `frontend/` 执行导致路径不存在 exit `127`，修正 cwd 后同组命令 exit `0`；该失败属于命令 harness，不是产品失败。
+- 正常 Admin 服务通过 Webpack 后 `/admin` 可返回页面，认证/bootstrap/JWKS/capability 在旧主仓库配置下返回结构化 `503`，不再是编译 `500`。只读 migration ledger 为 applied `54` / target `63`，最新 `0053_rare_lenny_balinger`，`0054`–`0062` 共九项 pending。本轮没有在正常数据库运行 migration、ACL、backfill 或写入验收。
+
+上述回执证明配置和部署代码可生成一致的 DTO/ORM 边界，不能替代真实 Google、正常账户、Device Flow、Run/Thread 或真实模型验收。正常部署仍需由运维提供 Google credentials、三个受限角色 DSN、Gateway binding、业务 policy JSON，并在允许的发布窗口完成 Admin Drizzle `0054`–`0062` 与 ACL 后才能继续公开业务写入。
 
 ## 发布顺序与回滚
 
