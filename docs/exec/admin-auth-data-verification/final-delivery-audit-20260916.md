@@ -9,12 +9,12 @@
 
 源码实现、跨项目契约、隔离数据库合同和确定性构建已经完成并在当前分支复核。正常 `ink-memory` 的 `0054–0062`、受限角色/ACL、私有配置激活、正常服务启动，以及真实 Google、Device Flow、Run/Thread、共享文件和模型验收尚未执行。本审计不能用于宣称整项任务完成。
 
-当前精确源码：
+实现快照与审查入口：
 
 | 项目 | 分支 / HEAD | 审查入口 | 状态 |
 | --- | --- | --- | --- |
-| Admin | `codex/admin-auth-data-provider` / `f7a182ff56a3b47fec23362d1825c43597b7c21d` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地与远端一致，PR `CLEAN` |
-| Dream | `codex/dream-admin-auth-data-client` / `dfd380210ccac52b8320b13be0eb63cc9d64f7c1` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 本地与远端一致；仅保留既存未跟踪 `.pnpm-store/` |
+| Admin | `codex/admin-auth-data-provider` / 实现快照 `f7a182ff56a3b47fec23362d1825c43597b7c21d` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 本地与远端一致，PR `CLEAN` |
+| Dream | `codex/dream-admin-auth-data-client` / 实现快照 `dfd380210ccac52b8320b13be0eb63cc9d64f7c1` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 后续提交仅增加或校正最终审计文档；精确审查 HEAD 与检查结果以 PR 为准，仅保留既存未跟踪 `.pnpm-store/` |
 
 ## 1. 基线发布
 
@@ -80,14 +80,14 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 - `CLAUDE_CODE_TMPDIR={AGENT_CWD}/{thread_id}/.claude-tmp`、真实 Thread workspace、`0700` 与精确 sandbox 放行范围不变。
 - Runtime `0.1.10`、SDK `0.2.145`、Plugin CLI 与官方 Claude CLI 分离由生产 Docker build 验证。
 
-## 7. 当前 HEAD 自动化证据
+## 7. 实现快照与审计提交自动化证据
 
 | 命令/运行 | 工作目录或平台 | 结果 |
 | --- | --- | --- |
 | Admin [Test Suite 35075819619](https://github.com/glide-the/dream-im-platform/actions/runs/35075819619) | GitHub / Admin `f7a182f` | exit `0`；63/63 migrations，8 capabilities，repeat no-op |
 | 同一 Admin deterministic job | GitHub / Admin `f7a182f` | exit `0`；274 files / 2074 tests passed，17 files / 36 tests skipped；ESLint、tsc、Next 16.1.6 build通过 |
-| Dream [Frontend CI 35076635284](https://github.com/glide-the/im-dream/actions/runs/35076635284) | GitHub / Dream `dfd38021` | exit `0`；Next 16.1.6 compile、TypeScript、3/3 static pages |
-| Dream [Backend CI 35076635320](https://github.com/glide-the/im-dream/actions/runs/35076635320) | GitHub / Dream `dfd38021` | exit `0`；生产 Docker build、Runtime 0.1.10、SDK 0.2.145、Plugin CLI gate通过 |
+| Dream [Frontend CI 35077514688](https://github.com/glide-the/im-dream/actions/runs/35077514688) | GitHub / 首个审计提交 `f5a56432` | exit `0`；1m2s，Next 16.1.6 compile、TypeScript、3/3 static pages |
+| Dream [Backend CI 35077514712](https://github.com/glide-the/im-dream/actions/runs/35077514712) | GitHub / 首个审计提交 `f5a56432` | exit `0`；5m6s，生产 Docker build、Runtime 0.1.10、SDK 0.2.145、Plugin CLI gate通过 |
 | `.venv/bin/python -m pytest -q tests` | Dream `backend`，实现代码最终快照 | exit `0`；3527 passed、24 skipped、615 subtests passed |
 | Markdown local-link checks | 两仓受影响文档 | exit `0`；最终同步3文件0 missing、Admin架构7文件67 links/0 missing、Dream总览2文件15 links/0 missing |
 
@@ -95,7 +95,7 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 
 ## 8. 正常切换候选
 
-私有候选目录和 env/manifest 均为 `0600`。候选绑定 Admin `f7a182f` 与 Dream `dfd38021`，状态为 `prepared-not-applied`；停机备份完整性已验证。预检快照记录正常库为 54/63 migrations、AUTH/DATA/CONTROL/Dream角色未创建。正常 `3000`、`5173`、`8765`、`54329` 当前均未监听。
+私有候选目录和 env/manifest 均为 `0600`。候选通过私有回执绑定 Admin 与 Dream 精确审查 HEAD，并在纯文档提交后刷新 Dream 绑定；状态为 `prepared-not-applied`，停机备份完整性已验证。预检快照记录正常库为 54/63 migrations、AUTH/DATA/CONTROL/Dream角色未创建。正常 `3000`、`5173`、`8765`、`54329` 当前均未监听。
 
 执行器默认只预检；实际提交必须同时显式提供 `--apply --production-approval`。本审计未运行 migration、role创建、`ALTER OWNER`、`GRANT/REVOKE`、配置激活或服务启动。
 
