@@ -1,16 +1,16 @@
 # [Input] Actual Deck Plugin/binding routes and shared OAuth/default/profile/Admin-operation fixture.
 # [Output] Default/role provenance, permission/error and original text Workspace technical evidence.
-# [Pos] Provider-free ingress harness; remaining local Plugin installation provider uses explicit test DI.
+# [Pos] Provider-free ingress harness; Deck Plugin persistence uses explicit Admin-control test DI.
+# [Sync] 2026-09-16: pass current OAuth actor and Workspace scope to Registry170 list.
 # [Sync] 2026-09-16: exercise binding reads through the typed Admin DTO client.
 from __future__ import annotations
 
 import httpx
 import pytest
-
 from routers import deck_plugin_binding, deck_plugins
 from routers.story_workspace import _story_workflow_current_user
 from services.admin_data.request_auth import AdminRequestActor
-from tests.test_admin_default_workspace import boundary, READ, WRITE
+from tests.test_admin_default_workspace import READ, WRITE, boundary
 
 BINDING = "/api/voice-decks/deck-1/plugin-binding"
 PLUGINS = "/api/deck-plugins/installations"
@@ -23,8 +23,12 @@ def deck_boundary(boundary):
     domain_calls = []
 
     class PluginProvider:
-        async def list_installations(self, *, scope_id):
-            domain_calls.append(("plugins", {"scope_id": scope_id}))
+        async def list_installations(self, *, scope_type, scope_id, actor):
+            domain_calls.append(("plugins", {
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "actor": actor,
+            }))
             return {"installations": []}
 
     app = browser.app
@@ -46,7 +50,9 @@ def test_actual_public_resolver_default_role_then_business_provider(deck_boundar
         assert response.json() == {"deck_id": "deck-1", "binding_revision": 0, "applied_to": "next_run", "binding": None}
     else:
         assert len(domain_calls) == 1
-        assert domain_calls[0][1] == {"scope_id": "existing-workspace-1"}
+        assert domain_calls[0][1]["scope_type"] == "workspace"
+        assert domain_calls[0][1]["scope_id"] == "existing-workspace-1"
+        assert isinstance(domain_calls[0][1]["actor"], AdminRequestActor)
         assert response.json()["permissions"] == {"can_manage": True, "can_install_local": True, "can_force_purge": True}
 
 

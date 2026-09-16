@@ -2,28 +2,23 @@
 # [Output] Reject runtime DDL/SQLite fallbacks and lock the Dream re-entry authorization predicates.
 # [Pos] Static PostgreSQL boundary regression suite.
 # [Sync] 2026-08-31: allow mutable current-Agent selection while keeping launch metadata internally consistent.
-# [Sync] 2026-09-16: remove the retired test-only revocation SQLite exception from the production boundary inventory.
+# [Sync] 2026-09-16: remove the retired Deck Plugin SQL service from the production boundary inventory.
 
 """Regression gates for the PostgreSQL-only Dream runtime SQL boundary."""
 
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import re
-import pytest
+from pathlib import Path
 
-from backend.services.deck_plugin.installation_service import InstallationService
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
 
-
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _PRODUCTION_SQL_FILES = (
-    "backend/services/deck/admin_gateway.py",
     "backend/services/deck/story_workflow_application.py",
-    "backend/services/deck_plugin/installation_service.py",
     "backend/services/deck_plugin/manifest_validator.py",
     "backend/services/claude_plugin/workspace_packer.py",
     "backend/services/story_workspace/dream_confirmation_service.py",
@@ -77,20 +72,6 @@ def test_production_sql_uses_postgresql_semantics_only() -> None:
     assert failures == []
 
 
-@pytest.mark.parametrize(
-    ("service_type", "method_name"),
-    ((InstallationService, "_update_row"),),
-)
-def test_dynamic_installation_updates_reject_unknown_identifiers(
-    service_type: type[object],
-    method_name: str,
-) -> None:
-    service = object.__new__(service_type)
-    method = getattr(service, method_name)
-    with pytest.raises(ValueError, match="unsupported deck installation update columns"):
-        method({"id": "install-1", "revision": 0}, injected_column="blocked")
-
-
 class _RecordingCursor:
     rowcount = 1
 
@@ -117,28 +98,6 @@ class _RecordingDb:
 
     def rollback(self) -> None:
         self.rollback_count += 1
-
-
-@pytest.mark.parametrize(
-    ("service_type", "method_name"),
-    ((InstallationService, "_update_row"),),
-)
-def test_dynamic_installation_updates_commit_without_closing_connection(
-    service_type: type[object],
-    method_name: str,
-) -> None:
-    db = _RecordingDb()
-    service = object.__new__(service_type)
-    service.db = db
-    getattr(service, method_name)(
-        {"id": "install-1", "revision": 2},
-        status="ready",
-    )
-    assert db.commit_count == 1
-    assert db.rollback_count == 0
-    sql, parameters = db.executions[0]
-    assert "status = %s" in sql
-    assert parameters == ("ready", "install-1", 2)
 
 
 def test_dream_reentry_queries_have_postgresql_jsonb_and_bound_parameters() -> None:

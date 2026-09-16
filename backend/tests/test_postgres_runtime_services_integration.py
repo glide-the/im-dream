@@ -10,27 +10,22 @@ inside one rollback-only outer transaction, so no test data is published.
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, field
 import os
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
+import pytest
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
-import pytest
 
-from backend.models.deck_plugin import InstallationStatus
-from backend.services.deck_plugin.installation_service import InstallationService
+from backend.persistence.config import require_test_database_target
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
-from backend.persistence.config import require_test_database_target
 
-
-_INSTALLATION_ID = "dpi_11111111111111111111111111111111"
 _CORE_EMPTY_TABLES = (
     "users",
     "story_workspace_workspaces",
@@ -188,44 +183,6 @@ def postgres_case() -> Any:
         connection.rollback()
         connection.close()
         observer.close()
-
-
-def test_plugin_installation_service_commits_inside_outer_rollback(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(deck_plugin_installations=1)
-    postgres_case.db.execute(
-        """
-        INSERT INTO deck_plugin_installations (
-            id, scope_type, scope_id, deck_plugin_id,
-            installed_versions_json, default_version, status,
-            approved_capabilities_json, source_policy_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            _INSTALLATION_ID,
-            "workspace",
-            "workspace-pg-runtime-test",
-            "plugin.pg-runtime-test",
-            '["1.0.0"]',
-            "1.0.0",
-            InstallationStatus.DISABLED.value,
-            "[]",
-            "test-policy",
-        ),
-    )
-
-    service = InstallationService(postgres_case.db)
-    postgres_case.db.begin_service_scope()
-    result = asyncio.run(service.enable(_INSTALLATION_ID))
-
-    row = postgres_case.db.execute(
-        "SELECT status, revision FROM deck_plugin_installations WHERE id = %s",
-        (_INSTALLATION_ID,),
-    ).fetchone()
-    assert result.status is InstallationStatus.READY
-    assert row == {"status": InstallationStatus.READY.value, "revision": 1}
-    assert _row_counts(postgres_case.observer)["deck_plugin_installations"] == 0
 
 
 def test_dream_reentry_jsonb_queries_execute_on_real_postgres(
