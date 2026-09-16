@@ -1,6 +1,7 @@
 <!-- [Input] User cross-project authentication/data migration requirement, repository rules and published Git baselines. -->
 <!-- [Output] Cross-project execution ownership, dependency gates, review and acceptance plan. -->
 <!-- [Pos] Coordinator plan; project implementation contracts remain owned by the Admin and Dream tasks. -->
+<!-- [Sync] 2026-09-17: reconcile the plan with implemented identity separation, normal cutover, current branches and remaining external acceptance gates. -->
 <!-- [Sync] 2026-09-14: track four baselines, active implementation tasks, isolated migration proof and Thread/message workstream. -->
 
 # Admin 认证与 Dream 数据访问迁移协调计划
@@ -68,13 +69,13 @@ Also create tags and corresponding GitHub Releases for glide-the/ink-claude-code
 | 阶段 | 责任 | 依赖 | 当前证据 / gate |
 | --- | --- | --- | --- |
 | 基线发布 | 协调 | 规则与远端核验 | 四个 tag 推送、Release 发布、远端 peeled SHA 核验成功 |
-| 现状扫描 | 两个项目 | 基线发布 | 执行中，不能以初步关键词清单替代完整入口分析 |
-| 规范契约与数据库决策 | Admin，Dream 反馈 | 完整扫描 | v0.1 设计文件已形成；同库 schema 方案待实际迁移/ACL 证明 |
-| 架构/交互设计评审 | 两项目，协调 | 规范契约 | 首轮已发现并要求修正密码兼容、任意邮箱门槛和 candidate schema 创建；领域契约仍待逐项评审 |
-| Admin schema/auth/data | Admin | 设计通过 | 认证骨架与未发布0054 candidate已形成；领域 API 和分离未完成 |
-| Dream 客户端及入口替换 | Dream | 已核验 Admin 契约 | strict DTO 客户端/JWT验证已形成；生产入口替换仍待闭合 |
-| 技术验证 | Luna runner，主任务修复 | 相应实现 | 协调文档两轮通过；项目首批单测通过不代表完整验收；迁移/破坏/真实用户由主任务处理 |
-| 完整真实验收 | 协调与项目主任务 | 正常本机服务、指定账户与已有实体/模型 | 用户授权现有账户 `dmeck@suoxya.com`，可通过公开入口选择已有实体与正常模型；Dream 当前入口未启动 |
+| 现状扫描 | 两个项目 | 基线发布 | 已完成生产import/调用图、ORM/SQL/连接池、后台任务、启动/健康与共享文件边界盘点；关闭证据同时包含源码门禁和正常进程零PG连接 |
+| 规范契约与数据库决策 | Admin，Dream 反馈 | 完整扫描 | 采用同一database内`identity/public/dream/drizzle`职责与表级ACL；Admin为唯一迁移/数据库访问owner，Dream生产无DSN/driver/fallback |
+| 架构/交互设计评审 | 两项目，协调 | 规范契约 | 已确认Admin operator与Dream user是独立业务域；browser/device/service是OAuth client，`client_credentials`无用户主体，用户数据另需委托token |
+| Admin schema/auth/data | Admin | 设计通过 | 当前`f79a099`：64 migrations、9发布capability、191具名operation、独立Admin Session/RBAC、OAuth Provider/Device/JWKS及正常ACL已激活 |
+| Dream 客户端及入口替换 | Dream | 已核验 Admin 契约 | 当前`2df9d9b4`：Pydantic DTO/Admin clients/BFF/resource verifier已接入，全生产数据库入口关闭，Runtime/SSE/FS保持Dream所有 |
+| 技术验证 | Luna runner，主任务修复 | 相应实现 | Admin 2091 tests、Dream backend 3538 tests、两端type/lint/build及隔离/正常公开协议验证通过；具体回执见最终交付审计 |
+| 完整真实验收 | 协调与项目主任务 | 正常本机服务、指定账户与已有实体/模型 | Google、Device、Thread持久化、MCP replacement与文件边界通过；Admin成功登录缺有效独立凭据，真实模型/Run/SSE受正常账户402额度阻塞 |
 
 ## 冲突登记
 
@@ -97,15 +98,14 @@ Also create tags and corresponding GitHub Releases for glide-the/ink-claude-code
 最终关闭入口清单须同时具备代码复查和运行公开生产入口的无数据库访问证据。
 只在下游实现、文档、必需验证全部完成后标记协调 goal complete。
 
-首版规范契约位于 Admin worktree 的 `docs/architecture/admin-dream-auth-data-contract.md`，状态为设计，尚无发布 API capability。
-协调评审要求补齐：长 Agent turn 的主体委托/续期、后台与工具范围、跨客户端 browser handle 绑定、设备/refresh 并发原子性、未知提交恢复、Gateway 主体签发归属，以及真实 schema/ACL 验证。
-首批认证代码评审还发现密码登录被禁用以及新增 `emailVerified` 门槛；已要求 Admin 保留 baseline 仍使用的密码产品能力并将验证迁入 Admin，邮箱验证限制仅依据实际产品要求，不因 owner 迁移自行新增或删除功能。
-Drizzle `0054_clean_network` 候选静态评审发现未创建 `identity/dream` schema 且 snapshot schemas 为空；已要求在提交/冻结未发布候选前修正 source/snapshot/DDL 一致性和 capability 发布。没有执行 migration，不能将此静态缺口报告为真实数据库失败；历史 `0000..0053` 永久保持不变。
+规范契约位于 Admin worktree 的 `docs/architecture/admin-dream-auth-data-contract.md`，当前发布面为191个具名operation、64个migration receipt和9项发布capability。所有接口采用严格DTO → Domain Service → typed Repository → Drizzle/UOW；Dream不提交SQL、表列或任意用户ID。
+协调评审要求的长 Agent turn 主体委托/续期、后台与工具scope、browser handle绑定、Device/refresh并发、未知提交恢复、Gateway主体签发和实际schema/ACL均已实现并有确定性或正常入口证据。仍未完成的部分只保留为真实验收门禁，不回写为设计缺口。
+首批评审发现的密码兼容、`emailVerified`门槛和0054 schema/snapshot问题已经以现行代码及前向migration修正；历史`0000..0053`保持不变，正常库现为0063/64条receipt。该历史缺陷不再代表当前候选状态。
 用户凭据不进入任务消息、版本库、公开日志或回执。
 
 ## 发布与回滚条件
 
 执行顺序为 Admin expand/schema/API → Dream 兼容接口 → backfill/validate → contract。
-本计划不授权修改正常本机数据库 schema，也不重启用户已有服务。
+本计划本身不作为任意数据库的通用修改授权；后续经用户授权的本机正常切换已按备份、精确目标绑定、forward migration、ACL actual-role probes和公开入口验证执行，详见[最终交付审计](../exec/admin-auth-data-verification/final-delivery-audit-20260916.md)。
 隔离 migration 必须先核验具名目标身份；应用回滚使用已审查制品，schema 问题新增前向 migration。
 基线 Release 只记录源码，不证明新方案已实现或可在旧 schema 上运行。

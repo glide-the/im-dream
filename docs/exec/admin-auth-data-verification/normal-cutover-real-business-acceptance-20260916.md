@@ -1,6 +1,7 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-17: record corrective normal Admin ACL activation and public Notion service-token DTO/ORM validation. -->
 <!-- [Sync] 2026-09-17: record independent Admin-session implementation, confidential service OAuth and current deterministic results. -->
 <!-- [Sync] 2026-09-16: record real Device approval/exchange, Resource Server access, refresh rotation and replay-family invalidation. -->
 <!-- [Sync] 2026-09-16: record independent refresh revocation, Device denial, Admin 0063 publication, Product OAuth forwarding, Gateway key rotation, Settings search and MCP replacement-auth findings. -->
@@ -193,3 +194,11 @@ Admin operator 与 Dream user 的代码路径已按设计稿分开。Admin 登�
 | 生产数据库路径扫描 | Dream `backend`与`frontend`，排除tests/e2e/lockfile | 未发现PostgreSQL驱动、DSN、SQL、连接池或静态service secret发送；测试目录保留的数据库探针不进入运行路径 |
 
 本节是技术验证，不把缺少Admin原凭据的成功后台登录、账户额度阻塞的真实模型回复、Run/Thread继续/取消或SSE终态写成已完成。
+
+### 2026-09-17 正常Admin ACL修正与Notion后台读取
+
+独立Admin登录首次走公开入口时返回`500`。只读诊断和受限角色复现将原因定位为正常库ACL未包含`admin_users.password_hash`读取与`admin_sessions`写入，而不是用户域合并或密码算法问题。按正常发布路径先生成停止集群的一致物理备份，再以owner-only `0600` manifest执行dry-run、正式apply和重复apply；三次均通过。最终策略绑定Admin `f79a0992eead124b1c05ae049c5440b60baee9e2`和Dream `2df9d9b423dac3131a0f15494272a821cea8f313`，覆盖64个migration、8个激活门禁capability、144条ACL语句、active Gateway与四个实际角色probe。
+
+修正后`ink_auth`可读取独立Admin credential列并写入Session/audit，`ink_admin_control`可读取RBAC；两者仍不能读取Dream `chat_thread`或历史`identity.admin_subject_links`，Dream角色仍是`NOLOGIN`且无database `CONNECT`。公开Admin登录由服务错误恢复为明确`401 ADMIN_CREDENTIALS_INVALID`，同一Chrome已有Dream会话访问Admin `/api/admin/auth/me`也保持`401`。这证明运行路径与ACL已修复，同时Dream登录、同邮箱或Dream密码都不会产生Admin Session。成功Admin登录仍需要该独立Admin member的有效凭据；本轮没有复制Dream密码、重置Admin密码、降低密码策略或建立跨域用户映射。
+
+Notion后台同步候选使用Dream confidential OAuth client的`client_credentials`，没有canonical Dream user。Repository先把ORM行的`config_json`、`metadata_json`和`snapshot_json`显式解码投影为严格DTO，再由Service和公开operation返回；DTO没有放宽extra-field策略。定向Repository/Service测试`17/17`、TypeScript和ESLint均通过。正常公开token endpoint返回`200`和300秒Bearer，随后`notion.sync-candidates.list`返回`200`、原request ID与1个connector；响应只含`config`/`metadata`等DTO字段，没有`*_json`存储列。该后台scope没有读取或写入Admin operator，也没有创建、合并或冒充Dream user。
