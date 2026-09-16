@@ -33,7 +33,8 @@
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
-<!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the published Runtime 0.1.9 package-root selector contract. -->
+<!-- [Sync] 2026-09-15: adopt SDK 0.2.145 and the published Runtime 0.1.10 package-root selector contract. -->
+<!-- [Sync] 2026-09-15: preflight Runtime 0.1.10 plugin management before installation. -->
 <!-- [Sync] 2026-09-13: document historical-thread resume storage boundaries. -->
 
 Historical Dream threads keep their note links and messages when their Claude
@@ -176,13 +177,13 @@ These commands write Admin-owned data. Use them only with the intended local dat
 
 ### 3. Install Dream and its Runtime
 
-The `develop` source contract requires the published Runtime `0.1.9`. On 2026-09-13, all five public npm archives were verified byte-for-byte against the same-SHA four-platform CI release, and registry `latest` is `0.1.9`. Do not mix current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed. See the [release and local adoption receipt](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
+The `develop` source contract requires the published Runtime `0.1.10`. On 2026-09-15, all five public npm archives were verified byte-for-byte against the same-SHA four-platform CI release, and registry `latest` is `0.1.10`. Do not mix current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed. See the [release and local adoption receipt](docs/deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md).
 
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.9
+npm install --global @glide-the/ink-claude-code-dream@0.1.10
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -194,7 +195,7 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must resolve to package-root `cli.js`, whose adjacent `release-manifest.json` must declare Runtime `0.1.9`; Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
+The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must resolve to package-root `cli.js`, whose adjacent `release-manifest.json` must declare Runtime `0.1.10`; Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
 
 ### 4. Configure Dream
 
@@ -326,13 +327,13 @@ The complete engineering flow—connection discovery, model tool call, call-ID a
 | Component | Supported version / owner |
 | --- | --- |
 | Dream integration branch | `develop` |
-| Dream project metadata | backend `0.1.3`, frontend `0.0.3`; API schema remains `2.0.0` |
+| Dream project metadata | backend `0.1.4`, frontend `0.0.4`; API schema remains `2.0.0` |
 | Python | `>=3.12` |
 | Node.js | `>=22 <25`; deployment images use Node 22 |
 | Frontend package manager | `pnpm@10.28.1` through Corepack |
 | Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.9`; registry `latest` is `0.1.9` as of 2026-09-13 |
+| Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.10`; registry `latest` is `0.1.10` as of 2026-09-15 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | PostgreSQL schema and access, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
@@ -340,9 +341,9 @@ The complete engineering flow—connection discovery, model tool call, call-ID a
 
 Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
 
-For Notion `Failed to read config.json`, distinguish file-read failure from malformed JSON and inspect the final Agent Bash binding. Runtime 0.1.9 rejects relative PATH entries before its native `ntn` candidate. Dream omits only relative directories proven absent at the current thread cwd from that bound launch's SDK environment, preserving valid command order and all strict shadow checks. It does not change shell profiles, parent PATH, credentials, or non-Notion turns. `ntn doctor` exit 0 alone is insufficient: inspect warnings and verify a read-only request through normal Chat.
+For Notion `Failed to read config.json`, distinguish file-read failure from malformed JSON and inspect the final Agent Bash binding. Runtime 0.1.10 rejects relative PATH entries before its native `ntn` candidate. Dream omits only relative directories proven absent at the current thread cwd from that bound launch's SDK environment, preserving valid command order and all strict shadow checks. It does not change shell profiles, parent PATH, credentials, or non-Notion turns. `ntn doctor` exit 0 alone is insufficient: inspect warnings and verify a read-only request through normal Chat.
 
-Runtime `0.1.9` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no second Runtime implementation is maintained. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
+Runtime `0.1.10` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no second Runtime implementation is maintained. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md).
 
 Admin Drizzle is the only owner of shared PostgreSQL migrations. Dream consumes exact published capabilities and fails closed when a required capability is missing. MCP App connection settings require Admin migration `0053_rare_lenny_balinger` and capability `dream.mcp-app-connection-settings.v1` before the matching Dream code is released.
 
@@ -371,7 +372,7 @@ Post-publication SDK/Runtime registry acceptance:
 ```bash
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.145 \
-  --runtime-version 0.1.9 \
+  --runtime-version 0.1.10 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -399,7 +400,7 @@ For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now bu
 
 ## Troubleshooting
 
-Plugin installation requires a qualified Runtime with `plugin` management commands, not just a successful `--version`. Dream now reuses its Agent Runtime resolver by default and checks `plugin --help` before installing; it does not fall back to ambient `claude`. `INK_CLAUDE_CLI_PATH` remains an explicit plugin-only absolute executable override. Published Runtime `0.1.9` is known to lack this command entry; a source repair is not an installed upgrade and must be delivered as a new qualified version. See the [plugin management contract](docs/design/deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同).
+Plugin installation requires a qualified Runtime with `plugin` management commands, not just a successful `--version`. Dream reuses its Agent Runtime resolver by default and checks `plugin --help` before installing; it does not fall back to ambient `claude`. `INK_CLAUDE_CLI_PATH` remains an explicit plugin-only absolute executable override. Runtime `0.1.10` restores the original non-interactive plugin and marketplace commands. Admin 0.1.1 and Dream now share canonical path-component digest ordering; Dream recomputes the Admin 0.1.0 whole-path order only for already immutable receipts and keeps canonical artifact identities. See the [plugin management contract](docs/design/deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同).
 
 If Next reports `Could not find the module ... in the React Client Manifest`, check its compilation root and cache before changing application modules. `frontend/next.config.js` derives `turbopack.root` from its own file location, not the launch working directory or ancestor lockfiles. Stop the frontend, confirm `.next/dev/lock` has no active owner, move only `frontend/.next` to an independent backup, then restart to rebuild. Do not delete parent lockfiles, reinstall unrelated dependencies, move environment/database files, or weaken the client boundary. Configuration regression: `corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line` (no browser or service required).
 
@@ -421,7 +422,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-The current source requires Runtime `0.1.9` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Install the exact release on normal `PATH`, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
+The current source requires Runtime `0.1.10` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Install the exact release on normal `PATH`, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
 
 ### `uv sync` removed pytest
 

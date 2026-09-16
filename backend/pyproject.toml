@@ -4,6 +4,7 @@
 # [Sync] 2026-09-15: remove unused local Authlib/bcrypt authority dependencies; retained versions and SDK pins remain unchanged.
 # [Sync] 2026-09-16: move psycopg to the development group after production PostgreSQL access moved behind Admin DTO APIs.
 # [Sync] 2026-09-13: bump project metadata to 0.1.3 for the unified original-module Runtime 0.1.9; SDK stays 0.2.145.
+# [Sync] 2026-09-15: bump project metadata to 0.1.4 for Runtime 0.1.10 plugin management; SDK stays 0.2.145.
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -11,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ink-and-memory-backend"
-version = "0.1.3"
+version = "0.1.4"
 description = "Ink & Memory backend API"
 requires-python = ">=3.12"
 dependencies = [

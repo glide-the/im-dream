@@ -37,6 +37,7 @@
 # [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains.
 # [Sync] 2026-09-15: compose the Registry99 frozen Reflections operations into the sole Admin request owner.
 # [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
+# [Sync] 2026-09-15: startup identity now expects Runtime 0.1.10.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    Admin API sink, and publisher lifecycle.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox

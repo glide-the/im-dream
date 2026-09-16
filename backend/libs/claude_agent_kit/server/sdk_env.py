@@ -80,6 +80,7 @@
 # [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
 # [Sync] 2026-09-13: omit only absent relative PATH directories for bound Notion launches; preserve lookup order and strict Runtime shadow rejection.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and digests for npm while preserving the separately qualified local-core layout.
+# [Sync] 2026-09-15: adopt Runtime 0.1.10 with restored non-interactive plugin management.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -115,7 +116,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.145"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.9"
+DREAM_CLAUDE_CLI_VERSION = "0.1.10"
 DREAM_CLAUDE_RUNTIME_ENTRYPOINT = "cli.js"
 DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT = f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"

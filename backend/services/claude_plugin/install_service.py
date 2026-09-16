@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: verify remote URL/ref/commit/manifests/full-plugin digest without using local-path catalog constants for entry installs.
 [Sync] 2026-09-15: artifact and CLI checks are shared static methods for server-derived Admin metadata; algorithms unchanged.
 [Sync] 2026-09-16: replace operation and installation SQL with the typed Admin report port.
+[Sync] 2026-09-15: verify current canonical and immutable Admin 0.1.0 full-plugin digest receipts without weakening content checks.
 
 Every install flows through the same pipeline:
 
@@ -41,7 +42,7 @@ from .builtin_sources import (
     resolve_local_marketplace,
 )
 from .compatibility import cli_version_to_semver, version_satisfies
-from .digest import compute_plugin_digest
+from .digest import compute_legacy_admin_plugin_digest, compute_plugin_digest
 from .package_spec import PackageSpec, PackageSpecError, parse_package_spec
 from services.admin_data.claude_plugin_data import (
     ClaudePluginExecutionEvidenceDTO,
@@ -852,11 +853,15 @@ class PluginInstallService:
         inventory = enumerate_components(plugin_root)
         digest = compute_plugin_digest(plugin_root)
         if approved_plugin_digest is not None:
+            legacy_admin_digest = compute_legacy_admin_plugin_digest(plugin_root)
             evidence["marketplace_revision"]["approved_plugin_digest"] = (
                 approved_plugin_digest
             )
             evidence["marketplace_revision"]["observed_plugin_digest"] = digest
-            if digest != approved_plugin_digest:
+            evidence["marketplace_revision"][
+                "observed_legacy_admin_plugin_digest"
+            ] = legacy_admin_digest
+            if approved_plugin_digest not in {digest, legacy_admin_digest}:
                 raise PluginInstallError(
                     MARKETPLACE_REMOTE_DRIFT,
                     "installed plugin content no longer matches the approved revision",

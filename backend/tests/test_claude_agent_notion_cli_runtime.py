@@ -2,7 +2,7 @@
 # [Output] Process-isolated provider-free proof that an approved actor-bound notion-cli Bash call executes inside the real Runtime and sandbox.
 # [Pos] Integration contract test node in backend/tests; no real Notion credential or content is accessed.
 # [Sync] 2026-09-04: add the Dream notion-cli PreToolUse regression acceptance.
-# [Sync] 2026-09-13: compile the fixture to match Runtime 0.1.9 native ntn policy without allowing shell-script shadows.
+# [Sync] 2026-09-15: compile the fixture to match Runtime 0.1.10 native ntn policy without allowing shell-script shadows.
 # [Sync] 2026-09-13: assert final Bash binding and real config file readability.
 
 from __future__ import annotations

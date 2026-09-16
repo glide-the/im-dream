@@ -9,6 +9,7 @@
 # [Sync] 2026-08-30: require the clean-room npm 0.1.4 sandbox.notion-cli
 #                    capability without changing Dream's portable baseline.
 # [Sync] 2026-09-12: require package-root cli.js for current clean-room selector fixtures and preserve legacy parsing fixtures.
+# [Sync] 2026-09-15: require plugin management in the isolated public Runtime probe.
 
 from __future__ import annotations
 
@@ -974,6 +975,7 @@ def test_isolated_install_owns_import_and_binds_cli_path(tmp_path: Path) -> None
     assert receipt["publicApi"] == list(acceptance.PUBLIC_API)
     assert receipt["cliPath"] == str(cli.resolve())
     assert receipt["cliVersion"] == FIXTURE["cliVersion"]
+    assert receipt["pluginManagement"] is True
 
 
 def test_main_prints_only_structured_safe_error(capsys) -> None:
