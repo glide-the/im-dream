@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-17: record the real Device delegated-user plus rotated Dream service-key Gateway canary. -->
 <!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity and record two-sided regression. -->
 <!-- [Sync] 2026-09-17: record a normal-session public Deck list/detail read through the current Admin consumer. -->
+<!-- [Sync] 2026-09-17: record normal-session Thread create/list/history/status, terminal SSE and idempotent stop with restricted-role persistence proof. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -79,7 +80,16 @@ schema 分离需 catalog/ACL 和 Drizzle 前向 migration 实证；新 `dream.op
 
 2026-09-17 正常Dream公开Agent链已验证到托管Codex：credential按Admin broker规范刷新后，上游返回HTTP 200和合法Responses SSE body，但缺少`Content-Type`。旧Gateway在parser之前返回502并留下Admin可见`settlement_failed/usageUnknown`。Admin已实现仅限Codex adapter、body存在、类型头为空的兼容规则；其他Provider仍fail closed，当前完整Admin回归277 files/2097 tests、类型、lint与build通过。该正常失败请求预留75,006 Token，当时当前周期剩余24,994，不足以启动同样完整turn；系统没有人工改usage或释放未知用量预留的接口，本轮未改订阅、Allowance或账本。
 
-同日追加小额真实Gateway canary：现有Dream用户Session通过公开RFC 8628 Device Flow批准public client，仅申请`messages:create`与Dream resource；无refresh的300秒用户token和已轮换的Dream canonical-subject service key同时通过Gateway，公开`/v1/messages`返回200，请求`req_b912a4968bbc464fb66bf4b656a7aa6d`记录11 input/5 output tokens。公开Product usage将其标记为`completed/settled`，reserved85/consumed16/released69；当前总额100,000、原未知请求仍预留75,006、已消费16、剩余24,978。该回执验证用户委托主体与服务client分离，并实测修复后的headerless Codex Responses路径；没有创建Admin Session。access token revoke返回400且无refresh token，文档按最长300秒自然失效记录，不虚报即时撤销。临时脚本/context server已删除/停止，未输出code、token、key或正文。完整Thread/Run/continue/cancel/SSE终态仍待额度条件满足后执行，小额canary不能替代该业务旅程。
+同日追加小额真实Gateway canary：现有Dream用户Session通过公开RFC 8628 Device Flow批准public client，仅申请`messages:create`与Dream resource；无refresh的300秒用户token和已轮换的Dream canonical-subject service key同时通过Gateway，公开`/v1/messages`返回200，请求`req_b912a4968bbc464fb66bf4b656a7aa6d`记录11 input/5 output tokens。公开Product usage将其标记为`completed/settled`，reserved85/consumed16/released69；当前总额100,000、原未知请求仍预留75,006、已消费16、剩余24,978。该回执验证用户委托主体与服务client分离，并实测修复后的headerless Codex Responses路径；没有创建Admin Session。access token revoke返回400且无refresh token，文档按最长300秒自然失效记录，不虚报即时撤销。临时脚本/context server已删除/停止，未输出code、token、key或正文。模型产生的新消息、continue、运行中cancel、live SSE与Workflow Run仍待额度和既有Deck binding条件满足后执行，小额canary不能替代该业务旅程。
+
+### 正常 Thread 创建、历史与终态控制回执（2026-09-17）
+
+- 复用本机正常Dream Browser Session调用公开`GET /api/claude-agent/threads?limit=50`返回200，共16个Thread；仅读取ID、时间与消息角色元数据。五个历史Thread存在assistant消息，其中`e6fd4e39-ce5f-4887-b585-1f508933b60a`通过当前Admin DTO消费者读取6条`user/assistant`交替历史，未读取或记录正文。
+- 对该历史终态Thread调用公开`GET .../stream`返回409 `Thread is not running`；调用公开`POST .../stop`返回200、`ok=true`、`stop_requested=false`。这验证终态SSE失败反馈和取消幂等性，不冒充运行中断流或真实运行中取消。
+- 通过公开`POST /api/claude-agent/threads`创建并保留无模型验收Thread `1326f102-0db5-41e6-b8ec-8d0ef874e6cc`，返回200；随后公开列表包含该ID，消息读取200且为0条，状态读取200、`running=false/lifecycle=not_found`，重复stop返回200且`stop_requested=false`。没有发送用户消息、启动Runtime、调用模型、删除Thread或改变历史正文。
+- Admin worktree使用正常`.env.local`中的受限`DREAM_DATA_DATABASE_URL`执行参数化只读查询，exit0，`public.chat_thread`精确返回1行、ID匹配且标题匹配；命令未打印DSN、用户ID、Token或正文。这是Admin持久化补充证据，业务写入本身只经过公开Dream生产入口。
+- 刷新正常订阅公开页面后仍显示总额100,000、已消费16、当前可用24,978，和已知75,006未知用量预留一致。没有修改Allowance、账本或模型上限。
+- 现有唯一Deck `86512acd-abc9-44d1-af72-ea5a60af225d`的公开plugin-binding读取返回200、revision0、binding null；因此本轮没有修改既有Deck配置来伪造Workflow Run。真实Preflight/Run create/read/cancel仍是独立待验收项。
 2026-09-16 初始启动检查确认 `3000`、`5173`、`8765` 与正常 `54329` 均未监听；随后本轮拥有的 Admin `pnpm dev` 启动 `3000` 与正常内嵌 PostgreSQL `54329`，用于只读状态探测。Docker daemon 未运行，但 Compose `config --quiet` 不依赖 daemon 且已用于配置渲染。Admin 主仓库配置将 `/Users/dmeck/project/ink-admin-memory/.ink-memory/postgres` 定义为正常数据目录。监听于 `51534` 的数据库是此前具名隔离 migration harness，不能用于真实验收，也不属于本轮清理范围。
 
 ### 真实业务执行概念与影响简报（2026-09-16）
