@@ -8,6 +8,7 @@
 <!-- [Sync] 2026-09-17: record a normal-session public Deck list/detail read through the current Admin consumer. -->
 <!-- [Sync] 2026-09-17: record normal-session Thread create/list/history/status, terminal SSE and idempotent stop with restricted-role persistence proof. -->
 <!-- [Sync] 2026-09-17: record the pre-change identity-domain review and normal-session read-only DTO/BFF acceptance across migrated data domains. -->
+<!-- [Sync] 2026-09-17: record exact real model-reservation and Workflow-binding completion gates. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -176,3 +177,15 @@ Admin聚焦2 files/18 tests、完整provider-free 278 files/2106 tests、TypeScr
 - Dream迁移读取域的provider-free回归8 files、198 tests全部通过。前端第一次用`node --test`执行Playwright文件因extensionless import失败，第二次用`tsx --test`因在Node runner中加载Playwright test失败；改用仓库规定的Playwright runner后暴露2个旧测试预期：绝对API URL和Browser Bearer。生产代码已经正确使用同源Cookie/CSRF，所以只修正测试和目录合同；最终5 files、33/33 tests、exit0。
 - Luna在最终未提交树只读复跑：同一Playwright 33/33、TypeScript、完整backend 3535 passed/24 skipped/615 subtests、lint 0 errors/17既有warnings、Next production build、PostgreSQL运行路径边界6/6、AutoDL topology与Remote DTO/BFF projection均exit0；未访问数据库、浏览器、账户、网络或secret。
 - 本回执没有发起模型turn、Run写入、外部Provider discovery、订阅/Deck/Plugin/MCP/Notion配置变化或数据库直连。Product models返回空列表而Gateway models返回9项；当前Product context没有entitlement，严格DTO与现有合同测试均通过，因此不把该差异擅自改成产品缺陷。独立Admin管理登录已在后续Session TTL配置回执中通过；完整模型turn、Workflow成功Run和自然Dream中央Session/handle TTL仍保持单独门禁。
+
+## 真实模型与 Workflow 完成性审计（2026-09-17）
+
+正常Dream Browser Session只通过公开同源入口读取Gateway目录、Product usage、SystemConfig、Deck binding和Plugin options。Gateway目录返回200、9个`callable=true/included`模型：7个`maxOutputTokens=128000`，2个`maxOutputTokens=384000`；服务端保存选择为`gateway/gpt-5.6-luna`。Admin Gateway的实际预留公式是`estimatedInputTokens + effectiveMaxOutputTokens`；Dream Runtime对这些非Anthropic公开alias的默认输出是32,000，并只允许认证目录capability提供上限。当前真实Allowance为100,000总额、75,006预留、16已消费、24,978剩余，因此任何候选即使输入为0也不能满足32,000最低预留。没有再次发起模型turn，既有`usageUnknown`请求保持可审计状态，也没有修改订阅、账本、Allowance或模型配置。
+
+唯一既有Deck `86512acd-abc9-44d1-af72-ea5a60af225d`仍是revision 0、binding null。其唯一发布Workflow option为`ink.dream.story-workflow@1.0.0`，但installation为`missing`、compatibility为`failed`、runtime readiness为`unknown`、`selectable=false`，公开reason为`DECK_PLUGIN_UNAVAILABLE`。本轮没有改动既有Deck，没有创建无法执行的验收Deck，也没有越过产品入口直写binding或Run。完整Agent turn/continue/运行中cancel/live SSE等待可合法预留至少32,000 Token；成功Preflight/Workflow Run等待正常产品流程提供已安装且可选的release。两项均为已证实的业务前置条件，不是测试harness故障；此前确定性、隔离和只读真实验收状态保持。
+
+同一canonical Dream user与同一Allowance的后续只读复核确认，Gateway目录和Product目录承担不同产品职责。Gateway `/v1/models`按enabled Model、Provider/Pricing、Subscription/period、显式Permission与Allowance计算实时调用资格；Entitlement存在时提供模型级限额，缺失时记录nullable快照与`allowance-only`。Product `/api/product/v1/me/model-catalog`只投影当前Plan Entitlement权益，因此当前旧Plan指向未进入enabled目录的`deepseek-v4-flash`时返回空列表是准确视图，不是用户主体或OAuth映射错误。现行设计稿已校正，业务代码无需改写。
+
+公开Workflow release详情为200且状态`uninstalled`；当前Dream user访问installation列表与runtime-readiness均得到403 `WORKFLOW_PERMISSION_DENIED`，没有`plugin:read/plugin:admin`。独立Admin operator不能冒充Dream Workspace subject。本轮未执行install、enable、binding、Preflight或Run写操作；成功Workflow验收仍需正常产品管理流程先建立ready installation。
+
+设计复核后的Dream聚焦回归命令为`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_admin_gateway_models.py tests/test_gateway_models_router.py tests/test_admin_product_client.py tests/test_product_bff_routes.py tests/test_admin_request_auth.py tests/test_admin_service_token.py`，cwd为Dream `backend`，exit0，58 passed/1个既有FastAPI lifespan弃用warning。它覆盖严格Pydantic Product/Gateway DTO、Browser user bearer与server-only service token边界。4份changed Markdown的最终链接扫描为37个本地链接/0缺失，`git diff --check` exit0；第一次临时内联链接脚本因引号SyntaxError未执行扫描，过度转义的第二版计数无效，最终修正后才采用上述结果。

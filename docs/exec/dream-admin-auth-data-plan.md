@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: record the real model-reservation and Workflow-binding completion gates. -->
 <!-- [Sync] 2026-09-17: add the pre-business-change OAuth role and user-domain design audit stage. -->
 <!-- [Sync] 2026-09-16: audit final authentication ownership and remove obsolete Dream SessionMiddleware/deployment cookie authority. -->
 <!-- [Sync] 2026-09-15: inspect Workspace76 component receipts and prepare registered public Run cancel consumption. -->
@@ -1158,3 +1159,37 @@ Admin 聚焦7文件35项、Dream Python请求/双身份3文件109项、Dream Nex
 所有请求使用现有Dream同源BFF和Browser handle，由BFF携带user bearer与server-only service bearer；不直接调用Admin内部接口，不修改Admin operator、Dream user映射、Deck绑定、订阅、Plugin/MCP/Notion配置或历史数据。正常结果必须符合公开DTO；401/403/404/409/503分别按身份、权限、实体、冲突与依赖失败判断。Admin不可用时必须明确失败，禁止回退Dream PostgreSQL。发现DTO、权限或投影偏差时，先定位Dream Pydantic→Admin Zod→Service→typed Repository链路并做最小业务修复，再重跑受影响流程；已符合目标的接口只补回执。
 
 保持Runtime、SSE、EventBus、turn/resume/cancel、资源策略LKG、共享文件系统与`.claude-tmp`不变。本阶段不发起模型turn、Run、写操作或外部Provider发现，也不清理用户历史。验收为实际公开请求成功、响应闭集与客户端DTO一致、Admin数据接口可用、Browser不能注入私有服务头、Dream生产源码无PostgreSQL回退；记录具体命令/状态/数量并同步业务验证稿。模型额度、合法Workflow绑定和独立Admin凭据仍作为单独真实验收门，不由本阶段替代。
+
+## 阶段47：真实模型与Workflow完成性审计
+
+### Optimized Prompt
+
+作为跨项目真实业务完成性审计负责人，复用当前正常 Dream Browser Session、Admin/Dream/Gateway服务和真实 PostgreSQL，只通过公开生产入口核对剩余模型turn与Workflow验收条件。先读取真实Gateway/Product模型目录、Dream模型选择与Runtime配置所有权、token预留/结算实现、Deck创建与Plugin绑定公开路由、strict DTO及当前验收回执；只记录模型别名、安全数值上限、可调用状态、拒绝原因、Deck/Plugin稳定标识和HTTP状态，不读取或保存prompt、正文、token、secret、DSN、Provider凭据或私有配置。
+
+模型验收不得修改订阅、allowance、账本、历史结算、服务端模型配置或客户端可见的Runtime所有权。先证明每个公开可选模型的合法预留要求；只有存在预留不高于当前真实可用额度的模型时，才用用户已有账户通过正常Dream入口发起一次受限turn，并核对Thread、SSE、Gateway request、Admin持久化和结算结果。若所有合法模型都超过当前额度，记录目录、预留规则、当前余额和失败回执，保持现有失败账本，不重复提交或伪造成功。
+
+Workflow验收不得修改用户已有Deck。先核对公开产品流程是否允许创建一个明确命名的本轮验收Deck，以及是否存在可合法绑定的Plugin/Workflow；只有公开create/bind/preflight流程、权限与依赖均可满足时才创建新Deck并按普通用户路径验收。不存在合法绑定时，记录当前唯一Deck绑定状态、可用目录和具体阻塞；不得直写数据库、内部Admin接口或配置字段。若无模型也能合法执行preflight、读取或取消等产品流程，只在其真实状态机允许时验证，不能把局部步骤报告为成功Run。
+
+所有调用继续使用Dream同源BFF与服务端双身份，不接受浏览器注入的service bearer或用户ID；数据库仍经Pydantic DTO → Admin Zod DTO → Domain Service → typed Repository → Drizzle/UOW。保持Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、资源策略LKG、共享文件系统、sandbox与`.claude-tmp`不变。同步阶段回执、架构/验收状态和PR说明；验证Markdown引用、源码边界与`git diff --check`。只有完整真实流程达到既有断言才能关闭对应门，否则以可复核证据继续列为未完成。
+
+### 阶段47真实完成性回执
+
+正常Dream Browser Session从公开同源入口读取Gateway模型目录、Product用量、SystemConfig、Deck列表、Plugin options与binding，均未直连Admin内部接口或数据库。`GET /api/gateway/models`返回200和9个`callable=true/included`模型：7个公开上限为128,000，2个为384,000；当前服务端选择为`provider=gateway/model=gpt-5.6-luna`。Admin Gateway `prepareGatewayRequest`按估算输入加有效最大输出执行Token预留；Dream固定Runtime在未知Gateway alias下使用32,000默认输出上限，认证目录只设置其模型capability上界，Browser、用户env与请求体不能降低服务端所有的Runtime配置。当前公开Allowance为granted 100,000、reserved 75,006、consumed 16、remaining 24,978，所以任意当前模型即使输入为0也至少需要32,000，大于24,978。本轮没有再次提交turn，也没有修改订阅、allowance、账本、结算记录或模型配置。完整Agent turn、continue、运行中cancel和live SSE保持未完成；小额Gateway canary仍不能替代这些流程。
+
+公开`GET /api/decks`继续返回唯一既有Deck `86512acd-abc9-44d1-af72-ea5a60af225d`。其`plugin-binding`为200、revision 0、binding null；`plugin-options`唯一发布项`ink.dream.story-workflow@1.0.0`为installation `missing`、compatibility `failed`、runtime readiness `unknown`、`selectable=false`，reason为`DECK_PLUGIN_UNAVAILABLE`，恢复动作为`select_an_available_installed_release`。由于不存在合法可选Workflow，本轮没有修改既有Deck，也没有创建不能执行的验收Deck或调用Preflight/Run写入口。成功Workflow Run仍等待正常产品流程安装并暴露可选release后验收；负向未知Run/Preflight回执继续有效，不能据此声称成功状态机已通过。
+
+## 阶段48：模型产品视角与 Workflow 安装权限复核
+
+### Optimized Prompt
+
+作为Admin Product/Gateway领域架构师和Dream消费端负责人，解释并验证同一canonical用户的Gateway目录与Product model catalog为何可能不同，不能先假设主体映射或授权存在缺陷。读取最新模型可见性业务决策、Gateway availability/Subscription resolver、Product context/model repository、Dream两个strict BFF DTO和正常库只读事实。确认`enabled`目录、Allowance调用资格、可选Plan Entitlement限额与订阅页权益投影的职责；若代码偏离最新已批准合同则最小修复业务与测试，若代码符合而现行文档仍描述旧强制白名单，则只校正文档，不回退已批准产品行为。
+
+同时检查`ink.dream.story-workflow@1.0.0`的公开release详情、Workspace installation列表、runtime readiness和install权限。普通Dream用户只有在已有`plugin:admin`权限且公开install DTO所需source、scope和idempotency均来自产品入口时才能安装；Admin operator域不得冒充Dream用户或继承其Workspace。缺权限时只记录403和所需管理动作，不绕过RBAC、不直写`deck_plugin_installations`、不把独立Admin Session与Dream Session合并。
+
+验收包括：同一canonical subject/Allowance在Gateway与Product响应中保持一致；Gateway enabled模型无Entitlement仍按最新`allowance-only`合同调用并保留nullable entitlement审计，Product model catalog明确是当前Plan权益视图；相同email不参与映射。Workflow release存在但installation missing时，普通用户install/readiness入口按RBAC拒绝，现有Deck保持revision 0/binding null。同步所有现行设计中的资格顺序与流程图，保留历史worklog原文；运行Markdown引用、`git diff --check`和相关focused测试，不修改订阅、账本、Plugin安装、Deck或数据库。
+
+### 阶段48复核结果
+
+只读正常库按公开Allowance事实定位到同一active Subscription：100,000 granted、75,006 reserved、16 consumed。其当前Plan Version只有一个旧`deepseek-v4-flash` Entitlement；最新Round 67已明确取消“Plan Entitlement是模型白名单”，Gateway允许任意`enabled`且Provider/Pricing/Subscription/Allowance/显式Permission满足的模型，并把缺Entitlement请求记录为`entitlementSource=allowance-only`。因此Gateway的9项included与Product context的空权益/空Product model catalog是两个产品视角，不是OAuth主体漂移。Product catalog继续表达当前Plan权益；设置与Runtime使用Gateway目录。本轮不修改业务代码。
+
+Workflow release详情公开读取200并包含受控source；Workspace installation列表和runtime-readiness对当前Dream用户均返回403 `WORKFLOW_PERMISSION_DENIED`，说明用户没有`plugin:read/plugin:admin`管理权限。普通用户无法通过正常入口安装该release，独立Admin operator也不能冒充Dream Workspace主体；本轮未提交install、enable、binding、Preflight或Run写请求。当前成功Workflow验收需由产品管理流程先为该Workspace或instance建立ready installation，再由Dream用户从公开options选择。
