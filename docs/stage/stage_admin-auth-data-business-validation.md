@@ -7,6 +7,7 @@
 <!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity and record two-sided regression. -->
 <!-- [Sync] 2026-09-17: record a normal-session public Deck list/detail read through the current Admin consumer. -->
 <!-- [Sync] 2026-09-17: record normal-session Thread create/list/history/status, terminal SSE and idempotent stop with restricted-role persistence proof. -->
+<!-- [Sync] 2026-09-17: record the pre-change identity-domain review and normal-session read-only DTO/BFF acceptance across migrated data domains. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -165,3 +166,13 @@ Admin `DeckVoiceRepository`已停止在读取时解析或规范化`memory_worksp
 Admin聚焦2 files/18 tests、完整provider-free 278 files/2106 tests、TypeScript、定向ESLint和production build均exit0；Dream公开Deck detail provider-free路由37 tests exit0。文档5 files相对链接0 missing，两个worktree diff check通过。该回执关闭已知empty-Memory兼容差异；真实账户Deck读取仍归入完整正常业务旅程，不由provider-free测试代替。
 
 同日正常公开读取复用现有Dream Browser Session：`GET /api/decks`返回200和1个既有Deck，`GET /api/decks/86512acd-abc9-44d1-af72-ea5a60af225d`返回200、相同外层ID、5个Voice，五项Memory均投影为产品object。该读取只走Dream BFF/API→Admin DTO路径，没有数据库直连、写入、模型调用或正文输出。真实行不包含empty text，因此该canary与55项producer/consumer确定性兼容测试分别证明正常部署路径和边界值，不能互相替代。
+
+## 用户业务域复核与迁移数据只读回执（2026-09-17）
+
+- 业务修改前先复核认证设计和实现：Admin Better Auth/OAuth Provider 是 Authorization Server；Dream browser/device 是 public client；Dream server 是 confidential client；Dream user 是 user token 的 delegated subject/resource owner；Admin operator 只存在于独立 `admin_users/admin_sessions/RBAC` 域。`client_credentials` 只标识 Dream server，不把每个 Dream user 注册成 client。相同邮箱不复制或合并密码、Session、角色与管理权限。
+- 聚焦边界验证：Admin login/guard/service identity/OAuth catalog 7 files、35 tests；Dream strict Pydantic request auth/service token 109 tests；Dream Next BFF 23 tests，全部 exit0。源码与测试没有发现需要修改的认证业务偏差，因此本轮没有为增加改动量重写登录实现。
+- 复用当前正常 Dream Browser Session，通过同源公开入口读取18组数据，全部HTTP 200：个人资料、偏好、Session、图片、报告、好友请求/关系、Product context/plans/usage/models、Gateway models、Plugin installations/marketplace、MCP capability/servers、Connector与Notion capability。仅记录顶层字段和数量，没有保存正文、prompt、文件内容、Token、secret、DSN或私有文件名。
+- Browser向`/api/me`主动注入伪造`Authorization`、私有service header和`X-User-Id`后仍返回正常Session主体的公开DTO；BFF没有转发调用方控制的身份头。该检查证明Browser只消费HttpOnly handle，user/service bearer均由服务端边界生成。
+- Dream迁移读取域的provider-free回归8 files、198 tests全部通过。前端第一次用`node --test`执行Playwright文件因extensionless import失败，第二次用`tsx --test`因在Node runner中加载Playwright test失败；改用仓库规定的Playwright runner后暴露2个旧测试预期：绝对API URL和Browser Bearer。生产代码已经正确使用同源Cookie/CSRF，所以只修正测试和目录合同；最终5 files、33/33 tests、exit0。
+- Luna在最终未提交树只读复跑：同一Playwright 33/33、TypeScript、完整backend 3535 passed/24 skipped/615 subtests、lint 0 errors/17既有warnings、Next production build、PostgreSQL运行路径边界6/6、AutoDL topology与Remote DTO/BFF projection均exit0；未访问数据库、浏览器、账户、网络或secret。
+- 本回执没有发起模型turn、Run写入、外部Provider discovery、订阅/Deck/Plugin/MCP/Notion配置变化或数据库直连。Product models返回空列表而Gateway models返回9项；当前Product context没有entitlement，严格DTO与现有合同测试均通过，因此不把该差异擅自改成产品缺陷。完整模型turn、Workflow成功Run、独立Admin管理凭据和自然Session TTL仍保持单独门禁。

@@ -1,7 +1,7 @@
-// [Input] Product API transport with injectable fetch responses and the Admin unavailable-plan state matrix.
-// [Output] Contract, security, error, and command receipt regression evidence.
+// [Input] Same-origin Cookie/CSRF Product API transport with injectable responses and the Admin unavailable-plan state matrix.
+// [Output] Contract, Browser credential isolation, error, and command receipt regression evidence.
 // [Pos] Focused browser-transport unit tests for the Token-only subscription surface.
-// [Sync] 2026-08-13: cover published configuration-incomplete plans returned by the real Admin Product API.
+// [Sync] 2026-09-17: assert Product BFF requests never forward a Browser OAuth Bearer value.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -106,10 +106,9 @@ test('the browser product boundary contains exactly the six approved same-origin
   ]);
 });
 
-test('context parsing preserves server Token facts and authenticated request behavior', async () => {
+test('context parsing preserves server Token facts and uses only the HttpOnly BFF session', async () => {
   const calls: Array<{ input: string; init?: RequestInit }> = [];
   const result = await fetchProductSubscriptionContext({
-    token: 'session-token',
     resolveUrl: (path) => path,
     fetchImpl: (async (input, init) => {
       calls.push({ input: String(input), init });
@@ -120,7 +119,7 @@ test('context parsing preserves server Token facts and authenticated request beh
   expect(result.data.allowance?.remaining).toBe(759_000);
   expect(calls[0]?.input).toBe(PRODUCT_BFF_ENDPOINTS.context);
   expect(calls[0]?.init?.credentials).toBe('include');
-  expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer session-token');
+  expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBeNull();
 });
 
 test('context parsing preserves the supported past-due renewal state', async () => {
@@ -129,7 +128,6 @@ test('context parsing preserves the supported past-due renewal state', async () 
   payload.data.subscription.allowedActions = ['renew'];
 
   const result = await fetchProductSubscriptionContext({
-    token: null,
     resolveUrl: (path) => path,
     fetchImpl: (async () => jsonResponse(payload)) as typeof fetch,
   });
@@ -144,7 +142,6 @@ test('plans parsing accepts the Admin published configuration-incomplete state a
   const fetchPlans = (plan: ReturnType<typeof unavailablePlan>) => fetchProductPlans(
     { page: 1, pageSize: 20 },
     {
-      token: null,
       resolveUrl: (path) => path,
       fetchImpl: (async () => jsonResponse({
         data: [plan],
@@ -189,7 +186,6 @@ test('strict parsing rejects unknown nested fields, unsafe integers, and broken 
     const payload = contextEnvelope();
     mutate(payload);
     await expect(fetchProductSubscriptionContext({
-      token: null,
       resolveUrl: (path) => path,
       fetchImpl: (async () => jsonResponse(payload)) as typeof fetch,
     })).rejects.toMatchObject({
@@ -213,7 +209,6 @@ test('all published product error statuses retain stable codes and safe recovery
       periodEnd: '2026-09-09T10:00:00Z',
     } : undefined;
     const promise = fetchProductSubscriptionContext({
-      token: null,
       resolveUrl: (path) => path,
       fetchImpl: (async () => jsonResponse({
         error: { code, message: 'Safe product error.', ...(details ? { details } : {}) },
@@ -232,7 +227,6 @@ test('all published product error statuses retain stable codes and safe recovery
 
 test('safe model and Gateway recovery details remain readable while unknown fields fail closed', async () => {
   const safeError = fetchProductSubscriptionContext({
-    token: null,
     resolveUrl: (path) => path,
     fetchImpl: (async () => jsonResponse({
       error: {
@@ -259,7 +253,6 @@ test('safe model and Gateway recovery details remain readable while unknown fiel
   });
 
   await expect(fetchProductSubscriptionContext({
-    token: null,
     resolveUrl: (path) => path,
     fetchImpl: (async () => jsonResponse({
       error: {
@@ -288,7 +281,6 @@ test('execute forwards the preview receipt, expected version, and one idempotenc
     reason: 'Apply the next monthly Token plan.',
   }, {
     idempotencyKey: 'subscription-command-12345678',
-    token: 'session-token',
     resolveUrl: (path) => path,
     fetchImpl: (async (input, init) => {
       captured = { input: String(input), init };
@@ -345,7 +337,6 @@ test('a non-target lifecycle execute keeps nullable Dream input and one receipt'
     reason: 'Pause without changing the personal monthly period.',
   }, {
     idempotencyKey: 'pause-command-12345678',
-    token: null,
     resolveUrl: (path) => path,
     fetchImpl: (async (_input, init) => {
       capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -394,7 +385,6 @@ test('preview never accepts an idempotency key and execute requires one', async 
     expectedVersion: 7,
   }, {
     idempotencyKey: 'not-allowed',
-    token: null,
     fetchImpl: (async () => { throw new Error('must not call'); }) as typeof fetch,
   })).toThrow('Preview commands cannot carry an idempotency key.');
 
@@ -409,7 +399,6 @@ test('preview never accepts an idempotency key and execute requires one', async 
     reason: 'Pause this monthly Token subscription.',
   }, {
     idempotencyKey: '',
-    token: null,
     fetchImpl: (async () => { throw new Error('must not call'); }) as typeof fetch,
   })).toThrow('Execute commands require a valid idempotency key.');
 });

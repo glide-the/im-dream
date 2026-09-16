@@ -1,6 +1,7 @@
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
+<!-- [Sync] 2026-09-17: freeze OAuth roles before further business changes; Dream applications are clients while Dream users remain delegated product subjects. -->
 <!-- [Sync] 2026-09-17: record client-local Dream logout and retained central SSO without Admin-session crossover. -->
 <!-- [Sync] 2026-09-17: separate Admin operator sessions from Dream OAuth subjects and model Dream browser/device/service as OAuth clients. -->
 <!-- [Sync] 2026-09-16: document the unified identity model, conflict handling and browser/Admin/device flows. -->
@@ -28,6 +29,19 @@ Admin 原有后台操作员，Dream 原有产品用户。两者属于不同业�
 - 浏览器和设备是 public OAuth client；Dream service 是 confidential client。`client_credentials` 只用于无用户后台 scope，不能代替用户委托 token。
 - 无用户后台调用使用 `Authorization: Bearer <service token>`。用户数据调用使用 `Authorization: Bearer <user token>`，Dream 服务端另加 `X-Ink-Dream-Service-Authorization: Bearer <service token>`；Browser 不能写入或读取第二个头。
 - Admin 对两个 token 分别验证 client、issuer/resource/scope 和 Dream user subject/entity 权限；service token 没有 canonical user，user token 也不能取得 Admin RBAC。
+
+### 2.1 OAuth 协议角色与业务主体
+
+| 角色 | 本项目中的实体 | 身份与权限 |
+| --- | --- | --- |
+| Authorization Server | Admin Better Auth/OAuth Provider | 签发、刷新 token 并提供 JWKS；它不是 Dream user |
+| Admin operator | `public.admin_users` + `public.admin_sessions` | 独立后台主体，只按 Admin RBAC 授权 |
+| Public client | Dream browser BFF、CLI/device | 无 secret，使用 code/PKCE 或 RFC 8628 请求用户委托 |
+| Confidential client | Dream server | 使用 `client_credentials` 取得 service token，只能执行具名无用户后台操作 |
+| Delegated subject/resource owner | Dream user：`identity.user → subject_links → public.users` | 用户 token 的 `sub`，拥有本人产品实体；不是 OAuth client registration |
+| Resource Server | Admin Dream data API 与适用的 Dream/Gateway API | 分别验证 service client 和用户 `sub`，执行 scope 与实体权限过滤 |
+
+`client_credentials` 不包含用户语义。用户数据请求仍需 Authorization Code 或 Device Flow 产生的 user bearer，并由 Dream 服务端附加自己的 service bearer。把每个 Dream user 建成 client 会丢失用户同意、产品所有权、禁用、Session、Device approval 和同一用户跨 client 授权，因此现行设计禁止这种映射。
 
 ## 3. 概念与规则
 
@@ -58,6 +72,8 @@ Dream 访问数据库的接口实现保持 strict Pydantic DTO → Admin Zod DTO
 | 任一侧禁用 | 只影响该业务域 | 不传播禁用状态到另一业务域 |
 
 本机指定验收账户在两个业务域中同邮箱、旧 hash 不同。当前 Google adoption 已建立 Better Auth user/account 与 Dream subject link，并且没有修改 Admin member。修正后的验收口令只匹配 Dream canonical user；它提交到 Admin 管理登录时返回 `401` 是预期结果。Admin 是否可登录只取决于独立 Admin 凭据，不需要、也不能通过合并 Dream user 解决。
+
+业务修改前的本轮设计审查已通过：Admin 独立登录/guard 不读取 Dream subject link；Dream 登录与 Device Flow 不创建 Admin Session；service token 的 `sub` 是 confidential `client_id`，用户 token 的 `sub` 是 Dream identity subject；用户接口要求双 Bearer；相同邮箱只触发显式采用/冲突检查。后续只有发现实际调用违反这些边界时才修改认证业务，不能为了“客户端模式”把 Dream user 改成 client。
 
 ## 4. 数据 ER 图
 

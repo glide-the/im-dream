@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: add the pre-business-change OAuth role and user-domain design audit stage. -->
 <!-- [Sync] 2026-09-16: audit final authentication ownership and remove obsolete Dream SessionMiddleware/deployment cookie authority. -->
 <!-- [Sync] 2026-09-15: inspect Workspace76 component receipts and prepare registered public Run cancel consumption. -->
 <!-- [Sync] 2026-09-15: prepare actual77 fail/envelope types and preserve production launch owner gaps. -->
@@ -1133,3 +1134,27 @@ Cloud Run投影进一步按运行职责拆分：backend与frontend使用独立se
 - 部署投影：全部changed shell `bash -n`、AutoDL topology、Remote env projection、Google Cloud synthetic dry-run、retired sync help/refusal均exit0；实际Google Cloud、正常服务和正常数据库未访问。
 - 前端未改业务源码，但对最终工作树执行`corepack pnpm lint && corepack pnpm build`，**exit0**；lint保留17个既有Hook warning、0 error，Next 16.1.6 production build与TypeScript通过。
 - 文档与工作树：Dream 17份changed Markdown、123个本地目标0缺失；Admin 2份changed Markdown、13个本地目标0缺失；两仓`git diff --check`均exit0。正常数据库仍为54/63，migration、role ACL、配置启用、服务重启及真实Google/Device/模型/业务旅程均未执行。
+
+## 阶段45：Dream 用户域与 OAuth client 角色复核
+
+### Optimized Prompt
+
+作为 Dream 认证消费端负责人，在继续业务修改前先核对现行设计与实现，不把 OAuth 术语和产品用户混用。读取 Dream 认证主设计、ER/流程图、项目架构、Next BFF、Python Admin client/request auth/service-token source，以及 Admin 业务域评审、Admin login/guard、service identity 和 operation contract。Admin Better Auth/OAuth Provider 是 Authorization Server；Dream browser/device 是 public client；Dream server 是 confidential client；Dream user 是 Authorization Code/Device token 的 delegated subject/resource owner；Admin operator 是独立 `admin_users/admin_sessions/RBAC` 管理主体。`client_credentials` 只证明 Dream server client，不得为每个 Dream user 建 client 或据此访问用户实体。
+
+用户数据调用必须保持双身份：`Authorization` 携带 user bearer，Dream 服务端用私有服务头附加 service bearer；Admin 分别验证 client 与用户 subject/scope/entity。无用户后台操作只使用具名 background scope。保持 strict Pydantic DTO → Admin Zod DTO → Domain Service → typed Repository → Drizzle/UOW；拒绝 caller user ID、SQL、表列、通用 CRUD 和 Admin 不可用时的 PostgreSQL fallback。保持 Runtime、SSE、EventBus、turn/resume/cancel、资源策略 LKG、共享文件系统和 `.claude-tmp` 不变。
+
+先写设计审查结论和角色表，再运行聚焦的 Admin/Dream auth、service identity、BFF 与请求认证测试；只有测试或源码证明实际调用偏离设计时才修改业务代码。验收要求相同邮箱不合并、不复制密码/Session/角色，Dream 登录不创建 Admin Session，Admin 登录不读取 Dream user，public client 无 secret，service token `sub == client_id`，用户 token `sub` 映射 canonical Dream user，所有文档/ER/时序图一致，Markdown引用和`git diff --check`通过。已经符合目标的业务实现不为增加改动量而重写。
+
+### 阶段45技术回执
+
+Admin 聚焦7文件35项、Dream Python请求/双身份3文件109项、Dream Next BFF 3文件23项全部通过。两仓各4份受影响Markdown的本地引用检查分别覆盖9/12个链接，缺失均为0；两仓`git diff --check`均exit0。首次Dream命令使用worktree根`.venv`和不存在的Vitest分别exit127/254，确认测试实际使用`backend/.venv`、`PYTHONPATH=backend`与原生`node --test`后fresh通过；两次首失败均是harness命令路径，不是认证业务失败。源码与测试证明现行实现符合角色设计，因此本阶段不改业务代码。
+
+## 阶段46：迁移数据域的正常用户只读业务验收
+
+### Optimized Prompt
+
+作为跨项目真实业务验收负责人，复用本机当前正常 Dream Browser Session、Admin/Dream/Gateway服务和真实 PostgreSQL，只通过公开生产入口验证已迁移的数据域。先从实际 Dream routers、frontend API client、strict Pydantic DTO、Admin operation registry与Zod输出确定可安全读取的用户资料、偏好、Session、图片/报告/社交、产品/模型目录、Plugin、MCP与Notion状态接口；不猜路径，不调用旧认证入口。每个请求只记录HTTP状态、顶层字段、数量和验收所需稳定ID，不读取或保存正文、prompt、文件内容、token、secret、DSN、加密配置或私有文件名。
+
+所有请求使用现有Dream同源BFF和Browser handle，由BFF携带user bearer与server-only service bearer；不直接调用Admin内部接口，不修改Admin operator、Dream user映射、Deck绑定、订阅、Plugin/MCP/Notion配置或历史数据。正常结果必须符合公开DTO；401/403/404/409/503分别按身份、权限、实体、冲突与依赖失败判断。Admin不可用时必须明确失败，禁止回退Dream PostgreSQL。发现DTO、权限或投影偏差时，先定位Dream Pydantic→Admin Zod→Service→typed Repository链路并做最小业务修复，再重跑受影响流程；已符合目标的接口只补回执。
+
+保持Runtime、SSE、EventBus、turn/resume/cancel、资源策略LKG、共享文件系统与`.claude-tmp`不变。本阶段不发起模型turn、Run、写操作或外部Provider发现，也不清理用户历史。验收为实际公开请求成功、响应闭集与客户端DTO一致、Admin数据接口可用、Browser不能注入私有服务头、Dream生产源码无PostgreSQL回退；记录具体命令/状态/数量并同步业务验证稿。模型额度、合法Workflow绑定和独立Admin凭据仍作为单独真实验收门，不由本阶段替代。
