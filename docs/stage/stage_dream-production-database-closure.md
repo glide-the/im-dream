@@ -7,15 +7,22 @@
 
 ## 背景与问题
 
-旧清单基于 baseline `7d38715c`，当前 worktree 已加入多个 Admin strict client，仍保留大量直接数据库模块和内部调用者。必须按当前源码重新识别生产入口、测试/importer边界、SQL/驱动/事务证据和调用者，不能用旧清单或一次关键字搜索宣称完成。
+旧清单基于 baseline `7d38715c`，当时 Dream 仍保留大量直接数据库模块和内部调用者。迁移过程按当前源码持续区分生产入口、测试/importer 边界、SQL/驱动/事务证据和调用者；旧清单和单次关键字搜索均不能替代现行源码门禁与正常业务运行验证。
 
 ## 目标与边界
 
-现行目标是关闭 Dream 全部生产数据库入口。Dream 仅传严格 DTO、服务身份与已验证用户委托，Admin Service/typed Repository/Drizzle 执行权限、锁、事务与持久化。Runtime、SSE、共享文件和临时目录协议不变。
+现行源码已经关闭 Dream 全部生产数据库入口。Dream 仅传严格 DTO、服务身份与已验证用户委托，Admin Service/typed Repository/Drizzle 执行权限、锁、事务与持久化。Runtime、SSE、共享文件和临时目录协议不变。正常数据库 migration/capability、角色 ACL 与真实业务运行验证仍是独立发布门禁。
 
 ## 概念与规则
 
-候选按 production、tests、script/importer 分开。AST SQL 字符串、psycopg/数据库模块 import、连接/事务调用和旧 helper call 分别计数；同名 `execute` 不自动算数据库访问。动态 SQL、工厂注入和 startup/health 另列。每个待迁移调用必须关联实际 Admin operation 或明确 pending，不能把多个原子步骤拆成无一致性的 HTTP 调用，也不能添加 Dream PostgreSQL fallback。
+候选按 production、tests、script/importer 分开。AST SQL 字符串、psycopg/数据库模块 import、连接/事务调用和旧 helper call 分别计数；同名 `execute` 不自动算数据库访问。动态 SQL、工厂注入和 startup/health 另列。迁移时每个调用均关联实际 Admin operation；原子步骤保持 Admin 单事务，Dream 没有 PostgreSQL fallback。
+
+## 现行裁决（2026-09-16）
+
+- `backend/tests/test_postgres_runtime_sql_boundaries.py` 扫描完整 `backend` 生产 Python 图及 `frontend/app`、`frontend/packages` 生产脚本，排除的只有 tests/e2e、虚拟环境、构建产物和缓存目录；任何数据库驱动/客户端、旧 `database` import、SQL 语句字面量或 Next 侧数据库 DSN 都会使门禁失败。
+- 原 `backend/database.py`、`backend/persistence/`、`backend/schema/` 与生产 SQL repository 已退出生产图；历史实现只保存在明确命名的测试 fixture/harness。
+- 部署脚本拒绝 Dream 的 `DATABASE_URL`/旧数据库环境文件；运行代码只使用 Admin 严格 DTO 客户端，Admin 使用 Zod DTO、domain Service、typed Repository 与 Drizzle。
+- 本节后续扫描数字与 pending 描述是各 Registry 实施时点的历史回执。它们不覆盖上述现行源码裁决，也不能替代尚未执行的正常库切换和真实业务验收。
 
 ## Optimized Prompt:
 

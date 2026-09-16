@@ -1,13 +1,14 @@
 <!-- [Input] Actual Git/GitHub/tool receipts from the cross-project coordinator. -->
 <!-- [Output] Durable baseline, task, evidence and unresolved dependency record. -->
 <!-- [Pos] Execution evidence for stage_admin-auth-data-coordination.md; not an implementation completion claim. -->
+<!-- [Sync] 2026-09-16: record current PR/CI state, guarded normal-database activation and complete Dream source closure gate. -->
 <!-- [Sync] 2026-09-15: retain launch75 first failures,974 continuation/308 recovery/19 preservation and active goals. -->
 
 # Admin 认证与 Dream 数据访问迁移协调回执
 
 ## 当前结论
 
-重构前基线发布和项目任务创建成功。两个实施任务正在运行，尚无完整迁移或业务验收结论。
+四个重构前基线 Release 已发布。Admin 与 Dream 源码实现位于专用分支和 Draft PR；Admin 当前 head 的确定性检查与 63 条迁移 journal 已通过，Dream 前后端 CI 已通过。Dream 生产源码数据库入口已经关闭，但正常数据库仍停在 54/63，角色/ACL 和候选配置尚未激活，真实 Google、Device Flow、正常 Run/Thread/SSE/文件与模型验收尚未执行，因此整体任务仍未完成。
 计划见 [协调计划](../stage/stage_admin-auth-data-coordination.md)。
 原始脱敏验证记录已保存为项目文件，见 [证据索引](admin-auth-data-verification/.folder.md)。私有fixture配置没有进入项目目录。
 
@@ -303,3 +304,21 @@ Dream以strict Pydantic RootModel consumer替换`story_workspace.py`的11个Work
 Dream扩展Story suite实际724pass/35fail/3skip、exit1。本切片直接导致的旧`story_workspace.database` patch测试已更新并进入49项通过；其余失败为旧auth override的401、legacy SQLite Chat fixture缺当前`history_final_text`列和缺少本机vendor episode artifacts。失败按实际保留，没有恢复Dream数据库依赖或调整业务预期；后续全业务/harness阶段继续处理。
 
 corrected source-only扫描读取543模块，得到79个production entry、50个SQL模块、454个SQL literal、28个driver/database import模块、52个legacy helper call、392个connection/transaction call、29个Admin consumer模块与132个operation name，parse errors为空。相对Registry111减少1个SQL模块、9个literal、1个driver/import模块、1个legacy helper和11个connection/transaction call；其余候选、完整真实Google/设备/指定账户业务/模型/Admin日常可见性验收仍未完成，goal保持active。
+
+## 当前源码关闭与发布门禁复核（2026-09-16）
+
+Admin 分支 `codex/admin-auth-data-provider` 已推送 `72ac08a1c6de787d0fd0f0624511534c2ce85232`；[Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) 为 CLEAN。当前 head 的 [Test Suite](https://github.com/glide-the/dream-im-platform/actions/runs/35065839215) exit 0：Deterministic checks 5m27s；Drizzle migration journal 51s，63 migrations、immutable journal、8 capabilities 与 repeat no-op 全通过。
+
+Dream 分支 `codex/dream-admin-auth-data-client` 的前一远端 head 为 `1cd6605bbdf3a43b83152b1cb16098f63ec1417c`；[Draft PR #63](https://github.com/glide-the/im-dream/pull/63) 为 CLEAN，[Backend CI](https://github.com/glide-the/im-dream/actions/runs/35060458341/job/104679484973) 与 [Frontend CI](https://github.com/glide-the/im-dream/actions/runs/35060458336/job/104679484800) 均成功。本轮进一步扩大静态关闭门禁，提交与 CI 回执以该分支后续 head 为准。
+
+| cwd | 实际命令 | exit | 关键输出与适用范围 |
+| --- | --- | ---: | --- |
+| Dream `backend` | `.venv/bin/python -m pytest -q tests/test_postgres_runtime_sql_boundaries.py` | 0 | `6 passed in 1.09s`；扫描完整 backend 生产 Python 图及 Next `app/packages` 生产脚本 |
+| Dream `backend` | 以门禁模块的实际文件选择器重算覆盖与命中 | 0 | backend Python 296、frontend script 291；数据库驱动/旧 database import 0、Python SQL literal 0、retired path 0；Next 数据库 client/DSN 断言由同一 6 项门禁通过 |
+| Dream root | `git diff --check` | 0 | 无空白错误；不修改用户已有 `.pnpm-store/` |
+
+门禁排除范围只有 tests/e2e、虚拟环境、构建产物和缓存目录；明确命名的历史数据库实现、SQL oracle、migration/故障注入与 clone harness 继续位于测试或脚本边界。它们不进入 Dream 应用启动、HTTP/SSE、后台 worker 或 Agent turn 模块图。运行代码使用严格 Pydantic DTO → Admin Zod DTO → domain Service → typed Repository → Drizzle，Admin 不可用时失败，不回退 Dream PostgreSQL。
+
+正常数据库仍有 54 条 migration receipt（through 0053）；0054–0062、四角色与 ACL 尚未应用，正常 Admin/Dream/Gateway 服务仍停止。受控 runner `pnpm auth-data-access:activate` 默认 dry-run；提交必须同时提供 `--apply --production-approval`，并核验 0600 manifest、停机备份 SHA、精确 database/port/data directory、63 receipts、8 capabilities、active canonical Gateway binding 与完整角色 credential。私有候选已绑定 Admin `72ac08a1...`，candidate environment check 通过；`normal_database_mutation` 仍为 `not_authorized-not_executed`。
+
+本节证明源码关闭和隔离技术门禁，不把它解释为正常数据库已经切换或真实业务已经验收。后续只有取得独立授权，才能执行正常库 migration/role/ACL、激活配置、启动服务并通过公开生产入口完成真实 Google、Device Flow、Run/Thread/SSE/文件、Gateway/账本与真实模型验收。
