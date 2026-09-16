@@ -3,6 +3,7 @@
 # [Pos] Provider-free tests for the unified Admin consumer boundary.
 # [Sync] 2026-09-14: cover auth/receipt security and exact closed Deck conflict feedback without upstream messages.
 # [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
+# [Sync] 2026-09-16: cover Better Auth scalar and closed resource/userinfo audience-array access tokens.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -363,6 +364,31 @@ def test_signed_token_subject_remains_opaque_and_jwks_cached(config, signing_key
         result = check.verify(signed, required_scopes=frozenset({"dream:read"}))
         assert result.subject == "ba-opaque-user" and not hasattr(result, "user_id")
     assert len(calls) == 1 and str(calls[0].url) == config.jwks_uri
+
+
+@pytest.mark.parametrize("audience", [
+    pytest.param("scalar", id="scalar-dream-resource"),
+    pytest.param("better-auth-array", id="better-auth-resource-and-userinfo"),
+])
+def test_accepts_admin_resource_audience_contract(config, signing_key, audience):
+    value = config.resource if audience == "scalar" else [config.resource, config.issuer + "/oauth2/userinfo"]
+    check, _ = verifier(config, [jwk(signing_key)])
+    assert check.verify(token(config, signing_key, claims={"aud": value})).subject == "ba-opaque-user"
+
+
+@pytest.mark.parametrize("audience", [
+    pytest.param(["https://unrelated.example/api", "https://dream.example/api"], id="arbitrary-extra"),
+    pytest.param(["https://admin.example/api/auth/oauth2/userinfo"], id="userinfo-only"),
+    pytest.param(["https://dream.example/api", "https://dream.example/api"], id="duplicate"),
+    pytest.param(["https://dream.example/api", ""], id="empty-member"),
+    pytest.param(["https://dream.example/api", 7], id="non-string-member"),
+    pytest.param([], id="empty-array"),
+])
+def test_rejects_non_resource_or_malformed_audience_array(config, signing_key, audience):
+    check, _ = verifier(config, [jwk(signing_key)])
+    with pytest.raises(AdminDataError) as exc:
+        check.verify(token(config, signing_key, claims={"aud": audience}))
+    assert exc.value.code == "INVALID_TOKEN_RESOURCE" and exc.value.status_code == 403
 
 
 @pytest.mark.parametrize("claims,status", [({"iss": "https://google.example"}, 401), ({"aud": "other-resource"}, 403), ({"scope": "product:read"}, 403), ({"exp": 1}, 401), ({"iat": int(time.time()) + 600}, 401), ({"sub": ""}, 401), ({"jti": ""}, 401), ({"client_id": ""}, 401), ({"exp": int(time.time()) + 1000}, 401), ({"iat": True}, 401), ({"scope": ["dream:read"]}, 401)])

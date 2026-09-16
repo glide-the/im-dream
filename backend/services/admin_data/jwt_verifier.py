@@ -2,6 +2,7 @@
 # [Output] Immutable verified OAuth claims; canonical users.id still requires Admin principal.
 # [Pos] Dream Resource Server signature/scope boundary using PyJWT's JWK and JWT validation.
 # [Sync] 2026-09-14: cached, rate-limited JWKS lookup with no token-selected network URLs.
+# [Sync] 2026-09-16: accept only the scalar Dream resource or Better Auth's closed resource/userinfo audience array.
 """Validate Admin OAuth access tokens; never issue or silently renew tokens."""
 
 from __future__ import annotations
@@ -25,6 +26,21 @@ from .errors import AdminDataError, invalid_access_token, unavailable
 
 def _nonempty_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and not any(ord(c) < 32 or ord(c) == 127 for c in value)
+
+
+def _has_allowed_resource_audience(value: Any, *, resource: str, issuer: str) -> bool:
+    """Require Dream resource membership without accepting unrelated token audiences."""
+
+    if isinstance(value, str):
+        return value == resource
+    if not isinstance(value, list) or not value or not all(_nonempty_text(item) for item in value):
+        return False
+    audiences = set(value)
+    return (
+        len(audiences) == len(value)
+        and resource in audiences
+        and audiences <= {resource, issuer + "/oauth2/userinfo"}
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +127,11 @@ class AdminJWTVerifier:
             with self._lock:
                 key = self._jwks.get_signing_key(header["kid"])
             claims = jwt.decode(token, key, algorithms=[ACCESS_TOKEN_ALGORITHM], issuer=self._config.issuer, audience=self._config.resource,
-                options={"require": ["sub", "iss", "aud", "exp", "iat", "jti", "client_id", "scope"], "strict_aud": True})
+                options={"require": ["sub", "iss", "aud", "exp", "iat", "jti", "client_id", "scope"], "verify_aud": False})
+            if not _has_allowed_resource_audience(
+                claims["aud"], resource=self._config.resource, issuer=self._config.issuer,
+            ):
+                raise AdminDataError("INVALID_TOKEN_RESOURCE", 403)
             for name in ("exp", "iat"):
                 if isinstance(claims[name], bool) or not isinstance(claims[name], int):
                     raise invalid_access_token()

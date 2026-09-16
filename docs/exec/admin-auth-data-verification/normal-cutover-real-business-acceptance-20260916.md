@@ -1,6 +1,8 @@
 <!-- [Input] Normal Admin/Dream/Gateway/PostgreSQL services, the user-authorized existing account, and actor-bound public product routes. -->
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
+<!-- [Sync] 2026-09-16: record exact legacy Google adoption, successful consent/return and the closed Better Auth audience-array repair. -->
+<!-- [Sync] 2026-09-16: record saved Google callbacks, closure of redirect mismatch and the specified email account-not-found result. -->
 <!-- [Sync] 2026-09-16: record real browser login, Google callback, identity-mapping and RFC 8628 pending/slow-down evidence. -->
 <!-- [Sync] 2026-09-16: define the normal-cutover impact boundary before starting Dream browser or model mutations. -->
 
@@ -65,3 +67,33 @@ Admin 统一认证、Admin DTO/Service/Repository/Drizzle 数据访问以及 Dre
 | Device 负例 | 同一公开 device authorization endpoint | harness `0`; 四项均 `400` | unknown client → `invalid_client`；unknown resource → `invalid_target`；外部 `user_id` → `invalid_request`；未授权 scope → `invalid_scope` | public client、resource、scope 与主体注入边界通过 |
 
 尚未执行：真实 Google callback、显式旧主体 adoption、用户批准/拒绝、OAuth token 兑换、refresh/revoke、Dream Thread/Run/SSE/模型和文件流程。Google 控制台配置与可证明的既有账户登录方法必须分别解决；不得把 Device pending 技术回执或密码 `401` 当作完整业务验收。
+
+### 2026-09-16 Google Cloud 回调与指定账户复核
+
+用户在动作时确认修改现有 Google OAuth Web Client。控制台保存并重新读取后，以下 URI 与原两个旧回调并存：
+
+- `http://localhost:3000/api/auth/callback/google`
+- `https://ink-admin.suoxya.com/api/auth/callback/google`
+
+随后从 Dream `GET /auth/start?return_to=/` 重新进入 Admin authorize 并点击标准 Google 登录。Google 已接受精确 `redirect_uri`，正常展示账号选择页，原 `redirect_uri_mismatch` 不再出现。选择“使用其他账号”并提交用户指定验收邮箱后，Google 返回“找不到此账号”；没有进入密码、同意或 callback，也没有创建 Better Auth user/account、subject link、Session 或 OAuth grant。
+
+该结果把剩余条件从“Cloud callback 未配置”收敛为“指定邮箱不是当前可登录的 Google 账号”。不能改用浏览器中其他已登录 Google 账号创建新主体，也不能因此把不同 Google email/subject 自动映射到旧 Dream/Admin 记录。下一步需要用户明确指定一个可登录且允许关联的 Google 账号，或选择受审计的旧 credential 恢复路径。
+
+### 2026-09-16 精确旧 Google 主体采用与真实返回
+
+用户随后在 Google 账号选择页选择了已有可登录账号。真实 callback 到达 Admin 后以 `LEGACY_SUBJECT_LINK_REQUIRED` 关闭，没有按邮箱创建或合并主体。只读核对发现旧 `public.oauth_accounts` 中存在一条 `provider='google'`、非空 `provider_sub` 且外键精确指向 canonical Dream user 的既有绑定；该主体没有 Admin membership。
+
+Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed Drizzle Repository 的 release-only adoption。owner-only `0600` 配置绑定数据库身份、旧 canonical/Google行与源指纹；Better Auth IDs只由Admin根据`provider_sub`派生。默认dry-run，正式执行要求`--apply --production-approval`。正常库inspect、dry-run、apply和repeat apply均通过：首个action为`create`，重复为`already-complete`；Better Auth user、Google account、Dream subject link和脱敏audit各一条，Admin link为0，旧Google行仍为一条且未修改。隔离合同还应用完整Admin Drizzle历史并验证错误参数只输出固定脱敏JSON。
+
+重新从Dream公开登录入口发起后，Google callback、Admin OAuth consent和返回Dream全部成功。正常库只读结果为Better Auth Session 1、browser session 1、refresh token lineage 1、OAuth access-token持久行0（access token为短期stateless JWT）；Dream Chat显示既有历史，同一浏览器访问`/admin`仍进入Admin登录页，因此产品登录没有授予管理权限。
+
+真实页面随后暴露 `INVALID_TOKEN_RESOURCE`。脱敏令牌形状核对证明Better Auth 1.7.4签发ES256 `at+jwt`，`aud`为Dream resource和issuer `/oauth2/userinfo`组成的数组；Dream原`strict_aud=True`只接受标量。修复后Dream显式要求resource存在，数组成员只能属于这两个配置派生值，并拒绝额外resource、userinfo-only、重复、空值和非字符串；签名、算法、issuer、TTL、client、scope、JWKS缓存和unknown-kid边界不变。
+
+| 验证 | 工作目录/入口 | 结果 |
+| --- | --- | --- |
+| `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py` | Dream `backend` | exit 0；81 passed |
+| `.venv/bin/python -m pytest -q tests/test_admin_data_boundary.py tests/test_admin_request_auth.py tests/test_product_bff_routes.py` | Dream `backend` | exit 0；117 passed，1个既有FastAPI生命周期deprecation warning |
+| Dream backend受控重启与浏览器reload | task-owned `127.0.0.1:8765`、现有Chrome登录页 | backend启动完成；Agent选择器不再显示`INVALID_TOKEN_RESOURCE`，历史会话正常加载 |
+| Admin管理权限隔离 | 同一浏览器`http://localhost:3000/admin` | 重定向/停留于Admin login，没有进入dashboard |
+
+尚未完成的真实项目：模型消息已选择Screenwriter并准备草稿，但实际发送需浏览器动作时确认；Device批准/拒绝/兑换/refresh/revoke、退出/Session失效、文件与故障恢复仍继续验收。本节不把登录成功扩张为这些下游项目已通过。
