@@ -1,7 +1,7 @@
 # [Input] Production OAuthClientCredentialsTokenSource with a deterministic fake Admin transport.
-# [Output] Basic client auth, exact grant/resource body, cache reuse and redacted failure evidence.
+# [Output] Basic client auth, exact grant/resource body, cache reuse, bounded transport recovery and redacted failure evidence.
 # [Pos] Provider-free OAuth machine-token protocol tests; no database or external HTTP.
-# [Sync] 2026-09-17: validate the new Dream confidential-client token source.
+# [Sync] 2026-09-17: validate one transport-only recovery without retrying an HTTP rejection.
 
 from __future__ import annotations
 
@@ -62,3 +62,38 @@ def test_client_credentials_failures_are_redacted(response: httpx.Response) -> N
         OAuthClientCredentialsTokenSource(_config(), client).access_token()
     assert captured.value.code == "ADMIN_SERVICE_AUTH_UNAVAILABLE"
     assert "secret:value" not in repr(captured.value)
+
+
+def test_client_credentials_recovers_one_transport_failure_with_short_timeout() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("stale pooled connection", request=request)
+        assert request.extensions["timeout"] == {key: 2.0 for key in ("connect", "read", "write", "pool")}
+        return httpx.Response(200, json={
+            "access_token": "recovered.service.token",
+            "token_type": "Bearer",
+            "expires_in": 300,
+            "expires_at": 1_900_000_000,
+            "scope": "capabilities:read",
+        })
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert OAuthClientCredentialsTokenSource(_config(), client).access_token() == "recovered.service.token"
+    assert len(calls) == 2
+
+
+def test_client_credentials_does_not_retry_http_rejection() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, json={"error": "temporarily_unavailable"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(AdminDataError):
+        OAuthClientCredentialsTokenSource(_config(), client).access_token()
+    assert calls == 1

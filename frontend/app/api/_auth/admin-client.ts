@@ -1,9 +1,9 @@
 // [Input] Explicit Admin confidential-client configuration and canonical v1 browser/principal/profile DTOs.
-// [Output] Bounded, no-retry server transport; OAuth credentials never leave this private module.
+// [Output] Process-shared bounded server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
-// [Sync] 2026-09-17: obtain and cache OAuth client_credentials tokens for every Admin service call.
+// [Sync] 2026-09-17: share the client across Next route invocations so token cache/flight coalescing are effective.
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -222,4 +222,28 @@ export class AdminBffClient {
     if (result.user.id !== resolution.principal.canonical_user_id) throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503);
     return result.user;
   }
+}
+
+type AdminBffGlobal = typeof globalThis & {
+  __inkDreamAdminBffClient?: { config: AdminBffConfig; client: AdminBffClient };
+};
+
+function sameConfig(left: AdminBffConfig, right: AdminBffConfig): boolean {
+  return left.origin === right.origin && left.issuer === right.issuer
+    && left.resource === right.resource && left.serviceId === right.serviceId
+    && left.serviceSecret === right.serviceSecret
+    && left.timeoutMilliseconds === right.timeoutMilliseconds
+    && left.maxResponseBytes === right.maxResponseBytes;
+}
+
+/** Reuse one server-only transport/token owner across Route Handler invocations and dev reloads. */
+export function configuredAdminBffClient(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): AdminBffClient {
+  const config = adminBffConfig(environment);
+  const owner = globalThis as AdminBffGlobal;
+  if (!owner.__inkDreamAdminBffClient || !sameConfig(owner.__inkDreamAdminBffClient.config, config)) {
+    owner.__inkDreamAdminBffClient = { config, client: new AdminBffClient(config) };
+  }
+  return owner.__inkDreamAdminBffClient.client;
 }

@@ -4,7 +4,7 @@
 // [Sync] 2026-09-17: verify configured Admin form actions and confidential-client transport.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AdminBffClient, adminBffConfig } from './admin-client.ts';
+import { AdminBffClient, adminBffConfig, configuredAdminBffClient } from './admin-client.ts';
 import { BffLoginBoundary } from './login-boundary.ts';
 import { createBffHandlers } from './handlers.ts';
 
@@ -176,4 +176,10 @@ test('default service token provider performs client_credentials once and caches
   await client.capabilities('request-1');
   await client.capabilities('request-2');
   assert.equal(tokenCalls, 1); assert.equal(apiCalls, 2);
+});
+
+test('configured Admin client is shared across Next route invocations', () => {
+  const first = configuredAdminBffClient(env);
+  const second = configuredAdminBffClient({ ...env });
+  assert.equal(first, second);
 });

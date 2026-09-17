@@ -1,7 +1,7 @@
 # [Input] Server-owned OAuth client ID/secret, Admin issuer/resource and bounded HTTP transport.
-# [Output] Cached short-lived client_credentials bearer or a redacted AdminDataError.
+# [Output] Cached short-lived client_credentials bearer with one bounded transport recovery or a redacted AdminDataError.
 # [Pos] Confidential service-token source shared by the sole Admin DTO client.
-# [Sync] 2026-09-17: replace static custom service headers with OAuth 2.0 client_credentials.
+# [Sync] 2026-09-17: recover one stale/closed token transport without retrying HTTP responses or business DTO calls.
 """Fetch and cache an Admin-issued machine token without exposing credentials."""
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class _ServiceTokenDTO(BaseModel):
 
 
 class OAuthClientCredentialsTokenSource:
-    """No-retry RFC 6749 client_credentials source with bounded token reuse."""
+    """RFC 6749 client_credentials source with bounded cache and transport recovery."""
 
     def __init__(self, config: AdminDataConfig, client: httpx.Client,
                  *, monotonic: Callable[[], float] = time.monotonic) -> None:
@@ -49,36 +49,45 @@ class OAuthClientCredentialsTokenSource:
             client_id = quote_plus(self._config.service_client_id, safe="")
             client_secret = quote_plus(self._config.service_secret, safe="")
             basic = b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
-            request = httpx.Request(
-                "POST",
-                self._config.issuer + "/oauth2/token",
-                headers={
-                    "accept": "application/json",
-                    "content-type": "application/x-www-form-urlencoded",
-                    "authorization": "Basic " + basic,
-                },
-                content=urlencode({
-                    "grant_type": "client_credentials",
-                    "resource": self._config.resource,
-                }).encode("ascii"),
-                extensions={"timeout": {key: self._config.timeout_seconds for key in ("connect", "read", "write", "pool")}},
-            )
-            try:
-                response = self._client.send(request, stream=True, follow_redirects=False, auth=None)
+            raw: bytearray | None = None
+            for attempt in range(2):
+                # The second attempt only recovers a stale/closed pooled connection.
+                # It cannot extend an unavailable Admin by another full request timeout.
+                timeout = self._config.timeout_seconds if attempt == 0 else min(2.0, self._config.timeout_seconds)
+                request = httpx.Request(
+                    "POST",
+                    self._config.issuer + "/oauth2/token",
+                    headers={
+                        "accept": "application/json",
+                        "content-type": "application/x-www-form-urlencoded",
+                        "authorization": "Basic " + basic,
+                    },
+                    content=urlencode({
+                        "grant_type": "client_credentials",
+                        "resource": self._config.resource,
+                    }).encode("ascii"),
+                    extensions={"timeout": {key: timeout for key in ("connect", "read", "write", "pool")}},
+                )
                 try:
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > self._config.max_response_bytes:
+                    response = self._client.send(request, stream=True, follow_redirects=False, auth=None)
+                    try:
+                        raw = bytearray()
+                        for chunk in response.iter_bytes():
+                            raw.extend(chunk)
+                            if len(raw) > self._config.max_response_bytes:
+                                raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
+                        if not 200 <= response.status_code < 300:
                             raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
-                    if not 200 <= response.status_code < 300:
-                        raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
-                finally:
-                    response.close()
-            except AdminDataError:
-                raise
-            except httpx.HTTPError:
-                raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503) from None
+                    finally:
+                        response.close()
+                    break
+                except AdminDataError:
+                    raise
+                except httpx.HTTPError:
+                    if attempt == 1:
+                        raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503) from None
+            if raw is None:
+                raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
             try:
                 token = _ServiceTokenDTO.model_validate_json(raw)
             except ValidationError:
