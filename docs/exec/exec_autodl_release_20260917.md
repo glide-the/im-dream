@@ -20,4 +20,5 @@
 - 发布顺序：Admin → migration/capability → Dream → 跨服务公开入口。
 - 部署前发现旧 AutoDL 脚本仍要求不存在的 local-core `0.1.9`；当前源码要求已发布 Runtime `0.1.10`。发布脚本改为安装并校验 npm `0.1.10`，不降级源码或复用远端 `0.1.4`。
 - 第一次 Dream 构建在切换前被主动终止，因为运行配置仍使用旧产品域名。当前发布只从环境注入 SeetaCloud 6006/6008 HTTPS 映射；MCP Apps sandbox route 从 Dream origin 派生并依靠 opaque iframe origin 隔离，不再要求第三个公网域名。中止时 `current` 未切换，未删除持久数据。
+- 第二次候选完成 Python SDK 0.2.145 与 Next 构建后，被旧发布断言拒绝：backend discovery 按既有生产合同把 npm wrapper 解析为 package-root `cli.js`，脚本却仍期待 wrapper 文件名。断言已与 backend Docker 门禁统一为 `cli.js` + `ink-claude-code-dream` 父目录；该次未创建 candidate、未切换 current。
 - 发布结果在实际执行后追加；本段不声明部署成功。
