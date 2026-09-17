@@ -27,6 +27,7 @@
 # [Sync] 2026-09-06: expose the fixed Node binary to Corepack's env-based launcher.
 # [Sync] 2026-09-12: install Info-ZIP for approved ordinary-workspace exports
 #                    on the direct-host topology.
+# [Sync] 2026-09-17: verify backend discovery resolves the npm package-root cli.js entrypoint.
 # [Sync] 2026-09-17: install published Runtime 0.1.10 and smoke an immutable candidate before atomic activation.
 set -euo pipefail
 
@@ -306,7 +307,7 @@ rm -rf \"\${staging}/frontend-src\"
 test -s \"\${staging}/frontend/server.js\"
 cd \"\${staging}/app\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.145'; assert sdk.__version__ == '0.2.145'\"
-PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; assert resolve_claude_cli_path().endswith('/ink-claude-code-dream')\"
+PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from pathlib import Path; from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; candidate=Path(resolve_claude_cli_path()); assert candidate.name == 'cli.js' and candidate.parent.name == 'ink-claude-code-dream', candidate\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values('$(quote "${AUTODL_APP_ROOT}/config/dream.env")').items() if value is not None}); import server\"
 test \"\$(/root/ink-autodl/runtime/npm/bin/ntn --version)\" = $(quote "ntn ${AUTODL_NOTION_CLI_VERSION}")
 rm -rf \"\${release}\"
