@@ -27,6 +27,7 @@
 # [Sync] 2026-09-06: expose the fixed Node binary to Corepack's env-based launcher.
 # [Sync] 2026-09-12: install Info-ZIP for approved ordinary-workspace exports
 #                    on the direct-host topology.
+# [Sync] 2026-09-17: fail verification explicitly and digest-check every persistent plugin artifact without user authority.
 # [Sync] 2026-09-17: verify backend discovery resolves the npm package-root cli.js entrypoint.
 # [Sync] 2026-09-17: install published Runtime 0.1.10 and smoke an immutable candidate before atomic activation.
 set -euo pipefail
@@ -357,8 +358,8 @@ tail -n 160 $(quote "${AUTODL_APP_ROOT}/logs/dream.log") >&2 || true
 exit 1"
 }
 
-verify_default_plugin() {
-  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values(\"${AUTODL_APP_ROOT}/config/dream.env\").items() if value is not None}); from services.deck.defaults import resolve_default_deck_plugin_ref; resolve_default_deck_plugin_ref()'"
+verify_plugin_artifacts() {
+  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values(\"${AUTODL_APP_ROOT}/config/dream.env\").items() if value is not None}); from services.claude_plugin import artifact_store, runtime; paths=[path for path in runtime.get_artifacts_root().iterdir() if path.is_dir()]; assert paths; parsed=[path.name.rsplit(\"@\", 2) for path in paths]; assert all(len(parts) == 3 and parts[2].startswith(\"sha256-\") for parts in parsed); assert all(artifact_store.get_artifact(parts[0], parts[1], parts[2].replace(\"sha256-\", \"sha256:\", 1)).path == path for path, parts in zip(paths, parsed))'"
 }
 
 verify_builtin_skills() {
@@ -384,14 +385,14 @@ EOF
 
 verify() {
   local topology
-  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); test -s \"\${current}/frontend/server.js\"; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; for endpoint in robots.txt sitemap.xml llms.txt; do content_type=\$(curl -fsS --max-time 10 -o /dev/null -w '%{content_type}' http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/\${endpoint}); case \"\${content_type}\" in text/html*) exit 1 ;; esac; done; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf next")"
+  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); test -s \"\${current}/frontend/server.js\"; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; for endpoint in robots.txt sitemap.xml llms.txt; do content_type=\$(curl -fsS --max-time 10 -o /dev/null -w '%{content_type}' http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/\${endpoint}); case \"\${content_type}\" in text/html*) exit 1 ;; esac; done; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf next")" || return
   [[ -n "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN is required for public verification."
-  curl -fsS --retry 15 --retry-delay 3 --retry-connrefused --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/api/health" >/dev/null
-  curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null
-  verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"
-  verify_default_plugin
-  verify_builtin_skills
-  log "Dream ${topology} topology, Node MCP Apps build, SEO crawler files, built-in Skills, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
+  curl -fsS --retry 15 --retry-delay 3 --retry-connrefused --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/api/health" >/dev/null || return
+  curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null || return
+  verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin" || return
+  verify_plugin_artifacts || return
+  verify_builtin_skills || return
+  log "Dream ${topology} topology, Node MCP Apps build, SEO crawler files, built-in Skills, plugin artifact store, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 mark_current_qualified() {

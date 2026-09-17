@@ -70,8 +70,10 @@ approved Bash 将以 Dream root 身份运行。
 脚本安装固定 Node/pnpm、Claude Runtime 与 Notion CLI，执行 frozen pnpm
 install 和 standalone Next build；release gate 验证 MCP Apps Node routes、
 FastAPI/Next/同源 API、`robots.txt`、`sitemap.xml`、`llms.txt`、内置
-Skills、默认 Deck Plugin、Admin 依赖和公网 origin。全部通过后才推进
+Skills、持久 plugin artifact store 的每项 content digest、Admin 依赖和公网 origin。全部通过后才推进
 `qualified`。
+
+发布器没有用户委托身份，不能调用 user-scoped `deck.default-plugin.resolve` 来冒充默认 Deck 验收；默认选择与本地 artifact/CLI 的组合在登录后的 Deck reconcile 业务流程验证。脚本对本机、公网、crawler、artifact 与 Skills 每个门禁显式传播非零状态，不能因函数处于回滚条件分支而吞掉子命令失败。
 
 Runtime 由公开 npm `@glide-the/ink-claude-code-dream@0.1.10` 安装。发布门禁验证其相邻 `release-manifest.json`、SDK `0.2.145` 绑定、production eligibility、CLI compatibility `2.1.241` 与 `plugin` 命令；旧的未发布 AutoDL local-core `0.1.9` 不再作为构建输入。
 后端 discovery 会解析 npm wrapper 的真实入口，因此候选断言 package-root 文件名为 `cli.js`、父目录为 `ink-claude-code-dream`；wrapper 自身仍由安装门禁执行 `plugin --help`，两项证据分别覆盖解析路径与公开命令入口。
