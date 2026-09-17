@@ -2,6 +2,7 @@
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
 <!-- [Sync] 2026-09-17: record independent Admin browser login after adding the required local Session TTL. -->
+<!-- [Sync] 2026-09-17: define and record the real Chat stop-delivery remediation and same-thread cancellation acceptance. -->
 <!-- [Sync] 2026-09-17: define the post-reboot real Dream launch retry boundary and preserve the first failed Run. -->
 <!-- [Sync] 2026-09-17: record read-only normal desired/effective resource-policy and fresh observer/LKG parity. -->
 <!-- [Sync] 2026-09-17: record real Chrome Dream logout, client-local revocation, same-subject SSO re-entry and Admin-login isolation. -->
@@ -41,7 +42,7 @@ Admin 统一认证、Admin DTO/Service/Repository/Drizzle 数据访问以及 Dre
 | Project identity/title | `stories/<project>/project.yaml` 和 Admin 投影 | Agent 写文件；成功 Hook 发布并由 Admin DTO 持久化 | Story 索引、执行页 Project 标题 | 本轮基础对话不要求修改，保持不变 |
 | Episode identity/title/content | `episodes/<EPxx>/` canonical artifacts | Agent 写文件；Hook 发布 | Episode API/工作台 | 本轮基础对话不要求修改，保持不变 |
 | Run-private publication | `.dream/runtime/runs/<run-id>/artifact/` 与 manifest | Dream host-owned Hook | 服务端 reader、Admin 投影 | 仅在选定流程实际生成制品时新增；不得改写既有 Run |
-| 共享文件与元数据 | 规范化 Thread workspace + Admin 文件元数据 DTO | Dream 写文件；Admin 原子保存元数据 | 文件下载、Thread 页面、Admin 查询 | 新文件只属于本轮 Thread；越界/符号链接仍拒绝；旧文件不变 |
+| 共享文件与元数据 | 规范化 Thread workspace + Admin Chat message `parts` DTO | Dream 写文件；Admin 原子保存附件消息 metadata | 文件下载、Thread 页面、Admin 查询 | 新文件只属于本轮 Thread；越界/符号链接仍拒绝；旧文件不变 |
 | 资源策略 effective/LKG | Admin desired + Dream 内存 LKG | Admin 写 desired；Dream 后台 provider 应用 | Runtime admission/诊断 | 只读验证 revision/value；不得从 turn 主路径查询或修改 |
 
 ## 用户流程与成功标准
@@ -52,7 +53,7 @@ Admin 统一认证、Admin DTO/Service/Repository/Drizzle 数据访问以及 Dre
 | Google 登录与既有主体关联 | Admin `socialProviders.google` | Google Account 关联到稳定应用主体 | 可见 Google OAuth；再查公开 profile | 主体稳定、无按邮箱任意合并 | 外部挑战/账户条件单独记为真实验收未完成，不替换为模拟 |
 | Device Flow | Admin device UI/token endpoints | public client、scope、resource、grant/token | 设备请求 + 可见批准/拒绝 + 轮询 | 错误码和状态符合 RFC 8628，refresh/revoke 生效 | 过期或已处理请求要求设备重新发起 |
 | Run/Thread/SSE | Dream Chat、Runtime、Admin 191-operation API | actor-bound Thread/Run/message/Gateway/ledger | 页面创建并发送正常用户话术；观察 SSE、继续与取消 | UI 完成且 Admin 可查询关联记录；失败信息明确 | Admin/Gateway/Runtime 错误不回退 DB，不盲重试非幂等写 |
-| 文件上传/读取 | Dream BFF/FastAPI、共享文件系统、Admin metadata DTO | Thread owner、路径和 metadata | 可见上传/读取；越权/非法路径负例 | 文件和元数据一致，失败可恢复，无越界/符号链接放行 | 元数据失败不把不完整对象展示为成功 |
+| 文件上传/读取 | Dream BFF/FastAPI、共享文件系统、Admin Chat message DTO | Thread owner、路径和 attachment parts | 可见上传/读取；越权/非法路径负例 | 文件和消息 metadata 一致，失败可恢复，无越界/符号链接放行 | metadata 写入未知时不启动 Runtime、不把不完整消息展示为已提交 |
 | Dream 无 PostgreSQL | Dream 进程、Admin 数据 API | Dream env/进程/连接边界 | 配置清单、进程环境键、连接观察、公开流程 | Dream 无 DSN/driver连接，全部持久化经 Admin | Admin 不可用时明确失败，禁止本地 SQL fallback |
 
 ## 对话边界
@@ -62,6 +63,23 @@ Admin 统一认证、Admin DTO/Service/Repository/Drizzle 数据访问以及 Dre
 ## 执行记录
 
 后续命令、退出码、关键脱敏输出、Run/Thread/request 标识和未执行原因在本文件追加；任何失败先区分业务缺陷、设计错误或 harness 问题，再修复并重跑受影响流程。
+
+### 2026-09-17 真实 Chat 取消修复执行指令
+
+**Optimized Prompt:**
+
+你是 Dream Chat Runtime、Next.js BFF、FastAPI 与真实业务验收工程师。基于已取得的权威证据修复同一真实 Thread 的停止生成链路：页面点击“停止生成”后进入 `Stopping`，但浏览器没有发出 `/api/claude-agent/threads/{thread_id}/stop`，后端 Thread 继续运行并最终持久化 assistant 消息；手工从同一已登录浏览器调用公开 Stop 接口则返回 `200` 和严格幂等 DTO，证明服务端路由、用户所有权和 ThreadFactory 取消入口可达。
+
+修改范围属于 Dream。先复用现有 Browser Session/CSRF、Chat Runtime 状态、同源 BFF 和 ThreadFactory，不改 Admin 数据契约、Runner、EventBus、SSE、turn/resume、资源策略 LKG、共享文件系统或数据库边界。把用户已提交的 Stop 作为独立业务请求：显式发送同源 Cookie、内存 CSRF、`no-store` 和有限超时；组件卸载或 Story Workspace 重挂载不得撤销已经提交的 Stop；严格校验 `ok`、`thread_id`、`stop_requested`、`running` 与 `lifecycle`，只有匹配当前 Thread 的回执或后续权威 idle 状态才能停止本地 reader。网络失败、超时、非 2xx、错误 Thread 或畸形 DTO 必须保持 composer 锁定并按现有权威状态恢复，不得把未知状态显示为已取消，也不得重试非幂等模型请求。
+
+实现前核对 ChatPanel、纯状态 helper、Next BFF、Python route/ThreadFactory 和现有测试；同步文件头与当前验收记录。增加可执行前端测试，证明真实点击路径会发出恰好一次 POST、携带 Cookie/CSRF、组件卸载不取消请求、畸形/错 Thread 回执失败关闭，以及 `stop_requested=false + running=false` 的幂等 idle 语义。重跑前端聚焦测试、TypeScript、ESLint 与受影响 Python stop 测试。最后使用 `dmeck@suoxya.com` 的现有 Dream 产品会话，在同一真实 Thread 发起一条足够长但正常可见的请求，观察 Stop 按钮，点击一次，并同时核对网络 `200`、权威 Thread idle、没有完整 assistant 终态以及后续同 Thread 可继续。保留 Run、Thread、消息和失败回执；不直接写数据库，不清理业务证据，不暴露密码、Token、DSN 或正文之外的 secret。
+
+验收失败时区分浏览器 harness、请求交付、后端取消和持久化竞态，修复对应层后只重跑受影响流程。成功标准是公开 UI、网络回执、权威状态和持久化历史四者一致，不能以按钮消失代替取消成功。
+
+**Optional Enhancers:**
+
+- 在 CDP 网络事件中保留脱敏的 method/path/status/timing，不记录 Cookie、CSRF 或 Authorization。
+- 对取消后的下一条短消息做同 Thread continue，证明 flyweight session 保留且没有销毁 Thread。
 
 ### 2026-09-16 认证与 Device 第一轮
 
@@ -115,7 +133,7 @@ Admin 按本阶段执行稿实现严格私有 DTO → Domain Service → typed D
 | 事实 | 真相源 | 所有者 | 本轮预期 |
 | --- | --- | --- | --- |
 | 附件字节 | Dream共享文件系统的规范化Thread路径 | Dream路径/权限/写入边界 | 新增本轮纯文本附件；拒绝越界和符号链接 |
-| 附件metadata | Admin具名文件DTO/Repository/Drizzle事务 | Admin数据服务 | 与当前actor/Thread/文件摘要绑定；失败不能显示成功 |
+| 附件metadata | Admin Chat message DTO/Service/Drizzle事务 | Admin数据服务 | `parts` 与当前actor/Thread/文件摘要绑定；失败不能显示成功 |
 | Chat消息与Run | Admin Thread/Run/message记录 | Dream编排、Admin持久化 | 选择附件阶段保持不变；发送后再单独验收 |
 | Project/Episode/资源策略 | canonical artifacts与Admin desired/Dream LKG | 原业务owner | 全部保持不变 |
 
@@ -240,3 +258,61 @@ Notion后台同步候选使用Dream confidential OAuth client的`client_credenti
 | Shared FS 与 `.claude-tmp` | 现有规范化真实 Thread workspace、`0700`、拒绝 symlink | 本请求无文件写入时保持；若Runtime创建目录仍遵守原协议 | 必须保持 | 路径/mode/symlink只读检查 |
 
 正常路径要求公开 launch 返回 `201`，Admin claim 后 Agent 调用 Gateway，SSE/页面进入可解释终态，Run/Thread/Gateway请求和结算能从日常 Admin 路径查询。Admin、Gateway或额度失败时保留明确业务终态且不重试非幂等写；未知提交通过原 request receipt恢复；任何 owner 准备失败必须关闭已创建客户端并把 dispatch claim恢复为未接受状态。页面若出现具体工具确认，只处理本场景明确需要且可见的操作；本请求不预期 Bash、网络或写文件工具，因此未知确认直接判为业务失败，不要求用户参与。
+
+### 2026-09-17 真实模型、停止与同 Thread 恢复
+
+正常订阅当前可用额度为一亿 token，先前 `402 SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED` 已不再成立。本轮继续使用既有 Dream 主体、正常 `localhost:5173/3000/8765`、正常 `ink-memory`、已有“剧本创作团队”Deck 和公开 Story Workspace 产品入口；没有授予额度、改计划、改资源策略、直接写数据库或清理业务回执。
+
+真实 Dream Run `run_587c9c41d82f49879ee0a0c4240678d2`、Thread `c1773195-17f9-5ee1-9233-f886b102d56c` 成功调用 Gateway `gpt-5.6-luna`。首轮完成中文 logline、2 个人物、1 个场景与 6 镜/42 秒分镜；Run 进入 `pending_review`，`failed_step/error_code` 均为空，Thread 进入 `idle`。公开 Dream files DTO 显示 characters/scenes/storyboards revision 均为 1，source 分别来自规范化 canonical workspace；页面可见陈默、无名乘客、终点站场景与分镜。随后同 Thread 继续成功，`turn_count=2`，未修改文件的短回复正常持久化。
+
+第一次真实取消暴露产品缺陷：点击后页面短暂显示 `Stopping`，但浏览器没有发出 `/stop` 请求；权威状态持续 `running`，模型最终完整完成第三个 assistant turn。服务端公开 Stop 路由从同一会话手工调用返回严格 `200` 幂等 DTO，因此缺陷定位为 ChatPanel 把已提交 Stop 的 `AbortController` 绑定到组件卸载，Story Workspace/ChatPanel 重挂载可在请求到达 BFF 前取消它。旧失败回执和完整 assistant 消息保留，没有删改历史或把按钮消失冒充取消成功。
+
+修复后 Stop 使用独立限时请求，显式携带同源 Cookie、内存 CSRF、`no-store` 与 `keepalive`，并以 Zod 严格校验完整 `ok/thread_id/stop_requested/running/lifecycle` DTO。React 卸载不再取消用户已经提交的 Stop；网络或 DTO 未知继续保持锁定并读取权威状态。真实页面在同一 Thread 再发一条长回复并点击一次 Stop，性能记录出现单次 `POST /api/claude-agent/threads/{thread}/stop`，约 298 ms 返回 `200`；约 1.2 秒后权威状态为 `idle/running=false`、`turn_count=4`，历史只新增该用户消息，没有 assistant 完整终态。随后同 Thread 发送短消息，约 4.8 秒后得到“线程已恢复”，`turn_count=5` 并回到 `idle`，证明只取消当前 turn，ThreadFactory、SSE 与后续持久化可继续。
+
+| 验证 | 工作目录/入口 | 结果 |
+| --- | --- | --- |
+| TypeScript | Dream `frontend`: `corepack pnpm exec tsc --noEmit --incremental false` | exit `0` |
+| 目标 ESLint | Dream `frontend`: ChatPanel、runtime helper、Stop transport 与两项测试 | exit `0` |
+| Stop Browser 合同 | Dream `frontend`: 两个聚焦 Playwright 文件、1 worker | exit `0`；7 passed；覆盖严格 DTO、Cookie/CSRF、单次 POST 与组件卸载后继续交付 |
+| Python Stop 合同 | Dream root: ThreadFactory/route 聚焦 pytest | exit `0`；4 passed、154 deselected；只有既有 FastAPI lifespan deprecation warnings |
+| diff hygiene | Dream root: `git diff --check` | exit `0` |
+| 真实取消与恢复 | 正常 Story Workspace UI + 脱敏 CDP status/history/network | Stop `200`、权威 idle、无 assistant 终态；后续同 Thread 正常完成 |
+
+### 2026-09-17 日常 Admin 可见性
+
+同一真实 Run 已从正常 Admin operator 会话的公开运营页面查询；该会话仍是独立 Admin 主体，没有把 Dream canonical user 按邮箱合并或授予管理权限。首次页面没有请求数据的根因是 Admin Refine 客户端漏注册 `story-workflow-runs`，随后又由服务端 allowlist 正确暴露 `id` 精确筛选缺口。Admin 以现有 DTO/Repository 边界修复：URL `runId` 映射到 `filter[id][eq]`，Repository 只接受参数化 `r.id = $1`，服务端继续执行 Admin Session 与 `story.read`。
+
+| 运营证据 | 公开入口 | 脱敏结果 |
+| --- | --- | --- |
+| Workflow Run 列表 | Admin `/admin/story/workflow-runs?runId=run_587c9c41d82f49879ee0a0c4240678d2` | 列表 API `200`，唯一记录与目标 Run ID 匹配，状态 `pending_review` |
+| Workflow Run 详情 | Admin `/api/admin/story-workflow-runs/{runId}` | `200`；5 条 transition、1 条 token consumption，workspace、Agent Session 与 source Thread 关系可见 |
+| Gateway 请求 | Admin Gateway Requests | `req_142e32d6798b4b60b980485f6a15466f`；`settled/succeeded`、HTTP 200、`gpt-5.6-luna` |
+| Token 结算 | Admin Token Ledger | reserve 107731、capture 52901、release 54830；capture + release = reserve |
+
+Admin 页面未读取完整 Gateway payload；本轮只读复核没有修改 Run、账本、订阅、用户映射或文件。真实 Run、Thread、Gateway request 和结算记录均保留供日常后台复核。
+
+### 2026-09-17 文件 metadata 故障恢复执行指令
+
+**Optimized Prompt:**
+
+你是 Dream 共享文件系统、Chat attachment DTO、Admin 数据服务和故障恢复测试负责人。核对实际附件边界并补齐“文件字节已上传、Admin 消息 metadata 写入失败或结果未知”场景。Dream 继续拥有文件存储、规范化 Thread workspace、路径/符号链接/权限与附件读取；Admin 通过严格 Chat message `parts` DTO、Domain Service、typed Repository 和 Drizzle 事务拥有持久消息 metadata。不得发明第二张 Dream 文件表，不得让 Dream 直连 PostgreSQL，也不得在真实正常数据库注入故障。
+
+增加 provider-free 确定性合同：附件 file part 随原用户 message id 提交；Admin 写入超时且结果未知时返回安全错误码、原 request id 与 `outcome_unknown=true`，关闭本次 owner/client，不启动 Agent Runtime、SSE 或模型调用；后续恢复只能查询原 operation/request receipt，禁止重发未知写。前端浏览器合同必须保留已提交文本和附件，显式显示可恢复失败，并以一次只读 reload 恢复权威历史，不重复发起 Agent POST。重跑该后端 route/turn-persistence 测试、前端浏览器合同和静态 PostgreSQL closure gate；记录真实上传/读取与隔离故障合同的不同证据级别。
+
+保持不变：两次真实附件上传及 actor-bound 读取回执、共享 workspace、`.claude-tmp 0700`、Runner/ThreadFactory/EventBus/SSE、Admin/Dream 身份域、正常 PostgreSQL 数据与已有业务回执。
+
+执行结果：后端 route/turn-persistence 聚焦为 `4 passed`。新增 attachment metadata 超时场景把 file part、文本、原 message id 一次提交给 Admin owner；Admin 返回 `504 ADMIN_TIMEOUT`、原 request id 和 `outcome_unknown=true` 时，persistence/editor client 均关闭且 ThreadFactory `run_streaming` 未调用。既有 unknown-write 合同只 GET 原 receipt、POST 总数保持 1。前端 `ChatThreadBindingConflict.test.ts` 为 `1 passed`：可恢复错误保留文本和附件，一次只读 reload 恢复权威历史，Agent POST 仍为 1。生产源码 PostgreSQL closure gate为 `7 passed`，扫描已跟踪及可提交的未跟踪 source，Dream Python/Next 均无数据库 driver、SQL、DSN 或退休 Repository 路径。真实正常数据库未做故障注入；两次真实上传/授权读取是业务证据，故障恢复是隔离技术证据，二者没有混报。
+
+### 2026-09-17 最终当前树门禁
+
+| 检查 | 工作目录 | 结果 |
+| --- | --- | --- |
+| TypeScript | Dream `frontend` | `corepack pnpm exec tsc --noEmit --incremental false`，exit `0` |
+| 完整 ESLint | Dream `frontend` | `corepack pnpm lint`，exit `0`；0 error、17 个既有 Hook warning |
+| Production build | Dream `frontend` | `corepack pnpm build`，exit `0`；Next 16.1.6 编译、类型检查、静态页与 trace 完成 |
+| Stop transport/browser | Dream `frontend` | 7 passed；严格DTO、Cookie/CSRF、单次POST、组件卸载后继续交付 |
+| attachment recovery browser | Dream `frontend` | 1 passed；附件/文本保留、read-only reload、无重复POST |
+| Stop + metadata backend | Dream root | Stop 4 passed；metadata/unknown-write 4 passed；均只有既有 lifespan deprecation warning |
+| PostgreSQL closure | Dream root | 7 passed；Python/Next production source无driver、SQL、DSN或退休Repository |
+| Markdown local links | Dream root | 当前修改的3份Markdown、4条本地链接、0 missing |
+| diff hygiene | Dream/Admin roots | 两仓 `git diff --check` 均 exit `0` |

@@ -1,5 +1,5 @@
 // [Input] Local AI SDK status plus authoritative thread/reconnect state.
-// [Output] Shared main-turn Stop visibility and strict stop-response decoding.
+// [Output] Shared main-turn Stop visibility, reader-settlement and reconnect decisions.
 // [Pos] Chat/Dream lifecycle primitive; transcript/subagent data is intentionally absent.
 
 export function chatMainTurnCanStop(
@@ -11,13 +11,6 @@ export function chatMainTurnCanStop(
     || localStatus === 'streaming'
     || runtimeRunning
     || reconnecting;
-}
-
-export function parseThreadStopResponse(payload: unknown): { stopRequested: boolean } | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const value = payload as Record<string, unknown>;
-  if (value.ok !== true || typeof value.stop_requested !== 'boolean') return null;
-  return { stopRequested: value.stop_requested };
 }
 
 /** Local readers may be aborted only after an explicit stop acknowledgement or

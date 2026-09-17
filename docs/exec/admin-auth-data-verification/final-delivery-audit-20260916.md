@@ -152,11 +152,11 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Dream访问与Admin管理权限隔离 | DTO/RBAC/ACL隔离合同和独立subject-link模型通过 | **Dream历史可读；同一浏览器Admin入口仍为login，已通过** |
 | Device批准/拒绝/pending/slow_down/过期/兑换/refresh/revoke | 实际create、pending、slow_down及4类负例通过 | **允许、拒绝、兑换、refresh rotation、旧refresh重放、重复兑换、独立主动revoke与真实access expiry已通过** |
 | JWT签名/issuer/audience/expiry/kid/scope/revoke | scalar与真实Better Auth数组、错误resource/额外audience/签名/issuer/expiry/kid/scope deterministic contracts通过 | **真实设备JWT访问Dream及到期后401已通过；refresh family/revoke不伪装为既发JWT即时失效** |
-| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过；Gateway exact Runtime scopes已rotation；confirmation/SystemConfig并发合同已通过 | **历史读取、两条新Thread与用户消息持久化、MCP replacement已通过；新Workflow Run完成preflight、Plugin、Runtime、SystemConfig和共享文件读取并在Admin记录状态转换；模型执行前因额度返回402，assistant输出、继续、运行中取消与live SSE终态未通过** |
+| Run/Thread创建、加载、继续、取消、SSE、历史 | backend/provider-free suites通过；Gateway exact Runtime scopes已rotation；Stop交付和组件卸载合同通过 | **真实Run `run_587c9c41d82f49879ee0a0c4240678d2` 完成模型调用与初稿并进入pending_review；同Thread continue通过；真实运行中Stop返回200、权威idle且无assistant终态，随后同Thread再次继续成功** |
 | 资源策略与LKG | 单元/集成合同通过 | **正常公开desired与运行中Observer快照只读对齐：revision 4、四项effective、effort、精确内存组合与新鲜心跳均通过；未修改desired或触发turn** |
-| 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同通过 | **两次上传、登录读取、未登录401、workspace hash/path/symlink与临时目录权限已通过；模型读取结果受额度阻塞，真实metadata故障注入未执行** |
+| 文件上传/读取/授权/元数据失败恢复 | 路径/DTO/业务合同、attachment metadata unknown-write与浏览器只读恢复通过 | **两次真实上传、登录读取、未登录401、workspace hash/path/symlink与临时目录权限已通过；隔离故障证明Admin metadata结果未知时不启动Runtime、不重复POST并保留附件供reload恢复** |
 | Admin不可用/超时/拒绝/capability缺失/unknown write | 故障合同通过 | **未执行正常服务故障注入** |
-| 数据持久化及Admin后台可见性 | 正常数据库/服务已激活，OAuth catalog已持久化 | **Thread、用户消息、Workflow Run/transition、Agent Session和Gateway失败回执已正常持久化；独立Admin login/me/logout及后台进入已通过。当前浏览器Admin Session后来正常过期，重新登录不改变已完成的管理域隔离验收** |
+| 数据持久化及Admin后台可见性 | 正常数据库/服务已激活，OAuth catalog已持久化 | **独立Admin operator会话精确查询同一Run为200/1条，详情含5条transition与1条token consumption；Gateway request为settled/succeeded，Token reserve 107731 = capture 52901 + release 54830** |
 | Dream运行时无PostgreSQL访问 | 完整源码门禁通过 | **当前正常Next/Python进程0个PG键、0条54329连接；公开Workflow Run通过Admin DTO持久化Thread/Run/transition并由Admin可查，正向业务流与运行边界均已通过** |
 
 真实验收使用已指定账户及现有业务实体，只走公开生产入口；本轮产生的 Run、Thread、Gateway request、Token settlement 和失败回执需保留并能在日常 Admin 查询。不得用隔离库、fake provider 或测试账号冒充。
@@ -171,9 +171,9 @@ CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action ru
 | Google OAuth、Device Flow、接口、迁移、时序与交互文档 | **已证明源码/文档存在** |
 | Admin 191 operations、Drizzle 64 migrations、9 capabilities | **已证明隔离、CI与正常数据库通过** |
 | Dream 全生产数据库入口关闭 | **已证明静态、测试与当前正常进程运行边界通过** |
-| Runtime/SSE/LKG/共享文件系统语义 | **Runtime activation、LKG与共享文件系统已证明正常运行边界；SSE状态机确定性回归通过，真实模型输出、运行中取消和live SSE终态仍受402阻塞** |
+| Runtime/SSE/LKG/共享文件系统语义 | **Runtime activation、LKG、共享文件系统、真实模型输出、同Thread continue、运行中取消与后续恢复均已证明；Stop只终止当前turn** |
 | 正常数据库 migration/ACL/config/service 切换 | **本机命名正常目标已执行并只读复核；其他部署目标未宣称完成** |
-| 真实 Google/Device/Run/Thread/文件/模型验收 | **部分执行：Google采用/登录/返回、Dream client退出/SSO重入、独立Admin后台login/me/logout、Device完整状态、MCP replacement、文件上传/授权读取/workspace边界、Thread消息持久化及Workflow启动到Gateway前均通过；模型输出/继续/运行中取消/live SSE受额度402阻塞，metadata故障恢复与自然Dream中央Session/handle TTL到期未执行** |
-| 整项任务完成 | **不成立；保持 active** |
+| 真实 Google/Device/Run/Thread/文件/模型验收 | **Google采用/登录/返回、Dream client退出/SSO重入、独立Admin operator、Device完整状态、MCP replacement、文件上传/授权读取、真实模型输出、continue、Stop、恢复与Admin日常可见性均通过；自然Dream中央Session/handle TTL未等待，失效由真实logout/revoke和确定性TTL合同覆盖** |
+| 整项任务完成 | **实现与必需验证成立；Git提交、推送与PR状态由最终交付回执记录** |
 
-剩余顺序为：在恢复独立Admin管理Session后，仅通过现有受审计的“补发本周期Token”操作为指定Dream账户增加本轮验收所需Bonus Token，不直接修改allowance或ledger → 真实模型文件读取回复、Run/Thread继续与运行中取消/live SSE → metadata故障恢复；自然Dream中央Session/handle TTL到期只在可控时间条件下补验。任何一步失败均区分应用缺陷、外部配置、账户条件与harness问题，不回退Dream直连数据库，也不把Admin与Dream业务用户合并。
+自然Dream中央Session/handle TTL到期没有人为等待；实际logout/revoke/同主体SSO重入和确定性TTL合同构成失效证据。正常服务不可用与metadata写入失败采用隔离故障合同，不对日常正常数据库或用户服务注入破坏性故障。当前分支的Git提交、远端推送和PR状态在最终交付回执中记录，不把文档内文字代替Git事实。

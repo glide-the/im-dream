@@ -29,6 +29,8 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 //                    workspace-backed Skills are suggested.
 // [Sync] 2026-06-25: stop button now calls the backend thread stop endpoint
 //                    instead of only aborting the local browser stream.
+// [Sync] 2026-09-17: keep an accepted Stop mutation alive across Story Workspace/ChatPanel remounts;
+//                    only a strict current-Thread receipt or authoritative idle may close local readers.
 // [Sync] 2026-07-20: pass threadId into ClaudeAgentChatTransport so plan-* SSE
 //                    frames route to the useThreadPlan store (claude-plan feature).
 // [Sync] 2026-07-20: forward todo-updated SSE frames to the useThreadTodos store
@@ -134,8 +136,8 @@ import {
   chatMainTurnCanStop,
   claimChatReconnect,
   chatStopMayAbortLocalReaders,
-  parseThreadStopResponse,
 } from './chatRuntimeState';
+import { requestClaudeThreadStop } from './threadStop';
 import {
   captureChatScrollAnchor,
   mergeRecoveredLatestPage,
@@ -311,8 +313,6 @@ export default function ChatPanel({
   const reconnectRetryTimerRef = useRef<number | null>(null);
   const reconnectRecoveryAttemptRef = useRef(0);
   const localCompletionRetryTimerRef = useRef<number | null>(null);
-  const stopRequestAbortRef = useRef<AbortController | null>(null);
-  const stopRequestTimerRef = useRef<number | null>(null);
   const stopRecoveryTimerRef = useRef<number | null>(null);
   const chatPanelMountedRef = useRef(true);
   const previousChatStatusRef = useRef<string>('ready');
@@ -326,8 +326,6 @@ export default function ChatPanel({
     chatPanelMountedRef.current = true;
     return () => {
       chatPanelMountedRef.current = false;
-      stopRequestAbortRef.current?.abort();
-      stopRequestAbortRef.current = null;
       reconnectAbortRef.current?.abort();
       reconnectAbortRef.current = null;
       olderHistoryAbortRef.current?.abort();
@@ -335,7 +333,6 @@ export default function ChatPanel({
       for (const timerRef of [
         reconnectRetryTimerRef,
         localCompletionRetryTimerRef,
-        stopRequestTimerRef,
         stopRecoveryTimerRef,
       ]) {
         if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -964,37 +961,17 @@ export default function ChatPanel({
     setIsStopping(true);
     // A failed/ambiguous Stop is not permission to unlock the composer.
     setRuntimeRunning(true);
-    const controller = new AbortController();
-    stopRequestAbortRef.current?.abort();
-    stopRequestAbortRef.current = controller;
-    if (stopRequestTimerRef.current !== null) window.clearTimeout(stopRequestTimerRef.current);
-    stopRequestTimerRef.current = window.setTimeout(() => controller.abort(), 10_000);
-    let acknowledged = false;
+    let stopRequested: boolean | null = null;
+    let authoritativeRunning: boolean | null = null;
     try {
-      const response = await fetch(
-        `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/stop`,
-        {
-          method: 'POST',
-          headers: { ...browserRequestHeaders() },
-          signal: controller.signal,
-        },
-      );
-      if (!response.ok) throw new Error(`Stop failed (${response.status}).`);
-      const stopResult = parseThreadStopResponse(await response.json());
-      if (stopResult === null) {
-        throw new Error('Stop response is malformed.');
-      }
-      acknowledged = stopResult.stopRequested;
+      const stopResult = await requestClaudeThreadStop(threadId);
+      stopRequested = stopResult.stopRequested;
+      authoritativeRunning = stopResult.running;
     } catch {
       // Network/malformed/non-2xx is authoritative-unknown.
     } finally {
-      if (stopRequestTimerRef.current !== null) {
-        window.clearTimeout(stopRequestTimerRef.current);
-        stopRequestTimerRef.current = null;
-      }
-      if (stopRequestAbortRef.current === controller) stopRequestAbortRef.current = null;
       if (chatPanelMountedRef.current) {
-        if (chatStopMayAbortLocalReaders(acknowledged, null)) abortLocalReaders();
+        if (chatStopMayAbortLocalReaders(stopRequested, authoritativeRunning)) abortLocalReaders();
         setIsStopping(false);
         if (stopRecoveryTimerRef.current === null) void recoverAfterStop();
       }

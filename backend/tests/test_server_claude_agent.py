@@ -3,6 +3,7 @@
 #          factory is initialised, request/response models are correct, and
 #          authentication is enforced.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-17: fail attachment metadata persistence closed before Runtime start.
 # [Sync] 2026-09-16: assert Admin HTTP owner ordering after removing Dream PostgreSQL lifecycle.
 # [Sync] 2026-09-13: expect the package-root Runtime 0.1.9 identity in startup diagnostics.
 # [Sync] 2026-09-15: expect the package-root Runtime 0.1.10 identity.
@@ -1960,6 +1961,84 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
                 "thread_id": "thread-generic",
                 "parts": [{"type": "text", "text": "hello"}],
                 "message_id": "public-message-1",
+                "metadata": None,
+            }],
+        )
+        self.assertEqual(owner.persistences[0].closed, 1)
+        self.assertEqual(owner.editors[0].closed, 1)
+        run_streaming.assert_not_called()
+
+    def test_attachment_metadata_timeout_keeps_original_identity_before_runtime_start(self):
+        import routers.claude_agent as route_module
+
+        file_part = {
+            "type": "file",
+            "url": "/api/storage/file/opaque",
+            "mediaType": "text/plain",
+            "filename": "acceptance.txt",
+        }
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-attachment-metadata",
+            message={
+                "id": "public-message-attachment",
+                "parts": [file_part, {"type": "text", "text": "读取附件。"}],
+            },
+        )
+        chat = _FakeAdminChatData(
+            thread={"id": "thread-attachment-metadata", "user_id": 7}
+        )
+
+        def lose_metadata_write(**_kwargs):
+            raise AdminDataError(
+                "ADMIN_TIMEOUT",
+                504,
+                request_id="attachment-metadata-write",
+                outcome_unknown=True,
+            )
+
+        owner = _FakeRouteOwner(
+            persistence_factory=lambda: _FakeTurnPersistence(lose_metadata_write)
+        )
+
+        async def call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user=_admin_user(),
+                chat=chat,
+                owner=owner,
+            )
+
+        with (
+            _system_config(),
+            unittest.mock.patch.object(
+                route_module,
+                "_resolve_platform_model_selection",
+                new=unittest.mock.AsyncMock(return_value="dream-balanced"),
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "run_streaming",
+            ) as run_streaming,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(call_route())
+
+        self.assertEqual(raised.exception.status_code, 504)
+        self.assertEqual(
+            raised.exception.detail,
+            {
+                "error_code": "ADMIN_TIMEOUT",
+                "request_id": "attachment-metadata-write",
+                "outcome_unknown": True,
+            },
+        )
+        self.assertEqual(
+            owner.persistences[0].persist_user_calls,
+            [{
+                "actor_id": "7",
+                "thread_id": "thread-attachment-metadata",
+                "parts": [file_part, {"type": "text", "text": "读取附件。"}],
+                "message_id": "public-message-attachment",
                 "metadata": None,
             }],
         )

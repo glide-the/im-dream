@@ -1,5 +1,5 @@
 // [Input] Shared local/authoritative runtime facts.
-// [Output] Stop visibility and strict stop response semantics.
+// [Output] Stop visibility, reader-settlement and reconnect semantics.
 // [Pos] Chat/Dream main-turn lifecycle contract seam.
 
 import { expect, test } from '@playwright/test';
@@ -8,7 +8,6 @@ import {
   chatReconnectNonceForHydratedThread,
   claimChatReconnect,
   chatStopMayAbortLocalReaders,
-  parseThreadStopResponse,
 } from '../chatRuntimeState';
 
 test('Stop is driven only by a cancellable main turn, never historical subagent transcript state', () => {
@@ -17,16 +16,6 @@ test('Stop is driven only by a cancellable main turn, never historical subagent 
   expect(chatMainTurnCanStop('streaming', false, false)).toBe(true);
   expect(chatMainTurnCanStop('ready', true, false)).toBe(true);
   expect(chatMainTurnCanStop('ready', false, true)).toBe(true);
-});
-
-test('Stop response requires explicit canonical acknowledgement', () => {
-  expect(parseThreadStopResponse({ ok: true, stop_requested: true }))
-    .toEqual({ stopRequested: true });
-  expect(parseThreadStopResponse({ ok: true, stop_requested: false }))
-    .toEqual({ stopRequested: false });
-  expect(parseThreadStopResponse({ ok: true })).toBeNull();
-  expect(parseThreadStopResponse({ ok: false, stop_requested: true })).toBeNull();
-  expect(parseThreadStopResponse('ok')).toBeNull();
 });
 
 test('an unending local reader is aborted only by typed acknowledgement or authoritative idle', () => {
