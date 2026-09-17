@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-selected-faults.mts token",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "case": "token",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"mode\": \"token\",\n  \"public_operation\": \"workflow-preflight.execute\",\n  \"assertions\": 25,\n  \"request_id\": \"pf_fault_e9cc86541e284e15ac7a0688917e63d7\",\n  \"status\": \"failed\",\n  \"failed_check\": \"token_issuance\",\n  \"error_code\": \"PREFLIGHT_TOKEN_ISSUE_FAILED\",\n  \"audit\": {\n    \"stages\": 4,\n    \"audits\": 1\n  },\n  \"source_full_projection\": \"equal\",\n  \"snapshot_delta\": 1,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\",\n  \"private_keys_exported\": false\n}\n"
+}

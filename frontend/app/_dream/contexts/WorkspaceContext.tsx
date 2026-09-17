@@ -1,4 +1,6 @@
-// [Input] Runtime API base config, AuthContext token, and system-config change events.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
+// [Input] Runtime API base config, shared Browser session/header owner, and system-config change events.
 // [Output] Provide active workspace session and Workspace Mode enabled state to chat/file UI.
 // [Pos] workspace-context provider node in frontend/app/_dream/contexts
 // [Sync] 2026-06-22: load Settings workspace_enabled and subscribe to same-tab
@@ -14,7 +16,6 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { getAuthToken } from './AuthContext';
 import { API_BASE } from '../lib/apiBase';
 import { subscribeWorkspaceModeChanged } from '../lib/system-config-events';
 
@@ -50,7 +51,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+          headers: { ...browserRequestHeaders() },
         });
         if (!response.ok) return;
         const payload = (await response.json()) as {

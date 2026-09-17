@@ -1,6 +1,8 @@
 > [Input] `backend/routers/claude_agent.py`, `backend/claude_agent/service.py`, `backend/claude_agent/context_builder.py`, `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`, `backend/libs/claude_agent_kit/types.py`
 > [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
 > [Pos] context-design-doc in `docs/design/claude-agent`
+> [Sync] 2026-09-15: Phase 1 reads Thread SystemConfig and recent Session projections through the bound `AdminTurnPersistence`; Admin or DTO failures stop before Workspace, Runtime and SSE, while a successful empty Session list keeps the empty prompt block.
+> [Sync] 2026-09-16: every production dispatcher supplies a bound Admin owner before ThreadFactory; Service has no SQL, database import, implicit mapper or ownerless persistence path.
 > [Sync] 2026-09-13: [当前恢复合同](./claude-session-resume-resolution.md) 替代下文跨项目 JSONL 存在性预检。DB 失败安全终止；缺失当前项目记录才 fresh；state.session_id 是 Dream thread，不是 Claude ID。既有 context builder 与历史上下文装配不变。
 > [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
 > [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
@@ -27,10 +29,11 @@ Prompt optimization for planning turns is specified separately in [`claude-agent
 It owns:
 
 - building or reusing the session `system_prompt`;
-- loading `system_config` once per turn for Settings-backed prompt, workspace, sandbox network, full-access, and SDK env configuration;
+- loading `system_config` once per turn through the bound `AdminTurnPersistence` for Settings-backed prompt, workspace, sandbox network, full-access, and SDK env configuration;
+- loading recent Session projections through the same owner only when the cached system prompt must be built or rebuilt;
 - building the current turn's Claude content blocks from `message_parts` and attachments;
 - resolving the working directory for the session;
-- **loading `existing_session` from `chat_thread` DB row** and resolving resume eligibility (`_has_usable_claude_resume` + local JSONL file probe);
+- **loading `existing_session` through the bound Admin Thread operation** and resolving resume eligibility (`_has_usable_claude_resume` + current-project JSONL file probe);
 - **deriving `thread_id_for_agent` and `should_resume`** for `AgentRunOptions`;
 - copying runtime controls into `AgentRunOptions`;
 - creating the per-turn `_TurnContext` that stores queue, tool confirmation state, streaming dedup sets, reasoning state, and persistence buffers;
@@ -65,13 +68,15 @@ sequenceDiagram
     Factory->>State: get_or_create(thread_id) + per-session lock
     Factory->>Runner: create or reuse runner
     Factory->>Service: assemble_context(request, state, queue, runner)
-    Service->>Service: get_system_config(user_id)
+    Service->>Service: AdminTurnPersistence.system_config(actor_id, thread_id)
     alt first turn or rebuilt state
-        Service->>Builder: build_system_prompt(user_id, configured_system_prompt)
+        Service->>Service: AdminTurnPersistence.recent_sessions(actor_id, thread_id)
+        Service->>Builder: build_system_prompt(recent_sessions, configured_system_prompt)
         Builder-->>Service: system prompt with Settings block + recent writing sessions
         Service->>State: cache system_prompt and mark initialized
     else Settings SYSTEM_PROMPT changed
-        Service->>Builder: build_system_prompt(user_id, configured_system_prompt)
+        Service->>Service: AdminTurnPersistence.recent_sessions(actor_id, thread_id)
+        Service->>Builder: build_system_prompt(recent_sessions, configured_system_prompt)
         Builder-->>Service: rebuilt system prompt
         Service->>State: replace cached system_prompt
     else initialized state
@@ -89,7 +94,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 
 | Input | Source | Required | Context role |
 |---|---|---:|---|
-| `request.user_id` | authenticated HTTP user | yes | Key for recent writing context lookup and persistence ownership. |
+| `request.user_id` | authenticated HTTP user | yes | Canonical actor checked against the immutable Workflow resolution and turn owner. |
 | `request.thread_id` | `/api/claude-agent/threads` | yes | Stable chat thread, Thread Session key, and workspace key after validation. |
 | `request.message_parts` | Vercel AI SDK `UIMessage.parts` | yes for normal text turns | User goal, optimized planning prompt, file metadata, source URL metadata, and workspace-file metadata. |
 | `request.attachments` | synced API attachments | no | Inline image content blocks when the media type can be sent to Claude. |
@@ -101,8 +106,9 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `state` | `AgentRunStatePool` | yes | Cross-turn cache for `system_prompt`, `cwd`, runner presence, lifecycle, and turn count. |
 | `queue` | factory-owned `asyncio.Queue` | yes | Shared queue later used by Phase 3 callbacks. |
 | `runner` | factory-owned runner cache | yes in current service signature | Passed through to `_TurnExecution`; not executed during assembly. |
-| `existing_session` (DB) | `database.get_chat_thread(thread_id, user_id)` | internal | Loaded by `assemble_context`; provides `claude_session_id` and `agent_contract_version` for resume gating. |
-| `system_config` (DB) | `database.get_system_config(user_id)` | internal | Loaded before prompt/cwd assembly; provides Settings SYSTEM_PROMPT, Workspace Mode, sandbox network policy, full-access approval mode, and user SDK env vars. |
+| `existing_session` | `AdminTurnPersistence.thread_record(actor_id, thread_id)` | internal | Loaded by `assemble_context`; provides `claude_session_id` and `agent_contract_version` for resume gating. Missing production owner stops before context assembly. |
+| `system_config` | `AdminTurnPersistence.system_config(actor_id, thread_id)` | internal | Loaded before prompt/cwd assembly; provides Settings SYSTEM_PROMPT, Workspace Mode, sandbox network policy, full-access approval mode, and user SDK env vars. |
+| `recent_sessions` | `AdminTurnPersistence.recent_sessions(actor_id, thread_id)` | internal, prompt rebuild only | Strict `SessionPreviewDTO` projections for UTC today and the preceding two dates, fetched with `include_text=false`. |
 
 ## 4. Context Source Order
 
@@ -115,7 +121,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
    The final task text enters through `request.message_parts`. For planning tasks, the text should already be transformed by the Expert Prompt Architect flow in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). `assemble_context` treats that optimized text as the user turn payload and does not call the optimizer itself.
 
 3. **Settings system prompt**
-   `assemble_context` calls `database.get_system_config(user_id)` before building `state.system_prompt`. When `system_config.system_prompt` is non-empty, Service passes it to `ClaudeAgentContextBuilder.build_system_prompt(user_id, configured_system_prompt=...)`.
+   `assemble_context` calls `AdminTurnPersistence.system_config(actor_id, thread_id)` before building `state.system_prompt`. When `system_config.system_prompt` is non-empty, Service passes it to `ClaudeAgentContextBuilder.build_system_prompt(recent_sessions, configured_system_prompt=...)`.
 
    The builder renders it as:
 
@@ -131,16 +137,18 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 
    The normalized Settings SYSTEM_PROMPT used for the cached prompt is stored on `AgentRunState.system_config_system_prompt`. During a live Thread Session, if Settings SYSTEM_PROMPT changes, Phase 1 rebuilds `state.system_prompt`; otherwise it reuses the cached prompt.
 
-   Fallback behavior:
+   Behavior:
 
    | Case | Behavior |
    |---|---|
    | Missing/empty `system_prompt` | Omit the configurable block; build the normal engine prompt. |
-   | `get_system_config` failure | Log a warning; build the engine prompt without Settings SYSTEM_PROMPT and continue the turn. |
+   | Admin, capability, transport or DTO failure | Propagate the error and stop before Workspace, Runner, CLI and SSE start. |
    | Settings/template conflict | Follow `_SYSTEM_PROMPT_TEMPLATE`; Settings block is lower priority by construction. |
 
 4. **Historical writing context**
-   On the first initialized turn for a state, `ClaudeAgentContextBuilder.build_system_prompt(user_id, configured_system_prompt=...)` loads recent writing sessions through `database.list_sessions_in_range`. Only sessions from the **last 3 days** are included in the system prompt. The rendered block is cached in `state.system_prompt` and reused until the state is rebuilt or Settings SYSTEM_PROMPT changes.
+   On the first initialized turn for a state, or when Settings SYSTEM_PROMPT changes, `ClaudeAgentService` calls `AdminTurnPersistence.recent_sessions(actor_id, thread_id)`. The owner verifies the immutable actor/Thread resolution, obtains the current renewed `server-persistence` grant, requires the exact Better Auth, runtime delegation and runtime purpose schemas, and calls Admin `session.list` for UTC today and the preceding two dates with `include_text=false`. Service converts the strict DTOs to Python projections and passes them to `ClaudeAgentContextBuilder.build_system_prompt(recent_sessions, configured_system_prompt=...)`. The rendered block is cached in `state.system_prompt`; an initialized state whose Settings prompt did not change makes no Session request.
+
+   Admin 401/403/503, capability mismatch, timeout or invalid DTO propagates before Workspace, Runner, CLI and SSE. It is never converted to an empty list and never falls back to Dream PostgreSQL. A successful Admin response with no sessions renders the existing `_No recent entries found._` text. ContextBuilder also contains its existing pure-render guard for a projection that was already obtained; that guard can render the same empty block without hiding an Admin read failure.
 
    Each entry in the recent sessions block uses the format:
    ```
@@ -200,8 +208,8 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | Message text | Extract text through the UIMessage parts protocol. Text parts remain the goal source; file/source/workspace-file parts become explicit metadata text. |
 | Attachments | Inline image MIME types may become image blocks. Unsupported binary types are represented by metadata when available; otherwise log and omit the binary payload. |
 | External facts | Do not prefetch arbitrary live data during assembly. Realtime facts must enter through explicit tools during Phase 3. |
-| Historical context | If DB context cannot be loaded, degrade to a valid system prompt with the no-session fallback. Do not fail the turn for missing optional history. |
-| Settings SYSTEM_PROMPT | Load only through `database.get_system_config(user_id)`. Treat as lower priority than `_SYSTEM_PROMPT_TEMPLATE`; omit when empty or unavailable. |
+| Historical context | Load only through the bound owner. Successful empty lists use the no-session block; Admin, capability, transport and DTO failures stop the turn before Workspace, Runtime and SSE. |
+| Settings SYSTEM_PROMPT | Load only through `AdminTurnPersistence.system_config`. Treat a successful empty value as absent and lower priority than `_SYSTEM_PROMPT_TEMPLATE`; propagate Admin/read-contract failure. |
 | Workspace override | Treat `request.cwd` as authorized internal callers only when Workspace Mode is enabled. When disabled, ignore it and do not initialize the full product workspace; only the server-owned runtime temp root is allowed. |
 | Tool policy | Support `auto`, `manual`, and `none`; invalid values should be rejected before SDK execution. |
 | Prompt optimization | Preserve the raw user task for audit upstream, but pass only the optimized planning prompt into `message_parts` when the turn is a planning task. |
@@ -234,13 +242,15 @@ State side effects:
 | Missing or unauthorized `thread_id` | API route rejects before `assemble_context`. |
 | Invalid session/workspace key | Factory or workspace layer rejects before SDK execution; no context should be persisted. |
 | Empty user text | API route rejects before context assembly. Attachment-only turns must still provide file/source/workspace metadata text. |
-| DB session lookup failure (`get_chat_thread`) | Log warning, set `existing_session = None`; treat as first turn — resume is skipped, no turn failure. |
+| Admin Thread lookup failure | Fail closed before Runtime according to the current resume contract; do not infer a first turn from storage failure. |
 | `_has_usable_claude_resume` returns False | Fall through to `thread_id_for_agent = None` silently; SDK allocates a fresh session. |
 | Local JSONL file missing (`locate_session_file` returns None) | Log warning with `stale_claude_session_id`; set `resume_existing_session = None`; SDK allocates a fresh session; `_persist_turn` will write the new `claude_session_id` to heal the DB row. |
 | `_AGENT_RUNTIME_CONTRACT_VERSION` mismatch | `_has_usable_claude_resume` returns False; fall through to a fresh session. |
 | Workspace initialization failure | Fail the turn before SDK execution; cleanup must leave the state idle and without stale `turn_context`. |
 | Unsupported attachment media | Log and continue with available metadata; do not inject unreadable binary data as text. |
-| `get_system_config` failure | Log warning, use default agent settings, build system prompt without Settings SYSTEM_PROMPT, and keep Workspace Mode enabled by default for backward compatibility. |
+| Admin SystemConfig failure | Propagate before prompt/workspace assembly; do not infer default settings. |
+| Admin recent Session failure | Propagate before Workspace, Runner, CLI and SSE; do not call Dream PostgreSQL or render the empty block. |
+| Successful empty recent Session projection | Render `_No recent entries found._` and continue normal context assembly. |
 | Workspace Mode disabled | Skip full workspace initialization and attachment sync; create only the thread runtime `.claude-tmp`, then continue with `cwd=None` and no workspace context. |
 | Prompt optimizer unavailable | Planning layer should fall back to the raw task or a policy-defined retry path before calling `assemble_context`; this method should not block waiting for optimizer recovery. |
 | Tool confirmation leak | Factory cleanup must cancel pending confirmations and clear `state.turn_context` when the stream ends or disconnects. |
@@ -260,12 +270,14 @@ State side effects:
 
 Coverage should stay focused on the contracts above:
 
-- `ClaudeAgentContextBuilder.build_system_prompt` includes the writing assistant role, recent entries, session count cap, no-session fallback, and DB-error fallback.
+- `ClaudeAgentContextBuilder.build_system_prompt` includes the writing assistant role, supplied recent entries, session count cap, successful-empty fallback, and pure projection-render fallback without importing or calling Dream database helpers.
 - `ClaudeAgentContextBuilder.build_system_prompt(..., configured_system_prompt=...)` renders non-empty Settings SYSTEM_PROMPT inside a lower-priority block and omits the block for empty config.
 - `ClaudeAgentContextBuilder.build_system_prompt` contains the exact `workspace://files/...` example, relative-root rule, forbidden-path list, and no-`<workspace_context>` gate.
 - `build_user_message` preserves block order: image attachments, runtime context, final user text/metadata.
 - `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
-- `assemble_context` passes Settings SYSTEM_PROMPT from `get_system_config` into `build_system_prompt`, and rebuilds the cached prompt when that config changes.
+- `assemble_context` passes Settings SYSTEM_PROMPT from the bound owner into `build_system_prompt`, and rebuilds the cached prompt when that config changes.
+- `assemble_context` calls `recent_sessions` once for the first build and once for a Settings prompt rebuild, but makes no Session call on an unchanged cache hit.
+- Admin recent Session errors propagate before ContextBuilder, Workspace and Runtime; no legacy database helper is invoked.
 - `assemble_context` initializes workspace and passes `cwd` only when `workspace_enabled=true`.
 - When `workspace_enabled=false`, `assemble_context` does not call the full `get_or_create_workspace`, clears `state.cwd`, passes `AgentRunOptions.cwd=None`, and binds `claude_tmp_workspace` to the minimal runtime root.
 - `assemble_context` copies `tool_choice`, `model`, `max_turns` into `AgentRunOptions`.
@@ -273,11 +285,11 @@ Coverage should stay focused on the contracts above:
 - **No-resume path (first turn)**: `run_options.thread_id=None`, `run_options.resume=False` when `existing_session` is absent or `_has_usable_claude_resume` returns False.
 - **File-probe miss**: when `locate_session_file` returns None for a otherwise valid `existing_session`, the method falls back to `thread_id_for_agent=None` and logs a warning.
 - **Contract version mismatch**: when `existing_session.agent_contract_version` differs from `_AGENT_RUNTIME_CONTRACT_VERSION`, resume is skipped.
-- **DB load failure**: when `get_chat_thread` raises, `assemble_context` does not fail the turn; it proceeds as a first turn.
+- **Admin Thread load failure**: when the bound owner cannot read or validate the Thread DTO, `assemble_context` fails before Runtime and does not infer a first turn.
 - `_TurnContext` starts clean each turn and does not reuse confirmation or reasoning state.
-- `_TurnExecution.resume_existing_session` is the DB row when resuming, `None` otherwise.
+- `_TurnExecution.resume_existing_session` is the strict Admin Thread projection when resuming, `None` otherwise.
 - Planning prompt optimization tests should assert that optimized prompt text enters through `message_parts`, while `assemble_context` remains optimizer-agnostic.
-- Failure tests should cover DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
+- Failure tests should cover Admin read failures without DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
 
 ## 10. Implementation Checklist
 
@@ -286,14 +298,14 @@ Coverage should stay focused on the contracts above:
 - [ ] Keep raw user task available upstream for audit or UI comparison.
 - [ ] Build `system_prompt` only through `ClaudeAgentContextBuilder`.
 - [x] Define Workspace Chat file references in that existing system prompt and gate them on `<workspace_context>`. *(2026-08-22)*
-- [x] Load Settings SYSTEM_PROMPT through `get_system_config` and render it as lower-priority configurable guidance. *(2026-06-22)*
-- [ ] Guard recent-session count through `INK_AGENT_CONTEXT_SESSIONS`.
+- [x] Load Settings SYSTEM_PROMPT through the bound Admin turn owner and render it as lower-priority configurable guidance. *(2026-09-15)*
+- [x] Load recent Session DTO projections only on prompt rebuild and guard the rendered count through `INK_AGENT_CONTEXT_SESSIONS`. *(2026-09-15)*
 - [ ] Convert UIMessage parts with `extract_text_from_parts` semantics.
 - [ ] Sync attachments to workspace before context assembly and inject workspace-file parts.
 - [ ] Keep unsupported binary payloads out of prompt text.
 - [ ] Resolve `cwd` without hard-coded local paths.
 - [x] Skip full product workspace initialization and `cwd` injection when `workspace_enabled=false`; retain only thread-local CLI temp ownership. *(2026-08-22)*
-- [x] **Load `chat_thread` row from DB and call `_has_usable_claude_resume` before building `AgentRunOptions`.** *(2026-05-29)*
+- [x] **Load the Thread record through the bound owner and call `_has_usable_claude_resume` before building `AgentRunOptions`.** *(current Admin boundary 2026-09-15)*
 - [x] **Probe local JSONL via `locate_session_file` before committing to `--resume`.** *(2026-05-29)*
 - [x] **Set `run_options.thread_id = thread_id_for_agent` (None on first turn) and `run_options.resume = should_resume`.** *(2026-05-29)*
 - [x] **Carry `resume_existing_session` in `_TurnExecution`.** *(2026-05-29)*

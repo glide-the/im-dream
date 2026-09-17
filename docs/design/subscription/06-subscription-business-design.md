@@ -5,6 +5,7 @@
 > 适用系统：`ink-admin-memory`、`ink-dream-memory`、PostgreSQL `ink-memory`
 > 配套文档：`../model-service/07-model-service-integration-design.md`
 > 文档性质：最终产品方案与代码级设计；本稿不实现业务代码
+> 现行同步：2026-09-16 Dream Product BFF 复用 Admin OAuth principal，Product 数据与主体有效性复核均由 Admin 持有。
 
 ## 术语与概念定义
 
@@ -28,7 +29,7 @@
 | Subscription Event | 记录创建、升级、降级、暂停、恢复、取消等生命周期事实的 append-only 事件 | 不允许 UPDATE/DELETE；重复命令由幂等键合并 |
 | Free provision | 为符合条件的 canonical user 创建默认 Free Subscription、Allowance 和 Event 的单事务操作 | 新用户触发和历史 backfill 复用同一函数 |
 | backfill | 对历史 canonical user 扫描并只补齐缺失 Free 资格的数据作业 | 必须幂等；不得覆盖已有订阅、Usage、Ledger 或 Event |
-| Product API | Admin 提供给 Dream BFF 的套餐、订阅上下文、Usage 和生命周期命令接口 | 只返回当前 signed subject 的安全产品投影 |
+| Product API | Admin 提供给 Dream BFF 的套餐、订阅上下文、Usage 和生命周期命令接口 | 只返回当前 Admin OAuth subject 的安全产品投影；不接受 caller user ID |
 | BFF | Backend for Frontend；Dream 浏览器访问的同源 FastAPI 服务边界 | 持有服务端凭据、校验 Admin DTO、映射安全错误 |
 | Payment Intent | 对一次待完成商业动作的服务端状态记录 | `requires_action/processing` 不代表支付成功 |
 | `expectedVersion` | Subscription 命令携带的乐观并发版本 | 与当前 `subscriptions.version` 不同返回 409 |
@@ -54,7 +55,7 @@
 
 - **Dream 普通用户：** 查看当前套餐、周期 Token 状态和 Admin 发布的可选套餐，发起当前允许的订阅动作。
 - **Admin 操作者：** 使用独立 Admin Session 与 permission 管理 Plan Identity、draft Plan Version、Entitlement、发布和 Subscription 运营。
-- **服务身份：** Dream BFF 使用 server-only credential 和由当前 Session 派生的 signed canonical subject 调用 Admin Product API。
+- **用户委托身份：** Dream BFF 从 opaque Browser handle 解析 Admin OAuth access token。读取要求 `product:read`，写入要求 `product:write`；Dream 只转发该 bearer，不签发 Product JWT，也不在请求 DTO、查询或自定义身份头中发送 canonical user ID。Admin 从 token subject 重新解析 canonical/platform identity。
 
 ### 2.2 本次范围
 
@@ -375,7 +376,8 @@ Dream 不根据 code 生成名称、价格、推荐、Token 或权益。当前�
 
 ### 9.2 BFF 规则
 
-- 从 Session 取得 canonical user；body/query 中不允许 user override。
+- 从共享 Admin OAuth principal 取得 canonical user；body/query/header 中不允许 user override。
+- Dream Product composition 不创建 PostgreSQL pool、不查询 `users`，也不在 Admin 不可用时回退数据库；Admin Product API 在 ORM 查询前再次校验 signed subject 的 active canonical/platform identity。
 - Pydantic DTO 使用 strict 与 `extra='forbid'`；整数不超过 JS safe integer。
 - 未知字段、缺字段、守恒冲突或枚举未知返回 Dream 502。
 - 连接/timeout 映射 503；安全 4xx 保留状态；不透传 Admin 原 body。
@@ -636,6 +638,8 @@ flowchart LR
 |---|---|
 | `backend/services/admin_product/models.py` | strict Pydantic DTO |
 | `backend/services/admin_product/client.py` | signed subject、deadline、安全错误 |
+| `backend/services/admin_product/service.py` | Admin principal 主体边界；不访问数据库 |
+| `backend/services/admin_product/runtime.py` | 仅组合 Admin HTTP client；不创建 PostgreSQL pool |
 | `backend/routers/product.py` | same-origin BFF、身份防覆盖 |
 | `frontend/app/_dream/api/productApi.ts` | strict Zod、API client |
 | `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceSubscription.ts` | query key、invalidate、命令状态机 |

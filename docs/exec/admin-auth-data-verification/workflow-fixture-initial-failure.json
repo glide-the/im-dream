@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-workflow-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 1,
+  "output": "WORKFLOW FIXTURE FAILED: 55000; sanitized diagnostic saved\n",
+  "classification": "primary-owned isolated fixture and public active grant setup"
+}

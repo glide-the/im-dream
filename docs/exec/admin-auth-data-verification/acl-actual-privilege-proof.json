@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "database": "ink_auth_data_codex_test_792494523a17_acl56",
+  "roles": [
+    {
+      "role": "auth",
+      "label": "protocol read",
+      "status": "allowed"
+    },
+    {
+      "role": "auth",
+      "label": "controlled registration execute",
+      "status": "denied",
+      "sqlstate": "23514"
+    },
+    {
+      "role": "auth",
+      "label": "direct canonical write",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "auth",
+      "label": "legacy password read",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "auth",
+      "label": "subscription mutation",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "auth",
+      "label": "Dream history read",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "public verification key read",
+      "status": "allowed"
+    },
+    {
+      "role": "data",
+      "label": "Auth signing private key",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "OAuth refresh secret",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "canonical insert",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "Provider credential read",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "Billing ledger mutation",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "Gateway credential hash",
+      "status": "denied",
+      "sqlstate": "42501"
+    },
+    {
+      "role": "data",
+      "label": "Dream owned table capability",
+      "status": "allowed"
+    },
+    {
+      "role": "control",
+      "label": "RBAC table access",
+      "status": "allowed"
+    },
+    {
+      "role": "dream",
+      "label": "Database CONNECT",
+      "status": "denied",
+      "sqlstate": "42501"
+    }
+  ],
+  "dream_access": {
+    "connect": false,
+    "identity_usage": false,
+    "thread_read": false,
+    "registration_execute": false
+  },
+  "normal_database": "untouched"
+}

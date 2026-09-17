@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "documents": 4,
+  "source_unchanged": true,
+  "prior_foreign_owned_index_exec_preserved": true,
+  "backup": "/private/tmp/ink-own-launch-workspace-doc-sync-ucb9wuii",
+  "sha256": {
+    "docs/stage/.folder.md": "15e7d5fd9fd462e330a41356a9451eb903fe5988c792cccd791d406e8488752a",
+    "docs/stage/stage_admin-dream-launch-component-validation.md": "98b99d27ae7014c387030c44cbdce4080829fc7c39b8fec748db737249acde89",
+    "docs/stage/stage_admin-default-workspace-domain.md": "eb7ac41a37aa432d248b2ccc53c6857ccb8eb6205d0d9216ffb82dfd5b66fa01",
+    "docs/exec/exec_admin-auth-data-coordination.md": "ff92f35dd27cf4b7575d349e87d4bdec6a50e1a9302b93e576acfb39a30c687d"
+  },
+  "staging_commits_cleanup": false
+}

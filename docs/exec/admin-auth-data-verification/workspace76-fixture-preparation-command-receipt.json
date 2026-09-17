@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-workspace76-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "exit_code": 1,
+  "output": "Workspace76 preparation failed at public-ordinary-grant; private diagnostics retained\n",
+  "scope": "primary isolated new fixtures; no normal account/provider/model"
+}

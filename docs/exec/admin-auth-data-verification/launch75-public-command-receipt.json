@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminDreamLaunch.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "exit_code": 1,
+  "output": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Unexpected public original status\n    at equal (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunch.contract.ts:96:69)\n    at checkOriginals (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunch.contract.ts:158:49)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <anonymous> (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunch.contract.ts:255:22) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v26.4.0\n",
+  "scope": "public production source/claim/finish on owned isolated technical target; no full Runtime/Google/normal business"
+}

@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-receipt-permission-contract.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"target\":\"ink_auth_data_codex_test_792494523a17_preflight61\",\"scope\":\"previous complete tail only; no accepted execute\",\"assertions\":11,\"other_actor\":\"absent\",\"read_only\":403,\"thread_grant\":403,\"actor_selector\":400,\"normal_database\":\"untouched\"}\n"
+}

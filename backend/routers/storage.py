@@ -6,16 +6,15 @@
 # [Sync] 2026-07-21: storage auth also accepts login cookies and a ?token= query
 #                    param so browser-embedded file URLs (<img src>, download links)
 #                    that cannot send Authorization headers no longer get 401.
+# [Sync] 2026-09-14: authenticate only Admin bearer injected by same-origin BFF; remove query/cookie/local renewal authority.
 
 import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Request, UploadFile
 from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-import auth
 from libs.file_storage import (
     UploadOptions,
     UploadUrlOptions,
@@ -28,7 +27,7 @@ from libs.file_storage import (
 )
 from libs.file_storage.interface import FileNotFoundError as StorageFileNotFoundError
 
-from .deps import apply_token_renewal, http_bearer
+from .deps import get_current_user
 
 router = APIRouter()
 
@@ -50,23 +49,7 @@ class UploadUrlRequest(BaseModel):
     contentType: Optional[str] = None
 
 
-def _require_storage_auth(
-    request: Request,
-    response: Response,
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
-) -> dict:
-    token = credentials.credentials if credentials else None
-    if not token:
-        token = request.cookies.get("access_token") or request.cookies.get("token")
-    if not token:
-        # Browser-embedded file URLs (<img src>, <a href download>) cannot set
-        # Authorization headers, so accept the token as a query parameter.
-        token = request.query_params.get("token")
-    user_data = auth.verify_access_token(token) if token else None
-    if not user_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    apply_token_renewal(request, response, user_data)
-    return user_data
+_require_storage_auth = get_current_user
 
 
 def _validate_content_type(provided_type: str, filename: str) -> str:

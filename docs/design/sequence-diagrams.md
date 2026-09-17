@@ -1,9 +1,27 @@
+<!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity. -->
+<!-- [Sync] 2026-09-15: route current-user picture history reads through Admin Registry103. -->
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
+<!-- [Sync] 2026-09-15: index current Voice mutation design separately from retained Deck/Voice legacy flows. -->
+<!-- [Sync] 2026-09-15: replace social flows with Admin while preserving the original in history. -->
+<!-- [Input] Module business flows, current Admin consumers and byte-preserved pre-migration sequence source. -->
+<!-- [Output] Module flow reference with explicit current ownership and retained migration dependencies. -->
+<!-- [Pos] Sequence index; focused current designs own authentication, Session, Deck, preferences and social rules. -->
+<!-- [Sync] 2026-09-15: public user preferences use Admin; retain original whole source in history. -->
+
+认证/Session/Deck的现行程序行为以[Admin交互](../architecture/admin-auth-data-interaction.md)和各功能稿为准；本稿其余尚未更新的旧issuer/直接SQL说明仅是迁移依赖，不作为现行规范。[原十模块时序原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)字节保持；用户偏好正常、状态、失败和验收见[现行稿](user-preferences-current.md)。
+
+Voice四公开mutation的现行正常、状态、失败与验收见[Voice CRUD现行稿](voice-crud-current.md)；下方模块8尚未更新的直接SQL只保留迁移依赖与历史流程。
+
 <!-- [Input] Current Next.js Dream Web modules and Python business routes/services. -->
 <!-- [Output] Current cross-module business sequence diagrams. -->
 <!-- [Pos] Design-level sequence index; domain details remain in their focused documents. -->
 <!-- [Sync] 2026-09-06: replace the retired Vite frontend label with the sole Next.js app/_dream source boundary. -->
 <!-- [Sync] 2026-09-01: replace debounced random-Voice inspiration with manual persistent Suggestion Cells on one Session-owned Claude Thread. -->
 <!-- [Sync] 2026-08-31: replace daily-picture generation with historical read-only Timeline access and remove its scheduler/runtime. -->
+
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Ink & Memory — 业务功能模块时序图
 
@@ -117,6 +135,7 @@ sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant Hook as useSessionLifecycle
+    participant Admin as Admin DTO/Service/Repository
     participant API as Backend API
     participant DB as database.py
 
@@ -141,8 +160,11 @@ sequenceDiagram
     end
 
     Hook->>API: GET /api/preferences
-    API->>DB: get_preferences(user_id)
-    DB-->>API: 用户偏好（voice_configs, meta_prompt 等）
+    API->>Admin: user-preferences.get + current OAuth + original UUID
+    Admin->>DB: identity/unified/owner校验后读取原配置
+    DB-->>Admin: raw config JSON/nullable字段/微秒时间
+    Admin-->>API: closed preferences DTO
+    API->>API: raw JSON还原voice_configs/state_config，无SQL
     API-->>Hook: preferences
     Hook->>FE: 渲染编辑器
     FE-->>User: 显示今日会话内容
@@ -309,30 +331,32 @@ sequenceDiagram
 
 ## 7. 历史图片读取模块
 
-Timeline 只读取并展示数据库中已保留的历史图片，不提供生成、重绘或保存入口。
+Timeline 只读取并展示Admin中已保留的当前用户历史图片，不提供生成、重绘或保存入口。普通列表与范围列表共享`picture-history.list`；全尺寸读取使用`picture-history.full`。Dream验证日期与limit，Admin从OAuth principal确定owner并执行排序、范围过滤和图片选择。完整规则见[当前用户图片历史](picture-history-current.md)。
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant API as GET /api/pictures/range
-    participant DB as database.py
+    participant Admin as Admin picture-history
     participant FullAPI as GET /api/pictures/{date}/full
 
     User->>FE: 打开 Timeline
     FE->>API: GET /api/pictures/range?start_date&end_date
-    API->>DB: get_daily_pictures_range(user_id, ...)
-    DB-->>API: 历史缩略图
+    API->>Admin: picture-history.list(start_date, end_date, limit)
+    Admin-->>API: owner历史缩略图或原图fallback
     API-->>FE: {pictures: [...]}
     FE-->>User: 展示历史图片
 
     User->>FE: 点击历史缩略图
     FE->>FullAPI: GET /api/pictures/{date}/full
-    FullAPI->>DB: get_daily_picture_full(user_id, date)
-    DB-->>FullAPI: full_image_base64
+    FullAPI->>Admin: picture-history.full(date)
+    Admin-->>FullAPI: 同日最新full_image_base64或null
     FullAPI-->>FE: {image_base64}
     FE-->>User: 展示全尺寸图片
 ```
+
+日期非法由Dream返回固定400；full结果为null或空字符串时保持`404 Picture not found for this date`。OAuth、权限、capability、Admin传输与DTO错误保持失败，不回退Dream数据库。普通列表把null prompt映射为空字符串，范围列表保留nullable prompt。
 
 ---
 
@@ -418,73 +442,55 @@ sequenceDiagram
 
 ## 9. 好友系统模块
 
-### 9.1 生成邀请码 & 接受好友请求
+正常流程、状态、失败及验收以[现行稿](social-friendship-current.md)为准；旧SQL/锁缺口说明见已保留的[原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)。
+
+### 9.1 生成邀请码与处理申请
 
 ```mermaid
 sequenceDiagram
-    actor UserA as 用户 A（邀请方）
-    actor UserB as 用户 B（被邀请方）
-    participant FE_A as Frontend A
-    participant FE_B as Frontend B
-    participant API as Backend API
-    participant DB as database.py
-
-    UserA->>FE_A: 点击「生成邀请码」
-    FE_A->>API: POST /api/friends/invite/generate
-    API->>DB: generate_invite_code(user_id_A)
-    Note over DB: 生成 6 位码，有效期 7 天
-    DB-->>API: {code, expires_at}
-    API-->>FE_A: 邀请码
-    FE_A-->>UserA: 显示邀请码
-
-    UserA->>UserB: 分享邀请码（线下/其他渠道）
-
-    UserB->>FE_B: 输入邀请码并提交
-    FE_B->>API: POST /api/friends/invite/use {code}
-    API->>DB: use_invite_code(code, user_id_B)
-    Note over DB: 验证码有效性，创建 pending 好友请求
-    DB-->>API: {success, request_id}
-    API-->>FE_B: 好友请求已发送
-
-    UserA->>FE_A: 打开好友请求列表
-    FE_A->>API: GET /api/friends/requests
-    API->>DB: get_friend_requests(user_id_A)
-    DB-->>API: [{request_id, from_user, status: "pending"}]
-    API-->>FE_A: 好友请求列表
-
-    UserA->>FE_A: 点击「接受」
-    FE_A->>API: POST /api/friends/requests/{request_id}/accept
-    API->>DB: accept_friend_request(request_id, user_id_A)
-    Note over DB: 更新 friendship status = 'accepted'
-    DB-->>API: {success}
-    API-->>FE_A: 好友关系已建立
+    actor A as 邀请方
+    actor B as 申请方
+    participant F as Dream Browser/BFF
+    participant D as Dream public routes/DTO client
+    participant P as Admin OAuth/domain/Drizzle
+    A->>F: 生成邀请码
+    F->>D: POST /api/friends/invite/generate
+    D->>P: 当前OAuth + service credential + UUID
+    P->>P: server policy生成code/expiry，事务回执
+    P-->>A: 原code/expires_at
+    A->>B: 线下分享code
+    B->>D: POST /api/friends/invite/use {code}
+    D->>P: exact UseInviteDTO + 当前OAuth + UUID
+    P->>P: 邀请码/pair锁、权限与状态检查
+    P->>P: pending + used_by/used_at + 原receipt同TX
+    P-->>D: closed success/result 或原业务error
+    D-->>B: 原整数ID/label或400 detail
+    A->>D: GET requests；POST request accept/reject
+    D->>P: 当前recipient OAuth + target requestID + UUID
+    P->>P: pair/行锁，pending只一个状态转换
+    P-->>A: 原success或400 detail
 ```
 
-### 9.2 查看好友时间线
+### 9.2 查看历史图片
 
 ```mermaid
 sequenceDiagram
-    actor User as 用户
-    participant FE as Frontend (FriendsView)
-    participant API as Backend API
-    participant DB as database.py
-
-    User->>FE: 点击某好友，查看其时间线
-    FE->>API: GET /api/friends/{friend_id}/timeline?limit=30
-    API->>DB: get_friend_timeline(user_id, friend_id, limit)
-    Note over DB: 校验双方为好友关系，获取缩略图列表
-    DB-->>API: [{date, thumbnail_base64, prompt}, ...]
-    API-->>FE: {pictures: [...]}
-    FE-->>User: 展示好友时间线缩略图
-
-    User->>FE: 点击某张缩略图，查看原图
-    FE->>API: GET /api/friends/{friend_id}/pictures/{date}/full
-    API->>DB: get_friend_picture_full(user_id, friend_id, date)
-    Note over DB: 再次校验好友关系后返回全图
-    DB-->>API: full_image_base64
-    API-->>FE: {image_base64}
-    FE-->>User: 展示全尺寸图片
+    actor U as 用户
+    participant D as Dream public routes/DTO client
+    participant P as Admin domain/Drizzle
+    U->>D: GET /api/friends/{friend_id}/timeline?limit=30
+    D->>P: current OAuth + decimal friendID + limit
+    P->>P: accepted关系检查，thumbnail/image fallback排序
+    P-->>D: pictures列表或null
+    D-->>U: 原图片字段或403
+    U->>D: GET /api/friends/{friend_id}/pictures/{date}/full
+    D->>P: current OAuth + friendID/date
+    P->>P: 再检查accepted关系与指定图片
+    P-->>D: image_base64或null/empty
+    D-->>U: 原全图wrapper或404
 ```
+
+写unknown只查同operation原UUID的receipt，absent不证明rollback或触发新写；其它模块旧流程仍是明确迁移依赖。
 
 ---
 
@@ -555,3 +561,5 @@ graph TB
     Backend --> Storage
     Backend --> External
 ```
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream pure projector保留empty text、解析合法JSON并把非法非空JSON映射为null，读取不heal或写库。无read retry或DB fallback。详见[Deck详情现行规则](deck/deck-detail-version-history.md)。

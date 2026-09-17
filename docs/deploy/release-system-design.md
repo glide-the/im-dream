@@ -5,6 +5,7 @@
 
 <!-- [Sync] 2026-08-31: replace deleted models.json deployment ownership with the Admin Gateway catalog. -->
 <!-- [Sync] 2026-09-06: archive this pre-Next/pre-PostgreSQL design as historical input and point operators to the current deploy index. -->
+<!-- [Sync] 2026-09-16: record final retirement of the executable Google Cloud SQLite sync path. -->
 
 > **历史设计，不是当前操作手册。** 本文保留了当时的 Vite/npm/nginx/SQLite/GCS 判断和脚本改造过程。当前 frontend 事实是 Next.js 16 + pnpm workspace，Dream 应用源码唯一位于 `frontend/app/_dream/**`，共享业务数据由 Admin PostgreSQL/Drizzle 管理。发布人员必须从 [当前发布文档入口](README.md) 开始，不得直接执行本文的旧命令或数据步骤。
 
@@ -453,7 +454,7 @@ deploy/
 | `deploy/remote-ssh/sync-data.sh` | 已收敛为 `backup` / `upload` / `download` 三个数据维护动作；`upload` 先备份远端数据、上传本地 `backend/data/`，再执行 Compose `up -d --force-recreate` 让后端重新加载数据库；`download` 先备份本地数据再覆盖同步远端目录 | 已完成 |
 | `setup-env.sh` | 重做 secret 分类：API key、token、JWT、Mem0 key 等进 Secret Manager；路径、TTL、模型名、开关作为普通 env | 高 |
 | `setup-env.sh` | 不再把所有非 secret `.env` key 盲目透传，改为 allowlist 或带敏感名检测 | 高 |
-| `deploy/google-cloud/sync-data.sh` | 已明确自动脚本只同步 SQLite/WAL/SHM，并过滤旧 `.cloud-env` 中的 `INK_CORS_*` 后写回固定前端域名；根路径 `deploy/sync-data.sh` 仅兼容委托；后续可增加 `file-storage/`、`agent-workspace/` 同步选项 | 部分完成 |
+| `deploy/google-cloud/sync-data.sh` | 已退役为fail-closed兼容入口，不再同步SQLite/WAL/SHM或重启Cloud Run；根路径`deploy/sync-data.sh`继续委托并得到同一拒绝。共享文件由独立文件系统拓扑维护 | 已完成 |
 | `deploy/google-cloud/setup-storage.sh` | 已归位到 Google Cloud 平台目录，结束提示路径为 `./deploy/google-cloud/deploy.sh deploy`；根路径 `deploy/setup-storage.sh` 仅兼容委托 | 已完成 |
 | `deploy.sh` | 根路径保留旧入口，委托 `deploy/google-cloud/deploy.sh deploy`；`IMAGE_TAG` 由平台脚本覆盖，默认仍可用 `latest` | 已完成 |
 | `docker-compose.yml` | 端口、`API_BASE_URL`、`BACKEND_URL` 保持默认，但文档说明如何覆盖 | 中 |

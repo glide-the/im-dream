@@ -1,6 +1,6 @@
 # [Input] Notion connector router and facade wiring for the business flow.
 # [Output] Exercise create → auth → resources → sync through the real router,
-#          PostgreSQL repository, pure transactional fake, and mocked CLI.
+#          Admin DTO client, provider-free Admin boundary, and mocked CLI.
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-04: route-level business flow coverage for Notion connector
 #                    create/auth/discovery/selection/sync.
@@ -20,6 +20,7 @@
 # [Sync] 2026-08-30: expose ntn installation metadata and connected Agent CLI availability.
 # [Sync] 2026-09-01: expose schema v5's archive-backed diary Skill and its
 #                    canonical Read+Bash tool boundary through read-only routes.
+# [Sync] 2026-09-16: route persistence through the Admin DTO/ORM service contract.
 
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -46,16 +48,22 @@ from notion import store as notion_store
 from notion import sync as notion_sync
 from notion.errors import NotionPermissionError
 from notion.credentials import NotionCredentialStore
-from notion_postgres_fake import build_fake_notion_store
+from notion_admin_fake import build_notion_admin_boundary
 from routers import notion as notion_router
 
 
 class TestNotionConnectorRouterFlow(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self._store, self._database, self._pool = build_fake_notion_store(users={7})
+        (
+            self._owner,
+            self._actor,
+            self._admin_state,
+            self._store,
+            self._background_store,
+        ) = build_notion_admin_boundary()
         notion_store.close_default_store()
-        notion_store.open_default_store(store=self._store)
+        notion_store.open_default_store(store=self._background_store)
         self._credential_runtime_root = Path(self._tmp.name) / "agentdata" / "notion-runtime"
         self._env_patcher = patch.dict(
             os.environ,
@@ -104,8 +112,15 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             patcher.start()
 
         app = FastAPI()
+        app.state.admin_request_auth = self._owner
         app.dependency_overrides[notion_router.get_current_user] = (
-            lambda: {"user_id": 7, "email": "board@example.com"}
+            lambda: {
+                **self._actor.current_user_projection(),
+                "email": "board@example.com",
+            }
+        )
+        app.dependency_overrides[notion_router.get_admin_request_auth] = (
+            lambda: self._owner
         )
         app.include_router(notion_router.router)
         self.client = TestClient(app)
@@ -116,6 +131,7 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         for patcher in reversed(self._patches):
             patcher.stop()
         notion_store.close_default_store()
+        self._owner.close()
         self._env_patcher.stop()
         self._tmp.cleanup()
 
@@ -654,7 +670,7 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         )
         self.assertEqual(first_poll.json()["auth_status"], "authenticated")
 
-        notion_store.update_connector(
+        self._store.update_connector(
             connector_id,
             7,
             {"auth_status": "expired"},
@@ -756,8 +772,16 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             headers={"Authorization": "Bearer test-token"},
         )
         connector_id = create_response.json()["connector"]["id"]
+        other_actor = replace(
+            self._actor,
+            canonical_user_id="8",
+            access_token="other-notion-oauth-token",
+        )
         self.client.app.dependency_overrides[notion_router.get_current_user] = (
-            lambda: {"user_id": 8, "email": "other@example.com"}
+            lambda: {
+                **other_actor.current_user_projection(),
+                "email": "other@example.com",
+            }
         )
 
         response = self.client.get(

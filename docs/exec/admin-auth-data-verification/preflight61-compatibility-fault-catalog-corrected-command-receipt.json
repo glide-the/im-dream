@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-selected-faults.mts compatibility",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "case": "compatibility",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"mode\": \"compatibility\",\n  \"public_operation\": \"workflow-preflight.execute\",\n  \"assertions\": 22,\n  \"request_id\": \"pf_fault_5819965b69ee45b2a2f6fa7aa96561a3\",\n  \"status\": \"failed\",\n  \"failed_check\": \"host_agent_runtime_compatibility\",\n  \"error_code\": \"CLAUDE_AGENT_INCOMPATIBLE\",\n  \"audit\": {\n    \"stages\": 2,\n    \"audits\": 1\n  },\n  \"source_full_projection\": \"equal\",\n  \"snapshot_delta\": 0,\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\",\n  \"private_keys_exported\": false\n}\n"
+}

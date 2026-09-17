@@ -1,4 +1,4 @@
-# [Input] None - consumes caller-provided partition memory_workspace_config.
+# [Input] Caller-provided partition memory_workspace_config; this module performs no data lookup.
 #          Prompt template files are sourced exclusively from partition config.
 # [Output] Provide init_memory_workspace to the workspace file-interface route,
 #          and get_memory_context_block to claude_agent/context_builder.py.
@@ -8,6 +8,7 @@
 # [Sync] 2026-06-06: all five core prompt files now come from the partition config
 #                    table; removed project .claude/memory/ fallback and long-term
 #                    summary starter creation. Memory workspace is procedural-only.
+# [Sync] 2026-09-16: remove the retired Dream database lookup example; callers must pass an Admin-derived DTO projection.
 
 """Memory Workspace manager for Claude Agent session directories.
 
@@ -45,8 +46,8 @@ Usage::
     )
 
     workspace = get_or_create_workspace(session_id)
-    memory_config = database.get_voice_memory_config_by_thread(thread_id)
-    init_memory_workspace(workspace, memory_config)  # /api/workspace/memory-init
+    memory_config = admin_voice_snapshot.memory_workspace_config
+    init_memory_workspace(workspace, memory_config)
     block = get_memory_context_block(workspace)
 """
 from __future__ import annotations

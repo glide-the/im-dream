@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "scope": "complete contract last permission/forbidden-actor block only; no accepted execution",
+  "original_fixtures": "unchanged",
+  "private_key_exported": false,
+  "normal_database": "untouched"
+}

@@ -9,6 +9,7 @@
 [Sync] 2026-08-25: stage SDK client registration until tokens exist so a cancelled first login cannot persist a credential-shaped partial document.
 [Sync] 2026-08-25: give interactive SDK discovery the OAuth timeout and direct cancellation ownership.
 [Sync] 2026-08-25: persist SDK-discovered authorization metadata inside the encrypted token document so reconstructed providers refresh through the discovered token endpoint.
+[Sync] 2026-09-16: replacement authorization ignores the old envelope until a new token exchange atomically overwrites it.
 """
 
 from __future__ import annotations
@@ -59,11 +60,14 @@ class EncryptedMcpTokenStorage(TokenStorage):
         *,
         actor_id: str,
         server_id: str,
+        replacement_mode: bool = False,
     ) -> None:
         self.repository = repository
         self.cipher = cipher
         self.actor_id = actor_id
         self.server_id = server_id
+        self.replacement_mode = replacement_mode
+        self._replacement_committed = False
         self._lock = asyncio.Lock()
         self._pending_client_info: dict[str, Any] | None = None
         self._oauth_context: Any | None = None
@@ -74,6 +78,8 @@ class EncryptedMcpTokenStorage(TokenStorage):
         self._oauth_context = context
 
     async def _document(self) -> dict[str, Any]:
+        if self.replacement_mode and not self._replacement_committed:
+            return {}
         record = await self.repository.get_credential(self.actor_id, self.server_id)
         if record is None:
             return {}
@@ -144,6 +150,8 @@ class EncryptedMcpTokenStorage(TokenStorage):
                 envelope=envelope,
                 expires_at=expires_at,
             )
+            if key == "tokens":
+                self._replacement_committed = True
             if key == "tokens":
                 self._pending_client_info = None
 
@@ -324,6 +332,7 @@ class ManagedMcpOAuthCoordinator:
                 self.cipher,
                 actor_id=actor_id,
                 server_id=server.id,
+                replacement_mode=True,
             )
             provider = OAuthClientProvider(
                 server.remote_url,

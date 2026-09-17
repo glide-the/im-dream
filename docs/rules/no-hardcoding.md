@@ -1,6 +1,7 @@
 # No Hardcoding Rule
 
 <!-- [Sync] 2026-09-06: resolve all Dream frontend configuration owners from frontend/app/_dream. -->
+<!-- [Sync] 2026-09-16: assign database/schema configuration to Admin Drizzle and typed DTO clients. -->
 
 ## Mandatory
 
@@ -11,7 +12,7 @@
 ## Global-First Search Order
 
 1. Environment variables, deployment config, and the Admin-owned model catalog.
-2. Backend central modules: `backend/config.py`, `backend/auth.py`, `backend/database.py`, and the focused service owner.
+2. Backend central modules: `backend/config.py`, `backend/auth.py`, `backend/services/admin_data/`, and the focused service owner.
 3. Frontend central modules: `frontend/app/_dream/constants/storageKeys.ts`, `frontend/app/_dream/i18n.ts`, `frontend/app/_dream/api/voiceApi.ts`, and shared utils under `frontend/app/_dream/utils/`.
 4. Prompt assets under `backend/prompts/`.
 5. API contract documentation in `backend/API.md` and behavioral notes under `docs/`.
@@ -25,5 +26,5 @@
 - Auth token handling belongs in `frontend/app/_dream/contexts/AuthContext.tsx`, `frontend/app/_dream/api/voiceApi.ts`, and `backend/auth.py`.
 - Model aliases and callability belong in the Admin catalog; Dream-owned credentials and endpoint overrides belong in their focused environment/config owner.
 - Voice persona prompt text belongs in `backend/prompts/*.md`; route handlers and Claude Agent services should load or reference prompt definitions instead of embedding long prompt strings.
-- Database schema and persistence behavior belong in `backend/database.py`; avoid duplicating SQL table names or storage serialization rules in unrelated modules.
+- Database schema, ORM repositories and transactions belong in Admin Drizzle/services; Dream uses named strict DTO operations and must not duplicate SQL table names or storage serialization rules.
 - API request/response shapes should match `backend/API.md` and the route/Pydantic contracts in `backend/server.py`; update docs when the contract changes.

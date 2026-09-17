@@ -1,0 +1,11 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 60,
+  "setup_assertions": 5,
+  "roles": "restricted AUTH/DATA, owner named fixture/verification only",
+  "public_grant": "actual owned Thread no Run context",
+  "fixture": "ready/error metadata and retired/disabled/owned Voice relations only; no real artifact/CLI/provider/model",
+  "normal_database": "untouched"
+}

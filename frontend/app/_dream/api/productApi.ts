@@ -1,10 +1,12 @@
-// [Input] Six same-origin Dream Product BFF routes, the Admin Product plan-state contract, and the current Dream auth token.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Six same-origin Dream Product BFF routes, the Admin Product plan-state contract, and the current Browser session.
 // [Output] Strict Token-only subscription, usage, model, and command contracts.
 // [Pos] Sole browser transport boundary for the Dream monthly Token subscription experience.
 // [Sync] 2026-08-13: align unavailable published-plan parsing with the Admin/Dream configuration-incomplete contract.
 
 import { z } from 'zod';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export const PRODUCT_BFF_ENDPOINTS = {
@@ -427,7 +429,7 @@ export type ProductCommand = PreviewProductCommand | ExecuteProductCommand;
 
 export interface ProductRequestOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
   resolveUrl?: (path: string) => string;
 }
@@ -491,10 +493,10 @@ function contractError(): ProductApiError {
   });
 }
 
-function requestHeaders(hasBody: boolean, tokenOverride: string | null | undefined): Headers {
+function requestHeaders(hasBody: boolean, csrfTokenOverride: string | null | undefined): Headers {
   const headers = new Headers({ Accept: 'application/json' });
-  const token = tokenOverride === undefined ? getAuthToken() : tokenOverride;
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = csrfTokenOverride === undefined ? getBrowserCsrfToken() : csrfTokenOverride;
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   if (hasBody) headers.set('Content-Type', 'application/json');
   return headers;
 }
@@ -516,7 +518,7 @@ async function requestProduct<T>(
   init: RequestInit = {},
 ): Promise<T> {
   let response: Response;
-  const headers = requestHeaders(init.body !== undefined, options.token);
+  const headers = requestHeaders(init.body !== undefined, options.csrfToken);
   new Headers(init.headers).forEach((value, key) => headers.set(key, value));
   try {
     response = await (options.fetchImpl ?? fetch)(
@@ -615,7 +617,7 @@ export function createProductPaymentIntent(
   if (!/^[A-Za-z0-9._~-]{8,128}$/.test(options.idempotencyKey)) {
     throw new TypeError('Payment intents require a valid idempotency key.');
   }
-  const headers = requestHeaders(true, options.token);
+  const headers = requestHeaders(true, options.csrfToken);
   headers.set('Idempotency-Key', options.idempotencyKey);
   return requestProduct(
     PRODUCT_BFF_ENDPOINTS.paymentIntents,
@@ -679,7 +681,7 @@ export function submitProductSubscriptionCommand(
   if (command.phase === 'execute' && !/^[A-Za-z0-9._~-]{8,128}$/.test(options.idempotencyKey ?? '')) {
     throw new TypeError('Execute commands require a valid idempotency key.');
   }
-  const headers = requestHeaders(true, options.token);
+  const headers = requestHeaders(true, options.csrfToken);
   if (command.phase === 'preview') {
     return requestProduct(PRODUCT_BFF_ENDPOINTS.commands, commandPreviewEnvelopeSchema, options, {
       method: 'POST',

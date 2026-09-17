@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-09-15: close the internal Story output REST path through Registry109. -->
+<!-- [Sync] 2026-09-15: standalone Story proposals use Registry109 DTO/ORM persistence and preserve Runtime/SSE/filesystem behavior. -->
 # Claude Agent 架构文档
 <!--
 [Input] Claude Agent application/kit runtime, SDK/CLI contracts, and deployment configuration.
@@ -8,7 +10,15 @@
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
+
+[Sync] 2026-09-15: public Thread resume and SDK Session writes use the bound server owner; unknown recovery covers its user/session commands.
+[Sync] 2026-09-15: first/rebuilt Agent prompts read recent Session projections through the same turn owner; Admin/read-contract failures stop before Workspace, Runtime and SSE.
+[Sync] 2026-09-15: atomic user reservation uses a server-only purpose grant; Factory owns renewal and terminal/cancel cleanup.
+[Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
+[Sync] 2026-09-16: Story Workspace stdio reads the current WorkflowRun through the turn-owned Admin DTO broker and retains only filesystem writes.
+[Sync] 2026-09-16: all production Agent persistence now uses Admin DTO/ORM operations; the prior remaining-DB note is implementation history, while real account/model acceptance remains separate.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
+[Sync] 2026-09-14: resource policy/observer composition consumes strict Admin APIs; LKG and runtime semantics remain unchanged.
 [Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
 -->
 
@@ -17,6 +27,9 @@
 作为 Voice/Writing/Chat 的单一 Thread SSE Agent runtime，不依赖第二套会话注册表。
 
 ---
+
+
+公开成功turn完成assistant持久化后，Dream解析standalone Story proposal并调用Registry109；内部Story输出REST入口也通过当前OAuth actor调用同一严格DTO consumer。Admin在单一事务保存Story图、回执和审计；未知响应只查询原request回执且不重发。两条入口都不回退Dream PostgreSQL；Runtime、SSE、turn/resume/cancel与共享文件系统协议不变。
 
 ## 1. 目录结构
 
@@ -98,6 +111,18 @@ ThreadFactory (thread_factory.py)
 
 ---
 
+<!-- [Sync] 2026-09-16: confirmation dispatcher now injects a claim-bound Admin turn owner. -->
+
+### 当前 Admin user-turn 持久化边界
+
+公开Chat在返回SSE前读取Admin Workflow上下文，创建绑定actor、Thread与当前Run的server-persistence委托，并原子预留user message和缺失title。Admin执行原stored confirmation guard，Dream只保留原文本投影和raw JSON词法。Service复用已确认相同输入；unknown保留原request ID，只查原receipt，absent阻止新写与推理。
+
+Factory在既有admission成功后启动独立Keeper和Chat Session broker。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，broker先停止accept并drain已dispatch读取，再等待writer、renewal线程和独立HTTP client关闭。confirmation dispatcher 通过 Registry121 从 durable claim 取得相同 owner，并在 Runtime 前注入 Workflow/Deck snapshots；ACK、claim替换或租约过期会在Admin下一次resolve/renew时失效。既有lease、EventBus、Runner与resume/cancel流程保持。grant不投影给CLI、Editor或user MCP。首次或Settings prompt变化时，Service通过owner调用Admin `session.list`取得UTC当天及前两天投影；Chat `get_sessions_range`用同一owner的私有broker取得任意日期及可选正文投影。user stdio只收到broker/policy allowlist，isolated bootstrap在package导入前清除继承env；原fuzzy/labels/limit/vector逻辑留在child。Reflections后台上下文及其他未迁移内部路径仍按各自typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
+
+同一私有broker还提供无实体selector的`workflow-run.current`投影，仅绑定Workflow Run的turn owner启用。Host使用当前可续期grant先调用Admin `workflow-managed-mcp-scope.resolve`，再以返回Workspace调用`workflow-run.read`；两个操作均使用严格Pydantic DTO，对应Admin Zod DTO、Service和typed Drizzle Repository。Host核对actor、Thread、Run、Workspace及冻结Deck来源后才返回完整`WorkflowRun`。Story Workspace stdio只获得broker tuple与既有host-owned actor/Thread/Run相等性上下文，验证回包后调用Dream `StoryWorkspaceDreamFileWriter`；它不持有Admin bearer或PostgreSQL路径。Admin失败、协议漂移或实体错配在打开Thread workspace前终止，禁止数据库回退；CAS、路径规范化、符号链接拒绝和原子文件替换保持不变。
+
+公开Service的Thread读取与SDK init/final/repair Session回写也通过同一owner；reply actor/thread错配拒绝。user/session未知写共享原operation/input/UUID，只有最近确认的Session同输入可复用。SDK init失败保留原日志/既有运行turn与cancel处理；assistant/Run旧DB写尚不在此owner内。
+
 ## 4. 迁移映射表（Pawkeyland → Ink & Memory）
 
 | Pawkeyland 源路径 | Ink & Memory 目标路径 | 迁移说明 |
@@ -155,7 +180,7 @@ SDK 的 Provider/Gateway 连接使用服务端允许的 `ANTHROPIC_*` 投影；`
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | 最终选中 `GatewayModel` | PostgreSQL int4 正整数或未设置 |
 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | 最终选中 `GatewayModel` | PostgreSQL int4 正整数或未设置 |
 
-全局 effort 由独立 PostgreSQL provider/refresher 动态替换并写入 effective snapshot；模型两项随 authenticated Admin Gateway catalog 解析，不在 admission、Runner、ThreadFactory、Agent 状态机或 turn 主路径查询数据库。service 只合并 immutable snapshots，runner 最后验证精确白名单并覆盖 user env，既有 Gateway 鉴权、resume/cancel/SSE 与工具语义不变。
+全局 effort 由独立 Admin API provider/refresher 动态替换并写入 effective snapshot；模型两项随 authenticated Admin Gateway catalog 解析，不在 admission、Runner、ThreadFactory、Agent 状态机或 turn 主路径查询数据库。service 只合并 immutable snapshots，runner 最后验证精确白名单并覆盖 user env，既有 Gateway 鉴权、resume/cancel/SSE 与工具语义不变。
 
 ### 5.2 会话保活配置
 
@@ -168,9 +193,11 @@ SDK 的 Provider/Gateway 连接使用服务端允许的 `ANTHROPIC_*` 投影；`
 | `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | `512` | 新建 CLI 进程树前要求的单 turn 增量预算；正安全整数 |
 | `INK_AGENT_MEMORY_RESERVE_MIB` | `128` | 为健康检查和非 Agent 请求保留的正安全整数内存余量；0 无效 |
 
-`INK_AGENT_SWEEP_INTERVAL_S` 同时提供 admission 的 `retryAfterSeconds` hint。上述四项都必须位于 `1..9_007_199_254_740_991`，且 run budget 与 reserve 的 MiB 合计不得超过 `8_589_934_591`，从而确保 required-headroom bytes 不越过 JSON/TypeScript 安全整数。这是跨系统精确序列化技术边界，不是产品配额；env、PostgreSQL desired parser、公开 `replace_config` 与 diagnostics/effective 投影采用同一规则。
+`INK_AGENT_SWEEP_INTERVAL_S` 同时提供 admission 的 `retryAfterSeconds` hint。上述四项都必须位于 `1..9_007_199_254_740_991`，且 run budget 与 reserve 的 MiB 合计不得超过 `8_589_934_591`，从而确保 required-headroom bytes 不越过 JSON/TypeScript 安全整数。这是跨系统精确序列化技术边界，不是产品配额；env、Admin desired DTO/原 admission parser、公开 `replace_config` 与 diagnostics/effective 投影采用同一规则。
 
-PostgreSQL desired 仅由独立 provider/refresher 在 composition root 周期读取，不进入 turn 主路径。合法更高 revision 无需重启即可通过公开 replacement 应用于后续 acquire；same revision/same config 不重复 replace，只刷新 diagnostics 状态与加载时间。invalid、capability/PG unavailable、revision 回滚、same revision/different config 或后台异常均保留 LKG effective/revision，且不改变现有 lease、admission 判断顺序、Runner、ThreadFactory、service、EventBus、SSE 或 turn/resume/cancel 状态机。
+Admin 持有的 PostgreSQL desired 仅由独立 HTTP provider/refresher 在 composition root 周期读取，不进入 turn 主路径。合法更高 revision 无需重启即可通过公开 replacement 应用于后续 acquire；same revision/same config 不重复 replace，只刷新 diagnostics 状态与加载时间。invalid、Admin/capability/PG unavailable、revision 回滚、same revision/different config 或后台异常均保留 LKG effective/revision，且不改变现有 lease、admission 判断顺序、Runner、ThreadFactory、service、EventBus、SSE 或 turn/resume/cancel 状态机。
+
+资源首批生产代码已接 `resource-policy.read` 和 `resource-observer.publish`：strict Pydantic 与 Admin 实际 input/output 版本及 SHA256 匹配后才调用。read 区分 configured/not_configured/invalid，响应或连接失败为 unavailable。observer 保留原 capacity-one 最新队列、timeout 隔离和单 worker；Admin 负责 DB clock、TTL、业务/审计/receipt 同事务，Dream unknown 写按原 request_id 查询回执，absent 时暂停后续 snapshot 写入。文件/类中的 `PostgresSink` 历史标识不代表仍有 SQL。该代码接入不是正常本机 Admin 已部署证据，其他生产 DB/旧 token authority 仍待迁移。详见 [交互设计](admin-auth-data-interaction.md) 和 [执行计划](../exec/dream-admin-auth-data-plan.md)。
 
 ### 5.3 功能配置
 
@@ -211,13 +238,16 @@ POST /api/claude-agent
     │   ├─ Admission: active turn + host/cgroup memory headroom
     │   │   └─ insufficient → retryable error + finish（不创建 CLI）
     │   │
-    │   ├─ Phase 1: context_builder
-    │   │   ├─ 查询 database.list_sessions(user_id) → 近期写作会话
-    │   │   └─ 拼装 system_prompt（Ink & Memory 写作助手角色）
+    │   ├─ Phase 1: service + context_builder
+    │   │   ├─ AdminTurnPersistence.recent_sessions(actor_id, thread_id)
+    │   │   │   └─ Admin session.list → strict Session DTO projection
+    │   │   └─ ContextBuilder拼装system_prompt（成功空列表才显示empty block）
+    │   │       └─ Admin/read-contract失败 → Workspace/Runtime/SSE前终止
     │   │
     │   ├─ Phase 2: server/agent_runner.py
     │   │   └─ ClaudeAgentRunner(session_id, cwd)
-    │   │       └─ env: ANTHROPIC_* → Claude SDK subprocess
+    │   │       ├─ env: ANTHROPIC_* → Claude SDK subprocess
+    │   │       └─ user MCP exact env → private Session broker → Admin session.list
     │   │
     │   └─ Phase 3: service.py
     │       ├─ runner.run_streaming(opts, callbacks)

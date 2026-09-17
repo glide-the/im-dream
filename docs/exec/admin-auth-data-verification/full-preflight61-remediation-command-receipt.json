@@ -1,0 +1,6 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-full-preflight61-remediation.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"cases\": 24,\n  \"original_fixture_sha256\": \"fc561c6dfacf2e32d34cc45538f92b6b3f0fc5963b68cf29265d87867871ddef\",\n  \"old_failed_request\": \"pf_request_e978d00fa84c4d54bb23ebbb6b977eb4\",\n  \"new_success_request\": \"pf_request_e13c187f64814891b017898aa5af74dd\",\n  \"original_failed_recovery\": \"actual public GET entire result equals actual original source; PF/map/receipt/audit unchanged\",\n  \"remaining_cases\": \"original23 never executed; their inputs/expectations/requestids retained; first old failing fixture preserved separately\",\n  \"expected_success\": \"unchanged; original failing expected passed was not edited to hide defect\",\n  \"credential_refresh\": \"new public verification JWK/short OAuth and ordinary Thread grant only; private key not exported; no reset\",\n  \"normal_database\": \"untouched\"\n}\n"
+}

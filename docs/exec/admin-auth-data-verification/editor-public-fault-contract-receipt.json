@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminEditorSession.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_acl56",
+  "exit_code": 0,
+  "output": "PUBLIC EDITOR SESSION CONTRACT PASS: operations=8; assertions=103; restricted-pools/owner/purpose/Session/NULL/microseconds/receipt/recovery/cascade; provider-free\n",
+  "classification": "primary credential/owned expiry-corruption fault contract; provider-free, no normal business acceptance"
+}

@@ -1,4 +1,10 @@
-"""Same-origin Dream BFF routes for subscription, payment and usage."""
+"""Same-origin Dream BFF routes for subscription, payment and usage.
+
+[Input] Admin OAuth bearer identity, strict Product DTOs and server-owned Product configuration.
+[Output] Product-scope actor DTO calls with stable Dream Product error envelopes.
+[Pos] Dream Product orchestration boundary; it never reads Product identity or business data from PostgreSQL.
+[Sync] 2026-09-16: require Product OAuth scopes and remove Dream Product token signing.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +14,16 @@ import re
 import uuid
 from typing import Any, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, ValidationError
 
-from .deps import get_current_user, http_bearer
+from starlette.concurrency import run_in_threadpool
+
+from .deps import get_admin_request_auth, http_bearer
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor
 from services.admin_product.client import assert_safe_product_payload
 from services.admin_product.config import parse_origin_allowlist
 from services.admin_product.errors import (
@@ -34,7 +44,7 @@ from services.admin_product.runtime import (
     close_default_product_bff_service,
     get_default_product_bff_service,
 )
-from services.admin_product.service import ProductBff
+from services.admin_product.service import ProductBff, ProductSessionActor
 
 
 router = APIRouter(tags=["product-subscription-bff"])
@@ -43,7 +53,6 @@ _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{8,128}$")
 _PAYMENT_INTENT_ID_PATTERN = re.compile(r"^pay_[a-f0-9]{32}$")
 _MAX_BODY_BYTES = 16_384
-_POSTGRES_BIGINT_MAXIMUM = 9_223_372_036_854_775_807
 _IDENTITY_OVERRIDE_HEADERS = (
     "x-user-id",
     "x-canonical-user-id",
@@ -92,37 +101,38 @@ def _assert_write_origin(request: Request) -> None:
         )
 
 
-def _session_subject(
+async def _session_actor(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None,
-) -> str:
+    required_scope: str,
+) -> ProductSessionActor:
     try:
-        user = get_current_user(request, response, credentials)
-    except HTTPException:
+        owner = get_admin_request_auth(request, credentials)  # type: ignore[arg-type]
+        if not credentials or credentials.scheme.lower() != "bearer":
+            raise HTTPException(status_code=401)
+        actor = await run_in_threadpool(
+            owner.authenticate,
+            credentials.credentials,
+            _request_id(request),
+            required_scopes=frozenset({required_scope}),
+        )
+    except (HTTPException, AdminDataError):
         raise ProductBffError(
             code="PRODUCT_AUTH_REQUIRED",
             message="A valid Dream session is required.",
             status_code=401,
         ) from None
-    user_id = user.get("user_id") if isinstance(user, dict) else None
-    if isinstance(user_id, bool) or not isinstance(user_id, (int, str)):
+    if not isinstance(actor, AdminRequestActor):
         raise ProductBffError(
             code="PRODUCT_AUTH_REQUIRED",
             message="A valid Dream session is required.",
             status_code=401,
         )
-    subject = str(user_id)
-    if (
-        not re.fullmatch(r"[1-9]\d{0,18}", subject)
-        or int(subject) > _POSTGRES_BIGINT_MAXIMUM
-    ):
-        raise ProductBffError(
-            code="PRODUCT_AUTH_REQUIRED",
-            message="A valid Dream session is required.",
-            status_code=401,
-        )
-    return subject
+    return ProductSessionActor(
+        canonical_user_id=actor.canonical_user_id,
+        scopes=actor.scopes,
+        access_token=actor.access_token,
+    )
 
 
 def _parse_query(request: Request, model: type[QueryT]) -> QueryT:
@@ -237,16 +247,7 @@ def _idempotency_key(
     return _required_idempotency_key(request)
 
 
-def _copy_session_renewal(source: Response, target: Response) -> None:
-    for key, value in source.raw_headers:
-        lowered = key.lower()
-        if lowered in {b"x-new-access-token", b"set-cookie"}:
-            target.raw_headers.append((key, value))
-
-
-def _success(
-    payload: dict[str, Any], session_response: Response, request_id: str
-) -> JSONResponse:
+def _success(payload: dict[str, Any], request_id: str) -> JSONResponse:
     assert_safe_product_payload(payload)
     if payload.get("meta", {}).get("requestId") != request_id:
         raise ProductBffError(
@@ -254,13 +255,11 @@ def _success(
             message="The subscription service returned an invalid response.",
             status_code=503,
         )
-    response = JSONResponse(
+    return JSONResponse(
         content=payload,
         status_code=200,
         headers={"cache-control": "no-store", "x-request-id": request_id},
     )
-    _copy_session_renewal(session_response, response)
-    return response
 
 
 def _error(error: ProductBffError, request_id: str) -> JSONResponse:
@@ -294,17 +293,16 @@ def _error(error: ProductBffError, request_id: str) -> JSONResponse:
 async def _read_route(
     *,
     request: Request,
-    session_response: Response,
     credentials: HTTPAuthorizationCredentials | None,
     operation: Any,
 ) -> JSONResponse:
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = _session_subject(request, session_response, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         _parse_query(request, EmptyQuery)
-        payload = await operation(subject, request_id)
-        return _success(payload, session_response, request_id)
+        payload = await operation(actor, request_id)
+        return _success(payload, request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -314,13 +312,11 @@ async def _read_route(
 @router.get("/api/story-workspace/subscription/context")
 async def subscription_context(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
     return await _read_route(
         request=request,
-        session_response=response,
         credentials=credentials,
         operation=service.subscription_context,
     )
@@ -329,18 +325,15 @@ async def subscription_context(
 @router.get("/api/story-workspace/subscription/plans")
 async def plans(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = _session_subject(request, response, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         query = _parse_query(request, PlansQuery)
-        return _success(
-            await service.plans(subject, query, request_id), response, request_id
-        )
+        return _success(await service.plans(actor, query, request_id), request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -350,18 +343,15 @@ async def plans(
 @router.get("/api/story-workspace/usage")
 async def usage(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
     request_id = _request_id(request)
     try:
         _assert_no_identity_override(request)
-        subject = _session_subject(request, response, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         query = _parse_query(request, UsageQuery)
-        return _success(
-            await service.usage(subject, query, request_id), response, request_id
-        )
+        return _success(await service.usage(actor, query, request_id), request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -371,13 +361,11 @@ async def usage(
 @router.get("/api/story-workspace/models")
 async def models(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
     return await _read_route(
         request=request,
-        session_response=response,
         credentials=credentials,
         operation=service.model_catalog,
     )
@@ -386,7 +374,6 @@ async def models(
 @router.post("/api/story-workspace/subscription/commands")
 async def subscription_commands(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
@@ -394,13 +381,13 @@ async def subscription_commands(
     try:
         _assert_write_origin(request)
         _assert_no_identity_override(request)
-        subject = _session_subject(request, response, credentials)
+        actor = await _session_actor(request, credentials, "product:write")
         command = await _parse_command(request)
         idempotency_key = _idempotency_key(request, command)
         payload = await service.subscription_command(
-            subject, command, request_id, idempotency_key
+            actor, command, request_id, idempotency_key
         )
-        return _success(payload, response, request_id)
+        return _success(payload, request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -410,7 +397,6 @@ async def subscription_commands(
 @router.post("/api/story-workspace/subscription/payment-intents")
 async def create_payment_intent(
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
@@ -418,13 +404,13 @@ async def create_payment_intent(
     try:
         _assert_write_origin(request)
         _assert_no_identity_override(request)
-        subject = _session_subject(request, response, credentials)
+        actor = await _session_actor(request, credentials, "product:write")
         payment = await _parse_payment_intent(request)
         idempotency_key = _required_idempotency_key(request)
         payload = await service.create_payment_intent(
-            subject, payment, request_id, idempotency_key
+            actor, payment, request_id, idempotency_key
         )
-        return _success(payload, response, request_id)
+        return _success(payload, request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:
@@ -435,7 +421,6 @@ async def create_payment_intent(
 async def payment_intent(
     payment_intent_id: str,
     request: Request,
-    response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     service: ProductBff = Depends(get_product_bff_service),
 ) -> JSONResponse:
@@ -444,12 +429,12 @@ async def payment_intent(
         _assert_no_identity_override(request)
         if not _PAYMENT_INTENT_ID_PATTERN.fullmatch(payment_intent_id):
             raise invalid_input(field="paymentIntentId")
-        subject = _session_subject(request, response, credentials)
+        actor = await _session_actor(request, credentials, "product:read")
         _parse_query(request, EmptyQuery)
         payload = await service.payment_intent(
-            subject, payment_intent_id, request_id
+            actor, payment_intent_id, request_id
         )
-        return _success(payload, response, request_id)
+        return _success(payload, request_id)
     except ProductBffError as exc:
         return _error(exc, request_id)
     except Exception:

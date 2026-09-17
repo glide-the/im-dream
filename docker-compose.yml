@@ -11,6 +11,8 @@
 #                    host mappings with network_mode: service:tun-proxy.
 # [Sync] 2026-08-28: bind the server-owned Notion user credential root to the
 #                    persisted agentdata volume beside AGENT_CWD.
+# [Sync] 2026-09-16: tombstone database env and load private Next BFF auth config from its own env file.
+# [Sync] 2026-09-16: tombstone retired Dream auth/session secrets inherited from backend/.env.
 # [Sync] 2026-08-31: remove the retired PolyCLI proxy and unused models.json mount contracts.
 
 services:
@@ -64,6 +66,18 @@ services:
       INK_NOTION_RUNTIME_ROOT: /app/data/notion-runtime
       INK_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_SITE_URL:-http://localhost}
       INK_BACKEND_PUBLIC_BASE_URL: ${BACKEND_PUBLIC_SITE_URL:-http://127.0.0.1:8765/}
+      DATABASE_URL: ""
+      INK_LOAD_DATABASE_URL_FROM_ENV_FILE: "0"
+      INK_DATABASE_ENV_FILE: ""
+      GOOGLE_CLIENT_SECRET: ""
+      JWT_SECRET: ""
+      JWT_SECRET_KEY: ""
+      SESSION_SECRET_KEY: ""
+      OAUTH_TOKEN_ENCRYPTION_KEY: ""
+      AUTH_TOKEN_ENCRYPTION_KEY: ""
+      COOKIE_SECURE: ""
+      COOKIE_SAMESITE: ""
+      INK_DREAM_BFF_COOKIE_SECRET: ""
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/api/health')"]
       interval: 30s
@@ -86,10 +100,13 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    env_file:
+      - ./frontend/.env.local
     environment:
       # nginx.conf.template uses this to proxy API/auth requests.
       # Backend shares tun-proxy's network namespace when TUN is enabled.
       BACKEND_URL: http://tun-proxy:8765
+      INK_BACKEND_INTERNAL_URL: http://tun-proxy:8765
       # runtime-config.js uses this browser-facing URL for direct CORS requests.
       API_BASE_URL: http://127.0.0.1:8765
     depends_on:

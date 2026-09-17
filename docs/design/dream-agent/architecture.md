@@ -188,7 +188,7 @@ Dream business HTTP commands no longer pass through one broad workflow gateway:
 |---|---|---|
 | `DreamLaunchEndpointService` | request DB scope and launch task-registry lifecycle | Agent execution or workflow projection |
 | `DreamLaunchApplicationService` | launch authorization, idempotency, preflight/run creation orchestration | SSE parsing or post-turn observation |
-| `StoryWorkflowRunApplicationService` | preflight/run/retry/cancel/guidance commands | Artifact and Episode commands |
+| `AdminPreflightData` / `AdminRunData` | preflight and Run read/create/retry/cancel through Admin DTO/ORM operations | Dream filesystem or Agent execution |
 | `DreamArtifactApplicationService` | Dream files, Episode Artifact surface, Story Index and run re-entry queries | Agent lifecycle |
 | `EpisodeApplicationService` | Episode recovery/continue commands and durable internal-command dispatch | Artifact truth or Chat terminal |
 | `DreamConfirmationApplicationService` | business confirmation persistence and dispatch | Chat tool confirmation |

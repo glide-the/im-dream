@@ -1,11 +1,13 @@
-// [Input] Runtime API base config, AuthContext token, workspace file APIs, and dashboard file UI state.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
+// [Input] Runtime API base config, shared Browser session/header owner, workspace file APIs, and dashboard file UI state.
 // [Output] Workspace file sidebar with list/upload/delete and file/folder-download behavior.
 // [Pos] dashboard file-sidebar component node
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin workspace file requests.
 // [Sync] 2026-08-17: allow directory rows to download their contents as ZIP archives.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconChevronDown, IconChevronRight, IconDownload, IconFile, IconFolder, IconLoader, IconPlus, IconTrash, IconX } from '../chat/Icons';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { API_BASE } from '../../lib/apiBase';
 
 export interface FileInfo {
@@ -134,7 +136,7 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
     setDirectoryError(null);
     try {
       const response = await fetch(`${API_BASE}/api/workspace/files?${new URLSearchParams({ sessionId, recursive: '1' }).toString()}`, {
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
@@ -196,7 +198,7 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
         formData.append('relativePath', normalizePath(file.webkitRelativePath || file.name));
       });
       setUploadQueue((current) => current.map((item) => ids.includes(item.id) ? { ...item, status: 'uploading' } : item));
-      const response = await fetch(`${API_BASE}/api/workspace/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` }, body: formData });
+      const response = await fetch(`${API_BASE}/api/workspace/files`, { method: 'POST', headers: { ...browserRequestHeaders() }, body: formData });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error || `上传失败 (${response.status})`);
@@ -234,7 +236,7 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
     if (!sessionId) return;
     try {
       const response = await fetch(buildWorkspaceDownloadUrl(sessionId, file.path), {
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };

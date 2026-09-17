@@ -1,4 +1,8 @@
+<!-- [Input] Canonical Story workspace files, Admin WorkflowRun DTO facts and Dream controlled file writers. -->
+<!-- [Output] Run-private preview, Episode binding and database/filesystem ownership contract. -->
+<!-- [Pos] Current Project/Episode Artifact contract consumed by Dream Agent and Story Workspace pages. -->
 <!-- [Sync] 2026-09-06: define Run-bound synchronization independent of Agent selection. -->
+<!-- [Sync] 2026-09-16: route Story Workspace MCP Run authority through Admin DTO/ORM while retaining Dream filesystem writes. -->
 # Project / Episode Artifact 合同
 
 跨系统权威文档是
@@ -120,6 +124,32 @@ sequenceDiagram
     H->>P: fsync 文件和目录
     H->>P: 原子替换 manifest
     Note over P: manifest 是当前 preview 的提交标记
+```
+
+### 3.1 受控 MCP 写入的数据与文件边界
+
+`write_dream_run`和`write_dream_stage`每次调用都通过当前turn owner取得数据库事实。stdio child发送的strict请求只有随机capability、request ID和固定操作`workflow-run.current`，不携带actor、Thread、Workspace、Run selector、SQL、表列或Admin凭据。Host先调用Admin `workflow-managed-mcp-scope.resolve`，再调用`workflow-run.read`；Admin以Zod DTO、Service和typed Drizzle Repository执行主体、Thread、Run、Workspace权限过滤与读取。Dream的Pydantic DTO再次核对actor、source Thread、Run、Workspace和冻结Deck来源。
+
+权限和DTO验证通过后，Dream才打开规范化的既有Thread workspace并调用`StoryWorkspaceDreamFileWriter`。Admin不接收物理路径、不写共享文件；Dream不执行SQL、不建立PostgreSQL连接。Admin不可用、capability错误、DTO漂移或实体错配时不产生文件写入，也不回退本地数据库。CAS revision、no-follow/symlink限制、`.dream/runtime/**`文件名、临时文件加`os.replace`与失败外形保持原合同。
+
+```mermaid
+sequenceDiagram
+    participant T as Story Workspace stdio
+    participant O as Dream turn owner
+    participant A as Admin DTO Service
+    participant D as Admin Drizzle Repository
+    participant F as Dream shared filesystem
+
+    T->>O: workflow-run.current(capability, request_id)
+    O->>A: workflow-managed-mcp-scope.resolve(Thread, Run)
+    A->>D: ORM owner/Thread/Run/Workspace过滤
+    D-->>A: Workspace DTO
+    O->>A: workflow-run.read(Workspace, Run)
+    A->>D: ORM Run读取与权限过滤
+    D-->>O: strict WorkflowRun DTO
+    O-->>T: 当前turn的完整Run投影
+    T->>T: 核对actor/Thread/Run
+    T->>F: CAS写run/stage文件
 ```
 
 ## 4. 成功 turn 后自动构建首集产物关联

@@ -1,0 +1,54 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "prior_success_cases": 6,
+  "cases": [
+    {
+      "label": "source-complete",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": true
+    },
+    {
+      "label": "unicode-255",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": true
+    },
+    {
+      "label": "fresh-semantic",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": false
+    },
+    {
+      "label": "consumed-after-expiry",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": false
+    },
+    {
+      "label": "retry-failed-parent",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": true
+    },
+    {
+      "label": "retry-cancelled-parent",
+      "receipt_count": 1,
+      "audit_count": 1,
+      "static_fields": "all exactly unchanged",
+      "new_run": true
+    }
+  ],
+  "protected_table_count": 12,
+  "state_sha256": "f902834daa1104db0c80a76b8ae6d40a95b1e0084f9a36cacf21e60c3679ab5c",
+  "original_public_run": "exit1 at readonly error-code expectation after previous six success flows; total count not emitted",
+  "remaining_scope": "22 denied cases and 10 receipt cases pending",
+  "normal_database": "untouched"
+}

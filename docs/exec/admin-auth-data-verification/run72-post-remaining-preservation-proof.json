@@ -1,0 +1,32 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "retained_accepted_originals": 6,
+  "renewed_unexecuted_sources": [
+    {
+      "label": "semantic-key-conflict",
+      "frozen_fields": 11,
+      "comparison": "all exactly unchanged"
+    },
+    {
+      "label": "stored-hash-mismatch",
+      "frozen_fields": 11,
+      "comparison": "all exactly unchanged"
+    },
+    {
+      "label": "consumed-without-map",
+      "frozen_fields": 11,
+      "comparison": "all exactly unchanged"
+    }
+  ],
+  "protected_business_tables": 8,
+  "prior_run_thread_message_history_consumption_session_binding_lock": "all byte-exact JSON text unchanged",
+  "remaining_contract": {
+    "exit_code": 0,
+    "denied_cases": 22,
+    "receipt_cases": 10,
+    "assertions": 230,
+    "skipped_accepted": 6
+  },
+  "normal_database": "untouched"
+}

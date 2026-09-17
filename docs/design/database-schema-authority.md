@@ -1,79 +1,72 @@
-# Dream 数据库 Schema 权威与运行时边界
+# Dream 数据库 Schema 与访问权威
 
-> 状态：Capability-only implemented；production environment inventory pending
-> 更新：2026-08-12
+> 状态：现行设计
+> 更新：2026-09-16
+> 历史稿：[Capability-only 阶段原文](../architecture/history/pre-admin-data-access-20260916/database-schema-authority.md)
 
-## R37 提交轮次记录
+## 背景与问题
 
-- 当前轮次目标：在两个存在其他未提交工作的仓库中，分别提交“Admin/Drizzle 单一 DDL 权威 + Dream 领域运行时所有权”实现，并强制把 Dream 根 `AGENTS.md` 纳入版本管理。
-- 优化后的执行提示词：审计两个工作树，只暂存数据库权威切换所需的 migration、catalog、capability、依赖清理、测试、运维文档与 Agent 协议；对同时包含 DreamAgent runtime 改动的文件执行分块暂存；分别验证 staged diff、敏感信息、测试证据和 `git diff --check` 后，按 Conventional Commits 在各仓库创建独立提交，不回退或暂存其他用户改动。
-- 本轮检查或修改范围：Dream 的 capability-only runtime、Alembic/DDL 删除、legacy importer、相关数据库测试和文档；Admin 的 0032、完整 Dream schema/catalog、migration runner、数据 migration registry、接管 E2E、文档与 `AGENTS.md`。
-- 本轮完成标准：两个提交仅包含上述边界；Dream `AGENTS.md` 被 Git 跟踪；`20260811_07` 的 live index/capability 和不可执行审计副本均位于 Admin；提交后其他 DreamAgent/UI 工作仍保持未暂存。
-- 本轮实际结果和未验证推断：提交前完整实现验证为 Dream 1,955 passed、22 skipped、655 subtests，Admin 378 tests、TypeScript、ESLint、schema cutover 与真实 43+5 数据 E2E 通过。生产环境的 06/07 分布、PITR、migrator ACL 仍是未验证的外部发布事实，不纳入本地提交完成声明。
+早期方案只把 DDL 迁到 Admin，Dream 仍持有 PostgreSQL 凭据、连接池、Repository 与事务。当前跨项目目标进一步要求 Admin 成为唯一数据库访问服务；Dream 只能通过带身份、权限和业务语义的接口读写数据。
 
-## 决策
+## 目标与边界
 
-Dream 不再是 PostgreSQL DDL 版本所有者。所有共享 Schema 变更只在 `/Users/dmeck/project/ink-admin-memory/drizzle` 以新的前向 migration 演进。Dream 保留领域运行时所有权：repository、transaction、用户身份、thread/workflow 绑定、业务权限和数据完整性仍由 Dream 代码负责。
+Admin Drizzle 是唯一 schema/migration 来源，Admin 的 DTO → Service → typed Drizzle Repository 是唯一生产数据库访问路径。Dream 保留产品路由、业务编排、Agent Runtime、EventBus、SSE、turn/resume/cancel、共享文件系统及 `CLAUDE_CODE_TMPDIR={AGENT_CWD}/{thread_id}/.claude-tmp`。
+
+Dream 生产进程不接收 `DATABASE_URL`，不初始化连接池，不执行 SQL、ORM、事务、capability 查询、DDL 或 migration。Admin 不接管 Dream 的文件写入、Runtime 或流式事件。
+
+## 数据区域决策
+
+当前采用**同一 PostgreSQL database 内按职责划分 schema**：
+
+- Better Auth 身份、OAuth/OIDC、Device Flow、Session 与管理权限由 Admin 认证模块拥有。
+- Dream 业务表属于 Admin 数据服务管理的 `dream` 区域，schema 与前向 migration 位于 Admin `drizzle/`。
+- Dream 不复制 User、Session、Workspace、Thread、Run 或 Artifact 主体。
+
+没有选择同实例不同 database，因为现有身份、Workspace、Thread、Run、消息及 Story Artifact 之间存在需要同事务和行锁维护的关系。分库会失去数据库级外键与单事务提交，必须增加跨库一致性协议，而当前收益不足以覆盖迁移和运维成本。职责隔离由 Admin 连接身份、schema grant、Service 权限检查和业务接口共同落实；它不是环境变量改名或表前缀变化。
+
+## 运行时契约
 
 ```mermaid
 sequenceDiagram
-  participant Release as Admin release job
+  participant Dream as Dream API / Runtime
+  participant Admin as Admin DTO Service
+  participant Repo as typed Drizzle Repository
   participant DB as PostgreSQL
-  participant Dream as Dream startup
-  Release->>DB: pnpm db:migrate (MIGRATION_DATABASE_URL)
-  DB-->>Release: atomic receipt + capabilities
-  Release->>DB: pnpm db:migrate:check
-  Dream->>DB: SELECT required schema_capabilities
-  alt all capabilities satisfy minimum versions
-    DB-->>Dream: safe capability receipt
-    Dream->>DB: normal repository queries
-  else capability missing or inconsistent
-    DB-->>Dream: mismatch
-    Dream-->>Dream: fail closed without DDL
-  end
+  Dream->>Admin: named operation + strict DTO + OAuth/delegation
+  Admin->>Admin: authenticate, authorize, validate capability
+  Admin->>Repo: one business operation / one UOW
+  Repo->>DB: Drizzle query, lock and transaction
+  DB-->>Repo: committed domain result
+  Repo-->>Admin: typed entity projection
+  Admin-->>Dream: strict DTO or stable business error
 ```
 
-## Runtime contract
+每个写接口由 Admin 在一个 UOW 内提交领域写、原始 operation receipt 与 audit。Dream 遇到响应未知时只用原 request ID 查询原回执；非幂等写入不盲重试，Admin 不可用时也不回退数据库。
 
-Dream production startup:
+## Schema 与发布
 
-- only reads `drizzle.schema_capabilities`;
-- requires `dream.schema.unified.v1` v1、`dream.workflow.thread-lookup.v1` v1、`dream.story-artifact-contract.v2` v2；
-- accepts unrelated higher Admin capabilities/global migrations；
-- never creates/alters/drops a table, runs Alembic, or falls back to SQLite；
-- logs only safe capability mode/version/hash metadata, never DSN or business values.
+所有结构变更只在 `/Users/dmeck/project/ink-admin-memory/drizzle` 增加前向 migration。发布遵循 expand → 双版本接口兼容 → backfill/validate → contract。Dream 依赖明确的 schema capability 与 API operation hash，不依赖 Drizzle 全局最新 head。
 
-There is no legacy-head fallback. The frozen `dream_alembic_version` relation,
-when present on an adopted database, is historical audit data only and Dream
-never reads it. Admin `0032` is responsible for validating an old `06/07`
-catalog and publishing the capability receipt before Dream starts.
+migration、回填和破坏性验证只允许在明确命名并核验身份的隔离数据库执行。生产发布由 Admin migration job 运行；Dream 启动只验证 Admin API capability，不读取 PostgreSQL capability 表。
 
-## Domain write boundary
+## Dream 中保留的历史工具
 
-Unified DDL does not grant Admin arbitrary Dream writes. Every workflow/data command must still validate the authenticated canonical user, thread/workspace ownership, workflow permission, expected version/idempotency key, referential integrity and terminal-state rules. Import tooling remains Dream-owned because it encodes source snapshot, transformation, conflict and digest semantics; Admin only owns its explicit runner and append-only receipt.
+原 `backend/database.py`、`backend/persistence/` 和 `backend/schema/` 已分别迁入 `backend/tests/legacy_database.py`、`backend/tests/legacy_persistence/`、`backend/tests/legacy_schema/`。它们只为历史 parity、fixture 和隔离 migration rehearsal 服务，由 pytest `conftest.py` 注册兼容 import；生产包、启动脚本与部署配置不可导入或配置这些模块。
 
-## 43+5 import
+需要 PostgreSQL 的验证脚本位于 `backend/tests/harness/` 或明确命名的 E2E 脚本，只能使用具名隔离数据库。它们不能作为 Dream 生产数据库访问能力，也不能作为真实业务验收替代品。
 
-New targets must first have `dream.schema.unified.v1`. The V2 definition fixes the 48-table inventory but intentionally does not fix a business row count. Source row count, manifest hash, per-table primary-key and row digests, foreign keys, sequences and triggers are verified on every run. Existing V1 receipts remain immutable and are reused when the source fingerprint matches.
+## 失败处理与回滚
 
-## Operational rule
+- Admin capability 缺失：Dream 返回明确依赖失败，不创建本地 schema。
+- 权限拒绝：返回业务 403/404 语义，不接受外部任意 user ID。
+- 超时或提交结果未知：写入进入 pending barrier，使用原 request ID 查回执。
+- Admin 发布回滚：保持已发布兼容接口和 expand schema；不得让 Dream 恢复 PostgreSQL 凭据。
+- 文件已写而元数据失败：Dream 保留规范化文件投影，使用同一业务标识与 request ID 恢复 Admin 元数据提交。
 
-Dream contains no Alembic runner or PostgreSQL DDL generator. For every new or
-adopted environment, run only the Admin release commands:
+## 验收
 
-```bash
-pnpm db:migrate
-pnpm db:migrate:check
-```
-
-Missing capability is a release/configuration failure. Dream must not repair it locally. For rollout, adoption modes, rollback and outstanding production inventory, use `/Users/dmeck/project/ink-admin-memory/docs/architecture/database-schema-authority.md`.
-
-## Historical artifact disposition
-
-| Original Dream artifact | Current status | Replacement | Handling |
-|---|---|---|---|
-| `backend/migrations/versions/20260809_01–20260809_06` | Removed from Dream | Admin `0032` plus full Drizzle contract | Frozen as non-executable `.py.txt` audit copies under Admin `drizzle/legacy/dream-alembic/` |
-| `backend/migrations/versions/20260811_07_dream_thread_lookup.py` | Removed from Dream | Admin `0032` + `dream.workflow.thread-lookup.v1` | Exact source archived as `.py.txt`; index contract remains live in Admin |
-| `backend/alembic.ini`, `backend/migrations/env.py`, `backend/schema/migration.py`, `backend/schema/baseline.py` | Deleted | Admin migration runner and atomic 0032 adoption | Recoverable from Git; no compatibility runner retained |
-| `backend/schema/postgres.py`, `backend/schema/postgres_schema.sql`, schema renderer | Deleted | Admin Drizzle SQL/schema/snapshot/catalog | Dream importer retains only data transformation and read-only target verification |
-| `dream_alembic_version` in adopted databases | Frozen audit data | `drizzle.__drizzle_migrations` + `drizzle.schema_capabilities` | Not read or updated by Dream; any later archive/drop requires a new Drizzle migration |
+1. `server.py` 无数据库 startup/shutdown，Dream 生产模块无 driver/legacy database import。
+2. Dream deployment/env/README 不要求 PostgreSQL DSN。
+3. 生产依赖不包含 psycopg；测试开发组可保留隔离验证所需驱动。
+4. Story Workspace 等业务通过严格 Pydantic DTO 调用 Admin Registry；Admin 由 Zod DTO、Service 和 typed Drizzle Repository 实现。
+5. 静态清单与公开入口运行验证都证明没有数据库回退。

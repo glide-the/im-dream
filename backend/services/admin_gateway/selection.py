@@ -1,7 +1,8 @@
-# [Input] Consume the authenticated Admin catalog and Dream's saved model preference.
+# [Input] Consume the authenticated Admin catalog and an explicitly authorized SystemConfig reader.
 # [Output] Resolve the selected callable GatewayModel and compatibility alias projection.
 # [Pos] Server-owned model selection boundary shared by public and internal Dream turns.
 # [Sync] 2026-08-28: retain the selected model runtime metadata instead of dropping it to an alias.
+# [Sync] 2026-09-15: remove the implicit Dream database reader and fail closed without an authorized snapshot.
 
 """Server-owned platform model selection for every Claude Agent turn."""
 
@@ -9,11 +10,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
-
-try:
-    import database
-except ModuleNotFoundError:  # Support package imports from repository root.
-    from backend import database
 
 from .errors import GatewayInferenceError
 from .models import GatewayModel, GatewayModelCatalog, GatewayModelCatalogClient
@@ -32,7 +28,7 @@ def resolve_platform_model(
     client_model_alias: str | None = None,
     *,
     catalog_client_factory: CatalogClientFactory = GatewayModelCatalogClient,
-    system_config_reader: SystemConfigReader = database.get_system_config,
+    system_config_reader: SystemConfigReader | None = None,
 ) -> GatewayModel:
     """Return the current callable model without trusting browser state.
 
@@ -41,6 +37,8 @@ def resolve_platform_model(
     override it.
     """
 
+    if system_config_reader is None:
+        raise GatewayInferenceError("GATEWAY_SYSTEM_CONFIG_UNAVAILABLE", 503)
     catalog = catalog_client_factory(canonical_user_id).fetch_catalog()
     callable_models = {
         model.model_alias: model for model in catalog.models if model.callable
@@ -62,7 +60,7 @@ def resolve_platform_model_alias(
     client_model_alias: str | None = None,
     *,
     catalog_client_factory: CatalogClientFactory = GatewayModelCatalogClient,
-    system_config_reader: SystemConfigReader = database.get_system_config,
+    system_config_reader: SystemConfigReader | None = None,
 ) -> str:
     """Compatibility projection for callers that only need the selected alias."""
 

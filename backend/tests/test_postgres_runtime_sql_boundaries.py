@@ -1,195 +1,217 @@
-# [Input] Production SQL-bearing modules and PostgreSQL-only Story Workspace query contracts.
-# [Output] Reject runtime DDL/SQLite fallbacks and lock the Dream re-entry authorization predicates.
-# [Pos] Static PostgreSQL boundary regression suite.
-# [Sync] 2026-08-31: allow mutable current-Agent selection while keeping launch metadata internally consistent.
+# [Input] Dream backend and Next server source graphs after Admin data-service migration.
+# [Output] Reject database clients, bootstrap, SQL/table access and retired repositories.
+# [Pos] Static production database-closure regression suite.
+# [Sync] 2026-09-16: scan all backend production Python for database imports and SQL.
 
-"""Regression gates for the PostgreSQL-only Dream runtime SQL boundary."""
+"""Prove Dream production modules can reach persistence only through Admin DTO clients."""
 
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import re
-import sqlite3
-
-import pytest
-
-from backend.services.deck_plugin.revocation_service import (
-    SQLiteRevocationRepository,
-)
-from backend.services.deck_plugin.compatibility_service import CompatibilityService
-from backend.services.deck_plugin.installation_service import InstallationService
-from backend.services.story_workspace.dream_reentry_service import (
-    StoryWorkspaceDreamReentryService,
-)
+from pathlib import Path
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-_PRODUCTION_SQL_FILES = (
-    "backend/services/deck/admin_gateway.py",
-    "backend/services/deck/story_workflow_application.py",
-    "backend/services/deck_plugin/installation_service.py",
-    "backend/services/deck_plugin/compatibility_service.py",
-    "backend/services/deck_plugin/manifest_validator.py",
-    "backend/services/deck_plugin/revocation_service.py",
-    "backend/services/claude_plugin/workspace_packer.py",
-    "backend/services/story_workspace/dream_confirmation_service.py",
-    "backend/services/story_workspace/agent_integration.py",
-    "backend/services/story_workspace/dream_launch_infrastructure.py",
-    "backend/services/story_workspace/dream_reentry_service.py",
-    "backend/libs/claude_agent_kit/server/story_workspace_tool.py",
-    "backend/routers/story_workspace.py",
-    "backend/script/import_diaries.py",
+_BACKEND_ROOT = _REPOSITORY_ROOT / "backend"
+_NON_PRODUCTION_PARTS = {
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "tests",
+}
+_FORBIDDEN_IMPORT_ROOTS = {
+    "aiosqlite",
+    "asyncpg",
+    "database",
+    "psycopg",
+    "psycopg2",
+    "sqlite3",
+    "sqlalchemy",
+}
+_RETIRED_DATABASE_PATHS = (
+    "backend/database.py",
+    "backend/persistence",
+    "backend/schema",
+    "backend/services/workflow/run_service.py",
+    "backend/services/story_workspace/dream_workflow_lifecycle_service.py",
+    "backend/services/story_workspace/artifact_story_index_repository.py",
+    "backend/services/story_workspace/artifact_story_index_service.py",
+    "backend/services/story_workspace/artifact_story_index_reconcile.py",
+    "backend/script/reconcile_story_artifact_index.py",
 )
-_SQL_MARKER = re.compile(
-    r"^\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|BEGIN|"
-    r"WHERE|AND|OR|SET|VALUES|JOIN|ORDER\s+BY|LIMIT)\b",
+_SQL_STATEMENT = re.compile(
+    r"^\s*(?:"
+    r"SELECT\b[\s\S]*\bFROM\b|"
+    r"WITH\b[\s\S]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b|"
+    r"INSERT\s+INTO\b|"
+    r"UPDATE\b[\s\S]*\bSET\b|"
+    r"DELETE\s+FROM\b|"
+    r"(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|SCHEMA|TRIGGER|FUNCTION)\b"
+    r")",
     re.IGNORECASE,
 )
-_FORBIDDEN_PRODUCTION_SQL = {
-    "qmark placeholder": re.compile(r"\?"),
-    "SQLite INSERT OR": re.compile(r"\bINSERT\s+OR\b", re.IGNORECASE),
-    "SQLite rowid": re.compile(r"\browid\b", re.IGNORECASE),
-    "SQLite JSON function": re.compile(
-        r"\bjson_(?:valid|extract|each)\s*\(", re.IGNORECASE
-    ),
-    "SQLite immediate transaction": re.compile(
-        r"\bBEGIN\s+IMMEDIATE\b", re.IGNORECASE
-    ),
-    "SQLite PRAGMA": re.compile(r"\bPRAGMA\b", re.IGNORECASE),
-    "runtime DDL": re.compile(r"\bCREATE\s+(?:TABLE|TRIGGER)\b", re.IGNORECASE),
+_FRONTEND_ROOTS = (
+    _REPOSITORY_ROOT / "frontend/app",
+    _REPOSITORY_ROOT / "frontend/packages",
+)
+_FRONTEND_SUFFIXES = {".cjs", ".js", ".mjs", ".ts", ".tsx"}
+_FRONTEND_NON_PRODUCTION_PARTS = {
+    ".next",
+    "__tests__",
+    "coverage",
+    "e2e",
+    "node_modules",
 }
+_FRONTEND_DATABASE_IMPORT = re.compile(
+    r"(?:\bfrom\s+|\brequire\s*\(|\bimport\s*\()\s*[\"']"
+    r"(?:@prisma/client|better-sqlite3|drizzle-orm|mysql2?|pg|postgres|sqlite3?)"
+    r"(?:[/\"'])"
+)
+_FRONTEND_DATABASE_MARKERS = (
+    "DATABASE_URL",
+    "INK_DATABASE_ENV_FILE",
+    "TEST_DATABASE_URL",
+    "postgresql://",
+)
+_STORY_RUNTIME_PATHS = (
+    "backend/services/deck/story_workflow_application.py",
+    "backend/services/story_workspace/dream_reentry_service.py",
+    "backend/services/story_workspace/dream_artifact_turn_hook.py",
+    "backend/routers/story_workspace.py",
+)
+_FORBIDDEN_STORY_STORAGE_MARKERS = (
+    "workflow_runs",
+    "story_workspace_stories",
+    "story_workspace_workspaces",
+    "chat_threads",
+    "database.get_db",
+    "DATABASE_URL",
+)
 
 
-def _sql_literals(path: Path) -> list[tuple[int, str]]:
+def _runtime_python_files() -> tuple[Path, ...]:
+    return tuple(
+        sorted(
+            path
+            for path in _BACKEND_ROOT.rglob("*.py")
+            if not _NON_PRODUCTION_PARTS.intersection(path.relative_to(_BACKEND_ROOT).parts)
+        )
+    )
+
+
+def _frontend_runtime_files() -> tuple[Path, ...]:
+    files: list[Path] = []
+    for root in _FRONTEND_ROOTS:
+        files.extend(
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and path.suffix in _FRONTEND_SUFFIXES
+            and not _FRONTEND_NON_PRODUCTION_PARTS.intersection(path.relative_to(root).parts)
+            and ".test." not in path.name
+            and ".spec." not in path.name
+        )
+    return tuple(sorted(set(files)))
+
+
+def _forbidden_imports(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    excluded_ranges = [
-        (node.lineno, node.end_lineno or node.lineno)
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-        and node.name == "SQLiteRevocationRepository"
-    ]
-    literals: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
-            continue
-        line = getattr(node, "lineno", 0)
-        if any(start <= line <= end for start, end in excluded_ranges):
-            continue
-        if _SQL_MARKER.search(node.value):
-            literals.append((line, node.value))
-    return literals
-
-
-def test_production_sql_uses_postgresql_semantics_only() -> None:
     failures: list[str] = []
-    for relative_path in _PRODUCTION_SQL_FILES:
-        path = _REPOSITORY_ROOT / relative_path
-        for line, sql in _sql_literals(path):
-            for label, pattern in _FORBIDDEN_PRODUCTION_SQL.items():
-                if pattern.search(sql):
-                    failures.append(f"{relative_path}:{line}: {label}")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or ""]
+        else:
+            continue
+        for name in names:
+            root = name.split(".", 1)[0]
+            if root in _FORBIDDEN_IMPORT_ROOTS:
+                failures.append(f"{path.relative_to(_REPOSITORY_ROOT)}:{node.lineno}:{name}")
+    return failures
+
+
+def _joined_string_text(node: ast.JoinedStr) -> str:
+    return "".join(
+        part.value if isinstance(part, ast.Constant) and isinstance(part.value, str) else "{}"
+        for part in node.values
+    )
+
+
+def _sql_literals(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    failures: list[str] = []
+    for node in ast.walk(tree):
+        value: str | None = None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            value = node.value
+        elif isinstance(node, ast.JoinedStr):
+            value = _joined_string_text(node)
+        if value is not None and _SQL_STATEMENT.match(value):
+            failures.append(f"{path.relative_to(_REPOSITORY_ROOT)}:{node.lineno}")
+    return failures
+
+
+def test_runtime_module_graph_has_no_database_driver_or_database_import() -> None:
+    failures = [
+        failure
+        for path in _runtime_python_files()
+        for failure in _forbidden_imports(path)
+    ]
     assert failures == []
 
 
-def test_sqlite_revocation_fixture_fails_closed_without_explicit_opt_in() -> None:
-    db = sqlite3.connect(":memory:")
-    try:
-        with pytest.raises(
-            RuntimeError,
-            match="restricted to explicit tests",
-        ):
-            SQLiteRevocationRepository(db)
-    finally:
-        db.close()
+def test_runtime_module_graph_has_no_sql_statements() -> None:
+    failures = [
+        failure
+        for path in _runtime_python_files()
+        for failure in _sql_literals(path)
+    ]
+    assert failures == []
 
 
-@pytest.mark.parametrize(
-    ("service_type", "method_name"),
-    (
-        (InstallationService, "_update_row"),
-        (CompatibilityService, "_update_installation"),
-    ),
-)
-def test_dynamic_installation_updates_reject_unknown_identifiers(
-    service_type: type[object],
-    method_name: str,
-) -> None:
-    service = object.__new__(service_type)
-    method = getattr(service, method_name)
-    with pytest.raises(ValueError, match="unsupported deck installation update columns"):
-        method({"id": "install-1", "revision": 0}, injected_column="blocked")
+def test_frontend_runtime_has_no_database_client_or_database_url() -> None:
+    failures: list[str] = []
+    for path in _frontend_runtime_files():
+        source = path.read_text(encoding="utf-8")
+        relative = path.relative_to(_REPOSITORY_ROOT)
+        if _FRONTEND_DATABASE_IMPORT.search(source):
+            failures.append(f"{relative}: database client import")
+        for marker in _FRONTEND_DATABASE_MARKERS:
+            if marker in source:
+                failures.append(f"{relative}: {marker}")
+    assert failures == []
 
 
-class _RecordingCursor:
-    rowcount = 1
-
-    def fetchall(self) -> list[object]:
-        return []
-
-
-class _RecordingDb:
-    def __init__(self) -> None:
-        self.executions: list[tuple[str, tuple[object, ...]]] = []
-        self.commit_count = 0
-        self.rollback_count = 0
-
-    def execute(
-        self,
-        sql: str,
-        parameters: tuple[object, ...] | list[object] = (),
-    ) -> _RecordingCursor:
-        self.executions.append((sql, tuple(parameters)))
-        return _RecordingCursor()
-
-    def commit(self) -> None:
-        self.commit_count += 1
-
-    def rollback(self) -> None:
-        self.rollback_count += 1
+def test_server_has_no_database_credential_or_pool_lifecycle() -> None:
+    source = (_REPOSITORY_ROOT / "backend/server.py").read_text(encoding="utf-8")
+    for marker in (
+        "DATABASE_URL",
+        "INK_LOAD_DATABASE_URL_FROM_ENV_FILE",
+        "startup_database",
+        "shutdown_database",
+        "database.init_db",
+        "database.close_db",
+    ):
+        assert marker not in source
 
 
-@pytest.mark.parametrize(
-    ("service_type", "method_name"),
-    (
-        (InstallationService, "_update_row"),
-        (CompatibilityService, "_update_installation"),
-    ),
-)
-def test_dynamic_installation_updates_commit_without_closing_connection(
-    service_type: type[object],
-    method_name: str,
-) -> None:
-    db = _RecordingDb()
-    service = object.__new__(service_type)
-    service.db = db
-    getattr(service, method_name)(
-        {"id": "install-1", "revision": 2},
-        status="ready",
-    )
-    assert db.commit_count == 1
-    assert db.rollback_count == 0
-    sql, parameters = db.executions[0]
-    assert "status = %s" in sql
-    assert parameters == ("ready", "install-1", 2)
+def test_story_workspace_runtime_has_no_sql_or_table_access() -> None:
+    failures: list[str] = []
+    for relative in _STORY_RUNTIME_PATHS:
+        source = (_REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+        for marker in _FORBIDDEN_STORY_STORAGE_MARKERS:
+            if marker in source:
+                failures.append(f"{relative}: {marker}")
+    assert failures == []
 
 
-def test_dream_reentry_queries_have_postgresql_jsonb_and_bound_parameters() -> None:
-    db = _RecordingDb()
-    assert StoryWorkspaceDreamReentryService._query_authorized_rows(db, 7) == []
-    authorized_sql, authorized_parameters = db.executions[-1]
-    assert "jsonb_array_elements" in authorized_sql
-    assert "::jsonb" in authorized_sql
-    assert "IS NOT DISTINCT FROM thread.voice_id" not in authorized_sql
-    assert authorized_sql.count("IS NOT DISTINCT FROM") == 1
-    assert authorized_sql.count("%s") == len(authorized_parameters) == 5
-
-    facts = StoryWorkspaceDreamReentryService._confirmation_facts(
-        db,
-        [{"thread_id": "thread-1", "run_id": "run-1"}],
-        7,
-    )
-    assert facts == {"run-1": (False, False)}
-    confirmation_sql, confirmation_parameters = db.executions[-1]
-    assert "::jsonb ->> 'kind'" in confirmation_sql
-    assert confirmation_sql.count("%s") == len(confirmation_parameters) == 3
+def test_replaced_local_database_services_are_retired() -> None:
+    assert [
+        relative
+        for relative in _RETIRED_DATABASE_PATHS
+        if (_REPOSITORY_ROOT / relative).exists()
+    ] == []

@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated database-managed `/api/claude-mcp` CRUD, discovery, inventory, and OAuth operation contracts.
 // [Output] Strict frontend DTOs plus explicit tools/resources/prompts discovery helpers with no CLI or browser credential persistence.
 // [Pos] Transport boundary for the `claude-mcp` Resources feature.
@@ -13,7 +15,7 @@
 // [Sync] 2026-09-06: add typed per-connection MCP App desired and effective settings APIs.
 // [Sync] 2026-09-13: map discovery wire serverInfo to the existing page-model server_info field.
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export type ClaudeMcpState =
@@ -204,8 +206,8 @@ export class ClaudeMcpApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getAuthToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = getBrowserCsrfToken();
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   headers.set('Accept', 'application/json');
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
 
@@ -295,8 +297,8 @@ export async function getClaudeMcpAppEffectiveStatus(
   serverIdentifier: string,
   workspaceId: string | null = null,
 ): Promise<ClaudeMcpAppEffectiveStatus> {
-  const token = getAuthToken();
-  if (!token) {
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) {
     throw new ClaudeMcpApiError('AUTH_REQUIRED', '需要登录后查看 MCP App 状态。', 401);
   }
   const query = new URLSearchParams({ serverRef: serverIdentifier });
@@ -304,7 +306,7 @@ export async function getClaudeMcpAppEffectiveStatus(
   const response = await fetch(`/api/mcp-apps/phase1-status?${query.toString()}`, {
     cache: 'no-store',
     credentials: 'include',
-    headers: { authorization: `Bearer ${token}` },
+    headers: { ...browserRequestHeaders({}, csrfToken) },
   });
   if (!response.ok) {
     throw new ClaudeMcpApiError(

@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-deck-runtime-domain/prepare-runtime-data-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "Runtime data6 fixture prepared; reused proven Workflow60; restricted roles; metadata-only, no filesystem/model acceptance\n",
+  "classification": "primary-owned metadata-only isolated setup"
+}

@@ -3,8 +3,25 @@
 [Output] Document management/download endpoints plus the fail-closed workspace:// content read boundary.
 [Pos] Workspace storage API design document in docs/design/workspace
 [Sync] 2026-08-22: add no-create, Thread-owner-bound public files/ content reads with strict path and symlink rejection.
+[Sync] 2026-09-15: use Admin OAuth/Thread metadata for content/download; settings migration remains pending.
 -->
 # Workspace File Management API — 设计文档
+
+## 当前 Admin 数据入口
+
+### 背景与问题
+
+生产文件身份已共用 Admin OAuth，但 content/download 的 Thread 所有权仍由 Dream 查询 PostgreSQL。实际 chat-thread.get 可独立替换这项读取；SystemConfig 和默认 Story Workspace 尚无已发布 operation，不能由用户偏好或 Deck default 替代。
+
+### 目标与边界
+
+两 GET 复用统一 current OAuth/dream:read 与原严格 Chat Thread DTO，消除 ownership 查询的 Dream SQL。保持原文件、ZIP、no-create、symlink 与响应 headers；Workspace Mode/初始化的 SystemConfig 读取和其他管理入口继续迁移。Runtime/TMPDIR/资源与正常服务不受本批改变。
+
+### 概念与规则
+
+服务器 request-auth owner 提供客户端和已认证 canonical actor。消费者刷新并匹配 identity/unified/keyset-pagination/final-projection 四项 schema 与实际 chat-thread.get hash，仅发送 Thread ID/OAuth/request UUID；响应 ID 和 user_id 必须匹配。输入 ID→Thread owner→Workspace Mode→public path→existing filesystem 的顺序保持。null 为原 WORKSPACE_NOT_FOUND/404；错误、错配、超时和未知异常使用原固定 WORKSPACE_AUTH_UNAVAILABLE/503，不回传上游正文、不重试、不进入 Mode/文件访问。
+
+权限读取不创建 Thread、工作区、Run 或文件，不改变状态。原 Settings、文件安全规则及正常响应继续适用；没有额外确认或部署环境分支。[生产入口技术测试](../../../backend/tests/test_workspace_router.py) 使用实际 OAuth/HTTP/DTO 与临时工作区，fence get_db/get_chat_thread，覆盖 schema/hash/actor-ID/timeout 拒绝及原 ZIP/Unicode/symlink/no-create/Settings。受控 SystemConfig fixture 只属于测试，不能声明所有文件数据无 PG；正常共享文件/CLI/Bash/模型验收由主协调执行。
 
 > **参考来源**: `glide-the/claude-agent-next-kit → docs/design/storage-api.md`
 > **路径**: `backend/routers/workspace.py`
@@ -227,7 +244,7 @@ Content-Type: application/json
 
 ```http
 GET /api/workspace/files/content?sessionId=<thread-id>&path=files/<relative-path>
-Authorization: Bearer <JWT>
+Authorization: Bearer <Admin OAuth access token>
 ```
 
 该端点是 `workspace://files/...` 的只读内容边界，不是第二套文件服务：
@@ -294,7 +311,7 @@ candidate.relative_to(workspace_path.resolve())  # 逃逸时抛出异常
 
 ### Chat 内容读取安全
 
-`/api/workspace/files/content` 在任何 workspace/path probe 前先验证 JWT、Thread 所有权和 Workspace Mode；随后用 `get_existing_workspace()` 解析现有真实目录，并通过 strict regular-file read 拒绝目录、设备、FIFO 和所有符号链接组件。普通管理/下载端点保持原生命周期，本安全边界不会暗中扩大它们的权限。
+`/api/workspace/files/content` 在任何 workspace/path probe 前先通过共享 Admin OAuth 身份与 typed Thread ownership 读取，再校验 Workspace Mode；随后用 `get_existing_workspace()` 解析现有真实目录，并通过 strict regular-file read 拒绝目录、设备、FIFO 和所有符号链接组件。下载复用相同 ownership→Mode→path→existing filesystem 顺序，普通管理端点保持原生命周期。
 
 ### 上传安全
 

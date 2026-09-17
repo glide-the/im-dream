@@ -28,9 +28,9 @@ from services.claude_plugin.workspace_init import (
     execute_init_profile,
     load_init_profile,
 )
-from services.claude_plugin.workspace_packer import (
-    WorkspacePackError,
-    pack_workspace_plugins,
+from services.claude_plugin.workspace_packer import WorkspacePackError
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
 )
 from libs.claude_agent_kit.server.plugin_launcher import (
     PluginLaunchError,

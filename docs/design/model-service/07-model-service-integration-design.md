@@ -1,7 +1,8 @@
 # Ink Memory 模型服务接入设计稿
 
-> 文档状态：最终设计
+> 文档状态：现行设计
 > 设计日期：2026-08-10
+> 最近同步：2026-09-16（Admin OAuth 目录读取与 `gateway-cli` Runtime delegation）
 > 适用系统：`ink-admin-memory`、`ink-dream-memory`、PostgreSQL `ink-memory`
 > 配套文档：`../subscription/06-subscription-business-design.md`
 > 文档性质：最终产品方案与代码级设计；本稿不实现业务代码
@@ -15,7 +16,8 @@
 | Admin | Ink Memory 的模型管理、订阅授权和 AI Gateway 服务端系统 | 持有 Registry、Provider route、资格规则、Secret 和 Usage/Ledger 真值 |
 | Dream | 面向 canonical user 的创作产品，包含浏览器前端、FastAPI BFF 和 Claude Agent | 展示安全目录、保存 alias、发起调用，不拥有路由或授权真值 |
 | canonical user | Dream 中可登录用户的唯一产品身份，对应 PostgreSQL `users.id` | Browser Session 的用户主体；不得由请求参数覆盖 |
-| signed canonical subject | Dream BFF 根据当前 Session 为 Admin 服务调用生成的短时签名用户声明 | 只在服务端传递，用于把服务身份与当前用户绑定 |
+| Admin OAuth access token | Admin 为当前 Dream 登录主体签发的用户授权 | Dream BFF 只把它用于 Admin 模型目录和 delegation 创建；请求参数不能覆盖主体 |
+| `gateway-cli` runtime delegation | Admin 在校验 OAuth 主体、Thread/Run、Gateway key 与三个固定 Gateway scope 后签发的短时 `idg_` bearer | 只交给单次 Agent Runtime；不能用于 Admin 数据接口或管理页面 |
 | AI Model Registry | Admin 中唯一的平台模型注册表，对应 `ai_models` | 管理 alias、显示信息、能力、限制和 enabled，不在 Dream 建副本 |
 | Provider | 实际提供模型推理能力的上游服务及其 Admin 内部路由配置 | base URL、credential、timeout/retry 仅存在 Admin |
 | upstream model | Provider 接口要求的真实模型标识 | 仅由 Admin route 解析，禁止返回 Dream Browser |
@@ -37,7 +39,7 @@
 | reconciliation | 对进程中断或 Usage 暂时未知的 Gateway Request 进行有界重试和审计结算 | 达到次数/时间上限必须进入 release、actual capture 或 conservative capture 终态 |
 | DTO | Data Transfer Object；Admin、BFF 和前端之间的版本化传输合同 | 不是数据库表；必须 strict allowlist 并排除内部路由字段 |
 | SSE | Server-Sent Events；流式模型响应的传输形式 | 首字节后错误通过安全 error event/termination 表达，后台仍完成结算 |
-| BFF | Backend for Frontend；Dream 浏览器访问的同源 FastAPI 服务边界 | 注入服务身份、传递 signed subject、严格校验 DTO 和安全错误 |
+| BFF | Backend for Frontend；Dream 浏览器访问的同源 FastAPI 服务边界 | 校验 Admin OAuth 主体、调用严格 DTO、创建用途限定的 Runtime delegation，并投影安全错误 |
 
 ## 1. 文档摘要
 
@@ -60,7 +62,7 @@
 - **Dream canonical user：** 查看平台模型、理解不可调用原因、选择当前可调用 alias，并通过 Claude Agent 使用。
 - **Admin 模型操作者：** 用独立 Admin Session/RBAC 管理 Registry、Provider、enabled 和 route readiness。
 - **Admin 套餐操作者：** 管理 Plan Entitlement/Allowance，决定哪些 Subscription 获得哪些模型 scope。
-- **Gateway runtime：** 使用服务身份和 signed canonical subject 执行最终资格、限流、Provider 路由和结算。
+- **Gateway runtime：** 使用 Admin 签发并绑定当前 Thread/Run 的 `gateway-cli` delegation 执行最终资格、限流、Provider 路由和结算。
 
 ### 2.2 本次范围
 
@@ -142,7 +144,8 @@
 
 ### 4.2 Dream
 
-- 从当前 Session 获取 `users.id`，BFF 派生 signed canonical subject。
+- 从当前 Admin OAuth access token 解析并经 Admin principal 接口确认 canonical user；不在 Dream 自行签用户主体。
+- 模型目录使用当前 OAuth access token 与 server-only Gateway key；每个 Agent turn 通过 Admin DTO 创建独立 `gateway-cli` delegation。
 - 浏览器通过 same-origin BFF 读取目录和提交 alias，不获得 Gateway credential。
 - 严格验证公共 DTO；未知字段、枚举或不变量冲突 fail closed。
 - 设置页保留所有 visible model，显示当前 availability 和恢复入口。
@@ -486,13 +489,14 @@ locked 卡片不发送保存。保存请求只含 `{model: alias}`；BFF 调 sel
 - Admin DTO 非法 → 502；connection/timeout → 503；安全业务 4xx 保真。
 - GET/POST/stream 不透明自动重试；由用户显式重试。幂等重放使用原 key/digest。
 - 不缓存授权结果，不允许 `models.json`、env Provider 型号或静态套餐 fallback。
-- Gateway/service key 和 subject signing key 只存在 server env/secret provider。
+- Gateway service key 只存在 Dream server env/secret provider；Dream 不再配置 subject signing key。
+- 浏览器 OAuth token 不进入 Claude Code 子进程；子进程只得到当前 turn 的 `gateway-cli` opaque bearer，且 SDK overlay 会清空 server credential 键。
 
 ### 10.3 Claude Agent 调用
 
 1. 新 turn 读取保存的 platform alias。
 2. 若 alias stale，不调用 Provider，返回 409 和重选状态。
-3. Dream server 发送 alias、protocol request、signed subject、Idempotency-Key 到 Admin Gateway。
+3. Dream server 用当前 OAuth actor 向 Admin 创建绑定 Thread/Run 的 `gateway-cli` delegation；Claude Code 子进程只发送 alias、protocol request、该 opaque bearer 和 turn idempotency key 到 Admin Gateway。
 4. Gateway 实时 eligibility + reserve。
 5. Gateway 内部解析 Provider/upstream/credential 并调用。
 6. Gateway capture/release，返回安全响应/requestId。

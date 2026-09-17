@@ -1,10 +1,9 @@
-# [Input] Consume exact Admin resource/Runtime capabilities, one fixed system_settings
-#         row, JSON-safe admission defaults, and an injected PostgreSQL lease factory.
+# [Input] Consume strict Admin desired-policy state DTOs and JSON-safe admission defaults.
 # [Output] Provide a public admission/global-effort provider and isolated periodic
 #          refresher with applied/not-configured/invalid/unavailable LKG status.
-# [Pos] PostgreSQL-only Claude Agent resource-policy boundary composed by agent_factory.
-# [Sync] 2026-08-28: add optional SDK-backed global effort; a higher revision atomically
-#                    replaces admission and Runtime policy while failures retain both LKGs.
+# [Pos] Admin API Claude Agent resource-policy boundary composed by agent_factory.
+# [Sync] 2026-09-14: replace SQL/capability/connection reads with a typed Admin reader;
+#                    retain the existing parser, monotonic refresher and Runtime LKG semantics.
 
 """Load and periodically refresh one validated Claude Agent admission policy."""
 from __future__ import annotations
@@ -24,10 +23,7 @@ from claude_agent.admission import (
     AgentAdmissionConfig,
     validate_agent_admission_config,
 )
-from schema.capabilities import (
-    claude_agent_resource_observer_capability_available,
-    claude_code_runtime_config_capability_available,
-)
+from services.admin_data.resource_models import ResourcePolicyReadOutputDTO
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +85,6 @@ def resource_policy_refresh_interval_from_env() -> float:
     ):
         return RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS
     return parsed
-
-
-def _row_value(row: Any, key: str, index: int) -> Any:
-    if isinstance(row, Mapping):
-        return row.get(key)
-    return row[index]
 
 
 def _updated_at_text(value: Any) -> str | None:
@@ -211,36 +201,19 @@ class ClaudeCodeRuntimePolicyStore:
 class ClaudeAgentResourcePolicyProvider:
     """Read and validate one Admin-owned desired policy without mutating schema."""
 
-    def __init__(self, db_factory: Callable[[], Any]) -> None:
-        self._db_factory = db_factory
+    def __init__(self, reader: Callable[[], ResourcePolicyReadOutputDTO]) -> None:
+        self._reader = reader
 
     def load(self, fallback: AgentAdmissionConfig) -> ResourcePolicyLoadResult:
         loaded_at = _utc_now_text()
-        connection: Any | None = None
         try:
-            connection = self._db_factory()
-            if (
-                not claude_agent_resource_observer_capability_available(connection)
-                or not claude_code_runtime_config_capability_available(connection)
-            ):
-                return self._fallback(fallback, "unavailable", loaded_at)
-            row = connection.execute(
-                "SELECT value, updated_at FROM system_settings "
-                "WHERE category = %s AND key = %s",
-                (RESOURCE_POLICY_CATEGORY, RESOURCE_POLICY_KEY),
-            ).fetchone()
+            policy = self._reader()
         except Exception:
             return self._fallback(fallback, "unavailable", loaded_at)
-        finally:
-            if connection is not None:
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-        if row is None:
-            return self._fallback(fallback, "not_configured", loaded_at)
-        updated_at = _updated_at_text(_row_value(row, "updated_at", 1))
-        parsed = _parse_policy(_row_value(row, "value", 0))
+        if policy.status in {"not_configured", "invalid"}:
+            return self._fallback(fallback, policy.status, loaded_at)
+        updated_at = _updated_at_text(policy.updated_at)
+        parsed = _parse_policy(policy.value.model_dump())
         if parsed is None or updated_at is None:
             return self._fallback(fallback, "invalid", loaded_at)
         config, revision, effort_level = parsed

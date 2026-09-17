@@ -8,11 +8,12 @@
 <!-- [Sync] 2026-08-30: generate README Skill rows from build_notion_capability_catalog and reuse that section in per-turn workspace context. -->
 <!-- [Sync] 2026-08-30: define catalog output—not a renderer-local Skill list—as the sole Settings/workspace Skill index contract. -->
 <!-- [Sync] 2026-08-30: record that Runtime 0.1.4 passes real fresh/resume Notion CLI acceptance and the separate public release gates. -->
+<!-- [Sync] 2026-09-16: move connector/resource/snapshot/thread persistence behind Admin Registry148-168 strict DTO and typed Drizzle repositories. -->
 
 # Notion 用户凭证、轻量索引与 Runtime CLI/Read 设计
 
-Status: Dream projection implemented; Runtime 0.1.4 real-business verified, publicly released, and adopted
-Updated: 2026-08-30
+Status: Dream projection implemented; Admin DTO data boundary implemented; Runtime 0.1.4 real-business verified, publicly released, and adopted
+Updated: 2026-09-16
 Scope: Notion 连接、用户凭证、策略同步、thread 投影、Skill、Agent CLI 与按需正文读取
 
 ## 1. 背景与问题
@@ -35,7 +36,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 |---|---|---|
 | 旧 snapshot builder | `backend/notion/sync.py` 对每个数据库 row 调用 `operations.get_page()`，后者连续请求 page、markdown、blocks | 根因：后台同步被正文数量线性放大。 |
 | 原子 current | `backend/notion/snapshot_store.py` 仅在完整 payload 构建后替换 `current.json` | 保留；不能用半成品缓解慢同步。 |
-| 资源状态 | `backend/notion/store.py::insert_resource` 旧值为 `synced` | 根因：UI 将“已选择”误报为“已进入成功索引”。 |
+| 资源状态 | 历史 `backend/notion/store.py::insert_resource` 旧值为 `synced`；现由 Admin Repository 事务维护 | UI 继续区分“已选择”和“已进入成功索引”；Dream 不执行 SQL。 |
 | 上游 Skill | `develop@e3523db9` 先读取 `.notion/index.json` / database 清单定位 ID，再按需读取页面 | 保留文件导航模型，并让同步安装的 `notion-cli` 使用当前 thread CLI 绑定。 |
 | Runtime hook | `agent_runner.py` 已有 `.editor` PreToolUse Read redirect 模式 | 复用同一 hook/临时文件机制，不新增 Agent 工具协议。 |
 | 凭证边界 | actor agentdata source + `{thread}/.notion-home` 0700/0600 投影 | 保留；与 MCP 的 actor snapshot 原则一致。 |
@@ -72,7 +73,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 规则：
 
-1. PostgreSQL `user_id` 是 connector 归属真相；Runtime 从当前 actor/thread 投影取得 CLI 环境，不从 connector DTO 推导身份。
+1. Admin Better Auth canonical user 与 Admin Drizzle connector `user_id` 是归属真相；Dream 只使用当前 OAuth/turn authority，并校验返回主体，不接受外部 user ID 选择数据。
 2. selection 保存后资源状态为 `pending`；只有同一批精确 `(resource_type, external_id)` 进入成功 index 并提交后才变为 `synced`。
 3. index builder 可分页枚举 data source rows，但不得调用 page/markdown/blocks 内容端点。
 4. `current.json` 只接受 `pages={}` 的新 payload；旧 LKG 可读取其 index 以平滑迁移，但 thread projector 无条件丢弃其中的 legacy page body。
@@ -155,7 +156,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 ## 8. 兼容、迁移与回滚
 
-- 公开 `/api/connectors*`、PostgreSQL schema 和 snapshot identity 字段保持；`pageCount` 改为 index 条目数而非嵌入正文数。
+- 公开 `/api/connectors*`、Admin Drizzle schema 和 snapshot identity 字段保持；Dream 通过 Registry148-168 DTO 访问，`pageCount` 为 index 条目数而非嵌入正文数。
 - 新 producer 强制 `pages={}`；thread projector 即使读取 legacy current 也只投影 index 并清理所有静态 page 文件；下一次成功同步再把 actor 旧正文 current 替换成轻索引。
 - `.notion/pages/<id>.json` 路径保留，但从静态 page 文件改为 Runtime Read hook，Agent 文件体验不变。
 - 内置 Skill 仍由 backend-owned 目录刷新；其他用户 Skill 不变。
@@ -181,7 +182,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 - actor agentdata、credential staging、thread projection、原子 LKG、现有 scheduler/config policy。
 - 固定 `ntn` 作为 Dream-owned/Agent Skill 共用 driver；现有 `.notion` 文件协议和 PreToolUse redirect 模式。
-- connector/resource/snapshot PostgreSQL 表和公开 API。
+- Admin-owned connector/resource/snapshot PostgreSQL 表、Registry148-168 和公开 API。
 
 ### 删除
 
@@ -201,7 +202,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 - `ink-dream-memory`：拥有 connector、Runtime hook、Skill、前端、workspace、Dream-side binding、设计和真实 Chat 验收。
 - `ink-claude-code-dream`：已确认受影响；生产 Bash sandbox 必须补齐精确 thread-bound Notion binding、capability/build/version 合同和 compiled-process 测试。
 - `claude-code-sourcemap/restored-src`：仅作为 `a8a678c` 上游 Bash 环境继承参考，不直接修改。
-- `ink-admin-memory`：本次无 schema/capability 变化，不创建迁移任务。
+- `ink-admin-memory`：拥有 Registry148-168 strict DTO/service/typed Drizzle Repository、权限和事务；复用现有五表与 `dream.schema.unified.v1`，本阶段不新增 migration。
 - 生产部署：不在本次范围；本机真实链路只有使用 qualified Runtime 制品后才能声明通过。
 
 业务时序见 [runtime-credential-and-skill-sequence.md](runtime-credential-and-skill-sequence.md)，本次根因与修复设计见 [runtime-bash-env-remediation.md](runtime-bash-env-remediation.md)，上游差异见 [upstream-gap-and-sync-review.md](upstream-gap-and-sync-review.md)。

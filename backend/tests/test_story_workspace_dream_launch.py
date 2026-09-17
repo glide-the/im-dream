@@ -266,6 +266,18 @@ class DreamLaunchApplicationServiceTest(unittest.IsolatedAsyncioTestCase):
             self.fixture.source_adapter.calls[1]["message_id"],
         )
 
+    async def test_semantic_run_replay_accepts_the_original_equivalent_preflight(
+        self,
+    ) -> None:
+        self.fixture.run_overrides["workflow_preflight_id"] = "pf_" + "f" * 32
+
+        result = await self.fixture.service.launch(
+            command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
+        )
+
+        self.assertEqual(result.workflow_run_id, RUN_ID)
+        self.assertEqual(len(self.fixture.dispatcher.calls), 1)
+
     async def test_same_key_with_different_content_conflicts_before_workflow_creation(
         self,
     ) -> None:

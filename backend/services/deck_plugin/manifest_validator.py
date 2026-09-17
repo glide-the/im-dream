@@ -1,3 +1,7 @@
+# [Input] Deck Plugin v1 manifest and server-owned source allowlist.
+# [Output] Pure validated manifest or stable validation error.
+# [Pos] Dream artifact validator; release uniqueness and persistence belong to Admin ORM.
+# [Sync] 2026-09-16: retire the unused database uniqueness hook from Dream production code.
 """Validation for Deck Plugin v1 manifests."""
 
 from __future__ import annotations
@@ -92,31 +96,10 @@ def _source_is_allowed(source_ref: str, allowlist: set[str]) -> bool:
     )
 
 
-def _assert_unique(
-    db: Any,
-    manifest: DeckPluginManifestV1,
-    exclude_release_id: str | None,
-) -> None:
-    query = (
-        "SELECT id FROM deck_plugin_releases "
-        "WHERE deck_plugin_id = %s AND deck_plugin_version = %s"
-    )
-    params: list[str] = [manifest.deck_plugin_id, manifest.deck_plugin_version]
-    if exclude_release_id is not None:
-        query += " AND id <> %s"
-        params.append(exclude_release_id)
-    if db.execute(query, params).fetchone() is not None:
-        raise _invalid(
-            "deck_plugin_id and deck_plugin_version must identify a unique release"
-        )
-
-
 def validate_manifest(
     manifest: DeckPluginManifestV1 | Mapping[str, Any],
     *,
     source_allowlist: Iterable[str],
-    db: Any | None = None,
-    exclude_release_id: str | None = None,
     production: bool = True,
 ) -> DeckPluginManifestV1:
     """Validate schema, references, capabilities, sources, and integrity."""
@@ -198,6 +181,4 @@ def validate_manifest(
                     f"runtime source is not in the administrator allowlist: {plugin.source_ref}",
                 )
 
-    if db is not None:
-        _assert_unique(db, parsed, exclude_release_id)
     return parsed

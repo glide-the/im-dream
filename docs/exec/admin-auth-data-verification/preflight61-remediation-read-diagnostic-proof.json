@@ -1,0 +1,137 @@
+{
+  "result": "DIAGNOSTIC",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "access": "public read operations + SELECT + actual source only",
+  "reads": [
+    {
+      "label": "read-checking",
+      "http_status": 200,
+      "prepared_diff_paths": [],
+      "actual_source_diff_paths": [],
+      "stored_status": "checking",
+      "expired_now": true
+    },
+    {
+      "label": "read-failed",
+      "http_status": 200,
+      "prepared_diff_paths": [],
+      "actual_source_diff_paths": [],
+      "stored_status": "failed",
+      "expired_now": true
+    },
+    {
+      "label": "read-passed-active",
+      "http_status": 200,
+      "prepared_diff_paths": [
+        ".preflight.preflight_token"
+      ],
+      "actual_source_diff_paths": [],
+      "stored_status": "passed",
+      "expired_now": true
+    },
+    {
+      "label": "read-passed-consumed",
+      "http_status": 200,
+      "prepared_diff_paths": [],
+      "actual_source_diff_paths": [],
+      "stored_status": "passed",
+      "expired_now": true
+    },
+    {
+      "label": "read-passed-expired-time",
+      "http_status": 200,
+      "prepared_diff_paths": [],
+      "actual_source_diff_paths": [],
+      "stored_status": "passed",
+      "expired_now": true
+    },
+    {
+      "label": "read-expired-status",
+      "http_status": 200,
+      "prepared_diff_paths": [],
+      "actual_source_diff_paths": [],
+      "stored_status": "expired",
+      "expired_now": true
+    }
+  ],
+  "executed_mappings": [
+    {
+      "label": "fresh-passed",
+      "status": "passed",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": true
+    },
+    {
+      "label": "concurrent-passed",
+      "status": "passed",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": false
+    },
+    {
+      "label": "new-original-same-fingerprint",
+      "status": "passed",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": false
+    },
+    {
+      "label": "fresh-concurrent-single-pipeline",
+      "status": "passed",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": true
+    },
+    {
+      "label": "disabled-check1",
+      "status": "failed",
+      "failed_check": "identity_workspace_permission",
+      "error_code": "WORKFLOW_PERMISSION_DENIED",
+      "execution_owner": true
+    },
+    {
+      "label": "wrong-revision-check2",
+      "status": "failed",
+      "failed_check": "binding_release",
+      "error_code": "BINDING_REVISION_CONFLICT",
+      "execution_owner": true
+    },
+    {
+      "label": "schema-check3",
+      "status": "failed",
+      "failed_check": "manifest_workflow_schema",
+      "error_code": "STORY_SCHEMA_INCOMPATIBLE",
+      "execution_owner": true
+    },
+    {
+      "label": "capability-check5",
+      "status": "failed",
+      "failed_check": "capability_source_policy",
+      "error_code": "WORKFLOW_PERMISSION_DENIED",
+      "execution_owner": true
+    },
+    {
+      "label": "latest-materialization-check7",
+      "status": "failed",
+      "failed_check": "runtime_materialization",
+      "error_code": "RUNTIME_PLUGIN_NOT_READY",
+      "execution_owner": true
+    },
+    {
+      "label": "checking-new-original-bounded",
+      "status": "checking",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": false
+    },
+    {
+      "label": "original-checking-no-resume",
+      "status": "checking",
+      "failed_check": null,
+      "error_code": null,
+      "execution_owner": true
+    }
+  ],
+  "normal_database": "untouched"
+}

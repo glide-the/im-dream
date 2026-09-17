@@ -1,8 +1,12 @@
+# [Sync] 2026-09-15: verify isolated user stdio clears to broker/policy values before package imports.
+# [Sync] 2026-09-15: verify user stdio gets only Session broker/policy values plus credential tombstones.
+# [Sync] 2026-09-15: verify Editor stdio receives only its local broker tuple, without DATABASE_URL or actor identity.
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
 # [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
 #          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-14: require empty Admin/Auth child tombstones while preserving existing env priority/routing assertions.
 # [Sync] 2026-09-12: execute an admitted ZIP command and reject dot-prefixed,
 #                    escaping, globbed, and symlinked archive paths.
 # [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
@@ -1389,6 +1393,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             hook = await self._capture_pre_tool_use_hook(
                 cwd=str(workspace),
                 editor_state={"cells": [{"id": "cell-1", "content": "hello"}]},
+                allowed_tools=["Read"],
             )
             result = await hook(
                 {
@@ -1569,7 +1574,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "mcp__story_workspace__write_dream_stage",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
-    async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
+    async def test_story_workspace_stdio_receives_only_trusted_identity_and_broker_env(self):
         self.set_query([])
         runner = self.make_runner()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1595,6 +1600,11 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                             "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
                                 "dream_agent_" + "a" * 64
                             ),
+                            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+                            "INK_SESSION_BROKER_PORT": "31415",
+                            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+                            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+                            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
                             "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
                         },
                     ),
@@ -1612,6 +1622,11 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             env["INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"],
             "dream_agent_" + "a" * 64,
         )
+        self.assertEqual(env["INK_SESSION_BROKER_HOST"], "127.0.0.1")
+        self.assertEqual(env["INK_SESSION_BROKER_PORT"], "31415")
+        self.assertEqual(env["INK_SESSION_BROKER_CAPABILITY"], "a" * 43)
+        self.assertEqual(env["INK_SESSION_BROKER_TIMEOUT_SECONDS"], "10.0")
+        self.assertEqual(env["INK_SESSION_BROKER_MAX_BYTES"], "1048576")
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
     async def test_story_workspace_stdio_is_not_started_without_trusted_run(self):
@@ -3628,6 +3643,105 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
 
 class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
+    def test_user_mcp_child_env_is_exact_and_tombstones_inherited_credentials(self):
+        broker_env = {
+            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+            "INK_SESSION_BROKER_PORT": "31415",
+            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
+            "INK_AGENT_SESSION_RETRIEVAL_MODE": "fuzzy",
+            "INK_AGENT_SESSION_FUZZY_MIN_SCORE": "0.4",
+        }
+        config = agent_runner_module._user_mcp_stdio_config({
+            **broker_env,
+            "ANTHROPIC_AUTH_TOKEN": "gateway-bearer",
+            "ANTHROPIC_API_KEY": "legacy-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
+            "DATABASE_URL": "postgresql://must-not-cross",
+            "INK_AGENT_USER_ID": "7",
+            "INK_AGENT_THREAD_ID": "thread-must-not-cross",
+            "CUSTOM_KEY": "must-not-cross",
+            **{
+                name: "admin-secret"
+                for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+            },
+        })
+        projected = agent_runner_module._mcp_server_config_json_value(
+            config, preserve_admin_tombstones=True
+        )
+        env = projected["env"]
+        self.assertEqual(projected["args"][:2], ["-I", "-c"])
+        bootstrap = projected["args"][2]
+        self.assertLess(
+            bootstrap.index("os.environ.clear()"),
+            bootstrap.index("runpy.run_module"),
+        )
+        self.assertIn(str(agent_runner_module._REPO_ROOT), bootstrap)
+        inherited = {
+            **os.environ,
+            "ANTHROPIC_AUTH_TOKEN": "parent-bearer",
+            "ANTHROPIC_API_KEY": "parent-api-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "parent-oauth",
+            "DATABASE_URL": "postgresql://parent-secret",
+            "INK_AGENT_USER_ID": "99",
+            "INK_AGENT_THREAD_ID": "parent-thread",
+            "CUSTOM_KEY": "parent-custom",
+            **{
+                name: "parent-admin-secret"
+                for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+            },
+            **env,
+        }
+        inspected_names = [
+            *broker_env,
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "DATABASE_URL",
+            "INK_AGENT_USER_ID",
+            "INK_AGENT_THREAD_ID",
+            "CUSTOM_KEY",
+            *sorted(sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES),
+        ]
+        captured = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import json,os,sys; "
+                    "from libs.claude_agent_kit.server.user_mcp_stdio import "
+                    "sanitize_user_mcp_environment; "
+                    "sanitize_user_mcp_environment(os.environ); "
+                    "print(json.dumps({name: os.getenv(name) for name in sys.argv[1:]}))"
+                ),
+                *inspected_names,
+            ],
+            env=inherited,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        child = json.loads(captured.stdout)
+
+        self.assertTrue(broker_env.items() <= child.items())
+        for name in (
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            *sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
+        ):
+            self.assertIsNone(child[name])
+            self.assertEqual(env[name], "")
+        self.assertIsNone(child.get("DATABASE_URL"))
+        self.assertIsNone(child.get("INK_AGENT_USER_ID"))
+        self.assertIsNone(child.get("INK_AGENT_THREAD_ID"))
+        self.assertIsNone(child.get("CUSTOM_KEY"))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("INK_AGENT_USER_ID", env)
+        self.assertNotIn("INK_AGENT_THREAD_ID", env)
+        self.assertNotIn("CUSTOM_KEY", env)
+
     async def test_user_mcp_exposes_only_session_retrieval(self):
         from mcp import types as mcp_types
         from libs.claude_agent_kit.server.mcp_server import (
@@ -3749,21 +3863,17 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
         warning.assert_not_called()
 
-    def test_server_owned_gateway_api_key_helper_counts_as_auth(self):
+    def test_admin_gateway_delegation_counts_as_auth(self):
         from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
 
         options = _SDK_OPTIONS(env={})
         apply_gateway_sdk_env_to_options(
             options,
-            "205",
+            "idg_" + "d" * 43,
             environment={
                 "INK_GATEWAY_ENABLED": "1",
                 "INK_GATEWAY_BASE_URL": "https://admin.example.test",
                 "INK_GATEWAY_SERVICE_KEY": "gw_" + "k" * 43,
-                "INK_GATEWAY_SUBJECT_JWT_ISSUER": "https://dream.example.test",
-                "INK_GATEWAY_SUBJECT_JWT_AUDIENCE": "ink-memory-gateway",
-                "INK_GATEWAY_SERVICE_CLIENT_ID": "dream-bff",
-                "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS": "240",
             },
         )
 
@@ -3787,7 +3897,13 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):
-    """Project dotenv loading only forwards SDK-level keys."""
+    """Project dotenv loading forwards SDK keys with server-secret child tombstones."""
+
+    def _assert_child_overlay(self, actual, expected):
+        for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES:
+            self.assertIn(name, actual)
+            self.assertEqual(actual[name], "")
+        self.assertEqual({key: value for key, value in actual.items() if key not in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES}, expected)
 
     def test_project_runtime_options_set_claude_code_retry_default_to_three(self):
         options = _SDK_OPTIONS()
@@ -3954,7 +4070,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             process_env={},
         )
 
-        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+        self._assert_child_overlay(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
 
     def test_merge_project_dotenv_env_includes_process_sdk_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3980,7 +4096,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             loaded,
             {
                 "ANTHROPIC_MODEL": "dotenv-model",
@@ -3997,7 +4113,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             process_env={"ANTHROPIC_AUTH_TOKEN": "cloud-secret-token"},
         )
 
-        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "explicit-token"})
+        self._assert_child_overlay(loaded, {"ANTHROPIC_AUTH_TOKEN": "explicit-token"})
 
     def test_apply_project_dotenv_to_options_reads_process_env_by_default(self):
         options = _SDK_OPTIONS()
@@ -4016,7 +4132,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
                 env_file=Path("/tmp/does-not-exist"),
             )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             options.env,
             {
                 "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
@@ -4042,7 +4158,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             options.env,
             {
                 "ANTHROPIC_AUTH_TOKEN": "server-token",
@@ -4320,24 +4436,25 @@ class TestEditorMcpBinding(unittest.TestCase):
         "cells": [{"id": "cell-current", "type": "text", "content": ""}],
     }
 
-    @patch.dict(
-        os.environ,
-        {"DATABASE_URL": "postgresql://unit:secret@127.0.0.1:5432/ink_unit"},
-        clear=False,
-    )
-    def test_stdio_config_projects_only_trusted_actor_and_database_capability(self):
+    def test_stdio_config_projects_only_turn_local_broker_capability(self):
+        broker_env = {
+            "INK_EDITOR_BROKER_HOST": "127.0.0.1",
+            "INK_EDITOR_BROKER_PORT": "31415",
+            "INK_EDITOR_BROKER_CAPABILITY": "a" * 43,
+            "INK_EDITOR_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_EDITOR_BROKER_MAX_BYTES": "1048576",
+        }
         config = agent_runner_module._editor_mcp_stdio_config({
+            **broker_env,
             "INK_AGENT_USER_ID": "7",
             "INK_AGENT_THREAD_ID": "thread-must-not-cross",
             "UNTRUSTED_VALUE": "must-not-cross",
         })
 
         env = config["env"] if isinstance(config, dict) else config.env
-        self.assertEqual(env["INK_AGENT_USER_ID"], "7")
-        self.assertEqual(
-            env["DATABASE_URL"],
-            "postgresql://unit:secret@127.0.0.1:5432/ink_unit",
-        )
+        self.assertTrue(broker_env.items() <= env.items())
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("INK_AGENT_USER_ID", env)
         self.assertNotIn("INK_AGENT_THREAD_ID", env)
         self.assertNotIn("UNTRUSTED_VALUE", env)
 

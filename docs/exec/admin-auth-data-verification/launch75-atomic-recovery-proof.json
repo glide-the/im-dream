@@ -1,0 +1,156 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "assertions": 308,
+  "selected_faults": [
+    {
+      "point": "source-thread",
+      "operation": "dream-launch-source.ensure",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "source-message",
+      "operation": "dream-launch-source.ensure",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "source-order",
+      "operation": "dream-launch-source.ensure",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "source-receipt",
+      "operation": "dream-launch-source.ensure",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "source-audit",
+      "operation": "dream-launch-source.ensure",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "claim-message",
+      "operation": "dream-launch-dispatch.claim",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "claim-receipt",
+      "operation": "dream-launch-dispatch.claim",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "claim-audit",
+      "operation": "dream-launch-dispatch.claim",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "finish-message",
+      "operation": "dream-launch-dispatch.finish",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "finish-receipt",
+      "operation": "dream-launch-dispatch.finish",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "finish-audit",
+      "operation": "dream-launch-dispatch.finish",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "all byte exact",
+      "cleanup": "PASS"
+    }
+  ],
+  "commit_losses": [
+    {
+      "operation": "dream-launch-source.ensure",
+      "actual_final_commit": true,
+      "injections": 1,
+      "initial_status": 503,
+      "original_get_status": 200,
+      "replay_status": 200,
+      "full_original_result": "actual source and DTO verified",
+      "exact_effects": {
+        "receipts": 1,
+        "audits": 1
+      },
+      "protected_tables": 17,
+      "recovery": "byte exact no duplicate effects"
+    },
+    {
+      "operation": "dream-launch-dispatch.claim",
+      "actual_final_commit": true,
+      "injections": 1,
+      "initial_status": 503,
+      "original_get_status": 200,
+      "replay_status": 200,
+      "full_original_result": "actual source and DTO verified",
+      "exact_effects": {
+        "receipts": 1,
+        "audits": 1
+      },
+      "protected_tables": 17,
+      "recovery": "byte exact no duplicate effects"
+    },
+    {
+      "operation": "dream-launch-dispatch.finish",
+      "actual_final_commit": true,
+      "injections": 1,
+      "initial_status": 503,
+      "original_get_status": 200,
+      "replay_status": 200,
+      "full_original_result": "actual source and DTO verified",
+      "exact_effects": {
+        "receipts": 1,
+        "audits": 1
+      },
+      "protected_tables": 17,
+      "recovery": "byte exact no duplicate effects"
+    }
+  ],
+  "normal_database": "untouched",
+  "runtime": "not executed",
+  "private_keys_exported": false
+}

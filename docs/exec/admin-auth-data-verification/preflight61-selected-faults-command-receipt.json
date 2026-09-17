@@ -1,0 +1,15 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/run-preflight61-selected-faults.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "cases": [
+    {
+      "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-selected-faults.mts compatibility",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "case": "compatibility",
+      "exit_code": 1,
+      "output": "{\n  \"result\": \"FAIL\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"mode\": \"compatibility\",\n  \"assertions\": 1,\n  \"exception\": \"DatabaseError\",\n  \"sqlstate\": \"42P01\",\n  \"message\": \"Private SQL diagnostics omitted\"\n}\n"
+    }
+  ],
+  "exit_code": 1,
+  "scope": "primary-owned selected DDL/fault acceptance, not real account/provider/model"
+}

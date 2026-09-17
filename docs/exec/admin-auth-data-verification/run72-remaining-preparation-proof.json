@@ -1,0 +1,40 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "total_original_cases": 28,
+  "remaining_denied_cases": 22,
+  "receipt_cases": 10,
+  "skipped_accepted_cases": 6,
+  "changes": [
+    "one readonly error code corrected against actual shared JWT Auth boundary",
+    "explicit remaining_denied_receipts harness marker",
+    "fresh OAuth credentials; three unexecuted negative operands have new requests/current PF with same input_hash"
+  ],
+  "accepted_case_body_expected_id_time": "exactly unchanged",
+  "original_preflight_deadlines": "all unchanged",
+  "renewed_unexecuted_cases": [
+    {
+      "label": "semantic-key-conflict",
+      "kind": "normal",
+      "input_hash": "unchanged",
+      "old_expiry": "unchanged",
+      "new_request": "new unexecuted case only"
+    },
+    {
+      "label": "stored-hash-mismatch",
+      "kind": "hash",
+      "input_hash": "unchanged",
+      "old_expiry": "unchanged",
+      "new_request": "new unexecuted case only"
+    },
+    {
+      "label": "consumed-without-map",
+      "kind": "consumed",
+      "input_hash": "unchanged",
+      "old_expiry": "unchanged",
+      "new_request": "new unexecuted case only"
+    }
+  ],
+  "original_full_fixture": "unchanged",
+  "normal_database": "untouched"
+}

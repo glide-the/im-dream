@@ -1,0 +1,19 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "receipts": [
+    {
+      "command": "node packages/db/dist/migrate.js",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+      "exit_code": 0,
+      "output": "Applied migration 0060_sharp_misty_knight\nGenerated database migrations applied successfully (MIGRATION_DATABASE_URL)\n"
+    },
+    {
+      "command": "node drizzle/data/auth-access-policy.mjs --apply",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+      "exit_code": 0,
+      "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_preflight61\",\"policy_sha256\":\"bc22effafbf2defbafb546a8ca80a57096f59006784c857f390b0ef8269f3fa7\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+    }
+  ]
+}

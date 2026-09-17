@@ -15,11 +15,16 @@ These tests execute the genuine ``claude`` binary — no mocks:
    against a no-plugin control run.
 
 Install success, pack success, argv correctness and Claude-side recognition
-are asserted as four SEPARATE facts.  When the CLI, network or auth is
-unavailable the whole class is skipped with an explicit BLOCKED reason —
-a skipped test is never a fake pass.
+are asserted as four SEPARATE facts. Execution requires explicit opt-in.
+An absent executable may be BLOCKED; after resolution, management, network
+or installation errors fail the opted-in test instead of becoming skips.
 
 Evidence is written to output/plugin-verify/latest-real-test/ in the repo.
+
+[Input] Explicit INK_RUN_REAL_PLUGIN_TESTS opt-in and the qualified CLI install pipeline.
+[Output] Real install/pack/load receipts; unsupported commands are failures, not skips.
+[Pos] Historical SQLite-backed technical integration fixture, not PostgreSQL business acceptance.
+[Sync] 2026-09-15: require opt-in network execution and fail on known-CLI install regressions.
 """
 
 from __future__ import annotations
@@ -40,14 +45,16 @@ if str(BACKEND_ROOT) not in sys.path:
 REPO_ROOT = BACKEND_ROOT.parent
 
 import database
-from backend.schema import legacy_main_sqlite
+from backend.tests.legacy_schema import legacy_main_sqlite
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin import runtime as plugin_runtime
 from services.claude_plugin.install_service import (
     PluginInstallError,
     PluginInstallService,
 )
-from services.claude_plugin.workspace_packer import pack_workspace_plugins
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
+)
 from libs.claude_agent_kit.server.plugin_launcher import (
     apply_plugin_launch_options,
 )
@@ -64,17 +71,28 @@ def _evidence(name: str, payload: object) -> None:
     )
 
 
+@unittest.skipUnless(os.environ.get("INK_RUN_REAL_PLUGIN_TESTS") == "1", "real plugin network test requires INK_RUN_REAL_PLUGIN_TESTS=1")
 class TestRealClaudePluginChain(unittest.TestCase):
     """Ordered real-CLI chain; setUpClass performs the real install once."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
         cls.root = Path(cls.tmp.name)
         cls._env_patch = os.environ.copy()
+        def restore_runtime_env() -> None:
+            key = "INK_CLAUDE_PLUGIN_RUNTIME_ROOT"
+            original = cls._env_patch.get(key)
+            if original is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original
+        cls.addClassCleanup(restore_runtime_env)
         os.environ["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"] = str(cls.root / "runtime")
         cls.db_path = cls.root / "real-test.db"
         cls.db = sqlite3.connect(cls.db_path)
+        cls.addClassCleanup(cls.db.close)
         cls.db.row_factory = sqlite3.Row
         cls.db.execute("PRAGMA foreign_keys=ON")
         cls.db.execute(
@@ -89,35 +107,22 @@ class TestRealClaudePluginChain(unittest.TestCase):
 
         try:
             plugin_cli.resolve_claude_binary()
-            plugin_cli.get_cli_version()
         except Exception as exc:
             cls.blocked_reason = f"BLOCKED: claude CLI unavailable: {exc}"
             return
+        # Once an executable resolves, a broken management command is a regression.
+        plugin_cli.get_cli_version()
         try:
             cls.operation = PluginInstallService(cls.db).install(PACKAGE_SPEC)
         except PluginInstallError as exc:
-            cls.blocked_reason = (
-                f"BLOCKED: real claude plugin install failed "
-                f"(code={exc.code}): {exc}"
-            )
-            return
+            raise AssertionError(f"real plugin install failed (code={exc.code}): {exc}") from exc
         except Exception as exc:  # network/auth/transport failures land here
-            cls.blocked_reason = f"BLOCKED: install execution error: {exc}"
-            return
+            raise AssertionError(f"real plugin install execution failed: {exc}") from exc
         cls.installation = PluginInstallService(cls.db).get_installation(
             cls.operation["installation_id"]
         )
         _evidence("01-install-operation.json", cls.operation)
         _evidence("02-installation-record.json", cls.installation)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if getattr(cls, "db", None) is not None:
-            cls.db.close()
-        os.environ.pop("INK_CLAUDE_PLUGIN_RUNTIME_ROOT", None)
-        if os.environ.get("INK_CLAUDE_PLUGIN_RUNTIME_ROOT") is None and "INK_CLAUDE_PLUGIN_RUNTIME_ROOT" in cls._env_patch:
-            os.environ["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"] = cls._env_patch["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"]
-        cls.tmp.cleanup()
 
     def setUp(self) -> None:
         if self.blocked_reason:

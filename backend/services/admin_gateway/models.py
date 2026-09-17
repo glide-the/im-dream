@@ -1,7 +1,7 @@
-# [Input] Consume the authenticated Admin Gateway model catalog.
+# [Input] Consume an Admin-issued OAuth or entity-delegation bearer and the server-only Gateway key.
 # [Output] Provide strict server-only model capabilities and Claude Code Runtime settings.
 # [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
-# [Sync] 2026-08-28: project positive model max-output capability with compact/context into the server-owned Runtime env.
+# [Sync] 2026-09-16: replace Dream-signed subject JWTs with Admin-issued bearers.
 
 """Strict server-only client for the Admin public Gateway model catalog."""
 
@@ -15,10 +15,8 @@ import requests
 
 from .config import AdminGatewayConfig, AdminGatewayConfigurationError
 from .errors import GatewayInferenceError
-from .token import issue_gateway_subject_token
-
-
 _MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+_ACCESS_TOKEN = re.compile(r"^[A-Za-z0-9._~-]{16,8192}$")
 _PROTOCOLS = frozenset({"anthropic", "openai"})
 _PUBLIC_CAPABILITIES = frozenset({"chat", "json", "tools", "vision", "streaming"})
 _AVAILABILITY = frozenset({
@@ -187,8 +185,8 @@ def _parse_model(raw: Any) -> GatewayModel:
 class GatewayModelCatalogClient:
     def __init__(
         self,
-        canonical_user_id: int | str,
         *,
+        access_token: str,
         configuration: AdminGatewayConfig | None = None,
         environment: Mapping[str, str] | None = None,
         transport: CatalogTransport = requests,
@@ -199,23 +197,18 @@ class GatewayModelCatalogClient:
             raise GatewayInferenceError("GATEWAY_UNAVAILABLE", 503) from exc
         if not self.configuration.enabled:
             raise GatewayInferenceError("GATEWAY_UNAVAILABLE", 503)
-        self.canonical_user_id = str(canonical_user_id)
+        token = str(access_token).strip()
+        if not _ACCESS_TOKEN.fullmatch(token):
+            raise GatewayInferenceError("GATEWAY_UNAUTHORIZED", 401)
+        self._access_token = token
         self.transport = transport
 
     def fetch_catalog(self, *, timeout: float = 10) -> GatewayModelCatalog:
         try:
-            token = issue_gateway_subject_token(
-                self.configuration,
-                self.canonical_user_id,
-                scope="models:list",
-            )
-        except AdminGatewayConfigurationError as exc:
-            raise GatewayInferenceError("GATEWAY_UNAUTHORIZED", 401) from exc
-        try:
             response = self.transport.get(
                 f"{self.configuration.base_url}/v1/models",
                 headers={
-                    "authorization": f"Bearer {token}",
+                    "authorization": f"Bearer {self._access_token}",
                     "x-api-key": self.configuration.service_key,
                     "accept": "application/json",
                 },

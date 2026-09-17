@@ -16,6 +16,7 @@
 #                    parent scrubbing, and omit-when-unset behavior.
 # [Sync] 2026-08-30: verify actor/thread-bound NOTION_* Runtime injection, token selection, tombstones, and path isolation.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and selector/capability digest binding.
+# [Sync] 2026-09-15: require Runtime 0.1.10 after plugin-management restoration.
 # [Sync] 2026-09-13: cover cwd-bound absent PATH filtering without parent mutation or relative shadow bypass.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""

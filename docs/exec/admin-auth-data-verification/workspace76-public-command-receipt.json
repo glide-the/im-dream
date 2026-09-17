@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminWorkspaceDefault.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"scope\":\"provider-free default Workspace\",\"cases\":14,\"receipts\":22,\"assertions\":347,\"protected_tables\":17,\"initial_same_and_distinct_original_concurrency\":true,\"actual_entire_original_source\":true,\"normal_business_runtime\":\"not executed\"}\n",
+  "scope": "strict public Route/original GET + SELECT-only verifier; primary-owned named technical fixture, no normal business/runtime"
+}

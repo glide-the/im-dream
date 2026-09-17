@@ -1,172 +1,103 @@
 """Authenticated Deck content-version state, preview, commit, and history routes.
 
-[Input] Strict version DTOs, current user, and the Deck content-version service.
-[Output] Production `/api/decks/{id}/versions*` endpoints with fail-closed capability/CAS errors.
-[Pos] Deck content-version HTTP boundary in backend/routers.
-[Sync] 2026-08-16: add explicit draft preview and immutable vN commit routes.
+[Input] Original public version DTOs, explicit Admin request actor and typed domain consumer.
+[Output] Existing `/api/decks/{id}/versions*` responses with safe CAS and unknown-result errors.
+[Pos] Public Deck version boundary; Admin owns snapshots, hashes, CAS and durable transactions.
+[Sync] 2026-09-15: replace public Dream PG service creation with five capability-gated Admin operations.
 """
-
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
-import database
-
-from .deps import get_current_user
-
-try:
-    from backend.models.deck_version import (
-        DeckVersionCommitRequest,
-        DeckVersionCommitResponse,
-        DeckVersionDetailResponse,
-        DeckVersionHistoryResponse,
-        DeckVersionMutationRequest,
-        DeckVersionPreviewResponse,
-        DeckVersionState,
-    )
-    from backend.services.deck.content_versioning import (
-        DeckContentVersionService,
-        DeckVersionAccessError,
-        DeckVersionCapabilityError,
-        DeckVersionConflict,
-        DeckVersionNoChanges,
-    )
-except ModuleNotFoundError:  # pragma: no cover - backend PYTHONPATH compatibility
-    from models.deck_version import (
-        DeckVersionCommitRequest,
-        DeckVersionCommitResponse,
-        DeckVersionDetailResponse,
-        DeckVersionHistoryResponse,
-        DeckVersionMutationRequest,
-        DeckVersionPreviewResponse,
-        DeckVersionState,
-    )
-    from services.deck.content_versioning import (
-        DeckContentVersionService,
-        DeckVersionAccessError,
-        DeckVersionCapabilityError,
-        DeckVersionConflict,
-        DeckVersionNoChanges,
-    )
-
+from .deps import get_current_user, invoke_admin_operation
+from models.deck_version import (
+    DeckVersionCommitRequest, DeckVersionCommitResponse, DeckVersionDetailResponse,
+    DeckVersionHistoryResponse, DeckVersionMutationRequest, DeckVersionPreviewResponse,
+    DeckVersionState,
+)
+from services.admin_data.deck_version_data import AdminDeckVersionData
+from services.admin_data import deck_version_models as dto
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestAuth
 
 router = APIRouter(prefix="/api/decks", tags=["deck-content-versions"])
 
 
-def _service() -> Iterator[DeckContentVersionService]:
-    db = database.get_db()
+def _data(request: Request) -> AdminDeckVersionData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckVersionData(owner.client)
+
+
+def _error(exc: AdminDataError, request_id: str) -> JSONResponse:
+    messages = {
+        "DECK_VERSION_CONFLICT": "Deck draft changed. Refresh the preview before committing.",
+        "DECK_VERSION_NO_CHANGES": "Deck content has no changes to commit.",
+        "DECK_VERSION_ACCESS_DENIED": "Deck not found or permission denied.",
+        "DECK_VERSION_NOT_FOUND": "Deck version not found or permission denied.",
+        "ADMIN_CAPABILITY_UNAVAILABLE": "Deck content version capability is not available.",
+    }
+    content = {"error_code": exc.code, "message": messages.get(exc.code, "Deck operation could not be completed."),
+        "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
+    if exc.details is not None:
+        content.update(exc.details.model_dump())
+    return JSONResponse(status_code=exc.status_code, content=content)
+
+
+async def _invoke(current_user: dict[str, Any], method, input_dto):
+    return await invoke_admin_operation(current_user, method, input_dto, error_handler=_error)
+
+
+def _input(model, **values):
     try:
-        yield DeckContentVersionService(db)
-    finally:
-        db.close()
-
-
-def _error(exc: Exception) -> JSONResponse:
-    if isinstance(exc, DeckVersionCapabilityError):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error_code": exc.code,
-                "message": "Deck content version capability is not available.",
-            },
-        )
-    if isinstance(exc, DeckVersionAccessError):
-        return JSONResponse(
-            status_code=404,
-            content={"error_code": exc.code, "message": "Deck not found or permission denied."},
-        )
-    if isinstance(exc, DeckVersionConflict):
-        return JSONResponse(
-            status_code=409,
-            content={
-                "error_code": exc.code,
-                "message": str(exc),
-                "current_draft_revision": exc.draft_revision,
-                "current_version": exc.latest_version,
-            },
-        )
-    if isinstance(exc, DeckVersionNoChanges):
-        return JSONResponse(
-            status_code=409,
-            content={"error_code": exc.code, "message": str(exc)},
-        )
-    raise exc
+        return model(**values)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Invalid Deck version input") from None
 
 
 @router.get("/{deck_id}/version-state", response_model=DeckVersionState)
-def get_version_state(
-    deck_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DeckContentVersionService = Depends(_service),
-):
-    try:
-        return service.get_state(deck_id, int(current_user["user_id"]))
-    except (DeckVersionCapabilityError, DeckVersionAccessError) as exc:
-        return _error(exc)
+async def get_version_state(deck_id: str, current_user: dict[str, Any] = Depends(get_current_user), data: AdminDeckVersionData = Depends(_data)):
+    result = await _invoke(current_user, data.state, _input(dto.DeckIdInputDTO, deck_id=deck_id))
+    return result if isinstance(result, JSONResponse) else result.model_dump()
 
 
 @router.post("/{deck_id}/versions/preview", response_model=DeckVersionPreviewResponse)
-def preview_version(
-    deck_id: str,
-    request: DeckVersionMutationRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DeckContentVersionService = Depends(_service),
-):
-    try:
-        return service.preview(deck_id, int(current_user["user_id"]), request)
-    except (
-        DeckVersionCapabilityError,
-        DeckVersionAccessError,
-        DeckVersionConflict,
-        DeckVersionNoChanges,
-    ) as exc:
-        return _error(exc)
+async def preview_version(deck_id: str, request: DeckVersionMutationRequest,
+    current_user: dict[str, Any] = Depends(get_current_user), data: AdminDeckVersionData = Depends(_data)):
+    result = await _invoke(current_user, data.preview, _input(dto.DeckVersionMutationInputDTO, deck_id=deck_id, **request.model_dump()))
+    return result if isinstance(result, JSONResponse) else result.model_dump()
 
 
 @router.post("/{deck_id}/versions", response_model=DeckVersionCommitResponse)
-def commit_version(
-    deck_id: str,
-    request: DeckVersionCommitRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DeckContentVersionService = Depends(_service),
-):
-    try:
-        return service.commit(deck_id, int(current_user["user_id"]), request)
-    except (
-        DeckVersionCapabilityError,
-        DeckVersionAccessError,
-        DeckVersionConflict,
-        DeckVersionNoChanges,
-    ) as exc:
-        return _error(exc)
+async def commit_version(deck_id: str, request: DeckVersionCommitRequest,
+    current_user: dict[str, Any] = Depends(get_current_user), data: AdminDeckVersionData = Depends(_data)):
+    result = await _invoke(current_user, data.commit, _input(dto.DeckVersionCommitInputDTO, deck_id=deck_id, **request.model_dump()))
+    if isinstance(result, JSONResponse):
+        return result
+    projection = result.model_dump()
+    projection["version"]["created_by"] = int(result.version.created_by)
+    return projection
 
 
 @router.get("/{deck_id}/versions", response_model=DeckVersionHistoryResponse)
-def list_versions(
-    deck_id: str,
-    limit: int = Query(default=50, ge=1, le=100),
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DeckContentVersionService = Depends(_service),
-):
-    try:
-        return service.list_versions(deck_id, int(current_user["user_id"]), limit=limit)
-    except (DeckVersionCapabilityError, DeckVersionAccessError) as exc:
-        return _error(exc)
+async def list_versions(deck_id: str, limit: int = Query(default=50, ge=1, le=100),
+    current_user: dict[str, Any] = Depends(get_current_user), data: AdminDeckVersionData = Depends(_data)):
+    result = await _invoke(current_user, data.history, _input(dto.DeckVersionHistoryInputDTO, deck_id=deck_id, limit=limit))
+    if isinstance(result, JSONResponse):
+        return result
+    projection = result.model_dump()
+    for version in projection["versions"]:
+        version["created_by"] = int(version["created_by"])
+    return projection
 
 
 @router.get("/{deck_id}/versions/{version}", response_model=DeckVersionDetailResponse)
-def get_version(
-    deck_id: str,
-    version: int,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DeckContentVersionService = Depends(_service),
-):
-    try:
-        return service.get_version(deck_id, int(current_user["user_id"]), version)
-    except (DeckVersionCapabilityError, DeckVersionAccessError) as exc:
-        return _error(exc)
-
+async def get_version(deck_id: str, version: int = Path(ge=1, le=9_007_199_254_740_991),
+    current_user: dict[str, Any] = Depends(get_current_user), data: AdminDeckVersionData = Depends(_data)):
+    result = await _invoke(current_user, data.detail, _input(dto.DeckVersionDetailInputDTO, deck_id=deck_id, version=version))
+    return result if isinstance(result, JSONResponse) else result.public_projection()

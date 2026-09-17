@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# [Input] Existing Dream/Admin/MCP Apps secure env files and explicit AutoDL service mappings.
-# [Output] Mode-0600 Dream backend/Next runtime env using the Admin-owned PostgreSQL identity.
+# [Input] Existing Dream/MCP Apps secure env files and explicit AutoDL service mappings.
+# [Output] Mode-0600 Dream backend/Next runtime env using Admin HTTP data/auth credentials.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
+# [Sync] 2026-09-16: project deployment-owned Admin DTO/BFF identity with exact issuer/resource/origin values.
+# [Sync] 2026-09-16: stop reading Admin PostgreSQL secrets or projecting DATABASE_URL into Dream.
+# [Sync] 2026-09-16: strip retired Dream auth/session secrets and cookie policy from the runtime projection.
+# [Sync] 2026-09-16: strip the retired Product HS256 signer; Product calls forward Admin OAuth only.
 # [Sync] 2026-08-26: leave Agent admission budgets unset so runtime auto-detects host/cgroup capacity.
 # [Sync] 2026-08-30: pin Dream to the generic qualified Linux x64 Runtime
 #                    0.1.4 built from authorized 2.1.88 source; AutoDL only
@@ -22,7 +26,6 @@ if [[ -f "${AUTODL_PLATFORM_ENV_FILE}" ]]; then
 fi
 SOURCE_ENV_FILE="${AUTODL_DREAM_SOURCE_ENV_FILE:-${REPO_ROOT}/backend/.env}"
 MCP_APPS_ENV_FILE="${AUTODL_MCP_APPS_ENV_FILE:-${REPO_ROOT}/frontend/.env.local}"
-ADMIN_ENV_FILE="${AUTODL_ADMIN_ENV_FILE:-}"
 OUTPUT_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
 AUTODL_DATA_ROOT="${AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
 AUTODL_DREAM_BACKEND_BIND_HOST="${AUTODL_DREAM_BACKEND_BIND_HOST:-${AUTODL_DREAM_BIND_HOST:-127.0.0.1}}"
@@ -31,37 +34,34 @@ AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_ADMIN_PUBLIC_ORIGIN="${AUTODL_ADMIN_PUBLIC_ORIGIN:-}"
+AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID="${AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID:-}"
+AUTODL_DREAM_ADMIN_SERVICE_SECRET="${AUTODL_DREAM_ADMIN_SERVICE_SECRET:-}"
+AUTODL_DREAM_BFF_COOKIE_SECRET="${AUTODL_DREAM_BFF_COOKIE_SECRET:-}"
 AUTODL_MCP_APPS_SANDBOX_ORIGIN="${AUTODL_MCP_APPS_SANDBOX_ORIGIN:-}"
 AUTODL_CLAUDE_CODE_CLI_PATH="${AUTODL_CLAUDE_CODE_CLI_PATH:-/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream}"
 
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
-env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$1"; }
 
 [[ -f "${SOURCE_ENV_FILE}" ]] || err "Missing Dream source env: ${SOURCE_ENV_FILE}"
 [[ -f "${MCP_APPS_ENV_FILE}" ]] || err "Missing MCP Apps source env: ${MCP_APPS_ENV_FILE}"
-[[ -n "${ADMIN_ENV_FILE}" && -f "${ADMIN_ENV_FILE}" ]] || err "AUTODL_ADMIN_ENV_FILE must select the generated Admin AutoDL env."
 [[ "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AUTODL_DATA_ROOT must stay under /root."
 [[ "${AUTODL_DREAM_BACKEND_BIND_HOST}" == "127.0.0.1" ]] || err "Dream backend must bind to 127.0.0.1 on AutoDL."
 [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use frontend 6006, backend 8765, and Admin 6008."
 [[ "${AUTODL_CLAUDE_CODE_CLI_PATH}" == /root/ink-autodl/runtime/* ]] || err "AUTODL_CLAUDE_CODE_CLI_PATH must stay under /root/ink-autodl/runtime."
 [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
 [[ "${AUTODL_ADMIN_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_ADMIN_PUBLIC_ORIGIN must be an exact HTTPS origin."
+[[ "${AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]] || err "AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID must be a valid registered identifier."
+[[ "${#AUTODL_DREAM_ADMIN_SERVICE_SECRET}" -ge 32 && "${AUTODL_DREAM_ADMIN_SERVICE_SECRET}" != *$'\n'* ]] || err "AUTODL_DREAM_ADMIN_SERVICE_SECRET must contain at least 32 bytes on one line."
+[[ "${#AUTODL_DREAM_BFF_COOKIE_SECRET}" -ge 32 && "${AUTODL_DREAM_BFF_COOKIE_SECRET}" != *$'\n'* ]] || err "AUTODL_DREAM_BFF_COOKIE_SECRET must contain at least 32 bytes on one line."
 [[ "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_MCP_APPS_SANDBOX_ORIGIN must be an exact HTTPS origin."
 [[ "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}" != "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "MCP Apps sandbox must use a separate HTTPS origin."
-
-database_user="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_USER)"
-database_password="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_PASSWORD)"
-database_name="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_DB)"
-[[ "${database_user}" =~ ^[A-Za-z0-9_]+$ ]] || err "Admin POSTGRES_USER is missing or unsupported."
-[[ "${database_password}" =~ ^[A-Za-z0-9._~-]+$ ]] || err "Admin POSTGRES_PASSWORD must be URL-safe."
-[[ "${database_name}" =~ ^[A-Za-z0-9_-]+$ ]] || err "Admin POSTGRES_DB is missing or unsupported."
 
 temp_file="$(mktemp "${SCRIPT_DIR}/.env.XXXXXX")"
 trap 'rm -f "${temp_file}"' EXIT
 umask 077
 awk -F= '
   BEGIN {
-    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_SITE_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_SANDBOX_ENABLED INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB", keys, " ")
+    split("DATABASE_URL INK_LOAD_DATABASE_URL_FROM_ENV_FILE INK_DATABASE_ENV_FILE GOOGLE_CLIENT_SECRET JWT_SECRET JWT_SECRET_KEY SESSION_SECRET_KEY OAUTH_TOKEN_ENCRYPTION_KEY AUTH_TOKEN_ENCRYPTION_KEY INK_ADMIN_PRODUCT_JWT_SECRET PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_SITE_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN INK_ADMIN_DREAM_BASE_URL INK_ADMIN_AUTH_ISSUER INK_DREAM_API_RESOURCE INK_ADMIN_DREAM_SERVICE_CLIENT_ID INK_ADMIN_DREAM_SERVICE_SECRET INK_DREAM_PUBLIC_ORIGIN INK_DREAM_BFF_REDIRECT_URI INK_DREAM_BFF_COOKIE_SECRET INK_DREAM_BFF_LOGIN_TTL_SECONDS AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_SANDBOX_ENABLED INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB", keys, " ")
     for (i in keys) excluded[keys[i]] = 1
   }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
@@ -76,7 +76,6 @@ awk -F= '
   }
 ' "${MCP_APPS_ENV_FILE}" >>"${temp_file}"
 {
-  printf 'DATABASE_URL=postgresql://%s:%s@127.0.0.1:54329/%s\n' "${database_user}" "${database_password}" "${database_name}"
   printf 'PORT=%s\n' "${AUTODL_DREAM_BACKEND_PORT}"
   printf 'HOST=%s\n' "${AUTODL_DREAM_BACKEND_BIND_HOST}"
   printf 'API_BASE_URL=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
@@ -86,24 +85,30 @@ awk -F= '
   printf 'INK_BACKEND_PUBLIC_BASE_URL=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
   printf 'INK_CORS_ALLOW_ORIGINS=%s,%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}" "${AUTODL_ADMIN_PUBLIC_ORIGIN}"
   printf 'INK_CORS_ALLOW_CREDENTIALS=true\n'
-  printf 'COOKIE_SECURE=true\n'
-  printf 'COOKIE_SAMESITE=none\n'
   printf 'INK_GATEWAY_BASE_URL=http://127.0.0.1:%s\n' "${AUTODL_ADMIN_PORT}"
   printf 'INK_ADMIN_PRODUCT_API_BASE_URL=http://127.0.0.1:%s\n' "${AUTODL_ADMIN_PORT}"
   printf 'INK_ADMIN_PRODUCT_ORIGIN=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
+  printf 'INK_ADMIN_DREAM_BASE_URL=%s\n' "${AUTODL_ADMIN_PUBLIC_ORIGIN}"
+  printf 'INK_ADMIN_AUTH_ISSUER=%s/api/auth\n' "${AUTODL_ADMIN_PUBLIC_ORIGIN}"
+  printf 'INK_DREAM_API_RESOURCE=%s/api\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
+  printf 'INK_ADMIN_DREAM_SERVICE_CLIENT_ID=%s\n' "${AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID}"
+  printf 'INK_ADMIN_DREAM_SERVICE_SECRET=%s\n' "${AUTODL_DREAM_ADMIN_SERVICE_SECRET}"
+  printf 'INK_DREAM_PUBLIC_ORIGIN=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
+  printf 'INK_DREAM_BFF_REDIRECT_URI=%s/auth/callback\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
+  printf 'INK_DREAM_BFF_COOKIE_SECRET=%s\n' "${AUTODL_DREAM_BFF_COOKIE_SECRET}"
+  printf 'INK_DREAM_BFF_LOGIN_TTL_SECONDS=600\n'
   printf 'AGENT_CWD=%s/agent-workspaces\n' "${AUTODL_DATA_ROOT}"
   printf 'ARTIFACT_WORKSPACE_ROOT=%s/artifacts\n' "${AUTODL_DATA_ROOT}"
   printf 'FILE_STORAGE_LOCAL_DIR=%s/file-storage\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_CLAUDE_PLUGIN_RUNTIME_ROOT=%s/claude-plugin-runtime\n' "${AUTODL_DATA_ROOT}"
   printf 'CLAUDE_CODE_CLI_PATH=%s\n' "${AUTODL_CLAUDE_CODE_CLI_PATH}"
   printf 'INK_AGENT_SANDBOX_ENABLED=false\n'
-  printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'
   printf 'INK_MCP_APPS_SANDBOX_URL=%s/mcp-apps-sandbox\n' "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}"
   printf 'INK_MCP_APPS_PARENT_ORIGINS=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
 } >>"${temp_file}"
 
-for required_key in DATABASE_URL SESSION_SECRET_KEY INK_GATEWAY_SERVICE_KEY INK_ADMIN_PRODUCT_JWT_SECRET INK_MCP_APPS_NODE_SERVICE_TOKEN INK_MCP_APPS_PLUGIN_MANIFEST_JSON INK_MCP_APPS_MAX_RESOURCE_BYTES INK_MCP_APPS_MAX_CATALOG_PAGES INK_MCP_APPS_UPSTREAM_TIMEOUT_MS INK_MCP_APPS_MAX_CONCURRENCY_PER_SCOPE INK_MCP_APPS_NETWORK_HOST_ALLOWLIST; do
-  grep -q "^${required_key}=" "${temp_file}" || err "${required_key} is missing from the projected env."
+for required_key in INK_GATEWAY_SERVICE_KEY INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_DREAM_BASE_URL INK_ADMIN_AUTH_ISSUER INK_DREAM_API_RESOURCE INK_ADMIN_DREAM_SERVICE_CLIENT_ID INK_ADMIN_DREAM_SERVICE_SECRET INK_DREAM_PUBLIC_ORIGIN INK_DREAM_BFF_REDIRECT_URI INK_DREAM_BFF_COOKIE_SECRET INK_MCP_APPS_NODE_SERVICE_TOKEN INK_MCP_APPS_PLUGIN_MANIFEST_JSON INK_MCP_APPS_MAX_RESOURCE_BYTES INK_MCP_APPS_MAX_CATALOG_PAGES INK_MCP_APPS_UPSTREAM_TIMEOUT_MS INK_MCP_APPS_MAX_CONCURRENCY_PER_SCOPE INK_MCP_APPS_NETWORK_HOST_ALLOWLIST; do
+  grep -Eq "^${required_key}=.+$" "${temp_file}" || err "${required_key} is missing or empty in the projected env."
 done
 chmod 600 "${temp_file}"
 mv "${temp_file}" "${OUTPUT_ENV_FILE}"

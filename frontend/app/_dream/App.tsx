@@ -1,3 +1,4 @@
+// [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
 // [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
 // [Output] Render the authenticated Story Workspace shell, writing canvas, and canonical Chat surfaces.
 // [Pos] frontend app-root node in frontend/app/_dream
@@ -680,11 +681,9 @@ export default function App() {
 
         // If user has already completed first login, clear localStorage
         if (preferences?.first_login_completed) {
-          // Clear all app data from localStorage (keep only auth token)
+          // Clear completed local import data and any retired credential.
           Object.values(STORAGE_KEYS).forEach(key => {
-            if (key !== STORAGE_KEYS.AUTH_TOKEN) {
-              localStorage.removeItem(key);
-            }
+            localStorage.removeItem(key);
           });
           return;
         }
@@ -1066,11 +1065,9 @@ export default function App() {
       const { markFirstLoginCompleted } = await import('./api/voiceApi');
       await markFirstLoginCompleted();
 
-      // Clear ALL localStorage data (keep only auth token)
+      // Clear completed local import data and any retired credential.
       Object.values(STORAGE_KEYS).forEach(key => {
-        if (key !== STORAGE_KEYS.AUTH_TOKEN) {
-          localStorage.removeItem(key);
-        }
+        localStorage.removeItem(key);
       });
 
       setShowMigrationDialog(false);
@@ -1105,11 +1102,9 @@ export default function App() {
       const { markFirstLoginCompleted } = await import('./api/voiceApi');
       await markFirstLoginCompleted();
 
-      // Clear ALL localStorage data (keep only auth token)
+      // Clear completed local import data and any retired credential.
       Object.values(STORAGE_KEYS).forEach(key => {
-        if (key !== STORAGE_KEYS.AUTH_TOKEN) {
-          localStorage.removeItem(key);
-        }
+        localStorage.removeItem(key);
       });
 
       setShowMigrationDialog(false);

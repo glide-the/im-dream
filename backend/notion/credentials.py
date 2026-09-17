@@ -8,11 +8,13 @@
 [Sync] 2026-08-29: revoke both private credentials and the public Notion index
                     projection from every known actor thread on disconnect.
 [Sync] 2026-08-30: project an existing workers.json beside auth/config/workspaces for the bound ntn Bash runtime.
+[Sync] 2026-09-16: replace thread database lookup with an actor-owned projection index.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -90,6 +92,7 @@ class NotionUserPaths:
     home: Path
     pending_root: Path
     snapshot_root: Path
+    projected_threads_index: Path
 
 
 @dataclass(frozen=True)
@@ -218,6 +221,7 @@ class NotionCredentialStore:
             home=_private_directory(user_root / "home"),
             pending_root=_private_directory(user_root / "pending"),
             snapshot_root=_private_directory(user_root / "snapshots"),
+            projected_threads_index=user_root / "projected-threads.json",
         )
 
     def begin_auth(self, actor_id: str | int, auth_session_id: str) -> Path:
@@ -377,6 +381,11 @@ class NotionCredentialStore:
             _remove_private_tree(target, parent=resolved_workspace)
             os.replace(staging, target)
             os.chmod(target, 0o700, follow_symlinks=False)
+            try:
+                self._record_projected_thread(actor_id, resolved_workspace.name)
+            except BaseException:
+                _remove_private_tree(target, parent=resolved_workspace)
+                raise
             return NotionCredentialProjection(
                 available=True,
                 thread_home=target,
@@ -386,10 +395,49 @@ class NotionCredentialStore:
             if staging.exists():
                 _remove_private_tree(staging, parent=resolved_workspace)
 
-    def _default_thread_ids(self, actor_id: int) -> Iterable[object]:
-        import database
+    def _projected_thread_ids(self, actor_id: str | int) -> tuple[str, ...]:
+        paths = self.user_paths(actor_id)
+        payload = _read_private_file(
+            paths.projected_threads_index,
+            max_bytes=self.settings.max_credential_file_bytes,
+        )
+        if payload is None:
+            return ()
+        try:
+            values = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return ()
+        if not isinstance(values, list):
+            return ()
+        return tuple(
+            value
+            for value in values
+            if isinstance(value, str)
+            and value
+            and not any(token in value for token in ("/", "\\", ".."))
+        )
 
-        return database.list_chat_threads(actor_id)
+    def _record_projected_thread(
+        self, actor_id: str | int, thread_id: str
+    ) -> None:
+        if not thread_id or any(token in thread_id for token in ("/", "\\", "..")):
+            raise NotionCredentialError("Notion thread identity is invalid.")
+        paths = self.user_paths(actor_id)
+        values = sorted({*self._projected_thread_ids(actor_id), thread_id})
+        try:
+            _write_private_file(
+                paths.projected_threads_index,
+                json.dumps(
+                    values, ensure_ascii=True, separators=(",", ":")
+                ).encode("utf-8"),
+            )
+        except OSError as exc:
+            raise NotionCredentialError(
+                "Notion thread projection index could not be updated."
+            ) from exc
+
+    def _default_thread_ids(self, actor_id: int) -> Iterable[object]:
+        return self._projected_thread_ids(actor_id)
 
     def clear_user(self, actor_id: str | int) -> None:
         """Revoke the actor source and every existing owned thread projection."""
@@ -420,6 +468,10 @@ class NotionCredentialStore:
         _remove_private_tree(paths.home, parent=paths.root)
         _remove_private_tree(paths.pending_root, parent=paths.root)
         _remove_private_tree(paths.snapshot_root, parent=paths.root)
+        try:
+            paths.projected_threads_index.unlink()
+        except FileNotFoundError:
+            pass
         _private_directory(paths.home)
         _private_directory(paths.pending_root)
         _private_directory(paths.snapshot_root)

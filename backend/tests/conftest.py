@@ -1,4 +1,5 @@
-"""Test-only compatibility for historical SQLite unit fixtures.
+# [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
+"""Test-only compatibility for historical SQLite fixtures and external OAuth.
 
 Production code speaks psycopg's ``%s`` parameter protocol.  A bounded set of
 legacy domain tests still exercises transaction/state-machine behavior with
@@ -12,9 +13,20 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import sys
 from typing import Any
 
+import pytest
 from psycopg import IntegrityError as PostgresIntegrityError
+
+
+# Historical database/schema fixtures are importable only inside pytest.
+from tests import legacy_persistence as _legacy_persistence
+from tests import legacy_schema as _legacy_schema
+sys.modules.setdefault("persistence", _legacy_persistence)
+sys.modules.setdefault("schema", _legacy_schema)
+from tests import legacy_database as _legacy_database
+sys.modules.setdefault("database", _legacy_database)
 
 
 # Never let importing backend/server.py inherit the developer's runtime DSN.
@@ -131,3 +143,18 @@ def _connect_with_postgres_placeholders(*args: Any, **kwargs: Any):
 # Pytest imports this file before test modules construct their in-memory/file
 # fixtures.  The patch is process-local to the test runner.
 sqlite3.connect = _connect_with_postgres_placeholders
+
+
+@pytest.fixture(autouse=True)
+def _provider_free_admin_service_token(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """Keep domain tests provider-free; the token source has its own protocol tests."""
+
+    if request.node.path.name == "test_admin_service_token.py":
+        return
+    from services.admin_data.service_token import OAuthClientCredentialsTokenSource
+
+    monkeypatch.setattr(
+        OAuthClientCredentialsTokenSource,
+        "access_token",
+        lambda _source: "fixture.service.access.token",
+    )

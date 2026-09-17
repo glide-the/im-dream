@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "database": "ink_auth_data_codex_test_792494523a17_acl56",
+  "role": "ink_auth_data_codex_test_792494523a17_acl56_auth",
+  "assertions": 37,
+  "results": [
+    {
+      "label": "Missing published Free rollback",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    },
+    {
+      "label": "Repeat requires explicit adoption",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    },
+    {
+      "label": "Controlled credential source registration",
+      "status": "passed",
+      "external_provider_used": false
+    },
+    {
+      "label": "Repeat requires explicit adoption",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    },
+    {
+      "label": "Controlled google source registration",
+      "status": "passed",
+      "external_provider_used": false
+    },
+    {
+      "label": "Google source refuses password",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    },
+    {
+      "label": "Unknown provider",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    },
+    {
+      "label": "Public sign-up/email",
+      "status": 200,
+      "code": null
+    },
+    {
+      "label": "Public sign-in/email",
+      "status": 200,
+      "code": null
+    },
+    {
+      "label": "Public sign-in/email",
+      "status": 401,
+      "code": "INVALID_EMAIL_OR_PASSWORD"
+    },
+    {
+      "label": "Adoption --inspect",
+      "status": 0,
+      "planned_or_created": 0,
+      "already_complete": 0,
+      "failed_closed": false
+    },
+    {
+      "label": "Adoption dry-run",
+      "status": 0,
+      "planned_or_created": 1,
+      "already_complete": 0,
+      "failed_closed": false
+    },
+    {
+      "label": "Adoption --apply",
+      "status": 1,
+      "failed_closed": true
+    },
+    {
+      "label": "Adoption --apply",
+      "status": 1,
+      "failed_closed": true
+    },
+    {
+      "label": "Adoption --apply",
+      "status": 0,
+      "planned_or_created": 1,
+      "already_complete": 0,
+      "failed_closed": false
+    },
+    {
+      "label": "Adoption --apply",
+      "status": 0,
+      "planned_or_created": 0,
+      "already_complete": 1,
+      "failed_closed": false
+    },
+    {
+      "label": "Public sign-in/email",
+      "status": 200,
+      "code": null
+    }
+  ],
+  "legacy_source_sha256": "518b5bfbb35783287d0435b90692f8c5eb65f42c9410139b973388d59ac862e2",
+  "legacy_rows_modified": 0,
+  "external_google_used": false,
+  "normal_database": "untouched"
+}

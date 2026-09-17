@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "source": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "source_type": "owned disposable provider-free technical fixture, not normal database",
+  "host": "127.0.0.1",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 61,
+  "migration_replayed": false,
+  "acl_exit_code": 0,
+  "source_table_count": 125,
+  "source_fingerprint_sha256": "0939609b17dd1ecdd410b3fac5b529092218c0f8bf16634c1fe83e8a94ac66e7",
+  "source_before_after": "exactly unchanged",
+  "business_seeds": "not yet executed",
+  "normal_database": "untouched"
+}

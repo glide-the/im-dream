@@ -1,0 +1,563 @@
+{
+  "status": "passed",
+  "frozen_files": {
+    "drizzle/0060_sharp_misty_knight.sql": "037508ab9cf0caac9bf1ada33d50a78aae45767a37d388721a241080f0f43b51",
+    "drizzle/meta/0060_snapshot.json": "c003a9b59d54874241bec277389fd242a8ee90e55d4205ec8905e24f9fae7bf6",
+    "drizzle/contracts/dream-workflow-preflight-request-v1.json": "aef13bcd4e4f7ba4302b5aac5a184a0887098315886cac687cb11d09bf90087c"
+  },
+  "prior_60_history": "all bytes and journal prefix checked by preceding replay; old domain fixtures not repeated",
+  "upgraded": {
+    "columns": [
+      {
+        "name": "service_client_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "actor",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "request_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "input_sha256",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workflow_preflight_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "canonical_user_id",
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workspace_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "execution_owner",
+        "type": "boolean",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      }
+    ],
+    "constraints": {
+      "workflow_preflight_requests_actor_not_null": {
+        "type": "n",
+        "definition": "NOT NULL actor",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_canonical_user_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL canonical_user_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_created_at_not_null": {
+        "type": "n",
+        "definition": "NOT NULL created_at",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_execution_owner_not_null": {
+        "type": "n",
+        "definition": "NOT NULL execution_owner",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_hash_check": {
+        "type": "c",
+        "definition": "CHECK (input_sha256 ~ '^[0-9a-f]{64}$'::text)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_input_sha256_not_null": {
+        "type": "n",
+        "definition": "NOT NULL input_sha256",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_owner_check": {
+        "type": "c",
+        "definition": "CHECK (canonical_user_id > 0)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_request_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL request_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_actor_request_id_": {
+        "type": "p",
+        "definition": "PRIMARY KEY (service_client_id, actor, request_id)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL service_client_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workflow_preflight_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_workflow_pref": {
+        "type": "f",
+        "definition": "FOREIGN KEY (workflow_preflight_id) REFERENCES workflow_preflights(workflow_preflight_id) ON DELETE RESTRICT",
+        "delete": "r",
+        "target": "workflow_preflights"
+      },
+      "workflow_preflight_requests_workspace_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workspace_id",
+        "delete": " ",
+        "target": "-"
+      }
+    },
+    "indexes": {
+      "workflow_preflight_requests_service_client_id_actor_request_id_": "CREATE UNIQUE INDEX workflow_preflight_requests_service_client_id_actor_request_id_ ON dream.workflow_preflight_requests USING btree (service_client_id, actor, request_id)",
+      "workflow_preflight_requests_preflight_idx": "CREATE INDEX workflow_preflight_requests_preflight_idx ON dream.workflow_preflight_requests USING btree (workflow_preflight_id)"
+    },
+    "trigger": {
+      "name": "workflow_preflight_requests_immutable",
+      "type": 58,
+      "enabled": "O",
+      "function": "dream.guard_workflow_preflight_request_immutable()"
+    },
+    "guard_configuration": [
+      "search_path=pg_catalog"
+    ],
+    "public_execute": false,
+    "ledger": {
+      "count": 61,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "7123babb03535e0a0c7a818e902c331cefbe73c660b46395136dcc9a5b19f3da"
+      ]
+    }
+  },
+  "repeat": "preceding replay identical catalog and one candidate; not repeated",
+  "concurrent": {
+    "columns": [
+      {
+        "name": "service_client_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "actor",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "request_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "input_sha256",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workflow_preflight_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "canonical_user_id",
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workspace_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "execution_owner",
+        "type": "boolean",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      }
+    ],
+    "constraints": {
+      "workflow_preflight_requests_actor_not_null": {
+        "type": "n",
+        "definition": "NOT NULL actor",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_canonical_user_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL canonical_user_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_created_at_not_null": {
+        "type": "n",
+        "definition": "NOT NULL created_at",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_execution_owner_not_null": {
+        "type": "n",
+        "definition": "NOT NULL execution_owner",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_hash_check": {
+        "type": "c",
+        "definition": "CHECK (input_sha256 ~ '^[0-9a-f]{64}$'::text)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_input_sha256_not_null": {
+        "type": "n",
+        "definition": "NOT NULL input_sha256",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_owner_check": {
+        "type": "c",
+        "definition": "CHECK (canonical_user_id > 0)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_request_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL request_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_actor_request_id_": {
+        "type": "p",
+        "definition": "PRIMARY KEY (service_client_id, actor, request_id)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL service_client_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workflow_preflight_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_workflow_pref": {
+        "type": "f",
+        "definition": "FOREIGN KEY (workflow_preflight_id) REFERENCES workflow_preflights(workflow_preflight_id) ON DELETE RESTRICT",
+        "delete": "r",
+        "target": "workflow_preflights"
+      },
+      "workflow_preflight_requests_workspace_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workspace_id",
+        "delete": " ",
+        "target": "-"
+      }
+    },
+    "indexes": {
+      "workflow_preflight_requests_service_client_id_actor_request_id_": "CREATE UNIQUE INDEX workflow_preflight_requests_service_client_id_actor_request_id_ ON dream.workflow_preflight_requests USING btree (service_client_id, actor, request_id)",
+      "workflow_preflight_requests_preflight_idx": "CREATE INDEX workflow_preflight_requests_preflight_idx ON dream.workflow_preflight_requests USING btree (workflow_preflight_id)"
+    },
+    "trigger": {
+      "name": "workflow_preflight_requests_immutable",
+      "type": 58,
+      "enabled": "O",
+      "function": "dream.guard_workflow_preflight_request_immutable()"
+    },
+    "guard_configuration": [
+      "search_path=pg_catalog"
+    ],
+    "public_execute": false,
+    "ledger": {
+      "count": 61,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "7123babb03535e0a0c7a818e902c331cefbe73c660b46395136dcc9a5b19f3da"
+      ]
+    }
+  },
+  "fresh_full_history": {
+    "columns": [
+      {
+        "name": "service_client_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "actor",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "request_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "input_sha256",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workflow_preflight_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "canonical_user_id",
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "workspace_id",
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "execution_owner",
+        "type": "boolean",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      }
+    ],
+    "constraints": {
+      "workflow_preflight_requests_actor_not_null": {
+        "type": "n",
+        "definition": "NOT NULL actor",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_canonical_user_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL canonical_user_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_created_at_not_null": {
+        "type": "n",
+        "definition": "NOT NULL created_at",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_execution_owner_not_null": {
+        "type": "n",
+        "definition": "NOT NULL execution_owner",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_hash_check": {
+        "type": "c",
+        "definition": "CHECK (input_sha256 ~ '^[0-9a-f]{64}$'::text)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_input_sha256_not_null": {
+        "type": "n",
+        "definition": "NOT NULL input_sha256",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_owner_check": {
+        "type": "c",
+        "definition": "CHECK (canonical_user_id > 0)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_request_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL request_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_actor_request_id_": {
+        "type": "p",
+        "definition": "PRIMARY KEY (service_client_id, actor, request_id)",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_service_client_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL service_client_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workflow_preflight_id",
+        "delete": " ",
+        "target": "-"
+      },
+      "workflow_preflight_requests_workflow_preflight_id_workflow_pref": {
+        "type": "f",
+        "definition": "FOREIGN KEY (workflow_preflight_id) REFERENCES workflow_preflights(workflow_preflight_id) ON DELETE RESTRICT",
+        "delete": "r",
+        "target": "workflow_preflights"
+      },
+      "workflow_preflight_requests_workspace_id_not_null": {
+        "type": "n",
+        "definition": "NOT NULL workspace_id",
+        "delete": " ",
+        "target": "-"
+      }
+    },
+    "indexes": {
+      "workflow_preflight_requests_service_client_id_actor_request_id_": "CREATE UNIQUE INDEX workflow_preflight_requests_service_client_id_actor_request_id_ ON dream.workflow_preflight_requests USING btree (service_client_id, actor, request_id)",
+      "workflow_preflight_requests_preflight_idx": "CREATE INDEX workflow_preflight_requests_preflight_idx ON dream.workflow_preflight_requests USING btree (workflow_preflight_id)"
+    },
+    "trigger": {
+      "name": "workflow_preflight_requests_immutable",
+      "type": 58,
+      "enabled": "O",
+      "function": "dream.guard_workflow_preflight_request_immutable()"
+    },
+    "guard_configuration": [
+      "search_path=pg_catalog"
+    ],
+    "public_execute": false,
+    "ledger": {
+      "count": 61,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "7123babb03535e0a0c7a818e902c331cefbe73c660b46395136dcc9a5b19f3da"
+      ]
+    }
+  },
+  "partial_rollback": {
+    "ledger": 60,
+    "capability_absent": true,
+    "guard_absent": true,
+    "sentinel_preserved": true
+  },
+  "constraint_assertions": [
+    {
+      "assertion": "original composite cannot rebind",
+      "sqlstate": "23505",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "invalid SHA",
+      "sqlstate": "23514",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "zero canonical ID",
+      "sqlstate": "23514",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "orphan PF",
+      "sqlstate": "23503",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "immutable UPDATE",
+      "sqlstate": "55000",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "immutable DELETE",
+      "sqlstate": "55000",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "immutable TRUNCATE",
+      "sqlstate": "55000",
+      "exit_code": null,
+      "execution": "preceding replay reached and asserted nonzero plus SQLSTATE before its final RESTRICT expected-code error; exact individual psql exit number was not retained; not repeated",
+      "nonzero_exit_verified": true
+    },
+    {
+      "assertion": "original Preflight RESTRICT retained",
+      "sqlstate": "23001",
+      "exit_code": 1,
+      "execution": "remaining precise RESTRICT assertion; original expected23503 was the wrong Appendix A code"
+    }
+  ],
+  "request_binding": "exact decimal ID/all columns/time unchanged after actual RESTRICT rejection; original PF retained",
+  "normal_database": "untouched",
+  "provider_model_runtime": "none",
+  "targets": {
+    "upgrade": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+    "concurrent": "ink_auth_data_codex_test_792494523a17_pf61_concurrent",
+    "partial": "ink_auth_data_codex_test_792494523a17_pf61_partial",
+    "fresh": "ink_auth_data_codex_test_792494523a17_pf61_fresh"
+  },
+  "harness_correction": "RESTRICT uses23001; missing-FK insert23503 remains separately asserted; no candidate/history/constraint/schema change or migration repeated"
+}

@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_social61",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 61,
+  "setup_assertions": 5,
+  "actors": 3,
+  "invites": 11,
+  "pictures": 4,
+  "bindings": "three explicit canonical decimal IDs/subjects and normal trigger-owned projections in disposable DB",
+  "original_grant": "actual public ordinary Thread server-persistence bearer only to prove social denial",
+  "roles": "restricted AUTH/DATA; owner setup/SELECT only",
+  "private_key": "never exported",
+  "normal_database": "untouched",
+  "provider_model_runtime_filesystem": "none"
+}

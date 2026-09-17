@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "root": "/Users/dmeck/.codex/worktrees/ef6e/ink-dream-memory",
+  "head": "7e3d0f4a63cb0e79416400f4c2fe2fcd9f6ef82c",
+  "worktree_dirty": true,
+  "method": "Python AST source-only; production excludes tests/scripts/tools/legacy fixtures/embedded skills/.venv; recognizes Constant, JoinedStr and literal concatenation SQL passed to execute/executemany; no imports or DB execution",
+  "baseline": {
+    "scanned_modules": 297,
+    "sql_modules": 29,
+    "sql_calls": 480,
+    "driver_import_modules": 13,
+    "connection_calls": 997,
+    "retired_symbol_definitions": [
+      {
+        "file": "backend/database.py",
+        "line": 327,
+        "name": "replace_deck_claude_plugin_refs"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 405,
+        "name": "list_deck_claude_plugin_refs"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 466,
+        "name": "seed_system_decks"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 568,
+        "name": "get_user_decks"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 600,
+        "name": "get_published_decks"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 637,
+        "name": "publish_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 674,
+        "name": "unpublish_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 689,
+        "name": "increment_deck_install_count"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 705,
+        "name": "get_deck_with_voices"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 850,
+        "name": "reconcile_default_screenplay_deck_plugin_ref"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 945,
+        "name": "create_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 986,
+        "name": "update_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1053,
+        "name": "delete_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1120,
+        "name": "auto_fork_system_decks"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1153,
+        "name": "create_default_screenplay_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1171,
+        "name": "fork_deck"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1272,
+        "name": "sync_deck_with_parent"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1359,
+        "name": "load_voices_from_user_decks"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1407,
+        "name": "create_voice"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1459,
+        "name": "update_voice"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1556,
+        "name": "delete_voice"
+      },
+      {
+        "file": "backend/database.py",
+        "line": 1592,
+        "name": "fork_voice"
+      },
+      {
+        "file": "backend/services/deck/agent_type.py",
+        "line": 42,
+        "name": "agent_type_records_for_decks"
+      },
+      {
+        "file": "backend/services/deck/agent_type.py",
+        "line": 93,
+        "name": "decorate_decks_with_agent_type"
+      },
+      {
+        "file": "backend/services/deck/content_versioning.py",
+        "line": 73,
+        "name": "content_version_capability_available"
+      },
+      {
+        "file": "backend/services/deck/content_versioning.py",
+        "line": 90,
+        "name": "advance_deck_draft_revision"
+      },
+      {
+        "file": "backend/services/deck/content_versioning.py",
+        "line": 113,
+        "name": "decorate_decks_with_content_version_state"
+      },
+      {
+        "file": "backend/services/deck/content_versioning.py",
+        "line": 159,
+        "name": "DeckContentVersionService"
+      }
+    ],
+    "parse_errors": []
+  },
+  "current": {
+    "scanned_modules": 296,
+    "sql_modules": 27,
+    "sql_calls": 402,
+    "driver_import_modules": 13,
+    "connection_calls": 860,
+    "retired_symbol_definitions": [],
+    "parse_errors": []
+  },
+  "delta": {
+    "scanned_modules": -1,
+    "sql_modules": -2,
+    "sql_calls": -78,
+    "driver_import_modules": 0,
+    "connection_calls": -137
+  },
+  "assertions": {
+    "content_versioning_absent": true,
+    "retired_symbols_absent_from_owned_modules": true,
+    "agent_type_sql_calls": 0,
+    "database_remaining_sql_calls": 73,
+    "active_builtin_backfill_retained": true
+  },
+  "current_sql_modules": [
+    "backend/database.py",
+    "backend/routers/claude_plugins.py",
+    "backend/schema/capabilities.py",
+    "backend/schema/catalog.py",
+    "backend/schema/importer.py",
+    "backend/schema/legacy_main_sqlite.py",
+    "backend/schema/legacy_notion_sqlite.py",
+    "backend/server.py",
+    "backend/services/claude_agent/remote_interaction_guard.py",
+    "backend/services/claude_agent/session_manager.py",
+    "backend/services/claude_plugin/install_service.py",
+    "backend/services/claude_plugin/marketplace_service.py",
+    "backend/services/claude_plugin/workspace_packer.py",
+    "backend/services/deck/admin_gateway.py",
+    "backend/services/deck/builtin_plugin.py",
+    "backend/services/deck/story_workflow_application.py",
+    "backend/services/deck_plugin/installation_service.py",
+    "backend/services/deck_plugin/revocation_service.py",
+    "backend/services/deck_plugin/rollback_manager.py",
+    "backend/services/runtime_plugin/materialization_manager.py",
+    "backend/services/runtime_plugin/reconcile_service.py",
+    "backend/services/story_workspace/artifact_story_index_reconcile.py",
+    "backend/services/story_workspace/artifact_story_index_repository.py",
+    "backend/services/story_workspace/dream_artifact_turn_hook.py",
+    "backend/services/story_workspace/dream_reentry_service.py",
+    "backend/services/story_workspace/dream_runtime_activation_service.py",
+    "backend/services/workflow/run_service.py"
+  ]
+}

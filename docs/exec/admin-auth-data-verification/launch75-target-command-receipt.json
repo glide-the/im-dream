@@ -1,0 +1,7 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/prepare-launch75-target.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "receipt_source": "actual exec session54964 completed exit0; primary recorded without re-execution",
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_launch75\",\n  \"source\": \"ink_auth_data_codex_test_792494523a17_run72\",\n  \"source_type\": \"owned disposable provider-free technical fixture, not normal database\",\n  \"host\": \"127.0.0.1\",\n  \"port\": 51534,\n  \"data_directory\": \"/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres\",\n  \"ledger\": 61,\n  \"migration_replayed\": false,\n  \"acl_exit_code\": 0,\n  \"source_table_count\": 125,\n  \"source_fingerprint_sha256\": \"df7dfed77316102b9bf860f1ba518758adef98236305852eed90318883b177c5\",\n  \"source_before_after\": \"exactly unchanged\",\n  \"business_seeds\": \"not yet executed\",\n  \"normal_database\": \"untouched\"\n}"
+}

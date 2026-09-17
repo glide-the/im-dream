@@ -1,7 +1,7 @@
-// [Input] Authenticated fetch boundary and managed discovery JSON with the backend's serverInfo wire field.
-// [Output] Verify inventory metadata, null Server info, capability counts, revisions, cache flags, and safe errors.
+// [Input] Same-origin Cookie/CSRF fetch boundary and managed discovery JSON with the backend's serverInfo wire field.
+// [Output] Verify Browser credentials exclude stored Bearer values while preserving inventory metadata and safe errors.
 // [Pos] Claude MCP API contract regression; no browser, real backend, MCP Server, or credentials.
-// [Sync] 2026-09-13: lock the serverInfo → server_info adaptation without changing the public API or page model.
+// [Sync] 2026-09-17: lock same-origin Cookie credentials and reject legacy Browser Bearer forwarding.
 
 import { expect, test } from '@playwright/test';
 import { ClaudeMcpApiError, getClaudeMcpServerInventory } from '../claudeMcpApi';
@@ -59,11 +59,11 @@ function respond(discovery: unknown) {
 test('maps backend serverInfo to page server_info and preserves the inventory contract', async () => {
   const discovery = discoveryPayload();
   globalThis.fetch = async (input, init) => {
-    expect(input).toBe('https://dream.test/api/claude-mcp/servers/team%2Fclock/discoveries');
+    expect(input).toBe('/api/claude-mcp/servers/team%2Fclock/discoveries');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toEqual({ force: false });
     expect(init?.credentials).toBe('include');
-    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer mcp-contract-token');
+    expect(new Headers(init?.headers).get('Authorization')).toBeNull();
     return new Response(JSON.stringify({ discovery }), { headers: { 'content-type': 'application/json' } });
   };
 

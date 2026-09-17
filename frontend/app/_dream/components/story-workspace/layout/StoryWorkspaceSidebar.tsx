@@ -1,3 +1,4 @@
+// [Sync] 2026-09-14: failed logout retains the real session and shows safe feedback in the user menu.
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
 // [Output] Render the collapsible desktop Story Workspace navigation sidebar with
 //          Chat/Dream/Decks plus a More disclosure for restored legacy entries.
@@ -52,7 +53,7 @@ export function StoryWorkspaceSidebar({
   onNavigate,
   onToggleCollapse,
 }: StoryWorkspaceSidebarProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, authError } = useAuth();
   const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -607,14 +608,14 @@ export function StoryWorkspaceSidebar({
                 <button
                   className="story-workspace-sidebar__logout"
                   onClick={() => {
-                    setShowUserMenu(false);
-                    logout();
+                    void logout();
                   }}
                   role="menuitem"
                   type="button"
                 >
                   Logout
                 </button>
+                {authError && <p role="alert" style={{ color: 'var(--color-state-danger)', padding: '0 12px' }}>{authError}</p>}
               </div>
             </>
           ) : null}

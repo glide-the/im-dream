@@ -1,4 +1,6 @@
-// [Input] ToolUIPart/DynamicToolUIPart from the chat message stream; auth token; API_BASE.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
+// [Input] ToolUIPart/DynamicToolUIPart from the chat message stream; Browser session and CSRF; API_BASE.
 // [Output] confirmToolCall() POST helper, resolveToolName()/isAskUserQuestionPart() classifiers,
 //          and resolvePendingToolConfirmation() — the single source of truth for whether a tool
 //          part is waiting on a user decision (drives ToolConfirmationDock and the ChatMessageList
@@ -14,7 +16,7 @@
 // [Sync] 2026-09-02: let session hydration stabilize an idle history with an
 //                    ID-only latest probe instead of repeating a full transcript read.
 import { getToolName, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { API_BASE } from '../../lib/apiBase';
 import { isEditorWriteTool } from './editorWriteTools';
 
@@ -181,7 +183,7 @@ export async function confirmToolCall(
 ) {
   const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+    headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
     body: JSON.stringify({ thread_id: threadId, tool_call_id: toolCallId, approved, reason, answers }),
   });
   let payload: unknown = null;

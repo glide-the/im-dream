@@ -18,8 +18,8 @@ Dream uses Next.js on `127.0.0.1:6006` and FastAPI on
 same-origin API/auth routes to FastAPI. The standalone launcher uses `screen`
 and does not install Docker or Nginx.
 
-`prepare-env.sh` combines the backend runtime configuration, Admin-owned
-PostgreSQL identity, and a private MCP Apps env file. MCP Apps iframe content
+`prepare-env.sh` combines the backend runtime configuration, Admin API
+configuration, and a private MCP Apps env file. It strips database keys. MCP Apps iframe content
 must use a separate HTTPS origin routed to the same port 6006 Next service;
 the parent origin remains the primary Dream HTTPS origin.
 
@@ -51,8 +51,7 @@ Create gitignored `platform.env` from `platform.env.example`, then project the
 runtime env and deploy:
 
 ```bash
-AUTODL_ADMIN_ENV_FILE=../ink-admin-memory/deploy/autodl-ssh/.env \
-  ./deploy/autodl-ssh/prepare-env.sh
+./deploy/autodl-ssh/prepare-env.sh
 ./deploy/autodl-ssh/test-topology.sh
 ./deploy/autodl-ssh/deploy.sh check
 ./deploy/autodl-ssh/deploy.sh deploy
@@ -65,8 +64,8 @@ public health gates pass.
 
 ## Safety and acceptance
 
-- Dream consumes the Admin-owned PostgreSQL schema and never runs migration,
-  runtime DDL, restore, or database deletion.
+- Dream consumes Admin DTO APIs and receives no PostgreSQL credential. It never
+  runs SQL, migration, runtime DDL, restore, or database deletion.
 - Workspace, Notion credential, Artifact, local-file, plugin Runtime, and
   service-home roots remain persistent and reject symbolic-link substitution.
 - AutoDL fixes `INK_AGENT_SANDBOX_ENABLED=false` because the outer container
@@ -84,7 +83,7 @@ public health gates pass.
 | File | Current meaning |
 |---|---|
 | `deploy.sh` | Versioned pnpm/Next/FastAPI release, verification, qualification, and rollback |
-| `prepare-env.sh` | Backend, Admin DB, public-origin, sandbox, and MCP Apps runtime projection |
+| `prepare-env.sh` | Backend/Admin API, public-origin, sandbox, and MCP Apps runtime projection with database keys removed |
 | `runtime/start-dream.sh` | Next.js and FastAPI supervisor |
 | `runtime/start-ink-memory.sh` | Admin-first idempotent restarter for already-published releases |
 | `runtime/init-dream-data.sh` | Persistent-directory ownership and symlink safety |

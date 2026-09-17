@@ -5,7 +5,7 @@
 #          (not collected), REST plan endpoint contract (exists:false / 404 /
 #          truncation).
 # [Pos] test node in backend/tests
-# [Sync] 2026-07-20: initial — claude-plan §5.1/§5.4/§5.5/§5.7 backend coverage.
+# [Sync] 2026-09-16: inject the Admin Chat ownership seam into REST endpoint tests.
 
 """Tests for the claude-plan backend half (Plan Mode capture & contracts).
 
@@ -424,12 +424,13 @@ class TestThreadPlanEndpoint(unittest.IsolatedAsyncioTestCase):
 
     async def _call(self, thread_id: str):
         return await self._router_module.claude_agent_thread_plan(
-            thread_id, current_user={"user_id": 1}
+            thread_id, current_user={"user_id": 1}, chat=unittest.mock.Mock()
         )
 
     async def test_404_when_thread_not_owned(self):
         with unittest.mock.patch.object(
-            self._router_module.database, "get_chat_thread", return_value=None
+            self._router_module, "_admin_thread",
+            new=unittest.mock.AsyncMock(return_value=None),
         ):
             with self.assertRaises(self._router_module.HTTPException) as ctx:
                 await self._call("thread-nope")
@@ -438,8 +439,9 @@ class TestThreadPlanEndpoint(unittest.IsolatedAsyncioTestCase):
     async def test_exists_false_contract(self):
         with (
             unittest.mock.patch.object(
-                self._router_module.database,
-                "get_chat_thread",
+                self._router_module,
+                "_admin_thread",
+                new_callable=unittest.mock.AsyncMock,
                 return_value={"thread_id": "thread-rest"},
             ),
             unittest.mock.patch.object(
@@ -468,8 +470,9 @@ class TestThreadPlanEndpoint(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                self._router_module.database,
-                "get_chat_thread",
+                self._router_module,
+                "_admin_thread",
+                new_callable=unittest.mock.AsyncMock,
                 return_value={"thread_id": session_id},
             ),
             unittest.mock.patch.object(

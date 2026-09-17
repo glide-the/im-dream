@@ -1,17 +1,19 @@
-"""Fail-closed, redacted configuration for the Admin Product API client."""
+"""Fail-closed, redacted configuration for the Admin Product API client.
+
+[Input] Server-owned Admin Product origin and transport bounds.
+[Output] Immutable HTTP configuration without any Dream token-signing authority.
+[Pos] Product transport configuration; user delegation arrives per request as OAuth.
+[Sync] 2026-09-16: remove Product JWT secret, issuer, audience, client and TTL.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import os
-import re
 from urllib.parse import urlsplit
 
 from .errors import configuration_unavailable
-
-
-_CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
 
 
 def _required(values: Mapping[str, str], name: str) -> str:
@@ -69,13 +71,8 @@ def parse_origin_allowlist(
 
 @dataclass(frozen=True, repr=False)
 class AdminProductConfig:
-    base_url: str = field(repr=False)
-    jwt_secret: str = field(repr=False)
-    jwt_issuer: str
-    jwt_audience: str
-    client_id: str
+    base_url: str
     request_origin: str
-    token_lifetime_seconds: int = 240
     timeout_seconds: float = 8.0
 
     def __post_init__(self) -> None:
@@ -85,44 +82,19 @@ class AdminProductConfig:
         )
         if normalized_url != self.base_url or normalized_origin != self.request_origin:
             raise configuration_unavailable()
-        if len(self.jwt_secret.encode("utf-8")) < 32:
-            raise configuration_unavailable()
-        if any(character in self.jwt_secret for character in "\r\n\x00"):
-            raise configuration_unavailable()
-        if (
-            not self.jwt_issuer
-            or len(self.jwt_issuer) > 200
-            or any(character in self.jwt_issuer for character in "\r\n\x00")
-        ):
-            raise configuration_unavailable()
-        if (
-            not self.jwt_audience
-            or len(self.jwt_audience) > 200
-            or any(character in self.jwt_audience for character in "\r\n\x00")
-        ):
-            raise configuration_unavailable()
-        if not _CLIENT_ID_PATTERN.fullmatch(self.client_id):
-            raise configuration_unavailable()
-        if not 30 <= self.token_lifetime_seconds <= 300:
-            raise configuration_unavailable()
         if not 0 < self.timeout_seconds <= 30:
             raise configuration_unavailable()
 
     def __repr__(self) -> str:
-        return (
-            "AdminProductConfig(base_url=<redacted>, jwt_secret=<redacted>, "
-            f"client_id={self.client_id!r})"
-        )
+        return "AdminProductConfig(base_url=<redacted>)"
 
     @classmethod
     def from_env(
         cls, *, environ: Mapping[str, str] | None = None
     ) -> "AdminProductConfig":
         values = os.environ if environ is None else environ
-        lifetime_raw = values.get("INK_ADMIN_PRODUCT_JWT_TTL_SECONDS", "240")
         timeout_raw = values.get("INK_ADMIN_PRODUCT_TIMEOUT_SECONDS", "8")
         try:
-            lifetime = int(lifetime_raw)
             timeout = float(timeout_raw)
         except (TypeError, ValueError):
             raise configuration_unavailable() from None
@@ -136,11 +108,6 @@ class AdminProductConfig:
         )
         return cls(
             base_url=base_url,
-            jwt_secret=_required(values, "INK_ADMIN_PRODUCT_JWT_SECRET"),
-            jwt_issuer=_required(values, "INK_ADMIN_PRODUCT_JWT_ISSUER"),
-            jwt_audience=_required(values, "INK_ADMIN_PRODUCT_JWT_AUDIENCE"),
-            client_id=_required(values, "INK_ADMIN_PRODUCT_CLIENT_ID"),
             request_origin=request_origin,
-            token_lifetime_seconds=lifetime,
             timeout_seconds=timeout,
         )

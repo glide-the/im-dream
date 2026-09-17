@@ -1,0 +1,15 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 60,
+  "context_cases": 18,
+  "confirmation_cases": 14,
+  "setup_assertions": 53,
+  "roles": "restricted AUTH/DATA; owner fixture/fault/verification only",
+  "terminal_grant": "created through actual public route while active; owned Run cancellation transition with status_version+1; failed completion transition retained",
+  "oracle": "actual original Python command model/hidden_parts/fingerprint/message_id; JSON-only, no copied algorithms",
+  "direct_writes": "named isolated FK-valid setup and explicit terminal transition only; all production assertions left to existing public harness",
+  "normal_database": "untouched",
+  "provider_model": "none"
+}

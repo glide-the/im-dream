@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-social61-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_social61",
+  "exit_code": 0,
+  "output": "SOCIAL61 fixture PASS:3actors/11codes/4historicalpictures; explicit originalThread grant; limited roles/fresh OAuth; private0[REDACTED]; normal untouched\n"
+}

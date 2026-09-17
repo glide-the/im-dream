@@ -7,12 +7,12 @@
 // [Sync] 2026-09-06: reserve MCP Apps and streaming Claude Agent API routes for
 //                    explicit Next handlers while proxying other APIs to Python.
 // [Sync] 2026-09-14: bind Turbopack and tracing to this config's directory, not ancestor lockfiles.
+// [Sync] 2026-09-14: runtime API/auth Route Handlers own credentials; disable legacy unauthenticated rewrites.
 
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
-const backendUrl = process.env.INK_BACKEND_INTERNAL_URL?.replace(/\/+$/, '');
 const standaloneOutput = process.env.INK_NEXT_OUTPUT === 'standalone';
 
 /** @type {import('next').NextConfig} */
@@ -34,21 +34,7 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    if (!backendUrl) return [];
-    return {
-      beforeFiles: [],
-      afterFiles: [
-        {
-          source: '/api/:path((?!mcp-apps(?:/|$)|claude-agent(?:/|$)).*)',
-          destination: `${backendUrl}/api/:path`,
-        },
-        { source: '/auth/:path*', destination: `${backendUrl}/auth/:path*` },
-        { source: '/oauth/google/:path*', destination: `${backendUrl}/oauth/google/:path*` },
-        { source: '/oauth/device/code', destination: `${backendUrl}/oauth/device/code` },
-        { source: '/oauth/token', destination: `${backendUrl}/oauth/token` },
-      ],
-      fallback: [],
-    };
+    return [];
   },
 };
 

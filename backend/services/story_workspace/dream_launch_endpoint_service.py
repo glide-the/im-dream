@@ -1,15 +1,22 @@
+# [Input] Authenticated launch command, Admin actor/client and request-scoped Runtime port.
+# [Output] Public launch context or closed route error while retaining Dream workflow execution.
+# [Pos] Dream HTTP application boundary; creates no authentication or database authority.
+# [Sync] 2026-09-17: compose launch turns from the request-owned Admin OAuth authority and log only safe failure facts.
 """HTTP application boundary for starting one Dream run."""
 
 from __future__ import annotations
 
-from typing import Any, Callable
-
-import database
+import logging
+from typing import Any
 
 try:
     from services.errors.error_registry import ApiRouteError
+    from services.admin_data.client import AdminDataClient
+    from services.admin_data.errors import AdminDataError
+    from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
     from services.story_workspace.dream_launch_infrastructure import (
         DreamLaunchApplicationError,
+        DreamLaunchRuntimePort,
         DreamLaunchTaskRegistry,
         build_dream_launch_application_service,
     )
@@ -17,21 +24,19 @@ try:
         DreamLaunchIdempotencyConflict,
         DreamLaunchProvenanceError,
     )
-    from services.story_workspace.preflight_builder import (
-        StoryWorkspacePreflightServiceBuilder,
-    )
-    from services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
-    from services.workflow.run_service import WorkflowRunError
+    from services.story_workspace.guidance_service import prepare_guidance_turn_owner
     from story_workspace.contracts import (
         StoryWorkspaceDreamLaunchCommand,
         StoryWorkspaceDreamRunContext,
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.errors.error_registry import ApiRouteError
+    from backend.services.admin_data.client import AdminDataClient
+    from backend.services.admin_data.errors import AdminDataError
+    from backend.services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
     from backend.services.story_workspace.dream_launch_infrastructure import (
         DreamLaunchApplicationError,
+        DreamLaunchRuntimePort,
         DreamLaunchTaskRegistry,
         build_dream_launch_application_service,
     )
@@ -39,17 +44,14 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         DreamLaunchIdempotencyConflict,
         DreamLaunchProvenanceError,
     )
-    from backend.services.story_workspace.preflight_builder import (
-        StoryWorkspacePreflightServiceBuilder,
-    )
-    from backend.services.story_workspace.workflow_security import (
-        story_workspace_workflow_token_secret,
-    )
-    from backend.services.workflow.run_service import WorkflowRunError
+    from backend.services.story_workspace.guidance_service import prepare_guidance_turn_owner
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamLaunchCommand,
         StoryWorkspaceDreamRunContext,
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 class DreamLaunchEndpointService:
@@ -58,10 +60,8 @@ class DreamLaunchEndpointService:
     def __init__(
         self,
         *,
-        db_factory: Callable[[], Any] = database.get_db,
         task_registry: DreamLaunchTaskRegistry | None = None,
     ) -> None:
-        self._db_factory = db_factory
         self._task_registry = task_registry or DreamLaunchTaskRegistry()
 
     def start(self) -> None:
@@ -78,20 +78,24 @@ class DreamLaunchEndpointService:
         request: StoryWorkspaceDreamLaunchCommand,
         *,
         actor: dict[str, str],
+        admin_client: AdminDataClient,
+        admin_request_auth: AdminRequestAuth,
+        admin_actor: AdminRequestActor,
+        runtime_port: DreamLaunchRuntimePort,
     ) -> StoryWorkspaceDreamRunContext:
-        db = self._db_factory()
         try:
-            token_secret = story_workspace_workflow_token_secret()
-            preflight_service = StoryWorkspacePreflightServiceBuilder(
-                db,
-                actor,
-                token_secret=token_secret,
-            ).build()
             service = build_dream_launch_application_service(
-                db,
-                preflight_service=preflight_service,
-                token_secret=token_secret,
+                admin_client,
+                actor=admin_actor,
+                workspace_id=actor["workspace_id"],
+                runtime_port=runtime_port,
                 launch_task_registry=self._task_registry,
+                turn_owner_factory=lambda *, thread_id, workflow_run_id: prepare_guidance_turn_owner(
+                    request_auth=admin_request_auth,
+                    actor=admin_actor,
+                    thread_id=thread_id,
+                    workflow_run_id=workflow_run_id,
+                ),
             )
             return await service.launch(
                 request,
@@ -101,33 +105,24 @@ class DreamLaunchEndpointService:
         except DreamLaunchIdempotencyConflict as exc:
             raise ApiRouteError("IDEMPOTENCY_CONFLICT", status_code=409) from exc
         except DreamLaunchProvenanceError as exc:
+            logger.warning("Dream launch provenance rejected: field=%s", exc.field)
             raise ApiRouteError("DECK_RUNTIME_CONFIG_INVALID", status_code=409) from exc
         except DreamLaunchApplicationError as exc:
+            logger.warning(
+                "Dream launch application rejected: code=%s status=%s",
+                exc.code,
+                exc.status_code,
+            )
             raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        except WorkflowRunError as exc:
-            self._raise_run_error(exc)
+        except AdminDataError as exc:
+            logger.warning(
+                "Dream launch Admin operation rejected: code=%s status=%s",
+                exc.code,
+                exc.status_code,
+            )
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
         except PermissionError as exc:
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
-        finally:
-            db.close()
-
-    @staticmethod
-    def _raise_run_error(exc: WorkflowRunError) -> None:
-        mapping = {
-            "IDEMPOTENCY_CONFLICT": ("IDEMPOTENCY_CONFLICT", 409),
-            "ILLEGAL_RUN_TRANSITION": ("WORKFLOW_STEP_FAILED", 409),
-            "WORKFLOW_RUN_NOT_FOUND": ("AGENT_EXECUTION_FAILED", 404),
-            "PREFLIGHT_NOT_FOUND_OR_NOT_AUTHORIZED": (
-                "WORKFLOW_PERMISSION_DENIED",
-                404,
-            ),
-            "PREFLIGHT_TOKEN_INVALID": ("WORKFLOW_PERMISSION_DENIED", 409),
-            "PREFLIGHT_TOKEN_EXPIRED": ("DECK_RUNTIME_CONFIG_UNAVAILABLE", 409),
-            "PREFLIGHT_TOKEN_REPLAYED": ("IDEMPOTENCY_CONFLICT", 409),
-            "RETRY_SOURCE_MISMATCH": ("CONFIG_VERSION_DRIFT", 409),
-        }
-        code, status = mapping.get(exc.code, ("AGENT_EXECUTION_FAILED", 422))
-        raise ApiRouteError(code, status_code=status) from exc
 
 
 _DREAM_LAUNCH_ENDPOINT_SERVICE = DreamLaunchEndpointService()

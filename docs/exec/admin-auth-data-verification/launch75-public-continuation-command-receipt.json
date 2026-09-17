@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminDreamLaunch.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"scope\":\"provider-free launch components\",\"validation_scope\":\"remaining_after_source_new_null\",\"cases\":37,\"skipped_accepted_cases\":1,\"prepared_cases\":38,\"receipts\":21,\"assertions\":974,\"source_application_and_entire_ensure\":true,\"claim_commit_before_captured_turn\":true,\"independent_finish\":true,\"full_prepare_failure_runtime\":\"not executed\",\"protected_tables\":17}\n",
+  "scope": "public production source/claim/finish on owned isolated technical target; no full Runtime/Google/normal business"
+}

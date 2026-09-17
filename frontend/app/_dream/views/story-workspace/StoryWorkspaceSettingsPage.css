@@ -259,6 +259,12 @@
   margin-top: 18px;
 }
 
+.story-workspace-work__plugin-stack {
+  display: grid;
+  min-width: 0;
+  gap: 32px;
+}
+
 .story-workspace-settings__section-header {
   margin-bottom: 20px;
 }

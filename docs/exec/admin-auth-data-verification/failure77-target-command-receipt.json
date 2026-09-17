@@ -1,0 +1,8 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/prepare-failure77-target.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_failure77\",\n  \"source\": \"ink_auth_data_codex_test_792494523a17_workspace76\",\n  \"source_type\": \"owned disposable provider-free technical fixture, not normal database\",\n  \"host\": \"127.0.0.1\",\n  \"port\": 51534,\n  \"data_directory\": \"/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres\",\n  \"ledger\": 61,\n  \"migration_replayed\": false,\n  \"acl_exit_code\": 0,\n  \"source_table_count\": 125,\n  \"source_fingerprint_sha256\": \"0939609b17dd1ecdd410b3fac5b529092218c0f8bf16634c1fe83e8a94ac66e7\",\n  \"source_before_after\": \"exactly unchanged\",\n  \"business_seeds\": \"not yet executed\",\n  \"normal_database\": \"untouched\"\n}\n",
+  "scope": "primary named technical clone/ACL; no normal database, provider, model, Runtime or fixture POST"
+}

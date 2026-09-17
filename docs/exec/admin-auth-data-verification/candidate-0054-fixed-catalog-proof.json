@@ -1,0 +1,50 @@
+{
+  "status": "passed",
+  "upgraded_prefix": {
+    "tables": 18,
+    "columns": 189,
+    "named_indexes": 50,
+    "named_constraints": 129,
+    "ledger": {
+      "count": 55,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+      ]
+    }
+  },
+  "repeat": "single candidate receipt",
+  "concurrent": {
+    "tables": 18,
+    "columns": 189,
+    "named_indexes": 50,
+    "named_constraints": 129,
+    "ledger": {
+      "count": 55,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+      ]
+    }
+  },
+  "fresh_full_history": {
+    "tables": 18,
+    "columns": 189,
+    "named_indexes": 50,
+    "named_constraints": 129,
+    "ledger": {
+      "count": 55,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+      ]
+    }
+  },
+  "partial_drift": "expected failure; ledger54; dream absent; no capability",
+  "acl": "not yet implemented/proven",
+  "legacy_account_mapping": "not yet executed",
+  "normal_database": "untouched"
+}

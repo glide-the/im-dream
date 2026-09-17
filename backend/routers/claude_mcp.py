@@ -1,14 +1,16 @@
-"""Thin FastAPI boundary for database-managed MCP resources.
+"""Thin FastAPI boundary for Admin-managed MCP resources.
 
 [Input] Authenticated actor, strict CRUD/discovery/OAuth DTOs, and optional workspace scope.
 [Output] Redacted managed-MCP capability, Server, discovery, operation, and error DTOs.
 [Pos] HTTP adapter only; no CLI, subprocess, credentials, MCP sessions, or persistence logic.
 [Sync] 2026-08-25: expose managed CRUD, bulk discovery, OAuth callback/cancel, and logout.
+[Sync] 2026-09-16: bind every product request to the shared Admin DTO repository and current OAuth actor.
 [Sync] 2026-08-25: map the explicit missing OAuth callback configuration gate to HTTP 503.
 [Sync] 2026-08-25: remove public auth_kind inputs; standard MCP discovery owns authentication classification.
 [Sync] 2026-08-27: map transient PostgreSQL capability verification failures to a safe retryable 503.
 [Sync] 2026-09-06: carry current policy revision through every Node revalidation and reject non-finite view TTL configuration.
 [Sync] 2026-09-06: expose actor-owned per-connection App settings and carry their revision into Node views.
+[Sync] 2026-09-16: bind each public request to its Admin OAuth actor and remove Dream PostgreSQL ownership.
 """
 
 from __future__ import annotations
@@ -17,13 +19,14 @@ from contextlib import asynccontextmanager
 import hmac
 import math
 import os
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .deps import get_current_user
+from services.admin_data.request_auth import AdminRequestActor
 
 try:
     from claude_mcp.contracts import (
@@ -42,6 +45,7 @@ try:
         get_default_claude_mcp_service,
         shutdown_default_claude_mcp_service,
     )
+    from claude_mcp.repository import McpDataAuthorization
 except ModuleNotFoundError:  # pragma: no cover
     from backend.claude_mcp.contracts import (
         ClaudeMcpError,
@@ -59,6 +63,7 @@ except ModuleNotFoundError:  # pragma: no cover
         get_default_claude_mcp_service,
         shutdown_default_claude_mcp_service,
     )
+    from backend.claude_mcp.repository import McpDataAuthorization
 
 
 _service: ClaudeMcpService | None = None
@@ -67,8 +72,6 @@ _service: ClaudeMcpService | None = None
 @asynccontextmanager
 async def _lifespan(_app):
     global _service
-    if _service is None:
-        _service = get_default_claude_mcp_service()
     try:
         yield
     finally:
@@ -244,10 +247,22 @@ def _mcp_apps_view_ttl_seconds() -> float:
     return value
 
 
-def get_claude_mcp_service() -> ClaudeMcpService:
+async def get_claude_mcp_service(
+    current_user=Depends(get_current_user),
+) -> AsyncIterator[ClaudeMcpService]:
+    global _service
     if _service is None:
-        raise RuntimeError("Managed MCP service has not started.")
-    return _service
+        _service = get_default_claude_mcp_service()
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    with _service.repository.authorize(
+        McpDataAuthorization(
+            actor_id=actor.canonical_user_id,
+            access_token=actor.access_token,
+        )
+    ):
+        yield _service
 
 
 def _actor_id(current_user: dict[str, Any]) -> str:

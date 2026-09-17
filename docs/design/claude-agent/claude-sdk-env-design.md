@@ -1,9 +1,11 @@
+<!-- [同步] 2026-09-14：Admin/Auth/BFF服务器秘密由最终SDK tombstone与stdio投影保护；Gateway/Editor长期委托迁移仍待闭合。 -->
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
 <!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
-<!-- [同步] 2026-09-13：源码合同升级到 SDK 0.2.145 × Runtime 0.1.9；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
+<!-- [同步] 2026-09-13：源码合同升级到 SDK 0.2.145 × Runtime 0.1.10；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
+<!-- [同步] 2026-09-15：Dream 默认 plugin 安装也使用同一个 manifest-qualified Runtime resolver。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -15,13 +17,13 @@
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
 > **[同步] 2026-09-12**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.145`
 > 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
-> 门禁的 `ink-claude-code-dream==0.1.9`；npm 默认布局为 package-root `cli.js`，AutoDL local-core 保留独立受检布局。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 门禁的 `ink-claude-code-dream==0.1.10`；npm 默认布局为 package-root `cli.js`，AutoDL local-core 保留独立受检布局。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-09-12**：Python 依赖文件把
 > `ink-claude-dream-agent-sdk==0.2.145` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
 > `--require-hashes`，并排除 official `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime `0.1.9` 已完成同 SHA 四平台资格、五包公开发布与本机 Dream 采用，见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。Docker 源码固定同一版本，但本次未运行镜像构建；AutoDL local-core 是独立受检制品，不能替代 npm 五包验收。
+> CLI 回滚物。Runtime `0.1.10` 已完成同 SHA 四平台资格、五包公开发布与本机 Dream 采用，见[发布与接入回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)。Docker 源码固定同一版本，但本次未运行镜像构建；AutoDL local-core 是独立受检制品，不能替代 npm 五包验收。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -240,19 +242,19 @@ session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbo
 `sandbox.notion-cli` 或 selector digest。Python SDK 已从正式 PyPI 按精确版本与
 SHA-256 锁原子切换到自有 distribution，安装环境不再带 Git `direct_url.json`。
 
-当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.9`：
+当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.10`：
 实际实现来自 Runtime `src`，默认入口为 `src/entrypoints/cli.tsx`，原始源码版权保留，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
 接口资格，不声明官方全产品等价。selector 源位于 Runtime 仓库 `package/`，两个 alias
-都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块。四个平台已完成同 SHA 资格，五个公开归档 integrity 与 CI 原归档一致，本机安装和服务启动身份已核对。具体证据范围见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，不把制品测试扩大为真实用户业务验收。
+都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块。四个平台已完成同 SHA 资格，五个公开归档 integrity 与 CI 原归档一致，本机安装和服务启动身份已核对。具体证据范围见[发布与接入回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)，不把制品测试扩大为真实用户业务验收。
 
 Runtime 只保留原始 `src`（1,902 文件、35 模块目录），其目录、模块路径、
 内容和权限摘要保持不变；重复 `restored-src` 已删除，不维护另一套源码树。
 来源摘要位于 `runtime/source-provenance.json`，原始源码进入构建且保留原版权。
-Dream backend/frontend 项目元数据分别 patch 升级为 `0.1.3`/`0.0.3`，
+Dream backend/frontend 项目元数据分别 patch 升级为 `0.1.4`/`0.0.4`，
 SDK 与 API schema 不变；这不代表生产服务更新。
 
-当前 Docker 源码精确安装 selector `0.1.9`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；精确版本与摘要不符时构建失败，不回退其他版本。本次未运行镜像构建。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
+当前 Docker 源码精确安装 selector `0.1.10`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；精确版本与摘要不符时构建失败，不回退其他版本。本次未运行镜像构建。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -435,7 +437,7 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 
 ## 9. 实现合同与版本化验收
 
-下列实现项描述当前代码合同；执行结果按日期和版本归入独立回执。2026-08-24 的计数不属于 `0.1.9` 新验收，本轮 Docker 只核对源码安装合同、未构建镜像。当前发布与本机采用见[发布回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，MCP Apps 修复与普通 Chat 复验见[恢复回执](../../exec/mcp-apps/local-startup-recovery.md)。
+下列实现项描述当前代码合同；执行结果按日期和版本归入独立回执。2026-08-24 的计数不属于 `0.1.10` 新验收，本轮 Docker 只核对源码安装合同、未构建镜像。当前发布与本机采用见[发布回执](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)，MCP Apps 修复与普通 Chat 复验见[恢复回执](../../exec/mcp-apps/local-startup-recovery.md)。
 
 - [x] `server.py` 启动加载 `backend/.env`，并在 Agent factory 前验证自有 SDK/Runtime。
 - [x] Runner 与 `SimpleClaudeAgentSDKClient` 都幂等应用共享 env/settings/TMPDIR helper。
@@ -451,7 +453,7 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 
 ### 10.1 风险
 
-- `backend/.env` 和进程环境中非 Claude Code / Anthropic SDK key 不再进入 Claude Code 子进程环境；服务进程仍在启动时加载完整 `.env`，供 session 和 Mem0 等 backend 配置读取。
+- SDK白名单只控制显式options.env，底层SDK仍先继承完整parent环境。§8精确Admin/Auth秘密键用空值overlay清除；其他业务凭据必须按其模块合同逐项处理，不能据白名单宣称全parent已过滤。server启动加载完整.env用于自身配置，原值保持。
 - 如果调用方显式传入错误的 `options.env`，会覆盖进程环境或 `backend/.env` 同名 key。该行为是设计要求，用于支持测试、临时切换或调用方定制。
 - 如果 backend 目录判断错误，`.env` 读取会失败。helper 以 `backend/libs/claude_agent_kit/server/sdk_env.py` 向上定位 backend 目录，需要测试覆盖。
 - 如果 Claude Code CLI 版本不支持 `--setting-sources`，子进程会启动失败。当前本地 `claude --help` 已包含 `--setting-sources <sources>`。
@@ -501,3 +503,27 @@ Admin 的 `ai_models.max_output_tokens` 已经是 Gateway 公开模型能力，�
 ### 13.3 验收与回滚
 
 Provider-free focused tests 必须同时证明目录投影、parent/user scrub、非法值零请求失败、服务 snapshot 合并，以及 compiled CLI 最终 HTTP JSON。回滚只通过 Runtime/Dream 前向版本恢复上一策略；不修改模型记录、不覆盖 npm 版本、不重写 Gateway 请求。
+
+## 8. Admin/Auth 服务器秘密与子进程边界
+
+### 背景与问题
+
+Admin数据客户端读取全局服务凭据，BFF与认证模块读取各自加密/签发秘密。SDK实际先继承服务器完整 `os.environ`，再叠加 `options.env`；从白名单或options中删除key仍会暴露parent里的value。新增Admin API并不授权把这些value交给Claude Code、Bash、hooks或外部stdio MCP。
+
+### 目标与边界
+
+服务器保留原配置供Admin请求/BFF使用；子进程不获得其秘密值。当前已实现Admin/Auth精确键保护，尚未完成旧Gateway全局签发秘密及Editor `DATABASE_URL` 路径迁移。它们仍是全域验收gate，不能借本节宣称Runtime已完成全部凭据隔离。模型catalog、Notion thread投影、tmpdir、Workspace Mode、lease与Agent/SSE语义保持原合同。
+
+### 概念与规则
+
+`ADMIN_AUTH_SERVER_ONLY_ENV_NAMES`来自实际配置：`INK_ADMIN_DREAM_SERVICE_SECRET`、`DREAM_DATA_SERVICE_CLIENTS`、`BETTER_AUTH_SECRET`、`AUTH_TOKEN_ENCRYPTION_KEY`、`GOOGLE_CLIENT_SECRET`、`INK_DREAM_BFF_COOKIE_SECRET`、`JWT_SECRET`、`JWT_SECRET_KEY`。origin、issuer、client ID只表达目标/客户端身份，不是秘密。
+
+`sdk_env.merge_project_dotenv_env`在project/process/options合并结束时给这些key写空值tombstone；`apply_user_sdk_env_to_options`在用户白名单覆盖后重复保护。空值是SDK overlay的删除等价表示，不是产品保护开关或默认secret，服务器os.environ不被改写。后续Simple SDK adapter再次合并时仍保持空值。
+
+`agent_runner._stdio_env`过滤这些显式extra env；`_write_mcp_config_projection`归一化内部/外部server config后移除同一组env key，不修改原config对象。MCP其余定义、thread identity、已绑定Notion凭据按原实现透传。长期工具授权必须由Admin基于现有subject/thread/Run/service/client/scope签发opaque token，仅送必要执行模块，不能用全局service secret或任意actor ID替代。
+
+正常流程为server加载配置→Admin client使用原值→SDK合并tombstone→MCP过滤→原spawn。非法Admin配置仍由AdminDataConfig fail closed；凭据不进入错误正文/日志/测试产物。源对象和parent未改变，失败不会删除服务器所需凭据或扩大child权限。
+
+### 影响范围与验收
+
+影响SDK merge/user-overlay和stdio配置投影；不改变tmp路径协议或真实Bash审批边界。确定性验证调用实际生产函数：parent/options/user/env显式秘密都不能进入child overlay或MCP JSON，二次merge不能恢复，parent原值与非秘密正常字段保持，config不被修改且现有0700/0600投影权限不变。原SDK/Runner suite验证输出、MCP identity、工具/取消/Workspace与Runtime调优合同。全部值用显式synthetic fixture，不调用真实账户、Google、PG或模型。

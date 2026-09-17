@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminSocialFriendship.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_social61",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"operations\":9,\"assertions\":230,\"fixture\":\"provider-free-isolated-restricted-roles\",\"semantics\":\"original errors/labels/NULL/precision; invitation and ordered pair locks; rejected same-ID resend; approve-reject concurrency; authorized pictures; immutable original receipt/audit\"}\n",
+  "classification": "provider-free original public9 Social contract, no direct SQL writes/provider/model/real user"
+}

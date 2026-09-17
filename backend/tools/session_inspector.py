@@ -1,117 +1,90 @@
 #!/usr/bin/env python3
-"""
-Inspect and rebuild sessions for a specific user/day.
+# [Input] Explicit account selector, Admin OAuth, public Dream URL, local day and timezone.
+# [Output] Inspect and rebuild matching Sessions through Admin-backed public DTO routes.
+# [Pos] Manual Session contract tool; no database credentials or SQL.
+# [Sync] 2026-09-16: replace Dream PostgreSQL reads/writes with public Session API calls.
 
-This utility lists every session that lands within the requested local day,
-prints their metadata, deletes each row, and recreates it using the same
-`database.save_session()` helper so we can verify our understanding of the schema.
-"""
+"""Inspect and rebuild Sessions through the same public routes used by the product."""
 
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import datetime, timedelta, timezone
+import os
 from zoneinfo import ZoneInfo
 
-import database
+import httpx
+
+from tools.session_inserter import _profile, _require_expected_account, _token
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect and rebuild sessions for a given day.")
-    parser.add_argument("--email", help="User email (alternative to --user-id)")
-    parser.add_argument("--user-id", type=int, help="User ID (alternative to --email)")
+    parser.add_argument("--email", help="Expected authenticated user email")
+    parser.add_argument("--user-id", type=int, help="Expected authenticated user ID")
+    parser.add_argument("--backend-url", default=os.environ.get("INK_MEMORY_BACKEND_URL", "http://localhost:8000"))
+    parser.add_argument("--api-token", default=os.environ.get("INK_MEMORY_IMPORT_API_TOKEN"))
     parser.add_argument("--date", required=True, help="Local date in YYYY-MM-DD")
-    parser.add_argument("--timezone", default="UTC", help="IANA timezone name (default: UTC)")
+    parser.add_argument("--timezone", default="UTC", help="IANA timezone name")
     return parser.parse_args()
 
 
-def resolve_user_id(email: str | None, user_id: int | None) -> int:
-    if user_id:
-        user = database.get_user_by_id(user_id)
-        if not user:
-            raise SystemExit(f"User ID {user_id} not found")
-        return user["id"]
-
-    if email:
-        user = database.get_user_by_email(email)
-        if not user:
-            raise SystemExit(f"User with email {email} not found")
-        return user["id"]
-
-    raise SystemExit("Either --email or --user-id is required.")
-
-
-def local_day_bounds(day: str, tz_name: str) -> tuple[str, str]:
-    tz = ZoneInfo(tz_name)
-    local_start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=tz)
-    local_end = local_start + timedelta(days=1)
-    utc_start = local_start.astimezone(timezone.utc)
-    utc_end = local_end.astimezone(timezone.utc)
-    return (
-        utc_start.strftime("%Y-%m-%d %H:%M:%S"),
-        utc_end.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-
-def fetch_sessions(user_id: int, utc_start: str, utc_end: str) -> list[dict]:
-    db = database.get_db()
-    try:
-        rows = db.execute(
-            """
-            SELECT id, name, editor_state_json, created_at, updated_at
-            FROM user_sessions
-            WHERE user_id = %s
-              AND created_at >= %s
-              AND created_at < %s
-            ORDER BY created_at ASC
-            """,
-            (user_id, utc_start, utc_end),
-        ).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        db.close()
-
-
-def rebuild_sessions(user_id: int, sessions: list[dict]) -> None:
-    if not sessions:
-        print("⚠️  No sessions found for the requested window.")
-        return
-
-    for session in sessions:
-        session_id = session["id"]
-        created_at = session["created_at"]
-        updated_at = session["updated_at"]
-        name = session.get("name")
-        editor_state = json.loads(session["editor_state_json"])
-        first_line = editor_state.get("cells", [{}])[0].get("content", "").split("\n")[0]
-
-        print("------------------------------------------------------------")
-        print(f"🗂  Session ID:   {session_id}")
-        print(f"📅  Created At:   {created_at}")
-        print(f"🕒  Updated At:   {updated_at}")
-        print(f"🏷️   Name:         {name or '(none)'}")
-        print(f"📝  First Line:   {first_line or '(empty)'}")
-        print("🔁 Rebuilding row through database.save_session()...")
-
-        database.delete_session(user_id, session_id)
-        database.save_session(
-            user_id,
-            session_id,
-            editor_state,
-            name=name,
-            created_at=created_at,
-        )
-        print("✅ Recreated successfully.")
+def _first_line(state: dict) -> str:
+    for cell in state.get("cells", []):
+        if cell.get("type") == "text" and isinstance(cell.get("content"), str):
+            return cell["content"].splitlines()[0] if cell["content"] else ""
+    return ""
 
 
 def main() -> None:
     args = parse_args()
-    user_id = resolve_user_id(args.email, args.user_id)
-    utc_start, utc_end = local_day_bounds(args.date, args.timezone)
-    sessions = fetch_sessions(user_id, utc_start, utc_end)
-    print(f"Found {len(sessions)} session(s) for user {user_id} between {utc_start} and {utc_end} UTC.")
-    rebuild_sessions(user_id, sessions)
+    ZoneInfo(args.timezone)
+    token = _token(args.api_token)
+    base = args.backend_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"}
+    with httpx.Client(timeout=60, trust_env=False, follow_redirects=False) as client:
+        profile = _profile(client, base, token)
+        _require_expected_account(profile, args.email, args.user_id)
+        listed = client.get(
+            f"{base}/api/sessions/range",
+            headers=headers,
+            params={
+                "start_date": args.date,
+                "end_date": args.date,
+                "timezone": args.timezone,
+            },
+        )
+        listed.raise_for_status()
+        ids = [item["id"] for item in listed.json().get("sessions", [])]
+        if not ids:
+            print("⚠️  No sessions found for the requested day.")
+            return
+        batched = client.post(f"{base}/api/sessions/batch", headers=headers, json={"ids": ids})
+        batched.raise_for_status()
+        sessions = batched.json().get("sessions", [])
+        print(f"Found {len(sessions)} session(s) for user {profile['id']} on {args.date}.")
+        for session in sessions:
+            state = session["editor_state"]
+            print("------------------------------------------------------------")
+            print(f"🗂  Session ID:   {session['id']}")
+            print(f"📅  Created At:   {session.get('created_at')}")
+            print(f"🕒  Updated At:   {session.get('updated_at')}")
+            print(f"🏷️   Name:         {session.get('name') or '(none)'}")
+            print(f"📝  First Line:   {_first_line(state) or '(empty)'}")
+            deleted = client.delete(f"{base}/api/sessions/{session['id']}", headers=headers)
+            deleted.raise_for_status()
+            recreated = client.post(
+                f"{base}/api/sessions",
+                headers=headers,
+                json={
+                    "session_id": session["id"],
+                    "editor_state": state,
+                    "name": session.get("name"),
+                    "labels": session.get("labels", []),
+                    "created_at": session.get("created_at"),
+                },
+            )
+            recreated.raise_for_status()
+            print("✅ Recreated successfully through the public Session API.")
 
 
 if __name__ == "__main__":

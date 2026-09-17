@@ -1,0 +1,7 @@
+{
+  "command": "node drizzle/data/auth-access-policy.mjs --apply",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "exit_code": 0,
+  "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_run72\",\"policy_sha256\":\"1329adca09012f2802b8e1e9d1095e520dca828f9b0f154c196072f56baa868a\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}\n"
+}

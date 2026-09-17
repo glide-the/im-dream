@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "mode": "token",
+  "public_operation": "workflow-preflight.execute",
+  "assertions": 25,
+  "request_id": "pf_fault_e9cc86541e284e15ac7a0688917e63d7",
+  "status": "failed",
+  "failed_check": "token_issuance",
+  "error_code": "PREFLIGHT_TOKEN_ISSUE_FAILED",
+  "audit": {
+    "stages": 4,
+    "audits": 1
+  },
+  "source_full_projection": "equal",
+  "snapshot_delta": 1,
+  "run_session_delta": 0,
+  "normal_database": "untouched",
+  "private_keys_exported": false
+}

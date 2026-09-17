@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] One complete StoryWorkspaceDreamConfirmationCommand.
 // [Output] Run-scoped 202 transport seam and single in-flight React hook.
 // [Pos] story-workspace hooks node - Dream's only confirmation action (Task 3 F3)
 // [Sync] 2026-08-04: initial implementation; no reject/retry/second-confirm path.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspaceDreamConfirmationAccepted,
@@ -59,7 +61,7 @@ export function storyWorkspaceParseDreamConfirmationAccepted(
 
 export interface StoryWorkspaceDreamConfirmationSubmitOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
   /** Full runtime URL override; the pure transport otherwise uses the relative path. */
   endpoint?: string;
@@ -78,7 +80,7 @@ export async function storyWorkspaceSubmitDreamConfirmation(
     Accept: 'application/json',
     'Content-Type': 'application/json',
   });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   const response = await (options.fetchImpl ?? fetch)(
     options.endpoint ?? storyWorkspaceDreamConfirmationEndpoint(runId),
     {
@@ -137,7 +139,7 @@ export function useStoryWorkspaceDreamConfirmation(
     setError(null);
     const pending = storyWorkspaceSubmitDreamConfirmation(runId, command, {
       fetchImpl: options.fetchImpl,
-      token: options.token === undefined ? getAuthToken() : options.token,
+      csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
       signal: options.signal,
       endpoint: apiUrl(storyWorkspaceDreamConfirmationEndpoint(runId)),
     }).then((result) => {
@@ -156,7 +158,7 @@ export function useStoryWorkspaceDreamConfirmation(
     });
     inFlight.current = pending;
     return pending;
-  }, [options.fetchImpl, options.signal, options.token, runId]);
+  }, [options.fetchImpl, options.signal, options.csrfToken, runId]);
 
   return { status, accepted, error, submit };
 }

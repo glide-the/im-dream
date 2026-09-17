@@ -1,0 +1,191 @@
+{
+  "result": "PASS",
+  "scope": "Named public candidates only; private payloads read locally for exact/JSON-escaped/URL-encoded/base64 secret matching; values never emitted",
+  "private_sources_read": 84,
+  "distinct_known_secret_values": 177,
+  "validated_token_selector_references": 332,
+  "selector_source": "actual Admin Preflight/Run72/launch75/workspace76 cases and receipts closed token selector enum; actual tokens.* values all scanned",
+  "candidate_count": 21,
+  "pattern_categories": [
+    "postgres_connection",
+    "github_credential",
+    "provider_key",
+    "aws_key",
+    "private_pem",
+    "bearer_literal",
+    "jwt_literal",
+    "delegation_literal",
+    "secret_assignment"
+  ],
+  "hits": [],
+  "files": [
+    {
+      "destination": "workspace76-public-harness-document-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-public-harness-document-first-gate.md",
+      "sha256": "c79cd875d8761e8170a0014879c75d2a86bd21ecb2c5e7ea5782424a9ce3273b",
+      "bytes": 1210,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-registration-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-registration-first-gate.md",
+      "sha256": "9d31575e97c73625fcc0bd6da19d6a2f0bf3142b8a3d5076005f20d6d34b4db0",
+      "bytes": 1964,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-primary-fixture-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-primary-fixture-static-gate.md",
+      "sha256": "4ecd208666efc65ddde4059e7d599e30592ec3685133201e5aa142ce5a50eaa4",
+      "bytes": 1544,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-primary-fixture-continuation-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-primary-fixture-continuation-static-gate.md",
+      "sha256": "8d083e31ea342a8265f2102cef27e1e92aad41909543fb1d3b197279294b1153",
+      "bytes": 1663,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-public-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-public-luna-receipt.md",
+      "sha256": "e41a6b03784aff6dc1c747b4b0030cfd7f16ec85b78890b119c45d39cb93fcd8",
+      "bytes": 1650,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-primary-atomic-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/workspace76-primary-atomic-static-gate.md",
+      "sha256": "867b8dc81011e05b86d3a57e7abf883a7bf3ac906f1dd0db0667b5224c014e86",
+      "bytes": 1571,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-target-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-target-proof.json",
+      "sha256": "21be40a6c22591cd6c9231cc5d58272f3c2d5665425e7722c3ccb7d9f49c487b",
+      "bytes": 687,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-target-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-target-command-receipt.json",
+      "sha256": "ab1c64b6a869c8132ac780859e352a749c249d81bc0ad1af9945f35c6a967613",
+      "bytes": 985,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-target-acl-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-target-acl-command-receipt.json",
+      "sha256": "39f2f0ab67a0e9701d4e035628a597da69fcedabaaef32db2fa109f9173d11cd",
+      "bytes": 624,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-fixture-preparation-failure.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-fixture-preparation-failure.json",
+      "sha256": "04eff486d9f1961c63ea9c6025274b96a63df9ebe0af9ebaa127708c41c01136",
+      "bytes": 243,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-fixture-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-fixture-preparation-command-receipt.json",
+      "sha256": "00997b85b0a24da2671a685df2a63f30cef2d802bb1950ad7cd8a8c6dadefca4",
+      "bytes": 439,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-fixture-preparation-continuation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-fixture-preparation-continuation-proof.json",
+      "sha256": "bb1dd4abb967a662c0c76fae7ef8534e4d5d59c9694e26c8eb78d34dd5d8f214",
+      "bytes": 949,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-fixture-preparation-continuation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-fixture-preparation-continuation-command-receipt.json",
+      "sha256": "3b7fe1dd16c761348d6326ae4cf2a2e3d2489b3f382d915eb53173164fd5ce24",
+      "bytes": 1256,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-public-command-receipt.json",
+      "sha256": "4c578ca5a2a35bad348322cd3366f03890f540c19512526350bee32367172215",
+      "bytes": 669,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-atomic-recovery-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-atomic-recovery-proof.json",
+      "sha256": "ad0f991d38bdc2f3e39103b498ff3966131a27ad3b5c87cd3dbf7d0581d1f405",
+      "bytes": 1144,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-atomic-recovery-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-atomic-recovery-command-receipt.json",
+      "sha256": "6dc503b4706beace995ec489ca6e2e47fffb720d860612d8a77c18ff4b4fc91a",
+      "bytes": 1290,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-atomic-recovery-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-atomic-recovery-cleanup-proof.json",
+      "sha256": "d7e3781abc3bbad09514abb926702f24dcebe077376c8fe21adc6ba3d1229c8a",
+      "bytes": 426,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-post-validation-preservation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-post-validation-preservation-proof.json",
+      "sha256": "48a10772d53ba367ff38acde7543be287e2d0e77984397c8d02f89b07e23f072",
+      "bytes": 475,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-post-validation-preservation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-post-validation-preservation-command-receipt.json",
+      "sha256": "5f2d1c708ae203d60a08dbceb608e340fbca470e4f32d8f75faae1f75c464859",
+      "bytes": 786,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "workspace76-public-disclosure-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/workspace76-public-disclosure-proof.json",
+      "sha256": "98e8d5019fa38c707be9f843676d1392d5ba3f022d2e273b807bf6b75e96ae12",
+      "bytes": 7507,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "user-system-config-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/user-system-config-first-gate.md",
+      "sha256": "190aab5d15c783144b2c9c4e56866be560b32a59dfab567b97adcdd5a6ca5778",
+      "bytes": 3087,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    }
+  ]
+}

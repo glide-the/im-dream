@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated Claude-thread production endpoints and optional Deck ownership filter.
 // [Output] Typed create/list/delete helpers shared by Chat history and Deck related-conversation management.
 // [Pos] Chat history transport owner in frontend/app/_dream/api.
 // [Sync] 2026-08-17: centralize Chat history transport and expose actor-scoped Deck filtering.
 // [Sync] 2026-09-01: allow product-owned Thread titles without attaching a Deck or Voice.
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { API_BASE } from '../lib/apiBase';
 
 export interface ChatHistoryThread {
@@ -33,7 +35,7 @@ export interface ChatThreadSearchParams {
 }
 
 function authHeaders(): HeadersInit {
-  return { Authorization: `Bearer ${getAuthToken()}` };
+  return { ...browserRequestHeaders() };
 }
 
 export async function createChatThread(

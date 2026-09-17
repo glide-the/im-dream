@@ -1,0 +1,9 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/verify-0060-actual-roles.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+  "exit_code": 1,
+  "output": "Actual0060 role proof failed: ERR_ASSERTION; safe assertion and completed queries retained\n",
+  "cause": "owner-mode bitwise comparison lacked parentheses; preceding dry/apply/repeat ACL exit0 unchanged; initial role probe failed before any DB access; only remaining actual roles rerun",
+  "acl_repeated": false
+}

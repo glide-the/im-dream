@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminWorkflowRunCreation.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"operations\":[\"workflow-run.create\",\"workflow-run.retry\"],\"validation_scope\":\"remaining_denied_receipts\",\"cases\":22,\"skipped_accepted_cases\":6,\"prepared_original_cases\":28,\"receipt_cases\":10,\"assertions\":230,\"source\":\"remaining denied/GET only; original accepted bounded results retained, no repeated creation/source execution\",\"fixture\":\"provider-free-isolated-restricted-roles\",\"normal_database\":\"untouched\"}\n",
+  "scope": "provider-free prepared public route and SELECT-only verification; not real business"
+}

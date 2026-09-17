@@ -9,6 +9,7 @@
 [Sync] 2026-08-25: a cancelled first login leaves client registration process-local until tokens exist.
 [Sync] 2026-08-25: require OAuth operations to use their own long timeout instead of inventory timeout.
 [Sync] 2026-08-25: preserve SDK-discovered authorization metadata inside the encrypted token document for restart-safe refresh routing.
+[Sync] 2026-09-16: prove replacement OAuth keeps an unreadable old envelope until the new token is ready, then atomically overwrites it.
 """
 
 from __future__ import annotations
@@ -127,6 +128,50 @@ def test_client_registration_is_staged_until_tokens_exist() -> None:
         assert repository.record is not None
         assert await storage.get_client_info() == client_info
         assert (await storage.get_tokens()).access_token == "access-secret"
+
+    asyncio.run(scenario())
+
+
+def test_replacement_mode_ignores_old_envelope_until_new_tokens_are_persisted() -> None:
+    async def scenario():
+        repository = _Repository()
+        old_storage = EncryptedMcpTokenStorage(
+            repository,
+            McpCredentialCipher(key=b"o" * 32, key_version=1),
+            actor_id="7",
+            server_id="server-1",
+        )
+        await old_storage.set_tokens(
+            OAuthToken(access_token="old-access", token_type="Bearer")
+        )
+        old_record = repository.record
+
+        replacement = EncryptedMcpTokenStorage(
+            repository,
+            McpCredentialCipher(key=b"n" * 32, key_version=1),
+            actor_id="7",
+            server_id="server-1",
+            replacement_mode=True,
+        )
+        assert await replacement.get_tokens() is None
+        assert repository.record is old_record
+
+        await replacement.set_client_info(
+            OAuthClientInformationFull(
+                client_id="replacement-client",
+                client_secret="replacement-secret",
+                redirect_uris=["https://dream.example.test/oauth/callback"],
+                client_name="Dream replacement",
+            )
+        )
+        assert repository.record is old_record
+
+        await replacement.set_tokens(
+            OAuthToken(access_token="new-access", token_type="Bearer")
+        )
+        assert repository.record is not old_record
+        assert repository.record.credential_revision == old_record.credential_revision + 1
+        assert (await replacement.get_tokens()).access_token == "new-access"
 
     asyncio.run(scenario())
 

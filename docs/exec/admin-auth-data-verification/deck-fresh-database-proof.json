@@ -1,0 +1,10 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_deck59",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "source": "owned fresh60ledger replay database; zero identities before fixture",
+  "ledger": 60,
+  "acl_exit": 0,
+  "acl_output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_deck59\",\"policy_sha256\":\"2870866db627ed068f98416d86871964f8cebbdd268a61c78bd1b142fd6fc795\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}",
+  "normal_database": "untouched"
+}

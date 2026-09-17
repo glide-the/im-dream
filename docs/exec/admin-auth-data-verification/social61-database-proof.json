@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_social61",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "source": "owned isolated fresh61/zeroidentity template; no normal clone",
+  "ledger": 61,
+  "acl_exit": 0,
+  "acl_output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_social61\",\"policy_sha256\":\"b9b278d75faffbf223a3a80fdaf40d0dc4a44b3a46690d4cb0e6bd099670f70d\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}",
+  "normal_database": "untouched"
+}

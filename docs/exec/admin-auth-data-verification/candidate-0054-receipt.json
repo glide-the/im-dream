@@ -1,0 +1,17 @@
+{
+  "frozen_files": {
+    "drizzle/0054_clean_network.sql": "2dd4cf10f42d985ccbaa3ec2c413b70264b01963ee7942d39127709eb91f59c0",
+    "drizzle/meta/0054_snapshot.json": "91d14458f242585b1dad0ea5fa747f976cba700f7dad2fad42e3e3fb3e8892d4",
+    "drizzle/contracts/identity-better-auth-v1.json": "e9e4d685b94aabb0bb086db4b2dd7b62c42d3c5f7e67037c31ff0f2b15810f5d"
+  },
+  "contract_sha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3",
+  "receipts": [
+    {
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "command": "node packages/db/dist/migrate.js",
+      "target": "ink_auth_data_codex_test_792494523a17",
+      "exit_code": 1,
+      "output": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/node_modules/.pnpm/pg@8.17.2/node_modules/pg/lib/client.js:588\n          Error.captureStackTrace(err)\n                ^\n\nerror: there is no unique constraint matching given keys for referenced table \"oauthClient\"\n    at /Users/dmeck/.codex/worktrees/729f/ink-admin-memory/node_modules/.pnpm/pg@8.17.2/node_modules/pg/lib/client.js:588:17\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async file:///Users/dmeck/.codex/worktrees/729f/ink-admin-memory/packages/db/dist/migrate.js:76:17 {\n  length: 157,\n  severity: 'ERROR',\n  code: '42830',\n  detail: undefined,\n  hint: undefined,\n  position: undefined,\n  internalPosition: undefined,\n  internalQuery: undefined,\n  where: undefined,\n  schema: undefined,\n  table: undefined,\n  column: undefined,\n  dataType: undefined,\n  constraint: undefined,\n  file: 'tablecmds.c',\n  line: '13611',\n  routine: 'transformFkeyCheckAttrs'\n}\n\nNode.js v24.13.0\n"
+    }
+  ]
+}

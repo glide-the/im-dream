@@ -1,6 +1,7 @@
 > [Input] Claude Agent context assembly, Chat SSE/history hydration, shared ChatMarkdown rendering, Workspace file router/core, and authenticated Thread ownership records.
 > [Output] Define the evidence-backed `workspace://` Markdown reference protocol, its minimal implementation boundary, security policy, interaction states, sequence, tests, and rollback.
 > [Pos] workspace URI preview protocol design in `docs/design/claude-agent`
+> [Sync] 2026-09-15: content/download use Admin OAuth Thread reads with original path/file order intact.
 > [Sync] 2026-08-22: initial protocol and implementation decision for Thread-owned `files/` image previews and file downloads in Chat Markdown.
 > [Sync] 2026-08-22: align Workspace image thumbnails and full-size modal behavior with the v2.1 light-paper visual contract.
 > [Sync] 2026-08-23: fix Chat long-image export by resolving protected Workspace images through the same Thread-bound access path before capture.
@@ -12,6 +13,22 @@
 > [Sync] 2026-09-13: add in-app report reading without replacing Markdown, file auth, or Agent/history contracts.
 
 # `workspace://` Workspace File Preview Protocol
+
+## Current metadata authority
+
+### Background and problem
+
+Shared file authentication already uses Admin OAuth. The remaining Dream PostgreSQL Thread lookup for content/download can use the published Chat operation independently of pending SystemConfig/default Workspace domains.
+
+### Goals and boundaries
+
+Replace only Thread ownership metadata with current OAuth and the strict Admin Chat DTO. Keep Workspace Mode, paths, no-create reads, symlinks, file/ZIP bytes and headers. Settings data and other file-management metadata remain migration work; the report/image protocol and Agent lifecycle remain intact.
+
+### Concepts and rules
+
+The server request owner supplies the authenticated actor and HTTP client. Check the four exact identity/unified/keyset-pagination/final-projection schemas and chat-thread.get capability; send only Thread ID with the original request UUID and OAuth. Require matching response Thread ID and canonical user. A null Thread retains 404; unavailable/malformed/mismatched metadata retains safe 503 without upstream text or retry. Run ownership before Mode, path and existing filesystem checks. Reads do not create or change Threads, Workspaces, Runs or files.
+
+The [public file harness](../../../backend/tests/test_workspace_router.py) uses actual OAuth/HTTP/DTO with controlled settings and temporary filesystem fixtures. It fences legacy ownership/database access and covers failures before Mode/files alongside the original ZIP, Unicode, symlink and no-create cases. This is technical evidence; normal shared-file, Bash/CLI and model acceptance remain separate. Earlier source-audit tables retain their dated context.
 
 ## Report-preview extension — background, goals and rules
 

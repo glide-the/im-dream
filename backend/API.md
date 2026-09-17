@@ -1,5 +1,23 @@
+<!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
+<!-- [Sync] 2026-09-15: document Registry101 aggregate import, calendar recovery and first-login completion. -->
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
+<!-- [Sync] 2026-09-15: record four original Voice mutation results and safe unknown write IDs. -->
+<!-- [Sync] 2026-09-15: preserve nine social responses, closed business errors and unknown write IDs. -->
+<!-- [Sync] 2026-09-15: document source-bound Admin refs and safe public validation. -->
+<!-- [Sync] 2026-09-15: document typed Admin preference get/save, required nullable wire and unknown result behavior. -->
+<!-- [Sync] 2026-09-15: document Admin-backed public Deck versions, exact capabilities and unknown-result recovery. -->
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../docs/design/deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
+
 # Ink & Memory API Documentation
 
+> [Sync] 2026-09-16: Admin DTO APIs own all production persistence; Dream has no database initialization or SQL path.
+> [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
+> [Sync] 2026-09-15: Reflections config GET/PUT/DELETE and memory-init ownership/config reads use Admin OAuth operations before filesystem access.
+> [Sync] 2026-09-15: Agent recent Session prompt context uses Admin `session.list` through the bound turn owner; Admin failures stop before Runtime.
+> [Sync] 2026-09-15: Chat `mcp__user__get_sessions_range` uses the same turn owner through a private loopback broker; the child receives no actor, database or Admin credential.
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
 > authorization, the server verifies the DB Claude ID in the current Runtime
 > project. Missing records start a fresh Claude session in the same business
@@ -35,6 +53,10 @@
 
 **Version:** 2.0.0
 **Base URL:** `http://localhost:8765` (dev backend) | `https://ink-backend.suoxya.com` (prod backend). Public app URLs in crawler files come from `INK_PUBLIC_BASE_URL`; backend API links come from `INK_BACKEND_PUBLIC_BASE_URL`.
+
+公开 `/api/friends` 的generate/use、requests/list/accept/reject、friends/list/remove、timeline/full九入口消费Admin当前OAuth领域合同。公开ID仍为整数，nullable时间保持微秒ISO；原closed `success:false/error` 返回400 detail，timeline null返回403，full null/empty返回404。写timeout/未知响应返回安全error_code、original request_id与outcome_unknown，不自动重发；用户body不提供acting user_id。邀请码policy/原子关系转换由Admin执行，原默认行为保持。详见[好友现行设计](../docs/design/social-friendship-current.md)。
+
+公开Voice POST/create、PUT/update、DELETE/delete、POST/fork分别消费voice.create/update/delete/collect。响应仍为voice_id或success:true；changed:false原404，create/fork closed错误原400；未知写保留original request_id/outcome_unknown，不自动重发。Memory仅接受finite对象，None省略/empty/false/0按原行为保留。详见[Voice现行稿](../docs/design/voice-crud-current.md)。
 
 ## Authentication
 
@@ -304,7 +326,10 @@ Known Device Flow errors include `authorization_pending`, `slow_down`,
 
 ### POST `/api/import-local-data`
 
-One-time import of localStorage data to database on first login.
+One-time import of localStorage data on first login. Dream parses each legacy
+field independently, then sends the accepted Session, Picture, Preferences and
+Report collections to the Admin `local-data.import` aggregate. Admin validates
+the current OAuth owner and commits all accepted categories in one transaction.
 
 **Headers:** `Authorization: Bearer <token>`
 
@@ -323,7 +348,11 @@ One-time import of localStorage data to database on first login.
 }
 ```
 
-All fields are optional. Strings should be JSON-stringified.
+All fields are optional and unknown fields are rejected. Values that represent
+objects or collections must be JSON-stringified. A malformed field contributes
+zero records while other valid fields can still import. A historical Report
+without a `timestamp` receives one request-scoped UTC timestamp; an existing
+timestamp must be a safe integer containing Unix milliseconds.
 
 **Response:**
 ```json
@@ -339,7 +368,29 @@ All fields are optional. Strings should be JSON-stringified.
 ```
 
 **Errors:**
+- `400` - Invalid Admin DTO or calendar recovery value
 - `401` - Missing or invalid token
+- `403` - OAuth scope is insufficient
+- `409` - A Session ID belongs to another user
+- `422` - The public request contains an unknown field or wrong field type
+- `503` - Admin capability, transport, receipt, or response validation failed
+
+An unknown write result is resolved only through the original request receipt;
+Dream does not resend the aggregate or fall back to its database helper.
+
+### POST `/api/import-calendar-recovery`
+
+Accepts the closed body `{ "calendarEntries": "<JSON object>" }`, normalizes
+only Session entries, and calls the same Admin aggregate. The response remains
+`{ "success": true, "imported": { "sessions": n } }`. Missing input returns
+`400 calendarEntries required`; malformed calendar JSON returns the fixed
+`400 Failed to parse calendar` response without echoing the input.
+
+### POST `/api/mark-first-login-completed`
+
+Calls Admin `first-login.complete` with the current OAuth actor. Missing,
+incomplete, and already-complete preference rows all produce the existing
+public response `{ "success": true }` after Admin confirms the stored state.
 
 ---
 
@@ -347,7 +398,9 @@ All fields are optional. Strings should be JSON-stringified.
 
 ### GET `/api/system-config`
 
-Returns the current user's Settings configuration as a JSON object.
+Returns the current user's Settings configuration as a JSON object. The route
+uses the request's OAuth actor with Admin `user-system-config.get`; invalid or
+unavailable Admin data fails closed and is not replaced by local defaults.
 
 Known fields include:
 
@@ -370,7 +423,9 @@ Known fields include:
 
 ### PUT `/api/system-config`
 
-Merges accepted fields into the current user's Settings configuration.
+Merges accepted fields into the current user's Settings configuration through
+Admin `user-system-config.patch`. After Admin confirms the patch, Dream performs
+an independent fresh `user-system-config.get` and returns that public projection.
 Unknown keys are ignored. `sandbox_network_mode` accepts `disabled`,
 `allowlist`, or `open`. `sandbox_network_allowed_domains` is sanitized to a
 flat domain-pattern list; use `open` mode instead of sending a bare `*`.
@@ -388,6 +443,47 @@ application does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths
 This runtime-only directory is prepared even when Workspace Mode is disabled;
 that does not initialize the full workspace, pass `cwd`, inject workspace
 context, or expose file surfaces.
+
+---
+
+## Reflections Section Configuration
+
+All routes require the normal Dream bearer token. `section` is one of
+`echoes`, `traits`, or `patterns`.
+
+### GET `/api/reflections/config/{section}`
+
+Reads the user's custom prompt-file object through Admin
+`reflections-section-config.get`, merges accepted files over Dream's static
+section defaults, and returns the display fields, `usedCustomConfig`, and the
+effective `prompt_files`. Invalid or corrupt Admin data fails closed.
+
+### PUT `/api/reflections/config/{section}`
+
+Accepts `{ "prompt_files": { "WORKFLOW.md": "..." } }`. Dream trims non-empty
+content and keeps only the five supported prompt filenames, then sends the raw
+JSON object through Admin `reflections-section-config.save`. The response keeps
+the existing `{ saved, section, updatedFiles }` shape. An unknown write result
+is recovered only with the original request ID and is never resent.
+
+### DELETE `/api/reflections/config/{section}`
+
+Calls Admin `reflections-section-config.delete` and returns the existing
+`{ "reset": true, "section": "..." }` response whether or not a custom row
+previously existed. Like save, an unknown delete result is resolved only from
+the original request receipt and never sends another write.
+
+### POST `/api/reflections/memory-init`
+
+Accepts `{ "threadId": "...", "section": "echoes" }`. After request and
+section validation, Dream uses Admin Chat data to confirm that the current user
+owns the Thread, reads the custom section configuration through Admin, merges
+it over static defaults, and writes the five prompt files plus
+`memory/procedural/analysis_state.json`. A missing Thread returns `404`.
+Authentication, ownership, capability, or configuration failure occurs before
+filesystem access. The async Reflections task APIs use the published Admin
+worker authority and strict task/result/event/report operations; Dream retains
+Agent execution, EventBus, SSE and workspace files.
 
 ---
 
@@ -514,6 +610,15 @@ Start or resume the current user's Claude Agent turn through the existing
 `text/event-stream` contract. Before creating a Claude Code CLI process tree,
 the backend enforces its configured active-turn cap and checks host/cgroup
 memory headroom.
+
+When the cached system prompt is first built, or rebuilt after a Settings
+`SYSTEM_PROMPT` change, the server uses the current Thread-bound persistence
+grant to request Session previews for UTC today and the prior two days. It
+preserves Admin's order and applies `INK_AGENT_CONTEXT_SESSIONS` while rendering.
+The ContextBuilder receives only validated preview fields and does not access
+Dream PostgreSQL. An Admin, delegation, capability, or DTO failure stops context
+assembly before Workspace or Claude Runtime startup. A keepalive turn with an
+unchanged Settings prompt reuses the cached prompt without another Session call.
 
 When capacity is unavailable the HTTP connection remains protocol-compatible:
 it receives one `error` event followed by the existing `finish` event. New
@@ -675,12 +780,14 @@ The endpoint returns `404` when the thread does not belong to the current user.
 
 ### GET `/api/pictures`
 
-Get recent daily pictures.
+Get recent daily pictures through Admin `picture-history.list`. Admin derives the
+owner from the current OAuth principal, orders records by date descending, and
+returns the stored thumbnail or falls back to the full image.
 
 **Headers:** `Authorization: Bearer <token>`
 
 **Query params:**
-- `limit` (optional, default 30) - Max number of pictures
+- `limit` (optional, default 30) - Nonnegative maximum number of pictures
 
 **Response:**
 ```json
@@ -690,7 +797,7 @@ Get recent daily pictures.
       "date": "2025-11-02",
       "image_base64": "iVBORw0KGgoAAAANSUhEUg...",
       "prompt": "A serene landscape...",
-      "created_at": "2025-11-02 05:22:41"
+      "created_at": "2025-11-02T05:22:41.123456Z"
     }
   ]
 }
@@ -704,18 +811,36 @@ Get historical picture thumbnails within an optional date range.
 
 **Headers:** `Authorization: Bearer <token>`
 
-**Query params:** `start_date`, `end_date`, `limit`.
+**Query params:** `start_date`, `end_date`, `limit`. Blank dates become `null`;
+nonblank values must be valid `YYYY-MM-DD` dates. Range boundaries are
+inclusive. This path preserves a nullable `prompt`, while the plain list keeps
+its original empty-string projection.
 
 ### GET `/api/pictures/{date}/full`
 
 Get the historical full-resolution image for one `YYYY-MM-DD` date. Returns `404`
 when that date has no retained picture.
 
+All three paths require current OAuth `dream:read` and the exact Registry103
+operation and identity/unified schema capabilities. Missing scope, capability,
+Admin transport, or malformed output fails explicitly without querying Dream
+PostgreSQL. Requests contain no user, friend, table, column, or SQL selector.
+
 ---
 
 ## Preferences
 
 ### GET `/api/preferences`
+
+Public preference get/save uses current OAuth and Admin's two typed operations
+with exact identity/unified capabilities. GET keeps missing-row `{}`, decoded
+config objects, nullable first-login integer and precise ISO timestamps. POST
+allows only voice_configs/meta_prompt/state_config/selected_state/timezone;
+null preserves stored fields, empty objects/strings remain explicit values.
+No body user ID, first-login or system policy write is accepted. Unknown save
+results keep their original request ID and are never automatically retried.
+Default voices remain local config; background/system/import domains are separate.
+
 
 Get user preferences.
 
@@ -750,7 +875,7 @@ Returns empty object `{}` if no preferences set.
 
 ### POST `/api/preferences`
 
-Save user preferences (partial updates supported).
+Save user preferences (partial updates supported). Only the five preference fields are accepted. Invalid fields, nonfinite numbers or malformed JSON return HTTP 422 with `{"detail":"Invalid preferences request"}`; the response does not echo submitted text.
 
 **Headers:** `Authorization: Bearer <token>`
 
@@ -864,7 +989,7 @@ Decks and retired forks with Deck- or Voice-level local changes remain visible.
 ### POST `/api/decks`
 
 Creates a user Deck and binds the configured default Claude plugin in one
-PostgreSQL transaction. The browser submits only Deck display fields; the server
+Admin transaction. The browser submits only Deck display fields; the server
 resolves the exact configured package/version (default `drama-forge` `1.0.1`),
 requires a ready installation, and verifies artifact digest and Claude CLI
 compatibility before committing the Deck and plugin reference.
@@ -919,9 +1044,10 @@ history, and no longer permanently blocks deletion.
 ### GET `/api/decks/{deck_id}/version-state`
 
 Returns the owned Deck's aggregate `draft_revision`, latest immutable content
-version, clean/dirty status, and next vN. Returns structured `503
-DECK_VERSION_CAPABILITY_MISSING` until Admin Drizzle publishes
-`dream.deck-content-versions.v1`; ordinary Deck editing remains available.
+version, clean/dirty status, and next vN. The public route uses current request OAuth and typed Admin operations. It
+returns structured `503 ADMIN_CAPABILITY_UNAVAILABLE` unless exact identity,
+unified schema, content-version and canonical-storage capabilities are present;
+other Deck editing consumers remain a separate migration scope.
 
 ### POST `/api/decks/{deck_id}/versions/preview`
 
@@ -934,13 +1060,25 @@ returns the target vN plus categorized changes. Preview never writes a version.
 Accepts the same expected values plus an optional 200-character description.
 Locks the Deck, repeats validation/diff/hash, appends an immutable `deck_versions`
 snapshot, and advances latest/published revision in one transaction. Stale facts
-or no changes return `409`; failures preserve the draft and previous vN.
+or no changes return `409`; confirmed transaction failures preserve the draft
+and previous vN. A timeout or invalid write response returns its original
+`request_id` and `outcome_unknown`; Dream never automatically retries the POST
+or treats an absent receipt as proof of rollback. Conflict responses retain
+only validated `current_draft_revision`/`current_version` and a safe message.
 
 ### GET `/api/decks/{deck_id}/versions`
 
 Returns owner-scoped immutable Deck content versions newest-first. Runtime plugin
 SemVer and binding revision are secondary snapshot/configuration facts and are
 not substituted for content vN.
+
+### GET `/api/decks/{deck_id}/versions/{version}`
+
+Returns the original flat version summary and `snapshot` object. Admin sends
+raw snapshot JSON; Dream validates its closed v1 shape then decodes it with
+Python, preserving float/negative-zero/bigint memory values, required nulls,
+creator integer and ISO microseconds. Admin owns all version transactions and
+canonicalization; the public version router has no Dream PG connection.
 
 ### GET `/api/voice-decks/{deck_id}/plugin-binding/history`
 
@@ -1000,8 +1138,9 @@ operation 仅表示把 connector-owned 轻量索引 materialize 到当前 thread
 
 ## Claude MCP Resources
 
-所有路由都要求正常 Dream 登录。PostgreSQL `dream_mcp_*` 是 Server 配置、
-作用域、启用状态、credential ref 与 discovery snapshot 的唯一事实来源；
+所有路由都要求正常 Dream 登录。Admin 管理的 `dream_mcp_*` 数据是 Server 配置、
+作用域、启用状态、credential ref 与 discovery snapshot 的唯一事实来源；Dream
+通过严格 DTO operation 访问这些数据，不接收数据库凭据；
 正常请求链不会执行 `claude --version`、`claude mcp help/list/get/login/logout`
 或其他 MCP 管理 CLI。Token、Authorization Header、callback code/state 不会
 出现在公开 DTO、普通配置字段或 access log；OAuth 文档只以 actor/server AAD
@@ -1074,21 +1213,24 @@ python test_real_migration.py      # Test with real data
 
 ---
 
-## Database
+## Database access
 
-SQLite database at `backend/data/ink-and-memory.db`
+Dream has no production database initialization command, credential, pool, SQL,
+ORM or runtime DDL. Admin Drizzle owns schema and migrations; named Admin DTO
+operations own authorization, transactions and persistence. Historical
+database/schema fixtures live under `backend/tests/**` and may run only against
+explicitly named disposable databases. See
+[the current authority contract](../docs/design/database-schema-authority.md).
 
-**Initialize/reset:**
-```python
-from database import init_db
-init_db()
-```
 
-**Tables:**
-- `users` - User accounts
-- `user_sessions` - Editor sessions
-- `daily_pictures` - Historical timeline images retained for read-only viewing
-- `user_preferences` - User settings
-- `analysis_reports` - Analysis results
-- `auth_sessions` - Session tokens (optional)
-- `schema_version` - Migration tracking
+## Current Deck Claude Plugin refs
+
+`GET/PUT /api/decks/{deck_id}/claude-plugins` use current Admin OAuth through the same Browser BFF. Both return the original `{deck_id, refs}`; `enabled` remains public integer 0/1 and timestamps retain microseconds.
+
+PUT accepts `{ "refs": [{ "plugin_installation_id": "...", "enabled": true, "order_index": 0 }] }`; enabled/order are optional, refs defaults empty. IDs are stripped and unique, order follows PostgreSQL integer bounds. Package/digest/compatibility/actor/path fields are rejected. Invalid request JSON/fields return fixed422 `{ "detail": "Invalid plugin request" }` without body echo. There is no arbitrary32-ref product quota.
+
+Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI checks before source-bound replace. Validation/verification failures do not send the write. Unknown writes retain `error.request_id` and `error.outcome_unknown`; no automatic retry. Other plugin install/catalog/runtime APIs remain separately staged. See the [current functional design](../docs/design/deck/deck-claude-plugin-refs-current.md).
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../docs/design/deck/deck-detail-version-history.md)。
+
+GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../docs/design/deck/deck-detail-version-history.md)。

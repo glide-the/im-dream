@@ -143,3 +143,20 @@ def test_no_saved_alias_and_no_callable_default_is_forbidden() -> None:
         )
     assert captured.value.status_code == 403
     assert captured.value.code == "GATEWAY_MODEL_NOT_AVAILABLE"
+
+
+def test_missing_authorized_system_config_reader_fails_before_catalog_access() -> None:
+    catalog_calls: list[int | str] = []
+
+    def catalog_factory(user_id: int | str) -> _CatalogClient:
+        catalog_calls.append(user_id)
+        return _CatalogClient(
+            GatewayModelCatalog((_model("dream-balanced"),), "dream-balanced")
+        )
+
+    with pytest.raises(GatewayInferenceError) as captured:
+        resolve_platform_model_alias(7, None, catalog_client_factory=catalog_factory)
+
+    assert captured.value.status_code == 503
+    assert captured.value.code == "GATEWAY_SYSTEM_CONFIG_UNAVAILABLE"
+    assert catalog_calls == []

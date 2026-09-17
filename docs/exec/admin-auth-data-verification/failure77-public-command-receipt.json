@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminDreamLaunchFailure.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 1,
+  "output": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Exact safe failure code required\n    at equal (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunchFailure.contract.ts:77:69)\n    at call (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunchFailure.contract.ts:105:36)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <anonymous> (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminDreamLaunchFailure.contract.ts:155:100) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v26.4.0\n",
+  "scope": "strict public Route/original GET + SELECT-only verifier; primary-owned named technical fixture, no normal business/runtime"
+}

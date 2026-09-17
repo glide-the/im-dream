@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] todo-updated SSE 事件（经 claude-agent-transport convertEvent 转发）
 //         与 GET /api/claude-agent/threads/{thread_id}/todos REST 水合响应。
 // [Output] 按 threadId 键控的轻量 todos store：useThreadTodos 订阅、applyTodoEvent 事件写入、
@@ -8,7 +10,7 @@
 //                    弹层「待办」分区。结构复刻 useThreadPlan.ts。
 
 import { useSyncExternalStore } from 'react';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ export async function hydrateThreadTodos(threadId: string): Promise<void> {
   try {
     const res = await fetch(
       apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/todos`),
-      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
+      { headers: { ...browserRequestHeaders() } },
     );
     if (!res.ok) return;
     const data = (await res.json()) as ThreadTodosApiResponse;

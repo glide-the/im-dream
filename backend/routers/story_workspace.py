@@ -1,24 +1,39 @@
 #!/usr/bin/env python3
-# [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
-# [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
+# [Sync] 2026-09-16: remove the unused legacy Run application factory; public Run routes stay on Admin DTOs.
+# [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
+# [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
+# [Sync] 2026-09-17: pass the same request-owned Admin OAuth authority into launch turn-owner composition.
+# [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
+# [Sync] 2026-09-16: route Story Workspace Artifact authority/index access through Registry185-191 DTOs.
+# [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
+# [Output] Publish user-scoped Story Workspace product, workflow, artifact, review, and catalog routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
+# [Sync] 2026-09-15: read Preflight through Admin OAuth without default Workspace or Dream SQL.
+# [Sync] 2026-09-15: execute Preflight through Admin; existing default Workspace lookup remains pending.
+# [Sync] 2026-09-15: consume full Run read/create/retry domains while retaining default Workspace SQL.
+# [Sync] 2026-09-15: replace Workflow ingress default SQL with OAuth-write Admin ensure; internal agent-output stays separate.
+# [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
+# [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
+# [Sync] 2026-09-15: route Story/Character/Scene review through Registry111 and remove those Dream SQL transactions.
+# [Sync] 2026-09-15: route catalog browse/edit through Registry114 DTO/ORM and remove this router's Dream SQL.
+# [Sync] 2026-09-15: persist Guidance through Registry115 and retain only same-Thread Runtime dispatch in Dream.
+# [Sync] 2026-09-16: route confirmation facts and persistence through Registry120 DTO clients.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional, Protocol
-from uuid import uuid4
+from typing import Any, Optional, Protocol
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-import database
 from story_workspace.contracts import (
     STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH,
     StoryWorkspaceAgentStoryPayload,
@@ -34,38 +49,60 @@ from story_workspace.contracts import (
     StoryWorkspaceStoryIndexReconcileCommand,
     StoryWorkspaceWorkspacePatch,
 )
-from services.story_workspace.agent_integration import (
-    AgentIntegrationError,
-    get_or_create_default_workspace,
-    store_agent_story_output,
+from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_current_user, invoke_admin_operation, resolve_admin_default_workspace
+from services.admin_data.errors import AdminDataError
+from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
+from services.admin_data.story_workspace_output_data import (
+    AdminStoryWorkspaceOutputData,
+    StoryWorkspaceOutputInputDTO,
 )
-from .deps import get_current_user
+from services.admin_data.story_workspace_review_data import (
+    AdminStoryWorkspaceReviewData,
+    StoryWorkspaceReviewBatchInputDTO,
+    StoryWorkspaceReviewTransitionInputDTO,
+)
+from services.admin_data.story_workspace_catalog_data import (
+    AdminStoryWorkspaceCatalogData,
+    StoryWorkspaceCatalogPatchInputDTO,
+    StoryWorkspaceCatalogReadInputDTO,
+    StoryWorkspaceCatalogWorkspaceInputDTO,
+)
+from services.admin_data.story_workspace_guidance_data import (
+    AdminStoryWorkspaceGuidanceData,
+    StoryWorkspaceGuidanceInputDTO,
+)
+from services.admin_data.story_workspace_confirmation_data import (
+    AdminStoryWorkspaceConfirmationData,
+)
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactData,
+)
+from services.admin_data.deck_plugin_binding_data import AdminDeckPluginBindingData
+from services.story_workspace.guidance_service import (
+    build_thread_turn_dispatcher,
+    prepare_guidance_turn_owner,
+)
+from services.story_workspace.dream_launch_runtime import AdminDreamLaunchRuntime
 
 try:
-    from services.errors.error_registry import ApiRouteError, build_error_payload
+    from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
     from services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_story_workflow_run_application_service,
     )
     from services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
     )
-    from services.story_workspace.artifact_story_index_repository import (
-        StoryWorkspacePublicStoryRepository,
-    )
 except ModuleNotFoundError:
-    from backend.services.errors.error_registry import ApiRouteError, build_error_payload
+    from backend.services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
     from backend.services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_story_workflow_run_application_service,
     )
     from backend.services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
-    )
-    from backend.services.story_workspace.artifact_story_index_repository import (
-        StoryWorkspacePublicStoryRepository,
     )
 
 
@@ -81,49 +118,6 @@ _STORY_INDEX_ROUTE_ERROR_STATUSES: dict[str, frozenset[int]] = {
     "story_index_database_unavailable": frozenset({503}),
     "story_index_write_failed": frozenset({503}),
 }
-
-_STORY_SORT_FIELDS = {"updated_at", "created_at", "title"}
-_CHARACTER_SORT_FIELDS = {"updated_at", "created_at", "name"}
-_SCENE_SORT_FIELDS = {"updated_at", "created_at", "name", "order_index"}
-
-_REVIEW_RESOURCES = {
-    StoryWorkspaceResourceType.STORY: "story_workspace_stories",
-    StoryWorkspaceResourceType.CHARACTER: "story_workspace_characters",
-    StoryWorkspaceResourceType.SCENE: "story_workspace_scenes",
-}
-
-_RESOURCE_IDENTIFIER_POLICY = {
-    "story_workspace_workspaces": {
-        "owner_column": "owner_id",
-        "mutable_columns": frozenset({"name", "settings"}),
-    },
-    "story_workspace_stories": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset({"title", "description", "content", "type"}),
-    },
-    "story_workspace_characters": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset(
-            {
-                "name",
-                "identity",
-                "personality",
-                "background",
-                "catchphrase",
-                "tags",
-                "avatar_url",
-            }
-        ),
-    },
-    "story_workspace_scenes": {
-        "owner_column": "author_id",
-        "mutable_columns": frozenset(
-            {"name", "description", "story_id", "order_index"}
-        ),
-    },
-}
-_FILTER_COLUMNS = frozenset({"review_status", "status", "type"})
-
 
 class _ReviewActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -191,50 +185,10 @@ class DreamLaunchEndpoint(Protocol):
         request: StoryWorkspaceDreamLaunchCommand,
         *,
         actor: dict[str, str],
-    ) -> Any: ...
-
-
-class StoryWorkflowRunService(Protocol):
-    async def create_preflight(
-        self,
-        request: _WorkflowPreflightRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_preflight(self, preflight_id: str, *, actor: dict[str, str]) -> Any: ...
-
-    async def create_run(
-        self,
-        request: _WorkflowRunCreateRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
-
-    async def retry_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunRetryRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def cancel_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunCancelRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def submit_guidance(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceGuidanceCommandPayload,
-        *,
-        actor: dict[str, str],
+        admin_client: Any,
+        admin_request_auth: AdminRequestAuth,
+        admin_actor: AdminRequestActor,
+        runtime_port: AdminDreamLaunchRuntime,
     ) -> Any: ...
 
 
@@ -244,6 +198,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
     async def get_episode_artifacts(
@@ -251,6 +207,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
         episode_id: str | None = None,
     ) -> Any: ...
 
@@ -259,6 +217,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
     async def get_story_index(
@@ -266,6 +226,8 @@ class DreamArtifactService(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
     async def reconcile_story_index(
@@ -274,6 +236,8 @@ class DreamArtifactService(Protocol):
         request: StoryWorkspaceStoryIndexReconcileCommand,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
         if_match: str,
     ) -> Any: ...
 
@@ -281,6 +245,8 @@ class DreamArtifactService(Protocol):
         self,
         *,
         actor: dict[str, str],
+        artifact_data: AdminStoryWorkspaceArtifactData,
+        access_token: str,
     ) -> Any: ...
 
 
@@ -291,11 +257,10 @@ class DreamConfirmationService(Protocol):
         request: StoryWorkspaceDreamConfirmationCommand,
         *,
         actor: dict[str, str],
+        run_data: AdminRunData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
+        access_token: str,
     ) -> Any: ...
-
-
-def get_story_workflow_run_service() -> StoryWorkflowRunService:
-    return get_story_workflow_run_application_service()
 
 
 def get_dream_artifact_service() -> DreamArtifactService:
@@ -308,15 +273,9 @@ def get_dream_confirmation_service() -> DreamConfirmationService:
 
 async def _story_workflow_current_user(
     current_user: dict[str, Any] = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> dict[str, Any]:
-    if current_user.get("workspace_id"):
-        return current_user
-    db = database.get_db()
-    try:
-        workspace_id = get_or_create_default_workspace(db, int(current_user["user_id"]))
-    finally:
-        db.close()
-    return {**current_user, "workspace_id": workspace_id}
+    return await resolve_admin_default_workspace(current_user, owner)
 
 
 def _workflow_actor(current_user: dict[str, Any]) -> dict[str, str]:
@@ -383,38 +342,10 @@ async def _story_index_call(awaitable: Any) -> Any:
         )
 
 
-def _story_db() -> Iterator[Any]:
-    db = database.get_db()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def _user_id(current_user: dict[str, Any]) -> int:
-    return int(current_user["user_id"])
-
-
-def _decode_json(value: Any, default: Any) -> Any:
-    if value is None:
-        return default
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    item = dict(row)
-    if "settings" in item:
-        item["settings"] = _decode_json(item["settings"], {})
-    if "tags" in item:
-        item["tags"] = _decode_json(item["tags"], [])
-    if "agent_generated" in item:
-        item["agent_generated"] = bool(item["agent_generated"])
-    return item
+def _story_catalog_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceCatalogData:
+    return AdminStoryWorkspaceCatalogData(owner.client)
 
 
 def _csv_values(raw: Optional[str]) -> list[str]:
@@ -423,507 +354,64 @@ def _csv_values(raw: Optional[str]) -> list[str]:
     return [value.strip() for value in raw.split(",") if value.strip()]
 
 
-def _append_in_filter(
-    conditions: list[str],
-    params: list[Any],
-    column: str,
-    raw: Optional[str],
-) -> None:
-    if column not in _FILTER_COLUMNS:
-        raise HTTPException(status_code=400, detail="Unsupported filter field")
-    values = _csv_values(raw)
-    if not values:
-        return
-    conditions.append(f"{column} IN ({', '.join('%s' for _ in values)})")
-    params.extend(values)
-
-
-def _sort_clause(sort: str, order: str, allowed: set[str]) -> str:
-    if sort not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported sort field")
-    normalized_order = order.lower()
-    if normalized_order not in {"asc", "desc"}:
-        raise HTTPException(status_code=400, detail="Order must be 'asc' or 'desc'")
-    return f" ORDER BY {sort} {normalized_order.upper()}, id ASC"
-
-
-def _paginate_query(
-    db: Any,
-    select_sql: str,
-    count_sql: str,
-    params: list[Any],
-    page: int,
-    per_page: int,
-) -> dict[str, Any]:
-    total = int(db.execute(count_sql, tuple(params)).fetchone()[0])
-    offset = (page - 1) * per_page
-    rows = db.execute(
-        select_sql + " LIMIT %s OFFSET %s",
-        tuple(params) + (per_page, offset),
-    ).fetchall()
-    return {
-        "data": [_row_to_dict(row) for row in rows],
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": (total + per_page - 1) // per_page,
-        },
-    }
-
-
-def _owned_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    owner_column: str,
-    user_id: int,
-) -> Any:
-    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
-    if policy is None or policy["owner_column"] != owner_column:
-        raise HTTPException(status_code=400, detail="Unsupported resource mapping")
-    row = db.execute(
-        f"SELECT * FROM {table} WHERE id = %s AND {owner_column} = %s",
-        (resource_id, user_id),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    return row
-
-
-def _patch_owned_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    owner_column: str,
-    user_id: int,
-    values: dict[str, Any],
-) -> dict[str, Any]:
-    _owned_row(db, table, resource_id, owner_column, user_id)
-    if not values:
-        raise HTTPException(status_code=400, detail="At least one field is required")
-    columns = list(values)
-    allowed_columns = _RESOURCE_IDENTIFIER_POLICY[table]["mutable_columns"]
-    unsupported_columns = set(columns) - allowed_columns
-    if unsupported_columns:
-        raise HTTPException(status_code=400, detail="Unsupported patch field")
-    assignments = ", ".join(f"{column} = %s" for column in columns)
-    cursor = db.execute(
-        f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
-        f"WHERE id = %s AND {owner_column} = %s",
-        tuple(values[column] for column in columns) + (resource_id, user_id),
-    )
-    if cursor.rowcount != 1:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Resource not found")
-    db.commit()
-    if table == "story_workspace_stories":
-        public_story = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=resource_id,
-            author_id=user_id,
-        )
-        if public_story is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        return public_story
-    return _row_to_dict(_owned_row(db, table, resource_id, owner_column, user_id))
-
-
-def _owned_review_row(
-    db: Any,
-    table: str,
-    resource_id: str,
-    user_id: int,
-) -> Any:
-    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
-    if policy is None or policy["owner_column"] != "author_id":
-        raise HTTPException(status_code=400, detail="Unsupported review resource")
-    row = db.execute(
-        f"SELECT * FROM {table} "
-        "WHERE id = %s AND author_id = %s AND agent_generated = 1",
-        (resource_id, user_id),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    return row
-
-
-def _audit_review_action(
-    user_id: int,
-    resource_type: StoryWorkspaceResourceType,
-    resource_id: str,
-    action: StoryWorkspaceBatchAction,
-    previous_status: str,
-    new_status: str,
-    review_notes: Optional[str] = None,
-) -> None:
-    logger.info(
-        "story_workspace_review",
-        extra={
-            "id": str(uuid4()),
-            "user_id": user_id,
-            "resource_type": resource_type.value,
-            "resource_id": resource_id,
-            "action": action.value,
-            "previous_status": previous_status,
-            "new_status": new_status,
-            "review_notes": review_notes,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        },
+def _story_catalog_error(exc: AdminDataError, request_id: str) -> JSONResponse:
+    if not exc.outcome_unknown:
+        if exc.code == "STORY_WORKSPACE_CATALOG_NOT_FOUND" and exc.status_code == 404:
+            return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+        if exc.code in {"INPUT_INVALID", "ADMIN_OPERATION_INPUT_INVALID"} and exc.status_code == 400:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Story Workspace request"})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": {
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        }},
     )
 
 
-def _transition_pending_review(
-    db: Any,
-    user_id: int,
-    resource_type: StoryWorkspaceResourceType,
-    resource_id: str,
-    action: StoryWorkspaceBatchAction,
-    review_notes: Optional[str] = None,
-) -> dict[str, Any]:
-    table = _REVIEW_RESOURCES[resource_type]
+def _catalog_input(model, value: dict[str, Any], detail: str):
     try:
-        db.execute("BEGIN")
-        previous = _owned_review_row(db, table, resource_id, user_id)
-        if previous["status"] == "archived" or previous["review_status"] != "pending":
-            raise HTTPException(
-                status_code=400,
-                detail="Item is not in pending review status",
-            )
-
-        if action == StoryWorkspaceBatchAction.CONFIRM:
-            if resource_type == StoryWorkspaceResourceType.STORY:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
-                    "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
-                    "updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                    "AND review_status = 'pending' AND status != 'archived'",
-                    (resource_id, user_id),
-                )
-                # Final story approval is the bundle gate described by Dream:
-                # the reviewed proposal is committed and its linked generated
-                # characters/scenes become usable in one transaction.
-                db.execute(
-                    """
-                    UPDATE story_workspace_scenes
-                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE story_id = %s AND author_id = %s AND agent_generated = 1
-                      AND review_status = 'pending' AND status != 'archived'
-                    """,
-                    (resource_id, user_id),
-                )
-                db.execute(
-                    """
-                    UPDATE story_workspace_characters
-                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE author_id = %s AND agent_generated = 1
-                      AND review_status = 'pending' AND status != 'archived'
-                      AND id IN (
-                        SELECT character_id FROM story_workspace_story_characters
-                        WHERE story_id = %s
-                      )
-                    """,
-                    (user_id, resource_id),
-                )
-            else:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'confirmed', "
-                    "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                    "AND review_status = 'pending' AND status != 'archived'",
-                    (resource_id, user_id),
-                )
-            new_status = "confirmed"
-        else:
-            cursor = db.execute(
-                f"UPDATE {table} SET review_status = 'rejected', review_notes = %s, "
-                "updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-                "AND review_status = 'pending' AND status != 'archived'",
-                (review_notes, resource_id, user_id),
-            )
-            new_status = "rejected"
-
-        if cursor.rowcount != 1:
-            raise HTTPException(
-                status_code=400,
-                detail="Item is not in pending review status",
-            )
-        if resource_type == StoryWorkspaceResourceType.STORY:
-            updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
-                story_id=resource_id,
-                author_id=user_id,
-            )
-            if updated is None:
-                raise HTTPException(status_code=404, detail="Resource not found")
-        else:
-            updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    _audit_review_action(
-        user_id,
-        resource_type,
-        resource_id,
-        action,
-        str(previous["review_status"]),
-        new_status,
-        review_notes,
-    )
-    return updated
-
-
-def _archive_story(
-    db: Any,
-    user_id: int,
-    story_id: str,
-) -> dict[str, Any]:
-    try:
-        db.execute("BEGIN")
-        previous = _owned_review_row(
-            db,
-            _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
-            story_id,
-            user_id,
-        )
-        if previous["status"] == "archived":
-            raise HTTPException(status_code=400, detail="Item is already archived")
-        cursor = db.execute(
-            "UPDATE story_workspace_stories "
-            "SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
-            "AND status != 'archived'",
-            (story_id, user_id),
-        )
-        if cursor.rowcount != 1:
-            raise HTTPException(status_code=400, detail="Item is already archived")
-        updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=story_id,
-            author_id=user_id,
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    _audit_review_action(
-        user_id,
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.ARCHIVE,
-        str(previous["status"]),
-        "archived",
-    )
-    return updated
-
-
-def _batch_review(
-    db: Any,
-    user_id: int,
-    request: _BatchReviewRequest,
-) -> dict[str, Any]:
-    table = _REVIEW_RESOURCES[request.resource_type]
-    placeholders = ", ".join("%s" for _ in request.ids)
-    try:
-        db.execute("BEGIN")
-        rows = db.execute(
-            f"SELECT * FROM {table} WHERE id IN ({placeholders}) "
-            "AND author_id = %s AND agent_generated = 1",
-            tuple(request.ids) + (user_id,),
-        ).fetchall()
-        previous_by_id = {str(row["id"]): row for row in rows}
-        eligible_ids = [
-            resource_id
-            for resource_id in request.ids
-            if resource_id in previous_by_id
-            and previous_by_id[resource_id]["review_status"] == "pending"
-            and previous_by_id[resource_id]["status"] != "archived"
-        ]
-
-        if eligible_ids:
-            eligible_placeholders = ", ".join("%s" for _ in eligible_ids)
-            common_where = (
-                f"WHERE id IN ({eligible_placeholders}) AND author_id = %s "
-                "AND agent_generated = 1 AND review_status = 'pending' "
-                "AND status != 'archived'"
-            )
-            params: tuple[Any, ...] = tuple(eligible_ids) + (user_id,)
-            if request.action == StoryWorkspaceBatchAction.CONFIRM:
-                if request.resource_type == StoryWorkspaceResourceType.STORY:
-                    cursor = db.execute(
-                        f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
-                        "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
-                        "updated_at = CURRENT_TIMESTAMP " + common_where,
-                        params,
-                    )
-                    for story_id in eligible_ids:
-                        db.execute(
-                            "UPDATE story_workspace_scenes SET review_status = 'confirmed', "
-                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE story_id = %s AND author_id = %s AND agent_generated = 1 "
-                            "AND review_status = 'pending' AND status != 'archived'",
-                            (story_id, user_id),
-                        )
-                        db.execute(
-                            "UPDATE story_workspace_characters SET review_status = 'confirmed', "
-                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE author_id = %s AND agent_generated = 1 "
-                            "AND review_status = 'pending' AND status != 'archived' "
-                            "AND id IN (SELECT character_id FROM story_workspace_story_characters "
-                            "WHERE story_id = %s)",
-                            (user_id, story_id),
-                        )
-                else:
-                    cursor = db.execute(
-                        f"UPDATE {table} SET review_status = 'confirmed', "
-                        "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                        + common_where,
-                        params,
-                    )
-                new_status = "confirmed"
-            elif request.action == StoryWorkspaceBatchAction.REJECT:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'rejected', "
-                    "review_notes = %s, updated_at = CURRENT_TIMESTAMP "
-                    + common_where,
-                    (request.review_notes,) + params,
-                )
-                new_status = "rejected"
-            else:
-                archive_fields = "status = 'archived', "
-                if request.resource_type != StoryWorkspaceResourceType.STORY:
-                    archive_fields += "archived_at = CURRENT_TIMESTAMP, "
-                cursor = db.execute(
-                    f"UPDATE {table} SET {archive_fields}"
-                    "updated_at = CURRENT_TIMESTAMP " + common_where,
-                    params,
-                )
-                new_status = "archived"
-
-            if cursor.rowcount != len(eligible_ids):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Review state changed during batch operation",
-                )
-
-            if request.resource_type == StoryWorkspaceResourceType.STORY:
-                public_repository = StoryWorkspacePublicStoryRepository(db)
-                updated_by_id = {}
-                for story_id in eligible_ids:
-                    public_story = public_repository.get_story_row(
-                        story_id=story_id,
-                        author_id=user_id,
-                    )
-                    if public_story is None:
-                        raise HTTPException(
-                            status_code=404,
-                            detail="Resource not found",
-                        )
-                    updated_by_id[story_id] = public_story
-            else:
-                updated_rows = db.execute(
-                    f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
-                    "AND author_id = %s",
-                    params,
-                ).fetchall()
-                updated_by_id = {
-                    str(row["id"]): _row_to_dict(row) for row in updated_rows
-                }
-        else:
-            new_status = request.action.value
-            updated_by_id = {}
-
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    updated_items = [updated_by_id[resource_id] for resource_id in eligible_ids]
-    skipped_ids = [
-        resource_id for resource_id in request.ids if resource_id not in updated_by_id
-    ]
-    for resource_id in eligible_ids:
-        previous = previous_by_id[resource_id]
-        previous_status = (
-            previous["status"]
-            if request.action == StoryWorkspaceBatchAction.ARCHIVE
-            else previous["review_status"]
-        )
-        _audit_review_action(
-            user_id,
-            request.resource_type,
-            resource_id,
-            request.action,
-            str(previous_status),
-            new_status,
-            request.review_notes,
-        )
-
-    return {
-        "success": True,
-        "action": request.action.value,
-        "resource_type": request.resource_type.value,
-        "total_requested": len(request.ids),
-        "total_updated": len(updated_items),
-        "skipped_ids": skipped_ids,
-        "updated_items": updated_items,
-    }
+        return model.model_validate(value)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=detail) from exc
 
 
 @router.get("/workspace")
-def get_workspace(
+async def get_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    row = db.execute(
-        "SELECT * FROM story_workspace_workspaces WHERE owner_id = %s "
-        "ORDER BY created_at ASC, id ASC LIMIT 1",
-        (user_id,),
-    ).fetchone()
-    if row is None:
-        workspace_id = str(uuid4())
-        db.execute(
-            "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
-            "VALUES (%s, %s, %s, %s)",
-            (workspace_id, "默认工作区", user_id, "{}"),
-        )
-        db.commit()
-        row = db.execute(
-            "SELECT * FROM story_workspace_workspaces WHERE id = %s AND owner_id = %s",
-            (workspace_id, user_id),
-        ).fetchone()
-    return _row_to_dict(row)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = StoryWorkspaceCatalogWorkspaceInputDTO.model_validate({"action": "ensure"})
+    result = await invoke_admin_operation(
+        current_user, data.workspace_recovering, input_dto,
+        error_handler=_story_catalog_error,
+    )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/workspace/{workspace_id}")
-def patch_workspace(
+async def patch_workspace(
     workspace_id: str,
     patch: StoryWorkspaceWorkspacePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
     values = patch.model_dump(exclude_unset=True)
-    if "settings" in values:
-        values["settings"] = json.dumps(values["settings"], ensure_ascii=False)
-    return _patch_owned_row(
-        db,
-        "story_workspace_workspaces",
-        workspace_id,
-        "owner_id",
-        _user_id(current_user),
-        values,
+    if not values:
+        raise HTTPException(status_code=400, detail="At least one field is required")
+    input_dto = _catalog_input(StoryWorkspaceCatalogWorkspaceInputDTO, {
+        "action": "patch", "workspace_id": workspace_id, "patch": values,
+    }, "Invalid Workspace patch")
+    result = await invoke_admin_operation(
+        current_user, data.workspace_recovering, input_dto,
+        error_handler=_story_catalog_error,
     )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.get("/stories")
-def list_stories(
+async def list_stories(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     status: Optional[str] = None,
@@ -933,58 +421,43 @@ def list_stories(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    try:
-        return StoryWorkspacePublicStoryRepository(db).list_stories(
-            author_id=_user_id(current_user),
-            q=q,
-            review_status=review_status,
-            status=status,
-            story_type=type,
-            sort=sort,
-            order=order,
-            page=page,
-            per_page=per_page,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Unsupported Story query") from exc
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "story_list", "q": q or None,
+        "review_status": _csv_values(review_status), "status": _csv_values(status),
+        "type": _csv_values(type), "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Story query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/stories/{story_id}")
-def get_story(
+async def get_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    try:
-        return StoryWorkspacePublicStoryRepository(db).get_story(
-            story_id=story_id,
-            author_id=_user_id(current_user),
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="Resource not found") from exc
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "story_detail", "resource_id": story_id,
+    }, "Invalid Story identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/stories/{story_id}")
-def patch_story(
+async def patch_story(
     story_id: str,
     patch: StoryWorkspaceStoryPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _patch_owned_row(
-        db,
-        "story_workspace_stories",
-        story_id,
-        "author_id",
-        _user_id(current_user),
-        patch.model_dump(exclude_unset=True),
-    )
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("story", story_id, patch.model_dump(exclude_unset=True), current_user, data)
 
 
 @router.get("/characters")
-def list_characters(
+async def list_characters(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     sort: str = "updated_at",
@@ -992,68 +465,42 @@ def list_characters(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    conditions = ["author_id = %s"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("name ILIKE %s")
-        params.append(f"%{q}%")
-    _append_in_filter(conditions, params, "review_status", review_status)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_characters" + where
-    select_sql += _sort_clause(sort, order, _CHARACTER_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_characters" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "character_list", "q": q or None,
+        "review_status": _csv_values(review_status), "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Character query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/characters/{character_id}")
-def get_character(
+async def get_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(
-            db,
-            "story_workspace_characters",
-            character_id,
-            "author_id",
-            user_id,
-        )
-    )
-    result["stories"] = StoryWorkspacePublicStoryRepository(
-        db
-    ).list_stories_for_character(
-        character_id=character_id,
-        author_id=user_id,
-    )
-    return result
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "character_detail", "resource_id": character_id,
+    }, "Invalid Character identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/characters/{character_id}")
-def patch_character(
+async def patch_character(
     character_id: str,
     patch: StoryWorkspaceCharacterPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    values = patch.model_dump(exclude_unset=True)
-    if "tags" in values:
-        values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
-    return _patch_owned_row(
-        db,
-        "story_workspace_characters",
-        character_id,
-        "author_id",
-        _user_id(current_user),
-        values,
-    )
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("character", character_id, patch.model_dump(exclude_unset=True), current_user, data)
 
 
 @router.get("/scenes")
-def list_scenes(
+async def list_scenes(
     q: Optional[str] = None,
     review_status: Optional[str] = None,
     story_id: Optional[str] = None,
@@ -1062,227 +509,350 @@ def list_scenes(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    conditions = ["author_id = %s"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("name ILIKE %s")
-        params.append(f"%{q}%")
-    if story_id:
-        conditions.append("story_id = %s")
-        params.append(story_id)
-    _append_in_filter(conditions, params, "review_status", review_status)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_scenes" + where
-    select_sql += _sort_clause(sort, order, _SCENE_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_scenes" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "scene_list", "q": q or None, "review_status": _csv_values(review_status),
+        "story_id": story_id or None, "sort": sort, "order": order.lower(),
+        "page": page, "per_page": per_page,
+    }, "Unsupported Scene query")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.model_dump(mode="json", exclude={"view"})
 
 
 @router.get("/scenes/{scene_id}")
-def get_scene(
+async def get_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(db, "story_workspace_scenes", scene_id, "author_id", user_id)
-    )
-    story = None
-    if result.get("story_id"):
-        story = StoryWorkspacePublicStoryRepository(db).get_story_row(
-            story_id=str(result["story_id"]),
-            author_id=user_id,
-        )
-    characters = db.execute(
-        "SELECT c.* FROM story_workspace_characters c "
-        "JOIN story_workspace_scene_characters sc ON sc.character_id = c.id "
-        "WHERE sc.scene_id = %s AND c.author_id = %s "
-        "ORDER BY c.name ASC, c.id ASC",
-        (scene_id, user_id),
-    ).fetchall()
-    result["story"] = story
-    result["characters"] = [_row_to_dict(row) for row in characters]
-    return result
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    input_dto = _catalog_input(StoryWorkspaceCatalogReadInputDTO, {
+        "view": "scene_detail", "resource_id": scene_id,
+    }, "Invalid Scene identifier")
+    result = await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_story_catalog_error)
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
 
 
 @router.patch("/scenes/{scene_id}")
-def patch_scene(
+async def patch_scene(
     scene_id: str,
     patch: StoryWorkspaceScenePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    values = patch.model_dump(exclude_unset=True)
-    if "story_id" in values and values["story_id"] is not None:
-        _owned_row(
-            db,
-            "story_workspace_stories",
-            values["story_id"],
-            "author_id",
-            user_id,
-        )
-    return _patch_owned_row(
-        db,
-        "story_workspace_scenes",
-        scene_id,
-        "author_id",
-        user_id,
-        values,
+    data: AdminStoryWorkspaceCatalogData = Depends(_story_catalog_data),
+) -> Any:
+    return await _patch_catalog_resource("scene", scene_id, patch.model_dump(exclude_unset=True), current_user, data)
+
+
+async def _patch_catalog_resource(
+    resource_type: str,
+    resource_id: str,
+    values: dict[str, Any],
+    current_user: dict[str, Any],
+    data: AdminStoryWorkspaceCatalogData,
+) -> Any:
+    if not values:
+        raise HTTPException(status_code=400, detail="At least one field is required")
+    input_dto = _catalog_input(StoryWorkspaceCatalogPatchInputDTO, {
+        "resource_type": resource_type, "resource_id": resource_id, "patch": values,
+    }, "Invalid Story Workspace patch")
+    result = await invoke_admin_operation(
+        current_user, data.patch_recovering, input_dto, error_handler=_story_catalog_error,
     )
+    return result if isinstance(result, JSONResponse) else result.item.model_dump(mode="json")
+
+
+def _story_review_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceReviewData:
+    return AdminStoryWorkspaceReviewData(owner.client)
+
+
+def _story_review_error(invalid_detail: str, *, batch: bool = False):
+    def handle(exc: AdminDataError, request_id: str) -> JSONResponse:
+        if not exc.outcome_unknown:
+            if exc.code == "STORY_WORKSPACE_REVIEW_NOT_FOUND" and exc.status_code == 404:
+                return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+            if exc.code == "STORY_WORKSPACE_REVIEW_STATE_INVALID" and exc.status_code == 409:
+                return JSONResponse(status_code=400, content={"detail": invalid_detail})
+            if batch and exc.code == "STORY_WORKSPACE_REVIEW_STATE_CHANGED" and exc.status_code == 409:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "Review state changed during batch operation"},
+                )
+            if exc.code in {"INPUT_INVALID", "ADMIN_OPERATION_INPUT_INVALID"} and exc.status_code == 400:
+                return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": {"error_code": exc.code,
+                "request_id": exc.request_id or request_id,
+                "outcome_unknown": exc.outcome_unknown}},
+        )
+
+    return handle
+
+
+async def _transition_story_review(
+    *,
+    resource_type: StoryWorkspaceResourceType,
+    resource_id: str,
+    action: StoryWorkspaceBatchAction,
+    review_notes: str | None,
+    current_user: dict[str, Any],
+    data: AdminStoryWorkspaceReviewData,
+) -> Any:
+    try:
+        input_dto = StoryWorkspaceReviewTransitionInputDTO(
+            resource_type=resource_type.value,
+            resource_id=resource_id,
+            action=action.value,
+            review_notes=review_notes,
+        )
+    except ValidationError:
+        return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+    invalid_detail = (
+        "Item is already archived"
+        if action == StoryWorkspaceBatchAction.ARCHIVE
+        else "Item is not in pending review status"
+    )
+    result = await invoke_admin_operation(
+        current_user,
+        data.transition_recovering,
+        input_dto,
+        error_handler=_story_review_error(invalid_detail),
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return result.item.model_dump(mode="json")
 
 
 @router.post("/stories/{story_id}/confirm")
-def confirm_story(
+async def confirm_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/stories/{story_id}/reject")
-def reject_story(
+async def reject_story(
     story_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.STORY,
-        story_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/stories/{story_id}/archive")
-def archive_story(
+async def archive_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _archive_story(db, _user_id(current_user), story_id)
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.STORY,
+        resource_id=story_id,
+        action=StoryWorkspaceBatchAction.ARCHIVE,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
+    )
 
 
 @router.post("/characters/{character_id}/confirm")
-def confirm_character(
+async def confirm_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.CHARACTER,
-        character_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.CHARACTER,
+        resource_id=character_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/characters/{character_id}/reject")
-def reject_character(
+async def reject_character(
     character_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.CHARACTER,
-        character_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.CHARACTER,
+        resource_id=character_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/scenes/{scene_id}/confirm")
-def confirm_scene(
+async def confirm_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.SCENE,
-        scene_id,
-        StoryWorkspaceBatchAction.CONFIRM,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.SCENE,
+        resource_id=scene_id,
+        action=StoryWorkspaceBatchAction.CONFIRM,
+        review_notes=None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/scenes/{scene_id}/reject")
-def reject_scene(
+async def reject_scene(
     scene_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _transition_pending_review(
-        db,
-        _user_id(current_user),
-        StoryWorkspaceResourceType.SCENE,
-        scene_id,
-        StoryWorkspaceBatchAction.REJECT,
-        body.review_notes if body else None,
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    return await _transition_story_review(
+        resource_type=StoryWorkspaceResourceType.SCENE,
+        resource_id=scene_id,
+        action=StoryWorkspaceBatchAction.REJECT,
+        review_notes=body.review_notes if body else None,
+        current_user=current_user,
+        data=data,
     )
 
 
 @router.post("/batch")
-def batch_review(
+async def batch_review(
     body: _BatchReviewRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    return _batch_review(db, _user_id(current_user), body)
+    data: AdminStoryWorkspaceReviewData = Depends(_story_review_data),
+) -> Any:
+    try:
+        input_dto = StoryWorkspaceReviewBatchInputDTO(
+            resource_type=body.resource_type.value,
+            ids=body.ids,
+            action=body.action.value,
+            review_notes=body.review_notes,
+        )
+    except ValidationError:
+        return JSONResponse(status_code=422, content={"detail": "Invalid review request"})
+    result = await invoke_admin_operation(
+        current_user,
+        data.batch_recovering,
+        input_dto,
+        error_handler=_story_review_error(
+            "Item is not in pending review status", batch=True
+        ),
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return result.model_dump(mode="json")
+
+
+def _story_output_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> AdminStoryWorkspaceOutputData:
+    return AdminStoryWorkspaceOutputData(owner.client)
+
+
+def _agent_story_output_error(
+    exc: AdminDataError,
+    request_id: str,
+) -> JSONResponse:
+    if not exc.outcome_unknown and (
+        (exc.code == "ADMIN_OPERATION_INPUT_INVALID" and exc.status_code == 400)
+        or (exc.code == "CHAT_THREAD_NOT_FOUND" and exc.status_code == 404)
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Unable to persist Agent story output"},
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": {
+                "error_code": exc.code,
+                "request_id": exc.request_id or request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            }
+        },
+    )
 
 
 @router.post("/internal/agent-output")
-def receive_agent_story_output(
+async def receive_agent_story_output(
     body: StoryWorkspaceAgentStoryPayload,
     agent_session_id: Optional[str] = Header(None, alias="X-Agent-Session-Id"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: Any = Depends(_story_db),
-) -> dict[str, Any]:
-    """Receive one authenticated Agent story bundle and persist it atomically."""
+    data: AdminStoryWorkspaceOutputData = Depends(_story_output_data),
+) -> Any:
+    """Persist one authenticated Chat Thread Story bundle through Admin."""
 
     if not agent_session_id or not agent_session_id.strip():
         raise HTTPException(status_code=400, detail="X-Agent-Session-Id is required")
 
-    user_id = _user_id(current_user)
     try:
-        workspace_id = get_or_create_default_workspace(db, user_id)
-        return store_agent_story_output(
-            db,
-            user_id,
-            workspace_id,
-            agent_session_id,
-            body,
+        input_dto = StoryWorkspaceOutputInputDTO(
+            thread_id=agent_session_id.strip(),
+            story=body.model_dump(mode="json"),
         )
-    except AgentIntegrationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail="Unable to persist Agent story output",
-        ) from exc
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Unable to persist Agent story output") from None
+    result = await invoke_admin_operation(
+        current_user,
+        data.store_recovering,
+        input_dto,
+        error_handler=_agent_story_output_error,
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return {
+        "story_id": result.story_id,
+        "review_status": result.review_status,
+        "character_ids": result.character_ids,
+        "scene_ids": result.scene_ids,
+    }
 
 
-@router.post("/workflow-preflights", status_code=202)
+def _preflight_data(request: Request, current_user: dict = Depends(get_current_user)) -> AdminPreflightData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminPreflightData(owner.client, canonical_user_id=actor.canonical_user_id)
+
+
+class _PreflightExecutionRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Preflight request"
+
+
+_preflight_execution_router = APIRouter(route_class=_PreflightExecutionRoute)
+
+
+@_preflight_execution_router.post("/workflow-preflights", status_code=202)
 async def create_workflow_preflight(
     request: _WorkflowPreflightRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminPreflightData = Depends(_preflight_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1291,17 +861,33 @@ async def create_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.create_preflight(request, actor=actor))
+    try:
+        input_json = json.dumps(request.input_data, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+        input_json.encode("utf-8")
+        input_dto = PreflightExecutionInputDTO(workspace_id=actor["workspace_id"], deck_id=request.deck_id,
+            binding_revision=request.binding_revision, input_json=input_json)
+    except (ValueError, RecursionError):
+        return JSONResponse(status_code=422, content={"detail": "Invalid Preflight request"})
+    return await invoke_admin_operation(current_user, data.execute, input_dto)
+
+
+router.include_router(_preflight_execution_router)
 
 
 @router.post("/dream-runs/start", status_code=201)
 async def story_workspace_start_dream_run(
     request: StoryWorkspaceDreamLaunchCommand,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
     launch_service: DreamLaunchEndpoint = Depends(get_dream_launch_endpoint_service),
 ):
     try:
         actor = _workflow_actor(current_user)
+        admin_actor = current_user.get("_admin_actor")
+        if not isinstance(owner, AdminRequestAuth) or not isinstance(
+            admin_actor, AdminRequestActor
+        ):
+            raise ApiRouteError("ADMIN_CONFIGURATION_INVALID", status_code=503)
     except ApiRouteError as exc:
         return JSONResponse(
             status_code=exc.status_code,
@@ -1309,86 +895,49 @@ async def story_workspace_start_dream_run(
         )
 
     async def accepted_response() -> StoryWorkspaceDreamLaunchAccepted:
-        context = await launch_service.start_dream_run(request, actor=actor)
+        runtime_port = AdminDreamLaunchRuntime(
+            AdminDeckPluginBindingData(owner.client),
+            admin_actor.access_token,
+        )
+        context = await launch_service.start_dream_run(
+            request,
+            actor=actor,
+            admin_client=owner.client,
+            admin_request_auth=owner,
+            admin_actor=admin_actor,
+            runtime_port=runtime_port,
+        )
         return StoryWorkspaceDreamLaunchAccepted.from_context(context)
 
     return await _workflow_call(accepted_response(), by_alias=True)
+
+
+def _artifact_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceArtifactData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceArtifactData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
 
 
 @router.get("/dream-runs")
 async def story_workspace_list_dream_runs(
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ) -> Any:
     """List only durable Dream runs visible to the authenticated actor."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
-
-
-@router.get("/workflow-preflights/{preflight_id}")
-async def get_workflow_preflight(
-    preflight_id: str,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
-):
-    try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(service.get_preflight(preflight_id, actor=actor))
-
-
-@router.post("/workflow-runs", status_code=201)
-async def create_workflow_run(
-    request: _WorkflowRunCreateRequest,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
-):
-    try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(service.create_run(request, actor=actor))
-
-
-@router.get("/workflow-runs/{workflow_run_id}")
-async def get_workflow_run(
-    workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
-):
-    try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(service.get_run(workflow_run_id, actor=actor))
-
-
-@router.get("/workflow-runs/{workflow_run_id}/dream-files")
-async def story_workspace_get_workflow_run_dream_files(
-    workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: DreamArtifactService = Depends(get_dream_artifact_service),
-):
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1396,7 +945,184 @@ async def story_workspace_get_workflow_run_dream_files(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        service.get_dream_files(workflow_run_id, actor=actor),
+        service.list_dream_runs(
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        ),
+        by_alias=True,
+    )
+
+
+def _preflight_read_error(exc: AdminDataError, request_id: str):
+    if exc.code == "WORKFLOW_PERMISSION_DENIED" and exc.status_code in {403, 404}:
+        return JSONResponse(status_code=404, content=build_error_payload("WORKFLOW_PERMISSION_DENIED"))
+    raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
+
+
+@router.get("/workflow-preflights/{preflight_id}")
+async def get_workflow_preflight(
+    preflight_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    data: AdminPreflightData = Depends(_preflight_data),
+):
+    try:
+        input_dto = PreflightInputDTO(workflow_preflight_id=preflight_id)
+        if input_dto.workflow_preflight_id != preflight_id:
+            raise ValueError("Preflight path must match its original ID")
+    except (ValidationError, ValueError):
+        return JSONResponse(status_code=404, content=build_error_payload("WORKFLOW_PERMISSION_DENIED"))
+    return await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_preflight_read_error)
+
+
+def _run_data(owner: AdminRequestAuth = Depends(get_admin_request_auth), current_user: dict = Depends(get_current_user)) -> AdminRunData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminRunData(owner.client, canonical_user_id=actor.canonical_user_id)
+
+
+def _run_data_error(exc: AdminDataError, request_id: str):
+    mapped = WORKFLOW_RUN_ROUTE_ERRORS.get(exc.code)
+    if not exc.outcome_unknown and ((mapped is not None and exc.status_code == mapped[1]) or (exc.code == "INVALID_RUN_REQUEST" and exc.status_code in {400, 422})):
+        error = workflow_run_route_error(exc.code)
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": request_id, "outcome_unknown": exc.outcome_unknown}) from None
+
+
+def _guidance_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceGuidanceData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceGuidanceData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
+
+
+def _confirmation_data(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> AdminStoryWorkspaceConfirmationData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminStoryWorkspaceConfirmationData(
+        owner.client,
+        canonical_user_id=actor.canonical_user_id,
+    )
+
+
+def _guidance_data_error(exc: AdminDataError, request_id: str):
+    if not exc.outcome_unknown:
+        if exc.code == "WORKFLOW_RUN_NOT_FOUND" and exc.status_code == 404:
+            error = workflow_run_route_error(exc.code)
+            return JSONResponse(
+                status_code=error.status_code,
+                content=build_error_payload(error.code),
+            )
+        if exc.code in {"WORKFLOW_RUN_NOT_GUIDABLE", "IDEMPOTENCY_CONFLICT"} and exc.status_code == 409:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=build_error_payload(exc.code),
+            )
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        },
+    ) from None
+
+
+class _RunCommandRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Workflow Run request"
+
+
+_run_create_router = APIRouter(route_class=_RunCommandRoute)
+_run_retry_router = APIRouter(route_class=_RunCommandRoute)
+_run_cancel_router = APIRouter(route_class=_RunCommandRoute)
+
+
+@_run_create_router.post("/workflow-runs", status_code=201)
+async def create_workflow_run(
+    request: _WorkflowRunCreateRequest,
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    data: AdminRunData = Depends(_run_data),
+):
+    try:
+        actor = _workflow_actor(current_user)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    try:
+        source_time = datetime.fromisoformat(request.source_message_time.replace("Z", "+00:00")).isoformat() if request.source_message_time else None
+        input_dto = RunCreateInputDTO(workspace_id=actor["workspace_id"], workflow_preflight_id=request.workflow_preflight_id,
+            preflight_token=request.preflight_token, idempotency_key=request.idempotency_key,
+            source_voice_thread_id=request.source_voice_thread_id, source_message_id=request.source_message_id, source_message_time=source_time)
+    except (ValueError, RecursionError):
+        error = workflow_run_route_error("INVALID_RUN_REQUEST")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.create, input_dto, error_handler=_run_data_error)
+
+
+router.include_router(_run_create_router)
+
+
+@router.get("/workflow-runs/{workflow_run_id}")
+async def get_workflow_run(
+    workflow_run_id: str,
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    data: AdminRunData = Depends(_run_data),
+):
+    try:
+        actor = _workflow_actor(current_user)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    try:
+        input_dto = RunLookupInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id)
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except (ValueError, RecursionError):
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_run_data_error)
+
+
+@router.get("/workflow-runs/{workflow_run_id}/dream-files")
+async def story_workspace_get_workflow_run_dream_files(
+    workflow_run_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
+):
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(
+        service.get_dream_files(
+            workflow_run_id,
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        ),
         by_alias=True,
     )
 
@@ -1412,11 +1138,15 @@ async def story_workspace_get_workflow_run_episode_artifacts(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Return one registry-owned Episode surface; no browser path is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1427,6 +1157,8 @@ async def story_workspace_get_workflow_run_episode_artifacts(
         service.get_episode_artifacts(
             workflow_run_id,
             actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
             episode_id=episode_id,
         ),
         by_alias=True,
@@ -1449,11 +1181,15 @@ async def story_workspace_get_workflow_run_episodes(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Return registry identity and bounded availability facts without bodies."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1461,7 +1197,12 @@ async def story_workspace_get_workflow_run_episodes(
             content=build_error_payload(exc.code),
         )
     result = await _workflow_call(
-        service.get_episode_index(workflow_run_id, actor=actor),
+        service.get_episode_index(
+            workflow_run_id,
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        ),
         by_alias=True,
     )
     if isinstance(result, JSONResponse):
@@ -1482,18 +1223,27 @@ async def story_workspace_get_workflow_run_story_index(
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Compare server-bound Artifact revisions with PostgreSQL without writing."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         return JSONResponse(
             status_code=403,
             content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
     result = await _story_index_call(
-        service.get_story_index(workflow_run_id, actor=actor)
+        service.get_story_index(
+            workflow_run_id,
+            actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
+        )
     )
     if isinstance(result, JSONResponse):
         return result
@@ -1519,11 +1269,15 @@ async def story_workspace_reconcile_workflow_run_story_index(
     ),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
+    artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
 ):
     """Retry one revision-guarded materialization; no locator input is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         return JSONResponse(
             status_code=403,
@@ -1534,6 +1288,8 @@ async def story_workspace_reconcile_workflow_run_story_index(
             workflow_run_id,
             request,
             actor=actor,
+            artifact_data=artifact_data,
+            access_token=request_actor.access_token,
             if_match=if_match,
         )
     )
@@ -1551,13 +1307,21 @@ async def story_workspace_reconcile_workflow_run_story_index(
 async def story_workspace_submit_workflow_run_dream_confirmation(
     workflow_run_id: str,
     request: StoryWorkspaceDreamConfirmationCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     service: DreamConfirmationService = Depends(get_dream_confirmation_service),
+    run_data: AdminRunData = Depends(_run_data),
+    confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
 ):
     """Persist one hidden confirmation and queue the originating Chat Agent."""
 
     try:
-        actor = {"actor_id": str(current_user["user_id"])}
+        actor = {
+            "actor_id": str(current_user["user_id"]),
+            "workspace_id": str(current_user["workspace_id"]),
+        }
+        request_actor = current_user["_admin_actor"]
+        if not isinstance(request_actor, AdminRequestActor):
+            raise ValueError("Admin actor unavailable")
     except (KeyError, TypeError, ValueError):
         exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
@@ -1569,17 +1333,20 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
             workflow_run_id,
             request,
             actor=actor,
+            run_data=run_data,
+            confirmation_data=confirmation_data,
+            access_token=request_actor.access_token,
         ),
         by_alias=True,
     )
 
 
-@router.post("/workflow-runs/{workflow_run_id}/retry", status_code=201)
+@_run_retry_router.post("/workflow-runs/{workflow_run_id}/retry", status_code=201)
 async def retry_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunRetryRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1588,15 +1355,30 @@ async def retry_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.retry_run(workflow_run_id, request, actor=actor))
+    try:
+        input_dto = RunRetryInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id,
+            workflow_preflight_id=request.workflow_preflight_id, preflight_token=request.preflight_token, idempotency_key=request.idempotency_key)
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except ValidationError as exc:
+        code = "WORKFLOW_RUN_NOT_FOUND" if any(error["loc"] == ("workflow_run_id",) for error in exc.errors(include_input=False)) else "INVALID_RUN_REQUEST"
+        error = workflow_run_route_error(code)
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    except ValueError:
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.retry, input_dto, error_handler=_run_data_error)
 
 
-@router.post("/workflow-runs/{workflow_run_id}/cancel")
+router.include_router(_run_retry_router)
+
+
+@_run_cancel_router.post("/workflow-runs/{workflow_run_id}/cancel")
 async def cancel_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunCancelRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1605,15 +1387,27 @@ async def cancel_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.cancel_run(workflow_run_id, request, actor=actor))
+    try:
+        input_dto = RunCancelInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id,
+            reason_code=f"user_cancelled:{request.reason}")
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except ValueError:
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.cancel, input_dto, error_handler=_run_data_error)
+
+
+router.include_router(_run_cancel_router)
 
 
 @router.post("/runs/{workflow_run_id}/guidance", status_code=202)
 async def submit_run_guidance(
     workflow_run_id: str,
     request: StoryWorkspaceGuidanceCommandPayload,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    request_auth: AdminRequestAuth = Depends(get_admin_request_auth),
+    data: AdminStoryWorkspaceGuidanceData = Depends(_guidance_data),
 ):
     """Submit one idempotent guidance command to a guidable run.
 
@@ -1624,12 +1418,65 @@ async def submit_run_guidance(
     different content (``IDEMPOTENCY_CONFLICT``).
     """
     try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
+        actor_id = str(current_user["user_id"])
+        if request.actor != actor_id:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        input_dto = StoryWorkspaceGuidanceInputDTO(
+            workflow_run_id=workflow_run_id,
+            kind=request.kind.value,
+            text=request.text,
+            step_id=request.step_id,
+            idempotency_key=request.idempotency_key,
+        )
+    except (ApiRouteError, ValidationError) as exc:
+        if isinstance(exc, ValidationError):
+            return JSONResponse(status_code=422, content={"detail": "Invalid guidance request"})
         return JSONResponse(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(
-        service.submit_guidance(workflow_run_id, request, actor=actor)
+    result = await invoke_admin_operation(
+        current_user,
+        data.submit_recovering,
+        input_dto,
+        error_handler=_guidance_data_error,
     )
+    if isinstance(result, JSONResponse):
+        return result
+
+    dispatched = False
+    if result.dispatch is not None:
+        dispatch = result.dispatch
+        turn_owner = None
+        try:
+            actor = current_user.get("_admin_actor")
+            if not isinstance(actor, AdminRequestActor):
+                raise AdminDataError("ADMIN_CONFIGURATION_INVALID", 503)
+            turn_owner = await prepare_guidance_turn_owner(
+                request_auth=request_auth,
+                actor=actor,
+                thread_id=dispatch.thread_id,
+                workflow_run_id=result.story_workspace_run_id,
+            )
+            parts = [part.model_dump(mode="json") for part in dispatch.parts]
+            metadata = dispatch.metadata.model_dump(mode="json")
+            owned_turn = turn_owner
+            turn_owner = None
+            dispatched = bool(build_thread_turn_dispatcher()(
+                owned_turn,
+                result.story_workspace_run_id,
+                dispatch.message_id,
+                parts,
+                metadata,
+            ))
+        except Exception:
+            if turn_owner is not None:
+                await asyncio.to_thread(turn_owner.close)
+            logger.exception(
+                "Guidance dispatch failed for run_id=%s message_id=%s",
+                workflow_run_id,
+                dispatch.message_id,
+            )
+    payload = result.model_dump(mode="json", exclude={"dispatch"})
+    payload["dispatched"] = dispatched
+    return payload

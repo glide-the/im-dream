@@ -4,6 +4,8 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentService 模块设计.md — 路径已适配 Ink & Memory 工程规范。
 > **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py；reasoning-start/delta/end 已启用。  
 > **[Sync] 2026-05-25 v1**: 更新 `_TurnContext` 类图补充持久化字段；更新 `execute_session` 描述。  
+> **[Sync] 2026-09-15**: `assemble_context`先通过精确`AdminTurnPersistence`读取Thread SystemConfig；缺owner、Admin错误或坏JSON在Workflow mapper、prompt、Workspace和Runner前失败，不回退Dream数据库。显式reader只供测试harness依赖注入。
+> **[Sync] 2026-09-16**: Chat、Reflections、launch、confirmation与Guidance生产turn均在进入ThreadFactory前携带绑定actor/Thread/Run的Admin owner；Service删除SQL、database import及消息/Session/workspace/MCP回退，缺owner直接失败。
 > **[Sync] 2026-05-25 v2**: 重大重构 — `collected_parts` 改为收集**原始 SSE 事件报文**（而非 UIMessage parts）；移除 `text_started` / `full_text_accumulator` / `tool_inv_by_id` 等状态字段；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做一次线性转换。
 > **[Sync] 2026-05-28**: 校准 `assemble_context` 边界：该阶段构建 `system_prompt` / `user_message` / `AgentRunOptions` / `_TurnContext`，但不发射 `message-metadata`、不创建 streaming callbacks；这些由 `execute_session` 执行。详细上下文接入规则见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)。
 > **[Sync] 2026-06-13**: `_make_tool_event_cb()` 处理 runner 已有 `tool_input_delta`，发射 `tool-input-delta` SSE 供前端在内置 `Write` 工具写文件时做终端式增量预览；完整方案见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
@@ -29,7 +31,7 @@
 |------|------|
 | 源模块 | `glide-the/claude-agent-next-kit` 的 `app/api/claude-agent`（TypeScript / Next.js API Route） |
 | 目标模块 | `backend/claude_agent/service.py` + `backend/claude_agent/tool_confirmation_store.py`（Python 3.11+） |
-| 依赖 | `backend/claude_agent/` — 已完成迁移的 `ClaudeAgentRunner` Python 包；`backend/database.py` — DB 持久化层；`backend/claude_agent/thread_factory.py` — 生产环境的 SSE 入口 |
+| 依赖 | `backend/claude_agent/` — 已完成迁移的 `ClaudeAgentRunner` Python 包；`backend/services/admin_data/turn_persistence.py` — 所有生产turn的Thread/SystemConfig/Session/消息及Workspace数据owner；`backend/claude_agent/thread_factory.py` — 生产环境的 SSE 入口 |
 | 迁移目标 | 1. 等价功能的 Python 服务层；2. 会话持久化（`onFinish` 迁移）；3. `thread_id` 续接逻辑；4. 在 `docs/design/claude-agent/` 中完整记录模块设计；5. 与 Thread Session（Observer/Flyweight-State/Builder/Factory）四模式协同 |
 
 ---
@@ -278,10 +280,10 @@ sequenceDiagram
 | `resolvePendingToolConfirmation(id, result)` | `store.resolve(id, result)` | 设置 Future 结果 |
 | `req.signal.aborted` / `AbortController` | `task.cancel()` / `asyncio.CancelledError` 经 Factory cleanup 处理 | 中止信号处理 |
 | `setInterval(heartbeat)` | Factory queue-drain keepalive 注释帧 | SSE 心跳由 FastAPI StreamingResponse 管理 |
-| `getConversationById(conversationId)` | `database.get_chat_thread(thread_id, user_id)` in route layer | 请求前做 thread ownership 校验。 |
+| `getConversationById(conversationId)` | route and every production turn owner use typed Admin Thread operations | 请求前做Thread ownership校验；Service无Dream数据库回退。 |
 | `threadIdForAgent` | `AgentRunOptions.thread_id = request.thread_id` | SDK 会话与 Ink & Memory chat thread 对齐。 |
 | `capturedSessionId = result.sessionId` | `captured_session_id = result.session_id` | 捕获 SDK 会话 ID |
-| `onFinish({ responseMessage })` → persist message rows | `_persist_turn(...)` calls `database.save_chat_message(...)` in `service.execute_session` | 会话持久化（post-run）|
+| `onFinish({ responseMessage })` → persist message rows | `_persist_turn(...)` requires the bound Admin owner for every production dispatcher; missing owner fails before persistence | 会话持久化（post-run）|
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -375,7 +377,8 @@ resolved = claude_agent_thread_factory.confirm_tool(
 | `backend/claude_agent/service.py` | `assemble_context`, `execute_session`, tool confirmation resolution, and message persistence |
 | `backend/claude_agent/context_builder.py` | `system_prompt` and `message_parts` to Claude content block assembly |
 | `backend/claude_agent/thread_factory.py` | Per-thread lock, runner cache, lifecycle observer calls, queue draining, and cleanup |
-| `backend/database.py` | Chat thread/message persistence and recent writing session lookup |
+| `backend/services/admin_data/turn_persistence.py` | Public Thread/SystemConfig/session/message persistence under the exact grant |
+| `backend/database.py` | Remaining internal/background persistence pending its Admin aggregate |
 | `backend/libs/claude_agent_kit/types.py` | `AgentRunOptions`, `AgentStreamingCallbacks`, `ToolEventPayload` |
 | `asyncio` | Queue event bridge, Future-based tool confirmation, background task execution, and `to_thread` DB calls |
 | `uuid` | uuid4() 用于生成 ID |
@@ -395,7 +398,7 @@ resolved = claude_agent_thread_factory.confirm_tool(
 
 | 能力 | ClaudeAgentService | ClaudeAgentThreadFactory |
 |------|--------------------|--------------------------|
-| 业务逻辑（DB 持久化 / reasoning / keepalive / message-final） | 内置 | ✅ 委托给内部 service 实例 |
+| 业务逻辑（Admin DTO 持久化 / reasoning / keepalive / message-final） | 内置 | ✅ 委托给内部 service 实例 |
 | 并发隔离 | 无 | `asyncio.Lock` per `session_id` (FIFO) |
 | 生命周期钩子 | 无 | `SessionObserverRegistry`（8 个钩子） |
 | 状态追踪 | 无状态 | `AgentRunStatePool`（turn_count / IDLE/RUNNING） |

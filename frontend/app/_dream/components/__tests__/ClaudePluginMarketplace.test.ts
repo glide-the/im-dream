@@ -1,5 +1,5 @@
 // [Input] ClaudePlugin admin source/styles/API, Story Workspace Work/Layout wiring, and Marketplace interaction design.
-// [Output] Lock the three-action menu, global Marketplace four-stage install, fail-closed capability, focus behavior, and responsive presentation.
+// [Output] Lock both plugin managers plus the Claude global Marketplace install, fail-closed capability, focus, and responsive presentation.
 // [Pos] Source-contract regression for ClaudePlugin Marketplace add scope.
 // [Sync] 2026-09-05: read the Settings view from the relocated non-framework app/_dream/views tree.
 // [Sync] 2026-08-19: assert the Admin-approved catalog DTO, entry-ID install, four-stage UX, and remote lineage copy.
@@ -20,9 +20,11 @@ const SETTINGS = read('app/_dream/views/story-workspace/StoryWorkspaceSettingsPa
 const LAYOUT = read('app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx');
 const DESIGN = read('../docs/design/deck-plugin/claude-plugin-marketplace-add.md');
 
-test('Work / Plugins keeps the shared Settings layout and mounts one ClaudePlugin manager', () => {
+test('Work / Plugins keeps the shared Settings layout and mounts both plugin domains', () => {
   expect(SETTINGS).toContain("workTab === 'plugins'");
+  expect(SETTINGS).toContain('<PluginAdminPage isMobile={isMobile} />');
   expect(SETTINGS).toContain('<ClaudePluginAdminPage />');
+  expect(SETTINGS).toContain('className="story-workspace-work__plugin-stack"');
   expect(SETTINGS).toContain('className="story-workspace-work__toolbar"');
   expect(LAYOUT).toContain('data-story-workspace-region="main"');
   expect(PAGE).toContain('className="claude-plugin-admin__topbar"');

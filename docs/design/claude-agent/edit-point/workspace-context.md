@@ -4,6 +4,7 @@
 > [Output] Define how workspace state (`.editor/` virtual index, workspace directory)
 >          enters the Agent context assembly pipeline as a `<workspace_context>` block.
 > [Pos] context-design-doc in `docs/design/claude-agent/edit-point`
+> [Sync] 2026-09-15: active Editor context uses a turn-local Admin broker; stdio receives no DB or actor credential.
 > [Sync] 2026-05-28: initial design — workspace context integration for edit-point.
 > [Sync] 2026-05-29: add Section 9 — editor_state role and loading path; clarify two-layer architecture (prompt layer vs runtime layer).
 > [Sync] 2026-05-29: §9.3 add reference to editor-state-lifecycle.md for complete lifecycle documentation.
@@ -15,7 +16,7 @@
 # 工作空间上下文接入设计
 
 Status: Updated  
-Updated: 2026-06-28
+Updated: 2026-09-15
 Scope: Design + 实现状态同步
 
 ---
@@ -281,130 +282,69 @@ sequenceDiagram
 
 ## 9. `editor_state` 的角色与加载路径
 
-### 9.1 "不依赖 `editor_state`" 的精确含义
+本节说明现行实现。迁移前的数据库直连说明保存在 [`workspace-context-legacy-db-20260628.md`](./workspace-context-legacy-db-20260628.md)。
 
-本文档第 3.2、5.1、5.2 节多次出现 "不依赖 `editor_state`" 的表述。这一表述**仅针对 `<workspace_context>` 提示词块的内容**，而非整个 edit-point 子系统。
+### 9.1 提示层与运行时层
 
-完整的 edit-point 上下文由**两个独立层**组成：
+| 层 | 执行模块 | 输入 | 输出 |
+| --- | --- | --- | --- |
+| 提示层 | `context_builder.py` | workspace path、Editor Session ID | `<workspace_context>` 中的读写说明和 exact Session ID |
+| 读取层 | Runner PreToolUse + `editor_index.py` | `AgentRunState.editor_state` | `.editor/*.json` 一次性只读响应 |
+| 写入层 | Editor stdio → turn broker → Admin | 工具参数、current Admin state | strict full-state replace 与 receipt |
 
-| 层 | 组件 | 依赖项 | 作用 |
-|----|------|--------|------|
-| **Prompt 层**（静态导航地图） | `<workspace_context>` 块 | 仅 `cwd` | 告知 Agent 工作空间布局、`.editor/` 的存在及读写规则 |
-| **运行时层**（实时数据注入） | PreToolUse 钩子 + Editor MCP 子进程 | `editor_state` | 当 Agent 实际调用 `read_file(".editor/...")` 时，将内存快照动态注入为可读数据 |
+`<workspace_context>` 只告诉 Agent 如何读取和修改；它不承载 EditorState 正文、authorization 或数据库 selector。EditorState 非空时，虚拟 Read 从 flyweight 获取当前值。写工具执行前通过 Admin `editor-state.load` 读取当前状态，写成功后再更新同一 flyweight。
 
-两层相互独立，但**缺一不可**：
+### 9.2 `editor_session_id` 来源
 
-- 无 `<workspace_context>` 块：Agent 不知道 `.editor/` 目录的存在，不会主动读取
-- 无 `editor_state`：Agent 知道 `.editor/` 存在并尝试读取，但 PreToolUse 钩子不满足触发条件（`opts.editor_state is not None` 为 `False`），只读到空占位符 `{}`
-- 两者都有：Agent 获得完整的工作空间感知能力，读取 `.editor/` 时得到实时文档数据
-
-### 9.2 `editor_state` 的两个运行时作用
-
-`AgentRunOptions.editor_state` 非空时，`agent_runner.py` 在运行时激活两个机制：
-
-#### 作用 A：PreToolUse 虚拟索引重定向
-
-`_pre_tool_use_hook` 中的拦截条件（三个条件**同时满足**）：
-
-```python
-if tool_name == "Read" and opts.editor_state is not None:
-    if is_editor_index_path(raw_path):
-        # 写临时文件 → updatedInput 重定向 → Agent 读到实时数据
+```text
+前端 request.editor_state["id"]
+  → 公开路由校验非空字符串并创建 exact Editor purpose grant
+  → ClaudeAgentRunRequest.editor_state
+  → AgentRunState.editor_state
+  → build_workspace_context_block(editor_session_id=...)
+  → Agent 把 exact ID 放入 Editor MCP 工具参数
 ```
 
-当 `editor_state` 为 `None` 时，拦截条件不满足，Agent 读到占位符 `{}`。
+| 字段 | 含义 | 授权用途 |
+| --- | --- | --- |
+| `editor_session_id` | `/api/sessions` 文档会话 ID | Admin grant 与 Editor operation exact binding |
+| `state.session_id` | Dream Chat Thread key | Factory lock/EventBus；不替代 Editor Session |
+| Claude Session ID | SDK续传标识 | 只用于Runtime resume |
+| workspace basename | 文件工作区名 | 只用于文件边界，不推导业务ID |
 
-#### 作用 B：Editor MCP 写工具子进程启动
-
-```python
-_editor_session_id = (opts.mcp_env or {}).get("INK_AGENT_SESSION_ID", "").strip()
-_editor_user_id = (opts.mcp_env or {}).get("INK_AGENT_USER_ID", "").strip()
-if (
-    _editor_session_id
-    and _editor_user_id
-    and any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
-):
-    # 启动 editor_mcp_stdio 子进程（INK_AGENT_SESSION_ID / INK_AGENT_USER_ID 传入）
-    # 子进程直接调用数据库读取/保存 editor_state，不依赖预序列化快照
-    mcp_servers["editor"] = _editor_mcp_stdio_config(session_id, user_id)
-```
-
-Editor MCP 子进程提供4个写工具（`mcp__editor__write_segment`、`mcp__editor__delete_segment`、`mcp__editor__insert_widget`、`mcp__editor__reply_to_comment`），均在 `_ALWAYS_CONFIRM_TOOL_NAMES` 中注册，必须经人类确认后才执行。`editor_state` 为 `None` 且 `mcp_env` 中无 session_id 时，子进程不启动。
-
-### 9.3 加载路径：从前端到 `AgentRunOptions`
-
-```
-前端 → HTTP API 请求（携带 editor_state 快照）
-  ↓
-ClaudeAgentRunRequest.editor_state     ← 前端传入的 EditorState JSON
-  ↓
-ClaudeAgentService.assemble_context()
-  │
-  ├─ editor_session_id = request.editor_state.get("id") or ""
-  │    ↑ user_sessions.id（来自 /api/sessions）
-  │    ↑ 在此步提取，NOT 从 cwd basename 推导
-  │
-  └─ build_user_message(
-         ...,
-         cwd = resolved_cwd,
-         editor_session_id = editor_session_id,   ← 显式传入
-     )
-       ↓
-       build_workspace_context_block(cwd, editor_session_id=editor_session_id)
-         ↓
-         <workspace_context> 块中包含：
-           Editor Session ID: {editor_session_id}   ← Claude 在写工具调用时传入
-```
-
-**实现文件**：`backend/claude_agent/service.py` `assemble_context` 方法。
-
-**三种 ID 对应关系（重申）：**
-
-| 字段 | 含义 | 提取方式 |
-|------|------|---------|
-| `editor_session_id` | 文档数据库记录 ID | `request.editor_state["id"]`（= `user_sessions.id`）|
-| `os.path.basename(cwd)` | workspace 目录名 | 由 `get_or_create_workspace` 创建，≠ editor_session_id |
-| `state.session_id` | Claude SDK 对话线程 ID | Claude Code SDK 生成 |
-
-**`editor_session_id` 为空的处理**：若 `request.editor_state` 为 `None`（纯对话轮次），`editor_session_id` 为空字符串，`<workspace_context>` 块仍注入但显示 `(unknown — ...)`。Agent 此时不会调用写工具（prompt 中没有 `<workspace_context>` 的情况下，Edit-Point Workflow 不触发）。
-
-> 完整的 `editor_state` 生命周期（数据结构定义、五阶段说明、业务时序图、不持久化决策）详见独立设计文档：
-> **[`editor-state-lifecycle.md`](./editor-state-lifecycle.md)**
-
-### 9.4 `editor_state` 存在与否的行为对比
-
-| 场景 | `editor_state` | `<workspace_context>` 块 | `.editor/` 读取结果 | Editor MCP |
-|------|---------------|--------------------------|---------------------|------------|
-| 纯对话轮次（pet chat 等） | `None` | 不注入（无 `cwd`）| N/A | 不启动 |
-| 工作空间对话（无编辑器） | `None` | 注入（描述 `.editor/` 机制）| 占位符 `{}` | 不启动 |
-| 文档编辑轮次 | 非 `None` | 注入（同上）| 实时 EditorState 数据 | 启动（需 mcp_env 含 session_id/user_id） |
-
-**Editor MCP 启动条件（2026-05-29 更新）**：editor MCP 子进程的启动不再依赖 `opts.editor_state`，而是检查 `mcp_env` 中是否同时含有 `INK_AGENT_SESSION_ID` 和 `INK_AGENT_USER_ID`。写工具子进程通过这两个变量直接从数据库获取和保存状态。`opts.editor_state` 仍用于 `.editor/` 虚拟索引 PreToolUse 拦截（读路径）。
-
-**纯对话轮次**（`cwd` 为 `None`）：`<workspace_context>` 块本身也不注入（`build_workspace_context_block` 仅在 `cwd` 非空时调用），`editor_state` 为 `None`，两层均不激活。
-
-**工作空间对话但无编辑器**（`cwd` 非空，`editor_state` 为 `None`）：`<workspace_context>` 块注入，描述 `.editor/` 的存在和机制。若 Agent 确实尝试读取 `.editor/`，得到占位符 `{}`，这是设计预期行为（见 §3.2、§6）。
-
-**文档编辑轮次**（`cwd` 非空，`editor_state` 非空）：两层完整激活，Agent 可获得实时文档数据并调用结构化 Editor MCP 工具。
-
-### 9.5 `editor_state` 与 `allowed_tools` 的协同条件
-
-Editor MCP 子进程的启动同时需要满足两个条件：
+### 9.3 Editor MCP 启动条件
 
 ```python
 opts.editor_state is not None
-AND
-any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
+and any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
 ```
 
-`allowed_tools` 中是否包含 `mcp__editor__*` 工具，由业务层（`ClaudeAgentService`）在构建 `AgentRunOptions` 时根据会话类型决定：
+active EditorState 存在时，Service 把 runtime `child_env()` 加入 `mcp_env`。Runner 的 Editor stdio config只选择五个broker字段：loopback host、port、随机turn capability、timeout和最大消息字节数。OAuth、Admin service secret、opaque Editor grant、actor ID、Admin origin与`DATABASE_URL`不会进入子进程。
 
-- **文档编辑会话**：传入 `editor_state` + 在 `allowed_tools` 中包含 `mcp__editor__*`
-- **纯对话会话**：不传 `editor_state`，`allowed_tools` 中不包含 `mcp__editor__*`
+Factory在既有admission之后启动active Editor broker。request未携带snapshot但flyweight有前轮state时仍启动；request与flyweight都为空时不启动。terminal/cancel的Phase 4关闭owner，SSE disconnect不提前关闭。
 
-这一双重条件设计保证：即使 `allowed_tools` 错误包含了 Editor MCP 工具名，在 `editor_state` 为 `None` 时子进程也不会启动（避免启动一个无法服务数据的 MCP 服务器）。
+### 9.4 场景行为
 
----
+| 场景 | active state | `<workspace_context>` | `.editor/` Read | Editor MCP |
+| --- | --- | --- | --- | --- |
+| 纯对话且无workspace | `None` | 不注入 | N/A | 不启动 |
+| workspace但无Editor | `None` | 描述机制 | 占位符 `{}` | 不启动 |
+| request携带Editor snapshot | request state | 包含exact Session ID | snapshot/flyweight | 启动broker |
+| request省略snapshot但flyweight存在 | cached state | 包含cached Session ID | cached/flyweight | 启动broker |
+| 写工具成功 | Admin committed state | 不重建prompt | 后续Read采用刷新state | 保持 |
+| `switch_editor`成功 | Admin target state | prompt文本不重建 | 后续Read采用目标state | 新Session独立grant |
+
+### 9.5 失败处理
+
+- request state ID非法：公开路由在SSE前返回422；
+- exact Session grant创建失败：关闭已建turn owner，不调用模型；
+- broker或Admin load失败：写工具返回closed error，flyweight不变；
+- replace结果未知：runtime保留原request ID，后续相同input只查询receipt；
+- switch target load失败：保留原Editor上下文；
+- tool result收到成功但cache缺失：Service可从Admin再load一次，成功才刷新；
+- Session event失败：记录既有安全日志，不回滚Admin已提交state。
+
+完整状态转换和验收见 [`editor-state-lifecycle.md`](./editor-state-lifecycle.md)，工具合同见 [`mcp-tools.md`](./mcp-tools.md)。
 
 ## 10. 系统提示词 Edit-Point Workflow 指导
 

@@ -1,5 +1,5 @@
-# [Input] Structured Dream Hook issues, ClaudeAgentService continuation builder, and chat persistence helpers.
-# [Output] Verify allowlisted/redacted message construction, stable identity, and persistence-before-SSE ordering.
+# [Input] Structured Dream Hook issues, ClaudeAgentService continuation builder, and Admin persistence owner.
+# [Output] Verify bounded message construction, typed persistence, stable identity, and pre-SSE ordering.
 # [Pos] Dream workbench auto-repair application contract test in backend/tests.
 # [Sync] 2026-09-01: initial bounded auto-repair message and dispatch coverage.
 # [Sync] 2026-09-01: cover duplicate-root/stage templates, move-not-copy
@@ -12,6 +12,7 @@
 #                    project-root repair message to carry server cleanup facts.
 # [Sync] 2026-09-01: a completed repair attempt is persisted before its second
 #                    Hook failure is classified, so the SSE transcript survives.
+# [Sync] 2026-09-16: fence SQL and use the exact Admin turn owner for both writes.
 
 """Dream workbench auto-repair message and continuation tests."""
 
@@ -39,6 +40,12 @@ from claude_agent.service import (
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from libs.claude_agent_kit.types import AgentRunResult
+from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
+from services.admin_data.dream_auto_repair_data import (
+    AdminDreamAutoRepairProvider,
+    DreamAutoRepairSettleOutputDTO,
+)
+from services.admin_data.errors import AdminDataError
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
     DreamArtifactTurnHookError,
@@ -52,6 +59,7 @@ from services.story_workspace.dream_auto_repair_service import (
     build_dream_auto_repair_message,
     dream_auto_repair_metadata_is_valid,
     persist_dream_auto_repair_message,
+    settle_dream_auto_repair_message,
 )
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
@@ -59,6 +67,27 @@ from story_workspace.contracts import StoryWorkspaceDreamRunContext
 RUN_ID = "run_0123456789abcdef0123456789abcdef"
 PROJECT_CLEANUP = ("server-project", ("workspace-project",))
 AMBIGUOUS_PROJECT_CLEANUP = ("server-project", ("stale-project",))
+
+
+class RecordingPersistence(AdminAgentTurnPersistence):
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def persist_user(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+class RecordingSettlement(AdminDreamAutoRepairProvider):
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def settle_dream_auto_repair(self, **kwargs):
+        self.calls.append(kwargs)
+        return DreamAutoRepairSettleOutputDTO(
+            message_id=kwargs["message_id"],
+            status=kwargs["status"],
+            changed=True,
+        )
 
 
 def mismatch_issue(
@@ -330,21 +359,102 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             originating_turn_id="turn-origin",
             project_cleanup=PROJECT_CLEANUP,
         )
-        with patch(
-            "services.story_workspace.dream_auto_repair_service.database.save_chat_message"
-        ) as save:
-            persist_dream_auto_repair_message(message)
-
-        save.assert_called_once_with(
-            message.thread_id,
-            "user",
-            message.persistence_parts(),
-            message.id,
-            dict(message.metadata),
+        provider = RecordingPersistence()
+        persist_dream_auto_repair_message(
+            message,
+            provider=provider,
+            actor_id="7",
         )
+
+        self.assertEqual(provider.calls, [{
+            "actor_id": "7",
+            "thread_id": message.thread_id,
+            "message_id": message.id,
+            "parts": message.persistence_parts(),
+            "metadata": dict(message.metadata),
+        }])
         self.assertEqual(message.sse_message()["id"], message.id)
         self.assertEqual(message.sse_message()["parts"], message.persistence_parts())
         self.assertEqual(message.sse_message()["metadata"], message.metadata)
+
+    def test_settlement_translates_product_metadata_to_strict_admin_dto(self) -> None:
+        message = build_dream_auto_repair_message(
+            issue=mismatch_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-origin",
+            originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
+        )
+        provider = RecordingSettlement()
+
+        changed = settle_dream_auto_repair_message(
+            message.id,
+            provider=provider,
+            actor_id="7",
+            thread_id=message.thread_id,
+            expected_metadata=message.metadata,
+            status="dispatched",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(len(provider.calls), 1)
+        call = provider.calls[0]
+        self.assertEqual(call["actor_id"], "7")
+        self.assertEqual(
+            call["expected_identity"].model_dump(),
+            {
+                "kind": DREAM_AUTO_REPAIR_METADATA_KIND,
+                "schema_version": "story-workspace-dream-auto-repair/v1",
+                "originating_message_id": "message-origin",
+                "originating_turn_id": "turn-origin",
+                "workflow_run_id": RUN_ID,
+                "repair_attempt": 1,
+                "validation_code": "PROJECT_STORY_SLUG_MISMATCH",
+                "idempotency_key": message.metadata["idempotencyKey"],
+                "project_cleanup": {
+                    "trusted_project_slug": "server-project",
+                    "stale_project_slugs": ["workspace-project"],
+                },
+            },
+        )
+
+    def test_settlement_preserves_closed_identity_and_state_failure_codes(self) -> None:
+        message = build_dream_auto_repair_message(
+            issue=mismatch_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-origin",
+            originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
+        )
+        for code in (
+            "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
+            "DREAM_AUTO_REPAIR_MESSAGE_CONFLICT",
+        ):
+            provider = RecordingSettlement()
+            provider.settle_dream_auto_repair = unittest.mock.Mock(
+                side_effect=AdminDataError(code, 409)
+            )
+            with self.assertRaises(DreamAutoRepairError) as raised:
+                settle_dream_auto_repair_message(
+                    message.id,
+                    provider=provider,
+                    actor_id="7",
+                    thread_id=message.thread_id,
+                    expected_metadata=message.metadata,
+                    status="dispatched",
+                )
+            self.assertEqual(raised.exception.code, code)
+
+    def test_production_auto_repair_module_has_no_database_or_sql_path(self) -> None:
+        source = (
+            ROOT / "services/story_workspace/dream_auto_repair_service.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("import database", source)
+        self.assertNotIn("database.", source)
+        self.assertNotIn("SELECT ", source)
+        self.assertNotIn("UPDATE chat_message", source)
 
     def test_continuation_commits_message_and_resume_before_sse(self) -> None:
         async def scenario():
@@ -377,11 +487,19 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 issue=mismatch_issue(),
             )
 
-            def persist(_message):
+            def persist(_message, **_kwargs):
                 order.append("persist")
 
-            def settle(_message_id, *, thread_id, expected_metadata, status):
-                del thread_id, expected_metadata
+            def settle(
+                _message_id,
+                *,
+                provider,
+                actor_id,
+                thread_id,
+                expected_metadata,
+                status,
+            ):
+                del provider, actor_id, thread_id, expected_metadata
                 order.append(f"settle:{status}")
                 return True
 
@@ -707,7 +825,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             with (
                 patch(
                     "claude_agent.service.persist_dream_auto_repair_message",
-                    side_effect=lambda _message: order.append("persist"),
+                    side_effect=lambda _message, **_kwargs: order.append("persist"),
                 ),
                 patch(
                     "claude_agent.service.settle_dream_auto_repair_message",

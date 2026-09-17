@@ -1,0 +1,9 @@
+{
+  "phase": "0061 post-upgrade catalog comparison",
+  "exit_code": 1,
+  "cause": "PostgreSQL renders text defaults with ::text and numeric defaults as strings; frozen descriptor stores normalized values",
+  "migration_execution": "upgrade applied successfully before assertion",
+  "candidate_modified": false,
+  "expected_digest_modified": false,
+  "rerun_scope": "owned four databases and candidate-0061 history only"
+}

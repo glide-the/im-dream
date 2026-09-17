@@ -1,7 +1,7 @@
 # [Sync] 2026-09-09: explain host-generated directory ZIP downloads to Agent replies.
 # [Sync] 2026-09-12: describe the literal ordinary-path ZIP boundary; hidden,
 #                    escaping, symlinked, and broad glob/root inputs stay out.
-# [Input] Consume database.list_sessions_in_range (via database module import).
+# [Input] Consume a service-validated recent Session projection.
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
 #         Imports build_workspace_context_block from claude_agent.workspace_context —
 #           that module's template is sourced from the virtual index mapping rules
@@ -10,6 +10,7 @@
 # [Pos] context-assembly node in backend/claude_agent
 # [Sync] 2026-05-22: rewritten for Ink & Memory; replaces Pawkeyland's pet/persona
 #                    context assembly with writing-session context injection.
+# [Sync] 2026-09-15: render only supplied Admin Session projections; remove direct database reads.
 # [Sync] 2026-05-26: merge build_user_message_content (SDK lib) into build_user_message
 #                    so that the SDK no longer participates in context processing.
 # [Sync] 2026-05-26: use extract_text_from_parts (message_parts.py) for full UIMessage
@@ -66,7 +67,7 @@ Assembles the system prompt that grounds the Claude agent in the user's
 Ink & Memory writing context.  Unlike the Pawkeyland version (which injects
 pet persona, Mem0 memories, and necklace sensor data), this builder:
 
-1. Loads the user's recent writing sessions from the database.
+1. Renders the user's service-validated recent Session projection.
 2. Renders a system prompt that positions Claude as a reflective writing
    assistant with knowledge of the user's recent entries.
 3. Provides a ``build_user_message`` helper that builds the full list of
@@ -292,7 +293,7 @@ When you need to work on a document whose session ID differs from the one shown 
    it via `mcp__user__get_sessions_range` if you only know the date or title.
 2. Call switch_editor(editor_session_id="<target-id>") — this requires NO human confirmation.
    The tool is a lightweight no-op on the MCP side; the server-side PostToolUse hook loads
-   the new editor_state from the database and updates the in-memory context automatically.
+   the new editor_state through the turn-owned Admin runtime and updates the in-memory context automatically.
 3. Confirm the switch — after the tool returns {{"ok": true}}, the .editor/ virtual index now
    serves content from the new session.  Proceed with the Edit-Point Workflow from step 2
    (Orient) onward.
@@ -341,10 +342,6 @@ the system template, follow the system template.
 
 """
 
-# Number of days to look back when loading recent sessions for the system prompt.
-_RECENT_SESSIONS_DAYS = 3
-
-
 def _render_configurable_system_prompt_block(
     configured_system_prompt: Optional[str],
 ) -> str:
@@ -358,10 +355,9 @@ def _render_configurable_system_prompt_block(
 
 
 def _render_session_entry(session: dict[str, Any]) -> str:
-    """Render one database session row into a Markdown entry block.
+    """Render one validated Session projection into a Markdown entry block.
 
-    database.list_sessions returns rows with keys:
-    id, name, labels, created_at, updated_at, first_line.
+    The projection has id, name, labels, created_at, updated_at and first_line.
     """
     raw_date = str(session.get("updated_at") or session.get("created_at") or "")[:10]
     session_id = str(session.get("id") or "")
@@ -391,7 +387,7 @@ class ClaudeAgentContextBuilder:
     Usage::
 
         builder = ClaudeAgentContextBuilder()
-        system_prompt = await builder.build_system_prompt(user_id)
+        system_prompt = await builder.build_system_prompt(recent_sessions)
         content_blocks = builder.build_user_message(raw_message, attachments=attachments)
     """
 
@@ -404,12 +400,12 @@ class ClaudeAgentContextBuilder:
 
     async def build_system_prompt(
         self,
-        user_id: str,
+        recent_sessions: list[dict[str, Any]],
         *,
         configured_system_prompt: Optional[str] = None,
     ) -> str:
-        """Build the system prompt by injecting Settings prompt and journal entries."""
-        recent_sessions_block = await self._load_recent_sessions_block(user_id)
+        """Build the system prompt from Settings and validated journal projections."""
+        recent_sessions_block = self._render_recent_sessions_block(recent_sessions)
         configurable_system_prompt_block = _render_configurable_system_prompt_block(
             configured_system_prompt
         )
@@ -598,58 +594,18 @@ class ClaudeAgentContextBuilder:
         return blocks
 
 
-    async def _load_recent_sessions_block(self, user_id: str) -> str:
-        """Return a Markdown block with the user's recent journal entries (last 3 days)."""
+    def _render_recent_sessions_block(
+        self, recent_sessions: list[dict[str, Any]]
+    ) -> str:
+        """Return the recent journal Markdown block from supplied projections."""
         try:
-            sessions = await self._fetch_recent_sessions(user_id)
+            sessions = list(recent_sessions or [])[: self._context_session_count]
+            entries = "".join(_render_session_entry(session) for session in sessions)
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed to load recent sessions for user_id=%s; skipping context.", user_id
-            )
+            logger.exception("Failed to render recent Session context; using empty context.")
             return _SESSIONS_HEADER + _NO_SESSIONS_TEXT + "\n"
 
         if not sessions:
             return _SESSIONS_HEADER + _NO_SESSIONS_TEXT + "\n"
 
-        entries = "".join(_render_session_entry(s) for s in sessions)
         return _SESSIONS_HEADER + entries + "\n"
-
-    async def _fetch_recent_sessions(self, user_id: str) -> list[dict[str, Any]]:
-        """Fetch sessions from the last 3 days from the database.
-
-        Uses ``database.list_sessions_in_range`` to limit results to the
-        ``_RECENT_SESSIONS_DAYS``-day window ending today (UTC).
-        """
-        import asyncio
-        import database  # local import; database module lives in backend/
-        from datetime import date, timedelta
-
-        today = date.today()
-        start_date = (today - timedelta(days=_RECENT_SESSIONS_DAYS - 1)).isoformat()
-        end_date = today.isoformat()
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, database.list_sessions_in_range, int(user_id), start_date, end_date
-        )
-        return list(result or [])[: self._context_session_count]
-
-    async def _fetch_sessions(self, user_id: str) -> list[dict[str, Any]]:
-        """Fetch recent sessions from the database using the project's database module.
-
-        Kept for backward compatibility; prefer ``_fetch_recent_sessions`` for
-        the system-prompt injection path.
-
-        ``database.list_sessions(user_id)`` is synchronous and manages its own
-        connection; we call it in a thread executor to avoid blocking the event loop.
-        """
-        import asyncio
-        import database  # local import; database module lives in backend/
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, database.list_sessions, user_id
-        )
-        rows = list(result or [])
-        # Respect context_session_count limit (DB returns all sessions)
-        return rows[: self._context_session_count]

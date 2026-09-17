@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "setup_assertions": 8,
+  "reused_owned_queued_operand": 1,
+  "new_graph_rows": 0,
+  "new_public_negative_grants": 2,
+  "old_rows_retained": 17,
+  "positive_post_calls": 0,
+  "oauth_signed_last": "new300s",
+  "private_key_exported": false,
+  "normal_database": "untouched",
+  "runtime_model_provider_filesystem": "not executed"
+}

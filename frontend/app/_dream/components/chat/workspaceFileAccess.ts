@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Strictly parsed Workspace URI, current Chat Thread identity, bearer auth state, and optional abort signal.
 // [Output] Shared authenticated Workspace content response/image blob helpers with stable failure classification.
 // [Pos] workspace file runtime access utility in frontend/app/_dream/components/chat
 // [Sync] 2026-09-09: route explicit downloads through the existing directory-ZIP endpoint.
 // [Sync] 2026-08-23: extract the existing file fetch/MIME boundary so live Markdown and long-image export share one authenticated path.
 
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type { WorkspaceUriParseResult } from './workspaceUri';
 
@@ -51,10 +53,10 @@ export async function fetchWorkspaceFile(
   signal?: AbortSignal,
   download = false,
 ): Promise<Response> {
-  const token = getAuthToken();
-  if (!token) throw new WorkspaceFileRequestError('access');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new WorkspaceFileRequestError('access');
   const response = await fetch(contentUrl(threadId, parsed.path, download), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...browserRequestHeaders({}, csrfToken) },
     signal,
   });
   if (!response.ok) throw new WorkspaceFileRequestError(failureFromStatus(response.status));

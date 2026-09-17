@@ -3,6 +3,7 @@
 <!-- [Pos] Current Notion connector interaction architecture bridge in docs/design/notion-session. -->
 <!-- [Sync] 2026-08-30: map the synchronized notion-cli Skill to the actor/thread-bound Agent Bash environment. -->
 <!-- [Sync] 2026-08-30: make the capability catalog the shared Skill source for Settings, workspace README, and per-turn context; retain discovery-only Feishu/local CLI placeholders. -->
+<!-- [Sync] 2026-09-16: route all connector metadata persistence through Admin Registry148-168 DTO/service/Drizzle operations. -->
 
 # Notion 连接器交互与架构映射
 
@@ -14,6 +15,9 @@
 flowchart LR
     Settings["Settings 配置"] --> Router["Connector API"]
     Router --> Facade["Actor-scoped Facade"]
+    Facade --> AdminDTO["Admin strict DTO client"]
+    AdminDTO --> AdminService["Admin permission/service"]
+    AdminService --> Drizzle["Typed Drizzle Repository"]
     Facade --> Credential["Credential Provider"]
     Facade --> Index["Light Index Provider"]
     Facade --> Catalog["Capability Catalog"]
@@ -31,7 +35,8 @@ flowchart LR
     CLI --> Notion
 ```
 
-- Settings 是连接、授权、范围和策略的唯一产品配置入口。
+- Settings 是连接、授权、范围和策略的唯一产品配置入口；当前 Admin OAuth actor 是 connector 数据权限主体。
+- Admin 执行 connector/resource/snapshot/thread 的权限过滤、SQL、ORM 和事务；Dream Facade 只编排 strict DTO、Notion CLI 与文件投影。
 - Chat 只读取服务器状态和来源摘要，点击“管理”回到 Settings。
 - 后台同步只发布轻量索引；Chat 初始化只投影，不运行同步。
 - Settings 的 Skill 行、workspace `.notion/README.md` 与每轮 workspace context 都消费 `build_notion_capability_catalog` 的返回值；README 生成函数和 context 不维护 Skill ID、标题、状态或 revision 的第二份清单。
@@ -58,8 +63,8 @@ flowchart LR
 
 | 状态 | Source of truth | 前端行为 |
 |---|---|---|
-| 连接/授权 | connector + credential Provider | 只规范化服务器 DTO |
-| 当前选择 | connector resources | 保存后用完整响应替换 UI |
+| 连接/授权 | Admin connector row + Dream credential Provider | 只规范化服务器 DTO |
+| 当前选择 | Admin-owned connector resources | 保存后用完整响应替换 UI |
 | 同步策略 | connector config 中的 policy snapshot | 展示 default/desired/effective/revision/status |
 | 最近成功索引 | actor current + connector identity | 无 identity 不显示“已同步” |
 | 部分可用 | 有有效授权/LKG，但最近重授权或同步失败 | warning，不覆盖为健康 |
@@ -72,6 +77,7 @@ flowchart LR
 - 新 turn 始终按当前选择过滤 LKG，因此取消范围优先于“保留旧成功”。
 - Notion Read/Skill 局部失败只影响该能力，不改变 turn、resume、cancel、EventBus 或 SSE。
 - 未选择、无凭证、权限不足、路径异常和 actor 不匹配全部 fail closed。
+- Admin 不可用、capability 缺失或未知写无法由原 request receipt 确认时返回明确失败；Dream 不回退到 PostgreSQL。
 
 ## 5. 已删除的历史路径
 

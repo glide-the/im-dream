@@ -1,5 +1,10 @@
+# [Sync] 2026-09-15: clear inherited user-stdio env in isolated Python before package imports.
+# [Sync] 2026-09-15: project only the Session broker tuple and retrieval policy to user stdio.
+# [Sync] 2026-09-16: project the same turn broker tuple to Story Workspace stdio for current-Run reads.
+# [Sync] 2026-09-15: project only the turn-local Editor broker tuple; remove DATABASE_URL and actor identity from Editor stdio.
 # [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
 #                    results; retain approved call identity until execution ends.
+# [Sync] 2026-09-14: scrub Admin/Auth server-secret keys from every explicit stdio MCP env projection.
 # [Sync] 2026-09-12: constrain shell ZIP exports to literal, in-workspace,
 #                    non-dot, non-symlink inputs and outputs.
 # [Sync] 2026-09-11: allow built-in query tools (Read/Grep/Glob/LS/NotebookRead) to access symlinked/source files in DEFAULT_BUILTIN_SKILLS_ROOT while keeping write tools strictly confined.
@@ -295,14 +300,21 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
-from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
+from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
+from .session_projection_protocol import (
+    SESSION_BROKER_ENV_NAMES,
+    SESSION_USER_MCP_ENV_NAMES,
+)
 from .sdk_env import (
+    ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
     apply_claude_config_home_to_options,
+    apply_admin_auth_credential_tombstones,
+    apply_gateway_credential_tombstones,
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
@@ -316,6 +328,7 @@ from .sdk_env import (
 from .builtin_skill_packages import DEFAULT_BUILTIN_SKILLS_ROOT
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
+from services.admin_data.editor_runtime import EDITOR_BROKER_ENV_NAMES
 
 try:
     from story_workspace.contracts import STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX
@@ -452,7 +465,10 @@ def _write_mcp_config_projection(
             json.dump(
                 {
                     "mcpServers": {
-                        str(name): _mcp_config_json_value(config)
+                        str(name): _mcp_server_config_json_value(
+                            config,
+                            preserve_admin_tombstones=(str(name) == "user"),
+                        )
                         for name, config in mcp_servers.items()
                     }
                 },
@@ -477,6 +493,22 @@ def _write_mcp_config_projection(
         except OSError:
             pass
         raise
+
+
+def _mcp_server_config_json_value(
+    config: object, *, preserve_admin_tombstones: bool = False
+) -> object:
+    """Project MCP configuration without restoring server authentication secrets."""
+    projected = _mcp_config_json_value(config)
+    if isinstance(projected, dict) and isinstance(projected.get("env"), dict):
+        projected["env"] = {
+            key: value for key, value in projected["env"].items()
+            if (
+                key not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+                or (preserve_admin_tombstones and value == "")
+            )
+        }
+    return projected
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     story_workspace_allowed_tool_names()
@@ -2143,23 +2175,39 @@ def _stdio_env(
             if value:
                 _set_env_aliases(env, canonical_name, legacy_name, value)
     for key, value in (extra_env or {}).items():
-        if value is not None:
+        if value is not None and str(key) not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES:
             env[str(key)] = str(value)
     return env
 
 
-def _user_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the user animation + session tool server.
+def _user_mcp_stdio_config(mcp_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+    """Build user stdio with the exact Session broker and retrieval-policy env."""
 
-    *extra_env* is forwarded to ``_stdio_env`` so that session-scoped bindings
-    (e.g. ``INK_AGENT_USER_ID``) reach the subprocess.
-    """
+    source = mcp_env or {}
+    allowed_env = {
+        name: str(source[name])
+        for name in SESSION_USER_MCP_ENV_NAMES
+        if source.get(name) is not None and str(source[name]).strip()
+    }
+    child_env = _stdio_env(extra_env=allowed_env)
+    apply_gateway_credential_tombstones(child_env)
+    apply_admin_auth_credential_tombstones(child_env)
+    module_name = "libs.claude_agent_kit.server.user_mcp_stdio"
+    bootstrap = (
+        "import os,runpy,sys;"
+        f"_names={SESSION_USER_MCP_ENV_NAMES!r};"
+        "_env={name:os.environ[name] for name in _names "
+        "if os.environ.get(name,'').strip()};"
+        "os.environ.clear();os.environ.update(_env);"
+        f"sys.path.insert(0,{str(_REPO_ROOT)!r});"
+        f"runpy.run_module({module_name!r},run_name='__main__')"
+    )
 
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
-        args=["-m", "libs.claude_agent_kit.server.user_mcp_stdio"],
-        env=_stdio_env(extra_env=extra_env),
+        args=["-I", "-c", bootstrap],
+        env=child_env,
     )
 
 
@@ -2190,17 +2238,16 @@ def _editor_mcp_stdio_config(
 ) -> McpStdioServerConfig:
     """Build the external stdio MCP config for the EditorState write-only server.
 
-    The Agent still supplies the visible Editor session ID in each tool call,
-    while the trusted actor and effective PostgreSQL capability come only from
-    the server process. Neither value is exposed through prompts or tool input.
+    The Agent supplies the visible Editor Session ID in each tool call. The
+    child receives only one private turn-local broker capability; OAuth,
+    service credentials, Admin bearers and PostgreSQL never cross this edge.
     """
-    trusted_env: dict[str, str] = {}
-    actor_id = str((mcp_env or {}).get("INK_AGENT_USER_ID") or "").strip()
-    database_url = str(os.getenv("DATABASE_URL") or "").strip()
-    if actor_id:
-        trusted_env["INK_AGENT_USER_ID"] = actor_id
-    if database_url:
-        trusted_env["DATABASE_URL"] = database_url
+    trusted_env = {
+        name: str((mcp_env or {}).get(name) or "").strip()
+        for name in EDITOR_BROKER_ENV_NAMES
+    }
+    if any(not value for value in trusted_env.values()):
+        raise ValueError("Editor runtime broker is unavailable")
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
@@ -2242,7 +2289,7 @@ def _apply_editor_session_binding(
 def _story_workspace_mcp_stdio_config(
     mcp_env: dict[str, str],
 ) -> McpStdioServerConfig:
-    """Build the Story Workspace MCP config with only trusted identity context."""
+    """Build Story Workspace MCP config with bound identity and broker context."""
 
     trusted_env = {
         name: mcp_env[name]
@@ -2251,6 +2298,7 @@ def _story_workspace_mcp_stdio_config(
             "INK_AGENT_THREAD_ID",
             "INK_AGENT_WORKFLOW_RUN_ID",
             "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
+            *SESSION_BROKER_ENV_NAMES,
         )
         if mcp_env.get(name)
     }
@@ -3532,8 +3580,8 @@ class ClaudeAgentRunner:
         # Fired by the SDK after a tool has executed and its result is
         # available.  Used exclusively to intercept the switch_editor
         # context-switch tool: after the no-op MCP handler returns ok, this
-        # hook reads the target editor_session_id from the tool input, loads
-        # the new editor_state from the database, and writes it into the
+        # hook reads the target editor_session_id from the tool input, adopts
+        # the state already loaded through Admin by the Editor tool, and writes it into the
         # AgentRunState flyweight via opts.editor_state_setter.  Subsequent
         # .editor/ reads in the same turn will see the new document context
         # because PreToolUse reads live_editor_state via opts.editor_state_getter
@@ -3552,9 +3600,9 @@ class ClaudeAgentRunner:
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
                 return {}
 
-            if opts.editor_state_setter is None:
+            if opts.editor_state_setter is None or opts.editor_state_loader is None:
                 logger.warning(
-                    "PostToolUse: switch_editor fired but editor_state_setter is None; "
+                    "PostToolUse: switch_editor fired but Editor runtime callbacks are unavailable; "
                     "skipping context switch."
                 )
                 return {}
@@ -3569,17 +3617,11 @@ class ClaudeAgentRunner:
                 return {}
 
             try:
-                actor_id = int(str(opts.canonical_user_id or "").strip())
-                new_state = await asyncio.to_thread(
-                    load_editor_state_from_db,
-                    new_session_id,
-                    actor_id,
-                )
+                new_state = opts.editor_state_loader(new_session_id)
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "PostToolUse: switch_editor DB load failed for session %r",
+                    "PostToolUse: switch_editor Admin cache load failed for session %r",
                     new_session_id,
-                    exc_info=True,
                 )
                 return {}
 
@@ -3693,7 +3735,7 @@ class ClaudeAgentRunner:
             # reaches EOF, later control writes can fail with
             # "ProcessTransport is not ready for writing".  Stdio MCP gives the
             # tool protocol its own child-process stdin/stdout.
-            mcp_servers["user"] = _user_mcp_stdio_config(extra_env=mcp_env)
+            mcp_servers["user"] = _user_mcp_stdio_config(mcp_env)
         if _memory_mcp_enabled() and any(
             tool.startswith(_MEMORY_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
@@ -3714,9 +3756,7 @@ class ClaudeAgentRunner:
             )
         ):
             mcp_servers["editor"] = _editor_mcp_stdio_config(mcp_env)
-            logger.debug(
-                "Editor MCP enabled with server-owned actor and persistence capability."
-            )
+            logger.debug("Editor MCP enabled with a turn-local persistence broker.")
 
         if (
             _is_trusted_story_workspace_mcp_context(cwd, mcp_env)
@@ -3842,7 +3882,7 @@ class ClaudeAgentRunner:
         gateway_model_override = gateway_enabled()
         apply_gateway_sdk_env_to_options(
             sdk_options,
-            opts.canonical_user_id,
+            opts.gateway_access_token,
             gateway_idempotency_key=opts.gateway_idempotency_key,
         )
         apply_notion_cli_env_to_options(

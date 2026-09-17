@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-workflow-remaining.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "WORKFLOW FIXTURE PREPARED: context=18; confirmation=14; public active grant then terminal transition; restricted roles; private proofs0[REDACTED]\n",
+  "classification": "primary-owned isolated fixture and public active grant setup"
+}

@@ -49,10 +49,6 @@ class AdminGatewayConfig:
     enabled: bool
     base_url: str = ""
     service_key: str = field(default="", repr=False)
-    issuer: str = ""
-    audience: str = ""
-    client_id: str = ""
-    token_lifetime_seconds: int = 240
 
     @classmethod
     def from_environment(
@@ -66,22 +62,11 @@ class AdminGatewayConfig:
         ).lower()
         if enabled not in _TRUE_VALUES:
             return cls(enabled=False)
-        raw_lifetime = values.get(
-            "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS",
-            "240",
-        ).strip()
-        try:
-            lifetime = int(raw_lifetime)
-        except ValueError as exc:
-            raise AdminGatewayConfigurationError(
-                "Admin Gateway integration is enabled but not safely configured"
-            ) from exc
         key = _required(values, "INK_GATEWAY_SERVICE_KEY")
         if (
             not key.startswith("gw_")
             or len(key.encode("utf-8")) < 32
             or any(character in key for character in "\r\n")
-            or not 30 <= lifetime <= 300
         ):
             raise AdminGatewayConfigurationError(
                 "Admin Gateway integration is enabled but not safely configured"
@@ -90,17 +75,11 @@ class AdminGatewayConfig:
             enabled=True,
             base_url=_base_url(_required(values, "INK_GATEWAY_BASE_URL")),
             service_key=key,
-            issuer=_required(values, "INK_GATEWAY_SUBJECT_JWT_ISSUER"),
-            audience=_required(values, "INK_GATEWAY_SUBJECT_JWT_AUDIENCE"),
-            client_id=_required(values, "INK_GATEWAY_SERVICE_CLIENT_ID"),
-            token_lifetime_seconds=lifetime,
         )
 
     def __repr__(self) -> str:
         return (
             "AdminGatewayConfig("
             f"enabled={self.enabled!r}, base_url=<redacted>, "
-            "service_key=<redacted>, issuer=<redacted>, audience=<redacted>, "
-            "client_id=<redacted>, "
-            f"token_lifetime_seconds={self.token_lifetime_seconds!r})"
+            "service_key=<redacted>)"
         )

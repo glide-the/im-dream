@@ -1,23 +1,24 @@
-"""Focused canonical event persistence, delivery, ordering, and safety tests."""
+# [Input] Immutable canonical Event DTOs and pure ordered EventConsumer.
+# [Output] Payload safety, deduplication, ordering and gap-timeout regressions without database persistence.
+# [Pos] Provider-free event contract tests; no runtime DDL or Dream database fallback.
+# [Sync] 2026-09-16: retire the unused EventEmitter database path and keep pure contracts.
+
+"""Focused canonical event contract, ordering, and safety tests."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
-import sqlite3
-import tempfile
 import unittest
+from uuid import uuid4
 
 from pydantic import ValidationError
 
-from backend.schema.legacy_main_sqlite import create_event_tables
 from backend.models.events import (
     CANONICAL_EVENT_TYPES,
     CanonicalEventType,
     EventEnvelope,
 )
 from backend.services.events.event_consumer import EventConsumer
-from backend.services.events.event_emitter import EventEmissionError, EventEmitter
 
 
 NOW = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -93,38 +94,46 @@ PAYLOADS = {
 
 
 class EventFixture:
+    """Build strict DTO fixtures without introducing a persistence provider."""
+
     def __init__(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.temp_dir.name) / "events.db"
-        self.db = sqlite3.connect(self.path)
-        self.db.row_factory = sqlite3.Row
-        create_event_tables(self.db)
-        self.queue_events: list[EventEnvelope] = []
-        self.projections: list[dict] = []
-        self.emitter = EventEmitter(
-            self.db,
-            workspace_id=WORKSPACE_ID,
-            queue_publisher=self.queue_events.append,
-            projection_publisher=self.projections.append,
-            clock=lambda: NOW,
-        )
+        self.emitter = self
 
     def close(self) -> None:
-        self.db.close()
-        self.temp_dir.cleanup()
+        return None
+
+    def build_envelope(
+        self,
+        event_type: CanonicalEventType | str,
+        aggregate_id: str,
+        payload: dict,
+        correlation_id: str,
+        causation_id: str | None = None,
+    ) -> EventEnvelope:
+        return EventEnvelope(
+            event_id=f"evt_{uuid4().hex}",
+            event_type=event_type,
+            event_version=1,
+            occurred_at=NOW,
+            workspace_id=WORKSPACE_ID,
+            aggregate_id=aggregate_id,
+            aggregate_version=1,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
+            payload=payload,
+        )
 
     def build(
         self,
         aggregate_id: str = "run_test",
         event_type: CanonicalEventType = CanonicalEventType.WORKFLOW_RUN_CREATED,
     ) -> EventEnvelope:
-        return self.emitter.build_envelope(
+        return self.build_envelope(
             event_type,
             aggregate_id,
             PAYLOADS[event_type],
             "operation_test",
         )
-
 
 class EventEnvelopeTests(unittest.TestCase):
     def test_all_ten_canonical_event_contracts_validate(self) -> None:
@@ -191,99 +200,6 @@ class EventEnvelopeTests(unittest.TestCase):
             self.assertEqual("prm_123", safe.payload["prompt_ref"])
         finally:
             fixture.close()
-
-
-class EventEmitterTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.fixture = EventFixture()
-
-    async def asyncTearDown(self) -> None:
-        self.fixture.close()
-
-    async def test_persist_first_delivery_and_sanitized_projection(self) -> None:
-        envelope = self.fixture.build()
-        await self.fixture.emitter.emit(envelope)
-
-        row = self.fixture.db.execute(
-            "SELECT * FROM events WHERE event_id = ?", (envelope.event_id,)
-        ).fetchone()
-        self.assertIsNotNone(row)
-        self.assertEqual(envelope.event_type.value, row["event_type"])
-        self.assertEqual(1, row["aggregate_version"])
-        self.assertEqual([envelope], self.fixture.queue_events)
-        self.assertEqual(envelope.event_id, self.fixture.projections[0]["event_id"])
-        self.assertEqual(envelope.payload, self.fixture.projections[0]["payload"])
-
-    async def test_retry_same_id_redelivers_without_duplicate_audit_row(self) -> None:
-        envelope = self.fixture.build()
-        await self.fixture.emitter.emit(envelope)
-        await self.fixture.emitter.emit(envelope)
-
-        count = self.fixture.db.execute(
-            "SELECT COUNT(*) FROM events WHERE event_id = ?", (envelope.event_id,)
-        ).fetchone()[0]
-        self.assertEqual(1, count)
-        self.assertEqual([envelope, envelope], self.fixture.queue_events)
-
-    async def test_delivery_failure_retains_authoritative_row_for_retry(self) -> None:
-        attempts = 0
-
-        def fail_once(_: EventEnvelope) -> None:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise RuntimeError("queue unavailable")
-
-        self.fixture.emitter._queue_publisher = fail_once
-        envelope = self.fixture.build()
-        with self.assertRaises(EventEmissionError) as caught:
-            await self.fixture.emitter.emit(envelope)
-        self.assertTrue(caught.exception.persisted)
-        self.assertEqual(1, self.fixture.db.execute("SELECT COUNT(*) FROM events").fetchone()[0])
-
-        await self.fixture.emitter.emit(envelope)
-        self.assertEqual(2, attempts)
-        self.assertEqual(1, self.fixture.db.execute("SELECT COUNT(*) FROM events").fetchone()[0])
-
-    async def test_aggregate_versions_follow_persisted_authority(self) -> None:
-        first = self.fixture.build()
-        await self.fixture.emitter.emit(first)
-        second = self.fixture.build()
-        await self.fixture.emitter.emit(second)
-        self.assertEqual((1, 2), (first.aggregate_version, second.aggregate_version))
-
-    async def test_database_events_are_append_only(self) -> None:
-        envelope = self.fixture.build()
-        await self.fixture.emitter.emit(envelope)
-        with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
-            self.fixture.db.execute(
-                "UPDATE events SET correlation_id = 'changed' WHERE event_id = ?",
-                (envelope.event_id,),
-            )
-        self.fixture.db.rollback()
-        with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
-            self.fixture.db.execute(
-                "DELETE FROM events WHERE event_id = ?", (envelope.event_id,)
-            )
-        self.fixture.db.rollback()
-
-    async def test_schema_initialization_is_idempotent(self) -> None:
-        create_event_tables(self.fixture.db)
-        create_event_tables(self.fixture.db)
-        self.fixture.db.commit()
-        index_names = {
-            row[0]
-            for row in self.fixture.db.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'"
-            )
-        }
-        self.assertTrue(
-            {
-                "idx_events_aggregate",
-                "idx_events_type",
-                "idx_events_correlation",
-            }.issubset(index_names)
-        )
 
 
 class EventConsumerTests(unittest.IsolatedAsyncioTestCase):

@@ -1,4 +1,7 @@
-"""Unit tests for services.claude_plugin (shared install/pack pipeline)."""
+"""Unit tests for services.claude_plugin (shared install/pack pipeline).
+
+[Sync] 2026-09-15: preserve immutable Admin 0.1.0 digest receipt compatibility.
+"""
 
 from __future__ import annotations
 
@@ -28,11 +31,12 @@ from services.claude_plugin.artifact_store import (
     get_artifact,
     import_tree,
 )
-from services.claude_plugin.workspace_packer import (
-    WorkspacePackError,
-    pack_workspace_plugins,
+from services.claude_plugin.workspace_packer import WorkspacePackError
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
 )
 from libs.claude_agent_kit.server.plugin_digest import (
+    compute_legacy_admin_plugin_digest,
     compute_plugin_digest,
     digest_is_valid,
 )
@@ -87,6 +91,26 @@ class CompatibilityTests(unittest.TestCase):
 
 
 class DigestTests(unittest.TestCase):
+    def test_legacy_admin_receipt_ordering_is_explicit_and_content_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text(
+                '{"name":"ordering-plugin","version":"1.0.0"}'
+            )
+            (root / "skills" / "a").mkdir(parents=True)
+            (root / "skills" / "a" / "SKILL.md").write_text("# nested")
+            (root / "skills.md").write_text("# root")
+
+            self.assertEqual(
+                compute_plugin_digest(root),
+                "sha256:6b9a1e781934ecdcae293f5c4a52c427184254cfb167f042184b9436a76ea196",
+            )
+            self.assertEqual(
+                compute_legacy_admin_plugin_digest(root),
+                "sha256:81667077dd55bbcea5c288c946401bd67d634fab3e47eeb74edc2d43caf8bb3c",
+            )
+
     def test_digest_is_deterministic_and_ignores_volatile_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

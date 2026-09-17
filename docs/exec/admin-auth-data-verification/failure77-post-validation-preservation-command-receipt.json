@@ -1,0 +1,8 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/failure77-preservation.py verify",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 0,
+  "output": "{\"result\": \"PASS\", \"target\": \"[REDACTED]\", \"assertions\": 293, \"original125_full_rows_retained\": 125, \"prepublic125_non_target_full_rows_retained\": 125, \"post_public17_all_full_rows_retained\": 17, \"all_positive_originals_current_owner_digest_scopes\": 6, \"already_failed_run_transitions_pf_bindings_history\": \"retained full rows\", \"active_owned_fault_functions\": 0, \"normal_database\": \"untouched\", \"provider_model_runtime_filesystem\": \"not executed\"}\n",
+  "scope": "primary SELECT-only owned original125/prepublic125/postpublic17/positive6 preservation; no business mutation"
+}

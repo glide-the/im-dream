@@ -1,4 +1,4 @@
-# [Input] Notion connector facade, auth, discovery, and snapshot materialization.
+# [Input] Notion facade, current Admin OAuth actor, discovery, and snapshot materialization.
 # [Output] Register /api/connectors* endpoints, read-only Notion capability/Skill projections, and own the strategy-driven snapshot worker lifecycle.
 # [Pos] notion route node in backend/routers
 # [Sync] 2026-07-04: initial Notion connector routes for create/auth/discover/
@@ -8,6 +8,7 @@
 # [Sync] 2026-08-28: expose versioned snapshot-sync strategy and run scheduled synchronization outside Chat turns.
 # [Sync] 2026-08-29: expose actor-scoped capability, Skill body, and stable-ID Skill file reads without adding MCP execution or filesystem path input.
 # [Sync] 2026-08-30: expose ntn installation-required state before auth and return an actionable missing-CLI response.
+# [Sync] 2026-09-16: bind user routes and scheduled sync to separate Admin DTO authorities.
 
 """Notion resource connector HTTP routes."""
 from __future__ import annotations
@@ -40,16 +41,28 @@ from notion.capabilities import (
     get_notion_skill_detail,
     get_notion_skill_file,
 )
+from notion.store import NotionConnectorStore
+from services.admin_data.notion_connector_data import AdminNotionConnectorData
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
-from .deps import get_current_user
+from .deps import get_admin_request_auth, get_current_user
 
 @asynccontextmanager
-async def _notion_store_lifespan(_app: Any) -> AsyncIterator[None]:
-    """Own the pool lifecycle; schema creation belongs only to Admin/Drizzle."""
+async def _notion_store_lifespan(app: Any) -> AsyncIterator[None]:
+    """Own the background DTO client; schema and transactions stay in Admin."""
 
     from notion.sync_scheduler import NotionSnapshotSyncWorker
 
-    open_default_store()
+    owner = getattr(app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise RuntimeError("ADMIN_CONFIGURATION_INVALID")
+    open_default_store(
+        store=NotionConnectorStore(
+            AdminNotionConnectorData(owner.client),
+            background=True,
+        )
+    )
     worker = NotionSnapshotSyncWorker()
     worker.start()
     try:
@@ -91,8 +104,26 @@ def _user_id(current_user: dict) -> int:
     return int(current_user["user_id"])
 
 
-def _connector_facade(current_user: dict, connector_id: Optional[str] = None):
-    return build_notion_facade(_user_id(current_user), connector_id)
+def _connector_facade(
+    current_user: dict,
+    owner: AdminRequestAuth,
+    connector_id: Optional[str] = None,
+):
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(
+        actor, AdminRequestActor
+    ):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    connector_store = NotionConnectorStore(
+        AdminNotionConnectorData(owner.client),
+        access_token=actor.access_token,
+        expected_user_id=actor.canonical_user_id,
+    )
+    return build_notion_facade(
+        _user_id(current_user),
+        connector_id,
+        connector_store=connector_store,
+    )
 
 
 def _coerce_resource_item(item: Any, kind: str) -> dict[str, Any]:
@@ -110,6 +141,8 @@ def _coerce_resource_list(items: Iterable[Any], kind: str) -> list[dict[str, Any
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, AdminDataError):
+        return HTTPException(status_code=exc.status_code, detail=exc.code)
     if isinstance(exc, NotionCapabilityNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, NotionCapabilityRevisionError):
@@ -153,8 +186,10 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Notion request failed safely.")
 
 
-def _current_notion_connector(current_user: dict) -> dict[str, Any] | None:
-    facade = _connector_facade(current_user)
+def _current_notion_connector(
+    current_user: dict, owner: AdminRequestAuth
+) -> dict[str, Any] | None:
+    facade = _connector_facade(current_user, owner)
     connectors = [
         connector
         for connector in facade.list_connectors()
@@ -171,8 +206,11 @@ def _current_notion_connector(current_user: dict) -> dict[str, Any] | None:
 
 
 @router.get("/api/connectors")
-def list_connectors(current_user: dict = Depends(get_current_user)):
-    facade = _connector_facade(current_user)
+def list_connectors(
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    facade = _connector_facade(current_user, owner)
     try:
         return {"connectors": facade.list_connectors()}
     except Exception as exc:  # noqa: BLE001
@@ -183,8 +221,9 @@ def list_connectors(current_user: dict = Depends(get_current_user)):
 def create_connector(
     body: ConnectorCreateRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user)
+    facade = _connector_facade(current_user, owner)
     try:
         connector = facade.create_connector(
             name=body.name,
@@ -197,11 +236,14 @@ def create_connector(
 
 
 @router.get("/api/connectors/notion/capabilities")
-def get_notion_capabilities(current_user: dict = Depends(get_current_user)):
+def get_notion_capabilities(
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
     try:
         return {
             "catalog": build_notion_capability_catalog(
-                _current_notion_connector(current_user)
+                _current_notion_connector(current_user, owner)
             )
         }
     except Exception as exc:  # noqa: BLE001
@@ -212,11 +254,12 @@ def get_notion_capabilities(current_user: dict = Depends(get_current_user)):
 def read_notion_skill(
     skill_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     try:
         return get_notion_skill_detail(
             skill_id,
-            _current_notion_connector(current_user),
+            _current_notion_connector(current_user, owner),
         )
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
@@ -243,8 +286,9 @@ def read_notion_skill_file(
 def get_connector(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return {"connector": facade.get_connector(connector_id)}
     except Exception as exc:  # noqa: BLE001
@@ -256,8 +300,9 @@ def update_connector(
     connector_id: str,
     body: ConnectorUpdateRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     updates: dict[str, Any] = {}
     if body.name is not None:
         updates["name"] = body.name
@@ -273,8 +318,9 @@ def update_connector(
 def delete_connector(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         deleted = facade.delete_connector(connector_id)
         return {"deleted": deleted}
@@ -286,8 +332,9 @@ def delete_connector(
 async def auth_login(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return await facade.start_auth(connector_id)
     except Exception as exc:  # noqa: BLE001
@@ -298,8 +345,9 @@ async def auth_login(
 async def auth_poll(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return await facade.poll_auth(connector_id)
     except Exception as exc:  # noqa: BLE001
@@ -310,8 +358,9 @@ async def auth_poll(
 async def list_databases(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         databases = await facade.list_databases(connector_id)
         return {"connectorId": connector_id, "databases": databases}
@@ -323,8 +372,9 @@ async def list_databases(
 async def list_pages(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         pages = await facade.list_pages(connector_id)
         return {"connectorId": connector_id, "pages": pages}
@@ -336,8 +386,9 @@ async def list_pages(
 def list_resources(
     connector_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return {"connectorId": connector_id, "resources": facade.list_selected_resources(connector_id)}
     except Exception as exc:  # noqa: BLE001
@@ -349,8 +400,9 @@ async def select_resources(
     connector_id: str,
     body: ResourceSelectionRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         databases = _coerce_resource_list(body.selected_databases, "database")
         pages = _coerce_resource_list(body.selected_pages, "page")
@@ -369,8 +421,9 @@ async def sync_connector(
     connector_id: str,
     body: SyncRequest | None = None,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return await facade.sync(connector_id=connector_id, workspace_id=(body.workspace_id if body else None))
     except Exception as exc:  # noqa: BLE001
@@ -382,8 +435,9 @@ def update_sync_policy(
     connector_id: str,
     body: SyncPolicyUpdateRequest,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
         return {
             "connector": facade.update_sync_policy(
@@ -401,12 +455,11 @@ def delete_resource(
     connector_id: str,
     resource_id: str,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    facade = _connector_facade(current_user, connector_id)
+    facade = _connector_facade(current_user, owner, connector_id)
     try:
-        from notion import delete_connector_resource
-
-        deleted = delete_connector_resource(connector_id, _user_id(current_user), resource_id)
+        deleted = facade.delete_selected_resource(resource_id, connector_id)
         return {"deleted": deleted}
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc

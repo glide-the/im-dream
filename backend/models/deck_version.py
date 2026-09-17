@@ -3,6 +3,7 @@
 [Input] Authenticated Deck identities, aggregate draft revisions, and explicit commit metadata.
 [Output] Strict version state, preview, commit, history, and conflict DTOs.
 [Pos] Deck content-version model node in backend/models.
+[Sync] 2026-09-15: enforce the published positive safe-integer CAS input contract without altering public responses.
 [Sync] 2026-08-16: introduce CozeLoop-inspired draft/explicit-commit contracts without Workflow.
 """
 
@@ -19,8 +20,8 @@ class _StrictModel(BaseModel):
 
 
 class DeckVersionMutationRequest(_StrictModel):
-    expected_draft_revision: int = Field(ge=1)
-    expected_base_version: int | None = Field(default=None, ge=1)
+    expected_draft_revision: int = Field(strict=True, ge=1, le=9_007_199_254_740_991)
+    expected_base_version: int | None = Field(default=None, strict=True, ge=1, le=9_007_199_254_740_991)
 
 
 class DeckVersionCommitRequest(DeckVersionMutationRequest):

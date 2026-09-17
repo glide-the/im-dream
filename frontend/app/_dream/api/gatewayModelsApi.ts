@@ -1,11 +1,13 @@
-// [Input] Auth token and Dream same-origin Gateway models BFF.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
+// [Input] Browser session and CSRF and Dream same-origin Gateway models BFF.
 // [Output] Strict platform model catalog DTOs and effective saved/default
 //          selection resolution for Settings controls.
 // [Pos] frontend API boundary for Admin public Gateway models.
 // [Sync] 2026-08-14: use Admin's callable defaultModelAlias when a new user
 //                    has not saved an explicit model preference.
 import { z } from 'zod';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { API_BASE } from '../lib/apiBase';
 
 const aliasSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/);
@@ -88,7 +90,7 @@ export function resolveGatewayModelSelection(
 
 export async function fetchGatewayModels(signal?: AbortSignal): Promise<GatewayModelCatalog> {
   const response = await fetch(`${API_BASE}/api/gateway/models`, {
-    headers: { Authorization: `Bearer ${getAuthToken()}` },
+    headers: { ...browserRequestHeaders() },
     signal,
   });
   if (!response.ok) throw new GatewayModelsApiError(response.status);

@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "validation_scope": "remaining_reads",
+  "new_preflights": 2,
+  "cases": 8,
+  "original_facts_expected_history": "unchanged",
+  "independent_expected": "actual original pure hash/fingerprint and full read projection with PostgreSQL current clock",
+  "new_active_expiry": "current PostgreSQL clock + original configured TTL; no old TTL changes",
+  "harness_correction": "Required active/expired markers each exactly once; old consumed and original remaining permission cases retained; earlier two fresh facts and all failure receipts remain unchanged",
+  "normal_database": "untouched"
+}

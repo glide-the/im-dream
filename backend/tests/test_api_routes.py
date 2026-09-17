@@ -4,42 +4,42 @@
 [Output] Route contracts and recovery metadata for every registered error code.
 [Pos] Backend API surface regression tests.
 [Sync] 2026-08-19: include four fail-closed Remote Marketplace error codes.
+[Sync] 2026-09-16: retire the pre-Admin Story gateway fixture; focused DTO suites own those routes.
+[Sync] 2026-09-16: update Deck Plugin route fakes for current OAuth actor and Registry170-174 scope.
+[Sync] 2026-09-16: include the registered unknown-result Claude Plugin error contract.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from routers import deck_plugins, story_workspace, voice_decks
+from routers import deck_plugins, voice_decks
+from services.admin_data.request_auth import AdminRequestActor
 from services.errors.error_registry import (
-    ApiRouteError,
     ERROR_REGISTRY,
+    ApiRouteError,
     build_error_payload,
 )
-
 
 PLUGIN_ID = "voice-decks.story-dramatize"
 VERSION = "3.1.0"
 DECK_ID = "deck-api-routes"
-PREFLIGHT_ID = "pf_" + "1" * 32
-RUN_ID = "run_" + "2" * 32
 
 
 class _DeckGateway:
-    async def list_installations(self, *, scope_id):
+    async def list_installations(self, *, scope_type, scope_id, actor):
         return {"installations": [{"scope_id": scope_id, "status": "ready"}]}
 
-    async def install(self, request, *, actor_id):
+    async def install(self, request, *, actor):
         return {
             "operation_id": "op_" + "3" * 32,
             "deck_plugin_installation_id": "dpi_" + "4" * 32,
@@ -48,10 +48,10 @@ class _DeckGateway:
             "status": "installing",
             "capability_diff": {"added": [], "removed": []},
             "runtime_readiness": "materializing",
-            "actor_id": actor_id,
+            "actor_id": actor.canonical_user_id,
         }
 
-    async def get_version(self, deck_plugin_id, version):
+    async def get_version(self, deck_plugin_id, version, **_kwargs):
         return {
             "deck_plugin_id": deck_plugin_id,
             "deck_plugin_version": version,
@@ -61,35 +61,35 @@ class _DeckGateway:
             "release_hash": "sha256:" + "a" * 64,
         }
 
-    async def enable(self, deck_plugin_id, request, *, actor_id):
-        return {"deck_plugin_id": deck_plugin_id, "status": "ready", "actor_id": actor_id}
+    async def enable(self, deck_plugin_id, request, *, actor):
+        return {"deck_plugin_id": deck_plugin_id, "status": "ready", "actor_id": actor.canonical_user_id}
 
-    async def disable(self, deck_plugin_id, request, *, actor_id):
+    async def disable(self, deck_plugin_id, request, *, actor):
         return {
             "deck_plugin_id": deck_plugin_id,
             "status": "disabled",
             "reason": request.reason,
             "revocation_level": request.revocation_level,
-            "actor_id": actor_id,
+            "actor_id": actor.canonical_user_id,
         }
 
-    async def upgrade(self, deck_plugin_id, request, *, actor_id):
+    async def upgrade(self, deck_plugin_id, request, *, actor):
         return {
             "deck_plugin_id": deck_plugin_id,
             "target_version": request.target_version,
             "status": "upgrade_pending",
-            "actor_id": actor_id,
+            "actor_id": actor.canonical_user_id,
         }
 
-    async def rollback(self, deck_plugin_id, request, *, actor_id):
+    async def rollback(self, deck_plugin_id, request, *, actor):
         return {
             "deck_plugin_id": deck_plugin_id,
             "target_version": request.target_version,
             "status": "ready",
-            "actor_id": actor_id,
+            "actor_id": actor.canonical_user_id,
         }
 
-    async def runtime_readiness(self, deck_plugin_id, *, environment):
+    async def runtime_readiness(self, deck_plugin_id, *, environment, **_kwargs):
         return {
             "deck_plugin_id": deck_plugin_id,
             "environment": environment,
@@ -98,13 +98,13 @@ class _DeckGateway:
             "loadable": True,
         }
 
-    async def reconcile(self, deck_plugin_id, request, *, actor_id):
+    async def reconcile(self, deck_plugin_id, request, *, actor):
         return {
             "operation_id": "op_" + "5" * 32,
             "deck_plugin_id": deck_plugin_id,
             "environment": request.environment,
             "status": "accepted",
-            "actor_id": actor_id,
+            "actor_id": actor.canonical_user_id,
         }
 
 
@@ -143,75 +143,22 @@ class _VoiceDeckGateway:
         }
 
 
-class _StoryGateway:
-    async def create_preflight(self, request, *, actor):
-        return {
-            "workflow_preflight_id": PREFLIGHT_ID,
-            "deck_id": request.deck_id,
-            "binding_revision": request.binding_revision,
-            "input_hash": "sha256:" + "b" * 64,
-            "status": "passed",
-            "actor": actor,
-        }
-
-    async def get_preflight(self, preflight_id, *, actor):
-        return {
-            "workflow_preflight_id": preflight_id,
-            "status": "passed",
-            "runtime_readiness": "ready",
-            "recovery": None,
-        }
-
-    async def create_run(self, request, *, actor):
-        return {
-            "workflow_run_id": RUN_ID,
-            "workflow_preflight_id": request.workflow_preflight_id,
-            "status": "queued",
-            # These values are deliberately generated by the trusted gateway,
-            # never accepted from the API request model.
-            "deck_plugin_id": PLUGIN_ID,
-            "deck_plugin_version": VERSION,
-            "deck_runtime_snapshot_id": "drs_frozen",
-            "actor": actor,
-        }
-
-    async def get_run(self, workflow_run_id, *, actor):
-        return {
-            "workflow_run_id": workflow_run_id,
-            "status": "queued",
-            "source": {
-                "deck_plugin_id": PLUGIN_ID,
-                "deck_plugin_version": VERSION,
-                "deck_runtime_snapshot_id": "drs_frozen",
-            },
-            "error": None,
-            "result_ref": None,
-        }
-
-    async def retry_run(self, workflow_run_id, request, *, actor):
-        return {
-            "workflow_run_id": "run_" + "6" * 32,
-            "retry_of_run_id": workflow_run_id,
-            "status": "queued",
-            "deck_plugin_version": VERSION,
-            "deck_runtime_snapshot_id": "drs_frozen",
-        }
-
-    async def cancel_run(self, workflow_run_id, request, *, actor):
-        return {
-            "workflow_run_id": workflow_run_id,
-            "status": "cancelled",
-            "actor_id": actor["actor_id"],
-            "reason": request.reason,
-        }
-
-
 def _authenticated_user():
+    actor = AdminRequestActor(
+        subject="subject-api-routes",
+        canonical_user_id="7",
+        client_id="dream-browser",
+        scopes=frozenset({"dream:read", "dream:write"}),
+        issued_at=1,
+        expires_at=4_000_000_000,
+        access_token="oauth-access",
+    )
     return {
         "user_id": 7,
         "workspace_id": "workspace-api-routes",
         "role": "admin",
         "permissions": ["plugin:read", "plugin:admin"],
+        "_admin_actor": actor,
     }
 
 
@@ -229,21 +176,9 @@ class ApiRouteContractTests(unittest.TestCase):
         voice_app.include_router(voice_decks.router)
         self.voice_client = TestClient(voice_app)
 
-        story_app = FastAPI()
-        story_app.dependency_overrides[story_workspace.get_current_user] = _authenticated_user
-        for dependency in (
-            story_workspace.get_story_workflow_run_service,
-            story_workspace.get_dream_artifact_service,
-            story_workspace.get_dream_confirmation_service,
-        ):
-            story_app.dependency_overrides[dependency] = _StoryGateway
-        story_app.include_router(story_workspace.router)
-        self.story_client = TestClient(story_app)
-
     def tearDown(self):
         self.deck_client.close()
         self.voice_client.close()
-        self.story_client.close()
 
     def test_all_nine_admin_routes_and_install_contract(self):
         common = {"scope_type": "workspace", "scope_id": "workspace-api-routes"}
@@ -300,44 +235,6 @@ class ApiRouteContractTests(unittest.TestCase):
         self.assertEqual(saved.json()["applied_to"], "next_run")
         self.assertFalse(validated.json()["workflow_run_created"])
 
-    def test_six_story_routes_copy_frozen_source_and_reject_client_override(self):
-        preflight = self.story_client.post("/api/story-workspace/workflow-preflights", json={
-            "deck_id": DECK_ID, "binding_revision": 7, "input": {"story_id": "story-1"}
-        })
-        preflight_get = self.story_client.get(
-            f"/api/story-workspace/workflow-preflights/{PREFLIGHT_ID}"
-        )
-        create_body = {
-            "workflow_preflight_id": PREFLIGHT_ID,
-            "preflight_token": "opaque-token",
-            "idempotency_key": "run-1",
-            "source_voice_thread_id": "thread-1",
-        }
-        created = self.story_client.post("/api/story-workspace/workflow-runs", json=create_body)
-        run_get = self.story_client.get(f"/api/story-workspace/workflow-runs/{RUN_ID}")
-        retried = self.story_client.post(f"/api/story-workspace/workflow-runs/{RUN_ID}/retry", json={
-            "workflow_preflight_id": PREFLIGHT_ID,
-            "preflight_token": "retry-token",
-            "idempotency_key": "run-2",
-        })
-        cancelled = self.story_client.post(
-            f"/api/story-workspace/workflow-runs/{RUN_ID}/cancel",
-            json={"reason": "user_requested"},
-        )
-        self.assertEqual(
-            [item.status_code for item in (preflight, preflight_get, created, run_get, retried, cancelled)],
-            [202, 200, 201, 200, 201, 200],
-        )
-        self.assertEqual(created.json()["deck_plugin_version"], VERSION)
-        self.assertEqual(created.json()["deck_runtime_snapshot_id"], "drs_frozen")
-        override = self.story_client.post("/api/story-workspace/workflow-runs", json={
-            **create_body,
-            "deck_plugin_version": "99.0.0",
-            "deck_runtime_snapshot_id": "client-controlled",
-        })
-        self.assertEqual(override.status_code, 422)
-
-
 class ErrorRegistryTests(unittest.TestCase):
     def test_registry_has_all_56_canonical_codes_with_recovery(self):
         # 27 legacy codes + 16 Claude Code plugin pipeline codes
@@ -345,7 +242,7 @@ class ErrorRegistryTests(unittest.TestCase):
         # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04)
         # + 4 Remote Marketplace fail-closed codes (2026-08-19).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 56)
+        self.assertEqual(len(ERROR_REGISTRY), 57)
         story_index_codes = {
             "story_index_row_missing",
             "story_index_schema_unavailable",
@@ -385,7 +282,7 @@ class ErrorRegistryTests(unittest.TestCase):
 
     def test_router_known_error_uses_nested_safe_envelope(self):
         class DeniedGateway(_DeckGateway):
-            async def get_version(self, deck_plugin_id, version):
+            async def get_version(self, deck_plugin_id, version, **_kwargs):
                 raise ApiRouteError(
                     "WORKFLOW_PERMISSION_DENIED",
                     status_code=403,
@@ -404,7 +301,7 @@ class ErrorRegistryTests(unittest.TestCase):
 
     def test_router_hides_unexpected_exception_and_enforces_admin_permission(self):
         class ExplodingGateway(_DeckGateway):
-            async def get_version(self, deck_plugin_id, version):
+            async def get_version(self, deck_plugin_id, version, **_kwargs):
                 raise RuntimeError("/Users/private prompt secret api-key")
 
         app = FastAPI()
@@ -412,6 +309,16 @@ class ErrorRegistryTests(unittest.TestCase):
             "user_id": 8,
             "role": "user",
             "permissions": [],
+            "workspace_id": "workspace-api-routes",
+            "_admin_actor": AdminRequestActor(
+                subject="subject-api-routes-user",
+                canonical_user_id="8",
+                client_id="dream-browser",
+                scopes=frozenset({"dream:read"}),
+                issued_at=1,
+                expires_at=4_000_000_000,
+                access_token="oauth-access",
+            ),
         }
         app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = ExplodingGateway
         app.include_router(deck_plugins.router)
