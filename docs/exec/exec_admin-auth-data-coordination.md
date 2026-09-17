@@ -1,6 +1,7 @@
 <!-- [Input] Actual Git/GitHub/tool receipts from the cross-project coordinator. -->
 <!-- [Output] Durable baseline, task, evidence and unresolved dependency record. -->
 <!-- [Pos] Execution evidence for stage_admin-auth-data-coordination.md; not an implementation completion claim. -->
+<!-- [Sync] 2026-09-17: record the primary-directory consolidation and focused post-merge validation. -->
 <!-- [Sync] 2026-09-16: record final source/PR/CI state, v2 exact-release binding, physical-backup rehearsal and the still-unapplied normal cutover. -->
 <!-- [Sync] 2026-09-15: retain launch75 first failures,974 continuation/308 recovery/19 preservation and active goals. -->
 
@@ -8,7 +9,7 @@
 
 ## 当前结论
 
-四个重构前基线 Release 已发布。Admin 与 Dream 源码实现位于专用分支和 Draft PR；Admin 当前 head 的确定性检查与 63 条迁移 journal 已通过，Dream 前后端 CI 已通过。Dream 生产源码数据库入口已经关闭，但正常数据库仍停在 54/63，角色/ACL 和候选配置尚未激活，真实 Google、Device Flow、正常 Run/Thread/SSE/文件与模型验收尚未执行，因此整体任务仍未完成。
+四个重构前基线 Release 已发布。Admin 与 Dream 源码实现已经合并到用户指定的两个主目录专用分支，既有 Draft PR 与历史实现分支仍保留。Dream 生产源码数据库入口已经关闭，正常数据库切换、认证与多项公开业务读取已完成既有验证；完整真实模型 turn、可执行 Workflow Run、运行中 cancel/live SSE 和最终全量复核仍未完成，因此整体任务保持 active。
 计划见 [协调计划](../stage/stage_admin-auth-data-coordination.md)。
 原始脱敏验证记录已保存为项目文件，见 [证据索引](admin-auth-data-verification/.folder.md)。私有fixture配置没有进入项目目录。
 
@@ -324,3 +325,19 @@ Dream 源码与发布证据快照为 `6478b791b84a1f136a5b5a426b127ee036445315`�
 正常停机物理备份已在本轮自有 PostgreSQL 18.1、端口 `55493` 的隔离恢复环境完整演练：初始 54 receipts 和 `35/1408/10` 三组业务计数得到确认；0054–0062 前向迁移后达到 63/63 与 8 capabilities；v2 activation 首次 apply、dry-run 和重复 apply 均 exit 0，142 项 ACL、实际角色 credential probes、Dream `NOLOGIN`/`CONNECT` deny 和数据计数保持均通过。隔离服务器已停止且自有 data directory 已删除，正常端口 `54329` 全程关闭；脱敏回执 SHA-256 为 `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`。
 
 本节证明源码关闭、精确发布绑定和隔离技术门禁，不表示正常数据库已经切换或真实业务已经验收。后续只有取得独立授权，才能执行正常库 migration/role/ACL、激活配置、启动服务并通过公开生产入口完成真实 Google、Device Flow、Run/Thread/SSE/文件、Gateway/账本与真实模型验收。
+
+## 主目录回收回执（2026-09-17）
+
+用户指定后续只在 `/Users/dmeck/project/ink-admin-memory` 与 `/Users/dmeck/project/ink-dream-memory` 工作。Admin worktree 最终提交 `41cfdef` 经无冲突 merge 进入 `c954477`，主目录当前工作分支为 `codex/admin-auth-data-unified-20260917`。Dream worktree 最终提交 `8a0844c4` 经五个文档冲突审查后进入 merge commit `5dec7ba2`，主目录继续使用 `codex/auth-data-coordination`。
+
+Dream 原目录内容在写入前同时保存为 backup branch、tracked patch、383路径 untracked tar 和 `stash@{0}`。stash 恢复后的383个路径全部存在：376个逐字节一致，7个差异均由实现分支保留了较新的测试隔离、client_credentials、相对链接、Runtime或最终迁移状态；没有把旧的数据库直连说明或中间候选状态覆盖回生产树。旧 Dream worktree 的 `.pnpm-store/` 与 `frontend/tsconfig.tsbuildinfo` 仍保持未跟踪且未修改。两个旧 worktree 只作为恢复副本保留，不再作为命令工作目录。
+
+| cwd | 命令 | exit | 关键结果 |
+| --- | --- | ---: | --- |
+| Admin 主目录 | `git merge-base --is-ancestor 41cfdef HEAD` | 0 | worktree 最终提交可达 |
+| Dream 主目录 | `git merge-base --is-ancestor 8a0844c4 HEAD` | 0 | worktree 最终提交可达 |
+| Admin 主目录 | 四文件 `pnpm test:run` 聚焦回归 | 0 | 4 files、15 tests |
+| Dream `backend` 主目录 | 五文件 pytest 聚焦回归 | 0 | 29 passed |
+| 两个主目录 | `git diff --check` | 0 | 无空白错误 |
+
+第一次聚焦回归分别暴露 Admin 主目录依赖未按 lockfile同步、Dream 主目录虚拟环境缺 pytest；补齐本机依赖后原命令通过。源码、lockfile和项目 dependency groups 均未为此改动。具体方案、冲突裁决和恢复路径见[主目录回收阶段计划](../stage/stage_worktree-sync_20260914.md#2026-09-17-主目录回收)。

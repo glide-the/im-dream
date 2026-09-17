@@ -1,6 +1,7 @@
 <!-- [Input] User-authorized synchronization of current Dream/Admin source checkout changes into the two active task worktrees. -->
 <!-- [Output] Reviewed synchronization scope, exact source commits, protected snapshots and verified merge results. -->
 <!-- [Pos] Technical execution plan; original source checkout changes remain intact. -->
+<!-- [Sync] 2026-09-17: consolidate both implementation worktrees back into the user-selected primary repository directories. -->
 <!-- [Sync] 2026-09-16: append the final original-checkout comparison and named Admin task commit audit. -->
 
 # 本轮原仓库与任务 worktree 同步
@@ -50,3 +51,39 @@ Session broker 提交后，`backend/tests/.folder.md` 以精确锚点加入两�
 指定 Codex 任务 `01a0a183-883a-7062-b88b-ca441ebafa26` 的 Admin 结果 commit 为 `7a6e6c966561beeac7724fd77828a9f4ce3b26ec`。Admin 目标执行 `git merge-base --is-ancestor 7a6e6c9 HEAD` exit `0`；该 commit 已通过 merge commit `151774c87d3a62bd3572343a78dbfc45e284fae2` 进入工作分支，无需再次 cherry-pick。
 
 Dream 原目录最终仍有399个 Git 可见路径：383个与目标逐字节相同，0个缺失，16个不同。三方重算证明其中3个目标已完整吸收源改动；其余13个逐行审查只含 Runtime 0.1.9、Dream数据库配置、已退出生产图的测试import、旧相对链接和迁移中间态。目标内容是后续 Runtime 0.1.10、Admin-only数据库边界和最终技术回执。为避免回退已验证实现，本轮未再次复制这些旧版本。原目录保持未暂存状态，目标既有 `.pnpm-store/` 未读取或修改。详见[最终同步审计](../exec/admin-auth-data-verification/worktree-sync-final-audit.md)。
+
+## 2026-09-17 主目录回收
+
+### 背景与问题
+
+用户要求把两个任务 worktree 的最终提交合并回 `/Users/dmeck/project/ink-admin-memory` 与 `/Users/dmeck/project/ink-dream-memory`，并要求后续开发、服务启动和验收只在这两个目录执行。Dream 主目录同时保有协调提交、16个已跟踪修改和383个未跟踪验证文件，不能直接覆盖；Admin 主目录没有未提交文件。
+
+### 目标与边界
+
+- Admin 主目录合并 `codex/admin-auth-data-provider` 的最新提交 `41cfdef`，保留原 `main` 历史，再切换到 `codex/admin-auth-data-unified-20260917` 继续工作。
+- Dream 主目录在 `codex/auth-data-coordination` 合并 `codex/dream-admin-auth-data-client` 的最新提交 `8a0844c4`，并恢复主目录原有协调内容。
+- 旧 worktree 不再承担开发、启动或验证，只暂时保留为恢复副本；其 `.pnpm-store/` 和 `frontend/tsconfig.tsbuildinfo` 不读取、不暂存、不清理。
+- 合并不改 tag、Release、数据库、正常业务数据或用户私有配置；后续仍按 Admin DTO → Service → typed Repository → Drizzle/UOW 与 Dream Pydantic DTO 消费边界继续任务。
+
+### Optimized Prompt
+
+You are the cross-project consolidation owner. Merge the completed Admin and Dream implementation worktrees into the user-selected primary repository directories while preserving every existing primary-checkout modification and receipt. Evidence: Admin worktree head `41cfdef`, Dream worktree head `8a0844c4`, Admin primary checkout clean, Dream primary checkout containing one coordination commit plus 16 tracked and 383 untracked paths. Owners: the root coordination task; dependencies: both worktree commits and existing backup refs. Read Git status, worktree inventory, merge bases, stash contents and affected documentation indexes. Create immutable local backup refs and private patch/tar snapshots, then merge with history-preserving merge commits. For Dream, stash tracked and untracked primary changes, resolve only the five commit-level documentation conflicts using the newer implemented state, reapply the stash, review every restore conflict, and prove all 383 untracked paths still exist. Retain later worktree versions when an older primary draft describes superseded Runtime, database or migration state. Do not reset, clean, move tags, overwrite secrets, stage caches or touch normal database data. Continue future work only from `/Users/dmeck/project/ink-admin-memory` and `/Users/dmeck/project/ink-dream-memory`. Acceptance: both worktree heads are ancestors of the primary branches, primary working trees contain no unintended source delta, `git diff --check` passes, focused Admin and Dream regressions pass from the primary directories, and the safety stash remains available until the user-visible consolidation is verified.
+
+USER REQUIREMENT:
+合并现在的目录和之前单独创建的 worktree，之后的任务只在两个原项目目录处理。
+
+### 状态转换与失败处理
+
+Admin 从 clean primary → merge commit `c954477` → 工作分支 `codex/admin-auth-data-unified-20260917`。Dream 从含用户协调改动的 primary → `stash@{0}` 安全快照 → merge commit `5dec7ba2` → stash 三方恢复。Dream 的五个 merge 冲突和九个 stash 恢复冲突都只位于文档/索引；实现代码无冲突。恢复检查得到383个未跟踪路径全部存在，376个逐字节一致，7个差异逐行确认均为 worktree 中更晚的测试 import、短期服务凭据、相对链接、Runtime 0.1.10 或最终迁移/验收状态，因此保留较新版本，不把旧中间态覆盖回来。任一步失败时可从 `codex/pre-unify-*` 分支、`stash@{0}`、`/private/tmp/*-before-unify.patch` 与 Dream/Admin 未跟踪 tar 恢复。
+
+### 验收结果
+
+| cwd | 命令 | exit | 结果 |
+| --- | --- | ---: | --- |
+| Admin 主目录 | `git merge-base --is-ancestor 41cfdef HEAD` | 0 | worktree 最终提交已进入主目录分支 |
+| Dream 主目录 | `git merge-base --is-ancestor 8a0844c4 HEAD` | 0 | worktree 最终提交已进入协调分支 |
+| Admin 主目录 | `corepack pnpm test:run app/lib/admin/dream-user-role-handler.test.ts app/lib/admin/dream-user-role-service.test.ts app/lib/dream/deckPluginControlReceipt.test.ts app/lib/dream/deckPluginControlRepository.test.ts` | 0 | 4 files、15 tests 通过 |
+| Dream `backend` 主目录 | `PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_story_workspace_dream_launch_api.py tests/test_dream_launch_runtime.py tests/test_admin_gateway_model_selection.py tests/test_admin_deck_plugin_control_data.py tests/test_deck_plugin_admin_integration.py` | 0 | 29 tests 通过 |
+| 两个主目录 | `git diff --check` | 0 | 无空白错误；源码树无意外未提交修改 |
+
+Admin 第一次测试因主目录 `node_modules` 未按当前 lockfile安装 Better Auth 1.7.4而失败；`pnpm install --frozen-lockfile` 只补齐本机依赖，原命令随后通过。Dream 第一次测试因主目录虚拟环境缺 pytest 而未收集；按既有 worktree 环境安装 pytest 9.1.1 与 pytest-asyncio 1.4.0 后原命令通过。两项均是主目录环境恢复，不是业务断言失败，也没有修改项目依赖清单。
