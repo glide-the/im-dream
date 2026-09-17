@@ -1,10 +1,10 @@
 // [Input] Public API requests with opaque Browser handle or explicit native OAuth Bearer.
 // [Output] Credential-selected, origin-checked, cache-free Python HTTP/SSE responses.
 // [Pos] BFF API authentication owner; Python verifies every Admin access token/principal.
-// [Sync] 2026-09-14: use strict cookie precedence and reuse the existing unbuffered transport.
+// [Sync] 2026-09-17: reuse the process-owned Admin client instead of exchanging a service token per API request.
 import { randomUUID } from 'node:crypto';
 import { configuredBackendOrigin, forwardBackendRequest } from '../_http-proxy.ts';
-import { AdminBffClient, adminBffConfig } from './admin-client.ts';
+import { AdminBffClient, configuredAdminBffClient } from './admin-client.ts';
 import { BffBoundaryError, BffLoginBoundary } from './login-boundary.ts';
 import { bffFailure } from './handlers.ts';
 
@@ -25,7 +25,7 @@ export async function apiAuthorization(request: Request, boundary: BffLoginBound
 
 export function configuredApiCredentials() {
   const boundary = BffLoginBoundary.fromEnvironment();
-  const admin = { resolve: async (...args: Parameters<AdminBffClient['resolve']>) => new AdminBffClient(adminBffConfig()).resolve(...args) };
+  const admin = configuredAdminBffClient();
   return { boundary, admin };
 }
 

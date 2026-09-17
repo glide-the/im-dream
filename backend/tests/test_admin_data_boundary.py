@@ -1,11 +1,11 @@
 # [Input] Exact Admin DTOs and production consumer classes with injected HTTP/JWKS providers.
-# [Output] Deterministic authentication/transport/unknown-commit contract receipts without PG/model calls.
+# [Output] Deterministic authentication, bounded read recovery and unknown-commit receipts without PG/model calls.
 # [Pos] Provider-free tests for the unified Admin consumer boundary.
 # [Sync] 2026-09-14: cover auth/receipt security and exact closed Deck conflict feedback without upstream messages.
 # [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
 # [Sync] 2026-09-16: cover Better Auth scalar and closed resource/userinfo audience-array access tokens.
 # [Sync] 2026-09-17: assert separate user and client_credentials bearer transport.
-# [Sync] 2026-09-17: verify immutable capability snapshots remove duplicate reads while forced refresh still invalidates atomically.
+# [Sync] 2026-09-17: recover one read-only transport failure while writes remain single-dispatch.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -131,6 +131,41 @@ def test_browser_exchange_unknown_outcome_never_retries(config, failure):
     assert "private-code" not in repr(body) and "secret" not in str(exc.value)
 
 
+def test_read_only_request_recovers_one_stale_transport_with_short_timeout(config):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("stale pooled connection", request=request)
+        assert request.extensions["timeout"] == {
+            key: 2.0 for key in ("connect", "read", "write", "pool")
+        }
+        return response(principal())
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert client.principal("admin-user-token", "request-1").canonical_user_id == "42"
+    assert len(calls) == 2
+
+
+def test_read_only_http_rejection_is_not_retried(config):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(503, json={
+            "error": {"code": "ADMIN_UNAVAILABLE", "message": "closed"},
+            "request_id": "request-1",
+        })
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(AdminDataError):
+        client.principal("admin-user-token", "request-1")
+    assert len(calls) == 1
+
+
 def test_browser_handle_expiry_and_credentials_stay_server_owned(config):
     client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(lambda _: response({"access_token": "private-token", "expires_at": "2026-09-14T20:00:00Z", "principal": principal()}))))
     result = client.resolve_browser_session(BrowserHandleRequestDTO(request_id="request-1", handle="dbr_" + "a" * 43))
@@ -179,7 +214,7 @@ def test_capability_snapshot_reuses_validated_catalog_and_forced_failure_invalid
 
     recovered = client.capabilities_snapshot("recovered")
     assert recovered is not first
-    assert capability_requests == ["first", "forced-failure", "recovered"]
+    assert capability_requests == ["first", "forced-failure", "forced-failure", "recovered"]
 
 
 @pytest.mark.parametrize("refresh_result", ["valid", "missing", "hash", "failure"])

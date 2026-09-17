@@ -74,9 +74,11 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 
 本机已有 Dream credential 兼容使用 Admin 发布期专用操作：私有 DTO 固定正常数据库物理目标、canonical Dream user ID、用途证据和 inspect 得到的源行指纹；Admin 服务端派生 Better Auth subject/account ID，在一个 typed Drizzle 事务内原样保存旧 Dream bcrypt 到 `identity.account(providerId='credential')` 并建立 `identity.subject_links`。该操作不修改 `public.users`，不读取或复制 `admin_users` 密码，不创建 `admin_sessions`、RBAC 或 `identity.admin_subject_links`；部分目标、邮箱冲突、Admin link 或源指纹变化全部失败。运行时登录只验证已经建立的 credential，不按邮箱临时合并。
 | Admin管理 | `admin_users/admin_sessions/RBAC`独立管理认证与权限校验 | Dream identity、邮箱、scope和subject link均不授予管理能力 |
-| Dream service client | confidential client使用`client_credentials`取得限定background scope；用户调用继续传用户delegated token | service token不能推导canonical user或访问任意用户数据 |
+| Dream service client | confidential client使用`client_credentials`取得限定background scope；用户调用继续传用户delegated token；token连接在未取得HTTP响应的transport error后只恢复一次，第二次最多2秒 | service token不能推导canonical user或访问任意用户数据；HTTP拒绝和业务DTO调用不重试 |
 
-内部 Admin 数据调用有两种凭据形态。background operation 把 service access token 放在 `Authorization`；用户 operation 把用户 access token 放在 `Authorization`，Next/Python 服务端另加私有 `X-Ink-Dream-Service-Authorization` service bearer。浏览器 API 代理会剥离该私有头的输入和输出，旧静态 service ID/secret 头不再发送。Admin 分别校验 confidential client 与 Dream 用户主体；任一 token 缺失、scope/resource 不符或映射失败都关闭请求，不回退 Dream PostgreSQL。
+内部 Admin 数据调用有两种凭据形态。background operation 把 service access token 放在 `Authorization`；用户 operation 把用户 access token 放在 `Authorization`，Next/Python 服务端另加私有 `X-Ink-Dream-Service-Authorization` service bearer。浏览器 API 代理会剥离该私有头的输入和输出，旧静态 service ID/secret 头不再发送。Admin 分别校验 confidential client 与 Dream 用户主体；任一 token 缺失、scope/resource 不符或映射失败都关闭请求，不回退 Dream PostgreSQL。无副作用读取（包括使用POST承载的typed read operation与receipt查询）仅在未取得HTTP响应的transport error后重建请求一次，第二次超时上限2秒；HTTP状态拒绝不重试。写操作只派发一次，超时后仅以原`request_id`查询receipt，不重放业务写入。
+
+Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更新后的`globalThis`实例；短期service access token和并发中的token兑换由该实例统一缓存/合并。Route Handler不能为每个浏览器API请求重新创建client，否则会把一次页面加载放大为多次`client_credentials`兑换并增加Admin认证数据库与网络延迟。配置值变化时丢弃旧实例并按新配置创建。
 
 业务数据继续遵守 strict Pydantic DTO → Admin Zod DTO → Domain Service → typed Drizzle Repository → transaction。Dream 不携带 SQL、表列、事务或 caller-selected user ID；Admin Repository 执行权限过滤、锁、幂等 receipt 和持久化，Dream 保留 Runtime、SSE、业务编排和共享文件系统。
 

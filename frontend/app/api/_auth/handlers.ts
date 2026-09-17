@@ -3,7 +3,7 @@
 // [Pos] Server BFF product boundary shared by thin Next auth Route Handlers.
 // [Sync] 2026-09-17: project Admin form actions while preserving recovery and server-only OAuth credentials.
 import { randomUUID } from 'node:crypto';
-import { AdminBffClient, adminBffConfig } from './admin-client.ts';
+import { AdminBffClient, configuredAdminBffClient } from './admin-client.ts';
 import { BffBoundaryError, BffLoginBoundary } from './login-boundary.ts';
 
 function json(body: unknown, status = 200): Response {
@@ -104,5 +104,5 @@ export function createBffHandlers(boundary: BffLoginBoundary, admin: AdminBffCli
 }
 
 export function configuredBffHandlers() {
-  return createBffHandlers(BffLoginBoundary.fromEnvironment(), new AdminBffClient(adminBffConfig()));
+  return createBffHandlers(BffLoginBoundary.fromEnvironment(), configuredAdminBffClient());
 }
