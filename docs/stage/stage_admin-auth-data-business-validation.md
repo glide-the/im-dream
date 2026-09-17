@@ -9,6 +9,7 @@
 <!-- [Sync] 2026-09-17: record normal-session Thread create/list/history/status, terminal SSE and idempotent stop with restricted-role persistence proof. -->
 <!-- [Sync] 2026-09-17: record the pre-change identity-domain review and normal-session read-only DTO/BFF acceptance across migrated data domains. -->
 <!-- [Sync] 2026-09-17: record exact real model-reservation and Workflow-binding completion gates. -->
+<!-- [Sync] 2026-09-17: record the delegation recovery deadlock fix, isolated proof and fresh public Run result. -->
 
 # Admin 认证与 Dream 数据迁移业务验证计划
 
@@ -182,6 +183,35 @@ Continue the consolidated Admin/Dream work in the two primary repositories, foll
 正常状态转换为：Admin提供Deck refs与Runtime依赖 → Dream按这些工件生成并验证完整launch manifest → Dream提交显式observed identity/version/digest/manifest状态 → Admin校验actor、Run、Thread，并要求每个锁依赖在完整manifest中精确出现 → 单事务只为Runtime锁条目写activation和materialization → 相同session同值重放返回既有结果。插件缺失、重复、任一manifest缺失、锁依赖版本或digest不符、锁已变、session同键异值或服务不可用时，激活前失败；额外且已本地验真的Deck ref保留为workspace运行输入但不进入Runtime receipt。Dream不得重试非幂等变体、回退本地数据库或继续启动模型。
 
 验证命令至少覆盖Dream Runtime组装与workspace manifest测试、Admin activation Service/DTO/Repository测试、Python compile、TypeScript typecheck和diff检查。真实回归继续使用本机正常Admin、Dream、Gateway与PostgreSQL，只经公开入口；任何后续provider或账户条件失败单独记录，不能用技术测试冒充真实业务验收。
+
+## Delegation 实体归属并发锁修复规划（2026-09-17）
+
+### Optimized Prompt:
+
+You are the Admin DTO/ORM authorization and PostgreSQL concurrency owner. Fix the real public Dream Run failure in which Deck preflight and `workflow-run.create` succeed, then `thread-system-config.get` returns `AUTH_SERVICE_UNAVAILABLE` after `DelegationRepository.ownsEntities` blocks on the actor-owned `chat_thread` row while another launch transaction updates non-key Thread state. Preserve the exact canonical Dream subject, Thread/Run/workspace ownership predicates and fail-closed behavior. Use the weakest PostgreSQL row lock that still prevents the referenced ownership row from being deleted or changing its key during the current UOW; do not remove the lock, retry the read blindly, weaken actor/Run/Thread checks, expose a generic CRUD endpoint or add Dream SQL. Confirm the choice against PostgreSQL's row-lock conflict table and the repository's actual Drizzle SQL. Keep the Pydantic caller → Admin Zod DTO → Service → typed Repository → Drizzle UOW chain, Admin/Dream user-domain separation and existing structured error mapping. Add focused repository/source tests and a named disposable-PostgreSQL concurrency test if the existing harness supports it; otherwise record that live contention reproduction remains covered by the public failure receipt and deterministic SQL contract. Update the repository header, affected folder/architecture docs and this acceptance record. Run focused Vitest, TypeScript, ESLint and diff/link checks, restart only the task-owned Admin service, then create one fresh public Dream Run and verify SystemConfig, Runtime activation, model/Gateway settlement, filesystem stages and Admin-visible state.
+
+USER REQUIREMENT:
+Continue all work in `/Users/dmeck/project/ink-admin-memory` and `/Users/dmeck/project/ink-dream-memory`, keep the DTO/ORM database-interface design, and finish validation without routine confirmation.
+
+### 目标、证据、依赖与验收
+
+| 项目/责任 | 已有证据与依赖 | 修改范围 | 保持不变 | 验收 |
+| --- | --- | --- | --- | --- |
+| Admin Auth/Data | Run `run_40ac4cd75a904144a6b3901a1902d128`已通过preflight/create；隔离库复现`claim-turn`恢复与SystemConfig读取在grant/message上的`40P01`反向锁环 | `app/lib/auth/delegationService.ts`、claim并发合同测试、目录与认证/数据契约文档 | canonical subject、Thread/Run/workspace四项谓词、runtime delegation、Zod/Service/UOW、错误结构 | 同claim恢复不再递归重锁grant；并发委托读取通过；错误主体继续拒绝 |
+| Dream | 公开入口已把失败写为`failed / dream_agent_dispatch / AUTH_SERVICE_UNAVAILABLE` | 不改生产业务；仅更新真实验收回执并重跑 | Runner、ThreadFactory、SSE、turn/resume/cancel、共享文件系统、无PG凭据 | 修复后新Run越过`thread-system-config.get`且不出现数据库fallback |
+| 协调 | 隔离PostgreSQL日志确认等待关系为`runtime_delegations FOR UPDATE`↔`chat_message FOR SHARE`，错误码`40P01` | 维护接口/锁顺序、测试命令、真实Run/Thread/Gateway回执 | 不修改订阅、Allowance、用户映射或Admin管理权限 | 确定性与隔离并发检查通过，公开Run按真实后续边界继续；模型平台失败单独记录 |
+
+设计复核通过隔离PostgreSQL确定了实际根因：不是Thread非键更新，而是同claim恢复在已持有claim message/Run锁后递归`resolve()`并请求grant更新锁；并发SystemConfig读取先持有grant锁再请求claim message共享锁，构成`40P01`反向锁环。修复保留现有`FOR SHARE`归属锁和全部主体/Thread/Run/Workspace谓词；同claim恢复在同一UOW已重新验证当前claim、active subject、精确实体归属、完整grant行及加密结果后直接返回原grant，不再次锁grant。正常委托读取继续按grant→claim message→实体顺序执行。未知写入不在本操作范围，读取失败不重试成另一种业务结果，也不回退Dream数据库。
+
+验证命令覆盖Delegation Repository生成SQL/权限服务、Thread SystemConfig handler/service、相关launch并发合同、TypeScript、ESLint、Markdown引用和diff。真实验证只经正常Dream页面与Admin接口；当前订阅Token不足只影响模型阶段，不得掩盖前置认证/数据接口的通过或失败。
+
+### 修复与真实业务回执
+
+- 修复前，命名隔离PostgreSQL合同在同一claim恢复并发读取时稳定触发`40P01`：一条事务先锁`runtime_delegations`再读`chat_message FOR SHARE`，另一条事务先持有claim消息/Run锁再经`resolve()`请求同一grant更新锁。该失败证明问题属于Admin事务锁顺序，不属于Dream Runtime、模型Provider或浏览器harness。
+- 修复后，Admin在`createForConfirmationClaim`恢复分支内继续验证当前claim与数据库时钟租约、active canonical subject、Thread/Run/Workspace归属、service/client/request/input/source绑定、purpose/scopes/editor/gateway属性、撤销/过期/密文/最大过期时间，以及恢复Token hash和完整加密结果；验证通过后直接返回原grant，不再次调用会取得grant更新锁的`resolve()`。DTO、Service、typed Repository、Drizzle UOW和失败关闭边界保持不变。
+- 确定性回归：Admin聚焦Vitest 4 files/58 tests、TypeScript、定向ESLint与双仓库`git diff --check`均exit0。命名隔离PostgreSQL脚本`node scripts/run-story-workspace-confirmation-contract.mjs`在修复后4 tests通过、exit0，回执数据库`ink_story_workspace_confirmation_test_7cd066450e`与受限执行角色由脚本核验，并在结束时清理。
+- 正常公开入口新建Run `run_d3bac195c4e94dafbe1bda6b70a7163d`、Thread `fe40b029-ed94-5d41-8c27-2f5834f0eea5`。`POST /api/story-workspace/dream-runs/start`返回201，随后`GET /api/system-config`与Dream文件读取返回200；Run依次写入`preflight → queued → running`，证明真实链路已经越过此前失败的`thread-system-config.get`、Runtime activation、Admin数据接口与共享文件系统读取，没有回退Dream PostgreSQL。
+- 同一Run最终按正常业务边界写为`failed / dream_agent_dispatch / DREAM_AGENT_DISPATCH_FAILED`。Admin可查Gateway请求`req_82d2c64ae8d747fbaa6fee89303da892`在模型执行前返回HTTP 402、`SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED`，输入/输出Token和预留/扣减均为0，且没有账本条目。该回执把认证/数据死锁修复判定为通过；完整真实模型输出与工作台文件生成仍等待正常Allowance满足预留条件，不能由隔离测试冒充完成，也不通过修改订阅或账本绕过。
 
 ## 认证边界确定性回归规划（2026-09-15）
 
