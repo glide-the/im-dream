@@ -27,6 +27,7 @@
 # [Sync] 2026-09-06: expose the fixed Node binary to Corepack's env-based launcher.
 # [Sync] 2026-09-12: install Info-ZIP for approved ordinary-workspace exports
 #                    on the direct-host topology.
+# [Sync] 2026-09-17: smoke an immutable candidate before atomic activation.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,9 +61,12 @@ AUTODL_NOTION_CLI_VERSION="${AUTODL_NOTION_CLI_VERSION:-0.15.1}"
 AUTODL_PYTHON="${AUTODL_PYTHON:-/root/miniconda3/bin/python}"
 AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"
 AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
+AUTODL_DREAM_SMOKE_FRONTEND_PORT="${AUTODL_DREAM_SMOKE_FRONTEND_PORT:-16006}"
+AUTODL_DREAM_SMOKE_BACKEND_PORT="${AUTODL_DREAM_SMOKE_BACKEND_PORT:-18765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_SCREEN_NAME="${AUTODL_DREAM_SCREEN_NAME:-ink-dream}"
+AUTODL_SMOKE_SCREEN_NAME="${AUTODL_DREAM_SMOKE_SCREEN_NAME:-${AUTODL_SCREEN_NAME}-smoke}"
 AUTODL_NPM_TOKEN="${AUTODL_NPM_TOKEN:-}"
 AUTODL_NPM_REGISTRY="${AUTODL_NPM_REGISTRY:-https://registry.npmjs.org}"
 AUTODL_PYPI_INDEX_URL="${AUTODL_PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
@@ -133,6 +137,7 @@ require_config() {
   [[ "${AUTODL_CLAUDE_REMOTE_BUILD_ROOT}" == "${AUTODL_APP_ROOT}"/* ]] || err "Claude Runtime build root must stay under AUTODL_APP_ROOT."
   [[ "${AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT}" == "${AUTODL_CLAUDE_REMOTE_BUILD_ROOT}"/* ]] || err "Claude Runtime package root must stay under its build root."
   [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use Dream frontend 6006, backend 8765, and Admin 6008."
+  [[ "${AUTODL_DREAM_SMOKE_FRONTEND_PORT}" =~ ^[0-9]+$ && "${AUTODL_DREAM_SMOKE_BACKEND_PORT}" =~ ^[0-9]+$ && "${AUTODL_DREAM_SMOKE_FRONTEND_PORT}" != "${AUTODL_DREAM_FRONTEND_PORT}" && "${AUTODL_DREAM_SMOKE_BACKEND_PORT}" != "${AUTODL_DREAM_BACKEND_PORT}" ]] || err "Dream smoke ports must be numeric and differ from serving ports."
 }
 
 check_local() {
@@ -361,14 +366,26 @@ test \"\$(/root/ink-autodl/runtime/npm/bin/ntn --version)\" = $(quote "ntn ${AUT
 rm -rf \"\${release}\"
 mv \"\${staging}\" \"\${release}\"
 chown -R $(quote "${AUTODL_SERVICE_USER}"):$(quote "${AUTODL_SERVICE_USER}") \"\${release}\"
-rollback_source=''
-if [ -L $(quote "${AUTODL_APP_ROOT}/qualified") ]; then
-  rollback_source=\"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/qualified"))\"
-elif [ -L $(quote "${AUTODL_APP_ROOT}/current") ]; then
-  rollback_source=\"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))\"
-fi
-if [ -n \"\${rollback_source}\" ]; then test -d \"\${rollback_source}\"; ln -sfn \"\${rollback_source}\" $(quote "${AUTODL_APP_ROOT}/previous"); fi
-ln -sfn \"\${release}\" $(quote "${AUTODL_APP_ROOT}/current")"
+ln -sfn \"\${release}\" $(quote "${AUTODL_APP_ROOT}/candidate")"
+}
+
+smoke_candidate() {
+  remote "set -euo pipefail
+candidate=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/candidate")); test -s \"\${candidate}/frontend/server.js\"
+screen -S $(quote "${AUTODL_SMOKE_SCREEN_NAME}") -X quit >/dev/null 2>&1 || true
+screen -dmS $(quote "${AUTODL_SMOKE_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream-smoke.log") bash -lc \"exec env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") INK_AUTODL_DATA_ROOT=$(quote "${AUTODL_DATA_ROOT}") AUTODL_DREAM_ENV_FILE=$(quote "${AUTODL_APP_ROOT}/config/dream.env") AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream-smoke.pid") AUTODL_DREAM_FRONTEND_PORT=${AUTODL_DREAM_SMOKE_FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${AUTODL_DREAM_SMOKE_BACKEND_PORT} AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin \${candidate}/start-dream.sh\"
+passed=0; for _ in \$(seq 1 120); do curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_SMOKE_BACKEND_PORT}/api/health >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_SMOKE_FRONTEND_PORT}/api/health >/dev/null 2>&1 && { passed=1; break; }; sleep 1; done
+screen -S $(quote "${AUTODL_SMOKE_SCREEN_NAME}") -X quit >/dev/null 2>&1 || true
+test \"\${passed}\" = 1 || { tail -n 160 $(quote "${AUTODL_APP_ROOT}/logs/dream-smoke.log") >&2 || true; exit 1; }"
+  log "Dream candidate passed isolated ${AUTODL_DREAM_SMOKE_FRONTEND_PORT}/${AUTODL_DREAM_SMOKE_BACKEND_PORT} smoke."
+}
+
+activate_candidate() {
+  remote "set -euo pipefail; candidate=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/candidate")); test -d \"\${candidate}\"; if [ -L $(quote "${AUTODL_APP_ROOT}/current") ]; then ln -sfn \"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))\" $(quote "${AUTODL_APP_ROOT}/previous"); fi; ln -sfn \"\${candidate}\" $(quote "${AUTODL_APP_ROOT}/current")"
+}
+
+prune_old_releases() {
+  remote "set -euo pipefail; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); find $(quote "${AUTODL_APP_ROOT}/releases") -mindepth 1 -maxdepth 1 -type d ! -path \"\${current}\" -exec rm -rf -- {} +; rm -f $(quote "${AUTODL_APP_ROOT}/previous") $(quote "${AUTODL_APP_ROOT}/candidate")"
 }
 
 stop_dream() {
@@ -434,7 +451,11 @@ mark_current_qualified() {
   remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); test -d \"\${current}\"; ln -sfn \"\${current}\" $(quote "${AUTODL_APP_ROOT}/qualified")"
 }
 
-deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; mark_current_qualified; }
+deploy() {
+  command_check; setup_host; sync_files; build_release; smoke_candidate; stop_dream; activate_candidate
+  if ! start_dream || ! verify; then rollback; err "Candidate activation failed; previous Dream release was restored."; fi
+  mark_current_qualified; prune_old_releases
+}
 
 rollback() {
   remote "test -L $(quote "${AUTODL_APP_ROOT}/previous")"

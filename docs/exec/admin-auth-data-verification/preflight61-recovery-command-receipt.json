@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/preflight61-recovery-validation.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "exit_code": 0,
+  "output": "{\n  \"result\": \"PASS\",\n  \"target\": \"ink_auth_data_codex_test_792494523a17_preflight61\",\n  \"assertions\": 44,\n  \"lost_commit_injections\": 1,\n  \"lost_commit\": \"actual final COMMIT before injected response loss; full original passed/source and PF/map/receipt/audit exact\",\n  \"expiry\": \"ordinary read token NULL; old original result exact; fresh new request expires old and creates fresh PF\",\n  \"initial_uow\": \"expiry/checking/map/audit all rolled back on selected new reserve fault\",\n  \"damaged_receipts\": [\n    {\n      \"kind\": \"ciphertext\",\n      \"status\": 503,\n      \"code\": \"WORKFLOW_PREFLIGHT_RECEIPT_UNAVAILABLE\"\n    },\n    {\n      \"kind\": \"workspace-binding\",\n      \"status\": 503,\n      \"code\": \"WORKFLOW_PREFLIGHT_RECEIPT_UNAVAILABLE\"\n    },\n    {\n      \"kind\": \"canonical-binding\",\n      \"status\": 403,\n      \"code\": \"WORKFLOW_PERMISSION_DENIED\"\n    }\n  ],\n  \"run_session_delta\": 0,\n  \"normal_database\": \"untouched\",\n  \"private_keys_exported\": false,\n  \"interruption_acceptance\": \"pending\"\n}\n",
+  "scope": "primary owned isolated mutation/fault, public production routes, no real account/provider/model"
+}

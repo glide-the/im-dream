@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminWorkflowPreflight.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "validation_scope": "remaining_reads",
+  "exit_code": 1,
+  "output": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Remaining active/expired read facts must both be unconsumed\n    at check (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminWorkflowPreflight.contract.ts:92:54)\n    at <anonymous> (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminWorkflowPreflight.contract.ts:177:9)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v26.4.0\n"
+}

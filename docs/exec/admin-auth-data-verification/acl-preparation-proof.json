@@ -1,0 +1,42 @@
+{
+  "status": "prepared",
+  "database": "ink_auth_data_codex_test_792494523a17_acl56",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "roles": [
+    {
+      "role": "ink_auth_data_codex_test_792494523a17_acl56_auth",
+      "super": false,
+      "createdb": false,
+      "createrole": false,
+      "inherit": false,
+      "bypassrls": false
+    },
+    {
+      "role": "ink_auth_data_codex_test_792494523a17_acl56_control",
+      "super": false,
+      "createdb": false,
+      "createrole": false,
+      "inherit": false,
+      "bypassrls": false
+    },
+    {
+      "role": "ink_auth_data_codex_test_792494523a17_acl56_data",
+      "super": false,
+      "createdb": false,
+      "createrole": false,
+      "inherit": false,
+      "bypassrls": false
+    },
+    {
+      "role": "ink_auth_data_codex_test_792494523a17_acl56_dream",
+      "super": false,
+      "createdb": false,
+      "createrole": false,
+      "inherit": false,
+      "bypassrls": false
+    }
+  ],
+  "private_config": "0600 current owner only",
+  "normal_database": "untouched"
+}

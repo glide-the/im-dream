@@ -1,8 +1,10 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Deck Plugin management REST contracts, authenticated browser fetch, and server-owned permission/status fields.
 // [Output] Normalized Deck workflow/runtime plugin records plus lifecycle mutation and operation helpers.
 // [Pos] frontend-only Deck Plugin Admin API adapter; deliberately independent from Paperclip PluginRecord.
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export type PluginCategory = 'deck-workflow' | 'claude-runtime';
@@ -349,10 +351,10 @@ export function normalizeDeckPluginInstallation(value: unknown): DeckPluginInsta
 }
 
 function authHeaders(json = false): HeadersInit {
-  const token = getAuthToken();
+  const csrfToken = getBrowserCsrfToken();
   return {
     ...(json ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(csrfToken ? { ...browserRequestHeaders({}, csrfToken) } : {}),
   };
 }
 

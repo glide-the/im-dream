@@ -1,0 +1,46 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "assertions": 90,
+  "selected_faults": [
+    {
+      "point": "workspace_insert",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "full byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "receipt_insert",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "full byte exact",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "audit_insert",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 17,
+      "rollback": "full byte exact",
+      "cleanup": "PASS"
+    }
+  ],
+  "commit_loss": {
+    "actual_final_commit": true,
+    "injections": 1,
+    "initial_status": 503,
+    "original_get_status": 200,
+    "replay_status": 200,
+    "workspace_effects": 1,
+    "receipts": 1,
+    "audits": 1,
+    "actual_entire_source": true,
+    "protected_tables": 17
+  },
+  "normal_database": "untouched",
+  "provider_model_runtime_filesystem": "not executed",
+  "private_key_exported": false
+}

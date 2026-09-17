@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import jwt
 import pytest
 
 from backend.services.admin_gateway.config import AdminGatewayConfig
@@ -12,6 +11,7 @@ from backend.services.admin_gateway.models import GatewayModelCatalogClient
 
 
 SERVICE_KEY = "gw_test_service_key_with_more_than_32_bytes"
+ACCESS_TOKEN = "idg_" + "a" * 43
 
 
 @dataclass
@@ -38,10 +38,6 @@ def configuration() -> AdminGatewayConfig:
         enabled=True,
         base_url="http://127.0.0.1:3000",
         service_key=SERVICE_KEY,
-        issuer="dream-test",
-        audience="admin-gateway-test",
-        client_id="dream-model-catalog-test",
-        token_lifetime_seconds=60,
     )
 
 
@@ -66,7 +62,7 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
         "default_model_alias": "dream-balanced",
     }))
     catalog = GatewayModelCatalogClient(
-        42,
+        access_token=ACCESS_TOKEN,
         configuration=configuration(),
         transport=transport,
     ).fetch_catalog()
@@ -92,15 +88,8 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
     }
     call = transport.calls[0]
     assert call["url"] == "http://127.0.0.1:3000/v1/models"
-    claims = jwt.decode(
-        call["headers"]["authorization"].removeprefix("Bearer "),
-        SERVICE_KEY,
-        algorithms=["HS256"],
-        audience="admin-gateway-test",
-        issuer="dream-test",
-    )
-    assert claims["sub"] == "42"
-    assert claims["scope"] == "models:list"
+    assert call["headers"]["authorization"] == f"Bearer {ACCESS_TOKEN}"
+    assert call["headers"]["x-api-key"] == SERVICE_KEY
 
 
 def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
@@ -111,7 +100,7 @@ def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
     }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
-            7,
+            access_token=ACCESS_TOKEN,
             configuration=configuration(),
             transport=malformed,
         ).list_models()
@@ -140,7 +129,7 @@ def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:
 
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
-            7,
+            access_token=ACCESS_TOKEN,
             configuration=configuration(),
             transport=transport,
         ).list_models()
@@ -168,7 +157,7 @@ def test_catalog_rejects_non_positive_model_max_output_capability() -> None:
     }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
-            7,
+            access_token=ACCESS_TOKEN,
             configuration=configuration(),
             transport=transport,
         ).list_models()
@@ -197,7 +186,7 @@ def test_catalog_rejects_invalid_claude_code_runtime_windows(runtime_value: Any)
     }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
-            7,
+            access_token=ACCESS_TOKEN,
             configuration=configuration(),
             transport=transport,
         ).list_models()

@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminWorkflowRunCreation.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "exit_code": 1,
+  "output": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Original safe error code required\n    at equal (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminWorkflowRunCreation.contract.ts:70:69)\n    at call (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminWorkflowRunCreation.contract.ts:93:62)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <anonymous> (/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/adminWorkflowRunCreation.contract.ts:139:76) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v26.4.0\n",
+  "scope": "provider-free prepared public route and SELECT-only verification; not real business"
+}

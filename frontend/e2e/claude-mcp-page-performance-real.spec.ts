@@ -40,7 +40,7 @@ function createActorToken(email: string): string {
     'from dotenv import load_dotenv',
     "load_dotenv('.env')",
     'import os',
-    "from persistence.config import load_database_url_from_env_file",
+    "from tests.legacy_persistence.config import load_database_url_from_env_file",
     "load_database_url_from_env_file(override=True) if os.environ.get('INK_LOAD_DATABASE_URL_FROM_ENV_FILE') == '1' else None",
     'import auth,database,sys',
     'db=database.get_db()',

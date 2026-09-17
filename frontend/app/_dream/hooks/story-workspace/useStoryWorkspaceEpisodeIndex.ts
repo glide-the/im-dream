@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Actor-scoped Run ID and the read-only Episode registry index endpoint.
 // [Output] Strict ETag-aware Episode index state with Run-local polling and invalidation.
 // [Pos] Story Workspace Episode index query boundary; it never selects or mutates an Episode.
 // [Sync] 2026-09-02: add the default Sync-page Episode index data source.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import {
   storyWorkspaceParseEpisodeIndexSurface,
@@ -50,14 +52,14 @@ export async function storyWorkspaceFetchEpisodeIndex(
   endpoint: string,
   options: {
     readonly fetchImpl?: typeof fetch;
-    readonly token?: string | null;
+    readonly csrfToken?: string | null;
     readonly etag?: string | null;
     readonly expectedRunId?: string;
     readonly signal?: AbortSignal;
   } = {},
 ): Promise<StoryWorkspaceEpisodeIndexFetchResult> {
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   if (options.etag) headers.set('If-None-Match', storyWorkspaceQuotedEtag(options.etag));
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
@@ -143,7 +145,7 @@ export function useStoryWorkspaceEpisodeIndex(
   runId: string | null | undefined,
   options: {
     readonly fetchImpl?: typeof fetch;
-    readonly token?: string | null;
+    readonly csrfToken?: string | null;
     readonly pollIntervalMs?: number;
   } = {},
 ): StoryWorkspaceEpisodeIndexState {
@@ -168,7 +170,7 @@ export function useStoryWorkspaceEpisodeIndex(
       apiUrl(storyWorkspaceEpisodeIndexEndpoint(requestRunId)),
       {
         fetchImpl: options.fetchImpl,
-        token: options.token === undefined ? getAuthToken() : options.token,
+        csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
         etag: etagRef.current,
         expectedRunId: requestRunId,
         signal: controller.signal,
@@ -198,7 +200,7 @@ export function useStoryWorkspaceEpisodeIndex(
         error: reason instanceof Error ? reason : new Error('Episode index request failed.'),
       });
     });
-  }, [normalizedRunId, options.fetchImpl, options.token]);
+  }, [normalizedRunId, options.fetchImpl, options.csrfToken]);
 
   useEffect(() => {
     mountedRef.current = true;

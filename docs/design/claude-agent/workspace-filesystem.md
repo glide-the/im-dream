@@ -2,6 +2,7 @@
 > **Ink & Memory 适配说明**: skills 同步已由 `workspace_file_sync.py` 引入；
 > `sync_skills_symlinks()` 会先导入 `.claude/skills/` 的真实写入，再维护
 > `workspace/skills/` 到 `.claude/skills/` 的发现软链接。
+> **[Sync] 2026-09-15**: 公开Workspace路由通过OAuth Admin SystemConfig读取Mode；content/download仍先验证Thread所有权。活动turn通过绑定的Admin persistence owner读取配置，失败发生在任何共享FS操作前且不回退Dream数据库。
 > **[Sync] 2026-06-06**: Memory Workspace 不再由 `init_workspace()` 或 `ClaudeAgentService.assemble_context()` 初始化；`/memory/` 仅通过 `POST /api/workspace/memory-init` 文件接口从 `voices.memory_workspace_config` 写入。详见 [`../memory/memory-workspace-design.md`](../memory/memory-workspace-design.md)。
 > **[Sync] 2026-06-16**: `.claude/skills/` 真实文件/目录会在下次 workspace
 > 同步时导入 `workspace/skills/`，支持 Agent 直接创建或替换 skill。
@@ -220,7 +221,10 @@ from libs.claude_agent_kit.server.workspace import (
 )
 
 async def assemble_context(self, request, *, state, queue, runner=None):
-    system_config = database.get_system_config(user_id)
+    system_config = request.admin_turn_persistence.system_config(
+        actor_id=request.user_id,
+        thread_id=request.thread_id,
+    )
     workspace_enabled = bool(system_config.get("workspace_enabled", True))
 
     if workspace_enabled:

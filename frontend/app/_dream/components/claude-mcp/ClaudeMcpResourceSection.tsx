@@ -13,6 +13,7 @@
 // [Sync] 2026-08-27: automatically retry transient capability verification without misreporting a missing migration.
 // [Sync] 2026-09-06: move MCP Server creation from the long settings flow into the shared accessible responsive dialog and focus its first field on open.
 // [Sync] 2026-09-06: group connection identity and endpoint inputs inside a caller-scoped wide dialog with a scrollable body and persistent action footer.
+// [Sync] 2026-09-16: expose OAuth replacement from terminal failed/configured states while preserving the current credential until exchange succeeds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -36,6 +37,7 @@ import {
   forgetClaudeMcpOAuthOperation,
   rememberClaudeMcpOAuthOperation,
 } from './oauthHandoff';
+import { canStartClaudeMcpAuth, claudeMcpAuthActionLabel } from './authPolicy';
 import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconPlus, IconX } from '../chat/Icons';
 import Modal from '../chat/Modal';
 import './ClaudeMcpResourceSection.css';
@@ -88,10 +90,6 @@ function serverStatusLabel(server: ClaudeMcpServer, state: ClaudeMcpState): stri
   if (state === 'connected') return AUTH_STATE_LABELS[authStateOf(server)];
   if (state === 'configured' && authStateOf(server) === 'unknown') return '已配置，等待检测连接';
   return STATE_LABELS[state];
-}
-
-function canStartAuth(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
-  return state === 'needs_auth' && authStateOf(server) === 'required';
 }
 
 function canLogout(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
@@ -253,7 +251,7 @@ export default function ClaudeMcpResourceSection({
   }, [activeOperationIds, load]);
 
   const start = async (server: ClaudeMcpServer, state: ClaudeMcpState) => {
-    if (!canStartAuth(server, state)) return;
+    if (!canStartClaudeMcpAuth(server, state)) return;
     setBusyServer(server.name);
     setError(null);
     try {
@@ -553,11 +551,9 @@ export default function ClaudeMcpResourceSection({
                       退出认证
                     </button>
                   ) : null}
-                  {canStartAuth(server, state) && !ACTIVE_STATES.includes(state) ? (
+                  {canStartClaudeMcpAuth(server, state) && !ACTIVE_STATES.includes(state) ? (
                     <button type="button" onClick={() => void start(server, state)} disabled={busyServer === server.name} style={actionButton(true)}>
-                      {state === 'connected' && authStateOf(server) === 'anonymous'
-                        ? '尝试认证'
-                        : state === 'connected' ? '重新认证' : '开始认证'}
+                      {claudeMcpAuthActionLabel(server)}
                     </button>
                   ) : null}
                   {canDetectConnection(server, state) && !ACTIVE_STATES.includes(state) ? (

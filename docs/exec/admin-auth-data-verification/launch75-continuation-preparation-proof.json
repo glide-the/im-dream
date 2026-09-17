@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "original_fixture_sha256": "ef01594cd9aef0806fd48afdb60b10ab2868856f004f8dce225266ce0251d13c",
+  "prior_protected_tables_unchanged": 17,
+  "prior_accepted_cases": 1,
+  "remaining_cases": 37,
+  "full_cases": 38,
+  "full_case_facts": "unchanged",
+  "original_get_checkpoints": 21,
+  "corrected_actor_query_cases": 3,
+  "new_closed_query_cases": 3,
+  "credential_refresh": "new technical OAuth only; old tokens/fixture remain retained",
+  "private_keys_exported": false,
+  "scope": "no business writes/lease refresh or original result reset"
+}

@@ -1,0 +1,11 @@
+{
+  "status": "prepared",
+  "database": "ink_auth_data_codex_test_792494523a17",
+  "user": "postgres",
+  "address": "127.0.0.1",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "historical_count": 54,
+  "baseline": "017f3acccc57991f0b3771c1c9bb9dd765255b07",
+  "owner_config": "/private/tmp/ink-auth-migration-validation/owner.json"
+}

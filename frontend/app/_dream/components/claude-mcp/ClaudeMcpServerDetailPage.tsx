@@ -14,6 +14,7 @@
 // [Sync] 2026-09-06: fold all connection-level App controls into one MCP usage-policy section.
 // [Sync] 2026-09-06: replace the manual usage-policy action with queued CAS auto-save, conflict rebasing, visible failure, and retained local edits.
 // [Sync] 2026-09-06: remove the usage-policy explanatory subtitle, summary/status footer, and all availability badges while retaining desired persistence and error alerts.
+// [Sync] 2026-09-16: allow an OAuth credential to be replaced from every terminal connection state without logging out first.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -42,6 +43,7 @@ import {
   forgetClaudeMcpOAuthOperation,
   rememberClaudeMcpOAuthOperation,
 } from './oauthHandoff';
+import { canStartClaudeMcpAuth, claudeMcpAuthActionLabel } from './authPolicy';
 import {
   IconCheck,
   IconChevronLeft,
@@ -113,10 +115,6 @@ const AUTH_STATE_LABELS: Record<ClaudeMcpAuthState, string> = {
 
 function authStateOf(server: ClaudeMcpServer | null): ClaudeMcpAuthState {
   return server?.auth_state ?? 'unknown';
-}
-
-function canStartAuth(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
-  return state === 'needs_auth' && authStateOf(server) === 'required';
 }
 
 function canLogout(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
@@ -638,7 +636,7 @@ export default function ClaudeMcpServerDetailPage({
   }, [load, operation]);
 
   const startAuth = useCallback(async () => {
-    if (busyAction || !canStartAuth(server, effectiveState)) return;
+    if (busyAction || !canStartClaudeMcpAuth(server, effectiveState)) return;
     setBusyAction('auth');
     setPageError(null);
     try {
@@ -921,12 +919,10 @@ export default function ClaudeMcpServerDetailPage({
                   {editing ? '取消编辑' : '编辑配置'}
                 </button>
               ) : null}
-              {canStartAuth(server, effectiveState) && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
+              {canStartClaudeMcpAuth(server, effectiveState) && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
                 <button type="button" onClick={() => void startAuth()} disabled={Boolean(busyAction)} style={{ ...actionStyle(true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'auth' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconShare style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  {effectiveState === 'connected' && authStateOf(server) === 'anonymous'
-                    ? '尝试认证'
-                    : effectiveState === 'connected' ? '重新认证' : '开始认证'}
+                  {server ? claudeMcpAuthActionLabel(server) : '开始认证'}
                 </button>
               ) : null}
               {canLogout(server, effectiveState) ? (

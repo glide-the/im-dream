@@ -1,0 +1,8 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/failure77-preservation.py checkpoint",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 0,
+  "output": "{\"result\": \"PASS\", \"scope\": \"primary SELECT-only accepted public checkpoint\", \"target\": \"[REDACTED]\", \"protected_tables\": 17, \"business_mutation\": false, \"normal_database\": \"untouched\"}\n",
+  "scope": "primary SELECT-only owned original125/prepublic125/postpublic17/positive6 preservation; no business mutation"
+}

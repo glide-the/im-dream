@@ -1,0 +1,407 @@
+{
+  "result": "PASS",
+  "scope": "Named public candidates only; private payloads read locally for exact/JSON-escaped/URL-encoded/base64 secret matching; values never emitted",
+  "private_sources_read": 55,
+  "distinct_known_secret_values": 86,
+  "validated_token_selector_references": 105,
+  "selector_source": "Admin tests/integration/adminWorkflowPreflight.contract.ts:20 enum /call selects tokens[name]; actual tokens.* included",
+  "candidate_count": 48,
+  "pattern_categories": [
+    "postgres_connection",
+    "github_credential",
+    "provider_key",
+    "aws_key",
+    "private_pem",
+    "bearer_literal",
+    "jwt_literal",
+    "delegation_literal",
+    "secret_assignment"
+  ],
+  "hits": [],
+  "files": [
+    {
+      "destination": "preflight61-remaining-read-seed-id-expiry-corrected-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-seed-id-expiry-corrected-proof.json",
+      "sha256": "026449cba80ca83587ba9d364d5da36147284388e4439bc0d18370a701c9ea27",
+      "bytes": 662,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-catalog-corrected-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-catalog-corrected-proof.json",
+      "sha256": "7337fb0821ce78be1fb303b37c34b4ff4b75e4555f18367610d9857bde506b19",
+      "bytes": 573,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-checking-execute-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-checking-execute-proof.json",
+      "sha256": "f3276657f6ca42c642d363336b990d41c0e8614a4b32aa353d6b89bba2e6aac5",
+      "bytes": 326,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-token-fault-catalog-corrected-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-token-fault-catalog-corrected-cleanup-proof.json",
+      "sha256": "a5b4102ea79f719f3d6c3924da313b424e937fb8086a7724401f55fc0748f40b",
+      "bytes": 156,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marker-seed-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-marker-seed-proof.json",
+      "sha256": "72920808675154eb179b3b7319b42fa83c41655232e59be533ced9ead01dc9fe",
+      "bytes": 675,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-fault-catalog-corrected-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-fault-catalog-corrected-cleanup-proof.json",
+      "sha256": "a5b4102ea79f719f3d6c3924da313b424e937fb8086a7724401f55fc0748f40b",
+      "bytes": 156,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-token-fault-catalog-corrected-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-token-fault-catalog-corrected-proof.json",
+      "sha256": "63023eff53c8254ac1e54b1446b24ab00425925ed5183012bf623ce0ac06647d",
+      "bytes": 550,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-cleanup-proof.json",
+      "sha256": "83a5f750c06fb423efbca23fbeafad0ca533ead05511aceb80504ec1816bbec6",
+      "bytes": 158,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-snapshot-recover-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-snapshot-recover-proof.json",
+      "sha256": "d74c29a3c649fb3924cc9f401af00a4dbf18f54475bc0315cead61d78091aa27",
+      "bytes": 394,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-binding-execute-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-binding-execute-proof.json",
+      "sha256": "a262bde6c52cd51c5eb7a3c6b750dddfd3e5c91a46c6a10649772d94856b5c7b",
+      "bytes": 325,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-credential-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-credential-proof.json",
+      "sha256": "6cce45c31a5ea14c725b3d6797e44ae654583f55568ac70449668cadaf466d78",
+      "bytes": 286,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-proof.json",
+      "sha256": "b342115fb6e1629cd889e106adbaea504c7fa1416fee366e478a52e34462bbe2",
+      "bytes": 236,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-binding-recover-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-binding-recover-proof.json",
+      "sha256": "f37d64e61b54ae608c8178eea39c502074239c41edd0003d5f5de83e1fd56c56",
+      "bytes": 393,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-snapshot-execute-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-snapshot-execute-proof.json",
+      "sha256": "9f217d5cea259e259b0064a99886ed36e3471a83035e59cee6fc2d65d439d07b",
+      "bytes": 326,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-fault-catalog-corrected-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-fault-catalog-corrected-proof.json",
+      "sha256": "af8da671fe3d2f0719651dca33c796dfcc3d3bea80698709d21ba2547781ce5c",
+      "bytes": 559,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-recovery-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-recovery-cleanup-proof.json",
+      "sha256": "66f04e414230b6c1df809e52453b8eb90666ac0a958ef2156495a03dec5096fd",
+      "bytes": 146,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-binding-fault-catalog-corrected-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-binding-fault-catalog-corrected-cleanup-proof.json",
+      "sha256": "a5b4102ea79f719f3d6c3924da313b424e937fb8086a7724401f55fc0748f40b",
+      "bytes": 156,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-binding-fault-catalog-corrected-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-binding-fault-catalog-corrected-proof.json",
+      "sha256": "b16a3161ab5c9dc3b977d6e86e38a21b417c86e3935b98e02f9fbc503bfc562d",
+      "bytes": 567,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-receipt-permission-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-receipt-permission-preparation-proof.json",
+      "sha256": "5f34b9cb70a9545161359f126b3ed60d6f18ab687c723b237cf9beb8fc271d8c",
+      "bytes": 288,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interrupt-checking-recover-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interrupt-checking-recover-proof.json",
+      "sha256": "0d55c4f0d6a66e2d8e4dcfc682247c56650c7ba2ff067e241808490df0891039",
+      "bytes": 394,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remediation-read-diagnostic-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remediation-read-diagnostic-proof.json",
+      "sha256": "8aacf1e34251a4b7cd259af3e4954040ca417a4c2343c28b62c508cbb25e7507",
+      "bytes": 3552,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-recovery-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-recovery-proof.json",
+      "sha256": "e51e68193a9274a3ef2fa277e1d8e3ebdbcc360ddea22baa831661ca52c646c8",
+      "bytes": 994,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marker-credential-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-marker-credential-proof.json",
+      "sha256": "6cce45c31a5ea14c725b3d6797e44ae654583f55568ac70449668cadaf466d78",
+      "bytes": 286,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-catalog-corrected-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-catalog-corrected-cleanup-proof.json",
+      "sha256": "83a5f750c06fb423efbca23fbeafad0ca533ead05511aceb80504ec1816bbec6",
+      "bytes": 158,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-preparation-id-expiry-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-preparation-id-expiry-corrected-command-receipt.json",
+      "sha256": "ab50be2f24c031ed2bc9e3fadb3010a1aaecb7ef7ae2ead37a6bc32d15393f39",
+      "bytes": 1609,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-token-fault-catalog-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-token-fault-catalog-corrected-command-receipt.json",
+      "sha256": "c2fb8965877398f6da7516297a04e8e2bd4b8207744659f02f74ab817c6e157a",
+      "bytes": 859,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-interruption-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-interruption-command-receipt.json",
+      "sha256": "229e9db2333a744cbf5198753d79ab907c63b464a8b09c97e65b2ddde25be6ba",
+      "bytes": 3751,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marker-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-marker-preparation-command-receipt.json",
+      "sha256": "276c58f107a63303e8c48aaec0b4b29bacaad9dcb779525b773c2bb4ba4baef4",
+      "bytes": 1622,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-binding-fault-catalog-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-binding-fault-catalog-corrected-command-receipt.json",
+      "sha256": "476467544099e38c3b6de09af490f4c6ff1e66d24dd7d29ed7c79ed1b8e14690",
+      "bytes": 898,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-snapshot-fault-catalog-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-snapshot-fault-catalog-corrected-command-receipt.json",
+      "sha256": "8347f90437f7d81a9a4d91356761aa913a67c049f9d89e88e01f4db145cb92ce",
+      "bytes": 874,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-public-command-receipt.json",
+      "sha256": "fddc046ec1e56d59a985beab0e8d15e911126084cdcd31e81ef6986f1743d432",
+      "bytes": 958,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-receipt-permission-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-receipt-permission-command-receipt.json",
+      "sha256": "c098d23781121ccbb6394f1ac75808ae14a758bc0c18ac4bceceb0d93bf4911c",
+      "bytes": 578,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-recovery-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-recovery-command-receipt.json",
+      "sha256": "8cf187fd28dc4d6adb08b665a5cf4fa678b0d60ce85d3f0f2664646918614e38",
+      "bytes": 1481,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-preparation-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-preparation-corrected-command-receipt.json",
+      "sha256": "65cbc4ce59d9996f36da5b3768e8f33a98a3d5a40d3116865dc6e9b489c918e4",
+      "bytes": 1658,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-selected-faults-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-selected-faults-command-receipt.json",
+      "sha256": "52f6a4c223bc00e240b7397c7ed8b0f4b8e660bbc5f356ab528f63dd15ea0dc6",
+      "bytes": 846,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marker-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-marker-public-command-receipt.json",
+      "sha256": "526e08223e9ecf17b983d2d9544fb002b5f3d3af9018c69ac5fbcb0aae438561",
+      "bytes": 704,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-remaining-read-preparation-command-receipt.json",
+      "sha256": "65cbc4ce59d9996f36da5b3768e8f33a98a3d5a40d3116865dc6e9b489c918e4",
+      "bytes": 1658,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-selected-faults-catalog-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-selected-faults-catalog-corrected-command-receipt.json",
+      "sha256": "e207819c6685c1ad0936377f8e13ba11057d3726dc44d6a44c516b8b38f66862",
+      "bytes": 4085,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-catalog-corrected-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-catalog-corrected-command-receipt.json",
+      "sha256": "5bcf8c8cdb2d92c4de313013299c7813d95393c38789554060a9b39b9d072692",
+      "bytes": 898,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-compatibility-fault-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/preflight61-compatibility-fault-command-receipt.json",
+      "sha256": "4f610064347b71a7cee99c5fa45506516090b8e74abd36424627085ffdd879de",
+      "bytes": 522,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-remediation-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-remediation-public-command-receipt.json",
+      "sha256": "a2e729ec26711f317658b1090d2c611fe7c1ef05a721d9607ad91cdf6a011ac9",
+      "bytes": 1030,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-public24-remediation-failure.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-public24-remediation-receipt.md",
+      "sha256": "1e469f2e315c3dc5dab22ca4404df1f846a5631d1e3816e6a2684c8d9b91cf4e",
+      "bytes": 2066,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-initial-failure.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-remaining-read-public-receipt.md",
+      "sha256": "65c876c0d593cf4022c1905891f9e2c3ec7498a2fcdfaae0c1fb63174b6dcda2",
+      "bytes": 1774,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marked-pass.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-remaining-read-marked-public-receipt.md",
+      "sha256": "f01822171c208aedf46362922a9bf0766e24542403f10b0aac6236aab645e576",
+      "bytes": 1659,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-remaining-read-marker-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-remaining-read-marker-gate.md",
+      "sha256": "75c9a3c7bc802ebfcfdde7434533cb19c8a87e0f3783083f14602169ce810c2f",
+      "bytes": 942,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "coordinator-preflight129-new17-review.md",
+      "source": "/private/tmp/ink-coordination-docs-validation/preflight129-new17-review.md",
+      "sha256": "c7e4cf17275e78c031d3cd4794a16ebe66e6d88618c1de71cf87530ceee87c04",
+      "bytes": 1389,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "recovery-index-safe-merge-proof.json",
+      "source": "/private/tmp/ink-coordination-docs-validation/recovery-index-safe-merge-proof.json",
+      "sha256": "e4583ae10ca23b185b63293b096ea6f6c9d896e50b20774e24aa4be4d6dc47c5",
+      "bytes": 491,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-receipt-permission-tail-pass.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-receipt-permission-tail-receipt.md",
+      "sha256": "eeb4a815d4fe0ccaef850353d78380bfa67981e9b865e8afbc6500e669926a37",
+      "bytes": 1531,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    }
+  ]
+}

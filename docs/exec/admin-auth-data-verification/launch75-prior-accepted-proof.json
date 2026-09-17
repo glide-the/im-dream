@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "protected_tables": 17,
+  "protected_state_sha256": "b5d5f6c977963f406656261b8e0f21e98862a7870f3571cd71cf5eec39d8d4b1",
+  "prior_accepted_cases": 1,
+  "prior_accepted_label": "source-new-null",
+  "correlated_audits": 1,
+  "remaining_cases": 37,
+  "scope": "SELECT-only; fixed relation inventory; original complete fixture and prior rows retained"
+}

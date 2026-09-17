@@ -1,6 +1,6 @@
-# [Input] Structured DreamArtifactValidationIssue, canonical chat_message persistence, and server-owned Dream Turn identity.
-# [Output] One stable visible auto-repair user message plus bounded dispatch-status settlement helpers.
-# [Pos] Dream application service between the post-turn Hook and ClaudeAgentService; it never runs the Agent.
+# [Input] Structured DreamArtifactValidationIssue, Admin persistence owner, and server-owned Dream Turn identity.
+# [Output] One stable visible auto-repair user message plus typed Admin settlement helpers.
+# [Pos] Dream application service; it owns repair orchestration while Admin owns ORM and transactions.
 # [Sync] 2026-09-01: initial persistence-first, one-attempt auto-repair message contract.
 # [Sync] 2026-09-01: add bounded canonical-root/stage-schema repair templates,
 #                    require move/merge cleanup, and expose a safe final reason
@@ -10,6 +10,7 @@
 # [Sync] 2026-09-01: persist the server-resolved trusted/stale project cleanup
 #                    scope in the visible repair fact so fresh Sessions cannot
 #                    guess the protected root from ambiguous workspace content.
+# [Sync] 2026-09-16: route insertion and terminal CAS through Admin DTO providers.
 
 """Build and persist one allowlisted Dream workspace auto-repair message."""
 
@@ -17,18 +18,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import json
 import re
 from typing import Any, Mapping
 
 try:
-    import database
+    from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
+    from services.admin_data.errors import AdminDataError
+    from services.admin_data.dream_auto_repair_data import (
+        AdminDreamAutoRepairProvider,
+        DreamAutoRepairIdentityDTO,
+        DreamAutoRepairProjectCleanupDTO,
+    )
     from services.story_workspace.dream_artifact_turn_hook import (
         DreamArtifactRepairability,
         DreamArtifactValidationIssue,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
-    from backend import database
+    from backend.services.admin_data.agent_turn_persistence import (
+        AdminAgentTurnPersistence,
+    )
+    from backend.services.admin_data.errors import AdminDataError
+    from backend.services.admin_data.dream_auto_repair_data import (
+        AdminDreamAutoRepairProvider,
+        DreamAutoRepairIdentityDTO,
+        DreamAutoRepairProjectCleanupDTO,
+    )
     from backend.services.story_workspace.dream_artifact_turn_hook import (
         DreamArtifactRepairability,
         DreamArtifactValidationIssue,
@@ -457,16 +471,23 @@ def build_dream_auto_repair_message(
     )
 
 
-def persist_dream_auto_repair_message(message: DreamAutoRepairMessage) -> None:
+def persist_dream_auto_repair_message(
+    message: DreamAutoRepairMessage,
+    *,
+    provider: AdminAgentTurnPersistence,
+    actor_id: str,
+) -> None:
     """Commit the exact user message before any SSE notification."""
 
     try:
-        database.save_chat_message(
-            message.thread_id,
-            "user",
-            message.persistence_parts(),
-            message.id,
-            dict(message.metadata),
+        if not isinstance(provider, AdminAgentTurnPersistence):
+            raise TypeError("Dream auto-repair persistence owner is unavailable")
+        provider.persist_user(
+            actor_id=actor_id,
+            thread_id=message.thread_id,
+            message_id=message.id,
+            parts=message.persistence_parts(),
+            metadata=dict(message.metadata),
         )
     except Exception as exc:
         raise DreamAutoRepairError(
@@ -476,29 +497,49 @@ def persist_dream_auto_repair_message(message: DreamAutoRepairMessage) -> None:
         ) from exc
 
 
-def _decode_metadata(raw: object) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return dict(raw)
-    if isinstance(raw, str):
-        try:
-            value = json.loads(raw)
-        except (TypeError, ValueError) as exc:
-            raise DreamAutoRepairError(
-                "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
-                "Dream 自动修正消息状态不可验证，已安全停止。",
-                cause=exc,
-            ) from exc
-        if isinstance(value, dict):
-            return value
-    raise DreamAutoRepairError(
-        "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
-        "Dream 自动修正消息状态不可验证，已安全停止。",
-    )
+def _identity_from_metadata(
+    metadata: Mapping[str, Any],
+) -> DreamAutoRepairIdentityDTO:
+    """Translate one validated product fact into Registry169's wire DTO."""
+
+    if not dream_auto_repair_metadata_is_valid(metadata):
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
+            "Dream 自动修正消息状态不可验证，已安全停止。",
+        )
+    cleanup = dream_auto_repair_project_cleanup_from_metadata(metadata)
+    try:
+        return DreamAutoRepairIdentityDTO(
+            kind=metadata["kind"],
+            schema_version=metadata["schemaVersion"],
+            originating_message_id=metadata["originatingMessageId"],
+            originating_turn_id=metadata["originatingTurnId"],
+            workflow_run_id=metadata["workflowRunId"],
+            repair_attempt=metadata["repairAttempt"],
+            validation_code=metadata["validationCode"],
+            idempotency_key=metadata["idempotencyKey"],
+            project_cleanup=(
+                None
+                if cleanup is None
+                else DreamAutoRepairProjectCleanupDTO(
+                    trusted_project_slug=cleanup[0],
+                    stale_project_slugs=list(cleanup[1]),
+                )
+            ),
+        )
+    except Exception as exc:
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
+            "Dream 自动修正消息状态不可验证，已安全停止。",
+            cause=exc,
+        ) from exc
 
 
 def settle_dream_auto_repair_message(
     message_id: str,
     *,
+    provider: AdminDreamAutoRepairProvider,
+    actor_id: str,
     thread_id: str,
     expected_metadata: Mapping[str, Any],
     status: str,
@@ -507,129 +548,43 @@ def settle_dream_auto_repair_message(
 
     if status not in _FINAL_STATUSES:
         raise ValueError("Dream auto-repair final status is invalid")
-    db = database.get_db()
     try:
-        db.execute("BEGIN")
-        row = db.execute(
-            "SELECT thread_id, role, metadata FROM chat_message WHERE id = %s",
-            (message_id,),
-        ).fetchone()
-        if row is None:
-            raise DreamAutoRepairError(
-                "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
-                "Dream 自动修正消息状态不可验证，已安全停止。",
-            )
-        stored = _decode_metadata(row["metadata"])
-        expected = dict(expected_metadata)
-        valid = (
-            row["thread_id"] == thread_id
-            and row["role"] == "user"
-            and dream_auto_repair_metadata_is_valid(stored)
-            and all(
-                stored.get(field) == expected.get(field)
-                for field in (
-                    "kind",
-                    "schemaVersion",
-                    "originatingMessageId",
-                    "originatingTurnId",
-                    "workflowRunId",
-                    "repairAttempt",
-                    "validationCode",
-                    "idempotencyKey",
-                    "projectCleanup",
-                )
-            )
+        if not isinstance(provider, AdminDreamAutoRepairProvider):
+            raise TypeError("Dream auto-repair settlement owner is unavailable")
+        result = provider.settle_dream_auto_repair(
+            actor_id=actor_id,
+            thread_id=thread_id,
+            message_id=message_id,
+            expected_identity=_identity_from_metadata(expected_metadata),
+            status=status,
         )
-        if not valid:
-            raise DreamAutoRepairError(
-                "DREAM_AUTO_REPAIR_MESSAGE_INVALID",
-                "Dream 自动修正消息状态不可验证，已安全停止。",
-            )
-        current_status = stored.get("dispatch_status")
-        if current_status == status:
-            db.commit()
-            return False
-        valid_transition = (
-            current_status == DREAM_AUTO_REPAIR_DISPATCHING
-            and status in _FINAL_STATUSES
-        ) or (
-            current_status == DREAM_AUTO_REPAIR_DISPATCHED
-            and status == DREAM_AUTO_REPAIR_FAILED
-        )
-        if not valid_transition:
-            raise DreamAutoRepairError(
-                "DREAM_AUTO_REPAIR_MESSAGE_CONFLICT",
-                "Dream 自动修正消息状态发生冲突，已安全停止。",
-            )
-        updated_metadata = dict(stored)
-        updated_metadata["dispatch_status"] = status
-        updated = db.execute(
-            "UPDATE chat_message SET metadata = %s WHERE id = %s "
-            "AND thread_id = %s AND role = 'user' AND metadata = %s",
-            (
-                json.dumps(
-                    updated_metadata,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ),
-                message_id,
-                thread_id,
-                row["metadata"],
-            ),
-        )
-        if updated.rowcount != 1:
-            replay = db.execute(
-                "SELECT thread_id, role, metadata FROM chat_message WHERE id = %s",
-                (message_id,),
-            ).fetchone()
-            if replay is not None:
-                replayed_metadata = _decode_metadata(replay["metadata"])
-                replay_is_same_claim = (
-                    replay["thread_id"] == thread_id
-                    and replay["role"] == "user"
-                    and dream_auto_repair_metadata_is_valid(replayed_metadata)
-                    and replayed_metadata.get("dispatch_status") == status
-                    and all(
-                        replayed_metadata.get(field) == expected.get(field)
-                        for field in (
-                            "kind",
-                            "schemaVersion",
-                            "originatingMessageId",
-                            "originatingTurnId",
-                            "workflowRunId",
-                            "repairAttempt",
-                            "validationCode",
-                            "idempotencyKey",
-                            "projectCleanup",
-                        )
-                    )
-                )
-                if replay_is_same_claim:
-                    db.commit()
-                    return False
-            db.rollback()
-            raise DreamAutoRepairError(
-                "DREAM_AUTO_REPAIR_MESSAGE_CONFLICT",
-                "Dream 自动修正消息状态发生冲突，已安全停止。",
-            )
-        db.commit()
-        return True
+        return result.changed
     except DreamAutoRepairError:
-        if db.in_transaction:
-            db.rollback()
         raise
-    except Exception as exc:
-        if db.in_transaction:
-            db.rollback()
+    except AdminDataError as exc:
+        if exc.code == "DREAM_AUTO_REPAIR_MESSAGE_INVALID":
+            raise DreamAutoRepairError(
+                exc.code,
+                "Dream 自动修正消息状态不可验证，已安全停止。",
+                cause=exc,
+            ) from exc
+        if exc.code == "DREAM_AUTO_REPAIR_MESSAGE_CONFLICT":
+            raise DreamAutoRepairError(
+                exc.code,
+                "Dream 自动修正消息状态发生冲突，已安全停止。",
+                cause=exc,
+            ) from exc
         raise DreamAutoRepairError(
             "DREAM_AUTO_REPAIR_STATUS_PERSIST_FAILED",
             "Dream 自动修正结果无法安全保存，已停止自动修正。",
             cause=exc,
         ) from exc
-    finally:
-        db.close()
+    except Exception as exc:
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_STATUS_PERSIST_FAILED",
+            "Dream 自动修正结果无法安全保存，已停止自动修正。",
+            cause=exc,
+        ) from exc
 
 
 __all__ = [

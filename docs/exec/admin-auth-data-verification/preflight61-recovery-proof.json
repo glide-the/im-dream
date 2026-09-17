@@ -1,0 +1,30 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "assertions": 44,
+  "lost_commit_injections": 1,
+  "lost_commit": "actual final COMMIT before injected response loss; full original passed/source and PF/map/receipt/audit exact",
+  "expiry": "ordinary read token NULL; old original result exact; fresh new request expires old and creates fresh PF",
+  "initial_uow": "expiry/checking/map/audit all rolled back on selected new reserve fault",
+  "damaged_receipts": [
+    {
+      "kind": "ciphertext",
+      "status": 503,
+      "code": "WORKFLOW_PREFLIGHT_RECEIPT_UNAVAILABLE"
+    },
+    {
+      "kind": "workspace-binding",
+      "status": 503,
+      "code": "WORKFLOW_PREFLIGHT_RECEIPT_UNAVAILABLE"
+    },
+    {
+      "kind": "canonical-binding",
+      "status": 403,
+      "code": "WORKFLOW_PERMISSION_DENIED"
+    }
+  ],
+  "run_session_delta": 0,
+  "normal_database": "untouched",
+  "private_keys_exported": false,
+  "interruption_acceptance": "pending"
+}

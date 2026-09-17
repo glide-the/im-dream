@@ -1,6 +1,7 @@
 # Component Reuse Rule
 
 <!-- [Sync] 2026-09-06: resolve all Dream frontend reuse owners from the private frontend/app/_dream tree. -->
+<!-- [Sync] 2026-09-16: make Admin DTO clients the sole persistence reuse boundary. -->
 
 ## Mandatory
 
@@ -20,16 +21,16 @@
 ## Backend Search Order
 
 1. Existing focused FastAPI router under `backend/routers/` and composition in `backend/server.py`.
-2. Auth, persistence, and runtime helpers in `backend/auth.py`, `backend/database.py`, `backend/config.py`, `backend/claude_agent/`, and `backend/speech_recognition.py`.
+2. Auth/data clients and runtime helpers in `backend/services/admin_data/`, `backend/auth.py`, `backend/config.py`, `backend/claude_agent/`, and `backend/speech_recognition.py`.
 3. Existing prompt assets in `backend/prompts/`.
 4. Existing tooling and tests in `backend/tools/` and `backend/tests/`.
-5. New module only when the behavior has a stable owner and would otherwise make `server.py` or `database.py` harder to maintain.
+5. New module only when the behavior has a stable owner and would otherwise make `server.py` or the focused Admin DTO/service adapter harder to maintain.
 
 ## Practical Examples
 
 - Add editor UI by extending existing components such as `App.tsx`, `ChatWidgetUI.tsx`, `DeckManager.tsx`, or smaller components nearby before introducing a new screen.
 - Add reusable client state through a hook in `frontend/app/_dream/hooks/` when multiple components need the same lifecycle, persistence, or API orchestration.
-- Add backend voice/deck behavior by reusing the existing database access patterns and Claude Agent Thread/SSE contracts before adding another route shape.
+- Add backend voice/deck behavior by reusing the existing Admin DTO client and Claude Agent Thread/SSE contracts before adding another route shape.
 - Add prompt behavior by creating or editing a file in `backend/prompts/` and loading it through `backend/config.py` patterns, not by embedding prompt bodies in request handlers.
 
 ## Documentation Requirement

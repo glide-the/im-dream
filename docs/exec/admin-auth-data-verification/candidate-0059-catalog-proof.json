@@ -1,0 +1,130 @@
+{
+  "status": "passed",
+  "frozen_files": {
+    "drizzle/0059_normal_martin_li.sql": "21c7d7c73beb0ec3a9cd163060748a1b41e9305dc1085cb5387668103a9f67e0",
+    "drizzle/meta/0059_snapshot.json": "d3954c1428e01acf566e83518a4d6344144dfb6c4a38306738180036315ed28d",
+    "drizzle/contracts/dream-deck-content-canonical-storage-v1.json": "8791d9c1090844311f24403360f91de0ed256f23874ece97239bd348fa6dd827"
+  },
+  "upgraded": {
+    "columns": 11,
+    "indexes": {
+      "deck_versions_pkey": "CREATE UNIQUE INDEX deck_versions_pkey ON public.deck_versions USING btree (id)",
+      "uq_deck_versions_deck_id_version": "CREATE UNIQUE INDEX uq_deck_versions_deck_id_version ON public.deck_versions USING btree (deck_id, version)",
+      "idx_deck_versions_deck_created": "CREATE INDEX idx_deck_versions_deck_created ON public.deck_versions USING btree (deck_id, created_at)"
+    },
+    "constraints": {
+      "ck_deck_versions_base_version": "CHECK (base_version IS NULL OR base_version >= 1)",
+      "ck_deck_versions_canonical_projection": "CHECK (snapshot_canonical_json IS NULL OR snapshot_canonical_json::jsonb = snapshot_json)",
+      "ck_deck_versions_source_draft_revision": "CHECK (source_draft_revision >= 1)",
+      "ck_deck_versions_version": "CHECK (version >= 1)",
+      "deck_versions_content_hash_not_null": "NOT NULL content_hash",
+      "deck_versions_created_at_not_null": "NOT NULL created_at",
+      "deck_versions_created_by_not_null": "NOT NULL created_by",
+      "deck_versions_deck_id_not_null": "NOT NULL deck_id",
+      "deck_versions_id_not_null": "NOT NULL id",
+      "deck_versions_pkey": "PRIMARY KEY (id)",
+      "deck_versions_snapshot_json_not_null": "NOT NULL snapshot_json",
+      "deck_versions_source_draft_revision_not_null": "NOT NULL source_draft_revision",
+      "deck_versions_version_not_null": "NOT NULL version",
+      "fk_deck_versions_created_by_users": "FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT",
+      "fk_deck_versions_deck_id_decks": "FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT",
+      "uq_deck_versions_deck_id_version": "UNIQUE (deck_id, version)"
+    },
+    "ledger": {
+      "count": 60,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "97a95f92efecf3435890fcb3f9c1ce46e33fbed8a3de4dca3a632484de4f1c76"
+      ]
+    }
+  },
+  "repeat": "prior replay asserted same catalog and single candidate receipt; not repeated",
+  "concurrent": {
+    "columns": 11,
+    "indexes": {
+      "deck_versions_pkey": "CREATE UNIQUE INDEX deck_versions_pkey ON public.deck_versions USING btree (id)",
+      "uq_deck_versions_deck_id_version": "CREATE UNIQUE INDEX uq_deck_versions_deck_id_version ON public.deck_versions USING btree (deck_id, version)",
+      "idx_deck_versions_deck_created": "CREATE INDEX idx_deck_versions_deck_created ON public.deck_versions USING btree (deck_id, created_at)"
+    },
+    "constraints": {
+      "ck_deck_versions_base_version": "CHECK (base_version IS NULL OR base_version >= 1)",
+      "ck_deck_versions_canonical_projection": "CHECK (snapshot_canonical_json IS NULL OR snapshot_canonical_json::jsonb = snapshot_json)",
+      "ck_deck_versions_source_draft_revision": "CHECK (source_draft_revision >= 1)",
+      "ck_deck_versions_version": "CHECK (version >= 1)",
+      "deck_versions_content_hash_not_null": "NOT NULL content_hash",
+      "deck_versions_created_at_not_null": "NOT NULL created_at",
+      "deck_versions_created_by_not_null": "NOT NULL created_by",
+      "deck_versions_deck_id_not_null": "NOT NULL deck_id",
+      "deck_versions_id_not_null": "NOT NULL id",
+      "deck_versions_pkey": "PRIMARY KEY (id)",
+      "deck_versions_snapshot_json_not_null": "NOT NULL snapshot_json",
+      "deck_versions_source_draft_revision_not_null": "NOT NULL source_draft_revision",
+      "deck_versions_version_not_null": "NOT NULL version",
+      "fk_deck_versions_created_by_users": "FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT",
+      "fk_deck_versions_deck_id_decks": "FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT",
+      "uq_deck_versions_deck_id_version": "UNIQUE (deck_id, version)"
+    },
+    "ledger": {
+      "count": 60,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "97a95f92efecf3435890fcb3f9c1ce46e33fbed8a3de4dca3a632484de4f1c76"
+      ]
+    }
+  },
+  "fresh_full_history": {
+    "columns": 11,
+    "indexes": {
+      "deck_versions_pkey": "CREATE UNIQUE INDEX deck_versions_pkey ON public.deck_versions USING btree (id)",
+      "uq_deck_versions_deck_id_version": "CREATE UNIQUE INDEX uq_deck_versions_deck_id_version ON public.deck_versions USING btree (deck_id, version)",
+      "idx_deck_versions_deck_created": "CREATE INDEX idx_deck_versions_deck_created ON public.deck_versions USING btree (deck_id, created_at)"
+    },
+    "constraints": {
+      "ck_deck_versions_base_version": "CHECK (base_version IS NULL OR base_version >= 1)",
+      "ck_deck_versions_canonical_projection": "CHECK (snapshot_canonical_json IS NULL OR snapshot_canonical_json::jsonb = snapshot_json)",
+      "ck_deck_versions_source_draft_revision": "CHECK (source_draft_revision >= 1)",
+      "ck_deck_versions_version": "CHECK (version >= 1)",
+      "deck_versions_content_hash_not_null": "NOT NULL content_hash",
+      "deck_versions_created_at_not_null": "NOT NULL created_at",
+      "deck_versions_created_by_not_null": "NOT NULL created_by",
+      "deck_versions_deck_id_not_null": "NOT NULL deck_id",
+      "deck_versions_id_not_null": "NOT NULL id",
+      "deck_versions_pkey": "PRIMARY KEY (id)",
+      "deck_versions_snapshot_json_not_null": "NOT NULL snapshot_json",
+      "deck_versions_source_draft_revision_not_null": "NOT NULL source_draft_revision",
+      "deck_versions_version_not_null": "NOT NULL version",
+      "fk_deck_versions_created_by_users": "FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT",
+      "fk_deck_versions_deck_id_decks": "FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT",
+      "uq_deck_versions_deck_id_version": "UNIQUE (deck_id, version)"
+    },
+    "ledger": {
+      "count": 60,
+      "candidate_count": 1,
+      "capability": [
+        1,
+        "97a95f92efecf3435890fcb3f9c1ce46e33fbed8a3de4dca3a632484de4f1c76"
+      ]
+    }
+  },
+  "partial_rollback": {
+    "ledger": 59,
+    "no_capability": true,
+    "no_new_check": true
+  },
+  "legacy_record": "prior replay pre/post original PK/hash/jsonb/time/owner assertion passed; nullable text remained NULL; no backfill",
+  "lossless_text": "exact negative-zero canonical bytes survived; SHA256 matches; JSONB projection remains queryable",
+  "append_only_update": {
+    "exit_code": 1,
+    "sqlstate": "55000",
+    "constraint_or_message": "DECK_CONTENT_VERSION_IMMUTABLE"
+  },
+  "projection_mismatch_insert": {
+    "exit_code": 1,
+    "sqlstate": "23514",
+    "constraint_or_message": "ck_deck_versions_canonical_projection"
+  },
+  "harness_correction": "old UPDATE checked projection but original0036 append-only trigger refuses every UPDATE55000; unchanged projection23514 assertion applied to a new INSERT, append-only also asserted; no migrations replayed",
+  "normal_database": "untouched"
+}

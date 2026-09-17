@@ -1,4 +1,7 @@
-"""Story Workspace MCP remains an optional two-tool preview seam."""
+"""Story Workspace MCP remains an optional two-tool preview seam.
+
+[Sync] 2026-09-16: anchor the source boundary assertion to the backend test root.
+"""
 
 from __future__ import annotations
 
@@ -33,8 +36,9 @@ def test_removed_workflow_tools_fail_closed() -> None:
 
 
 def test_preview_tools_do_not_advance_workflow_lifecycle() -> None:
-    source = Path(
-        "libs/claude_agent_kit/server/story_workspace_tool.py"
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "libs/claude_agent_kit/server/story_workspace_tool.py"
     ).read_text(encoding="utf-8")
     assert "_advance_workflow_lifecycle" not in source
     assert "StoryWorkspaceDreamWorkflowLifecycleService" not in source

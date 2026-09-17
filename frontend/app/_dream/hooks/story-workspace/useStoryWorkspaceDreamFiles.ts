@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Run-scoped Dream file REST projections and story-workspace output notices.
 // [Output] Strict parser/fetch/reducer seams plus useStoryWorkspaceDreamFiles().
 // [Pos] story-workspace hooks node - Dream workspace file read boundary (Task 3 F2)
@@ -6,7 +8,7 @@
 //                    legacy stage items without it normalize to null.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspaceDreamAgentActivityProjection,
@@ -329,7 +331,7 @@ export function storyWorkspaceDreamFilesEndpoint(runId: string): string {
 
 export interface StoryWorkspaceDreamFilesFetchOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
 }
 
@@ -339,7 +341,7 @@ export async function storyWorkspaceFetchDreamFiles(
   options: StoryWorkspaceDreamFilesFetchOptions = {},
 ): Promise<StoryWorkspaceDreamFilesResponse> {
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
     headers,
@@ -415,7 +417,7 @@ export interface StoryWorkspaceDreamFilesUseOptions {
   updatesEnabled?: boolean;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
 }
 
 export interface StoryWorkspaceDreamFilesState {
@@ -453,7 +455,7 @@ export function useStoryWorkspaceDreamFiles(
     dispatch({ type: 'start', generation: nextGeneration });
     void storyWorkspaceFetchDreamFiles(apiUrl(storyWorkspaceDreamFilesEndpoint(runId)), {
       fetchImpl: options.fetchImpl,
-      token: options.token === undefined ? getAuthToken() : options.token,
+      csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
       signal: nextController.signal,
     }).then((data) => {
       if (!nextController.signal.aborted) {
@@ -468,7 +470,7 @@ export function useStoryWorkspaceDreamFiles(
         });
       }
     });
-  }, [enabled, options.fetchImpl, options.token, runId]);
+  }, [enabled, options.fetchImpl, options.csrfToken, runId]);
 
   useEffect(() => {
     controller.current?.abort();

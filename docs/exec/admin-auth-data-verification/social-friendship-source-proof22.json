@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "source": "/Users/dmeck/project/ink-dream-memory/backend/database.py",
+  "source_sha256": "14223de35336e5568fffd37c5ff2d1ec81dacfdf356f69f16383134415039401",
+  "cases": 22,
+  "method": "original unmodified AST function bodies with injected fixed database result seams; no copied business algorithm or database import/connection",
+  "evidence": "legacy error strings/receiver rules/labels/bidirectional sort/bigints/NULL picture prompt/microseconds/no-access result/original six-char seven-day generation",
+  "new_defects": "concurrency,expired-PK collisions,deleted-consumer reactivation and rejected same-direction unique violation are explicitly fixed in the new design, not claimed byte-for-byte legacy behavior"
+}

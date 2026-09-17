@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Sidebar guidance inputs, thread chat_message rows, and the Task 3
 //         guidance endpoint.
 // [Output] Guidance seams for the execution page sidebar (Task 5, design_004
@@ -14,7 +16,7 @@
 //                    removes them.
 
 import { useCallback, useEffect, useState } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import { isStoryWorkspaceGuidanceMetadata } from '../../lib/story-workspace-guidance';
 import type {
@@ -133,7 +135,7 @@ export type StoryWorkspaceGuidanceSubmitOutcome =
 
 export interface SubmitStoryWorkspaceGuidanceOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
 }
 
 function readErrorCode(body: unknown): string | null {
@@ -166,7 +168,7 @@ export async function submitStoryWorkspaceGuidance(
     Accept: 'application/json',
     'Content-Type': 'application/json',
   });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
 
   let response: Response;
   try {
@@ -204,7 +206,7 @@ export function storyWorkspaceGuidanceHistoryEndpoint(threadId: string): string 
 
 export interface FetchStoryWorkspaceGuidanceHistoryOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
 }
 
@@ -220,7 +222,7 @@ export async function fetchStoryWorkspaceGuidanceHistory(
 ): Promise<StoryWorkspaceGuidanceHistoryEntry[]> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
 
   let response: Response;
   try {
@@ -270,7 +272,7 @@ export function useStoryWorkspaceGuidanceHistory(
     const controller = new AbortController();
     setIsLoading(true);
     void fetchStoryWorkspaceGuidanceHistory(apiUrl(storyWorkspaceGuidanceHistoryEndpoint(threadId)), {
-      token: getAuthToken(),
+      csrfToken: getBrowserCsrfToken(),
       signal: controller.signal,
     }).then((resolved) => {
       if (controller.signal.aborted) return;

@@ -1,0 +1,22 @@
+{
+  "result": "DIFFERENT",
+  "read_only": true,
+  "target": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "differences": [
+    {
+      "field": "source_message_time",
+      "storage_type": "str",
+      "expected_type": "str",
+      "storage": "2026-09-14T08:00:00.123456+08:00",
+      "expected": "2026-09-14T00:00:00.123456+00:00"
+    },
+    {
+      "field": "created_at",
+      "storage_type": "str",
+      "expected_type": "str",
+      "storage": "2026-09-14T08:00:00.123456+08:00",
+      "expected": "2026-09-14T00:00:00.123456+00:00"
+    }
+  ],
+  "normal_database": "untouched"
+}

@@ -17,7 +17,7 @@ flowchart LR
   Sandbox["MCP Apps sandbox HTTPS"] --> Next
   Next -->|API/Auth rewrite| API["FastAPI 127.0.0.1:8765"]
   API --> Admin["Admin/Gateway 127.0.0.1:6008"]
-  API --> PG["Admin-owned PostgreSQL 127.0.0.1:54329"]
+  Admin --> PG["Admin-owned PostgreSQL 127.0.0.1:54329"]
 ```
 
 唯一 Web 源码位于 `frontend/app/_dream/**`；构建使用
@@ -49,11 +49,10 @@ printf 'Dream: %s\nAdmin: %s\n' "${AutoDLService6006URL}" "${AutoDLService6008UR
 和本机 MCP Apps env 文件。然后生成 mode-0600 runtime env：
 
 ```bash
-AUTODL_ADMIN_ENV_FILE=../ink-admin-memory/deploy/autodl-ssh/.env \
-  ./deploy/autodl-ssh/prepare-env.sh
+./deploy/autodl-ssh/prepare-env.sh
 ```
 
-投影会保留 backend-owned MCP Apps service token，读取 frontend 的 manifest、
+投影会移除全部数据库配置键，保留 backend-owned MCP Apps service token，读取 frontend 的 manifest、
 feature 和资源/network policy，并覆盖为生产 sandbox/parent origins。AutoDL
 固定 `INK_AGENT_SANDBOX_ENABLED=false`：外层容器无法提供 namespace sandbox，
 approved Bash 将以 Dream root 身份运行。
@@ -72,6 +71,6 @@ FastAPI/Next/同源 API、`robots.txt`、`sitemap.xml`、`llms.txt`、内置
 Skills、默认 Deck Plugin、Admin 依赖和公网 origin。全部通过后才推进
 `qualified`。
 
-运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。
+运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。常规 `deploy` 不直接覆盖 `current`：它先生成不可变 `candidate`，在 `16006`/`18765` 运行完整 Next/FastAPI 隔离冒烟，通过后才停止旧 Dream 并原子切换。若启动或公开验证失败，本轮仍可恢复旧应用；验证成功后立即删除旧 release、`previous` 与 `candidate`，不保留长期回滚版本。共享 workspace、Artifact、Plugin Runtime 与 Admin/PostgreSQL 数据不参与 release 清理。
 启动/停止仅处理具名 Dream screen/PID；未知端口占用会 fail closed。回滚只
 切换 Dream release，不回滚 Admin migration、PostgreSQL 数据或 workspace。

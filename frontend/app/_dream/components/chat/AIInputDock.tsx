@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Consume file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
 // [Output] Render the Markdown-aware chat input, slash suggestions, attachments, and message submit/stop actions.
 // [Pos] chat-input-dock component node in frontend/app/_dream/components/chat
@@ -47,7 +49,7 @@ import {
   type UploadedFile,
 } from './AIInputDock.helpers';
 import { shouldSendMessageOnKeyDown } from './interaction-utils';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
@@ -226,7 +228,7 @@ export default function AIInputDock({
     void (async () => {
       try {
         const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+          headers: { ...browserRequestHeaders() },
         });
         if (!response.ok) return;
         const payload = (await response.json()) as { data?: { im_full_access_enabled?: boolean }; im_full_access_enabled?: boolean };
@@ -284,7 +286,7 @@ export default function AIInputDock({
 
       const response = await fetch(`${API_BASE}/api/workspace/files`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
         body: formData,
       });
 

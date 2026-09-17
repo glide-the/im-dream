@@ -1,0 +1,6 @@
+{
+  "result": "PASS",
+  "owned_initial_fault_trigger_function_removed": true,
+  "normal_services": "untouched",
+  "recovery_history": "retained"
+}

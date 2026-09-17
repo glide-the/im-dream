@@ -1,0 +1,11 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "fixture_manifest": {
+    "accepted": true
+  },
+  "fixture_lock": {
+    "accepted": true
+  },
+  "access": "actual restricted DATA role; existing binding SELECT/rowlocks only; no writes or authority bypass",
+  "actual_binding": "PASS"
+}

@@ -7,6 +7,8 @@
 [Sync] 2026-08-20: keep macOS secrets inside Claude Code Keychain; Agent reuses the user secure-storage identity.
 [Sync] 2026-08-20: return user MCP definitions to the Agent SDK directly because project-only setting sources ignore user-scope config files.
 [Sync] 2026-08-20: expose a bounded opaque-definition read for the public SDK inventory probe.
+[Sync] 2026-09-16: remove the dormant Dream database fallback; compatibility
+                   thread enumeration now requires an explicitly injected provider.
 """
 
 from __future__ import annotations
@@ -588,11 +590,12 @@ class ClaudeMcpCredentialSynchronizer:
 
     def _thread_rows(self, actor_id: str) -> list[dict]:
         canonical = canonicalize_actor_id(actor_id)
-        if self._thread_ids_provider is not None:
-            return self._thread_ids_provider(int(canonical))
-        import database
-
-        return database.list_chat_threads(int(canonical))
+        if self._thread_ids_provider is None:
+            raise ClaudeMcpCredentialError(
+                "Legacy thread credential synchronization requires an explicit "
+                "thread provider."
+            )
+        return self._thread_ids_provider(int(canonical))
 
     async def sync_existing_threads(self, actor_id: str) -> ClaudeMcpSyncSummary:
         self.require_supported()

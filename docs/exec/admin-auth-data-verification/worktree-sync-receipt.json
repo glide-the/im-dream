@@ -1,0 +1,307 @@
+{
+  "date": "2026-09-14",
+  "scope": "User-authorized original-checkout to active task-worktree synchronization",
+  "status": "Luna deterministic validation passed",
+  "command": "python3 /private/tmp/ink-worktree-sync-20260914-validate.py",
+  "cwd": "/Users/dmeck/project/ink-dream-memory",
+  "exit_code": 0,
+  "byte_and_preservation_checks": 149,
+  "projects": [
+    {
+      "name": "dream",
+      "source": "/Users/dmeck/project/ink-dream-memory",
+      "target": "/Users/dmeck/.codex/worktrees/ef6e/ink-dream-memory",
+      "base": "7d38715c1a8f74cb5fb3dcb114320156eaf6b3e6",
+      "source_head": "2c61efcfa48058f45c9dfffd8437b7de527a9f7a",
+      "target_head": "bc5000fa2d21549802205de62fc635e3f3faedb8",
+      "target_after_head": "bc5000fa2d21549802205de62fc635e3f3faedb8",
+      "entries": [
+        {
+          "path": "docs/.folder.md",
+          "mode": "source-only",
+          "base_sha256": "01595a832145c738daf7eb249320b36b2e91d989c6ffae5e584ab93824296612",
+          "source_sha256": "23505332a0588e781887c0516911448c31592aeb06d7a90a5da2526499ccd45c",
+          "target_before_sha256": "01595a832145c738daf7eb249320b36b2e91d989c6ffae5e584ab93824296612",
+          "result_sha256": "23505332a0588e781887c0516911448c31592aeb06d7a90a5da2526499ccd45c",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/.folder.md",
+          "mode": "three-way-reviewed-index-union",
+          "base_sha256": "7a680f578cc92222d502febbd97c2bef29d3c5e21e218f35adc06910340826ce",
+          "source_sha256": "4a01422a69e47a3d1075edc38c1d8a7bc292919423907b7a6b6bbe4584e1a460",
+          "target_before_sha256": "240826f6a2aeaafb8fca4c7fb1589cd083de528d9312be916f1938394a1adacc",
+          "result_sha256": "cb4719c1f24af4f617332f53938ebf5c36b2826fe43bdeaa97a979b2cf034c47",
+          "source_mode": 420,
+          "conflict_resolution": "Preserve all five task index rows, both source index rows, task file header and both synchronization records."
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/.folder.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "f014415c3ad1ddf4290190ecc70e8a353b2392a7f64770a76fb62b808d965a60",
+          "target_before_sha256": null,
+          "result_sha256": "f014415c3ad1ddf4290190ecc70e8a353b2392a7f64770a76fb62b808d965a60",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/baseline-history-sha256.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "ce0a1bbf7cbae7060de3435ebfda84ed475d768e34f5f7f2faa709f7973ac8ab",
+          "target_before_sha256": null,
+          "result_sha256": "ce0a1bbf7cbae7060de3435ebfda84ed475d768e34f5f7f2faa709f7973ac8ab",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/baseline-replay-receipt.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "d4b5818942d84c87f52cdee48e10e3f4cd6b9c83e57792e96eb621e1d3f5932f",
+          "target_before_sha256": null,
+          "result_sha256": "d4b5818942d84c87f52cdee48e10e3f4cd6b9c83e57792e96eb621e1d3f5932f",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/candidate-0054-failure-rollback-proof.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "a258cf5aa8f55ca4fb8a683ce9ebf6a1bd6d92cc9e811618f87ca778596b063d",
+          "target_before_sha256": null,
+          "result_sha256": "a258cf5aa8f55ca4fb8a683ce9ebf6a1bd6d92cc9e811618f87ca778596b063d",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/candidate-0054-fixed-catalog-proof.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "7fc61f8e48cb6e364803b59669ca205cbb94ef2b707574fd3db8dd5b50497cdd",
+          "target_before_sha256": null,
+          "result_sha256": "7fc61f8e48cb6e364803b59669ca205cbb94ef2b707574fd3db8dd5b50497cdd",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/candidate-0054-fixed-receipt.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "fe02ca4fac31958804f9c377aad4748d404db3adcd51b8932bbb31e3c785c61c",
+          "target_before_sha256": null,
+          "result_sha256": "fe02ca4fac31958804f9c377aad4748d404db3adcd51b8932bbb31e3c785c61c",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/candidate-0054-receipt.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "bb8c7bf8b098af7bcfe8e378dac9e33fd1987b4895db3e74a6f02948fa2ebc12",
+          "target_before_sha256": null,
+          "result_sha256": "bb8c7bf8b098af7bcfe8e378dac9e33fd1987b4895db3e74a6f02948fa2ebc12",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/prepare-receipt.json",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "c0bc3904f6c704c37b25e78125021740eae03bd33cf01148973b57cf7a08d830",
+          "target_before_sha256": null,
+          "result_sha256": "c0bc3904f6c704c37b25e78125021740eae03bd33cf01148973b57cf7a08d830",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/thread-focused-rerun.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "24810c371e341951dc5770f1988e9ccea77a51e35ba1a3fceb7cdc1e7a61d995",
+          "target_before_sha256": null,
+          "result_sha256": "24810c371e341951dc5770f1988e9ccea77a51e35ba1a3fceb7cdc1e7a61d995",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/thread-initial-validation.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "b7c16fda3b1c84963aab2dacf6327ec6748492c82d7cbcc1b63e22ec242ea298",
+          "target_before_sha256": null,
+          "result_sha256": "b7c16fda3b1c84963aab2dacf6327ec6748492c82d7cbcc1b63e22ec242ea298",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/admin-auth-data-verification/thread-public-contract-initial.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "347e567ab2e036dc61175deffdb3d7268a9b35b242241b33b8c922176606e505",
+          "target_before_sha256": null,
+          "result_sha256": "347e567ab2e036dc61175deffdb3d7268a9b35b242241b33b8c922176606e505",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/exec/exec_admin-auth-data-coordination.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "8f8c3b83e8944aa792359ff069d86d353b4faf12daef3aa88072a3b6a1e5b737",
+          "target_before_sha256": null,
+          "result_sha256": "8f8c3b83e8944aa792359ff069d86d353b4faf12daef3aa88072a3b6a1e5b737",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/.folder.md",
+          "mode": "source-only",
+          "base_sha256": "f57164262f4fa5d6f734cf6d3bc17b34ee6fda9a7ba2677e096afc9e75c10f8e",
+          "source_sha256": "95ccc42ed252e1797d11388a90dc7befbce0be28320b9252bffa8d953532c876",
+          "target_before_sha256": "f57164262f4fa5d6f734cf6d3bc17b34ee6fda9a7ba2677e096afc9e75c10f8e",
+          "result_sha256": "95ccc42ed252e1797d11388a90dc7befbce0be28320b9252bffa8d953532c876",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/stage_admin-auth-data-business-validation.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "2784d5288cf1ed0306bf45ac146f1bfbc22767ae97d1269e373f84f80a977d8f",
+          "target_before_sha256": null,
+          "result_sha256": "2784d5288cf1ed0306bf45ac146f1bfbc22767ae97d1269e373f84f80a977d8f",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/stage_admin-auth-data-coordination.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "fdf5bedf329f8bbd6bc71b5e9a9863edc34d6f4a51e7e7cf487a135110c950e4",
+          "target_before_sha256": null,
+          "result_sha256": "fdf5bedf329f8bbd6bc71b5e9a9863edc34d6f4a51e7e7cf487a135110c950e4",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/stage_admin-auth-data-migration-validation.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "30f15cf994e758ee010d5fa0fd995e6eb514edbe8c71a380e31781717e4eff60",
+          "target_before_sha256": null,
+          "result_sha256": "30f15cf994e758ee010d5fa0fd995e6eb514edbe8c71a380e31781717e4eff60",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/stage_admin-chat-thread-domain.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "01e303bb6ddf3342c1850a25d98211f14adb0c405223ef6d13e397961e69abf6",
+          "target_before_sha256": null,
+          "result_sha256": "01e303bb6ddf3342c1850a25d98211f14adb0c405223ef6d13e397961e69abf6",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/stage/stage_worktree-sync_20260914.md",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "374110d1ea3c76aec225a418a4f6c4269cc84bc1a28ddcef91894f8b36cb081b",
+          "target_before_sha256": null,
+          "result_sha256": "374110d1ea3c76aec225a418a4f6c4269cc84bc1a28ddcef91894f8b36cb081b",
+          "source_mode": 420
+        }
+      ]
+    },
+    {
+      "name": "admin",
+      "source": "/Users/dmeck/project/ink-admin-memory",
+      "target": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "base": "017f3acccc57991f0b3771c1c9bb9dd765255b07",
+      "source_head": "ca681ce9e3199ac67180d891bab9aea671424c34",
+      "target_head": "017f3acccc57991f0b3771c1c9bb9dd765255b07",
+      "target_after_head": "ca681ce9e3199ac67180d891bab9aea671424c34",
+      "entries": [
+        {
+          "path": "app/components/admin/.folder.md",
+          "mode": "source-only",
+          "base_sha256": "85b85fa92ceb112587501ee05b17242e0107f9155451a1e25d5049c3763c16c6",
+          "source_sha256": "ffc684ce8c698efdd4505cfbd29d487df9caa1ce20de96ba1be7e6769fef31dd",
+          "target_before_sha256": "85b85fa92ceb112587501ee05b17242e0107f9155451a1e25d5049c3763c16c6",
+          "result_sha256": "ffc684ce8c698efdd4505cfbd29d487df9caa1ce20de96ba1be7e6769fef31dd",
+          "source_mode": 420
+        },
+        {
+          "path": "app/components/admin/PricingSyncReview.tsx",
+          "mode": "source-only",
+          "base_sha256": "4342d6adba9a9d7b3afe45ded1bb764b26f7df2337a3d013c219ed68c678ec72",
+          "source_sha256": "73e6c04c6192ea70f53a44de4b5ddfa2d655a2d13917af719b17eb721a1595a1",
+          "target_before_sha256": "4342d6adba9a9d7b3afe45ded1bb764b26f7df2337a3d013c219ed68c678ec72",
+          "result_sha256": "73e6c04c6192ea70f53a44de4b5ddfa2d655a2d13917af719b17eb721a1595a1",
+          "source_mode": 420
+        },
+        {
+          "path": "app/lib/admin/.folder.md",
+          "mode": "source-only",
+          "base_sha256": "f457107176982ed5403e4420c9d43acdd424dce214131ab0d6c5ba0ba1e75cba",
+          "source_sha256": "6a85ad419f41de7d10fc828e0804854e29b901917fb90a4aa8bc21c25880bdf6",
+          "target_before_sha256": "f457107176982ed5403e4420c9d43acdd424dce214131ab0d6c5ba0ba1e75cba",
+          "result_sha256": "6a85ad419f41de7d10fc828e0804854e29b901917fb90a4aa8bc21c25880bdf6",
+          "source_mode": 420
+        },
+        {
+          "path": "app/lib/admin/pricing-sync.test.ts",
+          "mode": "source-only",
+          "base_sha256": "45ca74e48a21774c7cdd46434c88294f07b17d830211a142b02e47cf786333a3",
+          "source_sha256": "5653358a03a2a9f0830b581a1f8a704cde5401ec65d288b57be39472fb5506db",
+          "target_before_sha256": "45ca74e48a21774c7cdd46434c88294f07b17d830211a142b02e47cf786333a3",
+          "result_sha256": "5653358a03a2a9f0830b581a1f8a704cde5401ec65d288b57be39472fb5506db",
+          "source_mode": 420
+        },
+        {
+          "path": "app/lib/admin/pricing-sync.ts",
+          "mode": "source-only",
+          "base_sha256": "b09e33c634fcc7df8f972a09b840528533e245c34a113af9922965097d9c34f8",
+          "source_sha256": "1e35a6f2b4854e3f07bddf0240b222d31a918302741eeeea5557fcc04c0057b3",
+          "target_before_sha256": "b09e33c634fcc7df8f972a09b840528533e245c34a113af9922965097d9c34f8",
+          "result_sha256": "1e35a6f2b4854e3f07bddf0240b222d31a918302741eeeea5557fcc04c0057b3",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/design/cc-switch-model-billing-adaptation.md",
+          "mode": "source-only",
+          "base_sha256": "7b0f067e64257ec44371124f78d1836f384a3a0b69892fd9defb0210a22296e2",
+          "source_sha256": "a97f1443455cde45f524796b28a408f1ba8ae3f6713c54cdfba43f2a2cc3c428",
+          "target_before_sha256": "7b0f067e64257ec44371124f78d1836f384a3a0b69892fd9defb0210a22296e2",
+          "result_sha256": "a97f1443455cde45f524796b28a408f1ba8ae3f6713c54cdfba43f2a2cc3c428",
+          "source_mode": 420
+        },
+        {
+          "path": "docs/design/modules/04-model-catalog.md",
+          "mode": "source-only",
+          "base_sha256": "ed2c051dc30e85702c70d6ffb051b16e38d91cf592594f6ef15e133933130b21",
+          "source_sha256": "edbad8660987c02f702c9e90092ccc5a25917994a57e0c8decfa3585ac52a005",
+          "target_before_sha256": "ed2c051dc30e85702c70d6ffb051b16e38d91cf592594f6ef15e133933130b21",
+          "result_sha256": "edbad8660987c02f702c9e90092ccc5a25917994a57e0c8decfa3585ac52a005",
+          "source_mode": 420
+        },
+        {
+          "path": "tests/e2e/.folder.md",
+          "mode": "source-only",
+          "base_sha256": "1a2d2f5d2a56a8300bea56cfb35054d9848b95a4fb5768570030d542a75f7fb1",
+          "source_sha256": "f14f48b534741ff2ed54170778182125218c4bf932f40a168361964b3d679842",
+          "target_before_sha256": "1a2d2f5d2a56a8300bea56cfb35054d9848b95a4fb5768570030d542a75f7fb1",
+          "result_sha256": "f14f48b534741ff2ed54170778182125218c4bf932f40a168361964b3d679842",
+          "source_mode": 420
+        },
+        {
+          "path": "tests/e2e/pricing-sync-candidates.spec.ts",
+          "mode": "source-only",
+          "base_sha256": null,
+          "source_sha256": "4735b0e1f72ac37fabae807a31aecf13fe2aaed710d75397174a5afe1bad6fff",
+          "target_before_sha256": null,
+          "result_sha256": "4735b0e1f72ac37fabae807a31aecf13fe2aaed710d75397174a5afe1bad6fff",
+          "source_mode": 420
+        }
+      ]
+    }
+  ],
+  "concurrent_source_changes": [
+    {
+      "path": "repomix-output.xml",
+      "observed": "Source untracked export removed after snapshot; target also absent; do not resurrect or delete any target."
+    }
+  ],
+  "limits": [
+    "Larger auth/data refactor is active, not complete.",
+    "No source checkout was staged, committed, reset or cleaned by synchronization.",
+    "No runtime migrations, services, user accounts or releases were changed.",
+    "Post-validation receipt/plan additions are mirrored separately with exact bytes."
+  ]
+}

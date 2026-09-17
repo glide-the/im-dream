@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "method": "append only one own row after pinned SHA; target dirty original retained in0600backup",
+  "backup": "/private/tmp/ink-own-recovery-stage-index-20260915-ndj49eaj",
+  "prior_sha256": "7007592dd5aa76efe328782e46e1406f5f406a394d39376f147c70eb0a56361b",
+  "merged_sha256": "9377207ddb31deeac92489d2bc7aa1370e262be85b04c7c319484bf72cd7723f",
+  "other_lines": "unchanged",
+  "new_plan_created": "docs/stage/stage_admin-workflow-preflight-recovery-validation.md"
+}

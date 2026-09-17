@@ -1,297 +1,49 @@
-<!-- [输入] Next.js Device Verification UI、Python RFC 8628 routes 和 Admin-owned PostgreSQL 认证状态。 -->
-<!-- [输出] 说明当前 Device Authorization Grant 路由、状态、轮询、安全和身份边界。 -->
-<!-- [定位] 当前 Device Flow 架构；Schema 由 Admin Drizzle 管理，本文不提供 Dream migration。 -->
-<!-- [同步] 2026-09-06：Verification UI 更新为唯一 Next.js App Router，并移除 SQLite 当前态叙述。 -->
+<!-- [Input] Admin OAuth Device Token contract and Dream navigation consumers. -->
+<!-- [Output] Device interaction, state/failure rules and acceptance gates. -->
+<!-- [Pos] Dream Device consumer; Admin owns device/refresh authority and persistence. -->
+<!-- [Sync] 2026-09-17: reconcile completed approve/deny/exchange/refresh validation and the settled Gateway canary. -->
+<!-- [Sync] 2026-09-16: record normal-service RFC 8628 pending/slow_down and input-boundary evidence separately from user approval. -->
+<!-- [Sync] 2026-09-14: record retired Dream Device paths and actual Admin standard endpoints; preserve history. -->
 
-# Device Flow 认证架构
+# Dream Device OAuth 接入
 
-> 本文定义 Ink & Memory 的 OAuth 2.0 Device Authorization Grant（RFC 8628）实施方案。Device Flow 面向 CLI、Desktop、Agent、MCP Client 等非浏览器或弱输入设备；普通网页端登录继续使用 Google OAuth / OIDC。
+## 背景与问题
 
-## 1. Device Flow 是什么
+baseline `routers/device_oauth.py`自存短码、轮询/approve/deny/consume并签用户token。迁移目标是Admin OAuth Device Token flow，不能替换成Better Auth session flow。[旧Device原文](history/pre-admin-auth-data-20260914/auth-device.md)完整保留；实现状态见[执行计划](../exec/dream-admin-auth-data-plan.md)。
 
-Device Flow 允许设备端先请求 `device_code`、`user_code` 和 `verification_uri`，再让用户在另一台可用浏览器的设备上登录并确认授权。设备端随后轮询 token endpoint，直到授权完成、被拒绝或过期。
+## 目标与边界
 
-在本项目中：
+Admin是唯一device authorization/token/refresh authority、状态数据库与授权页。Dream提供必要登录导航与返回；CLI是public OAuth client，不持secret。Admin唯一规范在其`docs/architecture/admin-dream-auth-data-contract.md`，实际包核验后冻结路径、DTO、scope/resource、client注册与状态字段；此稿不创造另一套endpoint或第三方状态名。
 
-| 概念 | 当前项目解释 |
+## 概念与规则
+
+| 参与方 | 职责 |
 | --- | --- |
-| Authorization Server | Python FastAPI 后端 |
-| Device Client | CLI / Desktop / Agent / MCP Client |
-| Verification UI | Next.js Dream Web 中 `frontend/app/_dream/components/Auth/DeviceVerificationPage.tsx` 提供的 `/oauth/device/verify` 页面 |
-| User Login | 现有邮箱密码登录或 Google OAuth |
-| Final Token | Python 后端签发的本系统 `access_token` / `refresh_token` |
+| CLI/Device | 申请短码，显示Admin返回verification URI，按interval轮询OAuth token端点 |
+| Admin授权页 | 校验短码，登录后恢复原device上下文，显示client/scopes/resource并执行approve/deny |
+| Admin OAuth | 保存状态、expiry、节流、单次兑换、refresh轮转与撤销 |
+| Dream | 登录导航与返回、消费目标资源API；不存code、不签token、不改变状态机 |
 
-## 2. 为什么当前项目需要 Device Flow
+短码是授权上下文，不能证明用户身份；Admin session不能当CLI access token。同邮箱不自动合并。登录前后device context必须匹配且未过期，return URI受限，伪造client/scopes/resource不得改变授权内容。token/code不写公开日志或业务正文。
 
-| 客户端 | 痛点 | Device Flow 价值 |
-| --- | --- | --- |
-| CLI | 不适合嵌入网页登录和 callback listener | 显示短码，用户用浏览器确认 |
-| Desktop | callback 端口和系统浏览器唤起不稳定 | 不要求本地监听 callback |
-| Agent | Agent 运行环境可能无浏览器 | 让用户在主浏览器完成授权 |
-| MCP Client | MCP 工具端可能只有终端交互 | 设备端只轮询 token endpoint |
-| 无浏览器设备 | 输入能力弱 | `user_code` 短、可读、可过期 |
+## 正常流程与失败状态
 
-## 3. 适用与不适用场景
+申请 → pending → 用户登录查看client/scopes/resource → approve或deny → CLI轮询 → 单次兑换token。状态/错误直接遵循Admin/provider冻结字段，`authorization_pending`、`slow_down`、`access_denied`、`expired_token`等保留官方原名。
 
-| 场景 | 是否适用 | 说明 |
-| --- | --- | --- |
-| Next.js 普通网页登录 | 否 | 直接走 Python Google OAuth / OIDC，更短链路 |
-| CLI 登录 | 是 | `ink login` 可打印 `verification_uri` 和 `user_code` |
-| Desktop 登录 | 是 | 无需内置浏览器或 loopback callback |
-| Agent / MCP Client 登录 | 是 | 适合弱输入、跨进程认证 |
-| 服务端到服务端调用 | 暂不适用 | 二期可设计 client credentials 或 PAT |
+pending继续等待；slow_down按返回interval退避；deny终止；expire重新申请。重复/并发兑换由Admin单事务与请求恢复保证，不能在Dream先读approved再另一个HTTP写consumed。refresh使用OAuth refresh grant，不使用网页登录session API，保护scope/resource、撤销与并发轮转。
 
-## 4. API 路由设计
+## 页面失败、影响范围与验收
 
-| Method | Path | 认证 | 说明 |
-| --- | --- | --- | --- |
-| `POST` | `/oauth/device/code` | public client 或轻量 `client_id` | 设备请求 `device_code`、`user_code`、`verification_uri` |
-| `GET` | `/oauth/device/verify` | Web 登录态可选 | 展示 user_code 确认页；未登录时引导登录 |
-| `POST` | `/oauth/device/verify` | Web 登录态必需 | 用户确认或拒绝某个 `user_code` |
-| `POST` | `/oauth/token` | device client | 支持 `grant_type=urn:ietf:params:oauth:grant-type:device_code` |
+错码可重新输入，过期提示重新申请；未登录先登录再恢复上下文；权限不足不approve。Admin unavailable/timeout提示稍后重试，不能本地批准或fallback PG。页面显示client/scopes/resource，不加技术配额、内部说明或重复确认。
 
-相关配置：
+验收覆盖pending/approve/deny/slow_down/expire、兑换、重复并发、错误client/scope/resource、登录上下文恢复、refresh成功/轮转/撤销/未知结果。实际CLI公开OAuth协议与Dream API一起验证，session建立不能替代。全部生产device/refresh SQL迁Admin，保留现有用户PK/关系。技术fixture不能当真实用户验收。
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `WEBUI_URL` | `http://localhost:5173` | 生成 `verification_uri` |
-| `OAUTH_DEVICE_ALLOWED_CLIENT_IDS` | 空 | 空表示允许任意非空 public `client_id`，生产可配置 allowlist |
-| `DEVICE_CODE_EXPIRES_IN` | `600` | `device_code` / `user_code` 有效期秒数 |
-| `DEVICE_CODE_INTERVAL` | `5` | 设备轮询初始最小间隔秒数 |
+## 当前接入状态
 
-设备请求示例：
+Dream旧`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token`返回明确410与server配置解析出的Admin标准端点；不创建/批准/消费短码、不签token或修改refresh状态。CLI直接使用Admin issuer的`/device/code`和`/oauth2/token`，verification URI为Admin `/auth/device`。Browser旧验证页通过Next `/auth/device`导航到Admin授权页，user_code只用于恢复短码上下文，不作为身份。缺合法Admin公开authority返回503；旧凭据不会被转发。
 
-```http
-POST /oauth/device/code
-Content-Type: application/json
+正常本机Admin/Dream服务已经由公开入口验证注册device client/resource/scope、RFC 8628六字段、`authorization_pending`、`slow_down`、approve、deny、过期、重复与并发决定、OAuth token兑换、refresh rotation/replay、refresh revoke、access expiry、`invalid_client`、`invalid_target`、外部`user_id`拒绝和`invalid_scope`；所有响应均`no-store`，code/token未进入回执。
 
-{
-  "client_id": "ink-cli",
-  "scope": "openid profile offline_access"
-}
-```
+2026-09-17的真实Gateway canary使用现有Dream用户Session批准public device client，只申请`messages:create`和Dream resource。设备兑换得到无refresh的300秒用户access token，并与已轮换的Dream canonical-subject service key共同调用公开`/v1/messages`；请求`req_b912a4968bbc464fb66bf4b656a7aa6d`返回200，公开Product usage记录11 input/5 output、`completed/settled`、reserved85/consumed16/released69。该回执证明用户委托主体与服务client分离，且没有创建Admin管理Session。该access token调用revoke返回400并按最长300秒自然失效；此前独立refresh rotation/replay和refresh grant revoke回执仍有效，不能据此声称离线JWT可即时撤销。完整Thread/Run/continue/cancel/SSE仍属于正常业务旅程，小额canary不能替代。
 
-响应示例：
-
-```json
-{
-  "device_code": "opaque-device-code",
-  "user_code": "MQNA-JPOZ",
-  "verification_uri": "http://localhost:5173/oauth/device/verify",
-  "verification_uri_complete": "http://localhost:5173/oauth/device/verify?user_code=MQNA-JPOZ",
-  "expires_in": 600,
-  "interval": 5
-}
-```
-
-Token 轮询示例：
-
-```http
-POST /oauth/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=opaque-device-code&client_id=ink-cli
-```
-
-## 5. 数据表设计
-
-当前 Admin-owned PostgreSQL 已有 `users` 表，不新增第二套用户表。下列内容只描述 `device_authorizations` 的逻辑状态，不是 Dream migration；表、索引和约束由 Admin Drizzle 发布并由 Dream 的统一 Schema capability 消费。
-
-```sql
-CREATE TABLE IF NOT EXISTS device_authorizations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id TEXT NOT NULL,
-  device_code_hash TEXT UNIQUE NOT NULL,
-  user_code_hash TEXT UNIQUE NOT NULL,
-  user_id INTEGER,
-  scope TEXT,
-  status TEXT NOT NULL,
-  interval_seconds INTEGER NOT NULL,
-  last_poll_at DATETIME,
-  expires_at DATETIME NOT NULL,
-  approved_at DATETIME,
-  consumed_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-索引：
-
-| Index | 字段 | 用途 |
-| --- | --- | --- |
-| `idx_device_authorizations_device_code_hash` | `device_code_hash` | 轮询查找 |
-| `idx_device_authorizations_user_code_hash` | `user_code_hash` | 浏览器确认查找 |
-| `idx_device_authorizations_status_expires` | `status, expires_at` | 清理过期授权 |
-
-## 6. 状态流转
-
-| 状态 | 进入条件 | 可转出状态 |
-| --- | --- | --- |
-| `pending` | 设备成功请求 code | `approved`、`denied`、`expired` |
-| `approved` | 已登录用户确认授权 | `consumed`、`expired` |
-| `denied` | 用户拒绝授权 | 终态 |
-| `expired` | 当前时间超过 `expires_at` | 终态 |
-| `consumed` | token endpoint 成功换取 token | 终态 |
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending
-    pending --> approved: 用户确认
-    pending --> denied: 用户拒绝
-    pending --> expired: 超时
-    approved --> consumed: 设备换取 token
-    approved --> expired: 超时
-    denied --> [*]
-    expired --> [*]
-    consumed --> [*]
-```
-
-## 7. 轮询规则
-
-| 规则 | 行为 |
-| --- | --- |
-| 未确认 | 返回 `authorization_pending` |
-| 轮询过快 | 返回 `slow_down`，并把建议 interval 增加 5 秒或记录当前请求 |
-| 已过期 | 状态更新为 `expired`，返回 `expired_token` |
-| 已拒绝 | 返回 `access_denied` |
-| 已批准 | 返回本系统 `access_token` / `refresh_token`，并把状态改为 `consumed` |
-| 已消费后重试 | 返回 `invalid_grant` |
-
-## 8. 错误码
-
-| error | HTTP | 触发条件 |
-| --- | --- | --- |
-| `authorization_pending` | 400 | 用户还未确认 |
-| `slow_down` | 400 | 设备端低于 `interval` 轮询 |
-| `expired_token` | 400 | code 过期 |
-| `access_denied` | 400 | 用户拒绝 |
-| `invalid_grant` | 400 | device_code 不存在、已消费、状态非法 |
-| `invalid_client` | 401 | client_id 缺失或不被允许 |
-
-统一错误结构：
-
-```json
-{
-  "error": "authorization_pending",
-  "error_description": "Authorization has not completed yet."
-}
-```
-
-## 9. 安全策略
-
-1. `device_code` 只给设备端使用，数据库只保存 hash。
-2. `user_code` 给用户输入或确认，短、可读、有限有效期，数据库只保存 hash。
-3. `verification_uri` 给用户浏览器访问，可以带 `user_code` 作为便利参数。
-4. 设备端不接触 `GOOGLE_CLIENT_SECRET`。
-5. Device Flow 的最终 token 是本系统 token，不是 Google token。
-6. Google OAuth 只发生在用户浏览器确认授权阶段。
-7. 轮询必须限制 `interval`，过快返回 `slow_down`。
-8. code 成功换 token 后必须 `consumed`，不可重复使用。
-9. refresh token 只保存 hash，泄漏数据库也不能直接换 token。
-10. 清理任务应定期将超时 pending/approved 记录标记为 `expired` 或删除。
-
-## 10. Token 策略
-
-| Token | 颁发对象 | 存储 | 用途 |
-| --- | --- | --- | --- |
-| `access_token` | Device Client | 客户端自行保存 | 调业务 API，短有效期 |
-| `refresh_token` | Device Client | 客户端保存明文，DB 保存 hash | 换新 access token |
-| Google token | 仅后端可见 | 如需要保存则加密 | 证明用户身份或后续 Google API，一期可不持久化 |
-
-`access_token` payload 至少包含：
-
-```json
-{
-  "sub": "123",
-  "email": "user@example.com",
-  "typ": "access",
-  "exp": 1710000000,
-  "iat": 1709999100
-}
-```
-
-## 11. 与 Google OAuth 的关系
-
-Device Flow 不是新的用户体系。它只是让非浏览器设备获得本系统 token 的授权方式：
-
-1. 设备请求 code 时不登录 Google。
-2. 用户打开验证页后，如果浏览器未登录本系统，则进入现有邮箱密码登录或 Google OAuth。
-3. Google OAuth callback 后，Python 后端创建/绑定本地用户并建立 Web 登录态。
-4. 用户确认 `user_code` 后，设备轮询拿到 Python 后端签发的本系统 token。
-
-## 12. Mermaid 时序图
-
-```mermaid
-sequenceDiagram
-    participant Device as Device Client
-    participant BE as Python Backend
-    participant Browser as User Browser
-    participant Google as Google OAuth
-    participant DB as Database
-
-    Device->>BE: POST /oauth/device/code
-    BE->>DB: 保存 pending 授权记录
-    BE-->>Device: device_code / user_code / verification_uri / interval / expires_in
-    Browser->>BE: GET /oauth/device/verify?user_code=MQNA-JPOZ
-    alt Browser 未登录
-        Browser->>BE: 点击 Google 登录
-        BE->>Google: redirect 到 Google
-        Google-->>BE: callback
-        BE->>DB: 创建或绑定本地用户
-        BE-->>Browser: 回到验证页
-    end
-    Browser->>BE: POST /oauth/device/verify approve
-    BE->>DB: pending -> approved，写入 user_id
-    Device->>BE: POST /oauth/token
-    BE-->>Device: authorization_pending 或 slow_down
-    Device->>BE: POST /oauth/token
-    BE->>DB: approved -> consumed
-    BE-->>Device: access_token / refresh_token
-```
-
-业务 API 鉴权：
-
-```mermaid
-sequenceDiagram
-    participant Client as Device Client
-    participant Middleware as Python Auth Middleware
-    participant API as Business API
-    participant DB as Database
-
-    Client->>Middleware: Authorization: Bearer access_token
-    Middleware->>Middleware: 校验 JWT
-    Middleware->>DB: 查询 user_id
-    DB-->>Middleware: 用户存在
-    Middleware->>API: 注入 current_user
-    API->>DB: 执行业务查询
-    DB-->>API: 数据
-    API-->>Client: 响应
-```
-
-## 13. Authlib 接入点
-
-Authlib 的 RFC 8628 支持要求实现两个扩展点：
-
-| Authlib 类型 | 当前项目职责 |
-| --- | --- |
-| `DeviceAuthorizationEndpoint` | 生成 `device_code` / `user_code` / `verification_uri`，保存到 `device_authorizations` |
-| `DeviceCodeGrant` | 在 `/oauth/token` 处理 device_code grant，查询设备授权状态，执行 slow_down / pending / token 签发 |
-
-Authlib 当前没有直接可用的 FastAPI authorization-server 集成；本项目在现有 FastAPI 路由内显式继承 RFC 8628 核心类，并通过 `backend/database.py` 的 PostgreSQL helper 实现 Authlib 所需查询与保存方法。Python 负责状态转换，Schema 仍只由 Admin Drizzle 管理。
-
-## 14. 测试清单
-
-| 用例 | 预期 |
-| --- | --- |
-| 设备请求 code | 返回 `device_code`、`user_code`、`verification_uri`、`interval`、`expires_in` |
-| 用户打开 verification_uri | 展示 user_code 和确认/拒绝按钮 |
-| 未登录用户确认 | 被要求先登录 |
-| 设备未授权轮询 | 返回 `authorization_pending` |
-| 设备过快轮询 | 返回 `slow_down` |
-| 用户确认后轮询 | 返回本系统 `access_token` / `refresh_token` |
-| 用户拒绝后轮询 | 返回 `access_denied` |
-| 过期后轮询 | 返回 `expired_token` |
-| 成功消费后再次轮询 | 返回 `invalid_grant` |
-| 设备 token 调业务 API | `get_current_user` 能识别 `user_id` |
+Next保留同名旧Device/token410薄路径；actual `/auth/device`仍用于导航到Admin验证页。旧path不会先触发generic API认证或转发body。

@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_launch75",
+  "assertions": 19,
+  "original_accepted_case": "source-new-null",
+  "original_complete_source_thread_receipt": "unchanged",
+  "unrelated_full_relations": 8,
+  "other_prior_run_preflight_request_history_consumption_receipt_audit_rows": "all retained byte exact",
+  "scope": "SELECT-only; designated new claim metadata changes allowed; no original fixture/time/state reset"
+}

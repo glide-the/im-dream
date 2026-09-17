@@ -18,6 +18,7 @@
 # [Sync] 2026-08-22: keep local virtualenvs, QA artifacts, and generated output
 #                    out of the Remote SSH release tree on small ECS disks.
 # [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
+# [Sync] 2026-09-16: reject retired Dream auth secrets and stop propagating FastAPI cookie policy.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,8 +64,6 @@ REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
 REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN}}"
 REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
-REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
-REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
 REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE:-../../deploy/clash/config.yaml}"
 REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE:-metacubex/mihomo:latest}"
 REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER:-tun-proxy}"
@@ -149,8 +148,6 @@ Optional environment:
   REMOTE_API_BASE_URL   browser-facing backend URL; default: REMOTE_BACKEND_PUBLIC_ORIGIN
   REMOTE_CORS_ALLOW_ORIGINS  default: REMOTE_FRONTEND_PUBLIC_ORIGIN
   REMOTE_CORS_ALLOW_CREDENTIALS default: true
-  REMOTE_COOKIE_SECURE  default: true
-  REMOTE_COOKIE_SAMESITE default: none
   REMOTE_CLASH_CONFIG_FILE default: ../../deploy/clash/config.yaml, resolved from deploy/remote-ssh/docker-compose.yml
   REMOTE_CLASH_IMAGE    default: metacubex/mihomo:latest
   REMOTE_SETUP_NGINX    default: auto; deploy installs/updates host nginx when localhost-bound ports need it
@@ -278,7 +275,6 @@ remote_env_prefix() {
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
-    REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
     REMOTE_CLASH_CONFIG_FILE REMOTE_CLASH_IMAGE
     REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
     REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
@@ -333,6 +329,14 @@ check_local_prereqs() {
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-storage.sh" || { warn "Missing remote storage setup script."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/sync-data.sh" || { warn "Missing remote data sync script."; failed=1; }
   require_file "${REPO_ROOT}/backend/.env" || { warn "Missing backend/.env. Remote Compose env_file requires it."; failed=1; }
+  if [[ -f "${REPO_ROOT}/backend/.env" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${REPO_ROOT}/backend/.env"; then
+    warn "backend/.env still contains a Dream database credential; remove it before Remote SSH deployment."
+    failed=1
+  fi
+  if [[ -f "${REPO_ROOT}/backend/.env" ]] && grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE|INK_DREAM_BFF_COOKIE_SECRET)=[^[:space:]]+' "${REPO_ROOT}/backend/.env"; then
+    warn "backend/.env contains authentication authority not owned by FastAPI; use the Remote topology file for the Next-only BFF cookie key."
+    failed=1
+  fi
   require_file "${REPO_ROOT}/backend/Dockerfile" || { warn "Missing backend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/Dockerfile" || { warn "Missing frontend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/docker-entrypoint.sh" || { warn "Missing frontend/docker-entrypoint.sh."; failed=1; }

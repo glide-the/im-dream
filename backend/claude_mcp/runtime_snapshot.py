@@ -10,6 +10,7 @@
 [Sync] 2026-09-06: carry fresh descriptor-owned MCP App resource bindings beside, never inside, secret Runtime configs.
 [Sync] 2026-09-06: expose descriptor binding extraction for connection App availability checks.
 [Sync] 2026-09-06: rebuild expired descriptor inventory for policy-selected App Servers before a new Chat turn so first-call results retain their App identity.
+[Sync] 2026-09-16: require an explicit Admin OAuth or Runtime authorization context around snapshot reads.
 """
 
 from __future__ import annotations
@@ -162,6 +163,11 @@ class ManagedMcpRuntimeSnapshotLoader:
         self.app_inventory_refresher = app_inventory_refresher
         self.app_server_keys_provider = app_server_keys_provider
 
+    def authorize(self, authorization: Any):
+        """Bind one server-derived Admin credential for this async task tree."""
+
+        return self.repository.authorize(authorization)
+
     async def load(
         self,
         actor_id: str,
@@ -183,7 +189,7 @@ class ManagedMcpRuntimeSnapshotLoader:
         # User scope is projected first; the current actor-owned workspace row
         # with the same stable server_key intentionally replaces it.
         ordered = sorted(enabled, key=lambda row: 0 if row.scope == "user" else 1)
-        # Credential reads are local DB operations.  Expired OAuth rows may
+        # Credential reads use actor-bound Admin DTO operations. Expired OAuth rows may
         # trigger discovery, whose coordinator owns the bounded semaphore and
         # per-Server timeout.  A single refresh failure aborts this Chat turn
         # safely instead of injecting a known-stale bearer token.

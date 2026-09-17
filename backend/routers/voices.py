@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-# [Input] Consume database Deck/Voice APIs, the shared Deck-default service,
-#         and shared auth dependency.
+# [Sync] 2026-09-15: both public Deck list modes use Admin without default or filesystem side effects.
+# [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
+# [Sync] 2026-09-15: four public Voice operations use Admin; Deck chat-context/internal data remains pending.
+# [Sync] 2026-09-15: five public Deck mutations use Admin; deletion keeps code-owned closed dependency messages.
+# [Sync] 2026-09-15: Deck create/default reconcile use Registry104 plus Dream's shared-artifact verifier.
+# [Sync] 2026-09-16: format Admin-owned Deck deletion conflicts without importing Dream database code.
+# [Input] Consume typed Admin public Deck/Voice operations, the local Deck-default verifier and shared auth dependency.
 # [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
 #          fails closed unless its configured default plugin ref is verified;
 #          default-team repair is explicit and idempotent.
@@ -15,311 +20,332 @@
 # [Sync] 2026-08-15: reconcile missing legacy default teams as well as empty plugin refs.
 # [Sync] 2026-08-16: map preserved child/runtime Deck deletion dependencies to HTTP 409.
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-import database
 import config
 
 try:
     from services.deck.defaults import (
         DefaultDeckPluginUnavailable,
-        reconcile_default_screenplay_deck_plugin,
         resolve_default_deck_plugin_ref,
     )
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.services.deck.defaults import (
         DefaultDeckPluginUnavailable,
-        reconcile_default_screenplay_deck_plugin,
         resolve_default_deck_plugin_ref,
     )
 
-try:
-    from services.deck.sharing import DeckSharingPolicyError
-except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.services.deck.sharing import DeckSharingPolicyError
+from services.admin_data.chat_models import ChatStrictDTO
+from services.admin_data.deck_default_data import (
+    AdminDeckDefaultData,
+    DeckCreateInputDTO,
+    DeckDefaultInputDTO,
+    DefaultPluginEvidenceDTO,
+    DefaultPluginResolveInputDTO,
+)
+from services.admin_data.deck_mutation_data import AdminDeckMutationData, DeckUpdateRequestDTO
+from services.admin_data.deck_detail_data import AdminDeckDetailData
+from services.admin_data.deck_list_data import AdminDeckListData, DeckListInputDTO
+from services.admin_data.deck_version_models import DeckIdInputDTO
+from services.admin_data.models import DeckDeleteBlockedDetailsDTO
+from services.admin_data.voice_data import (
+    AdminVoiceData, VoiceCollectInputDTO, VoiceCreateRequestDTO, VoiceForkRequestDTO,
+    VoiceIdInputDTO, VoiceUpdateRequestDTO,
+)
+from services.admin_data.request_auth import AdminRequestAuth
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
-from .deps import get_current_user
 
-router = APIRouter()
+class _DeckRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Deck request"
 
 
-class DeckCreateRequest(BaseModel):
+router = APIRouter(route_class=_DeckRoute)
+
+
+class DeckCreateRequest(ChatStrictDTO):
     name: str
-    description: str = None
-    name_zh: str = None
-    name_en: str = None
-    description_zh: str = None
-    description_en: str = None
-    icon: str = None
-    color: str = None
+    description: str | None = None
+    name_zh: str | None = None
+    name_en: str | None = None
+    description_zh: str | None = None
+    description_en: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+    def domain_input(self, evidence: DefaultPluginEvidenceDTO) -> DeckCreateInputDTO:
+        return DeckCreateInputDTO(
+            **self.model_dump(),
+            order_index=None,
+            default_plugin_evidence=evidence,
+        )
 
 
-class DeckUpdateRequest(BaseModel):
-    name: str = None
-    description: str = None
-    name_zh: str = None
-    name_en: str = None
-    description_zh: str = None
-    description_en: str = None
-    icon: str = None
-    color: str = None
-    enabled: bool = None
-    order_index: int = None
+DeckUpdateRequest = DeckUpdateRequestDTO
 
 
-class VoiceCreateRequest(BaseModel):
-    deck_id: str
-    name: str
-    system_prompt: str
-    name_zh: str = None
-    name_en: str = None
-    icon: str = None
-    color: str = None
-    memory_workspace_config: dict = None
+VoiceCreateRequest = VoiceCreateRequestDTO
+VoiceUpdateRequest = VoiceUpdateRequestDTO
+VoiceForkRequest = VoiceForkRequestDTO
 
 
-class VoiceUpdateRequest(BaseModel):
-    name: str = None
-    system_prompt: str = None
-    name_zh: str = None
-    name_en: str = None
-    icon: str = None
-    color: str = None
-    enabled: bool = None
-    order_index: int = None
-    thread_id: str = None
-    memory_workspace_config: dict = None
-
-
-class VoiceForkRequest(BaseModel):
-    target_deck_id: str
+def _deck_list_data(request: Request) -> AdminDeckListData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckListData(owner.client)
 
 
 @router.get("/api/decks")
-def list_decks(published: bool = False, current_user: dict = Depends(get_current_user)):
-    """Get actor Decks or collectable system/public community Decks."""
-    if published:
-        decks = database.get_published_decks(
-            exclude_owner_id=current_user["user_id"],
-        )
-    else:
-        user_id = current_user["user_id"]
-        decks = database.get_user_decks(user_id)
-    return {"decks": decks}
+async def list_decks(published: bool = False, current_user: dict = Depends(get_current_user), data: AdminDeckListData = Depends(_deck_list_data)):
+    """Read actor Decks or the collectable community aggregate through Admin."""
+    return await invoke_admin_operation(current_user, data.list, DeckListInputDTO(community=published))
+
+
+def _deck_default_data(request: Request) -> AdminDeckDefaultData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckDefaultData(owner.client)
+
+
+def _default_deck_plugin_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=(
+            "Default Deck plugin "
+            f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
+            f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
+        ),
+    )
+
+
+def _deck_default_error(exc, request_id):
+    if (
+        not exc.outcome_unknown
+        and exc.status_code == 409
+        and exc.code == "DEFAULT_DECK_PLUGIN_UNAVAILABLE"
+    ):
+        raise _default_deck_plugin_unavailable()
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "error_code": exc.code,
+            "request_id": exc.request_id or request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        },
+    )
+
+
+async def _verified_default_plugin(
+    current_user: dict,
+    data: AdminDeckDefaultData,
+) -> DefaultPluginEvidenceDTO:
+    resolved = await invoke_admin_operation(
+        current_user,
+        data.resolve,
+        DefaultPluginResolveInputDTO(),
+    )
+    try:
+        return resolve_default_deck_plugin_ref(resolved.installation)
+    except DefaultDeckPluginUnavailable:
+        raise _default_deck_plugin_unavailable() from None
 
 
 @router.post("/api/decks/defaults/reconcile")
-def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
+async def reconcile_deck_defaults(
+    current_user: dict = Depends(get_current_user),
+    data: AdminDeckDefaultData = Depends(_deck_default_data),
+):
     """Create a missing actor default or repair its empty verified plugin ref."""
 
-    try:
-        return reconcile_default_screenplay_deck_plugin(current_user["user_id"])
-    except (DefaultDeckPluginUnavailable, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
-            raise
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Default Deck plugin "
-                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
-                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
-            ),
-        ) from None
+    evidence = await _verified_default_plugin(current_user, data)
+    return await invoke_admin_operation(
+        current_user,
+        data.reconcile,
+        DeckDefaultInputDTO(default_plugin_evidence=evidence),
+        error_handler=_deck_default_error,
+    )
+
+
+def _deck_detail_data(request: Request) -> AdminDeckDetailData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckDetailData(owner.client)
 
 
 @router.get("/api/decks/{deck_id}")
-def get_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Get deck with all voices"""
-    user_id = current_user["user_id"]
-    deck = database.get_deck_with_voices(user_id, deck_id)
-    if not deck:
+async def get_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckDetailData = Depends(_deck_detail_data)):
+    """Read the owned Deck aggregate through Admin and restore its public fields."""
+    deck = await invoke_admin_operation(current_user, data.detail, DeckIdInputDTO(deck_id=deck_id))
+    if deck is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     return deck
 
 
 @router.post("/api/decks")
-def create_deck(
-    request: DeckCreateRequest, current_user: dict = Depends(get_current_user)
+async def create_deck(
+    request: DeckCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    data: AdminDeckDefaultData = Depends(_deck_default_data),
 ):
     """Create a user Deck with its verified product-default Claude plugin."""
-    user_id = current_user["user_id"]
-    try:
-        default_plugin_ref = resolve_default_deck_plugin_ref()
-        deck_id = database.create_deck(
-            user_id,
-            name=request.name,
-            description=request.description,
-            name_zh=request.name_zh,
-            name_en=request.name_en,
-            description_zh=request.description_zh,
-            description_en=request.description_en,
-            icon=request.icon,
-            color=request.color,
-            default_plugin_ref=default_plugin_ref,
-        )
-    except (DefaultDeckPluginUnavailable, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
-            raise
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Default Deck plugin "
-                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
-                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
-            ),
-        ) from None
-    return {"deck_id": deck_id}
+    evidence = await _verified_default_plugin(current_user, data)
+    return await invoke_admin_operation(
+        current_user,
+        data.create,
+        request.domain_input(evidence),
+        error_handler=_deck_default_error,
+    )
 
 
-@router.put("/api/decks/{deck_id}")
-def update_deck(
-    deck_id: str,
-    request: DeckUpdateRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    """Update a user deck"""
-    user_id = current_user["user_id"]
-    updates = {k: v for k, v in request.dict().items() if v is not None}
+_deck_mutation_router = APIRouter(route_class=_DeckRoute)
 
-    success = database.update_deck(user_id, deck_id, updates)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Deck not found or permission denied"
-        )
+
+_DECK_DELETE_BLOCKED_MESSAGES = {
+    "child_decks": "Deck cannot be deleted while derived Decks still reference it.",
+    "related_threads": "Deck cannot be deleted while related Chat conversations still exist.",
+    "runtime_history": "Deck cannot be deleted because it has immutable runtime history.",
+    "referenced_records": "Deck cannot be deleted because it is still referenced.",
+}
+
+
+def _deck_delete_blocked_message(reason: str) -> str:
+    return _DECK_DELETE_BLOCKED_MESSAGES.get(
+        reason,
+        _DECK_DELETE_BLOCKED_MESSAGES["referenced_records"],
+    )
+
+
+def _deck_mutation_data(request: Request) -> AdminDeckMutationData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckMutationData(owner.client)
+
+
+def _deck_mutation_error(kind: str, deck_id: str):
+    def error(exc, request_id):
+        if not exc.outcome_unknown:
+            if exc.code == "DECK_DELETE_BLOCKED" and exc.status_code == 409 and kind == "delete":
+                reason = exc.details.reason if isinstance(exc.details, DeckDeleteBlockedDetailsDTO) else "referenced_records"
+                raise HTTPException(status_code=409, detail=_deck_delete_blocked_message(reason))
+            messages = {
+                "DEFAULT_DECK_PUBLISH_FORBIDDEN": (409, "System-initialized Decks cannot be published"),
+                "SELF_COLLECTION_FORBIDDEN": (409, "You cannot collect your own published Deck"),
+                "COLLECTION_SOURCE_UNAVAILABLE": (409, "Only system or published Decks can be collected"),
+            }
+            expected_kind = "publish" if exc.code == "DEFAULT_DECK_PUBLISH_FORBIDDEN" else "collect"
+            if exc.code in messages and kind == expected_kind and exc.status_code in {404, 409}:
+                status, message = messages[exc.code]
+                raise HTTPException(status_code=status, detail=message)
+            if exc.code == "DECK_ACCESS_DENIED" and exc.status_code == 404:
+                responses = {"sync": (400, "Deck not found or permission denied"),
+                    "publish": (404, "Deck not found or not owned by user"),
+                    "collect": (404, f"Deck {deck_id} not found")}
+                status, message = responses.get(kind, (404, "Deck not found or permission denied"))
+                raise HTTPException(status_code=status, detail=message)
+            if exc.code == "DECK_PARENT_MISSING" and kind == "sync" and exc.status_code in {404, 409}:
+                raise HTTPException(status_code=400, detail="Deck is not a fork (no parent)" if exc.status_code == 409 else "Parent deck not found")
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code,
+            "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
+    return error
+
+
+@_deck_mutation_router.put("/api/decks/{deck_id}")
+async def update_deck(deck_id: str, request: DeckUpdateRequest, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
+    result = await invoke_admin_operation(current_user, data.update, request.domain_input(deck_id), error_handler=_deck_mutation_error("update", deck_id))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Deck not found or permission denied")
     return {"success": True}
 
 
-@router.delete("/api/decks/{deck_id}")
-def delete_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete an unreferenced user Deck and its mutable refs/voices."""
-    user_id = current_user["user_id"]
-    try:
-        success = database.delete_deck(user_id, deck_id)
-    except database.DeckDeletionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Deck not found or permission denied"
-        )
+@_deck_mutation_router.delete("/api/decks/{deck_id}")
+async def delete_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
+    result = await invoke_admin_operation(current_user, data.delete, DeckIdInputDTO(deck_id=deck_id), error_handler=_deck_mutation_error("delete", deck_id))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Deck not found or permission denied")
     return {"success": True}
 
 
-@router.post("/api/decks/{deck_id}/fork")
-def fork_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Fork a deck (system or published community deck) to create user's own copy"""
-    user_id = current_user["user_id"]
-    try:
-        new_deck_id = database.fork_deck(user_id, deck_id)
-        database.increment_deck_install_count(deck_id)
-        return {"deck_id": new_deck_id}
-    except DeckSharingPolicyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+@_deck_mutation_router.post("/api/decks/{deck_id}/fork")
+async def fork_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
+    result = await invoke_admin_operation(current_user, data.collect, DeckIdInputDTO(deck_id=deck_id), error_handler=_deck_mutation_error("collect", deck_id))
+    return result.model_dump()
 
 
-@router.post("/api/decks/{deck_id}/publish")
-def publish_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """
-    Publish/unpublish a deck to community store.
-    @@@ Warning: Publishing breaks parent_id chain (deck becomes standalone)
-    """
-    user_id = current_user["user_id"]
-    try:
-        deck = database.get_deck_with_voices(user_id, deck_id)
-        if not deck:
-            raise HTTPException(
-                status_code=404, detail="Deck not found or not owned by user"
-            )
-
-        if deck.get("published"):
-            database.unpublish_deck(deck_id, user_id)
-            return {"success": True, "published": False}
-        database.publish_deck(deck_id, user_id)
-        return {"success": True, "published": True}
-    except HTTPException:
-        raise
-    except DeckSharingPolicyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from None
+@_deck_mutation_router.post("/api/decks/{deck_id}/publish")
+async def publish_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
+    result = await invoke_admin_operation(current_user, data.publish, DeckIdInputDTO(deck_id=deck_id), error_handler=_deck_mutation_error("publish", deck_id))
+    return {"success": True, "published": result.published}
 
 
-@router.post("/api/decks/{deck_id}/sync")
-def sync_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Sync user's forked deck with parent template (force overwrites local changes)"""
-    user_id = current_user["user_id"]
-    try:
-        result = database.sync_deck_with_parent(user_id, deck_id, force=True)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@_deck_mutation_router.post("/api/decks/{deck_id}/sync")
+async def sync_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
+    result = await invoke_admin_operation(current_user, data.sync, DeckIdInputDTO(deck_id=deck_id), error_handler=_deck_mutation_error("sync", deck_id))
+    return result.model_dump()
 
 
-@router.post("/api/voices")
-def create_voice(
-    request: VoiceCreateRequest, current_user: dict = Depends(get_current_user)
+class _VoiceRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Voice request"
+
+
+_voice_router = APIRouter(route_class=_VoiceRoute)
+
+
+def _voice_data(request: Request) -> AdminVoiceData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminVoiceData(owner.client)
+
+
+def _voice_error(kind: str, voice_id: str | None = None):
+    def error(exc, request_id):
+        if not exc.outcome_unknown and exc.status_code == 404:
+            if exc.code == "DECK_ACCESS_DENIED" and kind in {"create", "collect"}:
+                raise HTTPException(status_code=400, detail="Deck not found or permission denied" if kind == "create" else "Target deck not found or permission denied")
+            if exc.code == "VOICE_ACCESS_DENIED" and kind == "collect":
+                raise HTTPException(status_code=400, detail=f"Voice {voice_id} not found")
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code,
+            "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
+    return error
+
+
+@_voice_router.post("/api/voices")
+async def create_voice(
+    request: VoiceCreateRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Create a new voice in a user deck"""
-    user_id = current_user["user_id"]
-    try:
-        voice_id = database.create_voice(
-            user_id,
-            deck_id=request.deck_id,
-            name=request.name,
-            system_prompt=request.system_prompt,
-            name_zh=request.name_zh,
-            name_en=request.name_en,
-            icon=request.icon,
-            color=request.color,
-            memory_workspace_config=request.memory_workspace_config,
-        )
-        return {"voice_id": voice_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    result = await invoke_admin_operation(current_user, data.create, request.domain_input(), error_handler=_voice_error("create"))
+    return result.model_dump()
 
 
-@router.put("/api/voices/{voice_id}")
-def update_voice(
-    voice_id: str,
-    request: VoiceUpdateRequest,
-    current_user: dict = Depends(get_current_user),
+@_voice_router.put("/api/voices/{voice_id}")
+async def update_voice(
+    voice_id: str, request: VoiceUpdateRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Update a user voice"""
-    user_id = current_user["user_id"]
-    updates = {k: v for k, v in request.dict().items() if v is not None}
-
-    success = database.update_voice(user_id, voice_id, updates)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Voice not found or permission denied"
-        )
+    result = await invoke_admin_operation(current_user, data.update, request.domain_input(voice_id), error_handler=_voice_error("update"))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Voice not found or permission denied")
     return {"success": True}
 
 
-@router.delete("/api/voices/{voice_id}")
-def delete_voice(voice_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a user voice"""
-    user_id = current_user["user_id"]
-    success = database.delete_voice(user_id, voice_id)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Voice not found or permission denied"
-        )
+@_voice_router.delete("/api/voices/{voice_id}")
+async def delete_voice(voice_id: str, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data)):
+    result = await invoke_admin_operation(current_user, data.delete, VoiceIdInputDTO(voice_id=voice_id), error_handler=_voice_error("delete"))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Voice not found or permission denied")
     return {"success": True}
 
 
-@router.post("/api/voices/{voice_id}/fork")
-def fork_voice(
-    voice_id: str,
-    request: VoiceForkRequest,
-    current_user: dict = Depends(get_current_user),
+@_voice_router.post("/api/voices/{voice_id}/fork")
+async def fork_voice(
+    voice_id: str, request: VoiceForkRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Fork a voice to a user deck"""
-    user_id = current_user["user_id"]
-    try:
-        new_voice_id = database.fork_voice(user_id, voice_id, request.target_deck_id)
-        return {"voice_id": new_voice_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    result = await invoke_admin_operation(current_user, data.collect, VoiceCollectInputDTO(voice_id=voice_id, target_deck_id=request.target_deck_id), error_handler=_voice_error("collect", voice_id))
+    return result.model_dump()
+
+
+router.include_router(_deck_mutation_router)
+router.include_router(_voice_router)

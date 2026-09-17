@@ -1,34 +1,29 @@
-# [Input] Consume strict resource DTO snapshots, the exact Admin capability, and an injected database.get_db lease factory.
-# [Output] Provide a capacity-one latest publisher and isolated single-worker PostgreSQL upsert/TTL sink.
-# [Pos] Off-path PostgreSQL synchronization boundary for Claude Agent resource observation; owns no schema.
-# [Sync] 2026-08-27: type the nullable first sample explicitly, use DB-clock freshness,
-#                    and serialize timed-out driver work so old writes cannot overtake.
+# [Input] Consume strict resource snapshots and an injected typed Admin observer writer.
+# [Output] Provide a capacity-one latest publisher and isolated single-worker Admin API sink.
+# [Pos] Off-path resource synchronization boundary; historical module/class names remain internal compatibility identifiers.
+# [Sync] 2026-09-14: replace SQL with typed Admin observer writes and original request IDs;
+#                    retain latest queue, timeout isolation and single-worker ordering.
 
-"""Publish the latest content-free Claude Agent resource snapshot to PostgreSQL."""
+"""Publish the latest content-free resource snapshot through the Admin domain API."""
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any
 from uuid import UUID, uuid4
 
 from claude_agent.resource_diagnostics import (
     ClaudeAgentResourceDiagnosticsDTO,
     ResourcePipelineSnapshot,
 )
-from schema.capabilities import claude_agent_resource_observer_capability_available
 
 logger = logging.getLogger(__name__)
 
 _PUBLISH_INTERVAL_SECONDS = 5.0
 _WRITE_TIMEOUT_SECONDS = 1.0
-_STATEMENT_TIMEOUT_MILLISECONDS = 900
-_INSTANCE_TTL_DAYS = 7
 
 
 def _utc_now() -> datetime:
@@ -70,6 +65,7 @@ class ResourcePipelineMetrics:
 class ResourceSnapshotEnvelope:
     sampled_at: datetime | None
     snapshot: ClaudeAgentResourceDiagnosticsDTO
+    request_id: str = field(default_factory=lambda: str(uuid4()))
 
 
 class ClaudeAgentResourcePostgresSink:
@@ -78,21 +74,17 @@ class ClaudeAgentResourcePostgresSink:
     def __init__(
         self,
         *,
-        db_factory: Callable[[], Any],
+        writer: Callable[[ResourceSnapshotEnvelope, str, datetime], None],
         metrics: ResourcePipelineMetrics,
         instance_id: UUID | None = None,
         process_started_at: datetime | None = None,
         write_timeout_seconds: float = _WRITE_TIMEOUT_SECONDS,
-        statement_timeout_milliseconds: int = _STATEMENT_TIMEOUT_MILLISECONDS,
-        ttl_days: int = _INSTANCE_TTL_DAYS,
     ) -> None:
-        self._db_factory = db_factory
+        self._writer = writer
         self._metrics = metrics
         self._instance_id = str(instance_id or uuid4())
         self._process_started_at = process_started_at or _utc_now()
         self._write_timeout_seconds = max(0.05, float(write_timeout_seconds))
-        self._statement_timeout_milliseconds = max(1, int(statement_timeout_milliseconds))
-        self._ttl_days = max(1, int(ttl_days))
         self._queue: asyncio.Queue[ResourceSnapshotEnvelope] = asyncio.Queue(maxsize=1)
         self._task: asyncio.Task[None] | None = None
         self._inflight_operation: asyncio.Task[None] | None = None
@@ -193,47 +185,7 @@ class ClaudeAgentResourcePostgresSink:
             pass
 
     def _write_sync(self, envelope: ResourceSnapshotEnvelope) -> None:
-        connection: Any | None = None
-        try:
-            connection = self._db_factory()
-            with connection:
-                connection.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    (f"{self._statement_timeout_milliseconds}ms",),
-                )
-                if not claude_agent_resource_observer_capability_available(connection):
-                    raise RuntimeError("resource_observer_capability_unavailable")
-                payload = json.dumps(
-                    envelope.snapshot.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                connection.execute(
-                    "INSERT INTO claude_agent_resource_snapshots "
-                    "(instance_id, process_started_at, heartbeat_at, sampled_at, snapshot) "
-                    "VALUES (%s, LEAST(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, "
-                    "CASE WHEN %s::timestamptz IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, %s::jsonb) "
-                    "ON CONFLICT (instance_id) DO UPDATE SET "
-                    "heartbeat_at = CURRENT_TIMESTAMP, "
-                    "sampled_at = EXCLUDED.sampled_at, "
-                    "snapshot = EXCLUDED.snapshot, updated_at = CURRENT_TIMESTAMP",
-                    (
-                        self._instance_id,
-                        self._process_started_at,
-                        envelope.sampled_at,
-                        payload,
-                    ),
-                )
-                connection.execute(
-                    "DELETE FROM claude_agent_resource_snapshots "
-                    "WHERE instance_id <> %s "
-                    "AND heartbeat_at < CURRENT_TIMESTAMP - make_interval(days => %s)",
-                    (self._instance_id, self._ttl_days),
-                )
-        finally:
-            if connection is not None:
-                connection.close()
+        self._writer(envelope, self._instance_id, self._process_started_at)
 
 
 class ClaudeAgentResourcePublisher:

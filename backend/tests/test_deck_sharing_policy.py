@@ -1,19 +1,21 @@
 """Deck publication and collection policy regressions.
 
-[Input] Persisted Deck ownership/template/publication facts.
+[Input] Persisted policy facts and current Admin public mutation harness.
 [Output] Verify default Decks cannot publish, actors cannot collect themselves,
          and private Decks cannot be collected by ID.
 [Pos] Focused Deck sharing policy tests in backend/tests.
+[Sync] 2026-09-15: public mutation cases use actual FastAPI/Admin DTO owner.
+[Sync] 2026-09-15: community list case uses the current OAuth/DTO HTTP owner.
 [Sync] 2026-08-14: add My Published Decks permission coverage.
 """
 
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from tests.test_admin_deck_mutation_routes import boundary
+from tests.test_admin_deck_list_routes import boundary as list_boundary
 
 import config
-from routers import voices as voices_router
 from services.deck.sharing import (
     COLLECTION_SOURCE_UNAVAILABLE,
     DEFAULT_INITIALIZED_DECK,
@@ -99,52 +101,25 @@ def test_other_users_published_deck_remains_collectable() -> None:
     )
 
 
-def test_community_list_excludes_the_current_actor(monkeypatch) -> None:
-    calls: list[int | None] = []
-    monkeypatch.setattr(
-        voices_router.database,
-        "get_published_decks",
-        lambda exclude_owner_id=None: calls.append(exclude_owner_id) or [],
-    )
-    assert voices_router.list_decks(
-        published=True,
-        current_user={"user_id": 28},
-    ) == {"decks": []}
-    assert calls == [28]
+def test_community_list_excludes_the_current_actor(list_boundary) -> None:
+    browser, outputs, calls, *_ = list_boundary
+    outputs["decks"] = []
+    response = browser.get("/api/decks?published=true", headers={"authorization": "Bearer read-token"})
+    assert response.status_code == 200 and response.json() == {"decks": []}
+    assert len(calls) == 1 and calls[0][0] == {"community": True}
 
 
-def test_publish_route_returns_conflict_for_default_deck(monkeypatch) -> None:
-    monkeypatch.setattr(
-        voices_router.database,
-        "get_deck_with_voices",
-        lambda _user_id, _deck_id: {"id": "default", "published": False},
-    )
-    monkeypatch.setattr(
-        voices_router.database,
-        "publish_deck",
-        lambda _deck_id, _user_id: (_ for _ in ()).throw(
-            DeckSharingPolicyError(
-                DEFAULT_INITIALIZED_DECK,
-                "System-initialized Decks cannot be published",
-            )
-        ),
-    )
-    with pytest.raises(HTTPException) as caught:
-        voices_router.publish_deck("default", {"user_id": 28})
-    assert caught.value.status_code == 409
+def test_publish_route_returns_conflict_for_default_deck(boundary) -> None:
+    browser, _, outputs, *_ = boundary
+    outputs["deck.toggle-publication"] = (409, "DEFAULT_DECK_PUBLISH_FORBIDDEN", ...)
+    response = browser.post("/api/decks/default/publish", headers={"authorization": "Bearer write-token"})
+    assert response.status_code == 409
+    assert response.json() == {"detail": "System-initialized Decks cannot be published"}
 
 
-def test_fork_route_returns_conflict_for_self_collection(monkeypatch) -> None:
-    monkeypatch.setattr(
-        voices_router.database,
-        "fork_deck",
-        lambda _user_id, _deck_id: (_ for _ in ()).throw(
-            DeckSharingPolicyError(
-                SELF_COLLECTION_FORBIDDEN,
-                "You cannot collect your own published Deck",
-            )
-        ),
-    )
-    with pytest.raises(HTTPException) as caught:
-        voices_router.fork_deck("mine", {"user_id": 28})
-    assert caught.value.status_code == 409
+def test_fork_route_returns_conflict_for_self_collection(boundary) -> None:
+    browser, _, outputs, *_ = boundary
+    outputs["deck.collect"] = (409, "SELF_COLLECTION_FORBIDDEN", ...)
+    response = browser.post("/api/decks/mine/fork", headers={"authorization": "Bearer write-token"})
+    assert response.status_code == 409
+    assert response.json() == {"detail": "You cannot collect your own published Deck"}

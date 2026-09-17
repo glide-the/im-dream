@@ -1,0 +1,119 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "setup_assertions": 38,
+  "cases": 28,
+  "receipt_cases": 10,
+  "success_cases": 6,
+  "source": "actual original semantic fingerprint and _row_to_run static expectations before public seeds",
+  "seed_commands": [
+    {
+      "operation": "chat-thread.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "chat-message.persist",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.fail",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.create",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-run.cancel",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    },
+    {
+      "operation": "workflow-preflight.execute",
+      "status": 200,
+      "kind": "new isolated fixture setup"
+    }
+  ],
+  "oauth": "fresh ES256 at+jwt 300s; actual public Thread grant; private key never exported",
+  "normal_database": "untouched",
+  "contract_status": "pending Luna public harness"
+}

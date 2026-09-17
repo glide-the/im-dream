@@ -1,0 +1,9 @@
+{
+  "result": "FAIL",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "mode": "compatibility",
+  "assertions": 1,
+  "exception": "DatabaseError",
+  "sqlstate": "42P01",
+  "message": "Private SQL diagnostics omitted"
+}

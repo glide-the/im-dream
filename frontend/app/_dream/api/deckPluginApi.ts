@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Deck Plugin binding/options/validation and capability-backed Agent-type responses.
 // [Output] Typed consumers for binding endpoints plus optimistic Chat/Dream Agent selection.
 // [Pos] Deck Editor binding API client in frontend/app/_dream/api.
@@ -5,7 +7,6 @@
 // [Sync] 2026-08-16: restore the pre-01a00576 Agent-type and plugin-reference client
 //                    used by the full Deck maintenance popup.
 
-import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
 
 export type SelectionCompatibility = 'passed' | 'failed' | 'unknown';
@@ -118,10 +119,10 @@ export class DeckPluginApiError extends Error {
 }
 
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
   return {
-    Authorization: `Bearer ${token}`,
+    ...browserRequestHeaders({}, csrfToken),
     'Content-Type': 'application/json',
   };
 }

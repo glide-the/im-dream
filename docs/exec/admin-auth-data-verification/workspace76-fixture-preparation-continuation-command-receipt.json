@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-workspace76-fixture-continuation.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"target\":\"[REDACTED]\",\"setup_assertions\":16,\"new_technical_actors\":6,\"all_canonical_bigints_above_js_safe_integer\":true,\"initial_actor_workspace_count\":0,\"preexisting_rows_preserved\":true,\"first_preparation_protected_tables_exact\":17,\"original_preparation_exit_code\":1,\"expected_default_name_source\":\"actual entire original helper parameters\",\"status_source\":\"actual canonical column default\",\"cases\":14,\"receipts\":22,\"first_simultaneous_originals\":3,\"source_adapter\":\"fixed positional actual original helper; no SQL interpretation\",\"fresh_oauth\":\"300s, explicit subject/canonical mapping; private key not exported\",\"negative_receipts\":\"separate new request operands only\",\"normal_real_accounts_provider_model_runtime_filesystem\":\"not executed\",\"public_contract\":\"pending Luna; original preparation exit1 preserved\"}\n",
+  "scope": "primary isolated new fixtures; no normal account/provider/model"
+}

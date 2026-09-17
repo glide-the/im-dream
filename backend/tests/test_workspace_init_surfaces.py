@@ -30,9 +30,9 @@ from story_workspace.dream_workbench_context import (
     load_dream_asset_collaboration_contract,
     load_dream_workbench_contract,
 )
-from services.claude_plugin.workspace_packer import (
-    WorkspacePackError,
-    pack_workspace_plugins,
+from services.claude_plugin.workspace_packer import WorkspacePackError
+from tests.claude_plugin_workspace_fixture import (
+    pack_workspace_plugins_from_fixture as pack_workspace_plugins,
 )
 
 REPO_ROOT = BACKEND_ROOT.parent

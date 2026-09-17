@@ -7,6 +7,8 @@ test name so the S01-S14 release matrix is machine-auditable.
 
 [Sync] 2026-09-01: S13 requires successful assistant persistence before the
 Dream Hook/message-final terminal boundary.
+[Sync] 2026-09-16: acceptance harnesses use the typed Admin Thread seam and
+current confirmation owner parameters; partial-persistence mocks accept status.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from claude_agent.tool_confirmation_store import (
 )
 from fastapi import HTTPException
 from libs.claude_agent_kit.types import AgentRunResult
+from services.admin_data.request_auth import AdminRequestActor
 from services.story_workspace.dream_lifecycle_observer import (
     DreamLifecycleCoordinator,
     DreamLifecycleObserver,
@@ -175,15 +178,16 @@ class DreamAgentS04ConfirmationAcceptance(unittest.IsolatedAsyncioTestCase):
                     factory,
                 ),
                 mock.patch.object(
-                    route_module.database,
-                    "get_chat_thread",
-                    return_value=None,
+                    route_module,
+                    "_admin_thread",
+                    new=mock.AsyncMock(return_value=None),
                 ),
             ):
                 with self.assertRaises(HTTPException) as foreign:
                     await route_module.claude_agent_tool_confirm(
                         body,
                         current_user={"user_id": int(ACTOR_ID)},
+                        chat=mock.Mock(),
                     )
             self.assertEqual(foreign.exception.status_code, 404)
             self.assertTrue(store.has_pending("call-ask-user"))
@@ -198,15 +202,18 @@ class DreamAgentS04ConfirmationAcceptance(unittest.IsolatedAsyncioTestCase):
                     factory,
                 ),
                 mock.patch.object(
-                    route_module.database,
-                    "get_chat_thread",
-                    return_value={"id": THREAD_ID, "user_id": int(ACTOR_ID)},
+                    route_module,
+                    "_admin_thread",
+                    new=mock.AsyncMock(
+                        return_value={"id": THREAD_ID, "user_id": int(ACTOR_ID)}
+                    ),
                 ),
             ):
                 with self.assertRaises(HTTPException) as stale_actor:
                     await route_module.claude_agent_tool_confirm(
                         body,
                         current_user={"user_id": int(ACTOR_ID)},
+                        chat=mock.Mock(),
                     )
             self.assertEqual(stale_actor.exception.status_code, 409)
             self.assertTrue(store.has_pending("call-ask-user"))
@@ -219,18 +226,22 @@ class DreamAgentS04ConfirmationAcceptance(unittest.IsolatedAsyncioTestCase):
                     factory,
                 ),
                 mock.patch.object(
-                    route_module.database,
-                    "get_chat_thread",
-                    return_value={"id": THREAD_ID, "user_id": int(ACTOR_ID)},
+                    route_module,
+                    "_admin_thread",
+                    new=mock.AsyncMock(
+                        return_value={"id": THREAD_ID, "user_id": int(ACTOR_ID)}
+                    ),
                 ),
             ):
                 first = await route_module.claude_agent_tool_confirm(
                     body,
                     current_user={"user_id": int(ACTOR_ID)},
+                    chat=mock.Mock(),
                 )
                 replay = await route_module.claude_agent_tool_confirm(
                     body,
                     current_user={"user_id": int(ACTOR_ID)},
+                    chat=mock.Mock(),
                 )
 
             self.assertEqual(first, {"ok": True, "approved": True})
@@ -720,7 +731,7 @@ class DreamAgentS13SingleTerminalAcceptance(unittest.IsolatedAsyncioTestCase):
                 service,
                 "_persist_partial_assistant",
                 new=mock.AsyncMock(
-                    side_effect=lambda *_args: trace.append("persist:partial")
+                    side_effect=lambda *_args, **_kwargs: trace.append("persist:partial")
                 ),
             ),
             mock.patch.object(
@@ -879,24 +890,44 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
         gateway.get_dream_files = mock.AsyncMock(
             return_value={"threadId": THREAD_ID, "files": []}
         )
+        request_actor = AdminRequestActor(
+            "subject",
+            ACTOR_ID,
+            "dream",
+            frozenset({"dream:read", "dream:write"}),
+            1,
+            2,
+            "oauth",
+        )
+        artifact_data = mock.Mock()
+        current_user = {
+            "user_id": int(ACTOR_ID),
+            "_admin_actor": request_actor,
+        }
 
         listed = await route_module.story_workspace_list_dream_runs(
-            current_user={"user_id": int(ACTOR_ID)},
+            current_user=current_user,
             service=gateway,
+            artifact_data=artifact_data,
         )
         files = await route_module.story_workspace_get_workflow_run_dream_files(
             RUN_ID,
-            current_user={"user_id": int(ACTOR_ID)},
+            current_user=current_user,
             service=gateway,
+            artifact_data=artifact_data,
         )
         self.assertEqual(listed, [])
         self.assertEqual(files["threadId"], THREAD_ID)
         gateway.list_dream_runs.assert_awaited_once_with(
-            actor={"actor_id": ACTOR_ID}
+            actor={"actor_id": ACTOR_ID},
+            artifact_data=artifact_data,
+            access_token="oauth",
         )
         gateway.get_dream_files.assert_awaited_once_with(
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
+            artifact_data=artifact_data,
+            access_token="oauth",
         )
 
         denied_gateway = mock.Mock()

@@ -1,0 +1,10 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_acl56",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 59,
+  "production_pools": "restricted AUTH and DATA roles; owner verification/fault only",
+  "credential": "fresh 300-second ES256 at+jwt; private key only in process memory",
+  "fixture": "owned Thread and canonical_subject Gateway scope metadata only; no provider/model",
+  "normal_database": "untouched"
+}

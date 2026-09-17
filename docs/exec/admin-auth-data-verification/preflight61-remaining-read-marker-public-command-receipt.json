@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx tests/integration/adminWorkflowPreflight.contract.ts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "validation_scope": "remaining_reads",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"validation_scope\":\"remaining_reads\",\"operations\":1,\"cases\":8,\"assertions\":74,\"fixture\":\"provider-free-isolated-restricted-roles\",\"source\":\"actual PreflightService full projection/raw input/fingerprint/pft bytes\",\"semantics\":\"remaining reads only; independent active/expired unconsumed facts; full original projection; actual clock; no writes or repeated execution\"}\n"
+}

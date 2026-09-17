@@ -1,6 +1,7 @@
 # [Input] Consume backend/session_events.py and backend/routers/sessions.py.
 # [Output] Verify Edit Session event bus user isolation, browser SSE payloads, and route event publication.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-15: verify API update publication through production auth/DTO transport after confirmed Admin persistence.
 # [Sync] 2026-06-14: add tests for Edit Session event-driven sync bus.
 
 from __future__ import annotations
@@ -10,6 +11,9 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 from session_events import EditSessionEvent, SessionEventBus
 from routers import sessions as sessions_router
+from tests._admin_session_fixture import build_session_boundary, editor_state
 
 
 def _run(coro):
@@ -81,33 +86,29 @@ class TestSessionEventBus(unittest.TestCase):
 class TestSessionRouteEvents(unittest.TestCase):
     def test_save_session_publishes_api_update_event(self):
         async def scenario():
-            subscription = await sessions_router.session_event_bus.subscribe("9")
+            bus = SessionEventBus()
+            app, calls, _ = build_session_boundary(user_id="9")
+            subscription = await bus.subscribe("9")
             try:
-                with unittest.mock.patch.object(
-                    sessions_router.database,
-                    "save_session",
-                    return_value=None,
-                ) as save_session:
-                    result = await sessions_router.save_session(
-                        {
-                            "session_id": "session-api",
-                            "name": "Session API",
-                            "editor_state": {"id": "session-api", "cells": []},
-                        },
-                        {"user_id": 9},
-                    )
+                with mock.patch.object(sessions_router, "session_event_bus", bus):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://dream.example") as client:
+                        response = await client.post("/api/sessions", headers={"authorization": "Bearer write-token"}, json={
+                            "session_id": "session-1", "name": "Session API", "editor_state": editor_state(),
+                        })
+                    self.assertEqual(response.status_code, 200)
+                    result = response.json()
 
                 event = await asyncio.wait_for(subscription.get(), timeout=1.0)
             finally:
-                await sessions_router.session_event_bus.unsubscribe("9", subscription)
+                await bus.unsubscribe("9", subscription)
 
             self.assertEqual(result, {"success": True})
             self.assertEqual(
-                save_session.call_args.args[:4],
-                (9, "session-api", {"id": "session-api", "cells": []}, "Session API"),
+                calls[0][0:2],
+                ("session.save", {"session_id": "session-1", "editor_state": editor_state(), "name": "Session API", "labels": None, "created_at": None}),
             )
             self.assertEqual(event.type, "session_updated")
-            self.assertEqual(event.session_id, "session-api")
+            self.assertEqual(event.session_id, "session-1")
             self.assertEqual(event.source, "api")
 
         _run(scenario())

@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "cleanups": [
+    {
+      "point": "source_update",
+      "objects_removed": 2,
+      "result": "PASS"
+    },
+    {
+      "point": "receipt_insert",
+      "objects_removed": 2,
+      "result": "PASS"
+    },
+    {
+      "point": "audit_insert",
+      "objects_removed": 2,
+      "result": "PASS"
+    }
+  ],
+  "active_fault_objects": "none",
+  "history": "retained",
+  "normal_services": "untouched"
+}

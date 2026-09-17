@@ -9,6 +9,7 @@
 >            分区初始化端点对比、Reflections 完整时序图、输出格式 Contract、
 >            Polanyi 默会知识分区设计原则、前端 AnalysisView 交互变更、更新代码归属与验证清单。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题与 PaperStack 报告视图，补充仪表盘 / 报告双视图结构、一键按钮与分区独立按钮交互差异、ResultCard 统一类型说明、历史报告按日合并策略。
+> [Sync] 2026-09-15: 用户自定义分区配置改由Admin OAuth操作持久化；初始化先校验Admin Thread归属和配置，再访问共享文件系统。
 
 # Memory Workspace 设计
 
@@ -34,7 +35,7 @@ Memory Workspace 当前用于一个功能：**Reflections 页面分区分析**�
 
 | 场景 | 触发方 | 配置来源 | 初始化端点 | thread 生命周期 |
 |---|---|---|---|---|
-| **Reflections 分析** | Reflections 页面分区按钮 | `reflections_config.py`（静态代码） | `POST /api/reflections/memory-init` | 一次性（每次新建） |
+| **Reflections 分析** | Reflections 页面分区按钮 | Dream静态default + Admin用户自定义partial配置 | `POST /api/reflections/memory-init` | 一次性（每次新建） |
 
 ---
 
@@ -71,7 +72,7 @@ Memory Workspace 当前用于一个功能：**Reflections 页面分区分析**�
 
 ## 4. 模板来源
 
-配置存储于 `backend/reflections_config.py`（静态代码），三个分区各自独立：
+静态default存储于 `backend/reflections_config.py`，三个分区各自独立。用户自定义partial配置由Admin `reflections-section-config.get/save/delete`持久化；Dream只在请求内过滤允许的文件名、合并default并生成effective文件集合，不把display字段或完整effective配置写回Admin。
 
 | 分区 Key | 显示名（EN） | 显示名（ZH） | 分析目标 |
 |---|---|---|---|
@@ -85,7 +86,7 @@ Memory Workspace 当前用于一个功能：**Reflections 页面分区分析**�
 
 ## 5. 初始化边界
 
-`POST /api/claude-agent/threads` 只创建 DB chat thread，不初始化 Memory。
+`POST /api/claude-agent/threads` 只创建 Chat Thread，不初始化 Memory。
 
 Memory 初始化端点（仅 Reflections 场景使用）：
 
@@ -96,13 +97,15 @@ body: { "threadId": "<thread_id>", "section": "echoes" | "traits" | "patterns" }
 
 执行步骤：
 
-1. 验证当前用户身份
-2. 验证 section 为合法值
-3. 通过 `chat_thread` 验证 thread 归属
-4. 从 `reflections_config.REFLECTIONS_SECTION_CONFIGS[section]` 读取分区配置
+1. 验证当前用户身份、`threadId` 和 section
+2. 通过Admin Chat `chat-thread.get`验证Thread归属；不存在返回404
+3. 通过Admin `reflections-section-config.get`读取用户自定义partial配置
+4. 读取Dream静态default，只合并五个允许的非空提示词文件
 5. 创建 `{AGENT_CWD}/{thread_id}/memory/`
 6. 写入五个核心提示词文件（分区专属内容）
 7. 创建 `memory/procedural/analysis_state.json` 状态文件
+
+身份、Thread、capability或配置响应失败时停止请求，并且不访问文件系统。后台Reflections task尚无可续期的Admin授权，因此其自定义配置读取与task/result状态仍使用剩余Dream数据库路径；该后台缺口不改变本端点的顺序。
 
 ---
 
@@ -134,7 +137,8 @@ body: { "threadId": "<thread_id>", "section": "echoes" | "traits" | "patterns" }
         ▼
 2. POST /api/reflections/memory-init
    body: { threadId, section: "echoes" | "traits" | "patterns" }
-   → 后端从 reflections_config 读取分区 5 个文件
+   → 后端先用 Admin 验证 Thread owner并读取用户自定义partial配置
+   → 与 reflections_config 静态default合并为分区 5 个文件
    → 写入 {AGENT_CWD}/{thread_id}/memory/
    → 返回 { initialised: true, section, memoryPath }
         │
@@ -180,15 +184,20 @@ sequenceDiagram
     participant FE as Frontend (AnalysisView)
     participant ThreadAPI as "/api/claude-agent/threads"
     participant MemInitAPI as "/api/reflections/memory-init"
-    participant ReflCfg as "reflections_config.py"
+    participant Admin as "Admin data API"
+    participant ReflCfg as "Dream static defaults"
     participant Workspace as "thread workspace"
     participant AgentAPI as "/api/claude-agent (SSE)"
 
     FE->>ThreadAPI: POST (create disposable thread)
     ThreadAPI-->>FE: {thread_id}
     FE->>MemInitAPI: POST {threadId, section: "echoes"}
-    MemInitAPI->>ReflCfg: get_section_config("echoes")
-    ReflCfg-->>MemInitAPI: 5 prompt files
+    MemInitAPI->>Admin: chat-thread.get (current OAuth)
+    Admin-->>MemInitAPI: owned Thread
+    MemInitAPI->>Admin: reflections-section-config.get
+    Admin-->>MemInitAPI: nullable custom prompt JSON
+    MemInitAPI->>ReflCfg: get static default and merge accepted files
+    ReflCfg-->>MemInitAPI: effective 5 prompt files
     MemInitAPI->>Workspace: write memory/WORKFLOW.md + 4 files
     MemInitAPI-->>FE: {initialised: true}
     FE->>AgentAPI: POST {id: thread_id, tool_choice: "auto", max_turns: 1000}

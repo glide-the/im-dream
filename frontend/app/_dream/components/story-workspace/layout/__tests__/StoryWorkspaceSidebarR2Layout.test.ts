@@ -14,6 +14,7 @@
 //                    before entering the sidebar-owned Writing target cell.
 // [Sync] 2026-08-31: follow the Settings return control's localized accessible label.
 // [Sync] 2026-08-31: lock the single Story Workspace shell, unchanged ChatWidgetUI layout, and resizable Writing Thread Chat handoff.
+// [Sync] 2026-09-16: include retained-session logout error state in the sidebar auth owner seam.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -206,7 +207,7 @@ test('completed Editor writes open their exact note through canonical Writing', 
 });
 
 test('workspace user area owns the floating logout menu', () => {
-  expect(SIDEBAR).toContain('const { user, logout } = useAuth();');
+  expect(SIDEBAR).toContain('const { user, logout, authError } = useAuth();');
   expect(SIDEBAR).toContain('story-workspace-sidebar__user-menu');
   expect(SIDEBAR).toContain('story-workspace-sidebar__logout');
   expect(SIDEBAR).toContain('logout();');

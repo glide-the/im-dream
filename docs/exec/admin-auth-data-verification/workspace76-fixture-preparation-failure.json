@@ -1,0 +1,9 @@
+{
+  "result": "FAIL",
+  "target": "ink_auth_data_codex_test_792494523a17_workspace76",
+  "step": "public-ordinary-grant",
+  "sqlstate": null,
+  "setup_assertions": 26,
+  "private_diagnostics": "not exported",
+  "normal_database": "untouched"
+}

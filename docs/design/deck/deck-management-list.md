@@ -277,7 +277,7 @@ Settings 分类与 Work 页签是两个独立层级；不合并成一个导航�
 | Settings/Work 多语言 | `StoryWorkspaceSettingsPage`、`i18n.ts` | zh 仅“工作台”、en 仅“Work”；导航/页签/ARIA 同步切换 |
 | Work 三页签 | `StoryWorkspaceSettingsPage`、`settings-work` route | 三页签点击、URL query、刷新恢复 |
 | Work / Deck 完整管理 | `DeckSettingsPanel`、`DeckManager surface="settings"` | 搜索/筛选/分页/创建/编辑/启停/冲突 |
-| 相关对话删除闭环 | `DeckSettingsPanel`、`chatHistoryApi.ts`、Chat Thread API、`database.delete_deck` | Deck 过滤、预览、逐条确认删除、空状态解锁、事务冲突分类 |
+| 相关对话删除闭环 | `DeckSettingsPanel`、`chatHistoryApi.ts`、Chat Thread API、Admin `deck.delete` DTO/Service/Repository | Deck 过滤、预览、逐条确认删除、空状态解锁、事务冲突分类 |
 | 资源与插件复用 | 现有 connector/plugin manager | 页签可见且无重复状态 owner |
 
 验收截图保存于 `frontend/output/playwright/story-workspace-chat-first/`：

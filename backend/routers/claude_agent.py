@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-# [Input] Consume database chat APIs, Claude Agent request types/factory, builtin Skill catalog, and shared auth dependency.
+# [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
+# [Sync] 2026-09-16: bind Gateway catalog to Admin OAuth and Runtime to an Admin gateway-cli grant.
+# [Sync] 2026-09-16: bind history MCP App projections to the current Admin OAuth authorization.
+# [Sync] 2026-09-15: reuse the shared typed Admin invocation adapter with unchanged Chat error semantics.
+# [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
+# [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
+# [Sync] 2026-09-15: create the turn-owned Admin Editor runtime before public Agent execution.
+# [Sync] 2026-09-15: reuse one OAuth SystemConfig snapshot for model selection and attachment preparation.
+# [Sync] 2026-09-15: resolve Deck chat context through Registry105 before persistence, workspace and SSE.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
@@ -54,6 +62,7 @@
 #                    is removed without touching ordinary invocation/output refresh.
 # [Sync] 2026-09-06: reconstruct pre-fix user-scope Apps identity only from a
 #                    fresh actor-owned tools/list descriptor snapshot.
+# [Sync] 2026-09-14: migrate HTTP Thread ownership/CRUD/history to typed Admin operations; background persistence and other domains remain active migration targets.
 
 import asyncio
 import base64
@@ -67,11 +76,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, List, Literal, Mapping, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
-import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import (
@@ -110,7 +120,7 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     sync_attachments_to_workspace_files,
 )
 from libs.file_storage import server_file_storage
-from services.deck.chat_context import DeckChatContextError, DeckChatContextService
+from services.deck.chat_context import DeckChatContextAssembler, DeckChatContextError
 from services.admin_gateway import (
     GatewayInferenceError,
     GatewayModel,
@@ -122,7 +132,28 @@ from services.story_workspace.dream_auto_repair_service import (
     dream_auto_repair_metadata_is_valid,
 )
 
-from .deps import get_current_user
+from services.admin_data.chat_data import AdminChatData
+from services.admin_data import chat_models as chat_dto
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextData,
+    DeckChatContextInputDTO,
+)
+from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
+
+
+def get_admin_chat_data(owner: AdminRequestAuth = Depends(get_admin_request_auth)) -> AdminChatData:
+    return AdminChatData(owner.client)
+
+
+_chat_invoke = invoke_admin_operation
+
+
+async def _admin_thread(current_user: dict, chat: AdminChatData, thread_id: str) -> dict | None:
+    result = await _chat_invoke(current_user, chat.get_thread, chat_dto.ThreadIdInputDTO(thread_id=thread_id))
+    return result.thread.model_dump() if result.thread is not None else None
 
 logger = logging.getLogger(__name__)
 
@@ -608,7 +639,7 @@ def _project_chat_message_for_client(
 
 
 async def _load_current_user_mcp_app_resource_bindings(
-    user_id: int | str,
+    current_user: dict,
 ) -> dict[str, dict[str, str]]:
     """Best-effort read of current user-scope descriptor bindings for history."""
 
@@ -616,11 +647,24 @@ async def _load_current_user_mcp_app_resource_bindings(
         from claude_mcp.service import (  # noqa: PLC0415
             get_default_managed_mcp_runtime_snapshot_loader,
         )
+        from claude_mcp.repository import (  # noqa: PLC0415
+            McpDataAuthorization,
+        )
 
         loader = get_default_managed_mcp_runtime_snapshot_loader()
-        if loader is None:
+        actor = current_user.get("_admin_actor")
+        if loader is None or not isinstance(actor, AdminRequestActor):
             return {}
-        return await loader.load_mcp_app_resource_bindings(str(user_id), None)
+        with loader.authorize(
+            McpDataAuthorization(
+                actor_id=actor.canonical_user_id,
+                access_token=actor.access_token,
+            )
+        ):
+            return await loader.load_mcp_app_resource_bindings(
+                actor.canonical_user_id,
+                None,
+            )
     except Exception:  # noqa: BLE001 - history must retain ordinary MCP output
         logger.warning(
             "Managed MCP App history descriptor projection failed safely."
@@ -631,21 +675,41 @@ async def _load_current_user_mcp_app_resource_bindings(
 async def _resolve_platform_model_alias(
     user_id: int,
     client_model_alias: str | None,
+    system_config: Mapping[str, Any],
+    *,
+    access_token: str | None = None,
 ) -> str:
-    return (await _resolve_platform_model_selection(user_id, client_model_alias)).model_alias
+    return (
+        await _resolve_platform_model_selection(
+            user_id,
+            client_model_alias,
+            system_config,
+            access_token=access_token,
+        )
+    ).model_alias
 
 
 async def _resolve_platform_model_selection(
     user_id: int,
     client_model_alias: str | None,
+    system_config: Mapping[str, Any],
+    *,
+    access_token: str | None = None,
 ) -> GatewayModel | str:
     try:
+        catalog_factory = (
+            GatewayModelCatalogClient
+            if access_token is None
+            else lambda _canonical_user_id: GatewayModelCatalogClient(
+                access_token=access_token
+            )
+        )
         return await asyncio.to_thread(
             resolve_platform_model,
             user_id,
             client_model_alias,
-            catalog_client_factory=GatewayModelCatalogClient,
-            system_config_reader=database.get_system_config,
+            catalog_client_factory=catalog_factory,
+            system_config_reader=lambda _canonical_user_id: system_config,
         )
     except GatewayInferenceError as exc:
         raise HTTPException(
@@ -853,6 +917,8 @@ async def claude_agent_skill_commands(
 async def claude_agent_stream(
     body: ClaudeAgentRequestBody,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     """SSE streaming endpoint for Claude Agent.
 
@@ -866,7 +932,7 @@ async def claude_agent_stream(
     if not thread_id:
         raise HTTPException(status_code=400, detail="thread_id is required")
 
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -915,6 +981,15 @@ async def claude_agent_stream(
     if not message_text:
         raise HTTPException(status_code=400, detail="message text is required")
 
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    system_config = await invoke_admin_operation(
+        current_user,
+        AdminSystemConfigData(owner.client).get_user,
+        SystemConfigGetInputDTO(),
+    )
+
     requested_deck_id = body.deck_id
     persisted_deck_id = thread.get("deck_id")
     requested_voice_id = body.voice_id
@@ -928,30 +1003,51 @@ async def claude_agent_stream(
             },
         )
     deck_context = None
+    admin_deck_chat_context = None
     effective_deck_id = requested_deck_id or persisted_deck_id
     effective_voice_id = requested_voice_id or persisted_voice_id
     if effective_voice_id and not effective_deck_id:
         raise HTTPException(status_code=422, detail="voiceId requires deckId")
     if effective_deck_id:
-        deck_db = database.get_db()
         try:
-            deck_context = await DeckChatContextService(deck_db).resolve(
-                deck_id=str(effective_deck_id),
-                actor_id=str(user_id),
-                voice_id=str(effective_voice_id) if effective_voice_id else None,
+            admin_deck_chat_context = await invoke_admin_operation(
+                current_user,
+                AdminDeckChatContextData(
+                    owner.client,
+                    canonical_user_id=actor.canonical_user_id,
+                ).resolve,
+                DeckChatContextInputDTO(
+                    deck_id=str(effective_deck_id),
+                    voice_id=(
+                        str(effective_voice_id)
+                        if effective_voice_id
+                        else None
+                    ),
+                ),
             )
+            deck_context = await DeckChatContextAssembler(
+                admin_deck_chat_context.context_for(
+                    actor_id=str(user_id),
+                    deck_id=str(effective_deck_id),
+                    voice_id=(
+                        str(effective_voice_id)
+                        if effective_voice_id
+                        else None
+                    ),
+                ),
+                selected_voice_id=(
+                    str(effective_voice_id)
+                    if effective_voice_id
+                    else None
+                ),
+            ).resolve()
         except DeckChatContextError as exc:
             raise HTTPException(
                 status_code=exc.status_code,
                 detail={"error_code": exc.code, "message": str(exc)},
             ) from exc
-        finally:
-            deck_db.close()
-        if not persisted_deck_id and not database.bind_chat_thread_deck(
-            thread_id,
-            user_id,
-            str(effective_deck_id),
-        ):
+        if not persisted_deck_id and not (await _chat_invoke(current_user, chat.bind_deck,
+            chat_dto.ThreadBindDeckInputDTO(thread_id=thread_id, deck_id=str(effective_deck_id)))).changed:
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -959,13 +1055,9 @@ async def claude_agent_stream(
                     "message": "The conversation Deck changed concurrently.",
                 },
             )
-        if requested_voice_id and requested_voice_id != persisted_voice_id and not database.select_chat_thread_voice(
-            thread_id,
-            user_id,
-            str(effective_deck_id),
-            str(requested_voice_id),
-            str(persisted_voice_id) if persisted_voice_id else None,
-        ):
+        if requested_voice_id and requested_voice_id != persisted_voice_id and not (await _chat_invoke(current_user, chat.select_voice,
+            chat_dto.ThreadSelectVoiceInputDTO(thread_id=thread_id, deck_id=str(effective_deck_id), voice_id=str(requested_voice_id),
+                expected_voice_id=str(persisted_voice_id) if persisted_voice_id else None))).changed:
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -974,7 +1066,33 @@ async def claude_agent_stream(
                 },
             )
 
-    platform_model = await _resolve_platform_model_selection(user_id, body.model)
+    workflow_request_id = str(uuid4())
+    try:
+        workflow_resolution = await run_in_threadpool(owner.workflow_context, actor, thread_id, workflow_request_id)
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or workflow_request_id, "outcome_unknown": exc.outcome_unknown}) from None
+    if workflow_resolution.context is not None and (
+        workflow_resolution.context.deck_id != effective_deck_id
+        or workflow_resolution.context.agent_id != effective_voice_id
+    ):
+        raise HTTPException(status_code=409, detail={"error_code": "DREAM_THREAD_BINDING_CONFLICT", "request_id": workflow_request_id, "outcome_unknown": False})
+    editor_session_id = None
+    if body.editor_state is not None:
+        editor_session_id = body.editor_state.get("id")
+        if not isinstance(editor_session_id, str) or not editor_session_id:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error_code": "EDITOR_SESSION_ID_INVALID",
+                    "message": "The Editor Session identifier must be non-empty text.",
+                },
+            )
+    platform_model = await _resolve_platform_model_selection(
+        user_id,
+        body.model,
+        system_config,
+        access_token=actor.access_token,
+    )
     if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
         # intentionally resolve only an alias.
@@ -996,7 +1114,6 @@ async def claude_agent_stream(
     attachment_payloads: list[AttachmentPayload] = []
     if body.attachments:
         try:
-            system_config = database.get_system_config(user_id)
             workspace_enabled = bool(system_config.get("workspace_enabled", True))
             workspace_path = None
             if workspace_enabled:
@@ -1092,33 +1209,87 @@ async def claude_agent_stream(
         if effective_deck_id or effective_voice_id
         else None
     )
+    message_id = message_id or str(uuid4())
+
+    # Construct long-turn owners only after all fallible request preparation.
+    # Factory starts active keepers after admission and owns terminal cleanup.
+    gateway_request_id = str(uuid4())
+    try:
+        gateway_runtime = await run_in_threadpool(
+            owner.gateway_runtime,
+            actor,
+            workflow_resolution,
+            gateway_request_id,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or gateway_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
+    persistence_request_id = str(uuid4())
+    try:
+        turn_persistence = await run_in_threadpool(
+            owner.turn_persistence,
+            actor,
+            workflow_resolution,
+            persistence_request_id,
+        )
+    except AdminDataError as exc:
+        await run_in_threadpool(gateway_runtime.close)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or persistence_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
+
+    editor_request_id = str(uuid4())
+    try:
+        editor_runtime = await run_in_threadpool(
+            owner.editor_runtime,
+            actor,
+            workflow_resolution,
+            editor_request_id,
+            initial_session_id=editor_session_id,
+        )
+    except AdminDataError as exc:
+        await run_in_threadpool(gateway_runtime.close)
+        await run_in_threadpool(turn_persistence.close)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error_code": exc.code,
+                "request_id": exc.request_id or editor_request_id,
+                "outcome_unknown": exc.outcome_unknown,
+            },
+        ) from None
+
     if message_id is not None:
-        # Reserve the immutable public message identity before returning an SSE
-        # response or starting the Agent runtime.  The service repeats the same
-        # write as an exact CAS replay, closing the route/service race without
-        # granting browser IDs any server-command authority.
+        # One Admin transaction guards the control record, reserves the user
+        # message and fills only a missing title. Service reuses this known
+        # reservation, retaining the original command and request identity.
         resolved_user_parts = (
             list(message_parts)
             if message_parts
             else [{"type": "text", "text": ""}]
         )
         try:
-            await asyncio.to_thread(
-                database.save_chat_message,
-                thread_id,
-                "user",
-                resolved_user_parts,
-                message_id,
-                message_metadata,
-            )
-        except database.ChatMessageIdentityConflict as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail={
-                    "error_code": exc.code,
-                    "message": "The message identifier is already bound.",
-                },
-            ) from exc
+            await run_in_threadpool(turn_persistence.persist_user, actor_id=str(user_id), thread_id=thread_id,
+                parts=resolved_user_parts, message_id=message_id, metadata=message_metadata)
+        except AdminDataError as exc:
+            await run_in_threadpool(gateway_runtime.close)
+            await run_in_threadpool(turn_persistence.close)
+            await run_in_threadpool(editor_runtime.close)
+            detail = {"error_code": exc.code, "request_id": exc.request_id, "outcome_unknown": exc.outcome_unknown}
+            if exc.code == "CHAT_MESSAGE_IDENTITY_CONFLICT":
+                detail["message"] = "The message identifier is already bound."
+            raise HTTPException(status_code=exc.status_code, detail=detail) from None
 
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
@@ -1127,6 +1298,11 @@ async def claude_agent_stream(
         tool_choice=body.tool_choice,
         model=platform_model_alias,
         model_runtime_env=model_runtime_env,
+        admin_workflow_resolution=workflow_resolution,
+        admin_turn_persistence=turn_persistence,
+        admin_gateway_runtime=gateway_runtime,
+        admin_editor_runtime=editor_runtime,
+        admin_deck_chat_context=admin_deck_chat_context,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,
@@ -1156,20 +1332,21 @@ async def claude_agent_stream(
 @router.get("/api/claude-agent/chat-history")
 async def claude_agent_chat_history(
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return chat thread history for the authenticated user.
 
     Returns the list of chat threads (newest first) so the frontend
     can display the user's past conversations.
     """
-    user_id = current_user["user_id"]
-    threads = database.list_chat_threads(user_id)
-    return {"threads": threads or []}
+    result = await _chat_invoke(current_user, chat.list_threads, chat_dto.ThreadListInputDTO(deck_id=None, limit=None, offset=0))
+    return {"threads": [thread.model_dump() for thread in result.threads]}
 
 
 @router.post("/api/claude-agent/threads", response_model=CreateThreadResponseBody)
 async def claude_agent_create_thread(
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
     body: Optional[CreateThreadRequestBody] = None,
 ):
     """Create a new chat thread and return its ``thread_id``.
@@ -1178,49 +1355,20 @@ async def claude_agent_create_thread(
     ``thread_id`` must be included in every subsequent
     ``POST /api/claude-agent`` request for that conversation.
     """
-    user_id = current_user["user_id"]
     deck_id = body.deck_id if body else None
     voice_id = body.voice_id if body else None
     title = body.title if body else None
-    if deck_id:
-        deck = database.get_deck_with_voices(user_id, deck_id)
-        if deck is None:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error_code": "DECK_ACCESS_DENIED",
-                    "message": "Deck not found or permission denied.",
-                },
-            )
-        if not bool(deck.get("enabled")):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error_code": "DECK_DISABLED",
-                    "message": "The selected Deck is disabled.",
-                },
-            )
-        if voice_id and not any(
-            str(voice.get("id")) == voice_id and bool(voice.get("enabled"))
-            for voice in deck.get("voices", [])
-        ):
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error_code": "AGENT_ACCESS_DENIED",
-                    "message": "Agent not found, disabled, or outside the selected Deck.",
-                },
-            )
-    elif voice_id:
+    if voice_id and not deck_id:
         raise HTTPException(status_code=422, detail="voiceId requires deckId")
-    thread_id = database.create_chat_thread(user_id, deck_id=deck_id, voice_id=voice_id, title=title)
-    return {"thread_id": thread_id, "deck_id": deck_id, "voice_id": voice_id}
+    result = await _chat_invoke(current_user, chat.create_thread, chat_dto.ThreadCreateInputDTO(deck_id=deck_id, voice_id=voice_id, title=title))
+    return result.model_dump()
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/plugin-load-receipt")
 async def claude_agent_thread_plugin_load_receipt(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return the workspace plugin pack + launch receipt for a thread.
 
@@ -1230,7 +1378,7 @@ async def claude_agent_thread_plugin_load_receipt(
     frozen flag.  A thread without plugins returns an empty plugin list.
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1280,9 +1428,10 @@ async def claude_agent_list_threads(
     retrieval_mode: Optional[str] = Query(default=None),
     vector_query: Optional[str] = Query(default=None),
     min_score: Optional[float] = Query(default=None, ge=0, le=1),
-    limit: Optional[int] = Query(default=None, ge=1),
-    offset: int = Query(default=0, ge=0),
+    limit: Optional[chat_dto.PositiveSafeInteger] = Query(default=None, ge=1),
+    offset: chat_dto.NonnegativeSafeInteger = Query(default=0, ge=0),
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return chat threads, optionally searched by title and message content.
 
@@ -1298,13 +1447,8 @@ async def claude_agent_list_threads(
         retrieval_mode=retrieval_mode,
         vector_query=vector_query_obj,
     ):
-        threads = database.list_chat_threads(
-            user_id,
-            limit=limit,
-            offset=offset,
-            deck_id=deck_id,
-        )
-        return {"threads": threads}
+        result = await _chat_invoke(current_user, chat.list_threads, chat_dto.ThreadListInputDTO(deck_id=deck_id, limit=limit, offset=offset))
+        return {"threads": [thread.model_dump() for thread in result.threads]}
 
     config = build_chat_thread_search_config(
         query=query,
@@ -1322,7 +1466,8 @@ async def claude_agent_list_threads(
 
     candidates = []
     if config.retrieval_mode != "vector":
-        candidates = database.list_chat_threads_for_search(user_id, deck_id=deck_id)
+        result = await _chat_invoke(current_user, chat.search_threads, chat_dto.ThreadSearchInputDTO(deck_id=deck_id))
+        candidates = [thread.model_dump() for thread in result.threads]
     outcome = search_chat_threads(candidates, config)
     payload: dict[str, Any] = {
         "threads": outcome.threads,
@@ -1344,13 +1489,14 @@ async def claude_agent_thread_messages(
     cursor: str | None = None,
     known_latest_message_id: str | None = None,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return legacy full history or one stable newest-to-older message page.
 
     Returns 404 if the thread does not exist or belongs to another user.
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     if limit is None:
@@ -1360,14 +1506,15 @@ async def claude_agent_thread_messages(
                 detail="limit is required for cursor pagination",
             )
         mcp_app_resource_bindings = (
-            await _load_current_user_mcp_app_resource_bindings(user_id)
+            await _load_current_user_mcp_app_resource_bindings(current_user)
         )
+        result = await _chat_invoke(current_user, chat.list_messages, chat_dto.ThreadIdInputDTO(thread_id=thread_id))
         messages = [
             _project_chat_message_for_client(
                 message,
                 mcp_app_resource_bindings=mcp_app_resource_bindings,
             )
-            for message in database.list_chat_messages(thread_id)
+            for message in (item.model_dump() for item in result.messages)
         ]
         return {
             "thread": _project_chat_thread_for_client(thread),
@@ -1381,7 +1528,7 @@ async def claude_agent_thread_messages(
     if known_latest_message_id is not None:
         if not known_latest_message_id:
             raise HTTPException(status_code=400, detail="known latest id is invalid")
-        latest_message_id = database.get_latest_chat_message_id(thread_id)
+        latest_message_id = (await _chat_invoke(current_user, chat.latest_message, chat_dto.ThreadIdInputDTO(thread_id=thread_id))).message_id
         if latest_message_id == known_latest_message_id:
             return {
                 "thread": _project_chat_thread_for_client(thread),
@@ -1403,13 +1550,10 @@ async def claude_agent_thread_messages(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    page = database.list_chat_message_page(
-        thread_id,
-        limit,
-        before_created_at=before_created_at,
-        before_id=before_id,
-        before_created_at_is_null=before_created_at_is_null,
-    )
+    before = None
+    if before_id is not None:
+        before = chat_dto.MessageBeforeDTO(id=before_id, created_at=None if before_created_at_is_null else before_created_at.isoformat())
+    page = (await _chat_invoke(current_user, chat.message_page, chat_dto.MessagePageInputDTO(thread_id=thread_id, limit=limit, before=before))).model_dump()
     page_messages = page["messages"]
     if not isinstance(page_messages, list):
         raise RuntimeError("chat message page result is invalid")
@@ -1417,7 +1561,7 @@ async def claude_agent_thread_messages(
     if page.get("has_more") is True and page_messages:
         next_cursor = _encode_chat_message_cursor(thread_id, page_messages[0])
     mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(user_id)
+        await _load_current_user_mcp_app_resource_bindings(current_user)
     )
     return {
         "thread": _project_chat_thread_for_client(thread),
@@ -1442,21 +1586,22 @@ async def claude_agent_thread_message_process(
     thread_id: str,
     message_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return one owned projected assistant message's canonical process parts."""
 
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Message process not found")
-    message = database.get_chat_message_process_detail(thread_id, message_id)
-    if message is None:
+    result = await _chat_invoke(current_user, chat.process_detail, chat_dto.MessageDetailInputDTO(thread_id=thread_id, message_id=message_id))
+    if result.message is None:
         raise HTTPException(status_code=404, detail="Message process not found")
     mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(user_id)
+        await _load_current_user_mcp_app_resource_bindings(current_user)
     )
     return _project_chat_message_for_client(
-        message,
+        result.message.model_dump(),
         mcp_app_resource_bindings=mcp_app_resource_bindings,
     )
 
@@ -1465,11 +1610,12 @@ async def claude_agent_thread_message_process(
 async def claude_agent_thread_subagents(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return thread-owned subagent tasks without exposing raw transcripts."""
 
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     runtime_snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
@@ -1489,6 +1635,7 @@ async def claude_agent_thread_subagents(
 async def claude_agent_thread_stream(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """SSE reconnect endpoint — subscribe to an in-flight turn's EventBus.
 
@@ -1496,7 +1643,7 @@ async def claude_agent_thread_stream(
     Returns 409 when the thread is not currently running.
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1515,6 +1662,7 @@ async def claude_agent_thread_stream(
 async def claude_agent_thread_status(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return the live inference lifecycle state of *thread_id*.
 
@@ -1534,7 +1682,7 @@ async def claude_agent_thread_status(
     ``"not_found"``.
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1563,6 +1711,7 @@ async def claude_agent_thread_status(
 async def claude_agent_thread_plan(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return the current Plan Mode plan for *thread_id* (claude-plan §5.5).
 
@@ -1589,7 +1738,7 @@ async def claude_agent_thread_plan(
     ``plan_mode:"none"`` (never probes the global ``~/.claude/plans``).
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1604,6 +1753,7 @@ async def claude_agent_thread_plan(
 async def claude_agent_thread_todos(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return the current todo list for *thread_id* (claude-todo §5.5).
 
@@ -1630,7 +1780,7 @@ async def claude_agent_thread_todos(
     (never probes the global ``~/.claude/tasks``).
     """
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1643,6 +1793,7 @@ async def claude_agent_thread_todos(
 async def claude_agent_stop_thread(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Cancel the running Agent turn for *thread_id*.
 
@@ -1651,7 +1802,7 @@ async def claude_agent_stop_thread(
     """
 
     user_id = current_user["user_id"]
-    thread = database.get_chat_thread(thread_id, user_id)
+    thread = await _admin_thread(current_user, chat, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -1667,10 +1818,10 @@ async def claude_agent_stop_thread(
 async def claude_agent_delete_thread(
     thread_id: str,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Delete a chat thread and all its messages."""
-    user_id = current_user["user_id"]
-    deleted = database.delete_chat_thread(thread_id, user_id)
+    deleted = (await _chat_invoke(current_user, chat.delete_thread, chat_dto.ThreadIdInputDTO(thread_id=thread_id))).changed
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
     claude_agent_thread_factory.close_thread(thread_id)
@@ -1701,6 +1852,7 @@ async def claude_agent_message_latency(
 async def claude_agent_session_status(
     session_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Return the keepalive snapshot for the caller's active session.
 
@@ -1708,7 +1860,7 @@ async def claude_agent_session_status(
     """
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
-    if database.get_chat_thread(session_id, current_user["user_id"]) is None:
+    if await _admin_thread(current_user, chat, session_id) is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     snapshot = claude_agent_thread_factory.session_snapshot(session_id)
     if snapshot is None:
@@ -1720,6 +1872,7 @@ async def claude_agent_session_status(
 async def claude_agent_session_close(
     session_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Explicitly close (destroy) the caller's Claude Agent session.
 
@@ -1728,7 +1881,7 @@ async def claude_agent_session_close(
     """
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
-    if database.get_chat_thread(session_id, current_user["user_id"]) is None:
+    if await _admin_thread(current_user, chat, session_id) is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     claude_agent_thread_factory.close_thread(session_id)
     return {"ok": True, "session_id": session_id}
@@ -1738,6 +1891,7 @@ async def claude_agent_session_close(
 async def claude_agent_tool_confirm(
     body: ToolConfirmRequestBody,
     current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
 ):
     """Resolve a pending tool confirmation from the frontend.
 
@@ -1749,7 +1903,7 @@ async def claude_agent_tool_confirm(
     if not session_id:
         raise HTTPException(status_code=400, detail="thread_id is required")
     user_id = current_user["user_id"]
-    if database.get_chat_thread(session_id, user_id) is None:
+    if await _admin_thread(current_user, chat, session_id) is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     try:
         resolved = await claude_agent_thread_factory.confirm_tool(

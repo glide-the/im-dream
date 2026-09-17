@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] GET /api/claude-agent/threads/{thread_id}/subagents payloads.
 // [Output] Thread-keyed subagent task store for the header entry and right sidebar.
 // [Pos] claude-subagent projection hook in frontend/app/_dream/hooks
 // [Sync] 2026-08-04: initial REST hydration store backed by workspace transcript metadata.
 
 import { useSyncExternalStore } from 'react';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export type ThreadSubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -318,7 +320,7 @@ export function hydrateThreadSubagents(threadId: string): Promise<void> {
     try {
       const response = await fetch(
         apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/subagents`),
-        { headers: { Authorization: `Bearer ${getAuthToken()}` } },
+        { headers: { ...browserRequestHeaders() } },
       );
       if (!response.ok) throw new Error(`Subagent tasks unavailable (${response.status})`);
       const payload = (await response.json()) as ThreadSubagentApiResponse;

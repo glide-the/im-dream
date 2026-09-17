@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-# [Input] Consume backend/.env, HTTP requests, database/auth/config modules.
+# [Input] Consume backend/.env, HTTP requests, Admin auth/data clients, and runtime config.
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
+# [Sync] 2026-09-16: isolate FastAPI from retired auth secrets and the Next-only BFF cookie key.
+# [Sync] 2026-09-16: seed builtin Claude Plugins through Registry183-184 without Dream database access.
+# [Sync] 2026-09-16: bind the Registry121 claim-turn owner before confirmation reconciliation.
+# [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules.
@@ -10,16 +14,12 @@
 # [Sync] 2026-06-12: make CORS origin/credential policy environment-driven for cross-origin deployments.
 # [Sync] 2026-06-14: expose robots.txt, sitemap.xml, and llms.txt from shared SEO content generators.
 # [Sync] 2026-06-14: separate frontend public app URL from backend public API origin for SEO files.
-# [Sync] 2026-06-23: register Google OAuth and Device Flow routers, initialize
-#                    auth tables at startup, and add SessionMiddleware for
-#                    Authlib OAuth state.
+# [Historical Sync] 2026-06-23: registered the retired Dream Google/Device
+#                    authority and its local SessionMiddleware.
 # [Sync] 2026-07-04: register the Notion resource connector router so connector
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
 # [Sync] 2026-08-14: the mounted Deck router includes explicit default-plugin reconciliation.
-# [Sync] 2026-08-22: prefer the explicitly configured Admin database env file
-#                    over a stale backend/.env DATABASE_URL while preserving
-#                    process-injected deployment configuration.
 # [Sync] 2026-08-22: mount the fail-closed Claude MCP Resources router restored
 #                    onto the current develop application graph.
 # [Sync] 2026-08-22: preserve the centralized Claude Agent concurrency and
@@ -32,9 +32,14 @@
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
+# [Sync] 2026-09-16: remove Dream PostgreSQL bootstrap/shutdown; Admin APIs own
+#                    every runtime database capability and transaction.
+# [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains.
+# [Sync] 2026-09-15: compose the Registry99 frozen Reflections operations into the sole Admin request owner.
+# [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
 # [Sync] 2026-09-15: startup identity now expects Runtime 0.1.10.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
-#                    PostgreSQL sink, and publisher lifecycle around the database.
+#                    Admin API sink, and publisher lifecycle.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
 #                    capability through startup Agent-env cleanup.
 # [Sync] 2026-08-31: retire the PolyCLI get_writing_suggestion session; Writing
@@ -54,16 +59,26 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
-_DATABASE_URL_WAS_INHERITED = bool(os.environ.get("DATABASE_URL", "").strip())
 load_dotenv(_BACKEND_ENV_FILE, override=False)
 
-try:
-    from persistence.config import load_database_url_from_env_file
-except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.persistence.config import load_database_url_from_env_file
+_AUTH_ENV_KEYS_NOT_OWNED_BY_FASTAPI = (
+    "GOOGLE_CLIENT_SECRET",
+    "JWT_SECRET",
+    "JWT_SECRET_KEY",
+    "SESSION_SECRET_KEY",
+    "OAUTH_TOKEN_ENCRYPTION_KEY",
+    "AUTH_TOKEN_ENCRYPTION_KEY",
+    "COOKIE_SECURE",
+    "COOKIE_SAMESITE",
+    "INK_DREAM_BFF_COOKIE_SECRET",
+)
 
-if os.environ.get("INK_LOAD_DATABASE_URL_FROM_ENV_FILE") == "1":
-    load_database_url_from_env_file(override=not _DATABASE_URL_WAS_INHERITED)
+
+def _isolate_fastapi_auth_environment() -> None:
+    """Keep Admin-owned and Next-only auth secrets out of FastAPI and its children."""
+
+    for key in _AUTH_ENV_KEYS_NOT_OWNED_BY_FASTAPI:
+        os.environ.pop(key, None)
 
 
 def _drop_unsupported_agent_env() -> None:
@@ -101,6 +116,7 @@ def _drop_unsupported_agent_env() -> None:
             os.environ.pop(key, None)
 
 
+_isolate_fastapi_auth_environment()
 _drop_unsupported_agent_env()
 
 os.environ.setdefault("TZ", "UTC")
@@ -116,12 +132,8 @@ from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from starlette.middleware.sessions import SessionMiddleware
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from typing import Any
-
-# Import database module
-import database
 
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
 PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
@@ -151,16 +163,6 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
 )
 CORS_ALLOW_ORIGINS = _split_csv_env("INK_CORS_ALLOW_ORIGINS", DEFAULT_CORS_ALLOW_ORIGINS)
 CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
-SESSION_SECRET_KEY = (
-    os.environ.get("SESSION_SECRET_KEY")
-    or os.environ.get("JWT_SECRET")
-    or os.environ.get("JWT_SECRET_KEY")
-    or "dev-session-secret-change-in-production"
-)
-COOKIE_SECURE = _bool_env("COOKIE_SECURE", False)
-COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
-if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
-    COOKIE_SAMESITE = "lax"
 
 
 # ========== FastAPI Application ==========
@@ -171,14 +173,22 @@ app = FastAPI(
     version="2.0.0",
 )
 
-print(f"🧾 Backend version: {BACKEND_VERSION}")
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET_KEY,
-    same_site=COOKIE_SAMESITE,
-    https_only=COOKIE_SECURE,
-)
+@app.on_event("startup")
+async def startup_admin_request_auth():
+    """Bind the sole server-owned OAuth request/data owner; missing settings fail closed."""
+    from claude_mcp.service import configure_default_claude_mcp_service
+    from services.admin_data import AdminDataConfig
+    from services.admin_data.request_auth import create_production_admin_request_auth
+
+    owner = create_production_admin_request_auth(
+        AdminDataConfig.from_env()
+    )
+    app.state.admin_request_auth = owner
+    configure_default_claude_mcp_service(owner.client)
+
+
+print(f"🧾 Backend version: {BACKEND_VERSION}")
 
 # Add CORS middleware
 app.add_middleware(
@@ -190,15 +200,10 @@ app.add_middleware(
     expose_headers=["X-New-Access-Token", "ETag"],
 )
 
-@app.on_event("startup")
-async def startup_database():
-    """Open PostgreSQL and verify the required Admin/Drizzle capabilities."""
-    database.init_db()
-
-
 # ========== Claude Agent Factory ==========
 
 from agent_factory import (
+    claude_agent_resource_data,
     claude_agent_resource_postgres_sink,
     claude_agent_resource_policy_refresher,
     claude_agent_resource_publisher,
@@ -371,9 +376,14 @@ async def startup_claude_agent():
 
 @app.on_event("startup")
 async def story_workspace_startup_dream_confirmation_coordinator():
-    """Reconcile accepted Dream confirmations after the Agent is ready."""
+    """Bind the service-only Admin DTO worker, then reconcile confirmations."""
 
-    story_workspace_get_dream_confirmation_coordinator().start()
+    owner = getattr(app.state, "admin_request_auth", None)
+    if owner is None:
+        raise RuntimeError("Admin request/data owner is unavailable")
+    coordinator = story_workspace_get_dream_confirmation_coordinator()
+    coordinator.bind_worker(owner.story_workspace_confirmation_worker())
+    coordinator.start()
 
 
 @app.on_event("startup")
@@ -385,66 +395,23 @@ async def story_workspace_startup_dream_launch_dispatches():
 
 @app.on_event("startup")
 async def startup_claude_plugin_seed():
-    """Seed platform-builtin Claude plugins and backfill Deck references.
+    """Seed platform-builtin Claude plugins through Admin coordination.
 
     Uses the real CLI (``claude plugin validate``) for evidence.  Failure is
     non-fatal: the app starts normally and the operation record carries the
-    error; installs can be retried from Settings → Plugins.
+    error. Database reads, ref derivation and lifecycle transactions remain in
+    Admin; this startup path never falls back to PostgreSQL.
     """
 
     def _seed() -> None:
-        import database as _database
-        from services.claude_plugin.builtin_sources import PLATFORM_BUILTIN_SOURCES
-        from services.claude_plugin.install_service import (
-            PluginInstallError,
-            PluginInstallService,
+        from services.claude_plugin.builtin_reconcile import (
+            reconcile_platform_builtins,
         )
 
-        db = _database.get_db()
-        try:
-            service = PluginInstallService(db)
-            for canonical in PLATFORM_BUILTIN_SOURCES:
-                existing = db.execute(
-                    "SELECT id, resolved_version, artifact_digest FROM "
-                    "claude_plugin_installations WHERE package_name = %s AND "
-                    "marketplace = %s AND status = 'ready' ORDER BY created_at DESC "
-                    "LIMIT 1",
-                    (canonical.split("@")[0], canonical.split("@")[1]),
-                ).fetchone()
-                if existing is None:
-                    try:
-                        service.install(canonical, source_type="platform-builtin")
-                    except PluginInstallError as exc:
-                        logging.getLogger(__name__).warning(
-                            "platform-builtin plugin seed failed for %s: %s",
-                            canonical,
-                            exc,
-                        )
-                        continue
-                    existing = db.execute(
-                        "SELECT id, resolved_version, artifact_digest FROM "
-                        "claude_plugin_installations WHERE package_name = %s AND "
-                        "marketplace = %s AND status = 'ready' ORDER BY created_at "
-                        "DESC LIMIT 1",
-                        (canonical.split("@")[0], canonical.split("@")[1]),
-                    ).fetchone()
-                if existing is None:
-                    continue
-                created = _database.backfill_builtin_deck_plugin_refs(
-                    db,
-                    builtin_installation_id=existing[0],
-                    package_spec=canonical,
-                    resolved_version=existing[1],
-                    artifact_digest=existing[2],
-                )
-                if created:
-                    logging.getLogger(__name__).info(
-                        "backfilled %d deck Claude plugin refs for %s",
-                        created,
-                        canonical,
-                    )
-        finally:
-            db.close()
+        owner = getattr(app.state, "admin_request_auth", None)
+        if owner is None:
+            raise RuntimeError("Admin request/data owner is unavailable")
+        reconcile_platform_builtins(owner.claude_plugin_builtin_data())
 
     try:
         await asyncio.to_thread(_seed)
@@ -486,6 +453,10 @@ async def shutdown_claude_agent():
     except Exception:
         logging.getLogger(__name__).exception("Claude Agent factory close failed")
     try:
+        await asyncio.to_thread(claude_agent_resource_data.close)
+    except Exception:
+        logging.getLogger(__name__).exception("Claude Agent resource Admin client close failed")
+    try:
         # No producer may retain the process-wide Redis connection after the
         # factory drain. ``aclose`` resets its slot for test/app reloads.
         await RedisStreamEventBus.aclose()
@@ -495,10 +466,13 @@ async def shutdown_claude_agent():
 
 
 @app.on_event("shutdown")
-async def shutdown_database():
-    """Close PostgreSQL only after every Agent/business owner has settled."""
+async def shutdown_admin_request_auth():
+    """Release application-owned HTTP/JWKS after every Agent/business owner drains."""
+    from starlette.concurrency import run_in_threadpool
 
-    database.close_db()
+    owner = getattr(app.state, "admin_request_auth", None)
+    if owner is not None:
+        await run_in_threadpool(owner.close)
 
 
 
@@ -599,9 +573,7 @@ if __name__ == "__main__":
     print("\n📚 API Endpoints:")
     print("    GET  /api/health         - Health check")
     print("  Auth & User:")
-    print("    POST /api/register        - Register new user")
-    print("    POST /api/login           - Login")
-    print("    GET  /api/me              - Get current user")
+    print("    GET  /api/me              - Get Admin-authenticated current user")
     print("  Data Storage:")
     print("    POST /api/sessions        - Save session")
     print("    GET  /api/sessions        - List sessions")

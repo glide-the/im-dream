@@ -1,120 +1,96 @@
 #!/usr/bin/env python3
-# [Input] Consume database friend APIs and shared auth dependency.
-# [Output] Register /api/friends* endpoints.
-# [Pos] friend route node in backend/routers
+# [Input] Current Admin request actor and nine strict social DTO operations.
+# [Output] Original /api/friends routes, integer IDs, product errors and image responses.
+# [Pos] Social route node; no Dream database or client-authored acting identity.
 # [Sync] 2026-05-25: extracted friend and friend-picture routes from backend/server.py.
+# [Sync] 2026-09-15: consume Admin invitation/friendship policy and atomic transitions.
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-import database
+from services.admin_data.chat_models import NonnegativeSafeInteger
+from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.social_data import (
+    AdminSocialData, FriendPictureInputDTO, FriendRequestDTO, FriendSelectorDTO,
+    FriendTimelineDTO, PublicDatabaseId, SocialEmptyDTO, UseInviteDTO,
+)
 
-from .deps import get_current_user
-
-router = APIRouter()
-
-
-class UseInviteCodeRequest(BaseModel):
-    code: str
-
-
-class FriendRequestActionRequest(BaseModel):
-    pass
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
 
-@router.get("/api/friends/{friend_id}/pictures/{date}/full")
-def get_friend_picture_full_endpoint(
-    friend_id: int, date: str, current_user: dict = Depends(get_current_user)
-):
-    """Get full resolution image for a friend's specific date (only if users are friends)."""
-    user_id = current_user["user_id"]
-    full_image = database.get_friend_picture_full(user_id, friend_id, date)
-
-    if not full_image:
-        raise HTTPException(
-            status_code=404, detail="Picture not found or not accessible"
-        )
-
-    return {"image_base64": full_image}
+class _SocialRoute(SafeRequestValidationRoute):
+    validation_error_detail = 'Invalid friend request'
 
 
-@router.post("/api/friends/invite/generate")
-def generate_friend_invite(current_user: dict = Depends(get_current_user)):
-    """Generate a new friend invite code (6 chars, 7 days validity)"""
-    user_id = current_user["user_id"]
-    result = database.generate_invite_code(user_id)
+router = APIRouter(route_class=_SocialRoute)
+UseInviteCodeRequest = UseInviteDTO
+FriendRequestActionRequest = SocialEmptyDTO
+
+
+def _data(request: Request) -> AdminSocialData:
+    owner = getattr(request.app.state, 'admin_request_auth', None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail='ADMIN_CONFIGURATION_INVALID')
+    return AdminSocialData(owner.client)
+
+
+def _decision(result: dict) -> dict:
+    if result['success'] is False:
+        raise HTTPException(status_code=400, detail=result['error'])
     return result
 
 
-@router.post("/api/friends/invite/use")
-def use_friend_invite(
-    request: UseInviteCodeRequest, current_user: dict = Depends(get_current_user)
+@router.get('/api/friends/{friend_id}/pictures/{date}/full')
+async def get_friend_picture_full_endpoint(
+    friend_id: PublicDatabaseId, date: str, current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data),
 ):
-    """Use an invite code to send a friend request"""
-    user_id = current_user["user_id"]
-    result = database.use_invite_code(request.code, user_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+    result = await invoke_admin_operation(current_user, data.full, FriendPictureInputDTO(friend_id=str(friend_id), date=date))
+    if not result['image_base64']:
+        raise HTTPException(status_code=404, detail='Picture not found or not accessible')
     return result
 
 
-@router.get("/api/friends/requests")
-def get_friend_requests(current_user: dict = Depends(get_current_user)):
-    """Get all pending friend requests for current user"""
-    user_id = current_user["user_id"]
-    requests = database.get_friend_requests(user_id)
-    return {"requests": requests}
+@router.post('/api/friends/invite/generate')
+async def generate_friend_invite(current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return await invoke_admin_operation(current_user, data.generate, SocialEmptyDTO())
 
 
-@router.post("/api/friends/requests/{request_id}/accept")
-def accept_friend_request(
-    request_id: int, current_user: dict = Depends(get_current_user)
+@router.post('/api/friends/invite/use')
+async def use_friend_invite(request: UseInviteCodeRequest, current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return _decision(await invoke_admin_operation(current_user, data.use, request))
+
+
+@router.get('/api/friends/requests')
+async def get_friend_requests(current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return await invoke_admin_operation(current_user, data.requests, SocialEmptyDTO())
+
+
+@router.post('/api/friends/requests/{request_id}/accept')
+async def accept_friend_request(request_id: PublicDatabaseId, current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return _decision(await invoke_admin_operation(current_user, data.accept, FriendRequestDTO(request_id=str(request_id))))
+
+
+@router.post('/api/friends/requests/{request_id}/reject')
+async def reject_friend_request(request_id: PublicDatabaseId, current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return _decision(await invoke_admin_operation(current_user, data.reject, FriendRequestDTO(request_id=str(request_id))))
+
+
+@router.get('/api/friends')
+async def get_friends(current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return await invoke_admin_operation(current_user, data.friends, SocialEmptyDTO())
+
+
+@router.delete('/api/friends/{friend_id}')
+async def remove_friend(friend_id: PublicDatabaseId, current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data)):
+    return _decision(await invoke_admin_operation(current_user, data.remove, FriendSelectorDTO(friend_id=str(friend_id))))
+
+
+@router.get('/api/friends/{friend_id}/timeline')
+async def get_friend_timeline(
+    friend_id: PublicDatabaseId, limit: Annotated[NonnegativeSafeInteger, Query()] = 30,
+    current_user: dict = Depends(get_current_user), data: AdminSocialData = Depends(_data),
 ):
-    """Accept a friend request"""
-    user_id = current_user["user_id"]
-    result = database.accept_friend_request(request_id, user_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+    result = await invoke_admin_operation(current_user, data.timeline, FriendTimelineDTO(friend_id=str(friend_id), limit=limit))
+    if result['pictures'] is None:
+        raise HTTPException(status_code=403, detail='Not friends or friend not found')
     return result
-
-
-@router.post("/api/friends/requests/{request_id}/reject")
-def reject_friend_request(
-    request_id: int, current_user: dict = Depends(get_current_user)
-):
-    """Reject a friend request"""
-    user_id = current_user["user_id"]
-    result = database.reject_friend_request(request_id, user_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    return result
-
-
-@router.get("/api/friends")
-def get_friends(current_user: dict = Depends(get_current_user)):
-    """Get all accepted friends for current user"""
-    user_id = current_user["user_id"]
-    friends = database.get_friends(user_id)
-    return {"friends": friends}
-
-
-@router.delete("/api/friends/{friend_id}")
-def remove_friend(friend_id: int, current_user: dict = Depends(get_current_user)):
-    """Remove a friend"""
-    user_id = current_user["user_id"]
-    result = database.remove_friend(user_id, friend_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    return result
-
-
-@router.get("/api/friends/{friend_id}/timeline")
-def get_friend_timeline(
-    friend_id: int, limit: int = 30, current_user: dict = Depends(get_current_user)
-):
-    """Get a friend's timeline pictures (only if friends)"""
-    user_id = current_user["user_id"]
-    timeline = database.get_friend_timeline(user_id, friend_id, limit)
-    if timeline is None:
-        raise HTTPException(status_code=403, detail="Not friends or friend not found")
-    return {"pictures": timeline}

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# [Input] Consume Markdown diary/note files plus user/date import options.
-# [Output] Upsert diary content as Ink & Memory editor sessions.
+# [Input] Markdown diary/note files, user/date options and explicit Admin OAuth for Agent labels.
+# [Output] Upsert editor sessions and infer optional labels through authenticated public Dream routes.
 # [Pos] backend/script import utility node.
+# [Sync] 2026-09-16: replace all PostgreSQL reads/writes with Admin-backed public Session/Profile routes.
+# [Sync] 2026-09-15: require explicit Admin OAuth before Agent-mode I/O; no local JWT generation.
 # [Sync] 2026-05-31: created dated diary importer for user_sessions.
 # [Sync] 2026-05-31: default import matching now uses file creation time before filename dates.
 # [Sync] 2026-05-31: imported text now prefixes the source filename as the first line.
@@ -9,19 +11,15 @@
 # [Sync] 2026-05-31: top-level stems like 思考笔记本-5-17.md resolve dates from the filename stem before creation time.
 # [Sync] 2026-05-31: imported sessions default selectedState to ok.
 # [Sync] 2026-06-01: imported sessions can infer and persist labels before writing user_sessions.
-# [Sync] 2026-06-05: add --label-mode agent: create thread via POST /api/claude-agent/threads then call POST /api/claude-agent; token auto-generated from user DB record via auth.create_access_token; --backend-url / INK_MEMORY_BACKEND_URL / --api-token configure the connection.
+# [History] 2026-06-05: Agent labels originally generated local tokens; this authority was retired on 2026-09-15.
 # [Sync] 2026-07-19: _agent_infer_labels now reads the final assistant text from
 #                    the "message-final" SSE frame instead of a follow-up
 #                    GET /api/claude-agent/threads/{id}/messages call, which
 #                    could race the backend's async assistant-message
 #                    persistence (finish is enqueued before persistence
 #                    completes) and intermittently return empty labels.
-# [Sync] 2026-07-19: load backend/.env (same as server.py) before importing auth
-#                    so the auto-generated --label-mode agent JWT is signed with
-#                    the running backend's real JWT_SECRET instead of auth.py's
-#                    dev-secret fallback; fixes 401 Unauthorized on
-#                    POST /api/claude-agent/threads when the script's shell
-#                    doesn't already export JWT_SECRET.
+# [History] 2026-07-19: loading backend/.env corrected the former local-token key;
+#                       local signing and its fallback were retired on 2026-09-15.
 # [Sync] 2026-07-19: --label-mode agent now sends toolChoice "none" (label
 #                    inference never needs tools) and enforces a wall-clock
 #                    AGENT_LABEL_STREAM_TIMEOUT_S deadline around the SSE read
@@ -45,7 +43,7 @@ Filename dates remain available through --date-source filename for files named l
 
 It strips YAML front matter, prefixes the source filename as the first text
 line, infers primary labels from front matter, hashtags, paths, and content,
-writes a single text-cell editor state through database.save_session(), defaults
+writes a single text-cell editor state through the public Session API, defaults
 the imported session mood to OK, and keeps repeated runs idempotent by deriving
 a stable session UUID per user/source file/day.
 """
@@ -71,18 +69,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-# Load backend/.env the same way server.py does *before* importing auth, so a
-# locally auto-generated JWT (see _build_agent_token) is signed with the same
-# JWT_SECRET the running backend process verifies against. Without this, auth
-# falls back to its dev-secret default whenever the script's shell doesn't
-# already export JWT_SECRET, and every --label-mode agent call fails with
-# 401 Unauthorized against a real backend.
+# Load server-owned import configuration; Agent calls require explicit Admin OAuth.
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(BACKEND_DIR / ".env", override=False)
-
-import database  # noqa: E402
-import auth as _auth  # noqa: E402
 
 try:
     import httpx as _httpx  # noqa: E402
@@ -204,33 +194,73 @@ def _process_entry_task(task: _EntryTask) -> DiaryEntry | None:
 
 
 def _build_agent_token(user_id: int) -> str:
-    """Generate a short-lived JWT for internal script-to-service calls."""
-    db = database.get_db()
+    """Historical entry point refuses local signing, without reading the database."""
+    raise SystemExit("Agent labels require explicit --api-token or INK_MEMORY_IMPORT_API_TOKEN from Admin OAuth.")
+
+
+def _require_agent_token(raw: str | None) -> str:
+    token = str(raw or "").strip()
+    if not token or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
+        raise SystemExit("Agent labels require explicit --api-token or INK_MEMORY_IMPORT_API_TOKEN from Admin OAuth.")
+    return token
+
+
+def _authenticated_profile(backend_url: str, token: str) -> dict:
+    """Read the public profile before any import or label operation."""
+    if _httpx is None:
+        raise SystemExit("httpx is required for --label-mode agent.")
+    with _httpx.Client(timeout=30, trust_env=False, follow_redirects=False) as client:
+        response = client.get(
+            f"{backend_url.rstrip('/')}/api/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            profile = response.json() if response.status_code == 200 else None
+        except ValueError:
+            profile = None
+    if (
+        not isinstance(profile, dict)
+        or type(profile.get("id")) is not int
+        or profile["id"] <= 0
+        or (
+            "email" in profile
+            and (
+                not isinstance(profile["email"], str)
+                or not profile["email"]
+            )
+        )
+    ):
+        raise SystemExit("Admin OAuth profile is unavailable.")
+    return profile
+
+
+def _require_agent_account(backend_url: str, token: str, user_id: int) -> None:
+    """Bind label requests to the already selected import account."""
+
     try:
-        row = db.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
-        if not row:
-            raise SystemExit(f"Cannot build agent token: user {user_id} not found.")
-        email = row["email"]
-    finally:
-        db.close()
-    return _auth.create_access_token(user_id, email)
+        profile = _authenticated_profile(backend_url, token)
+    except SystemExit:
+        raise SystemExit("Admin OAuth account must match the import account.") from None
+    if profile["id"] != user_id:
+        raise SystemExit("Admin OAuth account must match the import account.")
 
 
 def _agent_create_thread(backend_url: str, token: str, title: str | None = None) -> str:
     """POST /api/claude-agent/threads and return the new thread_id.
 
-    If *title* is given, set it immediately via the local database so the
-    thread appears with a meaningful name in chat history.
+    The title is submitted in the same public create operation.
     """
     if _httpx is None:
         raise SystemExit("httpx is required for --label-mode agent (pip install httpx).")
     url = f"{backend_url.rstrip('/')}/api/claude-agent/threads"
     with _httpx.Client(timeout=30) as client:
-        resp = client.post(url, headers={"Authorization": f"Bearer {token}"})
+        resp = client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            json={"title": title} if title else {},
+        )
         resp.raise_for_status()
         thread_id = resp.json()["thread_id"]
-    if title:
-        database.update_chat_thread_title(thread_id, title)
     return thread_id
 
 
@@ -461,7 +491,7 @@ def parse_args() -> argparse.Namespace:
         "--backend-url",
         default=os.environ.get("INK_MEMORY_BACKEND_URL", DEFAULT_BACKEND_URL),
         help=(
-            "Base URL of the running Ink & Memory backend, used with --label-mode agent "
+            "Base URL of the running Ink & Memory backend used for profile, Session, and optional Agent calls "
             f"(default {DEFAULT_BACKEND_URL}, env INK_MEMORY_BACKEND_URL)."
         ),
     )
@@ -469,9 +499,8 @@ def parse_args() -> argparse.Namespace:
         "--api-token",
         default=os.environ.get("INK_MEMORY_IMPORT_API_TOKEN"),
         help=(
-            "Bearer JWT to authenticate against the backend. "
-            "If omitted, a token is auto-generated from the resolved user record "
-            "(env INK_MEMORY_IMPORT_API_TOKEN)."
+            "Admin OAuth bearer required for all reads/writes; use this option or "
+            "the INK_MEMORY_IMPORT_API_TOKEN secret. No local token is generated."
         ),
     )
     parser.add_argument(
@@ -490,7 +519,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=os.environ.get("INK_MEMORY_IMPORT_FORCE_LABELS", "").lower() in ("1", "true"),
         help=(
-            "Always run label inference even when the session already exists in the database. "
+            "Always run label inference even when the session already exists in Admin. "
             "By default, existing sessions (without --replace) skip label inference to avoid "
             "redundant agent calls (env INK_MEMORY_IMPORT_FORCE_LABELS)."
         ),
@@ -509,7 +538,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the import plan without writing to the database.",
+        help="Print the import plan without writing through the Session API.",
     )
     return parser.parse_args()
 
@@ -562,52 +591,33 @@ def resolve_source_dir(value: str | None) -> Path:
     return source_dir
 
 
-def list_users() -> list[dict]:
-    db = database.get_db()
-    try:
-        rows = db.execute("SELECT id, email, display_name FROM users ORDER BY id").fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        db.close()
+def resolve_user_id(
+    email: str | None,
+    user_id: int | None,
+    *,
+    backend_url: str,
+    token: str,
+) -> int:
+    """Resolve only the authenticated Admin profile; external IDs are checks."""
+
+    if email is None and user_id is None:
+        raise SystemExit("Either --email or --user-id is required.")
+    profile = _authenticated_profile(backend_url, token)
+    if user_id is not None and profile["id"] != user_id:
+        raise SystemExit("Admin OAuth account must match --user-id.")
+    if email is not None and profile.get("email") != email:
+        raise SystemExit("Admin OAuth account must match --email.")
+    return int(profile["id"])
 
 
-def resolve_user_id(email: str | None, user_id: int | None) -> int:
-    if user_id:
-        user = database.get_user_by_id(user_id)
-        if not user:
-            raise SystemExit(f"User ID {user_id} not found.")
-        return user["id"]
+def resolve_timezone(tz_arg: str | None, _user_id: int) -> ZoneInfo:
+    """Resolve the explicit/import default timezone without a database read."""
 
-    if email:
-        user = database.get_user_by_email(email)
-        if not user:
-            raise SystemExit(f"User with email {email} not found.")
-        return user["id"]
-
-    users = list_users()
-    if len(users) == 1:
-        return users[0]["id"]
-
-    raise SystemExit("Either --email or --user-id is required when multiple users exist.")
-
-
-def resolve_timezone(tz_arg: str | None, user_id: int) -> ZoneInfo:
-    tz_name = tz_arg
-
-    if not tz_name:
-        db = database.get_db()
-        try:
-            row = db.execute(
-                "SELECT timezone FROM user_preferences WHERE user_id = %s",
-                (user_id,),
-            ).fetchone()
-            tz_name = row["timezone"] if row and row["timezone"] else None
-        finally:
-            db.close()
-
-    if not tz_name:
-        tz_name = os.environ.get("INK_MEMORY_IMPORT_TIMEZONE") or DEFAULT_TIMEZONE
-
+    tz_name = (
+        tz_arg
+        or os.environ.get("INK_MEMORY_IMPORT_TIMEZONE")
+        or DEFAULT_TIMEZONE
+    )
     try:
         return ZoneInfo(tz_name)
     except Exception as exc:
@@ -1094,11 +1104,14 @@ def parse_db_timestamp(raw: str | None) -> datetime | None:
     return parsed
 
 
-def text_from_editor_state(editor_state_json: str) -> str:
-    try:
-        state = json.loads(editor_state_json)
-    except json.JSONDecodeError:
-        return ""
+def text_from_editor_state(editor_state_json: str | dict) -> str:
+    if isinstance(editor_state_json, dict):
+        state = editor_state_json
+    else:
+        try:
+            state = json.loads(editor_state_json)
+        except json.JSONDecodeError:
+            return ""
     return "\n\n".join(
         cell.get("content", "")
         for cell in state.get("cells", [])
@@ -1110,30 +1123,56 @@ def first_line_from_text(text: str) -> str:
     return text.splitlines()[0].strip() if text else ""
 
 
-def fetch_existing_sessions(user_id: int, tz: ZoneInfo) -> list[ExistingSession]:
-    db = database.get_db()
-    try:
-        rows = db.execute(
-            """
-            SELECT id, name, editor_state_json, created_at, updated_at
-            FROM user_sessions
-            WHERE user_id = %s
-            """,
-            (user_id,),
-        ).fetchall()
-    finally:
-        db.close()
+def fetch_existing_sessions(
+    user_id: int,
+    tz: ZoneInfo,
+    *,
+    backend_url: str,
+    token: str,
+) -> list[ExistingSession]:
+    """Read the actor's sessions through public Admin-backed endpoints."""
+
+    del user_id
+    if _httpx is None:
+        raise SystemExit("httpx is required for diary import.")
+    base = backend_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"}
+    with _httpx.Client(timeout=60, trust_env=False, follow_redirects=False) as client:
+        listed = client.get(
+            f"{base}/api/sessions",
+            params={"timezone": tz.key},
+            headers=headers,
+        )
+        listed.raise_for_status()
+        summaries = listed.json().get("sessions", [])
+        session_ids = [
+            item.get("id")
+            for item in summaries
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        if session_ids:
+            batched = client.post(
+                f"{base}/api/sessions/batch",
+                headers=headers,
+                json={"ids": session_ids},
+            )
+            batched.raise_for_status()
+            rows = batched.json().get("sessions", [])
+        else:
+            rows = []
 
     sessions: list[ExistingSession] = []
     for row in rows:
-        timestamp = parse_db_timestamp(row["created_at"] or row["updated_at"])
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            raise SystemExit("Session API returned an invalid row.")
+        timestamp = parse_db_timestamp(row.get("created_at") or row.get("updated_at"))
         local_day = timestamp.astimezone(tz).date() if timestamp else None
-        text = text_from_editor_state(row["editor_state_json"])
+        text = text_from_editor_state(row.get("editor_state") or {})
         sessions.append(
             ExistingSession(
                 session_id=row["id"],
                 local_day=local_day,
-                name=row["name"] or "",
+                name=str(row.get("name") or ""),
                 text_hash=normalized_text_hash(text) if text else "",
                 first_line=first_line_from_text(text),
             )
@@ -1242,64 +1281,65 @@ def build_editor_state(entry: DiaryEntry, selected_state: str | None) -> dict:
     }
 
 
-def preserve_import_timestamps(user_id: int, entry: DiaryEntry) -> None:
-    db = database.get_db()
-    try:
-        db.execute(
-            """
-            UPDATE user_sessions
-            SET created_at = %s,
-                updated_at = %s
-            WHERE user_id = %s AND id = %s
-            """,
-            (entry.created_at_db, entry.created_at_db, user_id, entry.session_id),
-        )
-        db.commit()
-    finally:
-        db.close()
-
-
 def import_entries(
     user_id: int,
     entries: list[DiaryEntry],
     dry_run: bool,
     selected_state: str | None,
+    *,
+    backend_url: str,
+    token: str,
 ) -> None:
-    with tqdm(
-        entries,
-        desc="Importing",
-        unit="entry",
-        file=sys.stderr,
-        dynamic_ncols=True,
-    ) as bar:
-        for entry in bar:
-            bar.set_postfix_str(entry.base_title[:50], refresh=False)
-            relative = entry.path.as_posix()
-            labels_text = ", ".join(entry.labels) if entry.labels else "-"
-            if entry.action == "skip":
+    """Persist planned Sessions through the public Admin-backed DTO route."""
+
+    del user_id
+    if _httpx is None:
+        raise SystemExit("httpx is required for diary import.")
+    client = _httpx.Client(timeout=60, trust_env=False, follow_redirects=False)
+    try:
+        with tqdm(
+            entries,
+            desc="Importing",
+            unit="entry",
+            file=sys.stderr,
+            dynamic_ncols=True,
+        ) as bar:
+            for entry in bar:
+                bar.set_postfix_str(entry.base_title[:50], refresh=False)
+                relative = entry.path.as_posix()
+                labels_text = ", ".join(entry.labels) if entry.labels else "-"
+                if entry.action == "skip":
+                    tqdm.write(
+                        f"SKIP    {entry.day.isoformat()}  [{entry.date_source}]  {entry.base_title}  "
+                        f"{relative}  labels=[{labels_text}]  ({entry.skip_reason})"
+                    )
+                    continue
+
+                verb = "REPLACE" if entry.action == "replace" else "INSERT "
                 tqdm.write(
-                    f"SKIP    {entry.day.isoformat()}  [{entry.date_source}]  {entry.base_title}  "
-                    f"{relative}  labels=[{labels_text}]  ({entry.skip_reason})"
+                    f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  "
+                    f"{relative}  labels=[{labels_text}]"
                 )
-                continue
+                if dry_run:
+                    continue
 
-            verb = "REPLACE" if entry.action == "replace" else "INSERT "
-            tqdm.write(
-                f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  "
-                f"{relative}  labels=[{labels_text}]"
-            )
-            if dry_run:
-                continue
-
-            database.save_session(
-                user_id,
-                entry.session_id,
-                build_editor_state(entry, selected_state),
-                name=entry.title,
-                created_at=entry.created_at_db,
-                labels=entry.labels,
-            )
-            preserve_import_timestamps(user_id, entry)
+                response = client.post(
+                    f"{backend_url.rstrip('/')}/api/sessions",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "session_id": entry.session_id,
+                        "editor_state": build_editor_state(entry, selected_state),
+                        "name": entry.title,
+                        "created_at": entry.created_at_state,
+                        "labels": entry.labels,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if payload != {"success": True}:
+                    raise SystemExit("Session API did not confirm the import write.")
+    finally:
+        client.close()
 
 
 def print_summary(entries: list[DiaryEntry], dry_run: bool) -> None:
@@ -1314,8 +1354,15 @@ def print_summary(entries: list[DiaryEntry], dry_run: bool) -> None:
 
 def main() -> None:
     args = parse_args()
+    token = _require_agent_token(args.api_token)
+    backend_url = (args.backend_url or DEFAULT_BACKEND_URL).rstrip("/")
     source_dir = resolve_source_dir(args.source_dir)
-    user_id = resolve_user_id(args.email, args.user_id)
+    user_id = resolve_user_id(
+        args.email,
+        args.user_id,
+        backend_url=backend_url,
+        token=token,
+    )
     tz = resolve_timezone(args.timezone, user_id)
     import_time = parse_time(args.time)
     start_day = parse_day(args.start_date, "--start-date") if args.start_date else None
@@ -1326,13 +1373,17 @@ def main() -> None:
 
     agent_ctx: AgentLabelContext | None = None
     if args.label_mode == "agent":
-        backend_url = args.backend_url or DEFAULT_BACKEND_URL
-        token = args.api_token or _build_agent_token(user_id)
+        _require_agent_account(backend_url, token, user_id)
         agent_ctx = AgentLabelContext(
             backend_url=backend_url, token=token, max_labels=args.max_labels
         )
 
-    existing = fetch_existing_sessions(user_id, tz)
+    existing = fetch_existing_sessions(
+        user_id,
+        tz,
+        backend_url=backend_url,
+        token=token,
+    )
     existing_session_ids = {s.session_id for s in existing}
 
     entries = collect_diary_entries(
@@ -1384,7 +1435,14 @@ def main() -> None:
         )
     print(f"Matched Markdown file(s): {len(entries)}")
 
-    import_entries(user_id, planned, dry_run=args.dry_run, selected_state=selected_state)
+    import_entries(
+        user_id,
+        planned,
+        dry_run=args.dry_run,
+        selected_state=selected_state,
+        backend_url=backend_url,
+        token=token,
+    )
     print_summary(planned, dry_run=args.dry_run)
 
 

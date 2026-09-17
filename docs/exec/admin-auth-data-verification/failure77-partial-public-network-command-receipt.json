@@ -1,0 +1,7 @@
+{
+  "command": "python3 /private/tmp/ink-auth-migration-validation/failure77-partial-public-diagnose.py diagnose",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "{\"result\": \"PASS\", \"target\": \"ink_auth_data_codex_test_792494523a17_failure77\", \"scope\": \"primary SELECT-only diagnostic and actual entire source oracle, no replayed POST\", \"assertions\": 287, \"confirmed_committed_positive_labels\": [\"first_rich_null\", \"nonnull_agent\", \"invalid_raw_recovery\", \"nonobject_raw_recovery\", \"missing_source_noop\", \"matching_persistence\"], \"positive_originals\": 6, \"new_original_receipts\": 6, \"new_original_audits\": 6, \"old125_and_prepublic125_non_target_full_rows_retained\": true, \"protected_checkpoint_tables\": 17, \"grants\": {\"matching_run\": {\"currently_live\": true, \"run_bound\": true, \"editor_bound\": false, \"dream_write\": true, \"remaining_seconds\": 106, \"maximum_remaining_seconds\": 106}, \"wrong_run\": {\"currently_live\": true, \"run_bound\": true, \"editor_bound\": false, \"dream_write\": true, \"remaining_seconds\": 106, \"maximum_remaining_seconds\": 106}, \"editor\": {\"currently_live\": true, \"run_bound\": false, \"editor_bound\": true, \"dream_write\": false, \"remaining_seconds\": 106, \"maximum_remaining_seconds\": 106}}, \"failed_public_exit\": 1, \"remaining_public_cases\": \"not accepted\", \"normal_database\": \"untouched\"}\n",
+  "scope": "primary SELECT-only owned port51534 after sandbox network failure; no success replay"
+}

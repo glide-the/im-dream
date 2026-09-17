@@ -1,0 +1,7 @@
+{
+  "result": "PASS",
+  "owned_trigger_removed": true,
+  "owned_function_removed": true,
+  "normal_services": "untouched",
+  "failure_history": "retained"
+}

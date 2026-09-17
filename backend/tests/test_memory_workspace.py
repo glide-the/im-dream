@@ -1,4 +1,5 @@
 # [Input] Consume memory_workspace.py and claude-agent routes.
+# [Sync] 2026-09-16: replace the retired Dream database Thread fixture with the production Admin DTO seam.
 # [Output] Validate procedural Memory workspace source rules and initialization boundary.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-06: cover partition-config prompt sources, no .claude/memory fallback,
@@ -258,14 +259,27 @@ class TestMemoryInitRouteBoundary(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_create_thread_route_does_not_initialize_memory(self):
-        from routers.claude_agent import claude_agent_create_thread
+        from routers import claude_agent as route_module
+        from services.admin_data.chat_models import ThreadCreateResultDTO
 
-        with unittest.mock.patch("database.create_chat_thread", return_value="thread-route"):
+        async def invoke(_current_user, _method, _input_dto):
+            return ThreadCreateResultDTO(
+                thread_id="thread-route",
+                deck_id=None,
+                voice_id=None,
+            )
+
+        chat = unittest.mock.Mock()
+        with unittest.mock.patch.object(route_module, "_chat_invoke", invoke):
             result = _run(
-                claude_agent_create_thread(current_user={"user_id": 1})
+                route_module.claude_agent_create_thread(
+                    current_user={"user_id": "1"},
+                    chat=chat,
+                )
             )
 
         self.assertEqual(result["thread_id"], "thread-route")
+        self.assertEqual(chat.create_thread.call_count, 0)
         self.assertFalse((Path(self._tmp.name) / "thread-route").exists())
 
 

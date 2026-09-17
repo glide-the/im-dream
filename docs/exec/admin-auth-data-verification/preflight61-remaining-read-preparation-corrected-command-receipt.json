@@ -1,0 +1,11 @@
+{
+  "commands": [
+    {
+      "command": "/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/ink-auth-migration-validation/prepare-preflight61-remaining-reads.py",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "exit_code": 1,
+      "output": "Traceback (most recent call last):\n  File \"/private/tmp/ink-auth-migration-validation/prepare-preflight61-remaining-reads.py\", line 24, in <module>\n    projection=oracle({'action':'preflight-projection','mode':'read','row':value,'raw_input_json':raw,'secret':e['INK_WORKFLOW_TOKEN_SECRET'],'clock':now.isoformat(timespec='microseconds')})['preflight'];assert (projection['preflight_token'] is not None)==active\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/tmp/ink-auth-migration-validation/prepare-preflight61-remaining-reads.py\", line 13, in oracle\n    r=subprocess.run([f['oracle_python'],'-B','/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/tests/integration/deckPluginMetadataOracle.py'],input=json.dumps(payload),env=env,capture_output=True,text=True);assert r.returncode==0,'Actual source error; private payload omitted';return json.loads(r.stdout)\n                                                                                                                                                                                                                           ^^^^^^^^^^^^^^^\nAssertionError: Actual source error; private payload omitted\n"
+    }
+  ],
+  "exit_code": 1
+}

@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/verify-0060-final-roles.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+  "exit_code": 0,
+  "output": "ACTUAL0060 ROLE PASS: queries=15; data SELECT/INSERT only; denied mutation/TRUNCATE/guard,Auth/control,user_model_permissions DML and signing private key; Dream CONNECT denied\n",
+  "scope": "only remaining4 actualrole query assertions and SELECTrights; prior11 succeeded probes not repeated; no ACL/migration/INSERT rerun"
+}

@@ -1,0 +1,14 @@
+{
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "command": "node packages/db/dist/migrate.js",
+  "target": "ink_auth_data_codex_test_792494523a17_acl56",
+  "exit_code": 0,
+  "output": "Applied migration 0057_striped_justice\nApplied migration 0058_bouncy_captain_britain\nGenerated database migrations applied successfully (MIGRATION_DATABASE_URL)\n",
+  "normal_database": "untouched",
+  "acl_refresh": {
+    "command": "node drizzle/data/auth-access-policy.mjs --apply",
+    "exit_code": 0,
+    "policy_sha256": "410c9c229091d1832d53306db6e2be6db8085a7dbc9ce105530cbb8ee39de891",
+    "output": "{\"mode\":\"applied\",\"database\":\"ink_auth_data_codex_test_792494523a17_acl56\",\"policy_sha256\":\"4581ef1103dd9a23a9cdfa776a21e2dd41af6ff7e9a35206ffb1626834e272aa\",\"statements\":140,\"limited_roles\":4,\"dream_database_access\":\"denied after apply\",\"auth_canonical_writes\":\"controlled registration function only\",\"data_identity_secrets\":\"not granted\",\"redacted\":true}"
+  }
+}

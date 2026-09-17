@@ -1,0 +1,8 @@
+{
+  "command": "node --import tsx /private/tmp/ink-auth-migration-validation/prepare-failure77-fixture.mts",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "exit_code": 1,
+  "output": "Failure77 preparation failed at new-technical-identity-graph; private diagnostics retained\n",
+  "scope": "primary isolated new fixtures; no normal account/provider/model"
+}

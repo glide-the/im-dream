@@ -1,4 +1,4 @@
-<!-- [Input] Current Dream post-turn Hook, ClaudeAgentService/ThreadFactory, chat_message persistence, EventBus/SSE, and ChatPanel history/reconnect reducer contracts. -->
+<!-- [Input] Current Dream post-turn Hook, ClaudeAgentService/ThreadFactory, Admin message DTOs, EventBus/SSE, and ChatPanel history/reconnect reducer contracts. -->
 <!-- [Output] Product and implementation contract for one bounded, visible, server-owned Dream workspace auto-repair turn. -->
 <!-- [Pos] Interaction/architecture source of truth for repairable Dream post-turn validation failures. -->
 <!-- [Sync] 2026-09-01: initial design after source investigation and pre-implementation simplification review. -->
@@ -11,6 +11,7 @@
 <!-- [Sync] 2026-09-01: persist every successful Claude logical Turn before its Dream Hook, retain that assistant across repair SSE handoff, and accept canonical relative artifact references/compact storyboard forms. -->
 <!-- [Sync] 2026-09-02: require backend and frontend Episode path audits to treat only slash-qualified home paths, never a standalone prose tilde, as sensitive. -->
 <!-- [Sync] 2026-09-04: distinguish post-commit Hook synchronization failure from an unprocessed message and keep reload/resume/SSE semantics unchanged. -->
+<!-- [Sync] 2026-09-16: move automatic-repair insertion and terminal CAS to Admin Registry44/169 without changing product flow. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -22,7 +23,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 1. `ClaudeAgentThreadFactory` 获取 Thread lock、`AgentRunState`、EventBus 和 admission lease。
 2. `ClaudeAgentService.assemble_context()` 从 authenticated actor + canonical Thread 解析 `StoryWorkspaceDreamRunContext`，组装 workspace、Deck/plugin、Claude resume 和 Runner options。
-3. `ClaudeAgentService.execute_session()` 先把 user `chat_message` 持久化，再调用 `ClaudeAgentRunner.run_streaming()`；回调把 normalized events 发布到 EventBus。
+3. `ClaudeAgentService.execute_session()` 先通过当前 `AdminTurnPersistence` 把 user message 持久化，再调用 `ClaudeAgentRunner.run_streaming()`；回调把 normalized events 发布到 EventBus。
 4. Claude 成功返回后，Service 先将本逻辑 Turn 已发送的 reasoning/tool/text SSE parts 持久化为 assistant `chat_message`，并更新 Claude session。
 5. assistant 提交成功后才调用 `DreamArtifactTurnHook.after_main_turn()`，把 workspace 文件同步到 Run-private artifact、Episode binding 和 PostgreSQL story projection；Hook 成功后发送 `message-final` 与唯一 terminal `finish`。
 6. 前端 POST stream 由 `ClaudeAgentChatTransport` 消费；自动 user 消息触发 history/reconnect handoff，上一条已持久化 assistant 保持可见；断线/刷新后最终以消息历史覆盖临时 id。
@@ -102,7 +103,7 @@ assistant 提交后的 non-repairable 或未知 Hook 异常统一投影为 `DREA
 
 ### 3.2 自动修正消息
 
-自动消息是普通 `chat_message(role='user')`，不是 UI-only 提示。它有稳定 server-reserved message id、文本 `parts` 和 server-owned metadata。第一次写入与完全相同的 CAS replay 都成功；不同内容占用同一 id 必须 fail closed。
+自动消息是普通 user message，不是 UI-only 提示。它有稳定 server-reserved message id、文本 `parts` 和 server-owned metadata。Dream 通过当前 turn 的 `chat-user-message.persist` 严格 DTO 写入；Admin 的 Service 与 Drizzle Repository 校验 actor/Thread 后提交。完全相同的 replay 成功，不同内容占用同一 id 必须 fail closed。
 
 ### 3.3 两个逻辑 Turn、一个受控运行任务
 
@@ -193,7 +194,7 @@ assistant 已持久化后，non-repairable/未知 Hook 失败必须返回 `DREAM
 
 稳定摘要输入只包含 server-owned `workflowRunId`、持久化 originating message identity 和 validation code；`originatingTurnId` 保留为诊断事实，但不参与 key，避免进程恢复后新的内存 Turn id 绕过一次性边界。前端不能提交 `dream_repair_` message id；公共 Chat route 将该前缀列为 reserved namespace。
 
-消息先以 `dispatching` 写入，再以单条 CAS 争抢执行权；只有 CAS 获胜者把状态改为 `dispatched` 并发布 SSE。因此 SSE 与历史恢复看到的初始可见记录完全一致。`dispatch_status` 复用现有 Chat/Dream 公开合同：
+消息先通过 `chat-user-message.persist` 以 `dispatching` 写入，再调用 Registry169 `dream-auto-repair.settle`。Admin 从 turn grant 派生 actor，锁定 owned user message、比较完整不可变 identity，并在 receipt/audit 事务中执行终态 CAS；Dream 不提交任意 metadata patch、数据库选择器或用户 ID。只有返回 `changed=true` 的调用方发布 SSE；未知提交只读取原 request receipt，不重发 POST，也不回退 PostgreSQL。因此 SSE 与历史恢复看到的记录一致。`dispatch_status` 复用现有 Chat/Dream 公开合同：
 
 - `dispatching`：自动 user 消息已落库，但执行权尚未完成 CAS；正常情况下不发布该中间态 SSE；
 - `dispatched`：本消息已唯一取得自动修正执行权；

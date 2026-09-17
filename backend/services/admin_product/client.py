@@ -1,8 +1,15 @@
-"""Injectable, no-retry client for the Admin Product and payment API routes."""
+"""Injectable, no-retry client for the Admin Product and payment API routes.
+
+[Input] Verified Admin OAuth bearer, strict Product DTOs and bounded HTTP configuration.
+[Output] Strict response DTOs with safe errors and no caller-provided user identity.
+[Pos] Dream Product transport; Admin owns subject mapping, ORM and transactions.
+[Sync] 2026-09-16: forward OAuth delegation and delete Dream Product JWT issuance.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any, Literal, Protocol, TypeVar
 
 import httpx
@@ -29,7 +36,7 @@ from .models import (
     UsageEnvelope,
     UsageQuery,
 )
-from .token import ProductScope, issue_product_token
+ProductScope = Literal["product:read", "product:write"]
 
 
 _MAX_RESPONSE_BYTES = 1_048_576
@@ -120,24 +127,24 @@ def assert_safe_product_payload(
 
 class AdminProductGateway(Protocol):
     async def plans(
-        self, canonical_user_id: str, query: PlansQuery, request_id: str
+        self, access_token: str, query: PlansQuery, request_id: str
     ) -> dict[str, Any]: ...
 
     async def subscription_context(
-        self, canonical_user_id: str, request_id: str
+        self, access_token: str, request_id: str
     ) -> dict[str, Any]: ...
 
     async def usage(
-        self, canonical_user_id: str, query: UsageQuery, request_id: str
+        self, access_token: str, query: UsageQuery, request_id: str
     ) -> dict[str, Any]: ...
 
     async def model_catalog(
-        self, canonical_user_id: str, request_id: str
+        self, access_token: str, request_id: str
     ) -> dict[str, Any]: ...
 
     async def subscription_command(
         self,
-        canonical_user_id: str,
+        access_token: str,
         command: PreviewSubscriptionCommand | ExecuteSubscriptionCommand,
         request_id: str,
         idempotency_key: str | None,
@@ -145,14 +152,14 @@ class AdminProductGateway(Protocol):
 
     async def create_payment_intent(
         self,
-        canonical_user_id: str,
+        access_token: str,
         payment: PaymentIntentCreate,
         request_id: str,
         idempotency_key: str,
     ) -> dict[str, Any]: ...
 
     async def payment_intent(
-        self, canonical_user_id: str, payment_intent_id: str, request_id: str
+        self, access_token: str, payment_intent_id: str, request_id: str
     ) -> dict[str, Any]: ...
 
 
@@ -160,7 +167,7 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class AdminProductClient:
-    """Call exactly one Admin route per BFF request, without automatic retry."""
+    """Forward one verified Admin OAuth bearer per Product DTO call, without retry."""
 
     def __init__(
         self,
@@ -182,21 +189,23 @@ class AdminProductClient:
 
     def _headers(
         self,
-        canonical_user_id: str,
-        scope: ProductScope,
+        access_token: str,
         request_id: str,
         *,
         write: bool = False,
         idempotency_key: str | None = None,
     ) -> dict[str, str]:
+        if not isinstance(access_token, str) or not re.fullmatch(
+            r"[A-Za-z0-9._~-]{16,8192}", access_token
+        ):
+            raise ProductBffError(
+                code="PRODUCT_AUTH_REQUIRED",
+                message="A valid Dream session is required.",
+                status_code=401,
+            )
         headers = {
             "accept": "application/json",
-            "authorization": "Bearer "
-            + issue_product_token(
-                self._configuration,
-                canonical_user_id=canonical_user_id,
-                scope=scope,
-            ),
+            "authorization": "Bearer " + access_token,
             "x-request-id": request_id,
         }
         if write:
@@ -211,7 +220,7 @@ class AdminProductClient:
         *,
         method: Literal["GET", "POST"],
         path: str,
-        canonical_user_id: str,
+        access_token: str,
         scope: ProductScope,
         request_id: str,
         response_model: type[ModelT],
@@ -227,8 +236,7 @@ class AdminProductClient:
                 json=body,
                 follow_redirects=False,
                 headers=self._headers(
-                    canonical_user_id,
-                    scope,
+                    access_token,
                     request_id,
                     write=method == "POST",
                     idempotency_key=idempotency_key,
@@ -294,12 +302,12 @@ class AdminProductClient:
         )
 
     async def plans(
-        self, canonical_user_id: str, query: PlansQuery, request_id: str
+        self, access_token: str, query: PlansQuery, request_id: str
     ) -> dict[str, Any]:
         return await self._request(
             method="GET",
             path="/api/product/v1/plans",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:read",
             request_id=request_id,
             response_model=PlansEnvelope,
@@ -307,24 +315,24 @@ class AdminProductClient:
         )
 
     async def subscription_context(
-        self, canonical_user_id: str, request_id: str
+        self, access_token: str, request_id: str
     ) -> dict[str, Any]:
         return await self._request(
             method="GET",
             path="/api/product/v1/me/subscription-context",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:read",
             request_id=request_id,
             response_model=ContextEnvelope,
         )
 
     async def usage(
-        self, canonical_user_id: str, query: UsageQuery, request_id: str
+        self, access_token: str, query: UsageQuery, request_id: str
     ) -> dict[str, Any]:
         return await self._request(
             method="GET",
             path="/api/product/v1/me/usage",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:read",
             request_id=request_id,
             response_model=UsageEnvelope,
@@ -332,12 +340,12 @@ class AdminProductClient:
         )
 
     async def model_catalog(
-        self, canonical_user_id: str, request_id: str
+        self, access_token: str, request_id: str
     ) -> dict[str, Any]:
         return await self._request(
             method="GET",
             path="/api/product/v1/me/model-catalog",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:read",
             request_id=request_id,
             response_model=ModelCatalogEnvelope,
@@ -345,7 +353,7 @@ class AdminProductClient:
 
     async def subscription_command(
         self,
-        canonical_user_id: str,
+        access_token: str,
         command: PreviewSubscriptionCommand | ExecuteSubscriptionCommand,
         request_id: str,
         idempotency_key: str | None,
@@ -368,7 +376,7 @@ class AdminProductClient:
         return await self._request(
             method="POST",
             path="/api/product/v1/me/subscription-commands",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:write",
             request_id=request_id,
             response_model=CommandResultEnvelope if execute else PreviewEnvelope,
@@ -378,7 +386,7 @@ class AdminProductClient:
 
     async def create_payment_intent(
         self,
-        canonical_user_id: str,
+        access_token: str,
         payment: PaymentIntentCreate,
         request_id: str,
         idempotency_key: str,
@@ -386,7 +394,7 @@ class AdminProductClient:
         return await self._request(
             method="POST",
             path="/api/product/v1/me/payment-intents",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:write",
             request_id=request_id,
             response_model=PaymentIntentEnvelope,
@@ -395,12 +403,12 @@ class AdminProductClient:
         )
 
     async def payment_intent(
-        self, canonical_user_id: str, payment_intent_id: str, request_id: str
+        self, access_token: str, payment_intent_id: str, request_id: str
     ) -> dict[str, Any]:
         return await self._request(
             method="GET",
             path=f"/api/product/v1/me/payment-intents/{payment_intent_id}",
-            canonical_user_id=canonical_user_id,
+            access_token=access_token,
             scope="product:read",
             request_id=request_id,
             response_model=PaymentIntentEnvelope,

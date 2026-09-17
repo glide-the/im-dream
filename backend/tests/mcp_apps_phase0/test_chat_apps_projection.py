@@ -1,7 +1,8 @@
 # [Input] Existing database.save_chat_message/list_chat_messages functions and a provider-free fake connection.
-# [Output] Prove five Apps fields survive save/list/public DTO and browser refresh without schema changes.
+# [Output] Prove five Apps fields survive legacy fixture save/list and Admin-backed public DTO projection.
 # [Pos] Phase 0 Chat compatibility PoC; it calls production persistence entrypoints but never a real database.
 # [Sync] 2026-09-04: cover task_301 P0-07 persistence, public route, and redaction boundary.
+# [Sync] 2026-09-16: adapt the public projection assertion to the Admin Chat consumer.
 
 from __future__ import annotations
 
@@ -9,7 +10,8 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -170,20 +172,34 @@ def test_existing_chat_save_and_list_round_trip_complete_apps_result() -> None:
     }
     with (
         patch.object(
-            claude_agent_router.database,
-            "get_chat_thread",
-            return_value=thread,
+            claude_agent_router,
+            "_admin_thread",
+            AsyncMock(return_value=thread),
         ),
         patch.object(
-            claude_agent_router.database,
-            "list_chat_messages",
-            return_value=restored,
+            claude_agent_router,
+            "_chat_invoke",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    messages=[
+                        SimpleNamespace(
+                            model_dump=lambda: dict(restored[0])
+                        )
+                    ]
+                )
+            ),
+        ),
+        patch.object(
+            claude_agent_router,
+            "_load_current_user_mcp_app_resource_bindings",
+            AsyncMock(return_value={}),
         ),
     ):
         public_history = asyncio.run(
             claude_agent_router.claude_agent_thread_messages(
                 "thread-phase0",
                 current_user={"user_id": 1},
+                chat=SimpleNamespace(list_messages=object()),
             )
         )
 

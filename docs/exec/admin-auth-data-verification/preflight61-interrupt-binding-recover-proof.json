@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "role": "recover",
+  "mode": "binding",
+  "assertions": 18,
+  "stage_audits": 2,
+  "original_lookup": "in_progress, full original source equal, never resumes",
+  "persisted_facts": "exact unchanged on public GET/replay",
+  "snapshot_delta": 0,
+  "run_session_delta": 0,
+  "normal_database": "untouched"
+}

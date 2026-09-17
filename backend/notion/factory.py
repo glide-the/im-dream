@@ -1,4 +1,4 @@
-# [Input] Notion connector auth, operation, store, and sync helpers.
+# [Input] Notion connector auth, operation, Admin DTO store, and sync helpers.
 # [Output] Provide a compact facade for routes and Claude Agent workspace attach.
 # [Pos] factory node in backend/notion
 # [Sync] 2026-07-04: initial Notion connector facade for auth, discovery, selection,
@@ -13,6 +13,7 @@
 #                    resources synced, and persist cancellation as a retryable local failure.
 # [Sync] 2026-08-29: preserve effective credentials after failed reauthorization
 #                    and make an empty source selection a successful fail-closed clear.
+# [Sync] 2026-09-16: inject OAuth/background Admin DTO persistence authorities.
 
 """Connector facade for the Notion resource connector backend."""
 from __future__ import annotations
@@ -159,6 +160,7 @@ class NotionConnectorFacade:
     """Thin orchestration wrapper for a user-owned Notion connector."""
 
     user_id: int
+    connector_store: store.NotionConnectorStore = field(repr=False)
     connector_id: Optional[str] = None
     credential_store: NotionCredentialStore = field(
         default_factory=NotionCredentialStore,
@@ -173,13 +175,13 @@ class NotionConnectorFacade:
     def _resolve_connector(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         resolved = connector_id or self.connector_id
         if resolved:
-            connector = store.get_connector(resolved, self.user_id)
+            connector = self.connector_store.get_connector(resolved, self.user_id)
             if connector is None:
                 raise NotionConnectorNotFoundError(
                     f"Connector {resolved!r} not found for user_id={self.user_id}"
                 )
             return connector
-        active = store.get_active_connector_for_user(self.user_id)
+        active = self.connector_store.get_active_connector_for_user(self.user_id)
         if active is None:
             raise NotionConnectorNotFoundError(
                 f"No Notion connector found for user_id={self.user_id}"
@@ -229,7 +231,7 @@ class NotionConnectorFacade:
             config_patch["poll_interval_seconds"] = poll_interval_seconds
         if detail is not None:
             config_patch["auth_error"] = detail
-        return store.save_auth_state(
+        return self.connector_store.save_auth_state(
             connector_id,
             self.user_id,
             auth_status=auth_status,
@@ -243,7 +245,7 @@ class NotionConnectorFacade:
         platform: str = "notion",
         config: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        return store.create_connector(
+        return self.connector_store.create_connector(
             self.user_id,
             name=name,
             platform=platform,
@@ -251,7 +253,7 @@ class NotionConnectorFacade:
         )
 
     def list_connectors(self) -> list[dict[str, Any]]:
-        return store.list_connectors(self.user_id)
+        return self.connector_store.list_connectors(self.user_id)
 
     def get_connector(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         return self._resolve_connector(connector_id)
@@ -264,11 +266,15 @@ class NotionConnectorFacade:
             safe_updates["config"] = _safe_request_config(
                 safe_updates.get("config") if isinstance(safe_updates.get("config"), Mapping) else {}
             )
-        return store.update_connector(str(connector["id"]), self.user_id, safe_updates)
+        return self.connector_store.update_connector(
+            str(connector["id"]), self.user_id, safe_updates
+        )
 
     def delete_connector(self, connector_id: Optional[str] = None) -> bool:
         connector = self._resolve_connector(connector_id)
-        deleted = store.delete_connector(str(connector["id"]), self.user_id)
+        deleted = self.connector_store.delete_connector(
+            str(connector["id"]), self.user_id
+        )
         if deleted:
             self.credential_store.clear_user(self.user_id)
         return deleted
@@ -288,7 +294,7 @@ class NotionConnectorFacade:
             interval_minutes=interval_minutes,
             last_synced_at=connector.get("last_synced_at"),
         )
-        return store.update_connector(
+        return self.connector_store.update_connector(
             str(connector["id"]),
             self.user_id,
             {"config": {SYNC_POLICY_CONFIG_KEY: policy}},
@@ -562,7 +568,7 @@ class NotionConnectorFacade:
         connector = self._resolve_connector(connector_id)
         selected_ids = {
             str(resource.get("external_id") or "")
-            for resource in store.list_connector_resources(str(connector["id"]), self.user_id)
+            for resource in self.connector_store.list_connector_resources(str(connector["id"]), self.user_id)
             if resource.get("resource_type") == "notion_database"
         }
         notion_home = self.credential_store.effective_home(self.user_id)
@@ -575,7 +581,7 @@ class NotionConnectorFacade:
         connector = self._resolve_connector(connector_id)
         selected_ids = {
             str(resource.get("external_id") or "")
-            for resource in store.list_connector_resources(str(connector["id"]), self.user_id)
+            for resource in self.connector_store.list_connector_resources(str(connector["id"]), self.user_id)
             if resource.get("resource_type") == "notion_page"
         }
         notion_home = self.credential_store.effective_home(self.user_id)
@@ -586,7 +592,17 @@ class NotionConnectorFacade:
 
     def list_selected_resources(self, connector_id: Optional[str] = None) -> list[dict[str, Any]]:
         connector = self._resolve_connector(connector_id)
-        return store.list_connector_resources(str(connector["id"]), self.user_id)
+        return self.connector_store.list_connector_resources(str(connector["id"]), self.user_id)
+
+    def delete_selected_resource(
+        self,
+        resource_id: str,
+        connector_id: Optional[str] = None,
+    ) -> bool:
+        connector = self._resolve_connector(connector_id)
+        return self.connector_store.delete_connector_resource(
+            str(connector["id"]), self.user_id, resource_id
+        )
 
     async def select_resources(
         self,
@@ -598,7 +614,7 @@ class NotionConnectorFacade:
         connector = self._resolve_connector(connector_id)
         selected_databases = [dict(item) for item in databases]
         selected_pages = [dict(item) for item in pages]
-        selection = store.replace_connector_resources(
+        selection = self.connector_store.replace_connector_resources(
             str(connector["id"]),
             self.user_id,
             selected_databases,
@@ -613,7 +629,7 @@ class NotionConnectorFacade:
                 config.get(SYNC_POLICY_CONFIG_KEY),
                 "cleared",
             )
-            cleared_connector = store.update_connector(
+            cleared_connector = self.connector_store.update_connector(
                 connector_key,
                 self.user_id,
                 {
@@ -651,7 +667,7 @@ class NotionConnectorFacade:
                 "started",
                 last_synced_at=connector.get("last_synced_at"),
             )
-            store.update_connector(
+            self.connector_store.update_connector(
                 connector_key,
                 self.user_id,
                 {"config": {SYNC_POLICY_CONFIG_KEY: started_policy}},
@@ -660,7 +676,7 @@ class NotionConnectorFacade:
                 if str(connector.get("auth_status") or "") != "authenticated":
                     raise NotionSnapshotNotReadyError("Connector is not authenticated yet.")
 
-                selected_resources = store.list_connector_resources(connector_key, self.user_id)
+                selected_resources = self.connector_store.list_connector_resources(connector_key, self.user_id)
                 if not selected_resources:
                     raise NotionSnapshotNotReadyError("No selected Notion resources available.")
 
@@ -678,7 +694,7 @@ class NotionConnectorFacade:
                     connector_key,
                     snapshot,
                 )
-                saved_snapshot = store.save_snapshot(
+                saved_snapshot = self.connector_store.save_snapshot(
                     connector_key,
                     self.user_id,
                     connector_key,
@@ -690,7 +706,7 @@ class NotionConnectorFacade:
                     "succeeded",
                     last_synced_at=_mapping(saved_snapshot.get("metadata")).get("fetched_at"),
                 )
-                current_connector = store.update_connector(
+                current_connector = self.connector_store.update_connector(
                     connector_key,
                     self.user_id,
                     {"config": {SYNC_POLICY_CONFIG_KEY: succeeded_policy}},
@@ -703,7 +719,7 @@ class NotionConnectorFacade:
                     error_code="SYNC_CANCELLED",
                 )
                 try:
-                    store.update_connector(
+                    self.connector_store.update_connector(
                         connector_key,
                         self.user_id,
                         {"config": {SYNC_POLICY_CONFIG_KEY: cancelled_policy}},
@@ -719,7 +735,7 @@ class NotionConnectorFacade:
                     error_code=_sync_error_code(exc),
                 )
                 try:
-                    store.update_connector(
+                    self.connector_store.update_connector(
                         connector_key,
                         self.user_id,
                         {"config": {SYNC_POLICY_CONFIG_KEY: failed_policy}},
@@ -773,6 +789,7 @@ def build_notion_facade(
     connector_id: Optional[str] = None,
     *,
     credential_store: NotionCredentialStore | None = None,
+    connector_store: store.NotionConnectorStore | None = None,
 ) -> NotionConnectorFacade:
     """Convenience constructor for router/service callers."""
 
@@ -780,6 +797,7 @@ def build_notion_facade(
     return NotionConnectorFacade(
         user_id=user_id,
         connector_id=connector_id,
+        connector_store=connector_store or store.default_store(),
         credential_store=resolved_store,
         snapshot_store=NotionSnapshotStore(resolved_store),
     )

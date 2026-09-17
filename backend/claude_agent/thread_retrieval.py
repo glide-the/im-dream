@@ -1,8 +1,9 @@
-# [Input] Consume chat thread search candidates from database.list_chat_threads_for_search.
+# [Input] Consume actor-scoped chat search candidates returned by Admin DTO operations.
 # [Output] Provide plugin-style chat history retrievers and retrieval response shaping.
 # [Pos] chat-thread-retrieval service node in backend/claude_agent
 # [Sync] 2026-06-27: initial plugin boundary for Chat history fuzzy search with
 #                    vector_query reserved for future vector-store integration.
+# [Sync] 2026-09-16: clarify that candidate persistence and permissions are Admin-owned.
 
 """Configurable retrieval for Claude Agent Chat history.
 

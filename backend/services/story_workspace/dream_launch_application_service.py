@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: compare Admin JSON timestamp DTOs to the canonical source instant before dispatch.
 """Single application use case for starting a Dream workspace run.
 
 Persistence, workflow services, and Agent dispatch are injected at the service
@@ -10,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import inspect
 import json
 from typing import Any, Protocol
 import uuid
@@ -126,7 +128,7 @@ class DreamLaunchWorkflowOperations(Protocol):
         self,
         *,
         preflight_id: str,
-        preflight_token: str,
+        preflight_token: str | None,
         idempotency_key: str,
         source_thread_id: str,
         source_message_id: str,
@@ -273,7 +275,9 @@ class DreamLaunchApplicationService:
             raise DreamLaunchProvenanceError(
                 "preflight.workflow_preflight_id"
             )
-        if not isinstance(preflight_token, str) or not preflight_token:
+        if preflight_token is not None and (
+            not isinstance(preflight_token, str) or not preflight_token
+        ):
             raise DreamLaunchProvenanceError(
                 "preflight.preflight_token"
             )
@@ -308,12 +312,14 @@ class DreamLaunchApplicationService:
             deck_runtime_snapshot_id=_field(run, "deck_runtime_snapshot_id"),
             runtime_plugin_lock_id=_field(run, "runtime_plugin_lock_id"),
         )
-        self._dispatcher(
+        dispatched = self._dispatcher(
             actor_id=actor_id,
             goal=command.goal,
             source=source,
             context=context,
         )
+        if inspect.isawaitable(dispatched):
+            await dispatched
         return context
 
     @staticmethod
@@ -377,7 +383,6 @@ class DreamLaunchApplicationService:
             "source_message_time": source.message_time,
             "created_by": actor_id,
             "workspace_id": workspace_id,
-            "workflow_preflight_id": _field(preflight, "workflow_preflight_id"),
             "deck_plugin_id": _field(binding, "deck_plugin_id"),
             "deck_plugin_version": _field(binding, "deck_plugin_version"),
             "deck_plugin_binding_id": _field(binding, "deck_plugin_binding_id"),
@@ -388,7 +393,15 @@ class DreamLaunchApplicationService:
             "runtime_plugin_lock_id": _field(preflight, "runtime_plugin_lock_id"),
         }
         for name, value in expected.items():
-            cls._require_equal(f"run.{name}", _field(run, name), value)
+            actual = _field(run, name)
+            if name == "source_message_time" and isinstance(actual, str):
+                try:
+                    actual = datetime.fromisoformat(actual.replace("Z", "+00:00"))
+                except ValueError:
+                    raise DreamLaunchProvenanceError(
+                        "run.source_message_time"
+                    ) from None
+            cls._require_equal(f"run.{name}", actual, value)
         run_id = _field(run, "workflow_run_id")
         if not isinstance(run_id, str) or not run_id:
             raise DreamLaunchProvenanceError(

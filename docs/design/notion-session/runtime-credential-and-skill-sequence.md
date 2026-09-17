@@ -389,7 +389,7 @@ sequenceDiagram
     participant Bash as Production Agent Bash
     participant CLI as ntn 0.15.1
     participant Notion as Notion API
-    participant Store as Normal PostgreSQL/Admin Evidence
+    participant Store as Admin DTO/Drizzle Evidence
 
     User->>UI: 新建 Chat，要求安全检查 Notion CLI
     UI->>API: 创建 thread + 首轮消息

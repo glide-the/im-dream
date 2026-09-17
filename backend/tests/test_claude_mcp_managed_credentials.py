@@ -4,6 +4,7 @@
 [Output] AES-256-GCM round-trip plus fail-closed key/AAD/tamper evidence.
 [Pos] Managed MCP credential boundary tests; no database, provider, or real secret access.
 [Sync] 2026-08-25: define the database-managed credential envelope contract.
+[Sync] 2026-09-16: prove default composition uses the injected Admin client without PostgreSQL.
 """
 
 from __future__ import annotations
@@ -69,32 +70,11 @@ def test_missing_or_malformed_key_configuration_fails_closed() -> None:
             McpCredentialCipher.from_env(environ=environ)
 
 
-def test_missing_key_does_not_prevent_default_service_startup(monkeypatch) -> None:
-    from backend.persistence.postgres import PostgresPool
-
-    class _Pool:
-        def __init__(self):
-            self.opened = False
-            self.closed = False
-
-        def open(self):
-            self.opened = True
-
-        def close(self):
-            self.closed = True
-
-        def connection(self, *_args, **_kwargs):  # never entered in this test
-            raise AssertionError("database must not be touched during composition")
-
-    pool = _Pool()
-    monkeypatch.setattr(
-        PostgresPool,
-        "from_env",
-        classmethod(lambda _cls, **_kwargs: pool),
-    )
+def test_missing_key_does_not_prevent_admin_client_composition(monkeypatch) -> None:
+    admin_client = object()
     monkeypatch.delenv("INK_CLAUDE_MCP_CREDENTIAL_KEY", raising=False)
 
-    service = build_default_claude_mcp_service()
+    service = build_default_claude_mcp_service(admin_client)
 
-    assert pool.opened is True
+    assert service.repository.admin_client is admin_client
     assert service.runtime_snapshot_loader.cipher is None

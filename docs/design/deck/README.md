@@ -1,9 +1,17 @@
+<!-- [Sync] 2026-09-17: close Admin producer parity for empty/raw legacy Memory text. -->
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
+<!-- [Sync] 2026-09-15: index current public Claude Plugin refs and outstanding install/runtime dependencies. -->
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
 <!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
 <!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
 <!-- [Sync] 2026-08-16: implement durable drafts, immutable Deck vN commits, and Settings / Work ownership. -->
 <!-- [Sync] 2026-08-17: add the related Chat cleanup and corrected Deck deletion boundary. -->
 <!-- [Sync] 2026-08-17: make preview Demo launch follow the server-owned Chat/Dream Agent type. -->
+
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Deck 管理与内容版本设计索引
 
@@ -44,6 +52,8 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 - `decks.latest_version` 与 `published_draft_revision` 只在 commit 事务成功后推进。
 - Schema 只由 Admin Drizzle migration `0036` 发布 capability `dream.deck-content-versions.v1`；Dream 不做 DDL。
 
+公开Claude Plugin refs的Admin ownership、source evidence与状态以[现行refs稿](./deck-claude-plugin-refs-current.md)为准；global install/runtime packing仍是独立迁移项。
+
 ## 文档导航
 
 - [PDF 逐页需求追踪](./deck-pdf-requirement-trace.md)
@@ -57,3 +67,7 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 - [业务时序](./deck-business-sequences.md)
 - [需求追踪与测试矩阵](./deck-traceability.md)
 - [市场分发延期范围](../deck-register/README.md)
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream pure projector保留empty text、解析合法JSON并把非法非空JSON映射为null，读取不heal或写库。无read retry或DB fallback。详见[Deck详情现行规则](deck-detail-version-history.md)。
+
+GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](deck-detail-version-history.md)。

@@ -1,3 +1,13 @@
+# [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
+# [Sync] 2026-09-17: prove Gateway allowance rejection is a stable redacted SSE error.
+# [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
+# [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
+# [Sync] 2026-09-16: inject Notion persistence through the current Admin turn owner.
+# [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
+# [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
+# [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
+# [Sync] 2026-09-15: validate Registry108 activation provider and Dream PostgreSQL fence.
+# [Sync] 2026-09-16: retire the zero-caller local activation transaction and keep Registry108 as the only writer.
 # [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
 #         service callback factories, and ToolEventPayload.
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
@@ -15,7 +25,8 @@
 # [Sync] 2026-06-21: cover sandbox network policy handoff to workspace init.
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
 #                    assembly, config-change cache rebuild, and config-load
-#                    failure fallback.
+#                    failure termination.
+# [Sync] 2026-09-15: cover Session broker env/fail-closed and recent projection cache behavior.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
 # [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
 #                    workspace_context Notion block rendering.
@@ -60,11 +71,14 @@
 # [Sync] 2026-09-04: require unexpected Dream post-turn synchronization
 #                    failures to retain the committed assistant and use the
 #                    existing typed workbench-sync error contract.
+# [Sync] 2026-09-15: inject SystemConfig only through the explicit test harness boundary.
+# [Sync] 2026-09-15: reuse the public Registry105 Deck DTO for Dream-mode prompt assembly without a second DB read.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import inspect
 import json
@@ -84,12 +98,13 @@ if str(ROOT) not in sys.path:
 
 import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before service import
 
+import database as _db
 import claude_agent.service as service_module
 import claude_mcp.service as claude_mcp_service_module
 import claude_agent.workspace_context as workspace_context_module
 from claude_agent.service import (
     ClaudeAgentRunRequest,
-    ClaudeAgentService,
+    ClaudeAgentService as _ProductionClaudeAgentService,
     _TurnContext,
 )
 from claude_agent.thread_pool import AgentRunState
@@ -102,21 +117,176 @@ from libs.claude_agent_kit.types import (
     ToolEventPayload,
 )
 from services.admin_gateway.models import GatewayModel
-from story_workspace.contracts import StoryWorkspaceDreamRunContext
+from services.admin_data.session_models import SessionPreviewDTO
+from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
+from services.admin_data.story_workspace_artifact_data import (
+    AdminStoryWorkspaceArtifactProvider,
+)
+from services.admin_data.deck_chat_context_data import (
+    AdminDeckChatContextResolution,
+    DeckChatContextOutputDTO,
+)
+from services.admin_data.turn_persistence import AdminTurnPersistence
+from services.admin_data.workflow_data import AdminWorkflowResolution
+from story_workspace.contracts import (
+    StoryWorkspaceAgentStoryPayload,
+    StoryWorkspaceDreamRunContext,
+)
+
+
+def _managed_loader(snapshot=None):
+    loader = unittest.mock.Mock()
+    loader.load = unittest.mock.AsyncMock(
+        return_value={} if snapshot is None else snapshot
+    )
+    loader.authorize.side_effect = lambda _authorization: nullcontext()
+    return loader
+
+
+def _bind_test_grant(owner, *, run_id=None):
+    owner.current_grant.return_value = SimpleNamespace(
+        token="idg_test-managed-mcp",
+        run_id=run_id,
+    )
+    return owner
+
+
+class _LegacyTurnPersistence(
+    AdminAgentTurnPersistence,
+    AdminStoryWorkspaceArtifactProvider,
+):
+    """Test-only adapter for historical fixtures that still patch database.py."""
+
+    def system_config(self, *, actor_id, thread_id):
+        del thread_id
+        return _db.get_system_config(int(actor_id))
+
+    def recent_sessions(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return ()
+
+    def session_projection_child_env(self):
+        return {}
+
+    def current_grant(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return SimpleNamespace(token="idg_test-managed-mcp", run_id=None)
+
+    def notion_connector_store(self, *, actor_id, thread_id):
+        del actor_id, thread_id
+        return SimpleNamespace(test_only_admin_notion_store=True)
+
+    def thread(self, *, actor_id, thread_id):
+        row = _db.get_chat_thread(thread_id, int(actor_id))
+        if row is None:
+            return None
+        return SimpleNamespace(model_dump=lambda: dict(row))
+
+    def update_session(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        session_id,
+        contract_version,
+    ):
+        del actor_id
+        _db.update_chat_thread_claude_session(
+            thread_id,
+            session_id,
+            contract_version,
+        )
+
+    def persist_user(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        message_id,
+        parts,
+        metadata,
+    ):
+        _db.save_chat_message(
+            thread_id,
+            "user",
+            parts=parts,
+            message_id=message_id,
+            metadata=metadata,
+        )
+        thread = _db.get_chat_thread(thread_id, int(actor_id))
+        if thread and not thread.get("title"):
+            text = "".join(
+                str(part.get("text") or "")
+                for part in parts
+                if isinstance(part, dict) and part.get("type") == "text"
+            ).strip()
+            _db.update_chat_thread_title(thread_id, text[:50])
+        return SimpleNamespace(message_id=message_id)
+
+    def persist_assistant(
+        self,
+        *,
+        actor_id,
+        thread_id,
+        message_id,
+        parts,
+        metadata,
+        history_final_text,
+        history_process_available,
+        history_projection_version,
+    ):
+        del actor_id
+        return _db.save_chat_message(
+            thread_id,
+            "assistant",
+            parts=parts,
+            message_id=message_id,
+            metadata=metadata,
+            history_final_text=history_final_text,
+            history_process_available=history_process_available,
+            history_projection_version=history_projection_version,
+        )
+
+
+class ClaudeAgentService(_ProductionClaudeAgentService):
+    """Test-only DI for historical fixtures without a real Admin server."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault(
+            "system_config_reader",
+            lambda user_id: _db.get_system_config(int(user_id)),
+        )
+        super().__init__(*args, **kwargs)
+
+    async def assemble_context(self, request, **kwargs):
+        if request.admin_turn_persistence is None:
+            request.admin_turn_persistence = _LegacyTurnPersistence()
+        if (
+            request.admin_workflow_resolution is None
+            and self._dream_context_mapper is None
+        ):
+            request.admin_workflow_resolution = AdminWorkflowResolution(
+                str(request.user_id),
+                request.thread_id,
+                None,
+            )
+        return await super().assemble_context(request, **kwargs)
+
+
 class _FakeContextBuilder:
     def __init__(self) -> None:
-        self.system_prompt_calls: list[tuple[str, str | None]] = []
+        self.system_prompt_calls: list[tuple[list[dict[str, Any]], str | None]] = []
         self.user_message_calls: list[dict[str, Any]] = []
 
     async def build_system_prompt(
         self,
-        user_id: str,
+        recent_sessions: list[dict[str, Any]],
         *,
         configured_system_prompt: str | None = None,
     ) -> str:
-        self.system_prompt_calls.append((user_id, configured_system_prompt))
+        self.system_prompt_calls.append((recent_sessions, configured_system_prompt))
         suffix = f":{configured_system_prompt}" if configured_system_prompt else ""
-        return f"system-prompt:{user_id}{suffix}"
+        return f"system-prompt:{len(recent_sessions)}{suffix}"
 
     def build_user_message(self, message_parts: list | None, **kwargs: Any) -> list[dict[str, Any]]:
         self.user_message_calls.append(kwargs)
@@ -126,6 +296,38 @@ class _FakeContextBuilder:
 class _FakeBus:
     async def publish(self, frame: str | None) -> None:
         pass
+
+
+def _admin_deck_snapshot(
+    deck_id: str = "deck-dream",
+) -> DeckChatContextOutputDTO:
+    return DeckChatContextOutputDTO.model_validate(
+        {
+            "deck": {
+                "id": deck_id,
+                "name": "Dream Deck",
+                "name_zh": None,
+                "name_en": None,
+                "description": None,
+                "description_zh": None,
+                "description_en": None,
+                "enabled": True,
+            },
+            "voices": [],
+            "plugin_refs": [],
+        }
+    )
+
+
+def _admin_deck_resolution(
+    deck_id: str = "deck-dream",
+) -> AdminDeckChatContextResolution:
+    return AdminDeckChatContextResolution(
+        canonical_user_id="7",
+        deck_id=deck_id,
+        voice_id=None,
+        snapshot=_admin_deck_snapshot(deck_id),
+    )
 
 
 class _StaticDreamContextMapper:
@@ -138,51 +340,96 @@ class _StaticDreamContextMapper:
         return self.context
 
 
-class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
-    def test_commits_the_story_bundle_before_emitting_success(self):
-        db = unittest.mock.Mock()
-        db.execute.return_value.fetchone.return_value = None
-        payload = unittest.mock.Mock()
+class _FakeAdminEditorRuntime(service_module.AdminEditorRuntime):
+    def __init__(self, states: dict[str, dict] | None = None) -> None:
+        self.states = states or {}
+        self.load_calls: list[str] = []
+
+    def child_env(self) -> dict[str, str]:
+        return {
+            "INK_EDITOR_BROKER_HOST": "127.0.0.1",
+            "INK_EDITOR_BROKER_PORT": "31415",
+            "INK_EDITOR_BROKER_CAPABILITY": "a" * 43,
+            "INK_EDITOR_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_EDITOR_BROKER_MAX_BYTES": "1048576",
+        }
+
+    def cached_state(self, session_id: str) -> dict | None:
+        value = self.states.get(session_id)
+        return dict(value) if value is not None else None
+
+    def load(self, input_dto, request_id: str):
+        del request_id
+        self.load_calls.append(input_dto.session_id)
+        state = self.states.get(input_dto.session_id)
+        return service_module.EditorLoadOutputDTO(
+            session_id=input_dto.session_id,
+            editor_state=state,
+            updated_at="2026-09-15T00:00:00Z" if state is not None else None,
+        )
+
+
+class TestStoryWorkspaceOutputTransaction(unittest.IsolatedAsyncioTestCase):
+    async def test_persists_the_story_bundle_through_the_turn_admin_owner(self):
+        provider = unittest.mock.Mock(
+            spec=service_module.AdminStoryWorkspaceOutputProvider
+        )
+        provider.store_story_workspace_output.return_value = {
+            "story_id": "story-1",
+            "review_status": "pending",
+        }
+        payload = StoryWorkspaceAgentStoryPayload(title="标题")
+        request = SimpleNamespace(
+            user_id="7",
+            thread_id="thread-1",
+            admin_turn_persistence=provider,
+        )
         with (
-            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
             unittest.mock.patch.object(
-                service_module, "get_or_create_default_workspace", return_value="workspace-1"
+                service_module, "parse_agent_story_output", return_value=payload
             ),
-            unittest.mock.patch.object(
-                service_module,
-                "store_agent_story_output",
-                return_value={"story_id": "story-1"},
-            ),
+            unittest.mock.patch.object(_db, "get_db") as database,
         ):
-            result = service_module._store_story_workspace_output_sync(
-                7, "thread-1", payload
+            result = await ClaudeAgentService()._store_story_workspace_output(
+                SimpleNamespace(request=request, dream_context=None),
+                '{"title":"标题"}',
             )
 
         self.assertEqual(result["story_id"], "story-1")
-        db.commit.assert_called_once_with()
-        db.rollback.assert_not_called()
-        db.close.assert_called_once_with()
+        provider.store_story_workspace_output.assert_called_once_with(
+            actor_id="7",
+            thread_id="thread-1",
+            story=payload.model_dump(mode="json"),
+        )
+        database.assert_not_called()
 
-    def test_rolls_back_the_story_bundle_when_persistence_fails(self):
-        db = unittest.mock.Mock()
-        failure = RuntimeError("fixture persistence failure")
+    async def test_admin_failure_keeps_chat_outcome_and_never_falls_back_to_database(self):
+        provider = unittest.mock.Mock(
+            spec=service_module.AdminStoryWorkspaceOutputProvider
+        )
+        provider.store_story_workspace_output.side_effect = RuntimeError(
+            "fixture persistence failure"
+        )
+        request = SimpleNamespace(
+            user_id="7",
+            thread_id="thread-1",
+            admin_turn_persistence=provider,
+        )
         with (
-            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
-            unittest.mock.patch.object(
-                service_module, "get_or_create_default_workspace", return_value="workspace-1"
-            ),
-            unittest.mock.patch.object(
-                service_module, "store_agent_story_output", side_effect=failure
-            ),
+            unittest.mock.patch.object(_db, "get_db") as database,
+            self.assertLogs(service_module.logger, level="ERROR") as logs,
         ):
-            with self.assertRaisesRegex(RuntimeError, "fixture persistence failure"):
-                service_module._store_story_workspace_output_sync(
-                    7, "thread-1", unittest.mock.Mock()
-                )
+            result = await ClaudeAgentService()._store_story_workspace_output(
+                SimpleNamespace(request=request, dream_context=None),
+                '{"title":"标题"}',
+            )
 
-        db.rollback.assert_called_once_with()
-        db.commit.assert_not_called()
-        db.close.assert_called_once_with()
+        self.assertIsNone(result)
+        database.assert_not_called()
+        self.assertIn(
+            "Admin Story Workspace output persistence failed",
+            "\n".join(logs.output),
+        )
 
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
@@ -205,9 +452,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             tempfile.TemporaryDirectory(prefix="dream-resume-next-turn-") as tmp,
-            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=lambda *_: dict(row)),
-            unittest.mock.patch.object(service_module._db, "update_chat_thread_claude_session", side_effect=save_id) as save,
+            unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(_db, "get_chat_thread", side_effect=lambda *_: dict(row)),
+            unittest.mock.patch.object(_db, "update_chat_thread_claude_session", side_effect=save_id) as save,
             unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
         ):
             state = AgentRunState(session_id=request.thread_id)
@@ -253,12 +500,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 request = ClaudeAgentRunRequest(
                     user_id="7", thread_id="dream-business-thread", resume=resume,
                     editor_state={"id": "note-business-session"},
+                    admin_editor_runtime=_FakeAdminEditorRuntime(),
                     message_parts=[{"type": "text", "text": "isolated fixture"}],
                 )
                 with (
                     tempfile.TemporaryDirectory(prefix="dream-resume-service-") as tmp,
-                    unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-                    unittest.mock.patch.object(service_module._db, "get_chat_thread", return_value=stored) as loader,
+                    unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+                    unittest.mock.patch.object(_db, "get_chat_thread", return_value=stored) as loader,
                     unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
                     unittest.mock.patch.object(session_files, "locate_resumable_session", return_value=located) as probe,
                 ):
@@ -284,8 +532,8 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         request = ClaudeAgentRunRequest(user_id="7", thread_id="dream-db-error", resume=True)
         with (
             tempfile.TemporaryDirectory(prefix="dream-resume-db-error-") as tmp,
-            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
-            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=RuntimeError("secret database details")),
+            unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(_db, "get_chat_thread", side_effect=RuntimeError("secret database details")),
             unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
             self.assertRaisesRegex(RuntimeError, "^CLAUDE_RESUME_DATABASE_UNAVAILABLE$"),
         ):
@@ -296,13 +544,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
         self._dream_thread_loader = unittest.mock.patch.object(
-            service_module._db,
+            _db,
             "get_chat_thread",
             return_value=None,
         )
         self._dream_thread_loader.start()
-        self.managed_mcp_loader = unittest.mock.Mock()
-        self.managed_mcp_loader.load = unittest.mock.AsyncMock(return_value={})
+        self.managed_mcp_loader = _managed_loader()
         self._managed_mcp_loader_patch = unittest.mock.patch.object(
             claude_mcp_service_module,
             "get_default_managed_mcp_runtime_snapshot_loader",
@@ -312,7 +559,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self._managed_mcp_workspace_patch = unittest.mock.patch.object(
             service_module,
             "_resolve_managed_mcp_workspace_scope_sync",
-            side_effect=lambda *, actor_id, context: (
+            side_effect=lambda *, actor_id, context, provider=None: (
                 "workspace-1" if context is not None else None
             ),
         )
@@ -373,11 +620,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         state = AgentRunState(session_id="thread_dream_turn")
         context = mapper.context
         assert context is not None
+        deck_snapshot = _admin_deck_resolution()
         request = ClaudeAgentRunRequest(
             user_id="7",
             thread_id="thread_dream_turn",
             message_id="dream_agent_" + "a" * 64,
             message_parts=[{"type": "text", "text": "create Dream"}],
+            admin_deck_chat_context=deck_snapshot,
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -386,12 +635,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             (workspace_path / ".dream").mkdir()
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={"deck_id": "deck-dream"},
                 ),
@@ -422,7 +671,14 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         pack.assert_called_once_with(
             str(workspace_path),
             "deck-dream",
+            actor_id="7",
+            thread_id="thread_dream_turn",
+            admin_turn_persistence=unittest.mock.ANY,
             dream_mode=True,
+        )
+        self.assertIsInstance(
+            pack.call_args.kwargs["admin_turn_persistence"],
+            _LegacyTurnPersistence,
         )
         self.assertIs(
             builder.user_message_calls[0]["story_workspace_dream_context"],
@@ -464,6 +720,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         resolve_dream_prompt.assert_awaited_once_with(
             context=context,
             actor_id="7",
+            admin_deck_chat_context=deck_snapshot,
         )
         self.assertEqual(
             builder.user_message_calls[0]["voice_system_prompt"],
@@ -475,6 +732,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             actor_id="7",
             cwd=str(workspace_path),
             remote_session_ref="thread_dream_turn",
+            provider=None,
         )
         self.assertEqual(execution.run_options.model, "dream-balanced")
         self.assertEqual(execution.run_options.server_runtime_env, {
@@ -496,6 +754,24 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             builder.user_message_calls[0]["model"],
             "dream-balanced",
         )
+
+    async def test_public_dream_prompt_reuses_admin_snapshot_without_database(self):
+        context = self._dream_context()
+        snapshot = _admin_deck_resolution()
+        with unittest.mock.patch.object(
+            _db,
+            "get_db",
+            side_effect=AssertionError("Registry105 snapshot must be reused"),
+        ) as dream_db:
+            prompt = await service_module._resolve_story_workspace_dream_deck_prompt(
+                context=context,
+                actor_id="7",
+                admin_deck_chat_context=snapshot,
+            )
+        dream_db.assert_not_called()
+        self.assertIn("Dream workspace-file turn", prompt)
+        self.assertIn("Dream Deck", prompt)
+        self.assertNotIn("exactly one JSON object", prompt)
 
     async def test_dispatched_auto_repair_turn_receives_fresh_cleanup_scope(self):
         context = self._dream_context()
@@ -551,12 +827,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={"deck_id": context.deck_id},
                 ),
@@ -612,8 +888,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_shared_thread_resume_uses_persisted_claude_session(self):
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={
+        managed_loader = _managed_loader({
             "remote-readonly": {
                 "type": "http",
                 "url": "https://mcp.example.test",
@@ -648,12 +923,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             }) + "\n", encoding="utf-8")
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value={
                         "claude_session_id": session_id,
@@ -697,71 +972,104 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(hasattr(service, "_make_dream_runtime_init_cb"))
 
-    def test_dream_runtime_has_no_deployment_environment_gate(self):
-        from services.story_workspace.dream_runtime_activation_service import (
-            StoryWorkspaceDreamRuntimeActivationService,
+    def test_dream_runtime_activation_contract_has_no_local_persistence_service(self):
+        from services.story_workspace import dream_runtime_activation_service
+
+        source = inspect.getsource(dream_runtime_activation_service)
+        self.assertFalse(
+            hasattr(
+                dream_runtime_activation_service,
+                "StoryWorkspaceDreamRuntimeActivationService",
+            )
+        )
+        for forbidden in (
+            "WorkflowRunService",
+            "SessionManager",
+            "ReconcileService",
+            ".execute(",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    async def test_dream_sdk_init_uses_admin_activation_after_local_manifest_verification(self):
+        from services.admin_data.workflow_runtime_activation_data import (
+            AdminWorkflowRuntimeActivationProvider,
         )
 
-        parameters = inspect.signature(
-            StoryWorkspaceDreamRuntimeActivationService
-        ).parameters
-        self.assertNotIn("environment_id", parameters)
-        self.assertNotIn("deployment_tier", parameters)
-
-    async def test_dream_sdk_init_reprovisions_frozen_runtime_evidence_before_activation(self):
         context = self._dream_context()
-        db = unittest.mock.Mock()
-        db.in_transaction = True
-        db.execute.return_value.fetchone.return_value = {
-            "workspace_id": "workspace-dream",
-            "source_voice_thread_id": context.thread_id,
-        }
-        provisioner = unittest.mock.Mock()
-        provisioner_factory = unittest.mock.Mock(return_value=provisioner)
-        activation = unittest.mock.Mock()
-        activation.activate_from_assembled_context = unittest.mock.AsyncMock()
-        activation_factory = unittest.mock.Mock(return_value=activation)
-        init = {
-            "session_id": "claude-session-runtime-repair",
-            "tools": ["mcp__story_workspace__write_dream_run"],
+        provider = AdminWorkflowRuntimeActivationProvider()
+        provider.activate_workflow_runtime = unittest.mock.Mock()
+        verified = {
+            "package_spec": "ink-dream-story@platform-builtin",
+            "resolved_version": "1.0.0",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "has_manifest": True,
+            "physical_path": "/must-not-cross-the-interface",
         }
 
         with (
             unittest.mock.patch.object(
-                service_module._db, "get_db", return_value=db
+                _db,
+                "get_db",
+                side_effect=AssertionError(
+                    "Dream Runtime activation opened PostgreSQL"
+                ),
             ),
             unittest.mock.patch(
                 "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
-                return_value=[{"package_spec": "ink-dream-story@platform-builtin"}],
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.dream_launch_infrastructure.DreamRuntimeProvisioningService",
-                provisioner_factory,
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.dream_runtime_activation_service.StoryWorkspaceDreamRuntimeActivationService",
-                activation_factory,
-            ),
-            unittest.mock.patch(
-                "services.story_workspace.workflow_security.story_workspace_workflow_token_secret",
-                return_value=b"runtime-test-secret",
+                return_value=[verified],
             ),
         ):
             await service_module._activate_story_workspace_dream_runtime(
                 context=context,
                 actor_id="7",
                 cwd="/server-owned/thread-workspace",
-                remote_session_ref=init["session_id"],
+                remote_session_ref="claude-session-runtime-repair",
+                provider=provider,
             )
 
-        provisioner_factory.assert_called_once_with(db)
-        provisioner.ensure_frozen_runtime_evidence.assert_called_once_with(
-            context.runtime_plugin_lock_id
+        provider.activate_workflow_runtime.assert_called_once_with(
+            actor_id="7",
+            thread_id=context.thread_id,
+            workflow_run_id=context.workflow_run_id,
+            remote_session_ref="claude-session-runtime-repair",
+            verified_plugins=[
+                {
+                    key: verified[key]
+                    for key in (
+                        "package_spec",
+                        "resolved_version",
+                        "artifact_digest",
+                        "has_manifest",
+                    )
+                }
+            ],
         )
-        activation.activate_from_assembled_context.assert_awaited_once()
-        self.assertNotIn("deployment_tier", activation_factory.call_args.kwargs)
-        self.assertNotIn("environment_id", activation_factory.call_args.kwargs)
-        db.close.assert_called_once_with()
+
+    async def test_dream_sdk_init_fails_closed_without_admin_activation_provider(self):
+        from services.story_workspace.dream_runtime_activation_service import (
+            StoryWorkspaceDreamRuntimeActivationError,
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_db",
+                side_effect=AssertionError(
+                    "Dream Runtime activation opened PostgreSQL"
+                ),
+            ),
+            unittest.mock.patch(
+                "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
+                return_value=[],
+            ),
+        ):
+            with self.assertRaises(StoryWorkspaceDreamRuntimeActivationError):
+                await service_module._activate_story_workspace_dream_runtime(
+                    context=self._dream_context(),
+                    actor_id="7",
+                    cwd="/server-owned/thread-workspace",
+                    remote_session_ref="sdk-thread",
+                )
 
     async def test_dream_turn_skips_legacy_standalone_proposal_persistence(self):
         service = ClaudeAgentService(
@@ -783,42 +1091,24 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         parse.assert_not_called()
 
-    async def test_workspace_pack_adds_server_adapter_only_for_dream_turn(self):
-        db = unittest.mock.Mock()
-        with (
-            unittest.mock.patch.object(
-                service_module._db, "get_db", return_value=db
-            ),
-            unittest.mock.patch.object(
-                service_module, "pack_workspace_plugins"
-            ) as pack,
-        ):
-            service_module._pack_thread_workspace_plugins(
-                "/workspace/thread", "deck-dream"
-            )
-            service_module._pack_thread_workspace_plugins(
-                "/workspace/thread", "deck-dream", dream_mode=True
-            )
-
-        self.assertEqual(
-            pack.call_args_list,
-            [
-                unittest.mock.call(
-                    db,
-                    workspace=Path("/workspace/thread"),
-                    deck_id="deck-dream",
-                    server_adapter_package_specs=(),
-                ),
-                unittest.mock.call(
-                    db,
-                    workspace=Path("/workspace/thread"),
-                    deck_id="deck-dream",
-                    server_adapter_package_specs=(
-                        "ink-dream-story@platform-builtin",
-                    ),
-                ),
-            ],
-        )
+    async def test_workspace_pack_fails_closed_without_the_admin_metadata_owner(self):
+        with unittest.mock.patch.object(
+            service_module,
+            "pack_workspace_plugins_with_refs_loader",
+        ) as pack:
+            with self.assertRaisesRegex(
+                service_module.AdminDataError,
+                "ADMIN_CONFIGURATION_INVALID",
+            ):
+                service_module._pack_thread_workspace_plugins(
+                    "/workspace/thread",
+                    "deck-dream",
+                    actor_id="7",
+                    thread_id="thread-dream",
+                    admin_turn_persistence=object(),  # type: ignore[arg-type]
+                    dream_mode=True,
+                )
+        pack.assert_not_called()
 
     async def test_system_config_is_loaded_before_resume_db_lookup(self):
         builder = _FakeContextBuilder()
@@ -841,7 +1131,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     {"INK_AGENT_SANDBOX_ENABLED": "false"},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={
                         "system_prompt": "Settings page prompt",
@@ -868,7 +1158,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     },
                 ) as get_system_config,
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ) as get_chat_thread,
@@ -886,7 +1176,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
 
         get_system_config.assert_called_once_with(7)
-        self.assertEqual(builder.system_prompt_calls, [("7", "Settings page prompt")])
+        self.assertEqual(builder.system_prompt_calls, [([], "Settings page prompt")])
         get_chat_thread.assert_called_once_with("thread_service_config", 7)
         get_or_create_workspace.assert_called_once_with(
             "thread_service_config",
@@ -906,7 +1196,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.run_options.sandbox_network_mode, "allowlist")
         self.assertEqual(
             execution.run_options.system_prompt,
-            "system-prompt:7:Settings page prompt",
+            "system-prompt:0:Settings page prompt",
         )
         self.assertEqual(str(workspace_path), execution.run_options.cwd)
         self.assertEqual(
@@ -937,8 +1227,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_workspace_mode_disabled_skips_workspace_initialization(self):
         builder = _FakeContextBuilder()
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={})
+        managed_loader = _managed_loader()
         service = ClaudeAgentService(
             context_builder=builder,
             managed_mcp_runtime_snapshot_loader=managed_loader,
@@ -953,12 +1242,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_system_config",
                 return_value={"workspace_enabled": False},
             ),
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_chat_thread",
                 return_value=None,
             ),
@@ -994,8 +1283,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         managed_loader.load.assert_awaited_once_with("7", None)
 
     async def test_workspace_mode_disabled_injects_managed_mcp_snapshot(self):
-        managed_loader = unittest.mock.Mock()
-        managed_loader.load = unittest.mock.AsyncMock(return_value={
+        managed_loader = _managed_loader({
             "remote-readonly": {
                 "type": "http",
                 "url": "https://mcp.example.test/mcp",
@@ -1013,7 +1301,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         with (
             unittest.mock.patch.object(
-                service_module._db,
+                _db,
                 "get_system_config",
                 return_value={"workspace_enabled": False},
             ),
@@ -1060,12 +1348,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_service_prompt_change"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"system_prompt": "new settings prompt"},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1082,14 +1370,174 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     runner=unittest.mock.Mock(),
                 )
 
-        self.assertEqual(builder.system_prompt_calls, [("7", "new settings prompt")])
+        self.assertEqual(builder.system_prompt_calls, [([], "new settings prompt")])
         self.assertEqual(state.system_config_system_prompt, "new settings prompt")
         self.assertEqual(
             execution.run_options.system_prompt,
-            "system-prompt:7:new settings prompt",
+            "system-prompt:0:new settings prompt",
         )
 
-    async def test_system_config_load_failure_builds_prompt_without_settings_prompt(self):
+    async def test_admin_recent_sessions_load_only_on_first_build_and_settings_rebuild(self):
+        builder = _FakeContextBuilder()
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
+        broker_env = {
+            "INK_SESSION_BROKER_HOST": "127.0.0.1",
+            "INK_SESSION_BROKER_PORT": "31415",
+            "INK_SESSION_BROKER_CAPABILITY": "a" * 43,
+            "INK_SESSION_BROKER_TIMEOUT_SECONDS": "10.0",
+            "INK_SESSION_BROKER_MAX_BYTES": "1048576",
+        }
+        owner.session_projection_child_env.return_value = broker_env
+        owner.system_config.side_effect = [
+            {"workspace_enabled": False, "system_prompt": "old"},
+            {"workspace_enabled": False, "system_prompt": "old"},
+            {"workspace_enabled": False, "system_prompt": "new"},
+        ]
+        owner.thread.return_value = None
+        owner.recent_sessions.side_effect = [
+            (SessionPreviewDTO(
+                id="session-a",
+                name="第一篇",
+                labels=["日记"],
+                created_at="2026-09-14T08:00:00Z",
+                updated_at="2026-09-15T09:00:00Z",
+                first_line="早晨",
+                text=None,
+            ),),
+            (SessionPreviewDTO(
+                id="session-b",
+                name="第二篇",
+                labels=[],
+                created_at="2026-09-15T08:00:00Z",
+                updated_at="2026-09-15T10:00:00Z",
+                first_line="夜晚",
+                text=None,
+            ),),
+        ]
+        service = _ProductionClaudeAgentService(
+            context_builder=builder,
+            managed_mcp_runtime_snapshot_loader=_managed_loader(),
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_admin_recent_context",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_admin_recent_context", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir, unittest.mock.patch.object(
+            service_module,
+            "get_or_create_thread_runtime_workspace",
+            return_value=Path(tmp_dir),
+        ):
+            state = AgentRunState(session_id=request.thread_id)
+            first = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+            cached = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+            rebuilt = await service.assemble_context(
+                request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock()
+            )
+
+        self.assertEqual(owner.recent_sessions.call_count, 2)
+        self.assertTrue(broker_env.items() <= first.run_options.mcp_env.items())
+        self.assertEqual(
+            [call[0][0]["id"] for call in builder.system_prompt_calls],
+            ["session-a", "session-b"],
+        )
+        self.assertEqual(first.run_options.system_prompt, "system-prompt:1:old")
+        self.assertEqual(cached.run_options.system_prompt, "system-prompt:1:old")
+        self.assertEqual(rebuilt.run_options.system_prompt, "system-prompt:1:new")
+
+    async def test_admin_recent_session_failure_stops_before_context_without_db_fallback(self):
+        builder = _FakeContextBuilder()
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
+        owner.system_config.return_value = {"workspace_enabled": False}
+        owner.thread.return_value = None
+        owner.recent_sessions.side_effect = RuntimeError("synthetic Admin failure")
+        service = _ProductionClaudeAgentService(
+            context_builder=builder,
+            managed_mcp_runtime_snapshot_loader=_managed_loader(),
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_admin_recent_failure",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_admin_recent_failure", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path(tmp_dir),
+            ) as runtime_workspace,
+            unittest.mock.patch.object(
+                _db,
+                "list_sessions_in_range",
+                side_effect=AssertionError("legacy range helper must not run"),
+            ) as legacy_range,
+            unittest.mock.patch.object(
+                _db,
+                "list_sessions",
+                side_effect=AssertionError("legacy Session helper must not run"),
+            ) as legacy_all,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic Admin failure"):
+                await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        runtime_workspace.assert_not_called()
+        legacy_range.assert_not_called()
+        legacy_all.assert_not_called()
+
+    async def test_session_broker_unavailable_stops_before_context_or_runtime_workspace(self):
+        builder = _FakeContextBuilder()
+        owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
+        owner.system_config.return_value = {"workspace_enabled": False}
+        owner.session_projection_child_env.side_effect = RuntimeError(
+            "SESSION_BROKER_UNAVAILABLE"
+        )
+        service = _ProductionClaudeAgentService(context_builder=builder)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_session_broker_failure",
+            message_parts=[{"type": "text", "text": "hello"}],
+            admin_workflow_resolution=AdminWorkflowResolution(
+                "7", "thread_session_broker_failure", None
+            ),
+            admin_turn_persistence=owner,
+        )
+
+        with unittest.mock.patch.object(
+            service_module, "get_or_create_thread_runtime_workspace"
+        ) as runtime_workspace:
+            with self.assertRaisesRegex(RuntimeError, "SESSION_BROKER_UNAVAILABLE"):
+                await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        runtime_workspace.assert_not_called()
+
+    async def test_system_config_load_failure_stops_before_context_or_workspace(self):
         builder = _FakeContextBuilder()
         service = ClaudeAgentService(context_builder=builder)
         state = AgentRunState(session_id="thread_service_config_failure")
@@ -1103,43 +1551,71 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_service_config_failure"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     side_effect=RuntimeError("system_config unavailable"),
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
-                ),
+                ) as get_chat_thread,
                 unittest.mock.patch.object(
                     service_module,
                     "get_or_create_workspace",
                     return_value=workspace_path,
-                ),
+                ) as get_or_create_workspace,
             ):
-                execution = await service.assemble_context(
+                with self.assertRaisesRegex(RuntimeError, "system_config unavailable"):
+                    await service.assemble_context(
+                        request,
+                        state=state,
+                        bus=_FakeBus(),
+                        runner=unittest.mock.Mock(),
+                    )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        get_chat_thread.assert_not_called()
+        get_or_create_workspace.assert_not_called()
+
+    async def test_production_service_without_turn_owner_fails_before_legacy_or_context(self):
+        builder = _FakeContextBuilder()
+        service = _ProductionClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_service_ownerless")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_service_ownerless",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                side_effect=AssertionError("legacy SystemConfig must not run"),
+            ) as legacy_config,
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_workspace",
+                side_effect=AssertionError("workspace must not run"),
+            ) as get_or_create_workspace,
+        ):
+            with self.assertRaisesRegex(Exception, "ADMIN_CONFIGURATION_INVALID"):
+                await service.assemble_context(
                     request,
                     state=state,
                     bus=_FakeBus(),
                     runner=unittest.mock.Mock(),
                 )
 
-        self.assertEqual(builder.system_prompt_calls, [("7", None)])
-        self.assertEqual(execution.run_options.system_prompt, "system-prompt:7")
-        self.assertEqual(
-            execution.run_options.mcp_env,
-            {
-                "INK_AGENT_USER_ID": "7",
-                "INK_AGENT_THREAD_ID": "thread_service_config_failure",
-            },
-        )
+        legacy_config.assert_not_called()
+        get_or_create_workspace.assert_not_called()
+        self.assertEqual(builder.system_prompt_calls, [])
 
 
 class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        loader = unittest.mock.Mock()
-        loader.load = unittest.mock.AsyncMock(return_value={})
+        loader = _managed_loader()
         self._managed_mcp_loader_patch = unittest.mock.patch.object(
             claude_mcp_service_module,
             "get_default_managed_mcp_runtime_snapshot_loader",
@@ -1265,12 +1741,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / "thread_notion_attach"
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1300,7 +1776,10 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                     runner=unittest.mock.Mock(),
                 )
 
-            build_notion_facade.assert_called_once_with(7)
+            build_notion_facade.assert_called_once_with(
+                7,
+                connector_store=unittest.mock.ANY,
+            )
             sync_builtin_workspace_skills.assert_called_once_with(
                 workspace_path,
                 enabled_platforms={"notion"},
@@ -1388,12 +1867,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
             )
             with (
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_system_config",
                     return_value={"workspace_enabled": True},
                 ),
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "get_chat_thread",
                     return_value=None,
                 ),
@@ -1509,36 +1988,34 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             turn_ctx.registered_tool_call_ids.add("tool-call-1")
             state = AgentRunState(session_id="thread-editor-write")
             state.with_editor_state({"id": "session-editor-write"}, 7)
-            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            refreshed_state = {
+                "id": "session-editor-write",
+                "cells": [{"id": "cell-1", "type": "text", "content": "new"}],
+            }
+            runtime = _FakeAdminEditorRuntime(
+                {"session-editor-write": refreshed_state}
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(
+                queue, turn_ctx, state, runtime
+            )
             subscription = await service_module.session_event_bus.subscribe("7")
 
             try:
-                with unittest.mock.patch.object(
-                    service_module._db,
-                    "get_session",
-                    return_value={
-                        "id": "session-editor-write",
-                        "editor_state": {
-                            "id": "session-editor-write",
-                            "cells": [{"id": "cell-1", "type": "text", "content": "new"}],
-                        },
-                    },
-                ) as get_session:
-                    await callback(
-                        ToolEventPayload(
-                            type="tool_result",
-                            tool_name="mcp__editor__write_segment",
-                            tool_call_id="tool-call-1",
-                            output={"ok": True, "cellId": "cell-1"},
-                            is_error=False,
-                        )
+                await callback(
+                    ToolEventPayload(
+                        type="tool_result",
+                        tool_name="mcp__editor__write_segment",
+                        tool_call_id="tool-call-1",
+                        output={"ok": True, "cellId": "cell-1"},
+                        is_error=False,
                     )
+                )
 
                 event = await asyncio.wait_for(subscription.get(), timeout=1.0)
             finally:
                 await service_module.session_event_bus.unsubscribe("7", subscription)
 
-            self.assertEqual(get_session.call_args.args, (7, "session-editor-write"))
+            self.assertEqual(runtime.load_calls, [])
             self.assertEqual(event.type, "session_updated")
             self.assertEqual(event.session_id, "session-editor-write")
             self.assertEqual(event.source, "agent")
@@ -1564,30 +2041,30 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
                 "cells": [{"id": "cell-1", "type": "text", "content": "old"}],
             }
             state.with_editor_state(original_state, 7)
-            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            refreshed_state = {
+                "id": "session-editor-write",
+                "cells": [],
+            }
+            runtime = _FakeAdminEditorRuntime(
+                {"session-editor-write": refreshed_state}
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(
+                queue, turn_ctx, state, runtime
+            )
             subscription = await service_module.session_event_bus.subscribe("7")
 
             try:
-                refreshed_state = {
-                    "id": "session-editor-write",
-                    "cells": [],
-                }
-                with unittest.mock.patch.object(
-                    service_module._db,
-                    "get_session",
-                    return_value={"editor_state": refreshed_state},
-                ) as get_session:
-                    output = {"ok": False, "error": error, "cellId": "cell-1"}
-                    await callback(ToolEventPayload(
-                        type="tool_result",
-                        tool_name="mcp__editor__write_segment",
-                        tool_call_id="tool-call-failed",
-                        output=output,
-                        is_error=False,
-                    ))
-                    frame = await queue.get()
-                    with self.assertRaises(asyncio.TimeoutError):
-                        await asyncio.wait_for(subscription.get(), timeout=0.01)
+                output = {"ok": False, "error": error, "cellId": "cell-1"}
+                await callback(ToolEventPayload(
+                    type="tool_result",
+                    tool_name="mcp__editor__write_segment",
+                    tool_call_id="tool-call-failed",
+                    output=output,
+                    is_error=False,
+                ))
+                frame = await queue.get()
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(subscription.get(), timeout=0.01)
             finally:
                 await service_module.session_event_bus.unsubscribe("7", subscription)
 
@@ -1595,8 +2072,8 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertTrue(frame.data["isError"])
             self.assertEqual(frame.data["output"], output)
             self.assertEqual(turn_ctx.collected_parts[-1]["isError"], True)
-            self.assertIs(state.editor_state, refreshed_state)
-            get_session.assert_called_once_with(7, "session-editor-write")
+            self.assertEqual(state.editor_state, refreshed_state)
+            self.assertEqual(runtime.load_calls, [])
 
         for error in ("cell_not_found", "save_failed"):
             with self.subTest(error=error):
@@ -1641,6 +2118,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                 user_id="7",
                 thread_id="thread-stop-service",
                 message_parts=[{"type": "text", "text": "hello"}],
+                admin_turn_persistence=_LegacyTurnPersistence(),
             )
             session_id = "44444444-4444-4444-8444-444444444444"
 
@@ -1676,7 +2154,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                     new=unittest.mock.AsyncMock(),
                 ) as persist_partial,
                 unittest.mock.patch.object(
-                    service_module._db,
+                    _db,
                     "update_chat_thread_claude_session",
                 ) as persist_session,
             ):
@@ -1757,6 +2235,7 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                         "kind": "story-workspace-dream-auto-repair",
                     },
                     model="claude-test",
+                    admin_turn_persistence=_LegacyTurnPersistence(),
                 ),
                 state=AgentRunState(session_id="thread-persist-repair"),
                 runner=unittest.mock.Mock(),
@@ -1804,10 +2283,66 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
             "story-workspace-dream-auto-repair",
         )
 
-    def test_identity_and_postgres_failures_are_rethrown_before_inference(self):
-        import database
+    def test_claimed_confirmation_uses_admin_owner_without_postgres(self):
+        async def scenario():
+            import database
 
-        async def scenario(failure: BaseException):
+            service = ClaudeAgentService()
+            owner = _bind_test_grant(unittest.mock.Mock(spec=AdminTurnPersistence))
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-confirmation-owner",
+                message_id="dream_confirm_" + "a" * 64,
+                message_parts=[{"type": "text", "text": "confirm"}],
+                message_metadata={
+                    "kind": "story-workspace-dream-confirmation",
+                    "dispatch_status": "dispatching",
+                    "dispatch_claim_id": "claim-owner",
+                },
+                user_message_pre_persisted=True,
+                admin_turn_persistence=owner,
+            )
+            execution = service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=request.thread_id),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            with (
+                unittest.mock.patch.object(
+                    database,
+                    "get_db",
+                    side_effect=AssertionError("confirmation must not open PostgreSQL"),
+                ) as get_db,
+                unittest.mock.patch.object(
+                    database,
+                    "save_chat_message",
+                    side_effect=AssertionError("confirmation must not save through PostgreSQL"),
+                ) as save_chat_message,
+            ):
+                await service._persist_user_message(execution)
+                service._save_assistant_message(
+                    request,
+                    parts=[{"type": "text", "text": "done"}],
+                    metadata={"turnStatus": "completed", "finalPartIndex": 0},
+                    history_final_text="done",
+                    history_process_available=False,
+                    history_projection_version=1,
+                )
+            get_db.assert_not_called()
+            save_chat_message.assert_not_called()
+            return owner
+
+        owner = _run(scenario())
+        owner.persist_user.assert_not_called()
+        owner.persist_assistant.assert_called_once()
+
+    def test_admin_identity_and_transport_failures_stop_before_inference(self):
+        async def scenario(failure: service_module.AdminDataError):
             service = ClaudeAgentService()
             queue: asyncio.Queue = asyncio.Queue()
             turn_ctx = _TurnContext(
@@ -1818,11 +2353,16 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                 ),
             )
             state = AgentRunState(session_id="thread-identity")
+            class RejectingPersistence(AdminAgentTurnPersistence):
+                def persist_user(self, **_kwargs):
+                    raise failure
+
             request = ClaudeAgentRunRequest(
                 user_id="7",
                 thread_id="thread-identity",
                 message_id="public-message-1",
                 message_parts=[{"type": "text", "text": "hello"}],
+                admin_turn_persistence=RejectingPersistence(),
             )
             runner = unittest.mock.Mock()
             runner.run_streaming = unittest.mock.AsyncMock()
@@ -1833,29 +2373,16 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                 run_options=unittest.mock.Mock(),
                 turn_context=turn_ctx,
             )
-            guard_db = unittest.mock.Mock()
-            with (
-                unittest.mock.patch.object(database, "get_db", return_value=guard_db),
-                unittest.mock.patch.object(
-                    database,
-                    "save_chat_message",
-                    side_effect=failure,
-                ),
-                unittest.mock.patch(
-                    "services.story_workspace.dream_confirmation_service."
-                    "story_workspace_guard_persisted_dream_confirmation_turn",
-                    return_value=False,
-                ),
-            ):
-                with self.assertRaises(type(failure)):
-                    await service.execute_session(execution)
+            with self.assertRaises(service_module.AdminDataError) as caught:
+                await service.execute_session(execution)
+            self.assertIs(caught.exception, failure)
             return runner
 
         for failure in (
-            database.ChatMessageIdentityConflict("public-message-1"),
-            database.PostgresError("database unavailable"),
+            service_module.AdminDataError("CHAT_MESSAGE_IDENTITY_CONFLICT", 409),
+            service_module.AdminDataError("ADMIN_UNAVAILABLE", 503),
         ):
-            with self.subTest(failure=type(failure).__name__):
+            with self.subTest(failure=failure.code):
                 runner = _run(scenario(failure))
                 runner.run_streaming.assert_not_awaited()
 
@@ -2146,6 +2673,25 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
         self.assertEqual(frame["type"], "error")
         self.assertIn("Command failed with exit code 1", frame["errorText"])
         self.assertIn("sandbox_hint", frame["errorText"])
+
+    def test_make_error_cb_redacts_gateway_allowance_details(self):
+        async def scenario():
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            callback = ClaudeAgentService._make_error_cb(queue)
+            await callback(RuntimeError(
+                "Claude SDK AssistantMessage error: unknown | provider_detail: "
+                "API Error: 402 billing_error code=SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED "
+                "available_tokens=76005 required_tokens=102993 private=request"
+            ))
+            return _parse_sse(queue.get_nowait())
+
+        frame = _run(scenario())
+        self.assertEqual(frame, {
+            "type": "error",
+            "errorText": "The current subscription-period Token allowance is insufficient.",
+            "errorCode": "GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED",
+            "retryable": False,
+        })
 
 
 if __name__ == "__main__":

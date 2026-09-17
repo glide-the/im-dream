@@ -1,10 +1,11 @@
-// [Input] Auth token storage, runtime API base config, and edit-session sync constants.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Same-origin session and in-memory CSRF, runtime API base config, and edit-session sync constants.
 // [Output] useEditSessionEvents hook that streams authenticated /api/sessions/events frames.
 // [Pos] edit-session SSE hook in frontend/app/_dream/hooks
 // [Sync] 2026-06-14: add fetch-based Edit Session SSE subscription for Agent MCP write sync.
 
 import { useEffect, useRef } from 'react';
-import { STORAGE_KEYS } from '../constants/storageKeys';
 import { SESSION_EVENT_RECONNECT_DELAY_MS } from '../constants/sessionSync';
 import { apiUrl } from '../lib/apiBase';
 
@@ -114,15 +115,15 @@ export function useEditSessionEvents(
 
     const run = async () => {
       while (!stopped) {
-        const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-        if (!token) return;
+        const csrfToken = getBrowserCsrfToken();
+        if (!csrfToken) return;
 
         controller = new AbortController();
         try {
           const response = await fetch(apiUrl('/api/sessions/events'), {
             headers: {
               Accept: 'text/event-stream',
-              Authorization: `Bearer ${token}`,
+              ...browserRequestHeaders({}, csrfToken),
             },
             signal: controller.signal,
           });

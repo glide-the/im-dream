@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
 #          IClaudeAgentSDKClient to server and application layers.
@@ -225,10 +226,12 @@ class AgentRunOptions:
     # context processing; when a plain string is provided the runner wraps it
     # in a single text block.
     user_message: Union[str, list[dict[str, Any]]]
-    # Canonical PostgreSQL users.id bound by the authenticated Dream session.
-    # Required when the Admin Gateway Claude canary is enabled; never accepted
-    # from a browser header or model payload.
+    # Canonical user ID remains runtime context; it is not a Gateway credential.
     canonical_user_id: Optional[str] = None
+    # Admin-issued opaque grant bound to the exact user, Thread/Run and
+    # gateway-cli scopes. The service key and OAuth access token stay outside
+    # the Claude subprocess.
+    gateway_access_token: Optional[str] = field(default=None, repr=False)
     # Server-derived stable key that correlates one persisted Dream message
     # with exactly one Admin Gateway settlement. Never accept the raw header
     # value from a browser request.
@@ -338,13 +341,16 @@ class AgentRunOptions:
     # result.  Falls back to ``editor_state`` when not set (e.g. unit tests).
     editor_state_getter: Optional[Any] = None
     # Optional setter that writes a new editor_state into the AgentRunState
-    # flyweight.  Called by the PostToolUse hook after a successful
-    # ``switch_editor`` tool call: the hook loads the target session's
-    # editor_state from the database and passes it to this setter so that
+    # flyweight. Called by the PostToolUse hook after a successful
+    # ``switch_editor`` tool call with the Admin runtime's cached state so that
     # subsequent .editor/ reads via ``editor_state_getter`` reflect the new
     # document context.
     # Signature: ``(new_editor_state: dict) -> None``.
     editor_state_setter: Optional[Any] = None
+    # Server-owned cache lookup populated by the Editor stdio broker. The
+    # runner receives no OAuth, Admin bearer, service credential or database
+    # capability. Signature: ``(editor_session_id: str) -> dict | None``.
+    editor_state_loader: Optional[Any] = None
 
 
 @dataclass

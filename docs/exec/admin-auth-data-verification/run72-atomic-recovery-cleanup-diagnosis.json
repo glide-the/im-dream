@@ -1,0 +1,9 @@
+{
+  "result": "DIAGNOSED",
+  "original_command_exit": 1,
+  "business_assertions_emitted": 68,
+  "business_result": "PASS",
+  "cause": "primary cleanup helper declared inside try block and referenced outside from finally",
+  "fix": "helper moved to module scope; no production source or expected state changed",
+  "rerun_scope": "SELECT-only owned catalog cleanup verification; successful68 business assertions not repeated"
+}

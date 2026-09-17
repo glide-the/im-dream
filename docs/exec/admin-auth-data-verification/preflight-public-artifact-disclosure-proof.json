@@ -1,0 +1,151 @@
+{
+  "result": "PASS",
+  "scope": "Named public candidates only; private payloads read locally for exact/JSON-escaped/URL-encoded/base64 secret matching; values never emitted",
+  "private_sources_read": 40,
+  "distinct_known_secret_values": 73,
+  "validated_token_selector_references": 72,
+  "selector_source": "Admin tests/integration/adminWorkflowPreflight.contract.ts:20 enum /call selects tokens[name]; actual tokens.* included",
+  "candidate_count": 16,
+  "pattern_categories": [
+    "postgres_connection",
+    "github_credential",
+    "provider_key",
+    "aws_key",
+    "private_pem",
+    "bearer_literal",
+    "jwt_literal",
+    "delegation_literal",
+    "secret_assignment"
+  ],
+  "hits": [],
+  "files": [
+    {
+      "destination": "full-preflight61-existing-facts-capture-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-existing-facts-capture-proof.json",
+      "sha256": "c6157fbc3fdb5211916c99425428061ee7d6c0e693ea1136c098342493e84f92",
+      "bytes": 704,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-seed-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-seed-proof.json",
+      "sha256": "a5ca752c47ec77e7f150f1d2d08f767fc39fd4af7c02e71c851439171ba73499",
+      "bytes": 755,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-credentials-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-credentials-proof.json",
+      "sha256": "3fabce7aac06b3dfda4615cfb60f554eb83d2dc18622627efce080e1768f8b14",
+      "bytes": 780,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-credentials-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-credentials-command-receipt.json",
+      "sha256": "fe0c5df170ad24b2eb32ada4fdade97f641befb5e30356166ae245cba1b9e6f3",
+      "bytes": 424,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-public-command-receipt.json",
+      "sha256": "715f649715fd0e3e4aad5bfeff199471183557ace025d5f6767d5144fcf73a3b",
+      "bytes": 1078,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-public-diagnostic-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-public-diagnostic-proof.json",
+      "sha256": "b006a08aab41e0f3f0d8468d1be2e86f38bca595d56865f5297b4604b7d3d58a",
+      "bytes": 1182,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-binding-diagnostic-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-binding-diagnostic-proof.json",
+      "sha256": "3d724d4bc469a23521445eae4661af90d6357d19dce51047d16551765a88bab8",
+      "bytes": 304,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-binding-diagnostic-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-binding-diagnostic-command-receipt.json",
+      "sha256": "bacc7351b09e096ecc5c43e655f2065309fde16a111644cb2448e8a923e23cee",
+      "bytes": 546,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-audit-unique-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-audit-unique-proof.json",
+      "sha256": "26b7eea4ac479367e6090fdc7940a91a24eb8e9295933a83c5e18be01f88604e",
+      "bytes": 1237,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-old-audit-key-probe-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-old-audit-key-probe-proof.json",
+      "sha256": "9f2fa17f89133fed015258daf1d219161f4be3377e1c3a453ff72fdc4205424a",
+      "bytes": 486,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight61-public24-initial-failure.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight61-public24-receipt.md",
+      "sha256": "aa6850aed25af32f8de5bb7942887e11719b0917e4c40fc65193f8efa6b37510",
+      "bytes": 1624,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight70-raw-stored-token-source-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight70-raw-stored-token-source-gate.md",
+      "sha256": "566bd283cb6a2a1d5c333208a7e28526b389b79285f166e863681ccfffb47a7c",
+      "bytes": 2259,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "preflight70-stage-audit-key-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/preflight70-stage-audit-key-gate.md",
+      "sha256": "e04241487572dd8059ba7c17835d4b488adb781f54319f07e2b0888098beae08",
+      "bytes": 1542,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "commit7a6-sync-luna-review.md",
+      "source": "/private/tmp/ink-coordination-docs-validation/commit7a6-sync-review.md",
+      "sha256": "d9e60dec532d06301ee3cb73015fc25f325eec405f6ee9c5507a12bb371401bf",
+      "bytes": 2338,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-remediation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-remediation-proof.json",
+      "sha256": "38972b17d61a443d12bd76f354c39a9342839c20828aa6c99462778eb782e9d5",
+      "bytes": 881,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "full-preflight61-remediation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/full-preflight61-remediation-command-receipt.json",
+      "sha256": "676af444789008e6e2c8b2da1da870a99e2c5ccd9e13ef981ba86324d69a4ef1",
+      "bytes": 1155,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    }
+  ]
+}

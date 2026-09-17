@@ -1,11 +1,13 @@
+"""Contract tests for the Dream-to-Admin Product DTO and OAuth forwarding boundary.
+
+[Sync] 2026-09-16: retire Dream Product token signing and forward the verified Admin OAuth bearer.
+"""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from pathlib import Path
 import unittest
 
 import httpx
-import jwt
 
 from services.admin_product.client import (
     AdminProductClient,
@@ -14,7 +16,6 @@ from services.admin_product.client import (
 )
 from services.admin_product.config import AdminProductConfig
 from services.admin_product.errors import ProductBffError
-from services.admin_product.identity import PostgresCanonicalUserRepository
 from services.admin_product.models import (
     ExecuteSubscriptionCommand,
     PaymentIntentCreate,
@@ -22,18 +23,14 @@ from services.admin_product.models import (
     PreviewSubscriptionCommand,
     UsageQuery,
 )
-from services.admin_product.token import issue_product_token
+
+OAUTH_ACCESS_TOKEN = "oauth_access_token_" + "x" * 43
 
 
 def _configuration() -> AdminProductConfig:
     return AdminProductConfig(
         base_url="https://admin.example.test",
-        jwt_secret="test-product-secret-that-is-at-least-32-bytes",
-        jwt_issuer="ink-dream-test",
-        jwt_audience="ink-admin-product-test",
-        client_id="dream-bff-test",
         request_origin="https://dream.example.test",
-        token_lifetime_seconds=240,
         timeout_seconds=2,
     )
 
@@ -312,35 +309,12 @@ class AdminProductConfigurationTests(unittest.TestCase):
             with self.assertRaises(ProductBffError):
                 assert_safe_product_payload({forbidden: "unsafe"})
 
-    def test_token_has_the_required_short_lived_subject_bound_claims(self) -> None:
-        configuration = _configuration()
-        token = issue_product_token(
-            configuration,
-            canonical_user_id="7",
-            scope="product:write",
-            now=datetime(2030, 1, 1, tzinfo=UTC),
-            token_id="jti-test",
-        )
-        payload = jwt.decode(
-            token,
-            configuration.jwt_secret,
-            algorithms=["HS256"],
-            audience=configuration.jwt_audience,
-            issuer=configuration.jwt_issuer,
-            options={"verify_exp": False, "verify_iat": False},
-        )
-        self.assertEqual(payload["sub"], "7")
-        self.assertEqual(payload["client_id"], "dream-bff-test")
-        self.assertEqual(payload["scope"], "product:write")
-        self.assertEqual(payload["jti"], "jti-test")
-        self.assertEqual(payload["exp"] - payload["iat"], 240)
-        self.assertLessEqual(payload["exp"] - payload["iat"], 300)
-
-    def test_configuration_repr_and_errors_do_not_reveal_url_or_secret(self) -> None:
+    def test_configuration_has_no_local_token_signing_authority(self) -> None:
         configuration = _configuration()
         rendered = repr(configuration)
         self.assertNotIn(configuration.base_url, rendered)
-        self.assertNotIn(configuration.jwt_secret, rendered)
+        self.assertFalse(hasattr(configuration, "jwt_secret"))
+        self.assertFalse(hasattr(configuration, "jwt_issuer"))
         with self.assertRaises(ProductBffError) as raised:
             AdminProductConfig.from_env(environ={})
         self.assertNotIn("INK_ADMIN_PRODUCT", str(raised.exception))
@@ -375,7 +349,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(handler)
         ) as http_client:
             client = AdminProductClient(_configuration(), client=http_client)
-            result = await client.plans("7", PlansQuery(), "req_test")
+            result = await client.plans(OAUTH_ACCESS_TOKEN, PlansQuery(), "req_test")
 
         self.assertEqual(result["data"][0]["versionStatus"], "published")
         self.assertEqual(
@@ -404,26 +378,20 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
         ) as http_client:
             client = AdminProductClient(_configuration(), client=http_client)
             with self.assertRaises(ProductBffError) as raised:
-                await client.plans("7", PlansQuery(), "req_test")
+                await client.plans(OAUTH_ACCESS_TOKEN, PlansQuery(), "req_test")
 
         self.assertEqual(raised.exception.status_code, 503)
 
-    async def test_product_routes_claim_scopes_and_write_idempotency(self) -> None:
+    async def test_product_routes_forward_one_oauth_bearer_and_write_idempotency(self) -> None:
         configuration = _configuration()
         observed: list[httpx.Request] = []
 
         async def handler(request: httpx.Request) -> httpx.Response:
             observed.append(request)
-            claims = jwt.decode(
-                request.headers["authorization"].removeprefix("Bearer "),
-                configuration.jwt_secret,
-                algorithms=["HS256"],
-                audience=configuration.jwt_audience,
-                issuer=configuration.jwt_issuer,
+            self.assertEqual(
+                request.headers["authorization"], "Bearer " + OAUTH_ACCESS_TOKEN
             )
-            self.assertEqual(claims["sub"], "7")
             if request.url.path == "/api/product/v1/plans":
-                self.assertEqual(claims["scope"], "product:read")
                 return httpx.Response(
                     200,
                     json={
@@ -444,15 +412,12 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
             if request.url.path == "/api/product/v1/me/model-catalog":
                 return httpx.Response(200, json={"data": _catalog(), "meta": _meta()})
             if request.url.path == "/api/product/v1/me/payment-intents":
-                self.assertEqual(claims["scope"], "product:write")
                 self.assertEqual(request.headers["idempotency-key"], "payment-key-123")
                 return httpx.Response(200, json={"data": _payment_intent(), "meta": _meta()})
             if request.url.path.startswith("/api/product/v1/me/payment-intents/"):
-                self.assertEqual(claims["scope"], "product:read")
                 return httpx.Response(200, json={"data": _payment_intent(), "meta": _meta()})
             self.assertEqual(request.url.path, "/api/product/v1/me/subscription-commands")
             self.assertEqual(request.headers["origin"], "https://dream.example.test")
-            self.assertEqual(claims["scope"], "product:write")
             body = json_from_request(request)
             if body["phase"] == "preview":
                 self.assertNotIn("idempotency-key", request.headers)
@@ -463,12 +428,12 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             client = AdminProductClient(configuration, client=http_client)
-            await client.plans("7", PlansQuery(), "req_test")
-            await client.subscription_context("7", "req_test")
-            await client.usage("7", UsageQuery(), "req_test")
-            await client.model_catalog("7", "req_test")
+            await client.plans(OAUTH_ACCESS_TOKEN, PlansQuery(), "req_test")
+            await client.subscription_context(OAUTH_ACCESS_TOKEN, "req_test")
+            await client.usage(OAUTH_ACCESS_TOKEN, UsageQuery(), "req_test")
+            await client.model_catalog(OAUTH_ACCESS_TOKEN, "req_test")
             await client.subscription_command(
-                "7",
+                OAUTH_ACCESS_TOKEN,
                 PreviewSubscriptionCommand(
                     action="pause", phase="preview", expectedVersion=7
                 ),
@@ -476,7 +441,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
                 None,
             )
             await client.subscription_command(
-                "7",
+                OAUTH_ACCESS_TOKEN,
                 ExecuteSubscriptionCommand(
                     action="pause",
                     phase="execute",
@@ -490,13 +455,13 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
                 "command-key-123",
             )
             await client.create_payment_intent(
-                "7",
+                OAUTH_ACCESS_TOKEN,
                 PaymentIntentCreate(planVersionId="pv_creator_1"),
                 "req_test",
                 "payment-key-123",
             )
             await client.payment_intent(
-                "7", "pay_1234567890abcdef1234567890abcdef", "req_test"
+                OAUTH_ACCESS_TOKEN, "pay_1234567890abcdef1234567890abcdef", "req_test"
             )
 
         self.assertEqual(
@@ -526,7 +491,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             client = AdminProductClient(configuration, client=http_client)
             with self.assertRaises(ProductBffError) as raised:
-                await client.subscription_context("7", "req_test")
+                await client.subscription_context(OAUTH_ACCESS_TOKEN, "req_test")
         self.assertEqual(raised.exception.status_code, 503)
         self.assertNotIn(forbidden_value, str(raised.exception))
 
@@ -539,7 +504,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             client = AdminProductClient(_configuration(), client=http_client)
             with self.assertRaises(ProductBffError) as raised:
-                await client.model_catalog("7", "req_test")
+                await client.model_catalog(OAUTH_ACCESS_TOKEN, "req_test")
         self.assertEqual(raised.exception.status_code, 503)
 
     async def test_safe_rate_limit_error_is_mapped_and_unknown_fields_fail_closed(self) -> None:
@@ -562,7 +527,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(safe_handler)) as http_client:
             client = AdminProductClient(configuration, client=http_client)
             with self.assertRaises(ProductBffError) as raised:
-                await client.subscription_context("7", "req_test")
+                await client.subscription_context(OAUTH_ACCESS_TOKEN, "req_test")
         self.assertEqual(raised.exception.status_code, 429)
         self.assertEqual(raised.exception.retry_after_seconds, 2)
         self.assertNotIn(upstream_message, raised.exception.message)
@@ -578,7 +543,7 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             client = AdminProductClient(_configuration(), client=http_client)
             with self.assertRaises(ProductBffError) as raised:
-                await client.subscription_context("7", "req_test")
+                await client.subscription_context(OAUTH_ACCESS_TOKEN, "req_test")
         self.assertEqual(attempts, 1)
         self.assertEqual(raised.exception.status_code, 503)
         self.assertNotIn("upstream", str(raised.exception))
@@ -588,55 +553,6 @@ def json_from_request(request: httpx.Request) -> dict:
     import json
 
     return json.loads(request.content)
-
-
-class _FakeCursor:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _FakeUnitOfWork:
-    def __init__(self, row):
-        self.row = row
-        self.query = ""
-        self.parameters = ()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, query, parameters):
-        self.query = query
-        self.parameters = parameters
-        return _FakeCursor(self.row)
-
-
-class CanonicalUserRepositoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_repository_uses_postgres_parameter_binding_and_no_sqlite_module(self) -> None:
-        unit = _FakeUnitOfWork({"canonical_user_id": "7"})
-        repository = PostgresCanonicalUserRepository(
-            unit_of_work_factory=lambda: unit  # type: ignore[arg-type]
-        )
-        identity = await repository.find_active("7")
-        self.assertEqual(identity.canonical_user_id, "7")  # type: ignore[union-attr]
-        self.assertIn("FROM users", unit.query)
-        self.assertIn("%s::bigint", unit.query)
-        self.assertNotIn("?", unit.query)
-        self.assertEqual(unit.parameters, ("7",))
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "services"
-            / "admin_product"
-            / "identity.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("import database", source)
-        self.assertNotIn("sqlite3", source)
-        self.assertNotIn("database.get_db", source)
 
 
 if __name__ == "__main__":

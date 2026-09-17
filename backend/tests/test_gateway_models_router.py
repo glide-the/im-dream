@@ -9,7 +9,15 @@ from backend.services.admin_gateway.models import GatewayModel, GatewayModelCata
 
 def test_bff_returns_all_visible_models_with_callability(monkeypatch) -> None:
     app = FastAPI()
-    app.dependency_overrides[route_module.get_current_user] = lambda: {"user_id": 7}
+    actor = route_module.AdminRequestActor(
+        "auth-user", "7", "ink-dream-browser",
+        frozenset({"dream:read", "models:list"}), 1, 9999999999,
+        "oauth-access-token-value",
+    )
+    app.dependency_overrides[route_module.get_current_user] = lambda: {
+        "user_id": 7,
+        "_admin_actor": actor,
+    }
     app.include_router(route_module.router)
 
     catalog = type("Catalog", (), {
@@ -42,7 +50,11 @@ def test_bff_returns_all_visible_models_with_callability(monkeypatch) -> None:
             ),
         ), "dream-balanced"),
     })()
-    monkeypatch.setattr(route_module, "GatewayModelCatalogClient", lambda _user_id: catalog)
+    monkeypatch.setattr(
+        route_module,
+        "GatewayModelCatalogClient",
+        lambda *, access_token: catalog,
+    )
 
     with TestClient(app) as client:
         response = client.get("/api/gateway/models")

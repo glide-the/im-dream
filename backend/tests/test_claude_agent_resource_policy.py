@@ -1,9 +1,9 @@
-# [Input] Consume the public startup resource-policy provider with injected PostgreSQL fakes.
+# [Input] Consume the public resource-policy provider with injected strict Admin DTO readers.
 # [Output] Verify capability gating, safe-integer/combined-memory schema, bounded refresh timing,
 #          and monotonic last-known-good refresh behavior.
 # [Pos] Provider-free Claude Agent resource policy tests in backend/tests.
-# [Sync] 2026-08-28: prove exact technical boundaries, nullable Runtime effort,
-#                    monotonic LKG, and background refresh exception isolation.
+# [Sync] 2026-09-14: replace DB fixtures with Admin state DTOs; preserve exact boundaries,
+#                    nullable Runtime effort, monotonic LKG and background exception isolation.
 
 from __future__ import annotations
 
@@ -33,57 +33,26 @@ from claude_agent.resource_policy import (
     ResourcePolicyLoadResult,
     resource_policy_refresh_interval_from_env,
 )
-from schema.capabilities import (
-    CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,
-    CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
-    CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
-    CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY,
-    CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256,
-    CLAUDE_CODE_RUNTIME_CONFIG_VERSION,
-)
+import json
+import pytest
+from pydantic import TypeAdapter, ValidationError
+from services.admin_data import AdminDataError
+from services.admin_data.resource_models import ResourcePolicyReadOutputDTO, UnconfiguredResourcePolicyDTO
 
 
-class _Cursor:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _Connection:
-    def __init__(self, policy_row, *, capability_hash=None):
+class _Reader:
+    def __init__(self, policy_row):
         self.policy_row = policy_row
-        self.capability_hash = capability_hash
-        self.queries: list[str] = []
-        self.closed = False
+        self.calls = 0
 
-    def execute(self, query, parameters=()):
-        self.queries.append(query)
-        if "drizzle.schema_capabilities" in query:
-            if self.capability_hash is None:
-                return _Cursor(None)
-            if parameters == (CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY,):
-                return _Cursor(
-                    (
-                        CLAUDE_CODE_RUNTIME_CONFIG_VERSION,
-                        CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256,
-                    )
-                )
-            assert parameters == (CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,)
-            return _Cursor(
-                (
-                    CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
-                    self.capability_hash,
-                )
-            )
-        if "FROM system_settings" in query:
-            assert parameters == ("claude_agent", "resource_policy")
-            return _Cursor(self.policy_row)
-        raise AssertionError(query)
-
-    def close(self):
-        self.closed = True
+    def __call__(self):
+        self.calls += 1
+        if self.policy_row is None:
+            return UnconfiguredResourcePolicyDTO(status="not_configured", value=None, updated_at=None)
+        value, updated_at = self.policy_row
+        if isinstance(updated_at, datetime):
+            updated_at = updated_at.isoformat()
+        return TypeAdapter(ResourcePolicyReadOutputDTO).validate_json(json.dumps({"status": "configured", "value": {"claudeCodeEffortLevel": None, **value}, "updated_at": updated_at}))
 
 
 _FALLBACK = AgentAdmissionConfig(
@@ -103,37 +72,35 @@ _POLICY = {
 
 
 def test_valid_policy_applies_exact_values_and_provenance() -> None:
-    connection = _Connection(
+    connection = _Reader(
         (_POLICY, datetime(2026, 8, 27, tzinfo=timezone.utc)),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(_FALLBACK)
 
     assert loaded.status == "applied"
     assert loaded.revision == 7
     assert loaded.updated_at == "2026-08-27T00:00:00Z"
     assert loaded.config == AgentAdmissionConfig(3, 768, 256, 120)
-    assert connection.closed is True
-    assert all(query.lstrip().upper().startswith("SELECT") for query in connection.queries)
+    assert connection.calls == 1
 
 
 def test_global_effort_is_optional_validated_and_projected_as_env() -> None:
-    configured = _Connection(
+    configured = _Reader(
         ({**_POLICY, "claudeCodeEffortLevel": "high"}, "2026-08-27T00:00:00Z"),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: configured).load(_FALLBACK)
+    loaded = ClaudeAgentResourcePolicyProvider(configured).load(_FALLBACK)
     assert loaded.status == "applied"
     assert loaded.claude_code_effort_level == "high"
     store = ClaudeCodeRuntimePolicyStore(loaded)
     assert store.snapshot_env() == {"CLAUDE_CODE_EFFORT_LEVEL": "high"}
 
-    invalid = _Connection(
+    invalid = _Reader(
         ({**_POLICY, "claudeCodeEffortLevel": "ultra"}, "2026-08-27T00:00:00Z"),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
-    rejected = ClaudeAgentResourcePolicyProvider(lambda: invalid).load(_FALLBACK)
+    with pytest.raises(ValidationError):
+        invalid()
+    rejected = ClaudeAgentResourcePolicyProvider(lambda: UnconfiguredResourcePolicyDTO(status="invalid", value=None, updated_at=None)).load(_FALLBACK)
     assert rejected.status == "invalid"
     assert ClaudeCodeRuntimePolicyStore(rejected).snapshot_env() == {}
 
@@ -183,12 +150,11 @@ def test_values_above_historical_product_caps_are_valid() -> None:
         "memoryReserveMib": 4_097,
         "retryAfterSeconds": 3_601,
     }
-    connection = _Connection(
+    connection = _Reader(
         (policy, datetime(2026, 8, 27, tzinfo=timezone.utc)),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(_FALLBACK)
 
     assert loaded.status == "applied"
     assert loaded.config == AgentAdmissionConfig(17, 8_193, 4_097, 3_601)
@@ -202,12 +168,11 @@ def test_safe_integer_and_combined_memory_exact_boundaries() -> None:
         "memoryReserveMib": 1,
         "retryAfterSeconds": AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
     }
-    connection = _Connection(
+    connection = _Reader(
         (exact, datetime(2026, 8, 27, tzinfo=timezone.utc)),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(_FALLBACK)
 
     assert loaded.status == "applied"
     assert loaded.config.max_concurrent_runs == AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
@@ -217,25 +182,23 @@ def test_safe_integer_and_combined_memory_exact_boundaries() -> None:
         **exact,
         "runMemoryBudgetMib": AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
     }
-    overflow_connection = _Connection(
+    overflow_connection = _Reader(
         (over_combined, "2026-08-27T00:00:00Z"),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
-    overflow = ClaudeAgentResourcePolicyProvider(
-        lambda: overflow_connection
-    ).load(_FALLBACK)
+    with pytest.raises(ValidationError):
+        overflow_connection()
+    overflow = ClaudeAgentResourcePolicyProvider(lambda: UnconfiguredResourcePolicyDTO(status="invalid", value=None, updated_at=None)).load(_FALLBACK)
 
     assert overflow.status == "invalid"
     assert overflow.config is _FALLBACK
 
 
 def test_missing_policy_retains_finite_fallback() -> None:
-    connection = _Connection(
+    connection = _Reader(
         None,
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(_FALLBACK)
 
     assert loaded.status == "not_configured"
     assert loaded.config is _FALLBACK
@@ -279,27 +242,24 @@ def test_invalid_policy_never_partially_applies() -> None:
         {**_POLICY, "schemaVersion": 2},
     )
     for value in invalid_values:
-        connection = _Connection(
+        connection = _Reader(
             (value, "2026-08-27T00:00:00Z"),
-            capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
         )
-        loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+        with pytest.raises(ValidationError):
+            connection()
+        loaded = ClaudeAgentResourcePolicyProvider(lambda: UnconfiguredResourcePolicyDTO(status="invalid", value=None, updated_at=None)).load(_FALLBACK)
         assert loaded.status == "invalid"
         assert loaded.config is _FALLBACK
         assert loaded.revision is None
 
 
-def test_capability_drift_and_database_failure_are_unavailable() -> None:
-    drifted = _Connection((_POLICY, "2026-08-27T00:00:00Z"), capability_hash="a" * 64)
-    drifted_load = ClaudeAgentResourcePolicyProvider(lambda: drifted).load(_FALLBACK)
-    failed_load = ClaudeAgentResourcePolicyProvider(
-        lambda: (_ for _ in ()).throw(OSError("database unavailable"))
-    ).load(_FALLBACK)
-
-    assert drifted_load.status == "unavailable"
-    assert failed_load.status == "unavailable"
-    assert drifted_load.config is _FALLBACK
-    assert failed_load.config is _FALLBACK
+def test_capability_drift_and_transport_failure_are_unavailable() -> None:
+    for error in (AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503), AdminDataError("ADMIN_UNAVAILABLE", 503), OSError("private network endpoint")):
+        def fail():
+            raise error
+        failed = ClaudeAgentResourcePolicyProvider(fail).load(_FALLBACK)
+        assert failed.status == "unavailable"
+        assert failed.config is _FALLBACK
 
 
 def test_out_of_contract_environment_fallback_uses_safe_defaults() -> None:
@@ -309,12 +269,11 @@ def test_out_of_contract_environment_fallback_uses_safe_defaults() -> None:
         memory_reserve_mib=0,
         retry_after_seconds=1,
     )
-    connection = _Connection(
+    connection = _Reader(
         None,
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(unsafe)
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(unsafe)
 
     assert loaded.status == "not_configured"
     assert loaded.config == AgentAdmissionConfig(1, 512, 128, 60)
@@ -327,12 +286,11 @@ def test_large_valid_environment_fallback_is_not_product_capped() -> None:
         memory_reserve_mib=4_097,
         retry_after_seconds=3_601,
     )
-    connection = _Connection(
+    connection = _Reader(
         None,
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
 
-    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(
+    loaded = ClaudeAgentResourcePolicyProvider(connection).load(
         large_valid
     )
 
@@ -341,17 +299,16 @@ def test_large_valid_environment_fallback_is_not_product_capped() -> None:
 
 
 def test_invalid_dynamic_concurrency_refresh_retains_last_known_good() -> None:
-    valid_connection = _Connection(
+    valid_connection = _Reader(
         (
             {**_POLICY, "maxConcurrentRuns": AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX},
             "2026-08-27T00:00:00Z",
         ),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
-    initial = ClaudeAgentResourcePolicyProvider(lambda: valid_connection).load(
+    initial = ClaudeAgentResourcePolicyProvider(valid_connection).load(
         _FALLBACK
     )
-    invalid_connection = _Connection(
+    invalid_connection = _Reader(
         (
             {
                 **_POLICY,
@@ -360,9 +317,8 @@ def test_invalid_dynamic_concurrency_refresh_retains_last_known_good() -> None:
             },
             "2026-08-27T00:01:00Z",
         ),
-        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     )
-    provider = ClaudeAgentResourcePolicyProvider(lambda: invalid_connection)
+    provider = ClaudeAgentResourcePolicyProvider(lambda: UnconfiguredResourcePolicyDTO(status="invalid", value=None, updated_at=None))
     observed: list[tuple[ResourcePolicyLoadResult, bool]] = []
     refresher = ClaudeAgentResourcePolicyRefresher(
         provider=provider,

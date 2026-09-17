@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_failure77",
+  "case_label": "editor",
+  "status": 403,
+  "actual_code": "DELEGATION_ENTITY_DENIED",
+  "original_fixture_expected_code": "ACCESS_SCOPE_REQUIRED",
+  "classification": "fixture error-code precedence mismatch; production shared binding-first boundary retained",
+  "assertions": 6,
+  "protected_tables": 17,
+  "accepted_success_post_replays": 0,
+  "normal_database": "untouched"
+}

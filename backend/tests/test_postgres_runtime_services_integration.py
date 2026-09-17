@@ -1,3 +1,5 @@
+# [Sync] 2026-09-16: remove the integration-only EventEmitter path after production retirement.
+
 """Opt-in real PostgreSQL checks for migrated Dream runtime SQL.
 
 These tests never consult ``DATABASE_URL``.  They run only when the caller
@@ -8,33 +10,22 @@ inside one rollback-only outer transaction, so no test data is published.
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 import os
 import re
+from dataclasses import dataclass, field
 from typing import Any
-from unittest import mock
 
 import psycopg
+import pytest
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
-import pytest
 
-import database as legacy_database
-
-from backend.models.deck_plugin import InstallationStatus
-from backend.models.events import CanonicalEventType, EventEnvelope
-from backend.services.deck_plugin.installation_service import InstallationService
-from backend.services.events.event_emitter import EventEmitter
+from backend.tests.legacy_persistence.config import require_test_database_target
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
-from backend.persistence.config import require_test_database_target
 
-
-_INSTALLATION_ID = "dpi_11111111111111111111111111111111"
 _CORE_EMPTY_TABLES = (
     "users",
     "story_workspace_workspaces",
@@ -194,101 +185,6 @@ def postgres_case() -> Any:
         observer.close()
 
 
-def test_event_emitter_is_append_only_and_retry_idempotent_on_postgres(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(events=1)
-    queued: list[EventEnvelope] = []
-    projections: list[dict[str, Any]] = []
-    emitter = EventEmitter(
-        postgres_case.db,
-        workspace_id="workspace-pg-runtime-test",
-        queue_publisher=queued.append,
-        projection_publisher=projections.append,
-        clock=lambda: datetime(2026, 8, 9, 8, 0, tzinfo=UTC),
-    )
-    envelope = emitter.build_envelope(
-        CanonicalEventType.WORKFLOW_RUN_STEP_PROGRESSED,
-        "run-pg-runtime-test",
-        {
-            "workflow_run_id": "run-pg-runtime-test",
-            "step_id": "draft",
-            "progress": 0.5,
-            "safe_summary": "PostgreSQL boundary verified",
-        },
-        "correlation-pg-runtime-test",
-    )
-
-    asyncio.run(emitter.emit(envelope))
-
-    postgres_case.db.begin_service_scope()
-    try:
-        with pytest.raises(psycopg.Error) as append_only_error:
-            postgres_case.db.execute(
-                "UPDATE events SET correlation_id = %s WHERE event_id = %s",
-                ("forbidden-rewrite", envelope.event_id),
-            )
-        assert append_only_error.value.sqlstate == "55000"
-    finally:
-        if postgres_case.db.in_transaction:
-            postgres_case.db.rollback()
-
-    asyncio.run(emitter.emit(envelope))
-
-    row = postgres_case.db.execute(
-        "SELECT event_id, aggregate_version, occurred_at "
-        "FROM events WHERE event_id = %s",
-        (envelope.event_id,),
-    ).fetchone()
-    assert row is not None
-    assert row["event_id"] == envelope.event_id
-    assert row["aggregate_version"] == 1
-    assert isinstance(row["occurred_at"], datetime)
-    assert queued == [envelope, envelope]
-    assert [item["event_id"] for item in projections] == [
-        envelope.event_id,
-        envelope.event_id,
-    ]
-
-
-def test_plugin_installation_service_commits_inside_outer_rollback(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(deck_plugin_installations=1)
-    postgres_case.db.execute(
-        """
-        INSERT INTO deck_plugin_installations (
-            id, scope_type, scope_id, deck_plugin_id,
-            installed_versions_json, default_version, status,
-            approved_capabilities_json, source_policy_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            _INSTALLATION_ID,
-            "workspace",
-            "workspace-pg-runtime-test",
-            "plugin.pg-runtime-test",
-            '["1.0.0"]',
-            "1.0.0",
-            InstallationStatus.DISABLED.value,
-            "[]",
-            "test-policy",
-        ),
-    )
-
-    service = InstallationService(postgres_case.db)
-    postgres_case.db.begin_service_scope()
-    result = asyncio.run(service.enable(_INSTALLATION_ID))
-
-    row = postgres_case.db.execute(
-        "SELECT status, revision FROM deck_plugin_installations WHERE id = %s",
-        (_INSTALLATION_ID,),
-    ).fetchone()
-    assert result.status is InstallationStatus.READY
-    assert row == {"status": InstallationStatus.READY.value, "revision": 1}
-    assert _row_counts(postgres_case.observer)["deck_plugin_installations"] == 0
-
-
 def test_dream_reentry_jsonb_queries_execute_on_real_postgres(
     postgres_case: _PostgresCase,
 ) -> None:
@@ -308,62 +204,3 @@ def test_dream_reentry_jsonb_queries_execute_on_real_postgres(
         _CORE_EMPTY_TABLES,
         0,
     )
-
-
-def test_legacy_voice_fork_binds_native_postgres_booleans(
-    postgres_case: _PostgresCase,
-) -> None:
-    postgres_case.expect_rows(users=1, decks=1, voices=2)
-    postgres_case.db.execute(
-        "INSERT INTO users (id, email, password_hash) VALUES (%s, %s, %s)",
-        (7, "voice-fork-pg@example.test", "test-only"),
-    )
-    postgres_case.db.execute(
-        """
-        INSERT INTO decks (id, name, owner_id, is_system, enabled)
-        VALUES (%s, %s, %s, %s, %s)
-        """,
-        ("deck-pg-voice-fork", "PostgreSQL Voice Fork", 7, False, True),
-    )
-    postgres_case.db.execute(
-        """
-        INSERT INTO voices (
-            id, deck_id, name, system_prompt, is_system, owner_id,
-            enabled, order_index, memory_workspace_config
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            "voice-pg-source",
-            "deck-pg-voice-fork",
-            "Source Voice",
-            "Source prompt",
-            True,
-            7,
-            True,
-            1,
-            "{}",
-        ),
-    )
-
-    postgres_case.db.begin_service_scope()
-    with mock.patch.object(legacy_database, "get_db", return_value=postgres_case.db):
-        forked_voice_id = legacy_database.fork_voice(
-            7,
-            "voice-pg-source",
-            "deck-pg-voice-fork",
-        )
-
-    row = postgres_case.db.execute(
-        """
-        SELECT is_system, enabled, parent_id, owner_id, order_index
-        FROM voices WHERE id = %s
-        """,
-        (forked_voice_id,),
-    ).fetchone()
-    assert row == {
-        "is_system": False,
-        "enabled": True,
-        "parent_id": "voice-pg-source",
-        "owner_id": 7,
-        "order_index": 2,
-    }

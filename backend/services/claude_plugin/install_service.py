@@ -1,8 +1,11 @@
 """Real Claude plugin install orchestration.
 
 [Input] Manual package specs or immutable Admin-approved Remote Marketplace receipts.
-[Output] Terminal operations, verified ready installations, immutable artifacts, and entry lineage.
+[Output] Lifecycle reports, verified immutable artifacts and Admin persistence evidence.
 [Pos] Single production ClaudePlugin install pipeline used by Settings and Deck consumers.
+[Sync] 2026-08-19: verify remote URL/ref/commit/manifests/full-plugin digest without using local-path catalog constants for entry installs.
+[Sync] 2026-09-15: artifact and CLI checks are shared static methods for server-derived Admin metadata; algorithms unchanged.
+[Sync] 2026-09-16: replace operation and installation SQL with the typed Admin report port.
 [Sync] 2026-09-15: verify current canonical and immutable Admin 0.1.0 full-plugin digest receipts without weakening content checks.
 
 Every install flows through the same pipeline:
@@ -11,7 +14,7 @@ Every install flows through the same pipeline:
     real `claude plugin install` → read the CLI's own registry → locate the
     plugin root → read the manifest → enumerate official component kinds →
     deterministic SHA-256 → import into the immutable artifact store →
-    database record (status ready).
+    Admin report (status ready).
 
 A failed step never produces a ``ready`` record; the operation evidence
 (argv, cwd, CLI version, exit code, sanitized output, file-tree delta) is
@@ -28,9 +31,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal, Protocol
 from urllib.parse import urlsplit, urlunsplit
-import uuid
 
 from . import artifact_store, cli, runtime
 from .builtin_sources import (
@@ -42,10 +44,15 @@ from .builtin_sources import (
 from .compatibility import cli_version_to_semver, version_satisfies
 from .digest import compute_legacy_admin_plugin_digest, compute_plugin_digest
 from .package_spec import PackageSpec, PackageSpecError, parse_package_spec
-from .marketplace_service import (
-    MARKETPLACE_REMOTE_DRIFT,
-    MarketplaceInstallSource,
+from services.admin_data.claude_plugin_data import (
+    ClaudePluginExecutionEvidenceDTO,
+    ClaudePluginInstallationEvidenceDTO,
+    ClaudePluginInstallReportInputDTO,
+    ClaudePluginMarketplaceSourceDTO,
+    ClaudePluginOperationDTO,
 )
+
+MARKETPLACE_REMOTE_DRIFT = "CLAUDE_PLUGIN_MARKETPLACE_REMOTE_DRIFT"
 
 try:  # POSIX file lock for concurrent install de-duplication.
     import fcntl
@@ -90,10 +97,6 @@ def _install_lock(key: str) -> Iterator[None]:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +316,7 @@ def _git_checkout_value(checkout: Path, *args: str) -> str:
 
 def _verified_remote_marketplace_checkout(
     spec: PackageSpec,
-    source: MarketplaceInstallSource,
+    source: ClaudePluginMarketplaceSourceDTO,
     evidence: dict[str, Any],
 ) -> None:
     known = _known_marketplaces().get(spec.marketplace)
@@ -376,7 +379,7 @@ def _ensure_marketplace(
     spec: PackageSpec,
     evidence: dict[str, Any],
     *,
-    marketplace_entry: MarketplaceInstallSource | None = None,
+    marketplace_entry: ClaudePluginMarketplaceSourceDTO | None = None,
 ) -> None:
     """Register the marketplace via the real CLI when not yet known."""
     if marketplace_entry is not None:
@@ -436,242 +439,14 @@ def _ensure_marketplace(
 
 
 # ---------------------------------------------------------------------------
-# Database helpers (tables created in database.py).
+# Admin persistence port. CLI/Git/filesystem execution remains in Dream.
 # ---------------------------------------------------------------------------
 
 
-def _insert_operation(db: Any, operation: dict[str, Any]) -> None:
-    marketplace_entry_id = operation.get("marketplace_entry_id")
-    if marketplace_entry_id is not None:
-        db.execute(
-            """
-            INSERT INTO claude_plugin_operations (
-                id, operation_kind, requested_package_spec, marketplace_entry_id,
-                status, phase, progress, message, executable, argv_json, cwd,
-                cli_version, exit_code, evidence_path, installation_id,
-                error_code, error_summary, created_at, updated_at, finished_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                operation["id"], operation["operation_kind"],
-                operation["requested_package_spec"], marketplace_entry_id,
-                operation["status"], operation["phase"], operation["progress"],
-                operation.get("message"), operation.get("executable"),
-                operation.get("argv_json"), operation.get("cwd"),
-                operation.get("cli_version"), operation.get("exit_code"),
-                operation.get("evidence_path"), operation.get("installation_id"),
-                operation.get("error_code"), operation.get("error_summary"),
-                operation["created_at"], operation["updated_at"],
-                operation.get("finished_at"),
-            ),
-        )
-        return
-    db.execute(
-        """
-        INSERT INTO claude_plugin_operations (
-            id, operation_kind, requested_package_spec, status, phase,
-            progress, message, executable, argv_json, cwd, cli_version,
-            exit_code, evidence_path, installation_id, error_code,
-            error_summary, created_at, updated_at, finished_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            operation["id"],
-            operation["operation_kind"],
-            operation["requested_package_spec"],
-            operation["status"],
-            operation["phase"],
-            operation["progress"],
-            operation.get("message"),
-            operation.get("executable"),
-            operation.get("argv_json"),
-            operation.get("cwd"),
-            operation.get("cli_version"),
-            operation.get("exit_code"),
-            operation.get("evidence_path"),
-            operation.get("installation_id"),
-            operation.get("error_code"),
-            operation.get("error_summary"),
-            operation["created_at"],
-            operation["updated_at"],
-            operation.get("finished_at"),
-        ),
-    )
-
-
-def _update_operation(db: Any, operation_id: str, **fields: Any) -> None:
-    if not fields:
-        return
-    assignments = ", ".join(f"{key} = %s" for key in fields)
-    values = [value if not isinstance(value, (dict, list)) else json.dumps(value) for value in fields.values()]
-    db.execute(
-        f"UPDATE claude_plugin_operations SET {assignments}, updated_at = %s WHERE id = %s",
-        (*values, _now(), operation_id),
-    )
-
-
-def _find_installation_by_artifact(
-    db: Any, spec: PackageSpec, resolved_version: str, digest: str
-) -> dict[str, Any] | None:
-    row = db.execute(
-        """
-        SELECT * FROM claude_plugin_installations
-        WHERE package_name = %s AND marketplace = %s
-          AND resolved_version = %s AND artifact_digest = %s
-        """,
-        (spec.package_name, spec.marketplace, resolved_version, digest),
-    ).fetchone()
-    return _row_to_dict(row) if row is not None else None
-
-
-def _insert_installation(db: Any, record: dict[str, Any]) -> None:
-    marketplace_entry_id = record.get("marketplace_entry_id")
-    if marketplace_entry_id is not None:
-        db.execute(
-            """
-            INSERT INTO claude_plugin_installations (
-                id, requested_package_spec, marketplace_entry_id, package_name,
-                marketplace, requested_version, resolved_version, source_type,
-                artifact_digest, artifact_path, claude_cli_version,
-                cli_git_commit_sha, manifest_json, component_inventory_json,
-                compatibility_json, status, operation_id, error_code,
-                error_summary, file_count, created_at, updated_at, installed_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                record["id"], record["requested_package_spec"],
-                marketplace_entry_id, record["package_name"],
-                record["marketplace"], record.get("requested_version"),
-                record["resolved_version"], record["source_type"],
-                record["artifact_digest"], record["artifact_path"],
-                record["claude_cli_version"], record.get("cli_git_commit_sha"),
-                record.get("manifest_json"), record["component_inventory_json"],
-                record.get("compatibility_json", "{}"), record["status"],
-                record["operation_id"], record.get("error_code"),
-                record.get("error_summary"), record.get("file_count", 0),
-                record["created_at"], record["updated_at"],
-                record.get("installed_at"),
-            ),
-        )
-        return
-    db.execute(
-        """
-        INSERT INTO claude_plugin_installations (
-            id, requested_package_spec, package_name, marketplace,
-            requested_version, resolved_version, source_type,
-            artifact_digest, artifact_path, claude_cli_version,
-            cli_git_commit_sha, manifest_json, component_inventory_json,
-            compatibility_json, status, operation_id, error_code,
-            error_summary, file_count, created_at, updated_at, installed_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            record["id"],
-            record["requested_package_spec"],
-            record["package_name"],
-            record["marketplace"],
-            record.get("requested_version"),
-            record["resolved_version"],
-            record["source_type"],
-            record["artifact_digest"],
-            record["artifact_path"],
-            record["claude_cli_version"],
-            record.get("cli_git_commit_sha"),
-            record.get("manifest_json"),
-            record["component_inventory_json"],
-            record.get("compatibility_json", "{}"),
-            record["status"],
-            record["operation_id"],
-            record.get("error_code"),
-            record.get("error_summary"),
-            record.get("file_count", 0),
-            record["created_at"],
-            record["updated_at"],
-            record.get("installed_at"),
-        ),
-    )
-
-
-def _revive_installation(
-    db: Any, installation_id: str, record: dict[str, Any]
-) -> None:
-    """Bring an existing non-ready installation row back to ready in place.
-
-    Used when reinstalling a package whose artifact identity
-    (package, marketplace, resolved version, digest) already has a row —
-    typically after an uninstall (soft delete) or a crashed/failed attempt.
-    Updating in place respects the UNIQUE artifact identity and keeps Deck
-    refs pointing at the same installation id.
-    """
-    if record.get("marketplace_entry_id") is None:
-        db.execute(
-            """
-            UPDATE claude_plugin_installations SET
-                requested_package_spec = %s, requested_version = %s,
-                source_type = %s, artifact_path = %s, claude_cli_version = %s,
-                cli_git_commit_sha = %s, manifest_json = %s,
-                component_inventory_json = %s, compatibility_json = %s,
-                status = 'ready', operation_id = %s,
-                error_code = NULL, error_summary = NULL,
-                file_count = %s, updated_at = %s, installed_at = %s
-            WHERE id = %s
-            """,
-            (
-                record["requested_package_spec"], record.get("requested_version"),
-                record["source_type"], record["artifact_path"],
-                record["claude_cli_version"], record.get("cli_git_commit_sha"),
-                record.get("manifest_json"), record["component_inventory_json"],
-                record.get("compatibility_json", "{}"), record["operation_id"],
-                record.get("file_count", 0), record["updated_at"],
-                record.get("installed_at"), installation_id,
-            ),
-        )
-        return
-    db.execute(
-        """
-        UPDATE claude_plugin_installations SET
-            requested_package_spec = %s, requested_version = %s,
-            source_type = %s,
-            marketplace_entry_id = COALESCE(marketplace_entry_id, %s),
-            artifact_path = %s, claude_cli_version = %s,
-            cli_git_commit_sha = %s, manifest_json = %s,
-            component_inventory_json = %s, compatibility_json = %s,
-            status = 'ready', operation_id = %s,
-            error_code = NULL, error_summary = NULL,
-            file_count = %s, updated_at = %s, installed_at = %s
-        WHERE id = %s
-        """,
-        (
-            record["requested_package_spec"],
-            record.get("requested_version"),
-            record["source_type"],
-            record.get("marketplace_entry_id"),
-            record["artifact_path"],
-            record["claude_cli_version"],
-            record.get("cli_git_commit_sha"),
-            record.get("manifest_json"),
-            record["component_inventory_json"],
-            record.get("compatibility_json", "{}"),
-            record["operation_id"],
-            record.get("file_count", 0),
-            record["updated_at"],
-            record.get("installed_at"),
-            installation_id,
-        ),
-    )
-
-
-def _attach_installation_lineage(
-    db: Any, installation_id: str, marketplace_entry_id: str | None
-) -> None:
-    if marketplace_entry_id is None:
-        return
-    db.execute(
-        "UPDATE claude_plugin_installations "
-        "SET marketplace_entry_id = COALESCE(marketplace_entry_id, %s), "
-        "updated_at = %s WHERE id = %s",
-        (marketplace_entry_id, _now(), installation_id),
-    )
+class PluginInstallReporter(Protocol):
+    def report(
+        self, request: ClaudePluginInstallReportInputDTO
+    ) -> ClaudePluginOperationDTO: ...
 
 
 # ---------------------------------------------------------------------------
@@ -682,8 +457,8 @@ def _attach_installation_lineage(
 class PluginInstallService:
     """Coordinates real CLI installs into the shared artifact store."""
 
-    def __init__(self, db: Any) -> None:
-        self.db = db
+    def __init__(self, reporter: PluginInstallReporter) -> None:
+        self._reporter = reporter
     # -- public API ---------------------------------------------------------
 
     def install(
@@ -691,9 +466,9 @@ class PluginInstallService:
         raw_spec: str,
         *,
         source_type: str | None = None,
-        marketplace_entry: MarketplaceInstallSource | None = None,
+        marketplace_entry: ClaudePluginMarketplaceSourceDTO | None = None,
         timeout_seconds: int = 300,
-        operation_id: str | None = None,
+        operation_id: str,
     ) -> dict[str, Any]:
         """Install *raw_spec* and return the operation record (finished)."""
         try:
@@ -749,10 +524,8 @@ class PluginInstallService:
                 self._fail_operation(operation, error)
                 raise error from None
             except Exception as exc:
-                # Unexpected failures (e.g. PostgresIntegrityError) must still
-                # move the operation to a terminal error state — otherwise the
-                # row stays in 'running' forever and the background task
-                # crashes without any user-visible error.
+                # Unexpected filesystem or process failures must still move
+                # the Admin operation to a terminal error state.
                 error = PluginInstallError(
                     PLUGIN_INSTALL_FAILED, f"unexpected install failure: {exc}"
                 )
@@ -760,54 +533,8 @@ class PluginInstallService:
                 raise error from None
         return result
 
-    def get_operation(self, operation_id: str) -> dict[str, Any] | None:
-        row = self.db.execute(
-            "SELECT * FROM claude_plugin_operations WHERE id = %s", (operation_id,)
-        ).fetchone()
-        return _row_to_dict(row) if row is not None else None
-
-    def get_installation(self, installation_id: str) -> dict[str, Any] | None:
-        row = self.db.execute(
-            "SELECT * FROM claude_plugin_installations WHERE id = %s", (installation_id,)
-        ).fetchone()
-        return _row_to_dict(row) if row is not None else None
-
-    def list_installations(self) -> list[dict[str, Any]]:
-        rows = self.db.execute(
-            """
-            SELECT * FROM claude_plugin_installations
-            ORDER BY created_at DESC, id DESC
-            """
-        ).fetchall()
-        return [_row_to_dict(row) for row in rows]
-
-    def uninstall(self, installation_id: str) -> dict[str, Any]:
-        """Mark an installation uninstalled and disable its Deck refs.
-
-        The immutable artifact is retained for audit (old thread workspaces
-        keep their own packed copies; nothing is silently mutated).
-        """
-        record = self.get_installation(installation_id)
-        if record is None:
-            raise PluginInstallError(
-                "CLAUDE_PLUGIN_NOT_FOUND", f"no installation {installation_id}"
-            )
-        with self.db:
-            self.db.execute(
-                "UPDATE claude_plugin_installations SET status = 'uninstalled', "
-                "updated_at = %s WHERE id = %s",
-                (_now(), installation_id),
-            )
-            self.db.execute(
-                "UPDATE deck_claude_plugin_refs SET enabled = 0, updated_at = %s "
-                "WHERE plugin_installation_id = %s",
-                (_now(), installation_id),
-            )
-        updated = self.get_installation(installation_id)
-        assert updated is not None
-        return updated
-
-    def check_cli_compatibility(self, record: dict[str, Any]) -> bool:
+    @staticmethod
+    def check_cli_compatibility(record: dict[str, Any]) -> bool:
         """SemVer compatibility of an installation against the current CLI."""
         try:
             compatibility = json.loads(record.get("compatibility_json") or "{}")
@@ -825,7 +552,8 @@ class PluginInstallService:
         except ValueError:
             return False
 
-    def verify_installation_artifact(self, record: dict[str, Any]) -> bool:
+    @staticmethod
+    def verify_installation_artifact(record: dict[str, Any]) -> bool:
         """Re-verify the artifact digest for an installation record."""
         try:
             artifact_store.get_artifact(
@@ -842,46 +570,48 @@ class PluginInstallService:
         spec: PackageSpec,
         kind: str,
         *,
-        operation_id: str | None = None,
+        operation_id: str,
         marketplace_entry_id: str | None = None,
     ) -> dict[str, Any]:
-        operation = {
-            "id": operation_id or f"cop_{uuid.uuid4().hex}",
-            "operation_kind": "install",
-            "requested_package_spec": spec.canonical
-            + (f"@{spec.requested_version}" if spec.requested_version else ""),
-            "status": "running",
-            "phase": "starting",
-            "progress": 5,
-            "message": f"Install requested ({kind})",
-            "source_type": kind,
-            "marketplace_entry_id": marketplace_entry_id,
-            "created_at": _now(),
-            "updated_at": _now(),
-        }
-        with self.db:
-            existing = self.db.execute(
-                "SELECT id FROM claude_plugin_operations WHERE id = %s",
-                (operation["id"],),
-            ).fetchone()
-            if existing is not None:
-                # Pre-created queued row (API path): transition to running.
-                _update_operation(
-                    self.db,
-                    operation["id"],
-                    status="running",
-                    phase="starting",
-                    progress=5,
-                    message=operation["message"],
-                    **(
-                        {"marketplace_entry_id": marketplace_entry_id}
-                        if marketplace_entry_id is not None
-                        else {}
-                    ),
-                )
-            else:
-                _insert_operation(self.db, operation)
+        reported = self._reporter.report(
+            ClaudePluginInstallReportInputDTO(
+                event="begin", operation_id=operation_id
+            )
+        )
+        requested = spec.canonical + (
+            f"@{spec.requested_version}" if spec.requested_version else ""
+        )
+        if (
+            reported.id != operation_id
+            or reported.requested_package_spec != requested
+            or reported.marketplace_entry_id != marketplace_entry_id
+            or reported.status != "running"
+        ):
+            raise PluginInstallError(
+                PLUGIN_INSTALL_FAILED,
+                "Admin returned a mismatched Claude Plugin operation",
+            )
+        operation = reported.model_dump(mode="json")
+        operation["source_type"] = kind
         return operation
+
+    def _progress(
+        self,
+        operation_id: str,
+        *,
+        phase: Literal["cli-install", "cli-validate", "verify", "import"],
+        progress: Literal[20, 55, 80],
+        message: str,
+    ) -> None:
+        self._reporter.report(
+            ClaudePluginInstallReportInputDTO(
+                event="progress",
+                operation_id=operation_id,
+                phase=phase,
+                progress=progress,
+                message=message,
+            )
+        )
 
     def _fail_operation(self, operation: dict[str, Any], error: PluginInstallError) -> None:
         evidence = {
@@ -894,61 +624,57 @@ class PluginInstallService:
             "finished_at": _now(),
         }
         evidence_path = cli.write_operation_evidence(operation["id"], evidence)
-        with self.db:
-            _update_operation(
-                self.db,
-                operation["id"],
-                status="error",
-                phase="error",
-                progress=100,
-                message=str(error),
+        self._reporter.report(
+            ClaudePluginInstallReportInputDTO(
+                event="fail",
+                operation_id=operation["id"],
                 error_code=error.code,
                 error_summary=str(error),
                 evidence_path=str(evidence_path),
-                finished_at=_now(),
             )
+        )
 
     def _finish_operation(
         self,
         operation: dict[str, Any],
         *,
-        installation_id: str,
+        installation: ClaudePluginInstallationEvidenceDTO,
         evidence: dict[str, Any],
-        message: str,
         execution: cli.CliExecution | None,
-        replayed: bool,
     ) -> dict[str, Any]:
         evidence.update(
             {
                 "operation_id": operation["id"],
                 "requested_package_spec": operation["requested_package_spec"],
                 "status": "ready",
-                "installation_id": installation_id,
-                "replayed": replayed,
                 "finished_at": _now(),
             }
         )
         evidence_path = cli.write_operation_evidence(operation["id"], evidence)
-        with self.db:
-            _update_operation(
-                self.db,
-                operation["id"],
-                status="ready",
-                phase="ready",
-                progress=100,
-                message=message,
-                executable=execution.executable if execution else None,
-                argv_json=json.dumps(execution.argv) if execution else None,
-                cwd=execution.cwd if execution else None,
-                cli_version=execution.cli_version if execution else None,
-                exit_code=execution.exit_code if execution else None,
-                evidence_path=str(evidence_path),
-                installation_id=installation_id,
-                finished_at=_now(),
+        execution_dto = (
+            ClaudePluginExecutionEvidenceDTO(
+                executable=execution.executable,
+                argv=execution.argv,
+                cwd=execution.cwd,
+                cli_version=execution.cli_version,
+                exit_code=execution.exit_code,
             )
-        finished = self.get_operation(operation["id"])
-        assert finished is not None
-        return finished
+            if execution is not None
+            else None
+        )
+        finished = self._reporter.report(
+            ClaudePluginInstallReportInputDTO(
+                event="complete",
+                operation_id=operation["id"],
+                installation=installation,
+                execution=execution_dto,
+                evidence_path=str(evidence_path),
+            )
+        )
+        evidence["installation_id"] = finished.installation_id
+        evidence["replayed"] = "replayed existing record" in (finished.message or "")
+        cli.write_operation_evidence(operation["id"], evidence)
+        return finished.model_dump(mode="json")
 
     # -- marketplace install path --------------------------------------------
 
@@ -958,7 +684,7 @@ class PluginInstallService:
         operation: dict[str, Any],
         *,
         timeout_seconds: int,
-        marketplace_entry: MarketplaceInstallSource | None,
+        marketplace_entry: ClaudePluginMarketplaceSourceDTO | None,
     ) -> dict[str, Any]:
         evidence: dict[str, Any] = {"source_type": operation["source_type"]}
         before = cli.snapshot_file_tree(runtime.get_config_dir())
@@ -970,8 +696,8 @@ class PluginInstallService:
                 evidence,
                 marketplace_entry=marketplace_entry,
             )
-        _update_operation(
-            self.db, operation["id"], phase="cli-install", progress=20,
+        self._progress(
+            operation["id"], phase="cli-install", progress=20,
             message=f"Running claude plugin install {spec.install_argv_spec}",
         )
         execution = cli.run_claude(
@@ -1055,8 +781,8 @@ class PluginInstallService:
             "source_type": "platform-builtin",
             "declared_source": str(source),
         }
-        _update_operation(
-            self.db, operation["id"], phase="cli-validate", progress=20,
+        self._progress(
+            operation["id"], phase="cli-validate", progress=20,
             message="Validating plugin with the real Claude CLI",
         )
         execution: cli.CliExecution | None = None
@@ -1109,8 +835,8 @@ class PluginInstallService:
         marketplace_entry_id: str | None = None,
         approved_plugin_digest: str | None = None,
     ) -> dict[str, Any]:
-        _update_operation(
-            self.db, operation["id"], phase="verify", progress=55,
+        self._progress(
+            operation["id"], phase="verify", progress=55,
             message="Verifying manifest and computing artifact digest",
         )
         manifest = read_manifest(plugin_root)
@@ -1159,83 +885,32 @@ class PluginInstallService:
             "file_count": artifact.file_count,
             "dir_name": artifact.dir_name,
         }
-        # Idempotent replay: same package + resolved version + digest.
-        existing = _find_installation_by_artifact(
-            self.db, spec, resolved_version, digest
-        )
-        if existing is not None and existing["status"] == "ready":
-            if marketplace_entry_id is not None:
-                with self.db:
-                    _attach_installation_lineage(
-                        self.db, existing["id"], marketplace_entry_id
-                    )
-            return self._finish_operation(
-                operation,
-                installation_id=existing["id"],
-                evidence=evidence,
-                message=(
-                    f"{spec.canonical} {resolved_version} already installed; "
-                    "replayed existing record"
-                ),
-                execution=execution,
-                replayed=True,
-            )
-        record = {
-            "id": f"cpi_{uuid.uuid4().hex}",
-            "requested_package_spec": operation["requested_package_spec"],
-            "marketplace_entry_id": marketplace_entry_id,
-            "package_name": spec.package_name,
-            "marketplace": spec.marketplace,
-            "requested_version": spec.requested_version,
-            "resolved_version": resolved_version,
-            "source_type": source_type,
-            "artifact_digest": digest,
-            "artifact_path": str(artifact.path),
-            "claude_cli_version": cli_version,
-            "cli_git_commit_sha": cli_git_commit_sha,
-            "manifest_json": json.dumps(manifest, ensure_ascii=False, sort_keys=True)
-            if manifest is not None
-            else None,
-            "component_inventory_json": json.dumps(
+        installation = ClaudePluginInstallationEvidenceDTO(
+            package_name=spec.package_name,
+            marketplace=spec.marketplace,
+            requested_version=spec.requested_version,
+            resolved_version=resolved_version,
+            source_type=source_type,
+            artifact_digest=digest,
+            artifact_path=str(artifact.path),
+            claude_cli_version=cli_version,
+            cli_git_commit_sha=cli_git_commit_sha,
+            manifest_json=(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True)
+                if manifest is not None
+                else None
+            ),
+            component_inventory_json=json.dumps(
                 inventory, ensure_ascii=False, sort_keys=True
             ),
-            "compatibility_json": json.dumps(
+            compatibility_json=json.dumps(
                 compatibility or {}, ensure_ascii=False, sort_keys=True
             ),
-            "status": "ready",
-            "operation_id": operation["id"],
-            "file_count": artifact.file_count,
-            "created_at": _now(),
-            "updated_at": _now(),
-            "installed_at": _now(),
-        }
-        if existing is not None:
-            # Reinstall after an uninstall (soft delete) or a crashed/failed
-            # attempt: revive the existing row in place instead of inserting
-            # a duplicate that violates the UNIQUE artifact identity.
-            with self.db:
-                _revive_installation(self.db, existing["id"], record)
-            return self._finish_operation(
-                operation,
-                installation_id=existing["id"],
-                evidence=evidence,
-                message=(
-                    f"Reinstalled {spec.canonical} {resolved_version} "
-                    f"({digest[:19]}…); revived existing record"
-                ),
-                execution=execution,
-                replayed=True,
-            )
-        with self.db:
-            _insert_installation(self.db, record)
+            file_count=artifact.file_count,
+        )
         return self._finish_operation(
             operation,
-            installation_id=record["id"],
+            installation=installation,
             evidence=evidence,
-            message=(
-                f"Installed {spec.canonical} {resolved_version} "
-                f"({digest[:19]}…)"
-            ),
             execution=execution,
-            replayed=False,
         )

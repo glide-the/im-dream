@@ -5,6 +5,7 @@
 # [Sync] 2026-08-28: export actor-scoped credential provider and safe Runtime errors;
 #                    remove public process-home resolution from the auth surface.
 # [Sync] 2026-08-28: export actor snapshot projection and scheduled-sync policy contracts.
+# [Sync] 2026-09-16: expose only the Admin-backed connector store; retire Dream repository export.
 
 """Notion resource connector backend package."""
 from __future__ import annotations
@@ -53,7 +54,6 @@ from .operations import (
     normalize_page_item,
 )
 from .store import (
-    NotionConnectorRepository,
     NotionConnectorStore,
     attach_thread_to_connector,
     close_default_store,
@@ -122,7 +122,6 @@ __all__ = [
     "discover_pages",
     "normalize_database_item",
     "normalize_page_item",
-    "NotionConnectorRepository",
     "NotionConnectorStore",
     "attach_thread_to_connector",
     "clear_workspace_snapshot",

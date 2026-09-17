@@ -1,6 +1,34 @@
+<!-- [Sync] 2026-09-17: explain Chat allowance rejection and Admin capability snapshot latency behavior. -->
+<!-- [Sync] 2026-09-15: route user and Thread SystemConfig persistence through exact Admin contracts. -->
+<!-- [Sync] 2026-09-15: route public Reflections custom configuration through registered83 Admin operations. -->
+<!-- [Sync] 2026-09-15: public complete/partial assistant persistence uses the bound Admin turn owner and original receipt recovery. -->
+<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
+<!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
+<!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
+<!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
+<!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
+<!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
+<!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
+<!-- [Sync] 2026-09-15: consume full Run read/create/retry domains with scoped original receipts. -->
+<!-- [Sync] 2026-09-15: prepare launch metadata types/source seam and retain production wiring gaps. -->
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
+<!-- [Sync] 2026-09-15: public Voice mutations consume four Admin commands with raw Memory JSON. -->
+<!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
+<!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
+<!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
+<!-- [Sync] 2026-09-15: discard stale Browser session results and retain success-only logout. -->
+<!-- [Sync] 2026-09-15: serialize resource HTTP shutdown after producers and Factory drain. -->
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-15: public user preferences use two OAuth-bound Admin operations with original partial merge and raw JSON projection. -->
+<!-- [Sync] 2026-09-15: describe Admin-owned Deck content version transactions and remaining Deck/runtime consumers. -->
+<!-- [Sync] 2026-09-15: document the bound Chat Session-tool broker and remaining background domains. -->
+<!-- [Sync] 2026-09-15: document public Session Admin consumers and their separate background authorization dependency. -->
+<!-- [Sync] 2026-09-15: document atomic user reservations and the factory-owned server persistence grant lifecycle. -->
+<!-- [Sync] 2026-09-15: document retired standalone authority and explicit Admin OAuth/account checks in named scripts. -->
 <!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
@@ -21,6 +49,12 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-16: record the Admin-only production database boundary and retain the incremental migration journal as history. -->
+
+Admin is the authentication center and the only production database access service. Dream startup receives no PostgreSQL credential or pool; strict DTO clients call named Admin operations, where Services and typed Drizzle Repositories own authorization, locks, transactions and persistence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md), [database authority](docs/design/database-schema-authority.md) and [execution gates](docs/exec/dream-admin-auth-data-plan.md). The private BFF requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. Login, registration and Google authentication run in Admin. Dream retains product routes, Agent Runtime, SSE and shared filesystem operations.
+
+The server consumer also requires explicit `INK_ADMIN_DREAM_BASE_URL`, its exact `INK_ADMIN_AUTH_ISSUER`, `INK_DREAM_API_RESOURCE`, and independent `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`. Configure the same registered public origin/callback and resource in Admin. Service credentials stay in the BFF/backend; public Runtime renewal receives only its purpose delegation.
+
 <!-- [Sync] 2026-09-14: document file-relative Next compilation roots and stopped-cache backup recovery. -->
 
 <p align="center">
@@ -34,6 +68,60 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 Ink & Memory is a workspace for writing with AI. You can keep long-running conversations, organize reusable Decks and Agents, connect external tools such as Notion or MCP Servers, and turn ideas into structured Dream workflows and creative assets.
 
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
+
+## Current runtime boundary
+
+Dream production modules contain no PostgreSQL driver or legacy database import. `server.py` does not load a database URL or start a pool. Historical SQL/schema/persistence helpers live under `backend/tests/**` for isolated parity and migration rehearsal only. Runtime, turn/resume/cancel, resource-policy LKG, shared workspace paths and `CLAUDE_CODE_TMPDIR` semantics remain unchanged. Source and deterministic checks do not replace real-account Google/model/business acceptance.
+
+## Migration journal (historical phases)
+
+The dated paragraphs below preserve the incremental cutover record. Statements that a later domain “still requires migration” describe that historical phase; the current boundary is the section above and the linked architecture documents.
+
+Resource reads/observer writes, shared request identity/profile, Chat CRUD/history/ownership, initial user-message reservation, Editor persistence, and user/Thread SystemConfig now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks. The server user-turn grant follows the existing Factory lifecycle; Gateway CLI credentials, internal dispatch wiring, and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
+
+Browser session checks discard cancelled or superseded results. Logout invalidates pending reads while keeping the last validated session on failure; the auth context commits only the current public snapshot.
+
+The resource Admin HTTP owner serializes background reads, observer writes and final close. Shutdown stops its producers and drains the Factory before closing it off the Agent turn; a closed owner cannot reopen or dispatch new requests.
+
+Public Chat also reads Admin's complete Workflow context before message reservation/SSE and passes an immutable actor/thread snapshot to Service, including ordinary-Chat null. Internal confirmation/launch dispatch and the remaining purpose consumers still require migration.
+
+Public user turns now reserve message/title through Admin's atomic confirmation guard command using raw Python JSON. A server-only Thread/Run persistence grant renews under Factory ownership and survives SSE disconnect; unknown writes keep their original receipt ID. Public Agent Thread reads, SDK-native session ID updates, recent writing Session context, Chat Session-tool projections, and complete/cancelled/error assistant messages use that bound grant. User/session/assistant writes share original-receipt recovery, and only the latest confirmed Session update is reused. Internal dispatcher assistant writes, Reflections background Session consumers, Gateway credentials and other database domains remain migration work.
+
+Public writing Session save/get/batch/list/range/aggregate/delete now use six typed Admin operations with explicit request OAuth. The same `session.list` contract accepts the exact Thread-bound `server-persistence` grant for Agent prompt context and Chat `get_sessions_range`. A private turn-local loopback broker exposes strict projections to user MCP without actor IDs, database access or Admin credentials; the child keeps the existing fuzzy, labels, limit and vector-interface behavior. Broker startup failures stop before Runtime, and close drains an in-flight read before grant resources. Reflections background reads remain separate authorization work.
+
+Public Deck content state/preview/commit/history/detail now use five typed Admin operations and exact schema capabilities. Admin executes snapshot/hash/CAS/version transactions; Dream restores the original raw snapshot response and preserves safe conflict details and unknown commit IDs without retrying. Other Deck/Voice operations, plugin filesystem verification and runtime consumers remain migration work.
+
+Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifies the selected artifact and CLI compatibility with the existing checks before submitting source-bound evidence; other plugin installation/runtime data paths remain migration work.
+
+Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, first-login writes and background preference context remain separate domains; SystemConfig is handled by the dedicated operations below.
+
+Settings GET/PUT now use Admin's `user-system-config.get/patch`; PUT returns a fresh independent read after a confirmed patch. Public Chat reads one OAuth-bound snapshot and reuses it for model selection and attachments. Active turns use `thread-system-config.get` through the exact Thread persistence grant before prompt, Workspace or Runtime assembly. Corrupt or unavailable configuration fails closed without a Dream database fallback. Gateway model selection requires an explicit authorized snapshot, so ownerless internal dispatch remains a named migration dependency.
+
+Public Reflections configuration GET/PUT/DELETE now uses three OAuth-bound Admin operations. A lost save/delete response is resolved only from the original request receipt and never sends a second write. `memory-init` confirms the Chat Thread owner through Admin, reads the user's custom section configuration, merges it with Dream's static prompt defaults, and only then writes the shared workspace. The ownerless background Reflections worker still reads its custom configuration and task/result state from the remaining Dream database path.
+
+The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
+
+Public invitations, friend requests, relationships and friend picture reads now use nine typed Admin operations. Admin owns invitation policy and atomic transitions; Dream preserves integer IDs, labels, timestamps, errors and unknown write IDs. Other database domains and normal business acceptance remain open.
+
+Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
+
+Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST preserves its 202 response, all 17 fields and explicit original three-state receipts. Run read/create/retry preserve all 28 fields and original 200/201 responses. Default-dependent Workflow ingress now uses the registered Admin workspace-default.ensure operation before these domains; it returns the original text ID and requires OAuth dream:write for initialization, including Run GET when no server Workspace is present. Unknown writes retain their original request ID without retries. Remaining lifecycle/launch/internal agent-output persistence still needs migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
+
+Story Workflow, Deck binding and Deck Plugin current-user dependencies share the same Admin default Workspace resolver. Deck Plugin role lookup reuses the current Admin profile with OAuth read scope and canonical ID validation; existing permission checks remain. Remaining domain and background persistence still need migration.
+
+Registered Run fail and launch failure-envelope consumers now preserve historical failed replies, raw error text and original receipt IDs. The production launch recorder still needs the Admin turn owner and must retain its two independent commits; these type checks do not establish normal model acceptance. See the [failure rules](docs/design/dream-launch-admin-metadata-current.md).
+
+Public Workflow Run cancel now uses its registered Admin command, preserving the original reason, full 28-field response, business errors and bounded original receipt. Agent cancellation retains its existing behavior.
+
+Launch source/claim/finish typed consumers and the original application source adapter are prepared against registered75. The production endpoint still needs OAuth actor wiring, and prepare/Voice/failure SQL remains. See the [metadata preparation rules](docs/design/dream-launch-admin-metadata-current.md).
+
+All public Workspace file routes read the current user's SystemConfig through OAuth before filesystem access. Content/download keep Thread ownership checks first, then apply Workspace Mode, path and filesystem checks. Missing Threads retain 404; configuration or metadata failures return safe 503 responses. File, ZIP and no-create behavior remains; other file-management data dependencies are still pending.
+
+Public Deck detail now reads one typed Admin aggregate and restores original owner IDs, timestamps and legacy Memory values. An Admin producer difference for empty Memory remains documented for correction.
+
+Public Deck update/delete/publication/collection/parent-sync now use five Admin commands. Original results and dependency-conflict messages remain; Admin owns locks and transactions, and unknown writes retain their original request ID. [Current rules](docs/design/deck-mutations-current.md).
+
+Public Voice create/update/delete/collect now use four Admin commands. Raw Memory JSON and omitted/null/empty fields retain their original behavior; Admin owns defaults, order, locks and draft changes. Other Deck and background data consumers still require migration.
 
 ## What you can do
 
@@ -112,7 +200,7 @@ The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must re
 
 ### 4. Configure Dream
 
-Create `backend/.env` from the example and point it at the Admin environment and your workspace root:
+Create `backend/.env` from the example and configure the Admin API and your workspace root:
 
 ```bash
 cd ../backend
@@ -120,17 +208,23 @@ test -f .env || cp .env.example .env
 ```
 
 ```dotenv
-DATABASE_URL=
-INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
-INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
-
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
+INK_ADMIN_DREAM_BASE_URL=http://127.0.0.1:3000
 
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
 INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
 ```
+
+Create the private Next BFF configuration separately. Use the same Admin service client ID/secret as the backend, an independent random cookie secret, and the exact callback registered by Admin:
+
+```bash
+cd ../frontend
+test -f .env.local || cp .env.example .env.local
+```
+
+`frontend/.env.local` and `backend/.env` are server-only. Neither file may contain `DATABASE_URL`; Dream has no PostgreSQL credential after the Admin DTO/ORM cutover.
 
 Provider keys stay in Admin; do not copy them into Dream.
 
@@ -243,7 +337,7 @@ The complete engineering flow—connection discovery, model tool call, call-ID a
 | Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.10`; registry `latest` is `0.1.10` as of 2026-09-15 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
-| Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
+| PostgreSQL schema and access, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
 | Dream Web, Thread/Run/Workspace integration | This repository |
 
 Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
@@ -303,7 +397,7 @@ Focused MCP Apps commands and the current provider-free evidence are listed in [
 - Roll back only to an explicitly reviewed immutable image or release; do not restore retired npm/Vite build paths.
 - MCP Apps remain production-off (`productionAppsEffective=false`) until a separate real-business acceptance changes that contract.
 
-For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported. An Alibaba edge that relays the existing public domains to explicit NATAPP Dream/Admin origins uses the recoverable [edge-relay procedure](docs/deploy/natapp-edge-relay.md), not an inferred Compose upstream.
+For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL builds the canonical Next.js workspace with the frozen pnpm lock, includes the server-only MCP Apps runtime, smokes an immutable candidate on isolated ports, and switches it only after validation. A successful deploy prunes old application releases instead of retaining a long-lived rollback version; persistent workspaces and shared artifacts are never release cleanup targets. Legacy Vite/npm/dist release paths are unsupported. An Alibaba edge that relays the existing public domains to explicit NATAPP Dream/Admin origins uses the recoverable [edge-relay procedure](docs/deploy/natapp-edge-relay.md), not an inferred Compose upstream.
 
 ## Troubleshooting
 
@@ -337,11 +431,17 @@ The current source requires Runtime `0.1.10` and output `2.1.241 (Claude Code)`.
 
 ### The Web page cannot reach an API or Voice
 
-Check that Admin is on `3000`, Dream is on `8765`, and Web is on `5173`. Next-to-Dream rewrites use `INK_BACKEND_INTERNAL_URL`; Browser REST/SSE uses the runtime `API_BASE_URL`; Voice uses the Browser `WS_BASE_URL` or the local `NEXT_PUBLIC_WS_BASE_URL` fallback.
+On this migration branch, REST/SSE/files stay on the Next origin and use authenticated Route Handlers. Configure the backend origin with server-only `INK_BACKEND_INTERNAL_URL` (or `BACKEND_URL`), and verify the Admin service configuration and BFF cookies. Generic API/auth rewrites are removed. Explicit speech WebSocket configuration is retained; speech recognition remains disabled in the backend.
 
 ### A build still asks for npm/Vite files
 
 The active Web workspace uses Corepack/pnpm, Next, `.next`, and `frontend/pnpm-lock.yaml`. A workflow looking for `frontend/package-lock.json`, `vite.config.ts`, or production `dist/index.html` is obsolete.
+
+### Chat reports an insufficient subscription Token allowance
+
+Dream saves the user message before model execution. If Chat reports **Subscription Token allowance is insufficient**, Gateway rejected the model request because the current subscription period cannot reserve the requested Tokens; this is separate from Admin DTO persistence. Adjust the supported subscription allowance or model configuration in Admin, then reload the conversation to confirm its saved state before deciding whether to send again. Do not retry repeatedly or edit subscription ledger rows directly.
+
+Dream keeps one fully validated immutable Admin capability snapshot for domain calls and still sends each business request through Admin authentication, authorization, DTO validation, and transaction handling. An explicit capability refresh invalidates the snapshot first and fails closed if refresh cannot complete.
 
 ### PostgreSQL capability or model is unavailable
 

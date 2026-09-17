@@ -3,6 +3,7 @@
 <!-- [Pos] Operator index for deploy/; detailed configuration remains in platform directories and root README files. -->
 <!-- [Sync] 2026-09-06: align deployment status with Next.js, pnpm, and known script drift at revision 54f3bbe5. -->
 <!-- [Sync] 2026-09-12: add the explicit-origin NATAPP edge-relay entry and recovery boundary. -->
+<!-- [Sync] 2026-09-16: document explicit Admin DTO/BFF identity projection and no Dream PostgreSQL credentials. -->
 
 # Deployment entry points
 
@@ -11,7 +12,7 @@
 The default Web artifact is the standalone Next.js server built from the single
 pnpm workspace in `frontend/`. The default container runs that server on port
 `80`; FastAPI remains a separate backend service. Admin owns Gateway,
-PostgreSQL, and the shared schema.
+PostgreSQL, the shared schema, and all database access. Dream deployments call Admin APIs with one registered server-only service identity shared by FastAPI and the Next BFF; the BFF uses a separate cookie-encryption secret.
 
 Deployment script presence is not production acceptance. The table below states
 what the checked-in scripts actually do at revision `54f3bbe5` and identifies

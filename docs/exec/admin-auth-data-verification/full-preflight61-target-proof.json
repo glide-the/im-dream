@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "source": "ink_auth_data_codex_test_792494523a17_workflow60",
+  "source_type": "already owned provider-free technical fixture only; not normal database clone",
+  "host": "127.0.0.1",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 61,
+  "forward_sql_sha256": "037508ab9cf0caac9bf1ada33d50a78aae45767a37d388721a241080f0f43b51",
+  "capability": [
+    1,
+    "7123babb03535e0a0c7a818e902c331cefbe73c660b46395136dcc9a5b19f3da"
+  ],
+  "source_table_count": 124,
+  "source_digest_sha256": "732ccc1a17eb3314f3d9bcf9f872aa172e663ab0079f2c4e2a1858e9ab3c0ab3",
+  "source_before_after": "exactly unchanged",
+  "auth_and_data_dsn_target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "business_seeds": "not yet executed; awaiting actual Admin fixture/fault recipe",
+  "normal_database": "untouched"
+}

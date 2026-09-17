@@ -1,390 +1,177 @@
 # MCP 工具目录 — EditorEngine 资源接口
 
-Status: Updated
-Updated: 2026-06-14
-Scope: Design + 实现状态同步（含写工具后 editor_state DB 刷新与前端事件通知）
+> [Input] `ClaudeAgentService` 的当前 EditorState、Editor MCP 工具参数、用户确认结果与 turn-owned Admin Editor runtime。
+> [Output] 四个受确认写工具、一个上下文切换工具、Admin load/replace/receipt 流程与状态刷新规则。
+> [Pos] EditorEngine Agent 写入现行设计；历史直连数据库方案见 [`mcp-tools-legacy-db-20260614.md`](./mcp-tools-legacy-db-20260614.md)。
+> [Sync] 2026-09-15: Editor stdio 改为 turn-local broker；OAuth、service secret、idg、actor 与数据库凭据不进入子进程。
 
----
+Status: Current
+Updated: 2026-09-15
+Scope: Design + production behavior
 
-## 目录
+## 1. 背景与问题
 
-1. [设计思路](#1-设计思路)
-2. [工具目录](#2-工具目录)
-3. [工具 Schema 定义](#3-工具-schema-定义)
-4. [权限矩阵](#4-权限矩阵)
-5. [工具调用流程](#5-工具调用流程)
-6. [前端交互入口](#6-前端交互入口)
+Agent 通过 `.editor/` 虚拟索引读取当前文档，通过 MCP 工具修改文档。旧实现让 Editor MCP 子进程读取 `DATABASE_URL` 和 actor ID 后直接访问 PostgreSQL，形成了第二条身份校验和数据访问路径，也会把数据库凭据投影到子进程。
 
----
+Admin 现已提供两个公开 Editor operation：
 
-## 1. 设计思路
+- `editor-state.load`：读取 exact Editor Session 的当前状态；
+- `editor-state.replace`：以完整 EditorState 替换当前状态，并提供原请求 ID 的 receipt。
 
-EditorEngine 已具备清晰的命令接口，将写操作方法直接映射为 MCP 工具。
+Dream 主进程必须持有 OAuth 和 purpose grant；Editor MCP 子进程只执行工具参数校验、状态变换和本机 broker 调用。
 
-**读写分离策略：**
+## 2. 目标与边界
 
-| 操作类型 | 路径 | 说明 |
-|---------|------|------|
-| **读取**（只读） | `.editor/` 虚拟索引 + PreToolUse 拦截 | Agent 通过 `read_file(".editor/cells.json")` 等路径触发 PreToolUse 钩子，获得内存快照（见 [`workspace-adapter.md`](./workspace-adapter.md)） |
-| **写入**（变更） | MCP 写工具（本文档） | 全部需要人类确认；MCP 子进程从数据库动态读取 Session 状态，变更后写回 |
+目标：
 
-**设计决策：MCP 工具仅保留写操作**
+- 每次修改前从 Admin 读取当前 EditorState，避免基于过期快照覆盖新内容；
+- 由 Admin 校验用户、Thread、Editor Session、Writing Thread、purpose 与 scope；
+- 写响应未知时保留原 request ID，只查询对应 receipt，不重发 replace；
+- 写成功后更新 `AgentRunState.editor_state`，使同一 turn 的后续 `.editor/` 读取立即看到新状态；
+- 保持原工具确认、SSE、Session event、Runner、admission、lease、resume 与 cancel 语义。
 
-- 读操作已由 `.editor/` 虚拟索引路径完整覆盖，无需在 MCP 中重复
-- 保留只读 MCP 工具会引入冗余路径，增加维护成本，且数据新鲜度不如虚拟索引（需要额外同步）
-- 写工具通过 `PreToolUse` 拦截，强制人类确认后才执行，确保安全
+边界：
 
-**EditorEngine 写操作映射：**
+- `.editor/` 仍是只读虚拟索引，不新增磁盘持久化；
+- Editor broker 是 Dream 主进程与本 turn Editor stdio 子进程之间的内部通道，不是公开 HTTP 接口；
+- `switch_editor` 只切换 Editor Session，不改变 Dream Thread、Claude Session、Workspace 或外部资源连接器；
+- Admin 数据库事务、所有权判断和 receipt 保存由 Admin 实现，Dream 不复制 SQL、DDL 或业务锁。
 
-| EditorEngine 方法 | MCP 工具 | 操作类型 |
-|-------------------|---------|---------|
-| `updateTextCell(cellId, text)` | `write_segment` | 写（必须确认） |
-| `deleteCell(cellId)` | `delete_segment` | 写（必须确认） |
-| `insertWidgetAtCursor(...)` | `insert_widget` | 写（必须确认） |
-| `addCommentChatMessage(commentId, role, content)` | `reply_to_comment` | 写（必须确认） |
+## 3. 概念与规则
 
-**数据源说明：**
+### 3.1 ID 与授权
 
-MCP 写工具子进程通过工具调用参数中的 `editor_session_id` 识别当前文档会话。
-`editor_session_id` 是 `/api/sessions` 接口的 `user_sessions.id`（文档编辑会话 ID），与下列 ID **不同**：
+| 值 | 含义 | 产生位置 | 判断位置 |
+| --- | --- | --- | --- |
+| `thread_id` | Dream Chat Thread | 公开 Chat 路由 | Admin 创建 purpose grant 时绑定 |
+| `editor_session_id` | `/api/sessions` 的文档会话 ID | `<workspace_context>` 和工具参数 | Admin grant 与每个 Editor operation 都要求 exact match |
+| Claude Session ID | Claude Runtime 续传标识 | SDK init | 不作为 Editor 授权依据 |
+| workspace path | Thread 文件工作区 | Dream workspace 组合 | 不推导 Editor Session ID |
 
-| ID | 含义 | 来源 |
-|----|------|------|
-| `editor_session_id` | 文档编辑会话 ID（本文档中的写工具参数） | `user_sessions.id`，来自 `/api/sessions` |
-| workspace_id | Agent 工作空间目录名（`os.path.basename(cwd)`） | 可能是 Claude thread_id 或其他标识符 |
-| thread_id | Claude SDK 对话线程 ID | Claude Code SDK 生成 |
+主进程用当前 OAuth 创建 `editor-stdio` grant。grant 固定：
 
-Claude 从 `<workspace_context>` 提示词块中的 `Editor Session ID` 字段读取 `editor_session_id` 并在每次写工具调用时传入。子进程通过 `WHERE id = editor_session_id` 直接从数据库读写，不依赖预序列化快照。
+- 当前 `thread_id`；
+- 一个 exact `editor_session_id`；
+- `run_id=null`；
+- scopes 为 `editor:read` 与 `editor:write`。
 
----
+创建 grant 前，Dream 核对 Admin capability 中 `editor-state.load` 和 `editor-state.replace` 的 version 与 contract SHA。缺失、重复或 hash 变化时拒绝创建。
 
-## 2. 工具目录
+### 3.2 子进程投影
 
-### 2.1 写工具（全部需要人类确认）
+Editor stdio 子进程只接收以下内部 broker 值：
 
-| 工具名 | 对应 Engine 方法 | 确认等级 | 说明 |
-|--------|----------------|---------|------|
-| `write_segment` | `updateTextCell(cellId, text)` | **必须确认** | 替换指定文本片段的完整内容 |
-| `delete_segment` | `deleteCell(cellId)` | **必须确认** | 删除指定片段（不可逆） |
-| `insert_widget` | `insertWidgetAtCursor(widgetType, data, afterCellId)` | **必须确认** | 在指定位置插入组件片段 |
-| `reply_to_comment` | `addCommentChatMessage(commentId, 'agent', content)` | **必须确认** | 向已有评论的对话历史追加 Agent 回复 |
+- loopback host；
+- 临时端口；
+- 每个 turn 随机 capability；
+- transport timeout；
+- 最大消息字节数。
 
-> **读取路径不在此文档：** 所有读操作通过 `.editor/` 虚拟索引拦截机制实现，见 [`workspace-adapter.md`](./workspace-adapter.md)。
+MCP 配置不投影 OAuth access token、Admin service identity、opaque idg、actor ID、`DATABASE_URL` 或 Admin origin。broker 只绑定 `127.0.0.1`，消息采用 closed DTO 和单行有界 JSON。
 
----
+### 3.3 读写分离
 
-## 3. 工具 Schema 定义
+| 操作 | 执行模块 | 输入 | 输出 |
+| --- | --- | --- | --- |
+| 虚拟读取 | Runner PreToolUse + `editor_index.py` | `AgentRunState.editor_state` | `.editor/*.json` 临时只读响应 |
+| 写前读取 | `editor_tool.py` → broker → Admin | exact Session ID | Admin 当前 EditorState 或缺失 |
+| 完整替换 | `editor_tool.py` → broker → Admin | strict EditorState | saved、Session ID、时间 |
+| 写后刷新 | `ClaudeAgentService` | runtime cache | 更新享元并发布既有 Session event |
+| Session 切换 | `switch_editor` → broker load → PostToolUse | 目标 Session ID | 目标缓存成为当前 EditorState |
 
-### 3.1 `write_segment`
+## 4. 工具目录
 
-```json
-{
-  "name": "write_segment",
-  "description": "替换指定文本片段的完整内容。此操作会修改用户的创作内容，必须经用户确认后执行。",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "editor_session_id": {
-        "type": "string",
-        "description": "Editor session ID from <workspace_context> (user_sessions.id from /api/sessions — NOT the workspace directory name)"
-      },
-      "cellId": {
-        "type": "string",
-        "description": "要修改的文本片段 ID"
-      },
-      "text": {
-        "type": "string",
-        "description": "新的完整文本内容（替换整个片段，而非追加）"
-      },
-      "reason": {
-        "type": "string",
-        "description": "说明此次修改的意图，将展示给用户以便决策"
-      }
-    },
-    "required": ["editor_session_id", "cellId", "text", "reason"]
-  }
-}
-```
+| 工具 | 输入要点 | 状态变换 | 确认 |
+| --- | --- | --- | --- |
+| `write_segment` | `editor_session_id`, `cellId`, `text`, `reason` | 替换 text cell 的完整 `content` | 必须 |
+| `delete_segment` | `editor_session_id`, `cellId`, `reason` | 删除 exact cell | 必须 |
+| `insert_widget` | `editor_session_id`, `widgetType`, optional `data`, optional `afterCellId`, `reason` | 插入 `chat`、`greeting` 或 `other` widget cell | 必须 |
+| `reply_to_comment` | `editor_session_id`, `commentId`, `content`, `reason` | 向 `chatHistory` 追加 role=`assistant` 和毫秒时间 | 必须 |
+| `switch_editor` | `editor_session_id` | 加载目标 Session，并在 PostToolUse 更新当前缓存 | 无需确认 |
 
-### 3.2 `delete_segment`
+四个修改工具继续注册在 `_ALWAYS_CONFIRM_TOOL_NAMES`。批准只允许执行已经展示的工具输入；拒绝返回原确认原因，且不调用 broker 或 Admin。
 
-```json
-{
-  "name": "delete_segment",
-  "description": "删除指定片段。此操作不可逆，必须经用户确认。",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "editor_session_id": {
-        "type": "string",
-        "description": "Editor session ID from <workspace_context> (user_sessions.id from /api/sessions)"
-      },
-      "cellId": {
-        "type": "string",
-        "description": "要删除的片段 ID"
-      },
-      "reason": {
-        "type": "string",
-        "description": "删除原因，将展示给用户以便决策"
-      }
-    },
-    "required": ["editor_session_id", "cellId", "reason"]
-  }
-}
-```
-
-### 3.3 `insert_widget`
-
-```json
-{
-  "name": "insert_widget",
-  "description": "在指定位置插入一个新的组件片段。必须经用户确认后执行。",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "editor_session_id": {
-        "type": "string",
-        "description": "Editor session ID from <workspace_context> (user_sessions.id from /api/sessions)"
-      },
-      "widgetType": {
-        "type": "string",
-        "description": "组件类型（如 'chat'、'image' 等）"
-      },
-      "data": {
-        "type": "object",
-        "description": "组件数据，结构取决于 widgetType"
-      },
-      "afterCellId": {
-        "type": "string",
-        "description": "在此片段 ID 之后插入；留空则追加至文档末尾"
-      },
-      "reason": {
-        "type": "string",
-        "description": "插入理由，将展示给用户以便决策"
-      }
-    },
-    "required": ["editor_session_id", "widgetType", "reason"]
-  }
-}
-```
-
-### 3.4 `reply_to_comment`
-
-```json
-{
-  "name": "reply_to_comment",
-  "description": "向指定评论的对话历史追加一条 Agent 回复消息。必须经用户确认后执行。",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "editor_session_id": {
-        "type": "string",
-        "description": "Editor session ID from <workspace_context> (user_sessions.id from /api/sessions)"
-      },
-      "commentId": {
-        "type": "string",
-        "description": "目标评论 ID"
-      },
-      "content": {
-        "type": "string",
-        "description": "回复内容"
-      },
-      "reason": {
-        "type": "string",
-        "description": "回复理由，将展示给用户以便决策"
-      }
-    },
-    "required": ["editor_session_id", "commentId", "content", "reason"]
-  }
-}
-```
-
----
-
-## 4. 权限矩阵
-
-| 工具 | Human（直接执行） | Agent auto 模式 | Agent manual 模式（PreToolUse） |
-|------|-----------------|----------------|-------------------------------|
-| `write_segment` | ✅ | 🔐 **必须确认**（修改创作内容） | 🔐 **必须确认** |
-| `delete_segment` | ✅ | 🔐 **必须确认**（不可逆） | 🔐 **必须确认** |
-| `insert_widget` | ✅ | 🔐 **必须确认** | 🔐 **必须确认** |
-| `reply_to_comment` | ✅ | 🔐 **必须确认** | 🔐 **必须确认** |
-
-> **说明：** 所有写工具在 `auto` 和 `manual` 模式下均必须通过 `PreToolUse` 拦截并等待人类决策。它们注册在 `_ALWAYS_CONFIRM_TOOL_NAMES` 列表中，确保不会被自动跳过。
-
----
-
-## 5. 工具调用流程
-
-### 5.1 整体架构
-
-```
-Agent 读取文档内容：
-  └─ 唯一路径: read_file(".editor/cells.json") 等
-               → PreToolUse 拦截（内存快照）→ 临时文件 → 返回实时数据
-               ✅ 从 AgentRunOptions.editor_state 内存读取；无 MCP 开销
-
-Agent 修改文档内容：
-  └─ 唯一路径: MCP 写工具（write_segment / delete_segment / insert_widget / reply_to_comment）
-               → PreToolUse 拦截 → 人类确认 → MCP 子进程从数据库读取最新状态 → 应用变更 → 写回数据库
-               🔐 全部经人类确认；基于数据库最新状态
-```
-
-### 5.2 写工具调用流程（必须确认）
-
-```
-Agent 意图修改片段内容
-  → 调用 write_segment(cellId, text, reason)
-  → PreToolUse hook 拦截（_ALWAYS_CONFIRM_TOOL_NAMES 中）
-  → 构建确认请求：
-      { toolName: 'write_segment', cellId, newText, reason }
-  → SSE 推送 tool-approval-request 至前端
-  → 前端渲染 AgentActionOverlay：
-      显示修改内容 + 操作理由
-  → 人类点击 Approve 或 Reject
-  → POST /api/claude-agent/tool-confirm
-  → ToolConfirmationStore.resolve
-      ├── Approve → hook 返回 { permissionDecision: 'allow' }
-      │             → MCP 子进程运行 write_segment handler
-      │             → handler 从数据库加载最新 editor_state
-      │             → 更新 cells[cellId].content = text
-      │             → database.save_session(user_id, session_id, updated_state)
-      │             → 返回 { ok: true }
-      │             → ★ service.py tool_result 回调检测到 mcp__editor__write_segment
-      │               → asyncio.to_thread(database.get_session, user_id, editor_session_id)
-      │               → state.editor_state = fresh_state（AgentRunState 享元更新）
-      │               → run_options.editor_state = fresh_state（当轮 PreToolUse 立即生效）
-      │               → SessionEventBus 发布 session_updated(source=agent, toolCallId)
-      │                 → 前端 /api/sessions/events 收到后 reload Writing 视图
-      └── Reject  → hook 返回 { permissionDecision: 'deny' }
-                    → Agent 收到拒绝原因，继续对话或调整方案
-```
-
-### 5.3 数据源：数据库动态读取
-
-MCP 写工具子进程通过工具调用参数中的 `editor_session_id` 定位文档，从数据库动态获取最新状态：
-
-```
-<workspace_context> 提示词块
-  Editor Session ID: sess-xxxx        ← user_sessions.id（来自 /api/sessions）
-  ≠ Working directory basename        ← workspace_id（可能是 thread_id 或其他）
-
-Claude 调用写工具时
-  write_segment(editor_session_id="sess-xxxx", cellId="c1", ...)
-                      ↓
-editor_tool.py::_write_segment("sess-xxxx", ...)
-  → database.get_db().execute("SELECT ... WHERE id = ?", ("sess-xxxx",))
-  → 应用变更
-  → database.get_db().execute("UPDATE ... WHERE id = ?", ("sess-xxxx",))
-```
-
-**三种 ID 的区别：**
-
-| ID 类型 | 来源 | 用途 |
-|---------|------|------|
-| `editor_session_id`（工具参数）| `user_sessions.id` from `/api/sessions` | 定位文档数据库记录 |
-| workspace_id（`cwd` basename）| Claude thread_id 或 workspace 标识符 | Agent 文件系统路径 |
-| Claude thread_id | Claude Code SDK | 对话历史续传 |
-
-### 5.4 时序图
+## 5. 正常流程
 
 ```mermaid
 sequenceDiagram
     participant Agent as Claude Agent
-    participant Hook as PreToolUse Hook<br/>(agent_runner.py)
-    participant Store as ToolConfirmationStore
-    participant SSE as SSE 推送
+    participant Hook as PreToolUse
     participant UI as Editor UI
-    participant Human as 用户
-    participant MCP as Editor MCP 子进程<br/>(editor_tool.py)
-    participant DB as Database
-    participant Svc as ClaudeAgentService<br/>tool_result 回调
-    participant State as AgentRunState<br/>（享元缓存）
-    participant Opts as run_options<br/>(AgentRunOptions)
+    participant MCP as Editor stdio
+    participant Broker as Dream turn broker
+    participant Admin as Admin Editor API
+    participant State as AgentRunState
 
-    Agent->>Hook: write_segment(cellId, text, reason)
-    Hook->>Store: createPendingConfirmation(toolCallId)
-    Hook->>SSE: tool-approval-request { toolCallId, toolName, cellId, newText, reason }
-    SSE->>UI: 推送确认事件
-    UI->>Human: 渲染 AgentActionOverlay（内容 + reason）
-    Hook->>Hook: await Promise（阻塞）
-
-    alt 用户 Approve
-        Human->>UI: 点击 Approve
-        UI->>Store: POST /tool-confirm { toolCallId, approved: true }
-        Store->>Hook: resolve(approved=true)
-        Hook->>Agent: { permissionDecision: 'allow' }
-        Agent->>MCP: 执行 write_segment handler
-        MCP->>DB: get_session(user_id, session_id)
-        DB-->>MCP: 最新 editor_state
-        MCP->>MCP: 更新 cells[cellId].content
-        MCP->>DB: save_session(user_id, session_id, updated_state)
-        MCP-->>Agent: { ok: true }
-
-        Note over Svc: ★ tool_result 事件到达，检测到写工具成功
-        Agent->>Svc: tool_result { toolCallId, output:{ok:true}, isError:false }
-        Svc->>DB: asyncio.to_thread(get_session, user_id, editor_session_id)
-        DB-->>Svc: { editor_state: { cells:[最新内容], ... } }
-        Svc->>State: state.editor_state = fresh_state
-        Note over State: opts.editor_state_getter 绑定到 state<br/>下次 PreToolUse 调用 getter 时自动读到最新值
-    else 用户 Reject
-        Human->>UI: 点击 Reject（可附理由）
-        UI->>Store: POST /tool-confirm { toolCallId, approved: false, reason }
-        Store->>Hook: resolve(approved=false, reason)
-        Hook->>Agent: { permissionDecision: 'deny' }
-        Note over Agent: 根据拒绝原因调整方案
-    end
+    Agent->>Hook: write_segment(Session, Cell, Text, Reason)
+    Hook->>UI: tool-approval-request
+    UI-->>Hook: approve
+    Hook-->>Agent: allow exact input
+    Agent->>MCP: execute tool
+    MCP->>Broker: editor-state.load(Session)
+    Broker->>Admin: Bearer exact grant + load
+    Admin-->>Broker: current EditorState
+    Broker-->>MCP: current EditorState
+    MCP->>MCP: apply one state transformation
+    MCP->>Broker: editor-state.replace(Session, state, request ID)
+    Broker->>Admin: Bearer exact grant + replace
+    Admin-->>Broker: saved + Session + timestamp
+    Broker-->>MCP: success
+    MCP-->>Agent: closed tool result
+    Agent->>State: tool-result callback adopts broker cache
+    State-->>UI: existing session_updated(source=agent)
 ```
 
----
+每个修改工具最多执行一次初始 load；如果目标 cell/comment/anchor 不存在，可再 load 一次确认是否由并发更新造成。第二次仍不存在时返回明确的目标缺失结果，不继续写。
 
-## 6. 前端交互入口
+`switch_editor` 先调用目标 Session 的 Admin load。主进程为新 Session 创建新的 exact grant；成功后 broker 缓存该状态，PostToolUse 只采用已缓存结果。目标缺失、授权失败或响应错误时保持原 EditorState。
 
-### 6.1 工具检测路由表
+新 Session grant 必须使用进入本 turn 时保存在主进程内存中的 OAuth access token。若长 turn 中该 token 已过期，Admin 会拒绝新的 grant；`switch_editor` 此时返回安全授权错误并保留原 EditorState。现有 Admin contract 没有用已存在 `editor-stdio` grant 派生另一 Session grant或刷新请求 OAuth 的接口，因此本阶段不把该失败改写成重试、PG fallback 或 service identity 扩权。已创建的 Session grant仍由各自 keeper 续期到 Admin 给定的 maximum。
 
-前端通过 `isEditorWriteTool(toolName)` 检测编辑器写工具，渲染专用确认 UI（位于 `EditorWriteApprovalUI.tsx`）。
+## 6. 写入结果与状态转换
 
-| MCP 工具名 | 前端 UI 组件 | 渲染位置 | 检测函数 |
-|-----------|------------|---------|---------|
-| `mcp__editor__write_segment` | `WriteSegmentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
-| `mcp__editor__delete_segment` | `DeleteSegmentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
-| `mcp__editor__insert_widget` | `InsertWidgetApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
-| `mcp__editor__reply_to_comment` | `ReplyToCommentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
+| 当前状态 | 条件 | 动作 | 后续状态 |
+| --- | --- | --- | --- |
+| ready | replace 返回 strict success | 缓存提交的完整 state | committed |
+| ready | Admin 明确 4xx 且 `outcome_unknown=false` | 清除本次 pending | ready，可处理新输入 |
+| ready | timeout、5xx 或响应无法判断且请求可能已发送 | 保存 operation、完整 input、原 request ID | unknown |
+| unknown | 再次收到相同 input | 查询原 receipt | unknown 或 committed |
+| unknown | receipt absent/不可用 | 不重发 replace | unknown |
+| unknown | receipt committed 且 Session/结果匹配 | 采用原结果并刷新缓存 | committed |
+| unknown | 收到不同 input | 返回 `ADMIN_WRITE_RESULT_UNKNOWN` | unknown |
 
-### 6.2 前端文件路径
+如果 grant 创建、输入校验或 broker 可用性检查在 replace POST 之前失败，不进入 unknown 状态。
 
-| 文件 | 职责 |
-|------|------|
-| `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx` | 4个专用确认 UI 组件 + `isEditorWriteTool()` 工具函数 |
-| `frontend/app/_dream/components/chat/ToolMessagePart.tsx` | 检测编辑器写工具，渲染 `EditorWriteApprovalUI` |
-| `frontend/app/_dream/components/chat/ChatMessageList.tsx` | 检测编辑器写工具，直接展开渲染（不折叠） |
+## 7. 失败反馈
 
-### 6.3 前端检测条件
+| 条件 | 对 Agent 的 closed error | 状态处理 |
+| --- | --- | --- |
+| Session ID 为空或 DTO 非法 | 参数错误 | 不访问 Admin |
+| 当前 Session 不存在 | `editor_session_not_found` | 保持当前缓存 |
+| cell/comment/anchor 不存在 | 对应 `*_not_found` | 一次有界重读后返回 |
+| broker 配置缺失或本机通道不可用 | `editor_state_unavailable` 或安全 Admin code | 不回显地址、token、正文或异常 |
+| Admin scope、purpose、Thread、Session 不匹配 | Admin closed code | 不采用返回内容 |
+| 长 turn 中请求 OAuth 已过期且要切换到未授权 Session | Admin closed auth code | 保持原 EditorState，不创建替代身份 |
+| Admin stored state 损坏或响应 shape 不匹配 | 安全 503 | 不修复、不写 fallback |
+| replace 结果未知 | safe error + 原 request ID | 阻止不同写，等待原 receipt |
+| 写成功但 UI event 发布失败 | 按现有事件日志处理 | 已提交状态不回滚 |
 
-`ChatMessageList.tsx` 中的工具渲染决策：
+## 8. 生命周期与影响范围
 
-```
-isEditorWriteTool(toolName) && !isCompleted
-  → 直接渲染 ToolMessagePart（isManualToolInvocation=true）
-  → ToolMessagePart 内部识别工具名 → 渲染对应专用 ApprovalUI
-```
+公开 Chat 路由在 SSE 前创建 runtime owner；request 包含 EditorState 时会同时创建初始 exact Session grant。Factory 仍先取得 admission lease，再为 active Editor context 启动 broker 和 renewal keeper。纯 Chat 且没有前轮 EditorState 时不启动 listener。
 
-编辑器写工具的 `tool part state` 在等待用户确认时处于 `input-available` 或 `approval-requested`（`isCompleted = false`），此时必须展示确认 UI，阻止 Agent 继续执行。
+SSE 断开只取消订阅，不关闭运行中的 turn。terminal 或 cancel 在 Phase 4 关闭 broker、每个 Session keeper、public Editor client 与 public Runtime client。关闭等待已经进入 broker 的动作结束，不修改 Agent lock、EventBus 或 lease 的既有顺序。
 
-### 6.4 确认提交接口
+本变更影响 Editor MCP persistence、Session switch 和写后缓存刷新。它不改变 Claude Runtime 配置所有权、resource-policy LKG、workspace 文件边界、`CLAUDE_CODE_TMPDIR`、Gateway、Deck、Notion 或其它 MCP。
 
-所有编辑器写工具确认均调用同一个接口：
+## 9. 验收
 
-```
-POST /api/claude-agent/tool-confirm
-Content-Type: application/json
-
-{
-  "thread_id": "{threadId}",
-  "tool_call_id": "{toolCallId}",
-  "approved": true | false,
-  "reason": "{拒绝理由（可选）}"
-}
-```
-
-完整交互时序参见 [`human-agent-collab.md` §8 业务时序图](./human-agent-collab.md#8-业务时序图)。
+- capability：两个 Editor operation 的 exact name/kind/scope/version/hash 必须匹配；
+- auth：创建使用主进程 OAuth + service identity，公开 Editor 调用只用 exact idg；
+- child env：不含 OAuth、service secret、idg、actor、DB、Admin origin；
+- DTO：EditorState closed shape、Session identity、optional/null、finite number、ISO timestamp 与 Admin 一致；
+- recovery：lost response 后相同 input 只查询原 receipt，absent 不重发，committed 恢复；
+- switching：目标 load 成功才更新享元，且每个 Session 使用独立 grant；
+- lifecycle：admission 后启动，disconnect 保持，terminal/cancel 关闭，close 幂等；
+- regression：Editor tool algorithms、确认、SSE event、Runner/service/factory 测试通过；
+- source boundary：`editor_tool.py` 无数据库 import/SQL，Editor stdio 配置无 `DATABASE_URL` 或 actor 投影。

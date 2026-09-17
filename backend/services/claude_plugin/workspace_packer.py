@@ -1,3 +1,7 @@
+# [Input] Immutable Deck plugin metadata plus shared artifact-store and workspace boundaries.
+# [Output] Verified packed plugins, launch manifest, repair receipt and Dream protocol surfaces.
+# [Pos] Dream filesystem executor; fresh-workspace metadata arrives through the Admin DTO loader.
+# [Sync] 2026-09-16: retire the legacy database handle and keep only Registry106 loader input.
 """Pack Deck-referenced plugin artifacts into an agent workspace.
 
 When a Deck Chat workspace is prepared, the packer:
@@ -25,11 +29,10 @@ import logging
 import os
 from pathlib import Path
 import stat
-from typing import Any
+from typing import Callable
 from uuid import uuid4
 
 from . import artifact_store, runtime, workspace_init
-from .package_spec import PackageSpecError, parse_package_spec
 
 logger = logging.getLogger(__name__)
 
@@ -60,96 +63,6 @@ class WorkspacePackError(RuntimeError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
-
-
-def load_deck_plugin_refs(db: Any, deck_id: str) -> list[dict[str, Any]]:
-    """Enabled, ordered plugin installation references for a Deck."""
-    rows = db.execute(
-        """
-        SELECT r.*, i.package_name, i.marketplace,
-               i.status AS installation_status,
-               i.compatibility_json AS installation_compatibility_json
-        FROM deck_claude_plugin_refs r
-        JOIN claude_plugin_installations i ON i.id = r.plugin_installation_id
-        WHERE r.deck_id = %s AND r.enabled = 1
-        ORDER BY r.order_index, r.created_at, r.plugin_installation_id
-        """,
-        (deck_id,),
-    ).fetchall()
-    return [_row_to_dict(row) for row in rows]
-
-
-def _load_server_adapter_refs(
-    db: Any,
-    package_specs: tuple[str, ...],
-) -> list[dict[str, Any]]:
-    """Resolve server-selected adapters to ready, digest-pinned installs.
-
-    These transient references intentionally have the same shape as Deck refs
-    so the immutable pack pipeline can consume both uniformly.  They are never
-    persisted to ``deck_claude_plugin_refs``.
-    """
-
-    refs: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for raw_spec in package_specs:
-        try:
-            spec = parse_package_spec(raw_spec)
-        except PackageSpecError as exc:
-            raise WorkspacePackError(
-                "CLAUDE_PLUGIN_NOT_FOUND",
-                f"server adapter package spec is invalid: {raw_spec!r}",
-            ) from exc
-        canonical = spec.canonical
-        if canonical in seen:
-            continue
-        seen.add(canonical)
-
-        predicates = ["package_name = %s", "marketplace = %s"]
-        params: list[Any] = [spec.package_name, spec.marketplace]
-        if spec.requested_version is not None:
-            predicates.append("resolved_version = %s")
-            params.append(spec.requested_version)
-        rows = db.execute(
-            f"""
-            SELECT * FROM claude_plugin_installations
-            WHERE {' AND '.join(predicates)}
-            ORDER BY installed_at DESC NULLS LAST, created_at DESC, id DESC
-            """,
-            params,
-        ).fetchall()
-        if not rows:
-            raise WorkspacePackError(
-                "CLAUDE_PLUGIN_NOT_FOUND",
-                f"server adapter installation was not found: {canonical}",
-            )
-        ready = next((row for row in rows if row["status"] == "ready"), None)
-        if ready is None:
-            raise WorkspacePackError(
-                "CLAUDE_PLUGIN_NOT_READY",
-                f"server adapter installation is not ready: {canonical} "
-                f"(status={rows[0]['status']})",
-            )
-        row = _row_to_dict(ready)
-        refs.append(
-            {
-                "plugin_installation_id": row["id"],
-                "package_spec": canonical,
-                "resolved_version": row["resolved_version"],
-                "artifact_digest": row["artifact_digest"],
-                "package_name": row["package_name"],
-                "marketplace": row["marketplace"],
-                "installation_status": row["status"],
-                "installation_compatibility_json": row.get(
-                    "compatibility_json", "{}"
-                ),
-            }
-        )
-    return refs
 
 
 def _manifest_entry(
@@ -365,19 +278,17 @@ def _ensure_dream_drama_compatibility(
         os.close(root_fd)
 
 
-def pack_workspace_plugins(
-    db: Any,
+def pack_workspace_plugins_with_refs_loader(
     *,
     workspace: Path,
     deck_id: str | None,
-    server_adapter_package_specs: tuple[str, ...] = (),
+    refs_loader: Callable[[], list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    """Idempotently pack a workspace for its locked Deck.
+    """Pack from one metadata loader, invoked only for a fresh Deck workspace.
 
     Returns the pack receipt.  With no Deck (or no enabled refs) the receipt
-    has an empty plugin list and no manifest is created.  Server-selected
-    adapter package specs are resolved from ready installation records only on
-    the first pack; they never mutate Deck refs or a frozen workspace.
+    has an empty plugin list and no manifest is created. A frozen workspace is
+    validated and repaired before the loader can perform Admin API I/O.
     """
     workspace = Path(workspace).resolve()
     receipt: dict[str, Any] = {
@@ -454,16 +365,7 @@ def pack_workspace_plugins(
         _write_json(workspace / PACK_RECEIPT_RELATIVE_PATH, receipt)
         return receipt
 
-    refs = load_deck_plugin_refs(db, deck_id)
-    package_specs_seen = {str(ref["package_spec"]) for ref in refs}
-    for adapter_ref in _load_server_adapter_refs(
-        db, server_adapter_package_specs
-    ):
-        package_spec = str(adapter_ref["package_spec"])
-        if package_spec in package_specs_seen:
-            continue
-        package_specs_seen.add(package_spec)
-        refs.append(adapter_ref)
+    refs = refs_loader()
     manifest_entries: list[dict[str, Any]] = []
     receipt_entries: list[dict[str, Any]] = []
     init_steps: list[dict[str, Any]] = []

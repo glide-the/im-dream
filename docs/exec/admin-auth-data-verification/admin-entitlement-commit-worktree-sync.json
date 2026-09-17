@@ -1,0 +1,31 @@
+{
+  "command": "git merge --ff-only 7a6e6c966561beeac7724fd77828a9f4ce3b26ec",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "exit_code": 0,
+  "output": "Updating ca681ce..7a6e6c9\nFast-forward\n app/components/admin/.folder.md                    |   2 +\n app/components/admin/AdminResourceManager.tsx      |  21 ++--\n app/components/admin/SubscriptionResourceViews.tsx |   7 +-\n app/lib/subscriptions/.folder.md                   |   2 +\n app/lib/subscriptions/entitlement-create.test.ts   |  86 ++++++++++++++++\n app/lib/subscriptions/publish-readiness.test.ts    | 101 +++++++++++++++++++\n app/lib/subscriptions/service.ts                   |  61 ++++++++++--\n docs/design/modules/03-subscriptions.md            |   8 +-\n docs/prd/modules/03-subscriptions.md               |  17 ++++\n tests/e2e/.folder.md                               |   1 +\n tests/e2e/subscription-entitlement-models.spec.ts  | 108 +++++++++++++++++++++\n 11 files changed, 394 insertions(+), 20 deletions(-)\n create mode 100644 app/lib/subscriptions/entitlement-create.test.ts\n create mode 100644 app/lib/subscriptions/publish-readiness.test.ts\n create mode 100644 tests/e2e/subscription-entitlement-models.spec.ts\n",
+  "source_commit": "7a6e6c966561beeac7724fd77828a9f4ce3b26ec",
+  "target_before": "ca681ce9e3199ac67180d891bab9aea671424c34",
+  "snapshot": "/private/tmp/ink-admin-entitlement-commit-sync-20260915-qf89crht",
+  "protected_dirty_file_count": 273,
+  "changed_file_count": 11,
+  "result": "PASS",
+  "target_after": "7a6e6c966561beeac7724fd77828a9f4ce3b26ec",
+  "target_branch": "codex/admin-auth-data-provider",
+  "protected_dirty": "all 273 original paths bytes/types/modes/status/cached diff unchanged",
+  "source": "HEAD and clean status unchanged",
+  "commit_blobs": "all eleven match exact source commit",
+  "checks": [
+    {
+      "command": "git diff --check",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "git diff --check ca681ce9e3199ac67180d891bab9aea671424c34 7a6e6c966561beeac7724fd77828a9f4ce3b26ec",
+      "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+      "exit_code": 0,
+      "output": ""
+    }
+  ]
+}

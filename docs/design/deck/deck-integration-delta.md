@@ -1,3 +1,7 @@
+<!-- [Input] Current Admin identity/default Workspace profile and existing Deck integration contracts. -->
+<!-- [Output] Current Deck integration workflow with explicit default/role provenance and remaining persistence scope. -->
+<!-- [Pos] Canonical Deck integration design; historical versions remain in Git. -->
+<!-- [Sync] 2026-09-15: public Deck/binding default and role provenance follow registered Admin contracts. -->
 # Deck Integration Canonical 设计 Delta
 
 > **Design ID**: `design_001_deck-integration-delta`
@@ -512,3 +516,17 @@ sequenceDiagram
 ### 16.6 当前 Gate
 
 本节实现完成的是可运行的 development/test 业务闭环，不改变 production Gate：真实 broker/SSE/WebSocket、多节点 runtime、WORM/retention、生产隔离、独立安全 reviewer 与 rollout approval 仍须按生产计划单独验收。不得以本地单测、前端 build 或开发环境 materialization 记录替代生产证据。
+
+## Admin 默认 Workspace 与角色读取
+
+### 背景与问题
+
+Deck binding 和Logical Deck Plugin current-user resolver以前调用Dream默认Workspace SQL，Logical Deck Plugin还读取users.role。主协调要求三个公开resolver使用已验证Admin初始化合同，角色必须来自当前账户，不把user ID当凭据。
+
+### 目标与边界
+
+两resolver与StoryWorkflow共用Admin named ensure；现有bindings/options/history/selection/control-plane provider、权限函数和DTO不改。服务器已有workspace_id/非空role保留。后台、internal输出及其它domain数据库事务独立迁移；本改动不证明CLI/模型/正常业务验收。
+
+### 概念与规则
+
+无服务器Workspace时使用当前immutable OAuth actor/dream:write调用empty workspace-default.ensure；exact identity/unified/version/hash、原textID及unknown原UUID/原GET/no resend沿[共享默认规则](../workflow-preflight-read-current.md#三个公开-current-user-resolver)。默认失败停止后续provider。Logical Deck Plugin缺role时通过既有current profile取得raw role，OAuth dream:read与canonical ID匹配，unavailable/timeout/坏回复明确失败；不以user role补充缺数据。权限和scope函数继续原判断，read-only但需初始化以及write-only但需profile均403，不扩scope或role alias。新tests以实际公开router/OAuth/default/profile/DTO验证流程，仅剩余business provider使用显式DI；oldDB fenced。

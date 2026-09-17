@@ -1,7 +1,8 @@
-<!-- [输入] Dream managed-DB MCP 的前端、API、Service、PostgreSQL、标准 MCP Client、OAuth、Claude Agent SDK/Runtime 与真实验收事实。 -->
+<!-- [输入] Dream MCP 前端/Runtime、Admin Data API/Drizzle、标准 MCP Client、OAuth 与真实验收事实。 -->
 <!-- [输出] 面向产品、前端、后端、QA 和运维的中文 MCP 业务交互时序图集。 -->
 <!-- [定位] dream-managed-mcp-resources.md 的业务流程伴随文档；主设计稿继续拥有数据、协议、安全和迁移合同。 -->
 <!-- [同步] 2026-08-25：按已实现的详情自动 force=false inventory、后端认证判定、OAuth 自动 callback、Chat 快照注入和零管理 CLI 路径整理。 -->
+<!-- [同步] 2026-09-16：所有持久化图改为 Dream strict DTO → Admin typed Drizzle → PostgreSQL，Dream 不再直连数据库。 -->
 
 # Dream 托管 MCP 业务交互时序图
 
@@ -13,10 +14,11 @@
 |---|---|
 | Resources UI | Dream 设置中的 MCP Server 列表与详情页 |
 | Dream API | actor 鉴权后的公开 /api/claude-mcp 接口 |
-| MCP Service | Server CRUD、状态聚合、缓存失效与错误 DTO 边界 |
+| MCP Service | Dream 产品状态聚合、标准 MCP discovery/OAuth 与错误 DTO 边界 |
+| Admin Data API | strict Zod DTO、当前主体/Thread/Run 权限、Server CRUD、CAS、事务与 receipt |
 | Inventory Service | 复用标准 MCP Client 执行 initialize 和 tools/resources/prompts discovery |
 | Runtime | 仅执行 Chat turn；不作为 Dream MCP 管理数据库 |
-| PostgreSQL | MCP Server、加密凭据、inventory snapshot 和导入回执的唯一事实来源 |
+| Admin PostgreSQL | MCP Server、加密凭据、inventory snapshot 和导入回执的唯一持久事实；仅 Admin Drizzle 访问 |
 | inventory snapshot | 某一 config revision + credential revision 下的 tools/resources/prompts 脱敏发现结果 |
 | runtime config snapshot | 某个 Chat turn 读取的 enabled Server 配置与 credential refs/revisions；不等于 inventory snapshot |
 | single-flight | 同一 actor、Server 和 revision 组合的并发 discovery 只执行一次远端连接，其余请求共享结果 |
@@ -29,15 +31,15 @@
 
 | 场景 | 用户看到的结果 | 关键约束 |
 |---|---|---|
-| Resources 列表 | Server 配置立即展示 | 只查数据库；零远端 MCP 连接 |
+| Resources 列表 | Server 配置立即展示 | Dream 调 Admin DTO；零远端 MCP 连接 |
 | Server 详情 | 自动出现 Tools、Resources、Prompts | 自动 force=false；缓存优先；无刷新按钮 |
 | 新增 Server | 只填写名称、transport 和 URL/profile | 后端连接后判断匿名或 OAuth |
 | OAuth | Provider 授权完成后自动返回 Dream | 无复制 callback 地址或授权码 |
 | 修改/删除/logout | 状态与 inventory 自动更新 | CAS revision；精确失效 credential/snapshot |
 | 多 Server discovery | 成功项正常展示，失败项独立报错 | 有界并行；单 Server 失败不阻塞兄弟 |
-| Chat/workspace | Agent 使用数据库中的 MCP 工具 | 每 turn 读取一致快照；临时投影 finally 删除 |
+| Chat/workspace | Agent 使用 Admin 返回的 MCP 配置 | 每 turn 用 server-persistence grant 读取一致快照；临时投影 finally 删除 |
 | cancel/resume | 停止当前操作，后续同 Thread 可继续 | resume Agent session，不恢复旧 MCP ClientSession |
-| 旧配置迁移 | 显式导入一次，正常页面只读数据库 | 幂等 receipt；不调用 CLI；不覆盖较新配置 |
+| 旧配置迁移 | 显式导入一次，正常页面调用 Admin | OAuth principal 派生 actor；幂等 receipt；不调用 CLI；不覆盖较新配置 |
 
 ## 3. 历史慢路径：页面加载触发 11 + N 个管理子进程
 
@@ -68,7 +70,7 @@ sequenceDiagram
     Note over S,CLI: 管理页总计 11 + N 个 CLI 子进程
 ~~~
 
-## 4. Server 列表：数据库快速返回
+## 4. Server 列表：Admin DTO 快速返回
 
 ~~~mermaid
 sequenceDiagram
@@ -77,20 +79,25 @@ sequenceDiagram
     participant UI as Resources UI
     participant API as Dream API
     participant S as MCP Service
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
 
     U->>UI: 进入 Resources 页面
     par 页面能力
         UI->>API: GET /capability
         API->>S: 校验 capability
-        S->>DB: 首次校验精确 schema capability
-        DB-->>S: available
+        S->>Admin: 首次校验精确 schema capability
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
+        DB-->>Admin: committed rows/result
+        Admin-->>S: available
         S-->>UI: managed_db
     and Server 列表
         UI->>API: GET /servers
         API->>S: list_servers(actor)
-        S->>DB: 查询 actor 可见 Server 与凭据状态
-        DB-->>S: Server rows
+        S->>Admin: 查询 actor 可见 Server 与凭据状态
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
+        DB-->>Admin: committed rows/result
+        Admin-->>S: Server rows
         S-->>UI: ServerDTO[]
     end
     UI-->>U: 立即展示 Server 卡片
@@ -106,7 +113,8 @@ sequenceDiagram
     participant UI as Server 详情页
     participant API as Dream API
     participant S as MCP Service
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant D as Inventory Service
     participant C as 标准 MCP Client
     participant M as MCP Server
@@ -114,15 +122,19 @@ sequenceDiagram
     U->>UI: 点击管理与工具
     UI->>API: GET /capability + GET /servers/{id}
     API->>S: actor-scoped get
-    S->>DB: 读取 Server 与 credential revision
-    DB-->>S: 当前 ServerDTO
+    S->>Admin: 读取 Server 与 credential revision
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    DB-->>Admin: committed rows/result
+    Admin-->>S: 当前 ServerDTO
     S-->>UI: ServerDTO
     UI-->>U: 先展示配置、连接和 inventory 加载状态
     UI->>API: 自动 POST /servers/{id}/discoveries<br/>force=false
     API->>D: discover(actor, server id)
-    D->>DB: 原子读取当前配置与 config/credential revisions<br/>并查相同 revisions 的有效 snapshot
+    D->>Admin: 原子读取当前配置与 config/credential revisions<br/>并查相同 revisions 的有效 snapshot
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     alt revisions 匹配且 snapshot 未过期
-        DB-->>D: cached inventory
+        DB-->>Admin: committed rows/result
+        Admin-->>D: cached inventory
         D-->>UI: DiscoveryDTO cached=true
     else 无有效 snapshot
         D->>C: 创建请求内 ClientSession
@@ -138,7 +150,8 @@ sequenceDiagram
             M-->>C: prompts
         end
         C-->>D: 聚合 inventory
-        D->>DB: 保存 revisions 绑定的安全 snapshot
+        D->>Admin: 保存 revisions 绑定的安全 snapshot
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         D-->>UI: DiscoveryDTO cached=false
     end
     UI-->>U: 自动展示 Tools、Resources、Prompts
@@ -155,7 +168,8 @@ sequenceDiagram
     participant UI as Resources UI
     participant API as Dream API
     participant S as MCP Service
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant D as Inventory Service
     participant M as MCP Server
 
@@ -163,19 +177,23 @@ sequenceDiagram
     Note over U,UI: 不选择认证方式，不输入任意 stdio command/env
     UI->>API: POST /servers
     API->>S: 校验 actor、URL/SSRF、transport/profile
-    S->>DB: INSERT Server revision=1
-    DB-->>UI: configured
+    S->>Admin: INSERT Server revision=1
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    DB-->>Admin: committed rows/result
+    Admin-->>UI: configured
     U->>UI: 打开 Server 详情
     UI->>API: 自动 POST discovery force=false
     API->>D: 使用标准 MCP Client 连接
     alt 匿名 initialize 成功
         D->>M: list tools/resources/prompts
         M-->>D: inventory
-        D->>DB: 保持 auth_kind=none + 保存 snapshot
+        D->>Admin: 保持 auth_kind=none + 保存 snapshot
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         D-->>UI: connected / anonymous
         UI-->>U: 自动展示 inventory，不显示 OAuth 动作
     else 标准 credential-required 或已验证 OAuth challenge
-        D->>DB: CAS auth_kind=oauth
+        D->>Admin: CAS auth_kind=oauth
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         D-->>UI: needs_auth / required
         UI-->>U: 显示开始认证
     else timeout、不可达或非法响应
@@ -195,7 +213,8 @@ sequenceDiagram
     participant O as OAuth Coordinator
     participant P as OAuth Provider
     participant CB as Dream 同源 callback SPA
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant D as Inventory Service
 
     U->>UI: 点击开始认证
@@ -214,10 +233,13 @@ sequenceDiagram
     API->>O: 校验 actor、state、PKCE、expiry
     O->>P: exchange token
     P-->>O: access/refresh token
-    O->>DB: AES-GCM 加密凭据<br/>credential revision++
-    O->>DB: 失效旧 inventory snapshot
+    O->>Admin: AES-GCM 加密凭据<br/>credential revision++
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    O->>Admin: 失效旧 inventory snapshot
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     O->>D: 完成认证后的 discovery
-    D->>DB: 保存新 revision inventory
+    D->>Admin: 保存新 revision inventory
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     loop operation 为 active
         UI->>API: GET /auth-operations/{operationId}
         API->>O: 查询 actor-owned operation
@@ -237,18 +259,22 @@ sequenceDiagram
     participant UI as Server 详情页
     participant API as Dream API
     participant S as MCP Service
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant D as Inventory Service
 
     alt 修改显示名称或连接配置
         U->>UI: 保存配置
         UI->>API: PATCH /servers/{id}<br/>expected_revision
         API->>S: actor + CAS update
-        S->>DB: SELECT FOR UPDATE
+        S->>Admin: SELECT FOR UPDATE
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         alt revision 匹配
-            S->>DB: revision++，失效 snapshot
+            S->>Admin: revision++，失效 snapshot
+            Admin->>DB: typed Drizzle ORM + ownership/transaction
             opt endpoint/transport 等安全字段变化
-                S->>DB: 删除/失效 Dream 本地密文凭据<br/>credential revision++
+                S->>Admin: 删除/失效 Dream 本地密文凭据<br/>credential revision++
+                Admin->>DB: typed Drizzle ORM + ownership/transaction
             end
             S-->>UI: 新 ServerDTO
             UI->>API: 自动 discovery force=false
@@ -260,7 +286,8 @@ sequenceDiagram
     else logout
         U->>UI: 点击退出认证
         UI->>API: DELETE /servers/{id}/credential
-        S->>DB: 删除密文凭据 + credential revision++<br/>失效 snapshot
+        S->>Admin: 删除密文凭据 + credential revision++<br/>失效 snapshot
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         S-->>UI: logged_out
         UI->>API: 自动 discovery force=false
         alt Server 仍允许匿名访问
@@ -271,8 +298,10 @@ sequenceDiagram
     else 删除 Server
         U->>UI: 确认移除
         UI->>API: DELETE /servers/{id}?expected_revision
-        S->>DB: actor-owned CAS delete
-        DB-->>S: cascade credential/snapshot
+        S->>Admin: actor-owned CAS delete
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
+        DB-->>Admin: committed rows/result
+        Admin-->>S: cascade credential/snapshot
         S-->>UI: removed
         UI-->>U: 返回数据库 Server 列表
     end
@@ -288,15 +317,18 @@ sequenceDiagram
     participant C as API 调用方
     participant API as Dream API
     participant D as Discovery Coordinator
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant A as Server A
     participant B as Server B
     participant N as Server N
 
     C->>API: POST /discoveries {server_ids}
     API->>D: actor-scoped bulk request
-    D->>DB: 一次读取配置、凭据引用和 revisions
-    DB-->>D: detached inputs
+    D->>Admin: 一次读取配置、凭据引用和 revisions
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
+    DB-->>Admin: committed rows/result
+    Admin-->>D: detached inputs
     par semaphore slot 1
         D->>A: initialize + list capabilities
         A-->>D: success inventory
@@ -307,14 +339,15 @@ sequenceDiagram
         D->>N: initialize + list capabilities
         N-->>D: success inventory
     end
-    D->>DB: 分别保存成功 snapshot 与安全错误
+    D->>Admin: 分别保存成功 snapshot 与安全错误
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     D-->>API: complete / partial / failed + per-item DTO
     API-->>C: A、N 正常；B 独立失败
     Note over D,N: 单 Server 失败不取消兄弟；同 revision 请求 single-flight
     Note over C,N: 聚合请求等待每项成功、失败或独立 timeout 后返回，不无限等待
 ~~~
 
-## 10. Chat/workspace：每个 turn 从数据库投影 MCP 配置
+## 10. Chat/workspace：每个 turn 从 Admin DTO 投影 MCP 配置
 
 ~~~mermaid
 sequenceDiagram
@@ -322,7 +355,8 @@ sequenceDiagram
     actor U as 用户
     participant UI as Dream Chat UI
     participant API as Dream Chat API
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant L as MCP Snapshot Loader
     participant R as Agent Runner
     participant SDK as Claude Agent SDK
@@ -331,9 +365,11 @@ sequenceDiagram
 
     U->>UI: 发送新 turn 或继续同 Thread
     UI->>API: Chat request<br/>不携带 MCP secret/config
-    API->>DB: 校验 actor、Thread、Deck/workspace
+    API->>Admin: 校验 actor、Thread、Deck/workspace
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     API->>L: load enabled MCP snapshot
-    L->>DB: 读取 Server + credential refs/revisions
+    L->>Admin: 读取 Server + credential refs/revisions
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     L->>L: 内存解密并生成 detached mcp_servers
     L-->>R: AgentRunOptions
     R->>R: 合并内置 Server并检查名称冲突
@@ -351,7 +387,7 @@ sequenceDiagram
     UI-->>U: 可见结果
     R->>R: finally 删除临时配置
     end
-    Note over DB,RT: 数据库是配置真相源；Runtime 不执行 MCP 管理 list/get
+    Note over Admin,RT: 数据库是配置真相源；Runtime 不执行 MCP 管理 list/get
     Note over U,RT: 普通连续对话和异常恢复都在每个 turn 重读 runtime config snapshot
 ~~~
 
@@ -365,7 +401,8 @@ sequenceDiagram
     participant API as Dream API
     participant S as ClaudeAgentService
     participant RT as Runtime
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant M as MCP Server
 
     alt 用户停止正在运行的 Chat turn
@@ -374,15 +411,18 @@ sequenceDiagram
         API->>S: cancel 当前 bg_task
         S->>RT: interrupt/cancel
         RT->>M: 发送协议 cancel 或关闭当前连接
-        S->>DB: 持久化安全终态与已有 partial parts
+        S->>Admin: 持久化安全终态与已有 partial parts
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         S-->>UI: running=false / idle
     else Runtime 异常退出
         RT--xS: process exited
-        S->>DB: 记录安全错误与 Thread 状态
+        S->>Admin: 记录安全错误与 Thread 状态
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         S-->>UI: 可恢复错误
         U->>UI: 在同 Thread 继续对话
         UI->>API: resume turn
-        API->>DB: 重新读取最新 MCP revisions
+        API->>Admin: 重新读取最新 MCP revisions
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
         API->>RT: 新 Runtime + 既有 Claude session id
         RT->>M: 新建 MCP ClientSession
         RT-->>UI: SSE 继续输出
@@ -399,23 +439,30 @@ sequenceDiagram
     actor O as 操作员
     participant I as 一次性 Importer
     participant F as 明确提供的旧配置文件
-    participant DB as PostgreSQL
+    participant Admin as Admin Data API
+    participant DB as Admin PostgreSQL
     participant UI as Dream Resources
 
     O->>I: 指定 actor + bounded manifest
     I->>F: 只读文件，不启动 Claude CLI
     I->>I: canonicalize、拒绝 secret、计算 hash
-    I->>DB: 查询 import receipt 与目标 revision
+    I->>Admin: 查询 import receipt 与目标 revision
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     alt 相同 source/config hash 已成功
-        DB-->>I: unchanged / no-op
+        DB-->>Admin: committed rows/result
+        Admin-->>I: unchanged / no-op
     else 数据库已有更新配置
-        DB-->>I: conflict / 不覆盖
+        DB-->>Admin: committed rows/result
+        Admin-->>I: conflict / 不覆盖
     else 可安全导入
-        I->>DB: transaction insert Server + receipt
-        DB-->>I: imported
+        I->>Admin: transaction insert Server + receipt
+        Admin->>DB: typed Drizzle ORM + ownership/transaction
+        DB-->>Admin: committed rows/result
+        Admin-->>I: imported
     end
     I-->>O: 脱敏结果
-    UI->>DB: 正常页面只读 managed-DB 配置
+    UI->>Admin: 正常页面只读 managed-DB 配置
+    Admin->>DB: typed Drizzle ORM + ownership/transaction
     Note over F,UI: cutover 后业务页面永不读取旧 CLI 配置
 ~~~
 

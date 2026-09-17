@@ -1,8 +1,10 @@
-// [Input] Story Workspace workflow REST/SSE contracts and the current auth token.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Story Workspace workflow REST/SSE contracts and the current Browser session.
 // [Output] Typed, authenticated API helpers, including canonical-first Dream display titles.
 // [Pos] Story Workspace workflow API client; it never derives authoritative workflow state locally.
 // [Sync] 2026-08-14: validate Dream's server-owned initial/in-progress outcome projection.
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 import type {
   StoryWorkspaceDreamLaunchAccepted,
@@ -169,7 +171,7 @@ export const storyWorkspaceDreamRunsEndpoint = '/api/story-workspace/dream-runs'
 
 export interface StoryWorkspaceDreamLaunchRequestOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
   /** Full runtime URL override; the pure transport otherwise uses the relative path. */
   endpoint?: string;
@@ -189,8 +191,8 @@ export class StoryWorkspaceApiError extends Error {
 
 function authHeaders(hasBody: boolean): Headers {
   const headers = new Headers({ Accept: 'application/json' });
-  const token = getAuthToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = getBrowserCsrfToken();
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   if (hasBody) headers.set('Content-Type', 'application/json');
   return headers;
 }
@@ -253,8 +255,8 @@ export async function storyWorkspaceStartDreamRun(
     Accept: 'application/json',
     'Content-Type': 'application/json',
   });
-  const token = options.token === undefined ? getAuthToken() : options.token;
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken;
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   const response = await (options.fetchImpl ?? fetch)(
     options.endpoint ?? apiUrl(storyWorkspaceDreamLaunchEndpoint),
     {
@@ -456,15 +458,15 @@ export interface StoryWorkspaceDreamRunsRequestOptions {
   endpoint?: string;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
-  token?: string | null;
+  csrfToken?: string | null;
 }
 
 export async function storyWorkspaceFetchDreamRuns(
   options: StoryWorkspaceDreamRunsRequestOptions = {},
 ): Promise<StoryWorkspaceDreamReentryCollection> {
   const headers = new Headers({ Accept: 'application/json' });
-  const token = options.token === undefined ? getAuthToken() : options.token;
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken;
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   const response = await (options.fetchImpl ?? fetch)(
     options.endpoint ?? apiUrl(storyWorkspaceDreamRunsEndpoint),
     {

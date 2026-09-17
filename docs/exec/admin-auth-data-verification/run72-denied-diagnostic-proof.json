@@ -1,0 +1,20 @@
+{
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "cases": [
+    {
+      "label": "missing-token",
+      "status": 401,
+      "code": "ACCESS_TOKEN_REQUIRED",
+      "expected_status": 401,
+      "expected_code": null
+    },
+    {
+      "label": "readonly-token",
+      "status": 403,
+      "code": "ACCESS_SCOPE_REQUIRED",
+      "expected_status": 403,
+      "expected_code": "DREAM_SCOPE_REQUIRED"
+    }
+  ],
+  "normal_database": "untouched"
+}

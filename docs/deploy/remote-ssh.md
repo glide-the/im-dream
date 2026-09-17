@@ -13,6 +13,7 @@
 [Sync] 2026-08-31: remove the deleted legacy models.json prerequisite.
 [Sync] 2026-09-06: align the frontend container with Next standalone and mark legacy VITE/SQLite script drift.
 [Sync] 2026-09-12: link the explicit, recoverable NATAPP edge-relay switch without changing the Compose release path.
+[Sync] 2026-09-16: replace retired FastAPI Google/session-cookie projection with Admin OAuth and a server-only Next BFF handle.
 -->
 
 阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
@@ -88,10 +89,10 @@ Internet :80/:443
 - 主机 nginx 上游由 `setup-nginx` 根据 `REMOTE_BACKEND_PORT` / `REMOTE_FRONTEND_PORT` 渲染，端口覆盖时不会继续使用静态默认值。
 - 后端容器内部 `PORT` 默认固定为 `REMOTE_BACKEND_CONTAINER_PORT=8765`，避免 `backend/.env` 中的 `PORT` 让 uvicorn 监听端口与 Compose 映射脱节。
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
-- 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
+- 浏览器从Dream `/auth/start`进入Admin授权页，callback只回到`https://ink-frontend.suoxya.com/auth/callback`；旧FastAPI `/api/login`固定返回410迁移响应。
 - `BACKEND_URL=http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT}` 由前端容器入口投影为 `INK_BACKEND_INTERNAL_URL`，供 Next rewrite fallback 使用。
-- 后端 `WEBUI_URL` 默认为 `https://ink-frontend.suoxya.com`，`API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`，用于 Google OAuth callback 和登录成功跳转。
-- 后端生产 cookie 默认 `COOKIE_SECURE=true`、`COOKIE_SAMESITE=none`，CORS 默认只允许 `https://ink-frontend.suoxya.com` 且 `INK_CORS_ALLOW_CREDENTIALS=true`。
+- Dream FastAPI使用`DREAM_GATEWAY_ORIGIN/api/auth`校验Admin签发的目标access token；Google callback、Better Auth Session和OAuth/Device token authority全部位于Admin。
+- Next BFF使用独立`DREAM_BFF_COOKIE_SECRET`维护host-only HttpOnly handle；FastAPI不安装SessionMiddleware，也不读取旧Dream Google/JWT/Session/OAuth secret或Cookie策略。CORS默认只允许`https://ink-frontend.suoxya.com`且`INK_CORS_ALLOW_CREDENTIALS=true`。
 
 ## 常用配置
 
@@ -125,9 +126,7 @@ Internet :80/:443
 | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` | 前端公网 origin |
 | `REMOTE_API_BASE_URL` | `REMOTE_BACKEND_PUBLIC_ORIGIN` | 前端 runtime API base URL |
 | `REMOTE_CORS_ALLOW_ORIGINS` | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | 后端 CORS allowlist |
-| `REMOTE_CORS_ALLOW_CREDENTIALS` | `true` | 前后端分域 OAuth cookie 登录需要 |
-| `REMOTE_COOKIE_SECURE` | `true` | 生产 HTTPS cookie Secure |
-| `REMOTE_COOKIE_SAMESITE` | `none` | 前后端分域 cookie 策略 |
+| `REMOTE_CORS_ALLOW_CREDENTIALS` | `true` | 允许已配置Dream origin调用FastAPI；不能替代OAuth校验 |
 | `REMOTE_CLASH_CONFIG_FILE` | `../../deploy/clash/config.yaml` | Mihomo 配置文件，路径相对 `deploy/remote-ssh/docker-compose.yml` 解析 |
 | `REMOTE_CLASH_IMAGE` | `metacubex/mihomo:latest` | Mihomo TUN 容器镜像 |
 | `REMOTE_SYNC_DATA` | `0` | 代码部署默认不上传本地 `backend/data/` |
@@ -150,21 +149,21 @@ export REMOTE_CORS_ALLOW_ORIGINS=${REMOTE_FRONTEND_PUBLIC_ORIGIN}
 ./deploy/remote-ssh/deploy.sh deploy
 ```
 
-Google Console 必须配置：
+Google Console配置属于Admin Better Auth；Dream发布只校验下列Admin注册信息：
 
 ```text
 Authorized JavaScript origins:
-  https://ink-frontend.suoxya.com
+  https://ink-admin.suoxya.com
 
 Authorized redirect URIs:
-  https://ink-backend.suoxya.com/oauth/google/callback
+  https://ink-admin.suoxya.com/api/auth/callback/google
 ```
 
 发布后验证：
 
 ```bash
 curl -I https://ink-backend.suoxya.com/api/health
-curl -I 'https://ink-backend.suoxya.com/oauth/google/login?return_to=/'
+curl -I https://ink-frontend.suoxya.com/auth/start
 curl -I https://ink-frontend.suoxya.com/runtime-config.js
 ```
 
@@ -209,7 +208,7 @@ REMOTE_BUILD_PULL=1 ./deploy/remote-ssh/deploy.sh deploy
 
 ## 数据维护
 
-> 本节的 `backend/data` SQLite 同步是脚本残留，不是当前共享业务数据合同。阿里云/真实业务路径必须使用 Admin-owned PostgreSQL 及其备份/恢复流程，见 [aliyun.md](aliyun.md)。在 `deploy/remote-ssh/sync-data.sh` 迁移前，不得对真实业务执行下列 SQLite upload/download 操作。
+> `backend/data`只同步非数据库运行文件。`sync-data.sh upload`会拒绝SQLite/WAL/SHM；共享业务数据必须使用Admin-owned PostgreSQL及其备份/恢复流程，见[aliyun.md](aliyun.md)。
 
 `deploy` 默认保护远端数据：`REMOTE_SYNC_DATA=0` 时不会 rsync 本地 `backend/data/` 到服务器。
 
@@ -228,7 +227,7 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
 ```
 
 `sync-data` 会先执行远端数据备份，再上传本地 `backend/data/`，最后在远端执行
-`docker-compose up -d --force-recreate`，让后端重新加载上传后的 SQLite 数据库。
+`docker-compose up -d --force-recreate`，让后端重新加载上传后的非数据库运行文件。
 
 需要把远端 `backend/data/` 下载回本地时：
 
@@ -239,7 +238,7 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
 `download-data` 会先把当前本地 `backend/data/` 备份到
 `backend/data/bak_local_YYYYMMDD_HHMMSS/`，再下载远端数据到本地目录。
 
-上述命令只记录旧脚本行为，不属于当前发布验收。
+这些命令不迁移、备份或恢复业务数据库；任何SQLite文件都会在upload前被拒绝。
 
 也可以直接调用底层脚本：
 

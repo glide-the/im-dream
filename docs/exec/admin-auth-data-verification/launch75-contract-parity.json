@@ -1,0 +1,59 @@
+{
+  "result": "PASS",
+  "operations": 75,
+  "prior_72_full_descriptors_unchanged": true,
+  "original_preflight_receipt_bytes_unchanged": true,
+  "special_delegation_artifact_bytes_unchanged": true,
+  "new_operations": [
+    {
+      "name": "dream-launch-source.ensure",
+      "contract_sha256": "cb498be127a6aca92c9e6e0cde099c9c80cf78ca2486186e9d043457c2263503",
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        }
+      ]
+    },
+    {
+      "name": "dream-launch-dispatch.claim",
+      "contract_sha256": "958549a9bfe4b02d8b31e1e538c81ffad020bb4525a328f542f865b377e8ec43",
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        }
+      ]
+    },
+    {
+      "name": "dream-launch-dispatch.finish",
+      "contract_sha256": "5aa3b738bef5319ee705f5851d83588e1d18dcaf37bdc5789267494fec480f2e",
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        }
+      ]
+    }
+  ],
+  "public_launch_components": "pending primary-owned isolated public validation",
+  "full_launch": "prepare/failure/Runtime still pending"
+}

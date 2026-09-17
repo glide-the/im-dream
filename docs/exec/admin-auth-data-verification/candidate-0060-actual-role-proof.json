@@ -1,0 +1,127 @@
+{
+  "result": "PASS",
+  "database": "ink_auth_data_codex_test_792494523a17_pf61_upgrade",
+  "port": 51534,
+  "data_directory": "/private/tmp/ink-auth-data-migration-20260914-792494523a17/postgres",
+  "ledger": 61,
+  "actual_role_queries": 15,
+  "outcomes": [
+    {
+      "role": "data",
+      "label": "immutable PF binding read",
+      "result": "allowed"
+    },
+    {
+      "role": "data",
+      "label": "immutable PF binding INSERT",
+      "result": "allowed"
+    },
+    {
+      "role": "data",
+      "label": "data denied UPDATE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied DELETE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied TRUNCATE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "data denied guard function EXECUTE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "auth",
+      "label": "other role denied request read",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "auth",
+      "label": "other role denied request insert",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "control",
+      "label": "other role denied request read",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "control",
+      "label": "other role denied request insert",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "Admin model permission denied INSERT",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "Admin model permission denied UPDATE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "Admin model permission denied DELETE",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "data",
+      "label": "signing private-key denial",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": true
+    },
+    {
+      "role": "dream",
+      "label": "Dream database CONNECT denied",
+      "result": "denied",
+      "sqlstate": "42501",
+      "actual_connection": false
+    }
+  ],
+  "data_rights": {
+    "read": true,
+    "insert": true,
+    "update": false,
+    "delete": false,
+    "truncate": false,
+    "guard_execute": false
+  },
+  "dream_rights": {
+    "connect": false,
+    "schema": false,
+    "request_read": false
+  },
+  "normal_database": "untouched",
+  "direct_writes": "only newly identified immutable request fixtures on actual limited data connections; remaining final4 queries perform no write",
+  "harness_correction": "initial mode-precedence error before DB; next probe UPDATE used nonexistent user_id column and got42703 before ACL checking; retained11 prior actual queries, tested actual catalog column UPDATE42501 and remaining3 only"
+}

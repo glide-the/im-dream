@@ -1,6 +1,6 @@
-"""Actor-scoped orchestration for database-managed MCP resources.
+"""Actor-scoped orchestration for Admin-managed MCP resources.
 
-[Input] Injected PostgreSQL repository, standard-MCP discovery, OAuth coordinator, and policy.
+[Input] Injected Admin DTO repository, standard-MCP discovery, OAuth coordinator, and policy.
 [Output] Safe CRUD, capability, discovery, OAuth, logout, and legacy-compatible DTO projections.
 [Pos] Managed MCP application service; no CLI, subprocess, filesystem config, or runtime DDL.
 [Sync] 2026-08-25: replace online CLI management with exact-capability managed PostgreSQL flow.
@@ -12,6 +12,7 @@
 [Sync] 2026-09-06: compose actor desired App settings with server policy and current descriptor availability.
 [Sync] 2026-09-06: let the server-owned App-callable list classify tools whose optional MCP risk hints are absent, while explicit unsafe hints still veto.
 [Sync] 2026-09-06: refresh an expired App inventory through the existing bounded discovery single-flight before declaring the connection unavailable.
+[Sync] 2026-09-16: compose the managed-MCP domain with the shared AdminDataClient instead of PostgreSQL.
 """
 
 from __future__ import annotations
@@ -94,20 +95,18 @@ class ClaudeMcpService:
         oauth: Any,
         runtime_snapshot_loader: Any = None,
         mcp_apps_policy_provider: Any = None,
-        pool: Any = None,
     ) -> None:
         self.repository = repository
         self.discovery = discovery
         self.oauth = oauth
         self.runtime_snapshot_loader = runtime_snapshot_loader
         self.mcp_apps_policy_provider = mcp_apps_policy_provider
-        self._pool = pool
 
     async def _require_capability(self) -> None:
         if not await self.repository.capability_available():
             raise ClaudeMcpError(
                 ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING,
-                "Managed MCP database capability is unavailable.",
+                "Managed MCP Admin schema capability is unavailable.",
             )
 
     async def _require_app_settings_capability(self) -> None:
@@ -722,8 +721,6 @@ class ClaudeMcpService:
 
     async def shutdown(self) -> None:
         await self.oauth.shutdown()
-        if self._pool is not None:
-            self._pool.close()
 
 
 class _UnavailableOAuthCoordinator:
@@ -764,8 +761,8 @@ def _mcp_apps_policy_from_env() -> McpAppsRuntimePolicy:
         ) from exc
 
 
-def build_default_claude_mcp_service() -> ClaudeMcpService:
-    """Open and inject the production PostgreSQL/MCP dependencies explicitly."""
+def build_default_claude_mcp_service(admin_data_client: Any) -> ClaudeMcpService:
+    """Inject the shared Admin DTO client and Dream-owned MCP dependencies."""
     from .crypto import McpCredentialCipher, McpCredentialConfigurationError
     from .inventory import (
         McpDiscoveryCoordinator,
@@ -774,18 +771,11 @@ def build_default_claude_mcp_service() -> ClaudeMcpService:
         StdioProfileResolver,
     )
     from .oauth import ManagedMcpAuthResolver, ManagedMcpOAuthCoordinator
-    from .repository import PostgresMcpRepository
+    from .repository import AdminManagedMcpRepository
     from .runtime_snapshot import ManagedMcpRuntimeSnapshotLoader
     from .settings import ClaudeMcpSettings
-    try:
-        from backend.persistence.postgres import PostgresPool
-    except ModuleNotFoundError:  # pragma: no cover
-        from persistence.postgres import PostgresPool
-
     settings = ClaudeMcpSettings.from_env()
-    pool = PostgresPool.from_env(application_name="ink-dream-managed-mcp")
-    pool.open()
-    repository = PostgresMcpRepository(pool)
+    repository = AdminManagedMcpRepository(admin_data_client)
     try:
         cipher = McpCredentialCipher.from_env()
     except McpCredentialConfigurationError:
@@ -861,15 +851,24 @@ def build_default_claude_mcp_service() -> ClaudeMcpService:
         oauth=oauth,
         runtime_snapshot_loader=runtime_snapshot_loader,
         mcp_apps_policy_provider=_mcp_apps_policy_from_env,
-        pool=pool,
     )
+
+
+def configure_default_claude_mcp_service(admin_data_client: Any) -> ClaudeMcpService:
+    """Bind the process singleton to the application-owned Admin client once."""
+
+    global _default_service
+    if _default_service is None:
+        _default_service = build_default_claude_mcp_service(admin_data_client)
+    elif _default_service.repository.admin_client is not admin_data_client:
+        raise RuntimeError("Managed MCP service already uses another Admin client.")
+    return _default_service
 
 
 def get_default_claude_mcp_service() -> ClaudeMcpService:
     """Return the process singleton shared by Router and Chat integration."""
-    global _default_service
     if _default_service is None:
-        _default_service = build_default_claude_mcp_service()
+        raise RuntimeError("Managed MCP service has not been configured.")
     return _default_service
 
 
@@ -888,6 +887,7 @@ async def shutdown_default_claude_mcp_service() -> None:
 __all__ = [
     "ClaudeMcpService",
     "build_default_claude_mcp_service",
+    "configure_default_claude_mcp_service",
     "get_default_claude_mcp_service",
     "get_default_managed_mcp_runtime_snapshot_loader",
     "shutdown_default_claude_mcp_service",

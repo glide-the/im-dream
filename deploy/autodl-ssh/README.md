@@ -1,5 +1,5 @@
 <!-- [Input] AutoDL direct-host scripts, current Next.js/pnpm source, and deployment safety contracts. -->
-<!-- [Output] Current release, runtime, safety, verification, and rollback procedure. -->
+<!-- [Output] Current release, runtime, safety, candidate-smoke, atomic-switch, and verification procedure. -->
 <!-- [Pos] AutoDL Dream operator guide for the canonical Next.js/FastAPI topology. -->
 <!-- [Sync] 2026-09-06: migrate AutoDL to Next.js standalone, frozen pnpm, and the Node MCP Apps runtime. -->
 <!-- [Sync] 2026-09-11: restore public-origin discovery through the AutoDL-injected AutoDLService6006URL/AutoDLService6008URL mappings. -->
@@ -18,8 +18,8 @@ Dream uses Next.js on `127.0.0.1:6006` and FastAPI on
 same-origin API/auth routes to FastAPI. The standalone launcher uses `screen`
 and does not install Docker or Nginx.
 
-`prepare-env.sh` combines the backend runtime configuration, Admin-owned
-PostgreSQL identity, and a private MCP Apps env file. MCP Apps iframe content
+`prepare-env.sh` combines the backend runtime configuration, Admin API
+configuration, and a private MCP Apps env file. It strips database keys. MCP Apps iframe content
 must use a separate HTTPS origin routed to the same port 6006 Next service;
 the parent origin remains the primary Dream HTTPS origin.
 
@@ -51,8 +51,7 @@ Create gitignored `platform.env` from `platform.env.example`, then project the
 runtime env and deploy:
 
 ```bash
-AUTODL_ADMIN_ENV_FILE=../ink-admin-memory/deploy/autodl-ssh/.env \
-  ./deploy/autodl-ssh/prepare-env.sh
+./deploy/autodl-ssh/prepare-env.sh
 ./deploy/autodl-ssh/test-topology.sh
 ./deploy/autodl-ssh/deploy.sh check
 ./deploy/autodl-ssh/deploy.sh deploy
@@ -65,15 +64,18 @@ public health gates pass.
 
 ## Safety and acceptance
 
-- Dream consumes the Admin-owned PostgreSQL schema and never runs migration,
-  runtime DDL, restore, or database deletion.
+- Dream consumes Admin DTO APIs and receives no PostgreSQL credential. It never
+  runs SQL, migration, runtime DDL, restore, or database deletion.
 - Workspace, Notion credential, Artifact, local-file, plugin Runtime, and
   service-home roots remain persistent and reject symbolic-link substitution.
 - AutoDL fixes `INK_AGENT_SANDBOX_ENABLED=false` because the outer container
   rejects the required namespace operations. Approved Bash therefore runs as
   the Dream root service account without bubblewrap filesystem/network
   isolation; the launcher fails if this deployment-owned value changes.
-- Start, stop, and rollback affect only the named Dream process, screen session,
+- Start and stop affect only the named Dream process and screen session. A deploy
+  builds an immutable candidate, verifies it on `16006`/`18765`, switches
+  `current`, then removes every old release after public verification succeeds;
+  no long-lived rollback release is retained.
   and versioned release links.
 - Acceptance checks the standalone server, Node MCP Apps route manifest,
   FastAPI and same-origin health, crawler media/body (including `/llms.txt`),
@@ -83,12 +85,14 @@ public health gates pass.
 
 | File | Current meaning |
 |---|---|
-| `deploy.sh` | Versioned pnpm/Next/FastAPI release, verification, qualification, and rollback |
-| `prepare-env.sh` | Backend, Admin DB, public-origin, sandbox, and MCP Apps runtime projection |
+| `deploy.sh` | Versioned pnpm/Next/FastAPI candidate build, isolated smoke, atomic activation, verification, and old-release pruning |
+| `prepare-env.sh` | Backend/Admin API, public-origin, sandbox, and MCP Apps runtime projection with database keys removed |
 | `runtime/start-dream.sh` | Next.js and FastAPI supervisor |
 | `runtime/start-ink-memory.sh` | Admin-first idempotent restarter for already-published releases |
 | `runtime/init-dream-data.sh` | Persistent-directory ownership and symlink safety |
 | `test-topology.sh` | Provider-free current topology and env projection test |
 
-Use `status`, `logs`, and `verify` for diagnosis. `rollback` switches only the
+Use `status`, `logs`, and `verify` for diagnosis. `rollback` is available only
+during a failed activation before the successful deploy prunes the temporary
+previous release; it switches only the
 Dream release links and never reverses Admin migrations or user data.

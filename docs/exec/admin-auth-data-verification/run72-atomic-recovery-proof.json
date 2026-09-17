@@ -1,0 +1,106 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "assertions": 68,
+  "selected_faults": [
+    {
+      "point": "run-insert",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "token-map",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "pf-cas",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "transition-first",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "queued-update",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "transition-second",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "receipt",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "audit",
+      "operation": "workflow-run.create",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    },
+    {
+      "point": "receipt",
+      "operation": "workflow-run.retry",
+      "status": 503,
+      "code": "AUTH_SERVICE_UNAVAILABLE",
+      "protected_tables": 16,
+      "transaction": "all byte-exact unchanged",
+      "cleanup": "PASS"
+    }
+  ],
+  "lost_commit": {
+    "actual_final_commit": true,
+    "injections": 1,
+    "initial_status": 503,
+    "original_get": 200,
+    "replay_status": 200,
+    "full_source_static": "all original fields exactly match",
+    "exact_effects": {
+      "runs": 1,
+      "history": 2,
+      "consumes": 1,
+      "receipts": 1,
+      "audits": 1
+    },
+    "original_scopes_and_times": "unchanged"
+  },
+  "normal_database": "untouched",
+  "private_keys_exported": false
+}

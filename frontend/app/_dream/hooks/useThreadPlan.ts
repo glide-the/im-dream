@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] plan-mode-changed / plan-updated SSE 事件（经 claude-agent-transport convertEvent 转发）
 //         与 GET /api/claude-agent/threads/{thread_id}/plan REST 水合响应。
 // [Output] 按 threadId 键控的轻量 plan store：useThreadPlan 订阅、applyPlanEvent 事件写入、
@@ -7,7 +9,7 @@
 //                    plan-* SSE 帧不产生消息气泡，全部状态经本 store 流向 PlanPanel。
 
 import { useSyncExternalStore } from 'react';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 // ---------------------------------------------------------------------------
@@ -155,7 +157,7 @@ export async function hydrateThreadPlan(threadId: string): Promise<void> {
   try {
     const res = await fetch(
       apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/plan`),
-      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
+      { headers: { ...browserRequestHeaders() } },
     );
     if (!res.ok) return;
     const data = (await res.json()) as ThreadPlanApiResponse;

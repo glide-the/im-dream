@@ -8,6 +8,7 @@
 [Sync] 2026-08-25: isolate interactive OAuth discovery from short inventory single-flight/timeout ownership.
 [Sync] 2026-09-06: allow explicit IPv4/IPv6 loopback MCP endpoints while retaining other non-global IP denials.
 [Sync] 2026-09-06: retain only the descriptor-owned MCP App resource binding in safe tool inventory.
+[Sync] 2026-09-17: persist discovery at the exact credential revision committed by the same SDK OAuth storage.
 """
 
 from __future__ import annotations
@@ -116,6 +117,17 @@ class McpTransportHttpError(RuntimeError):
         self.status_code = status_code
         self._private_body = private_body
         super().__init__("MCP transport HTTP request failed.")
+
+
+def _transport_auth(value: Any) -> Any:
+    """Unwrap Dream's redacted revision carrier for the third-party transport."""
+
+    return getattr(value, "transport_auth", value)
+
+
+def _committed_credential_revision(value: Any) -> int | None:
+    revision = getattr(value, "committed_credential_revision", None)
+    return revision if isinstance(revision, int) and revision > 0 else None
 
 
 @dataclass(frozen=True, repr=False)
@@ -630,7 +642,7 @@ class McpDiscoveryCoordinator:
                         resolved_auth = await self.auth_resolver.resolve(actor_id, server)
                     result = await self._discover_session(
                         server,
-                        resolved_auth,
+                        _transport_auth(resolved_auth),
                         initialize_timeout_seconds=(
                             timeout_seconds if auth is not None else None
                         ),
@@ -653,18 +665,64 @@ class McpDiscoveryCoordinator:
                     error=_safe_error(exc),
                     discovered_at=datetime.now(timezone.utc).isoformat(),
                 )
+        save_server = server
+        committed_revision = _committed_credential_revision(resolved_auth)
+        if committed_revision is not None and committed_revision != server.credential_revision:
+            authoritative = await self.repository.get_server(
+                actor_id,
+                server.id,
+                server.workspace_id,
+            )
+            if not self._same_discovery_server(server, authoritative) or (
+                authoritative.credential_revision != committed_revision
+            ):
+                raise ClaudeMcpError(
+                    ClaudeMcpErrorCode.SERVER_REVISION_CONFLICT,
+                    "Managed MCP server revision changed during discovery.",
+                )
+            save_server = authoritative
+            result = replace(
+                result,
+                credential_revision=authoritative.credential_revision,
+            )
         try:
             await self.repository.save_discovery_snapshot(
                 actor_id,
-                server,
+                save_server,
                 result,
                 ttl_seconds=self.policy.cache_ttl_seconds,
             )
         except TypeError:
             # Provider-free repository protocol compatibility; production
             # Postgres repository accepts the explicit policy TTL.
-            await self.repository.save_discovery_snapshot(actor_id, server, result)
+            await self.repository.save_discovery_snapshot(
+                actor_id,
+                save_server,
+                result,
+            )
         return result
+
+    @staticmethod
+    def _same_discovery_server(
+        original: McpServerRecord,
+        authoritative: McpServerRecord | None,
+    ) -> bool:
+        """Accept only the same enabled Server/config after an owned token write."""
+
+        return authoritative is not None and all((
+            authoritative.id == original.id,
+            authoritative.user_id == original.user_id,
+            authoritative.workspace_id == original.workspace_id,
+            authoritative.scope == original.scope,
+            authoritative.server_key == original.server_key,
+            authoritative.display_name == original.display_name,
+            authoritative.transport is original.transport,
+            authoritative.remote_url == original.remote_url,
+            authoritative.stdio_profile_key == original.stdio_profile_key,
+            authoritative.auth_kind is original.auth_kind,
+            authoritative.enabled is True,
+            authoritative.config_revision == original.config_revision,
+        ))
 
     async def _discover_session(
         self,

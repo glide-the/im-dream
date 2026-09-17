@@ -1,17 +1,17 @@
-"""PostgreSQL managed MCP repository contracts with injected fake UoWs.
+"""Admin DTO adapter contracts for managed MCP persistence.
 
-[Input] Scripted PostgreSQL rows and actor/workspace/CAS inputs.
-[Output] Exact capability gating, scoped SQL, CRUD, uniqueness, and revision failure evidence.
-[Pos] Provider-free persistence tests; no database connection or runtime DDL.
-[Sync] 2026-08-25: define the Admin-owned managed MCP table consumption contract.
-[Sync] 2026-08-27: prove only successful capability checks are cached and transient failures recover.
-[Sync] 2026-09-06: cover independent MCP App settings capability, ownership, and CAS writes.
+[Input] Exact Registry134-147 Pydantic operations and a scripted Admin client.
+[Output] OAuth/delegation binding, DTO mapping, receipt recovery and DB-closure evidence.
+[Pos] Provider-free Dream consumer tests; no SQL, ORM, pool or database connection.
+[Sync] 2026-09-16: replace PostgreSQL repository tests with Admin DTO adapter contracts.
+[Sync] 2026-09-16: include the retained credential compatibility module in the
+                   production database-access source fence.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,61 +21,33 @@ from claude_mcp.contracts import (
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     McpAuthKind,
-    McpAppPreferenceState,
-    McpAppSettingsPatch,
     McpScope,
     McpServerCreate,
     McpServerPatch,
     McpTransport,
 )
-from claude_mcp.repository import PostgresMcpRepository
-from schema.capabilities import MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256
+from claude_mcp.repository import AdminManagedMcpRepository, McpDataAuthorization
+from services.admin_data.errors import AdminDataError
+from services.admin_data.managed_mcp_data import (
+    CREATE_MANAGED_MCP_SERVER,
+    GET_MANAGED_MCP_SERVER,
+    LIST_MANAGED_MCP_SERVERS,
+    MANAGED_MCP_OPERATIONS,
+    MANAGED_MCP_SCHEMA_REQUIREMENTS,
+    UPDATE_MANAGED_MCP_SERVER,
+)
+from services.admin_data.models import AbsentReceiptDTO, CommittedReceiptDTO
 
 
-@dataclass
-class _Cursor:
-    rows: list[dict[str, Any]]
-
-    def fetchone(self):
-        return self.rows[0] if self.rows else None
-
-    def fetchall(self):
-        return list(self.rows)
+SERVER_ID = "123e4567-e89b-42d3-a456-426614174000"
+THREAD_ID = "223e4567-e89b-42d3-a456-426614174000"
+RUN_ID = "run_" + "a" * 32
 
 
-class _Connection:
-    def __init__(self, handler: Callable[[str, tuple[Any, ...]], list[dict[str, Any]]]):
-        self.handler = handler
-        self.calls: list[tuple[str, tuple[Any, ...]]] = []
-
-    def execute(self, query: str, parameters=()):
-        params = tuple(parameters)
-        self.calls.append((query, params))
-        return _Cursor(self.handler(query, params))
-
-
-class _Uow:
-    def __init__(self, connection: _Connection) -> None:
-        self.connection = connection
-        self.committed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, query, parameters=()):
-        return self.connection.execute(query, parameters)
-
-    def commit(self):
-        self.committed = True
-
-
-def _row(**overrides: Any) -> dict[str, Any]:
+def _server(**overrides: Any) -> dict[str, Any]:
     return {
-        "id": "server-1",
-        "user_id": 7,
+        "id": SERVER_ID,
+        "user_id": "7",
         "workspace_id": None,
         "scope": "user",
         "server_key": "alpha",
@@ -89,326 +61,210 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "credential_revision": 0,
         "credential_id": None,
         "credential_configured": False,
-        "created_at": "2026-08-25T00:00:00+00:00",
-        "updated_at": "2026-08-25T00:00:00+00:00",
+        "created_at": "2026-09-16T00:00:00Z",
+        "updated_at": "2026-09-16T00:00:00Z",
         **overrides,
     }
 
 
-def _repository(connection: _Connection) -> PostgresMcpRepository:
-    return PostgresMcpRepository(
-        unit_of_work_factory=lambda **_kwargs: _Uow(connection),
-        expected_contract_sha256="a" * 64,
-    )
+class _AdminClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, Any, str, str]] = []
+        self.supported = True
+        self.fail_write_unknown = False
+        self.receipt_committed = True
 
+    def supports(self, operations, schemas) -> bool:
+        assert operations == MANAGED_MCP_OPERATIONS
+        assert schemas == MANAGED_MCP_SCHEMA_REQUIREMENTS
+        return self.supported
 
-def test_capability_requires_exact_hash_and_never_issues_ddl() -> None:
-    connection = _Connection(
-        lambda query, _params: (
-            [{"version": 1, "contract_sha256": "a" * 64}]
-            if "mcp:capability" in query
-            else []
-        )
-    )
+    def execute(self, operation, input_dto, request_id, *, access_token):
+        self.calls.append((operation, input_dto, request_id, access_token))
+        if self.fail_write_unknown and operation.capability.kind == "write":
+            raise AdminDataError(
+                "ADMIN_WRITE_RESULT_UNKNOWN",
+                503,
+                request_id,
+                outcome_unknown=True,
+            )
+        payload: dict[str, Any]
+        if operation is LIST_MANAGED_MCP_SERVERS:
+            payload = {"servers": [_server()]}
+        elif operation is GET_MANAGED_MCP_SERVER:
+            payload = {"server": _server()}
+        elif operation is UPDATE_MANAGED_MCP_SERVER:
+            payload = {"server": _server(config_revision=2, display_name="Beta")}
+        else:
+            payload = {"server": _server()}
+        return operation.output_dto.model_validate(payload)
 
-    repository = _repository(connection)
-    assert repository.capability_available_sync() is True
-    assert repository.capability_available_sync() is True
-    assert sum("mcp:capability" in query for query, _ in connection.calls) == 1
-    assert all(
-        not any(keyword in call[0].upper() for keyword in ("CREATE ", "ALTER ", "DROP "))
-        for call in connection.calls
-    )
-
-    capability_rows = [
-        {"version": 1, "contract_sha256": "b" * 64},
-        {"version": 1, "contract_sha256": "a" * 64},
-    ]
-    drifted = _Connection(
-        lambda query, _params: (
-            [capability_rows.pop(0)] if "mcp:capability" in query else []
-        )
-    )
-    recovering_repository = _repository(drifted)
-    assert recovering_repository.capability_available_sync() is False
-    assert recovering_repository.capability_available_sync() is True
-    assert recovering_repository.capability_available_sync() is True
-    assert sum("mcp:capability" in query for query, _ in drifted.calls) == 2
-
-
-def test_transient_capability_query_failure_is_distinct_and_not_cached() -> None:
-    attempts = 0
-
-    def handler(query: str, _params: tuple[Any, ...]):
-        nonlocal attempts
-        if "mcp:capability" not in query:
-            return []
-        attempts += 1
-        if attempts == 1:
-            raise RuntimeError("database restarting")
-        return [{"version": 1, "contract_sha256": "a" * 64}]
-
-    repository = _repository(_Connection(handler))
-    with pytest.raises(ClaudeMcpError) as raised:
-        repository.capability_available_sync()
-    assert raised.value.code is ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE
-    assert "database restarting" not in str(raised.value)
-    assert repository.capability_available_sync() is True
-    assert repository.capability_available_sync() is True
-    assert attempts == 2
-
-
-def test_app_settings_capability_and_actor_scoped_cas_are_independent() -> None:
-    def handler(query: str, _params: tuple[Any, ...]):
-        if "mcp:app-settings-capability" in query:
-            return [{
-                "version": 1,
-                "contract_sha256": MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
-            }]
-        if "mcp:app-settings-get" in query:
-            return [{
-                "app_desired_enabled": False,
-                "app_desired_low_risk_tool_calls": False,
-                "app_desired_ui_messages": False,
-                "app_settings_revision": 1,
-            }]
-        if "mcp:app-settings-update" in query:
-            return [{
-                "app_desired_enabled": True,
-                "app_desired_low_risk_tool_calls": True,
-                "app_desired_ui_messages": False,
-                "app_settings_revision": 2,
-            }]
-        return []
-
-    connection = _Connection(handler)
-    repository = _repository(connection)
-    assert repository.app_settings_capability_available_sync() is True
-    assert repository.app_settings_capability_available_sync() is True
-    current = repository.get_app_settings_sync("7", "server-1")
-    assert current is not None and current.revision == 1
-    updated = repository.update_app_settings_sync(
-        "7",
-        "server-1",
-        McpAppSettingsPatch(
-            expected_revision=1,
-            desired=McpAppPreferenceState(
-                enabled=True,
-                low_risk_tool_calls=True,
+    def receipt(self, operation, request_id, *, access_token):
+        assert access_token == "idg_runtime"
+        if not self.receipt_committed:
+            return AbsentReceiptDTO(
+                request_id=request_id,
+                status="absent",
+                operation=operation.capability.name,
+            )
+        return CommittedReceiptDTO[operation.output_dto](
+            request_id=request_id,
+            status="committed",
+            operation=operation.capability.name,
+            result=operation.output_dto.model_validate(
+                {"server": _server(config_revision=2, display_name="Recovered")}
             ),
-        ),
-    )
-    assert updated.revision == 2 and updated.desired.enabled is True
-    assert sum(
-        "mcp:app-settings-capability" in query
-        for query, _ in connection.calls
-    ) == 1
-    update_query = next(
-        query for query, _ in connection.calls if "mcp:app-settings-update" in query
-    )
-    assert "config_revision" not in update_query
-    assert "app_settings_revision = app_settings_revision + 1" in update_query
-
-
-def test_list_and_get_are_actor_and_workspace_scoped_reads() -> None:
-    connection = _Connection(
-        lambda query, params: (
-            [_row()]
-                if "mcp:list" in query or ("mcp:get" in query and params[2] == "7")
-            else []
         )
-    )
-    repository = _repository(connection)
-
-    assert [item.server_key for item in repository.list_servers_sync("7")] == ["alpha"]
-    assert repository.get_server_sync("7", "server-1").server_key == "alpha"
-    assert repository.get_server_sync("8", "server-1") is None
-
-    list_query, list_params = next(call for call in connection.calls if "mcp:list" in call[0])
-    get_query, get_params = next(call for call in connection.calls if "mcp:get" in call[0])
-    assert "server.user_id = %s::bigint" in list_query
-    assert "server.user_id = %s::bigint" in get_query
-    assert list_params[0] == "7" and get_params[:3] == (
-        "server-1", "server-1", "7"
-    )
 
 
-def test_create_update_delete_use_transactions_and_cas_revision() -> None:
-    def handler(query: str, _params: tuple[Any, ...]):
-        if "mcp:create" in query:
-            return [_row()]
-        if "mcp:update-lock" in query:
-            return [_row()]
-        if "mcp:update */" in query:
-            return [_row(config_revision=2)]
-        if "mcp:delete-lock" in query:
-            return [_row(config_revision=2)]
-        if "mcp:delete */" in query:
-            return [{"id": "server-1"}]
-        if "mcp:workspace-owner" in query:
-            return [{"owned": True}]
-        return []
+@pytest.mark.asyncio
+async def test_capability_is_local_exact_catalog_check_under_explicit_authority() -> None:
+    client = _AdminClient()
+    repository = AdminManagedMcpRepository(client)
+    with pytest.raises(ClaudeMcpError) as missing:
+        await repository.capability_available()
+    assert missing.value.code is ClaudeMcpErrorCode.IDENTITY_UNAVAILABLE
 
-    connection = _Connection(handler)
-    repository = _repository(connection)
-    created = repository.create_server_sync(
+    with repository.authorize(McpDataAuthorization("7", "oauth_access")):
+        assert await repository.capability_available() is True
+        client.supported = False
+        assert await repository.app_settings_capability_available() is False
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_oauth_reads_use_actor_free_strict_dto_and_map_domain_records() -> None:
+    client = _AdminClient()
+    repository = AdminManagedMcpRepository(client)
+    with repository.authorize(McpDataAuthorization("7", "oauth_access")):
+        rows = await repository.list_servers("7")
+        found = await repository.get_server("7", SERVER_ID)
+
+    assert [row.server_key for row in rows] == ["alpha"]
+    assert found is not None and found.remote_url == "https://mcp.example.test/mcp"
+    assert [call[0] for call in client.calls] == [
+        LIST_MANAGED_MCP_SERVERS,
+        GET_MANAGED_MCP_SERVER,
+    ]
+    for _operation, input_dto, _request_id, token in client.calls:
+        assert token == "oauth_access"
+        assert input_dto.authority is None
+        assert "actor" not in input_dto.model_dump()
+        assert "user_id" not in input_dto.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_runtime_write_carries_exact_thread_run_authority_and_dto_patch() -> None:
+    client = _AdminClient()
+    repository = AdminManagedMcpRepository(client)
+    authorization = McpDataAuthorization(
         "7",
-        McpServerCreate(
-            server_key="alpha",
-            display_name="Alpha",
-            transport=McpTransport.STREAMABLE_HTTP,
-            auth_kind=McpAuthKind.NONE,
-            scope=McpScope.USER,
-            remote_url="https://mcp.example.test/mcp",
-        ),
+        "idg_runtime",
+        thread_id=THREAD_ID,
+        workflow_run_id=RUN_ID,
     )
-    updated = repository.update_server_sync(
-        "7", "server-1", McpServerPatch(expected_revision=1, enabled=False)
-    )
-    removed = repository.delete_server_sync("7", "server-1", expected_revision=2)
-
-    assert created.config_revision == 1
-    assert updated.config_revision == 2
-    assert removed.id == "server-1"
-    write_queries = [query for query, _ in connection.calls if "mcp:" in query and not query.lstrip().upper().startswith("SELECT")]
-    assert all("user_id" in query for query in write_queries)
-    assert any("config_revision = %s" in query for query in write_queries)
-
-
-def test_transport_or_auth_change_revokes_bound_credential_and_snapshot() -> None:
-    def handler(query: str, _params: tuple[Any, ...]):
-        if "mcp:update-lock" in query:
-            return [_row(
-                credential_revision=3,
-                credential_id="credential-old",
-                credential_configured=True,
-            )]
-        if "mcp:update */" in query:
-            return [_row(
-                remote_url="https://new.example.test/mcp",
-                config_revision=2,
-                credential_revision=0,
-                credential_id=None,
-                credential_configured=False,
-            )]
-        return []
-
-    connection = _Connection(handler)
-    updated = _repository(connection).update_server_sync(
-        "7",
-        "server-1",
-        McpServerPatch(
-            expected_revision=1,
-            remote_url="https://new.example.test/mcp",
-        ),
-    )
-    queries = [query for query, _ in connection.calls]
-    assert any("mcp:update-credential-clear" in query for query in queries)
-    assert any("mcp:update-snapshot-clear" in query for query in queries)
-    assert updated.credential_configured is False
-    assert updated.credential_revision == 0
-
-
-def test_cas_miss_and_workspace_ownership_fail_closed() -> None:
-    connection = _Connection(
-        lambda query, _params: [_row()] if "mcp:update-lock" in query else []
-    )
-    repository = _repository(connection)
-
-    with pytest.raises(ClaudeMcpError) as conflict:
-        repository.update_server_sync(
-            "7", "server-1", McpServerPatch(expected_revision=9, enabled=False)
-        )
-    assert conflict.value.code is ClaudeMcpErrorCode.SERVER_REVISION_CONFLICT
-
-    with pytest.raises(ClaudeMcpError) as ownership:
-        repository.create_server_sync(
+    with repository.authorize(authorization):
+        created = await repository.create_server(
             "7",
             McpServerCreate(
-                server_key="workspace-alpha",
-                display_name="Workspace Alpha",
-                transport=McpTransport.STDIO,
+                server_key="alpha",
+                display_name="Alpha",
+                transport=McpTransport.STREAMABLE_HTTP,
                 auth_kind=McpAuthKind.NONE,
-                scope=McpScope.WORKSPACE,
-                workspace_id="foreign-workspace",
-                stdio_profile_key="safe-profile",
+                scope=McpScope.USER,
+                remote_url="https://mcp.example.test/mcp",
             ),
         )
-    assert ownership.value.code is ClaudeMcpErrorCode.SERVER_OWNERSHIP_CONFLICT
+        updated = await repository.update_server(
+            "7",
+            SERVER_ID,
+            McpServerPatch(expected_revision=1, display_name="Beta"),
+        )
 
-
-def test_credential_delete_then_reauth_precisely_invalidates_old_revision_cache() -> None:
-    old_snapshot = {
-        "status": "complete",
-        "inventory": {"tools": [{"name": "stale"}], "resources": [], "prompts": []},
-        "safe_error_code": None,
-        "discovered_at": "2026-08-25T00:00:00+00:00",
+    assert created.config_revision == 1
+    assert updated.config_revision == 2 and updated.display_name == "Beta"
+    create_call, update_call = client.calls
+    assert create_call[0] is CREATE_MANAGED_MCP_SERVER
+    assert update_call[0] is UPDATE_MANAGED_MCP_SERVER
+    assert create_call[1].authority.model_dump() == {
+        "thread_id": THREAD_ID,
+        "workflow_run_id": RUN_ID,
     }
-    snapshots = [old_snapshot]
-
-    def handler(query: str, _params: tuple[Any, ...]):
-        if "mcp:credential-delete-lock" in query:
-            return [_row(credential_revision=1, credential_id="credential-old", credential_configured=True)]
-        if "mcp:credential-upsert" in query:
-            return [{
-                "id": "credential-new", "server_id": "server-1", "kind": "oauth",
-                "ciphertext": "cipher", "iv": "iv", "tag": "tag",
-                "fingerprint": "fingerprint", "key_version": 1,
-                "credential_revision": 1, "expires_at": None,
-            }]
-        if "mcp:credential-snapshot-invalidate" in query:
-            snapshots.clear()
-            return []
-        if "mcp:discovery-get" in query:
-            return list(snapshots)
-        return []
-
-    connection = _Connection(handler)
-    repository = _repository(connection)
-    logged_out = repository.delete_credential_sync("7", "server-1")
-    credential = repository.upsert_credential_sync(
-        "7",
-        "server-1",
-        kind="oauth",
-        envelope=SimpleNamespace(
-            ciphertext="cipher", iv="iv", tag="tag",
-            fingerprint="fingerprint", key_version=1,
-        ),
-    )
-    reauthed = replace(
-        logged_out,
-        credential_id=credential.id,
-        credential_configured=True,
-        credential_revision=credential.credential_revision,
-    )
-    assert credential.credential_revision == 1
-    assert repository.get_discovery_snapshot_sync("7", reauthed) is None
-    invalidations = [
-        query for query, _ in connection.calls
-        if "mcp:credential-snapshot-invalidate" in query
-    ]
-    assert len(invalidations) == 2
+    assert update_call[1].model_dump(exclude={"authority"}) == {
+        "server_id": SERVER_ID,
+        "expected_revision": 1,
+        "display_name": "Beta",
+        "transport": None,
+        "auth_kind": None,
+        "remote_url": None,
+        "stdio_profile_key": None,
+        "enabled": None,
+    }
 
 
-def test_existing_success_receipt_preserves_nullable_target() -> None:
-    connection = _Connection(
-        lambda query, _params: ([{
-            "state": "imported",
-            "target_server_id": None,
-            "canonical_config_sha256": "b" * 64,
-        }] if "mcp:import-lock" in query else [])
+@pytest.mark.asyncio
+async def test_actor_mismatch_stops_before_admin_http() -> None:
+    client = _AdminClient()
+    repository = AdminManagedMcpRepository(client)
+    with repository.authorize(McpDataAuthorization("7", "oauth_access")):
+        with pytest.raises(ClaudeMcpError) as denied:
+            await repository.list_servers("8")
+    assert denied.value.code is ClaudeMcpErrorCode.IDENTITY_UNAVAILABLE
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_write_reads_only_original_receipt_and_never_retries() -> None:
+    client = _AdminClient()
+    client.fail_write_unknown = True
+    repository = AdminManagedMcpRepository(client)
+    with repository.authorize(McpDataAuthorization("7", "idg_runtime")):
+        recovered = await repository.update_server(
+            "7", SERVER_ID, McpServerPatch(expected_revision=1, display_name="Beta")
+        )
+    assert recovered.display_name == "Recovered"
+    assert len(client.calls) == 1
+
+    client.receipt_committed = False
+    with repository.authorize(McpDataAuthorization("7", "idg_runtime")):
+        with pytest.raises(ClaudeMcpError) as unknown:
+            await repository.update_server(
+                "7", SERVER_ID, McpServerPatch(expected_revision=1, display_name="Beta")
+            )
+    assert unknown.value.code is ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE
+    assert len(client.calls) == 2
+
+
+def test_registry134_147_contract_hashes_match_shared_admin_artifact() -> None:
+    artifact_path = Path(__file__).resolve().parents[2] / "docs" / "architecture" / "admin-dream-operation-contracts.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    published = {item["capability"]["name"]: item["capability"] for item in artifact}
+    for operation in MANAGED_MCP_OPERATIONS:
+        assert published[operation.capability.name] == operation.capability.model_dump()
+
+
+def test_production_managed_mcp_composition_contains_no_database_access() -> None:
+    root = Path(__file__).resolve().parents[1]
+    sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            root / "claude_mcp" / "repository.py",
+            root / "claude_mcp" / "service.py",
+            root / "claude_mcp" / "credentials.py",
+            root / "script" / "import_claude_mcp_config.py",
+        ]
     )
-    receipt = _repository(connection).import_server_sync(
-        "7",
-        McpServerCreate(
-            server_key="alpha",
-            display_name="Alpha",
-            transport=McpTransport.STREAMABLE_HTTP,
-            auth_kind=McpAuthKind.NONE,
-            remote_url="https://mcp.example.test/mcp",
-        ),
-        "a" * 64,
-        "b" * 64,
+    forbidden = (
+        "PostgresMcpRepository",
+        "PostgresPool",
+        "DATABASE_URL",
+        "persistence.postgres",
+        "persistence.config",
+        "import database",
+        "backend.database",
+        "SELECT ",
+        "INSERT ",
+        "UPDATE ",
+        "DELETE ",
     )
-    assert receipt.state == "noop"
-    assert receipt.target_server_id is None
+    assert not [value for value in forbidden if value in sources]

@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "target": "ink_auth_data_codex_test_792494523a17_preflight61",
+  "cases": 24,
+  "new_decks": 9,
+  "new_installations": 9,
+  "new_materializations": 10,
+  "original_source": "actual models/release+lock hash, builder resolve_binding/ensure_snapshot and PreflightService input/fingerprint/full read projection",
+  "source_snapshot_insert": "captured 9 positional parameters; one read-only-case snapshot persisted by primary",
+  "original_mapping": "awaiting actual operationInputDigest in primary credential preparation; no public invocation yet",
+  "deferred_primary_faults": "check4/6/8 and stage recovery/expiry/ciphertext faults; no ordinary Runtime/model/Google proof",
+  "normal_database": "untouched",
+  "setup_assertions": 4
+}

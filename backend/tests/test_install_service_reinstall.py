@@ -1,51 +1,40 @@
-"""Unit tests for PluginInstallService reinstall/revive and remote digest semantics.
-
-[Input] Production install service with explicit SQLite fixture, fake CLI registry, and canonical plugin trees.
-[Output] Replay/revive/error terminal evidence plus rejection of content outside an Admin-approved digest.
-[Pos] Provider-free install contract test; SQLite is a named fixture, never a runtime fallback.
-[Sync] 2026-08-19: add Remote Marketplace ref transport, full-content drift rejection, and lineage fixture columns.
-
-Covers the UNIQUE-constraint crash seen when reinstalling a plugin whose
-previous installation row was soft-deleted (status='uninstalled'): the
-service must revive the existing row in place instead of inserting a
-duplicate, and unexpected exceptions must still move the operation row to
-a terminal error state.
-"""
-
+# [Input] Dream CLI/filesystem install pipeline plus a typed in-memory Admin reporter.
+# [Output] Lifecycle order, terminal failure, immutable artifact and remote digest evidence.
+# [Pos] Provider-free executor contract; replay/revive transactions are tested in Admin.
+# [Sync] 2026-09-16: remove the retired SQLite persistence fixture from Dream install tests.
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
-import os
 from pathlib import Path
-import sqlite3
-import sys
 import tempfile
-import unittest
 from unittest import mock
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+import pytest
 
-import database
-from backend.schema import legacy_main_sqlite
+from services.admin_data.claude_plugin_data import (
+    ClaudePluginInstallReportInputDTO,
+    ClaudePluginMarketplaceSourceDTO,
+    ClaudePluginOperationDTO,
+)
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin import install_service
+from services.claude_plugin.digest import compute_plugin_digest
 from services.claude_plugin.install_service import (
     MARKETPLACE_REMOTE_DRIFT,
     PLUGIN_INSTALL_FAILED,
     PluginInstallError,
     PluginInstallService,
 )
-from services.claude_plugin.digest import compute_plugin_digest
-from services.claude_plugin.marketplace_service import MarketplaceInstallSource
 from services.claude_plugin.package_spec import parse_package_spec
 
+
 PACKAGE_SPEC = "drama-forge@drama-studio"
+NOW = datetime(2026, 9, 16, tzinfo=UTC)
 
 
-def _approved_remote_source() -> MarketplaceInstallSource:
-    return MarketplaceInstallSource(
+def _approved_remote_source() -> ClaudePluginMarketplaceSourceDTO:
+    return ClaudePluginMarketplaceSourceDTO(
         entry_id="cpme_drama_forge",
         package_spec=PACKAGE_SPEC,
         package_name="drama-forge",
@@ -70,162 +59,199 @@ def _fake_execution(argv: list[str]) -> plugin_cli.CliExecution:
         timed_out=False,
         stdout="",
         stderr="",
-        started_at="2026-08-03T00:00:00+00:00",
-        finished_at="2026-08-03T00:00:01+00:00",
+        started_at="2026-09-16T00:00:00+00:00",
+        finished_at="2026-09-16T00:00:01+00:00",
         duration_ms=1000,
     )
 
 
-class ReinstallReviveTests(unittest.TestCase):
-    """install → uninstall → install must revive, never violate UNIQUE."""
+def _operation(operation_id: str, **changes) -> ClaudePluginOperationDTO:
+    values = {
+        "id": operation_id,
+        "operation_kind": "install",
+        "requested_package_spec": PACKAGE_SPEC,
+        "marketplace_entry_id": None,
+        "status": "running",
+        "phase": "starting",
+        "progress": 5,
+        "message": "Install execution started",
+        "executable": None,
+        "argv_json": None,
+        "cwd": None,
+        "cli_version": None,
+        "exit_code": None,
+        "evidence_path": None,
+        "installation_id": None,
+        "error_code": None,
+        "error_summary": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+        "finished_at": None,
+    }
+    values.update(changes)
+    return ClaudePluginOperationDTO.model_validate(values)
 
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        self._env = mock.patch.dict(
-            os.environ,
-            {"INK_CLAUDE_PLUGIN_RUNTIME_ROOT": str(self.root / "runtime")},
+
+class Reporter:
+    def __init__(self, operation_id: str, *, marketplace_entry_id=None) -> None:
+        self.operation_id = operation_id
+        self.marketplace_entry_id = marketplace_entry_id
+        self.calls: list[ClaudePluginInstallReportInputDTO] = []
+        self.installation = None
+
+    def report(
+        self, request: ClaudePluginInstallReportInputDTO
+    ) -> ClaudePluginOperationDTO:
+        assert request.operation_id == self.operation_id
+        self.calls.append(request)
+        common = {"marketplace_entry_id": self.marketplace_entry_id}
+        if request.event == "begin":
+            return _operation(self.operation_id, **common)
+        if request.event == "progress":
+            return _operation(
+                self.operation_id,
+                phase=request.phase,
+                progress=request.progress,
+                message=request.message,
+                **common,
+            )
+        if request.event == "fail":
+            return _operation(
+                self.operation_id,
+                status="error",
+                phase="error",
+                progress=100,
+                message=request.error_summary,
+                error_code=request.error_code,
+                error_summary=request.error_summary,
+                evidence_path=request.evidence_path,
+                finished_at=NOW,
+                **common,
+            )
+        self.installation = request.installation
+        return _operation(
+            self.operation_id,
+            status="ready",
+            phase="ready",
+            progress=100,
+            message="Installation completed",
+            installation_id="cpi_installation",
+            evidence_path=request.evidence_path,
+            executable=(request.execution.executable if request.execution else None),
+            argv_json=(
+                json.dumps(request.execution.argv) if request.execution else None
+            ),
+            cwd=request.execution.cwd if request.execution else None,
+            cli_version=(request.execution.cli_version if request.execution else None),
+            exit_code=request.execution.exit_code if request.execution else None,
+            finished_at=NOW,
+            **common,
         )
-        self._env.start()
-        # Plugin source tree the fake registry record points at.
-        self.plugin_root = self.root / "src" / "drama-forge"
-        (self.plugin_root / ".claude-plugin").mkdir(parents=True)
-        (self.plugin_root / ".claude-plugin" / "plugin.json").write_text(
+
+
+@pytest.fixture
+def install_fixture(monkeypatch):
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        monkeypatch.setenv(
+            "INK_CLAUDE_PLUGIN_RUNTIME_ROOT", str(root / "runtime")
+        )
+        plugin_root = root / "src" / "drama-forge"
+        (plugin_root / ".claude-plugin").mkdir(parents=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
             json.dumps({"name": "drama-forge", "version": "1.0.1"})
         )
-        (self.plugin_root / "skills").mkdir(parents=True)
-        (self.plugin_root / "skills" / "SKILL.md").write_text("# skill")
-        self.db = sqlite3.connect(":memory:")
-        self.db.row_factory = sqlite3.Row
-        legacy_main_sqlite.create_claude_plugin_tables(self.db)
-        self.db.execute(
-            "ALTER TABLE claude_plugin_operations ADD COLUMN marketplace_entry_id TEXT"
-        )
-        self.db.execute(
-            "ALTER TABLE claude_plugin_installations ADD COLUMN marketplace_entry_id TEXT"
-        )
-        self.db.commit()
-        # Stub the CLI boundary: marketplace ensure, registry lookup, run.
-        self._patches = [
-            mock.patch.object(
-                install_service,
-                "_ensure_marketplace",
-                lambda spec, evidence, **_kwargs: evidence.setdefault(
-                    "marketplace_revision", {}
-                ),
+        (plugin_root / "skills").mkdir()
+        (plugin_root / "skills" / "SKILL.md").write_text("# skill")
+        monkeypatch.setattr(
+            install_service,
+            "_ensure_marketplace",
+            lambda spec, evidence, **_kwargs: evidence.setdefault(
+                "marketplace_revision", {}
             ),
-            mock.patch.object(
-                install_service,
-                "_registry_entry_for",
-                lambda spec: {
-                    "installPath": str(self.plugin_root),
-                    "version": "1.0.1",
-                    "gitCommitSha": "abc123",
-                },
-            ),
-            mock.patch.object(
-                plugin_cli,
-                "run_claude",
-                lambda argv, *, cwd, timeout_seconds: _fake_execution(argv),
-            ),
-        ]
-        for patcher in self._patches:
-            patcher.start()
-
-    def tearDown(self) -> None:
-        for patcher in self._patches:
-            patcher.stop()
-        self._env.stop()
-        self.db.close()
-        self._tmp.cleanup()
-
-    def _install(self) -> dict:
-        return PluginInstallService(self.db).install(PACKAGE_SPEC)
-
-    def _installation_count(self) -> int:
-        row = self.db.execute(
-            "SELECT COUNT(*) FROM claude_plugin_installations "
-            "WHERE package_name = 'drama-forge'"
-        ).fetchone()
-        return int(row[0])
-
-    def test_reinstall_after_uninstall_revives_same_installation(self) -> None:
-        op1 = self._install()
-        inst_id = op1["installation_id"]
-        service = PluginInstallService(self.db)
-        service.uninstall(inst_id)
-        self.assertEqual(service.get_installation(inst_id)["status"], "uninstalled")
-
-        op2 = self._install()
-        self.assertEqual(op2["status"], "ready", op2.get("error_summary"))
-        self.assertEqual(
-            op2["installation_id"], inst_id,
-            "reinstall must revive the same installation row",
         )
-        inst = service.get_installation(inst_id)
-        self.assertEqual(inst["status"], "ready")
-        self.assertEqual(inst["operation_id"], op2["id"])
-        self.assertIsNone(inst["error_code"])
-        self.assertIsNone(inst["error_summary"])
-        self.assertEqual(
-            self._installation_count(), 1,
-            "reinstall must not insert a duplicate row",
+        monkeypatch.setattr(
+            install_service,
+            "_registry_entry_for",
+            lambda spec: {
+                "installPath": str(plugin_root),
+                "version": "1.0.1",
+                "gitCommitSha": "abc123",
+            },
         )
+        monkeypatch.setattr(
+            plugin_cli,
+            "run_claude",
+            lambda argv, *, cwd, timeout_seconds: _fake_execution(argv),
+        )
+        yield plugin_root
 
-    def test_repeated_install_replays_ready_record(self) -> None:
-        op1 = self._install()
-        op2 = self._install()
-        self.assertEqual(op2["status"], "ready", op2.get("error_summary"))
-        self.assertEqual(op2["installation_id"], op1["installation_id"])
-        self.assertEqual(self._installation_count(), 1)
 
-    def test_unexpected_exception_marks_operation_error(self) -> None:
-        with mock.patch.object(
-            install_service.artifact_store,
-            "import_tree",
-            side_effect=sqlite3.IntegrityError(
-                "UNIQUE constraint failed: "
-                "claude_plugin_installations.package_name"
-            ),
-        ):
-            service = PluginInstallService(self.db)
-            with self.assertRaises(PluginInstallError) as caught:
-                service.install(PACKAGE_SPEC)
-        self.assertEqual(caught.exception.code, PLUGIN_INSTALL_FAILED)
-        row = self.db.execute(
-            "SELECT status, phase, error_code, finished_at "
-            "FROM claude_plugin_operations"
-        ).fetchone()
-        self.assertEqual(row[0], "error", "operation must not stay 'running'")
-        self.assertEqual(row[1], "error")
-        self.assertEqual(row[2], PLUGIN_INSTALL_FAILED)
-        self.assertIsNotNone(row[3], "operation must have finished_at set")
+def test_success_reports_closed_lifecycle_and_admin_installation_evidence(
+    install_fixture,
+):
+    reporter = Reporter("cop_success")
+    result = PluginInstallService(reporter).install(
+        PACKAGE_SPEC, operation_id="cop_success"
+    )
 
-    def test_remote_entry_rejects_installed_content_outside_approved_digest(self) -> None:
-        approved = _approved_remote_source()
+    assert result["status"] == "ready"
+    assert result["installation_id"] == "cpi_installation"
+    assert [item.event for item in reporter.calls] == [
+        "begin",
+        "progress",
+        "progress",
+        "complete",
+    ]
+    assert [item.phase for item in reporter.calls[1:3]] == [
+        "cli-install",
+        "verify",
+    ]
+    assert reporter.installation is not None
+    assert reporter.installation.artifact_digest == compute_plugin_digest(
+        install_fixture
+    )
+    assert Path(reporter.installation.artifact_path).is_dir()
 
-        with self.assertRaises(PluginInstallError) as caught:
-            PluginInstallService(self.db).install(
-                PACKAGE_SPEC,
-                source_type="marketplace",
-                marketplace_entry=approved,
+
+def test_unexpected_executor_failure_reports_terminal_error(install_fixture):
+    reporter = Reporter("cop_failed")
+    with mock.patch.object(
+        install_service.artifact_store,
+        "import_tree",
+        side_effect=OSError("disk unavailable"),
+    ):
+        with pytest.raises(PluginInstallError) as caught:
+            PluginInstallService(reporter).install(
+                PACKAGE_SPEC, operation_id="cop_failed"
             )
 
-        self.assertEqual(
-            caught.exception.code,
-            MARKETPLACE_REMOTE_DRIFT,
-            str(caught.exception),
+    assert caught.value.code == PLUGIN_INSTALL_FAILED
+    assert reporter.calls[-1].event == "fail"
+    assert reporter.calls[-1].error_code == PLUGIN_INSTALL_FAILED
+    assert Path(reporter.calls[-1].evidence_path).is_file()
+
+
+def test_remote_entry_rejects_content_outside_admin_approved_digest(
+    install_fixture,
+):
+    approved = _approved_remote_source()
+    reporter = Reporter(
+        "cop_drift", marketplace_entry_id=approved.entry_id
+    )
+
+    with pytest.raises(PluginInstallError) as caught:
+        PluginInstallService(reporter).install(
+            PACKAGE_SPEC,
+            source_type="marketplace",
+            marketplace_entry=approved,
+            operation_id="cop_drift",
         )
-        self.assertNotEqual(
-            compute_plugin_digest(self.plugin_root),
-            approved.approved_plugin_digest,
-        )
-        row = self.db.execute(
-            "SELECT status, error_code FROM claude_plugin_operations "
-            "WHERE marketplace_entry_id = ?",
-            (approved.entry_id,),
-        ).fetchone()
-        self.assertEqual(tuple(row), ("error", MARKETPLACE_REMOTE_DRIFT))
+
+    assert caught.value.code == MARKETPLACE_REMOTE_DRIFT
+    assert compute_plugin_digest(install_fixture) != approved.approved_plugin_digest
+    assert reporter.calls[-1].event == "fail"
+    assert reporter.calls[-1].error_code == MARKETPLACE_REMOTE_DRIFT
 
 
 def test_remote_marketplace_registration_transports_the_approved_ref() -> None:
@@ -241,7 +267,9 @@ def test_remote_marketplace_registration_transports_the_approved_ref() -> None:
         mock.patch.object(
             install_service,
             "resolve_local_marketplace",
-            side_effect=AssertionError("remote entry must not resolve a local marketplace"),
+            side_effect=AssertionError(
+                "remote entry must not resolve a local marketplace"
+            ),
         ),
         mock.patch.object(plugin_cli, "run_claude", side_effect=run_claude),
         mock.patch.object(
@@ -260,14 +288,12 @@ def test_remote_marketplace_registration_transports_the_approved_ref() -> None:
             marketplace_entry=approved,
         )
 
-    assert observed == [[
-        "plugin",
-        "marketplace",
-        "add",
-        "https://github.com/example/drama-studio#release/v1",
-    ]]
+    assert observed == [
+        [
+            "plugin",
+            "marketplace",
+            "add",
+            "https://github.com/example/drama-studio#release/v1",
+        ]
+    ]
     verify_checkout.assert_called_once()
-
-
-if __name__ == "__main__":
-    unittest.main()

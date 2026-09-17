@@ -1,0 +1,19 @@
+{
+  "original_command": "python3 /private/tmp/ink-auth-migration-validation/replay-candidate-0059.py",
+  "cwd": "/Users/dmeck/.codex/worktrees/729f/ink-admin-memory",
+  "original_exit": 1,
+  "cause": "projection-test UPDATE intercepted by original immutable trigger55000, all migration/legacy/lossless checks already passed",
+  "remaining_command": "python3 /private/tmp/ink-auth-migration-validation/verify-candidate-0059-projection.py",
+  "remaining_exit": 0,
+  "append_only": {
+    "exit_code": 1,
+    "sqlstate": "55000",
+    "constraint_or_message": "DECK_CONTENT_VERSION_IMMUTABLE"
+  },
+  "projection_insert": {
+    "exit_code": 1,
+    "sqlstate": "23514",
+    "constraint_or_message": "ck_deck_versions_canonical_projection"
+  },
+  "migration_repeated": false
+}

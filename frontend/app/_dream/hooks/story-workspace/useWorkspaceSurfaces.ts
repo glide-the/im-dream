@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Existing GET /api/claude-agent/threads/{thread_id}/plugin-load-receipt
 //         responses (whole-file passthrough of launch-manifest / pack-receipt).
 // [Output] useWorkspaceSurfaces(threadId) → StoryWorkspaceSurface[] | undefined,
@@ -8,7 +10,7 @@
 //                    change, no filesystem probing from the frontend.
 
 import { useEffect, useState } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspacePluginLoadReceiptResponse,
@@ -54,7 +56,7 @@ export function resolveWorkspaceSurfaces(
 
 export interface FetchWorkspaceSurfacesOptions {
   fetchImpl?: typeof fetch;
-  token?: string | null;
+  csrfToken?: string | null;
   signal?: AbortSignal;
 }
 
@@ -68,7 +70,7 @@ export async function fetchWorkspaceSurfaces(
 ): Promise<StoryWorkspaceSurface[] | undefined> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
 
   let response: Response;
   try {
@@ -110,7 +112,7 @@ export function useWorkspaceSurfaces(
     }
     const controller = new AbortController();
     void fetchWorkspaceSurfaces(apiUrl(workspaceSurfacesEndpoint(threadId)), {
-      token: getAuthToken(),
+      csrfToken: getBrowserCsrfToken(),
       signal: controller.signal,
     }).then((resolved) => {
       if (!controller.signal.aborted) setSurfaces(resolved);

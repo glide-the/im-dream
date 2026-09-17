@@ -1,11 +1,24 @@
 <!-- [Input] Deck CRUD, content-version capability, binding CAS, and deferred Thread apply receipt. -->
 <!-- [Output] Eleven end-to-end Mermaid business sequences. -->
 <!-- [Pos] Deck management/version sequence source of truth. -->
+<!-- [Sync] 2026-09-15: route content history/preview/commit through Admin and distinguish unknown transport results. -->
 <!-- [Sync] 2026-08-16: implement durable draft/explicit commit and retain explicit-only Thread upgrades. -->
 <!-- [Sync] 2026-08-17: add typed Deck-preview Demo dispatch to Chat or the dedicated Dream workbench. -->
 <!-- [Sync] 2026-08-17: add same-Thread, same-Deck next-turn Agent selection with validation and CAS. -->
 
 # Deck 业务时序
+
+## 背景与问题
+
+草稿/内容版本与运行binding是不同状态。Dream旧版本路由直接连接PG；公开five content操作现由Admin领域事务提供，网络结果不明需与已确认失败区分。
+
+## 目标与边界
+
+保持现有十一条可见业务流程。图2与图3的版本段通过Admin；创建/表单CRUD、其它Deck/Runtime图仍列为待迁移领域依赖，不将旧SQL作为迁移目标。共享FS/CLI仍Dream所有，不以metadata技术fixture代替实际验证。
+
+## 概念与规则
+
+current OAuth→Admin principal/owner/four exact physicalcapability→strict DTO/Service/Repository/Drizzle。preview无业务写，commit在同TX锁/CAS/hash/append/latest revision/receipt；safe409仅两revision。网络unknown保留原UUID、不重发、不把absent解释为rollback。正常/失败与影响范围见[内容版本交互](deck-detail-version-history.md)，本轮验收为actual HTTP/DTO DB-fenced技术合同。
 
 ## 1. 打开管理列表并加载内容版本
 
@@ -32,15 +45,16 @@ sequenceDiagram
 sequenceDiagram
   actor U as 用户
   participant UI as 前端
-  participant A as Deck API
-  participant V as 版本/权限校验
+  participant A as Dream Deck API
+  participant M as Admin DTO/Service/Repository
   participant DB as PostgreSQL
   Note over UI: 默认 folded，不请求 history
   U->>UI: 点击版本记录
   UI->>A: GET /api/decks/{id}/versions
-  A->>V: capability + owner 权限
-  V->>DB: 读取不可变 deck_versions DESC
-  A-->>UI: current state + vN history / empty / error
+  A->>M: typed history + request OAuth + original UUID
+  M->>DB: 验证four capabilities/principal/owner，读取immutable versions DESC
+  M-->>A: closed current/history + ISO microseconds
+  A-->>UI: 原current state + creator int/history / empty / safe error
   UI-->>U: 桌面流内 300px / 窄屏同组件全宽
   U->>UI: 再次点击、收起或 Escape
   UI-->>U: 关闭并恢复焦点
@@ -49,35 +63,45 @@ sequenceDiagram
 
 ## 3. 创建、保存草稿并提交新版本
 
+创建/表单保存保留原公开入口；该前半段的数据库消费者继续待Admin迁移。版本preview/commit段已经由Admin执行，Dream不生成snapshot/hash或执行版本事务。
+
 ```mermaid
 sequenceDiagram
   actor U as 用户
   participant UI as 前端
-  participant A as Deck API
-  participant V as 版本/权限校验
+  participant A as Dream Deck API
+  participant C as 原CRUD领域服务（消费者待迁移）
+  participant M as Admin DTO/Service/Repository
   participant DB as PostgreSQL
   U->>UI: 创建 Deck
   UI->>A: POST /api/decks
-  A->>DB: INSERT Deck durable draft r1
+  A->>C: 原创建与default plugin证据流程
+  C->>DB: INSERT Deck durable draft r1
   A-->>UI: deck_id；打开维护弹窗
   U->>UI: 修改 Deck/Agent/插件表单
   UI->>A: 原生产 PUT/POST/DELETE
-  A->>V: owner + 字段校验
-  V->>DB: 锁 Deck，比较旧值，写入并 draft_revision+1
+  A->>C: owner + 字段校验
+  C->>DB: 锁Deck、比较旧值、写入并推进draft revision
   U->>UI: 点击提交 v1/vN+1
   UI->>A: POST /versions/preview(expected draft/base)
-  A->>V: owner + capability + CAS + snapshot diff/hash
-  A-->>UI: target vN + 分类差异 + 影响范围
+  A->>M: typed preview + OAuth + UUID
+  M->>DB: owner/four capabilities/CAS + snapshot diff/hash；无业务写
+  M-->>A: target vN + 分类差异 + 影响范围
+  A-->>UI: 原preview响应
   U->>UI: 确认并填写可选说明
   UI->>A: POST /versions(expected draft/base)
-  A->>DB: BEGIN + FOR UPDATE Deck
-  A->>V: 重验权限/CAS/hash/no-op
-  alt 冲突或无变化
-    V-->>UI: 409；不写版本，刷新后重新预览
-  else 提交成功
-    A->>DB: INSERT immutable deck_versions vN
-    A->>DB: UPDATE latest/published draft revision + COMMIT
-    A-->>UI: vN + clean draft state
+  A->>M: typed commit + OAuth + original UUID
+  M->>DB: BEGIN + owned Deck FOR UPDATE + CAS/hash/no-op
+  alt 已确认冲突或无变化
+    M-->>A: safe 409 + closed revisions
+    A-->>UI: 刷新事实后重新预览
+  else 已确认提交成功
+    M->>DB: INSERT immutable vN + UPDATE latest/published revision + receipt + COMMIT
+    M-->>A: version + clean draft state
+    A-->>UI: 原creator int/ISO微秒响应
+  else Admin响应结果不明
+    A-->>UI: 安全unknown结果与原request ID
+    Note over A,M: 只读取原receipt/版本事实；absent不证明rollback，不自动POST重试
   end
 ```
 

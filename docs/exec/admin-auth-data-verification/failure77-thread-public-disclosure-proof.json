@@ -1,0 +1,486 @@
+{
+  "result": "FAIL",
+  "scope": "actual known private values plus JSON/URL/base64 forms and9 credential patterns; no private payload export",
+  "private_sources_read": 106,
+  "distinct_known_secret_values": 414,
+  "encoded_forms": 1507,
+  "candidate_count": 51,
+  "pattern_categories": [
+    "database_credential_url",
+    "github_secret",
+    "provider_secret",
+    "aws_secret",
+    "private_key",
+    "bearer",
+    "signed_jwt",
+    "delegation",
+    "quoted_secret_assignment"
+  ],
+  "hits": [
+    {
+      "destination": "failure77-fixture-continuation-command-receipt.json",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-continuation-proof.json",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-correction-command-receipt.json",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-correction-failure.json",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-partial-public-network-command-receipt.json",
+      "known_secret_matches": 2,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-partial-public-proof.json",
+      "known_secret_matches": 2,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-target-acl-command-receipt.json",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-first-static-gate.md",
+      "known_secret_matches": 3,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-fixture-recipe.md",
+      "known_secret_matches": 4,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-first-gate.md",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-before-lock-review-plan.md",
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    }
+  ],
+  "files": [
+    {
+      "destination": "failure77-atomic-recovery-cleanup-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-atomic-recovery-cleanup-proof.json",
+      "sha256": "e4c051901d452901f918c34a7016f995f58f96fb3263b65109a585989addb055",
+      "bytes": 423,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-atomic-recovery-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-atomic-recovery-command-receipt.json",
+      "sha256": "50a99f7edf926338ec87402750f4c3cf93362325672945ab4788c61b6e6b2fb8",
+      "bytes": 1555,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-atomic-recovery-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-atomic-recovery-proof.json",
+      "sha256": "6e3c7fbacb10cb7d1b7b931ee4e4e9563c2869b7b9a3724873d220162e7d2082",
+      "bytes": 1415,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-preflight-network-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-continuation-preflight-network-command-receipt.json",
+      "sha256": "68d910146bbce6d2cd0aab89887e2acb3839e4a38f53cecc949ad7baefff53d3",
+      "bytes": 507,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-preflight-sandbox-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-continuation-preflight-sandbox-command-receipt.json",
+      "sha256": "3b99ea573a35fa70509c7d3641877f83b5cc0a2cb02ebbb1e708350638effc4e",
+      "bytes": 550,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-retry-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-continuation-retry-preparation-command-receipt.json",
+      "sha256": "481808c0c4c52407e9f1b0bdafc5c4a12920a56664d84297cdc5bd386f0f7086",
+      "bytes": 781,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-retry-preparation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-continuation-retry-preparation-proof.json",
+      "sha256": "04f44ec1e7b65a37b837983c47f9ccb4660fd2e82327d7933929370ae8d202db",
+      "bytes": 415,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-editor-diagnostic-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-editor-diagnostic-command-receipt.json",
+      "sha256": "bf18150aaab6d96fae85823f3ebba3961f7a8186a7c84c1aea23824cb63ba4db",
+      "bytes": 721,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-editor-diagnostic-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-editor-diagnostic-proof.json",
+      "sha256": "73988bcbb5f5a562f5fe43905a1279fe19b0c19e0dd4234dc1c91e2e6aeaf5d4",
+      "bytes": 464,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-continuation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-continuation-command-receipt.json",
+      "sha256": "7e44f0233805a0f186b677fbac7b46e812feb59924fd759b9001585bbbad320a",
+      "bytes": 1512,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-continuation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-continuation-proof.json",
+      "sha256": "a8b3a3e97960d7aa60568db5d12fa0bc4c22c23209bd597faebeaa0ad24009b2",
+      "bytes": 1209,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-correction-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-correction-command-receipt.json",
+      "sha256": "a0c49b625addd12596449de0b8940d95667515a080ae28586f66bbfd1729d52e",
+      "bytes": 458,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-correction-failure.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-correction-failure.json",
+      "sha256": "14c1a0f5dbae13c2b11d1c7349aa8ce9ad73ff387e6d5dcf4d703d2311f44873",
+      "bytes": 266,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-preparation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-preparation-command-receipt.json",
+      "sha256": "e1fde76a2f9aa8a6f4e4bd5f28c94ec89af22bfb9be4dc11ccbdb700895ee2cc",
+      "bytes": 440,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fixture-preparation-failure.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fixture-preparation-failure.json",
+      "sha256": "5f542974874b7cafc4422b584618b42f11e808d35e81a5b0bc307c5b6ad6c42f",
+      "bytes": 258,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fresh-negative-grant-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fresh-negative-grant-command-receipt.json",
+      "sha256": "ffdb9703598e9fdfb0f4536e256cdfb00af8d235120dec0e47b332067d4ad212",
+      "bytes": 1165,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-fresh-negative-grant-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-fresh-negative-grant-proof.json",
+      "sha256": "5a5814fea2f5e2189c8d1411a2c7114fdebae6fa8180f6964402e0478a6f98f2",
+      "bytes": 820,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-partial-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-partial-public-command-receipt.json",
+      "sha256": "13c6e7132009ae2d83a50dae99c779a5544313316568077dc2a57ccedd0af287",
+      "bytes": 1145,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-partial-public-network-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-partial-public-network-command-receipt.json",
+      "sha256": "d9bb58b46506280507f299dbad0f0f95bc9ad50e3304f2041f3301bab0d69fb3",
+      "bytes": 1546,
+      "known_secret_matches": 2,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-partial-public-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-partial-public-proof.json",
+      "sha256": "ed09d4dea61625d083a20a33df6ac48c922c42c9a17bd577ad1e7971448a2198",
+      "bytes": 1340,
+      "known_secret_matches": 2,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-post-public-checkpoint-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-post-public-checkpoint-command-receipt.json",
+      "sha256": "91af2f05ccfb3f7c82bd0033e0dda9a17cdf9efb989c65aee5d080ff7b851f5c",
+      "bytes": 597,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-post-validation-preservation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-post-validation-preservation-command-receipt.json",
+      "sha256": "bc04e6c4f69539bd379a4fa72741314eb917cde71c1f40bd6ac4316c9f88d619",
+      "bytes": 868,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-post-validation-preservation-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-post-validation-preservation-proof.json",
+      "sha256": "447d8385d48d737098646f64c6eb99fed8699423cad1f43660e11c300fbd8a5b",
+      "bytes": 509,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-public-command-receipt.json",
+      "sha256": "c94daabc641e260a96c1aba26c078b5ccb404023b2669408704ade95a06b7e5d",
+      "bytes": 1164,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-continuation-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-public-continuation-command-receipt.json",
+      "sha256": "ddcde12294ae6ba6beb95d84ac2e4353c061fa96729e40ec1d6e85d1747982ca",
+      "bytes": 461,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-continuation-network-retry-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-public-continuation-network-retry-command-receipt.json",
+      "sha256": "0c413179493c15d37fa3c2d8ca320ff9572001cd996bdcd7fce887acafb33502",
+      "bytes": 851,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-target-acl-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-target-acl-command-receipt.json",
+      "sha256": "57b11cf1f06afe1070bc07a24c6eb3203d2a659e5c6c7eff39a54c50fbf4cb58",
+      "bytes": 620,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-target-command-receipt.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-target-command-receipt.json",
+      "sha256": "363501d2122d99bd151f579fef7084bb4bef0b17019a8d8cba36740e13ff956b",
+      "bytes": 1124,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-target-proof.json",
+      "source": "/private/tmp/ink-auth-migration-validation/failure77-target-proof.json",
+      "sha256": "491ebc00f66edad3eeac22c4241cafcf0a27d7ef0008fc17ab1fc1d5d2c9ff95",
+      "bytes": 688,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-document-freeze-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-continuation-document-freeze-gate.md",
+      "sha256": "c461489f05bb2bf1e67186ab67b8e83879cde8176a44344bcce6acdd39ad6e9c",
+      "bytes": 1334,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-first-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-continuation-first-static-gate.md",
+      "sha256": "9afd1b234a4b38ac6f5482d840e0eebc2980199b67778d30b55d1bf3586116f8",
+      "bytes": 1900,
+      "known_secret_matches": 3,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-ready-document-sync-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-continuation-ready-document-sync-gate.md",
+      "sha256": "d48f4fe7ba2e87eff341fc754a4804838ea7942a16d4dce66caf980d331c1aa8",
+      "bytes": 975,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-continuation-typing-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-continuation-typing-correction-gate.md",
+      "sha256": "a2a500e924825702c075faeb4aac7bdbba4f159c234c6e029a2cd0372e3077e5",
+      "bytes": 883,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-document-readiness-sync-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-document-readiness-sync-gate.md",
+      "sha256": "b1d2f1bfd7d1af639e0255f7340fd8080489be64196e77c892c4d96d957a7ebf",
+      "bytes": 843,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-last-wrappers-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-last-wrappers-static-gate.md",
+      "sha256": "cfbda77a58bd2682900c29eda3ac4cce3ca6f3d5c6f6e394f5a1b67278cb08af",
+      "bytes": 975,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-next-primary-syntax-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-next-primary-syntax-gate.md",
+      "sha256": "ea249e7a0c21f45aeacf8283f8d09b110e1f166e82435e4ac32a2939c350bed4",
+      "bytes": 774,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-primary-fixture-continuation-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-primary-fixture-continuation-static-gate.md",
+      "sha256": "5604a6409f288aa35a6d6d8223254b5dc2e45a314c80bdb049cae17207c44d8c",
+      "bytes": 2058,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-primary-fixture-correction-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-primary-fixture-correction-static-gate.md",
+      "sha256": "a990656745b67e6db0a846878acf36ccec72a430533fedbd7deff7075a8b0ed3",
+      "bytes": 2032,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-primary-fixture-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-primary-fixture-static-gate.md",
+      "sha256": "f6fbec06eb28c4d77e342e79444a7f21c5716b3d816e3705448cdc345997ee4c",
+      "bytes": 2005,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-primary-target-static-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-primary-target-static-correction-gate.md",
+      "sha256": "995c5bd4d7ed1bc6ce87c3614efb3157dc6945a1b7f3509073246634f35cc81b",
+      "bytes": 2074,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-primary-target-static-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-primary-target-static-gate.md",
+      "sha256": "9a280127a47c81f87265ea239336c435a728abaa43d0cd47aceb50a816bb2fe3",
+      "bytes": 1320,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-continuation-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-public-continuation-luna-receipt.md",
+      "sha256": "326b51e546a0a1ae4ac6a10a00b8f6313e86d953053cb457d6e3d691628a246d",
+      "bytes": 1282,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-continuation-network-retry-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-public-continuation-network-retry-luna-receipt.md",
+      "sha256": "94f2d1b046610b60750265d1ffc4a3819a239db64ca45a5d9ffe55ec10e775f7",
+      "bytes": 1728,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-fixture-recipe.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-public-fixture-recipe.md",
+      "sha256": "7959646b36bd080ce8793e8bfa24d6a10e11e5b89338f7f5b92869b22012b633",
+      "bytes": 8750,
+      "known_secret_matches": 4,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-harness-document-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-public-harness-document-first-gate.md",
+      "sha256": "73f81342c8fefae82d69659fff8257663e7786ab918804555033e89106aeb597",
+      "bytes": 1212,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-public-luna-receipt.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-public-luna-receipt.md",
+      "sha256": "3db83b6bf3f66ae593f0b2916da1853237038b082b24ac5852c13a5a5c6c5aaa",
+      "bytes": 2014,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "failure77-registration-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/failure77-registration-first-gate.md",
+      "sha256": "43ae8ad81b55353a350a0a0c5598adb650f2d4a0b6ee9e392eb4b5b6c4db8dca",
+      "bytes": 2285,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-correction-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/thread-system-config-correction-gate.md",
+      "sha256": "b59f295a5171e45a7225a64eb3cab697cf69fa5361307e5cbf6271738ddc38c4",
+      "bytes": 1967,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-first-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/thread-system-config-first-gate.md",
+      "sha256": "283b09920de5996094de90dba44f10065b3b49b381589d69c7b2b5a0b743fef1",
+      "bytes": 3258,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-read-lock-review-gate.md",
+      "source": "/private/tmp/ink-workflow-read-validation/thread-system-config-read-lock-review-gate.md",
+      "sha256": "8e8c30837d1cb54573aefa340491611c55f4956a05979576f0ab82d16b92ab3f",
+      "bytes": 2166,
+      "known_secret_matches": 0,
+      "pattern_labels": []
+    },
+    {
+      "destination": "thread-system-config-before-lock-review-plan.md",
+      "source": "/private/tmp/ink-thread-config-read-lock-review-95r8v9vb/0-stage_admin-thread-system-config-domain.md",
+      "sha256": "67a50716938f26a97794d5d4402502fc7f66e9cea9845f2ce0243ad73986d72d",
+      "bytes": 6443,
+      "known_secret_matches": 1,
+      "pattern_labels": []
+    }
+  ]
+}

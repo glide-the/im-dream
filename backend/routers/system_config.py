@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume database system-config APIs and shared auth dependency.
+# [Input] Consume typed Admin SystemConfig operations, shared OAuth auth and Gateway catalog.
 # [Output] Register GET/PUT /api/system-config endpoints.
 # [Pos] system-config route node in backend/routers
 # [Sync] 2026-05-27: initial implementation — system config (model, theme, env_vars, etc.).
@@ -15,6 +15,7 @@
 #                    (absolute-only, trailing-slash stripped, deduped, capped).
 # [Sync] 2026-08-30: reserve INK_AGENT_SANDBOX_ENABLED for deployment-owned
 #                    process configuration; user env_vars cannot override it.
+# [Sync] 2026-09-15: route Settings reads and writes through Admin with a fresh post-patch read.
 
 """System configuration API.
 
@@ -55,9 +56,14 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 
-import database
 from services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient
-from .deps import get_current_user
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.system_config_data import (
+    AdminSystemConfigData,
+    SystemConfigGetInputDTO,
+    SystemConfigPatchInputDTO,
+)
+from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
 router = APIRouter()
 
@@ -79,13 +85,20 @@ _SERVER_CONTROLLED_ENV_KEYS = frozenset(
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "OPENAI_BASE_URL",
         "INK_ADMIN_PRODUCT_API_BASE_URL",
-        "INK_ADMIN_PRODUCT_JWT_ISSUER",
-        "INK_ADMIN_PRODUCT_JWT_AUDIENCE",
-        "INK_ADMIN_PRODUCT_CLIENT_ID",
         "INK_ADMIN_PRODUCT_ORIGIN",
         "INK_GATEWAY_BASE_URL",
         "INK_GATEWAY_SERVICE_CLIENT_ID",
         "INK_AGENT_SANDBOX_ENABLED",
+        "CLAUDE_CODE_EFFORT_LEVEL",
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+        "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+        "CLAUDE_CODE_TMPDIR",
+        "INK_AGENT_USER_ID",
+        "INK_AGENT_THREAD_ID",
+        "INK_AGENT_WORKFLOW_RUN_ID",
+        "INK_STORY_WORKSPACE_MESSAGE_ID",
     }
 )
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
@@ -226,16 +239,25 @@ def _sanitize_sandbox_fs_allowed_write_paths(raw: object) -> list[str]:
 
 
 @router.get("/api/system-config")
-def get_system_config(current_user: dict = Depends(get_current_user)):
+async def get_system_config(
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
     """Return the caller's system configuration."""
-    user_id = current_user["user_id"]
-    return _public_system_config(database.get_system_config(user_id))
+    data = AdminSystemConfigData(owner.client)
+    config = await invoke_admin_operation(
+        current_user,
+        data.get_user,
+        SystemConfigGetInputDTO(),
+    )
+    return _public_system_config(config)
 
 
 @router.put("/api/system-config")
 async def put_system_config(
     request: dict,
     current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     """Merge *request* into the caller's system configuration.
 
@@ -259,8 +281,13 @@ async def put_system_config(
         if not _MODEL_ALIAS_PATTERN.fullmatch(model_alias):
             raise HTTPException(status_code=422, detail="Invalid platform model alias")
         try:
+            actor = current_user.get("_admin_actor")
+            if not isinstance(actor, AdminRequestActor):
+                raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
             catalog = await asyncio.to_thread(
-                GatewayModelCatalogClient(user_id).fetch_catalog
+                GatewayModelCatalogClient(
+                    access_token=actor.access_token,
+                ).fetch_catalog
             )
         except GatewayInferenceError as exc:
             raise _gateway_error(exc) from exc
@@ -319,9 +346,22 @@ async def put_system_config(
         patch["env_vars"] = _sanitize_env_vars(request["env_vars"])
 
     if patch:
-        database.save_system_config(user_id, patch)
+        data = AdminSystemConfigData(owner.client)
+        await invoke_admin_operation(
+            current_user,
+            data.patch_user,
+            SystemConfigPatchInputDTO(**patch),
+        )
+    else:
+        data = AdminSystemConfigData(owner.client)
+
+    config = await invoke_admin_operation(
+        current_user,
+        data.get_user,
+        SystemConfigGetInputDTO(),
+    )
 
     return {
         "success": True,
-        "data": _public_system_config(database.get_system_config(user_id)),
+        "data": _public_system_config(config),
     }

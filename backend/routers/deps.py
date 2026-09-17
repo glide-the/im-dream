@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-# [Input] Consume auth token helpers and common FastAPI dependency inputs.
-# [Output] Provide shared auth/date/text helpers to backend router modules.
+# [Input] Consume the Admin request-auth owner and common FastAPI dependency inputs.
+# [Output] Provide bearer-only canonical identity and shared date/text helpers to backend routers.
 # [Pos] shared dependency node in backend/routers
+# [Sync] 2026-09-15: reuse one explicit actor/threadpool/error adapter for typed Chat and Session operations.
+# [Sync] 2026-09-15: allow a domain's safe error response through the same actor invocation path.
+# [Sync] 2026-09-15: reuse scoped typed-request validation with fixed errors and no raw body echo.
+# [Sync] 2026-09-15: share OAuth-write default Workspace resolution across three public current-user dependencies.
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
@@ -10,55 +14,101 @@
 #                    is past half of its lifetime.
 # [Sync] 2026-08-31: normalize PostgreSQL datetime and ISO-string timestamps as
 #                    UTC-aware values for timezone-correct calendar grouping.
+# [Sync] 2026-09-14: switch shared request authentication to Admin; remove local JWT/cookie/query renewal authority.
 
-import os
 from datetime import datetime, timezone
 import re
 from typing import Optional
+from uuid import uuid4
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-import auth
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.workspace_data import AdminWorkspaceData, WorkspaceDefaultInputDTO
 
 http_bearer = HTTPBearer(auto_error=False)
 
 
-def _bool_env(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+class SafeRequestValidationRoute(APIRoute):
+    validation_error_detail = "Invalid request"
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def validate_request(request: Request):
+            try:
+                return await handler(request)
+            except RequestValidationError:
+                # Framework details include raw input, including private text
+                # and numbers that cannot be encoded in a JSON response.
+                return JSONResponse(status_code=422, content={"detail": self.validation_error_detail})
+
+        return validate_request
 
 
-def apply_token_renewal(request: Request, response: Response, user_data: dict) -> None:
-    """
-    Sliding expiration: when the presented access token is past half of its
-    lifetime, attach a freshly signed token to the response so active clients
-    never hit the 1-hour expiry. Bearer clients read the X-New-Access-Token
-    header; browser clients get their access_token cookie refreshed when one
-    was presented.
-    """
-    new_token = auth.maybe_renew_access_token(user_data)
-    if not new_token:
-        return
+def get_admin_request_auth(request: Request, credentials: HTTPAuthorizationCredentials = Depends(http_bearer)) -> AdminRequestAuth:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if owner is None:
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return owner
 
-    response.headers[auth.NEW_ACCESS_TOKEN_HEADER] = new_token
 
-    if request.cookies.get("access_token") or request.cookies.get("token"):
-        samesite = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
-        if samesite not in {"lax", "strict", "none"}:
-            samesite = "lax"
-        response.set_cookie(
-            "access_token",
-            new_token,
-            max_age=int(auth.ACCESS_TOKEN_EXPIRE_DELTA.total_seconds()),
-            secure=_bool_env("COOKIE_SECURE", False),
-            httponly=True,
-            samesite=samesite,
-            path="/",
-        )
+async def get_admin_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> dict:
+    """Production resource dependency: no cookie/query token or local JWT renewal."""
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+    request_id = str(uuid4())
+    required_scopes = frozenset({"dream:read" if request.method in {"GET", "HEAD", "OPTIONS"} else "dream:write"})
+    try:
+        actor = await run_in_threadpool(owner.authenticate, credentials.credentials, request_id, required_scopes=required_scopes)
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
+    request.state.admin_request_actor = actor
+    request.state.admin_request_id = request_id
+    return actor.current_user_projection()
+
+
+get_current_user = get_admin_current_user
+
+
+async def invoke_admin_operation(current_user: dict, method, input_dto, *, error_handler=None):
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    request_id = str(uuid4())
+    try:
+        return await run_in_threadpool(method, input_dto, request_id, access_token=actor.access_token)
+    except AdminDataError as exc:
+        if error_handler is not None:
+            return error_handler(exc, request_id)
+        detail = {"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
+        raise HTTPException(status_code=exc.status_code, detail=detail) from None
+
+
+async def resolve_admin_default_workspace(current_user: dict, owner: AdminRequestAuth) -> dict:
+    if current_user.get("workspace_id"):
+        return current_user
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    if "dream:write" not in actor.scopes:
+        raise HTTPException(status_code=403, detail="INSUFFICIENT_SCOPE")
+    data = AdminWorkspaceData(owner.client, canonical_user_id=actor.canonical_user_id)
+    result = await invoke_admin_operation(current_user, data.ensure_default, WorkspaceDefaultInputDTO())
+    return {**current_user, "workspace_id": result.workspace_id}
 
 
 def _count_mixed_words(text: str) -> int:
@@ -84,31 +134,6 @@ def _count_mixed_words(text: str) -> int:
     )
     word_count += len([w for w in english_words.split() if w])
     return word_count
-
-
-def get_current_user(
-    request: Request,
-    response: Response,
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
-) -> dict:
-    """
-    Dependency to extract and verify JWT token from Authorization header.
-
-    Raises:
-        HTTPException 401 if token is missing or invalid
-    """
-    token = credentials.credentials if credentials else None
-    if not token:
-        token = request.cookies.get("access_token") or request.cookies.get("token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing authorization token")
-
-    user_data = auth.verify_access_token(token)
-    if not user_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    apply_token_renewal(request, response, user_data)
-    return user_data
 
 
 def _clean_timestamp(ts_raw: Optional[str | datetime]) -> Optional[datetime]:

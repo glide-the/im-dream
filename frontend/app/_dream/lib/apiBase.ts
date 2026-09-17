@@ -6,6 +6,7 @@
 // [Sync] 2026-06-15: remove /ink-and-memory same-origin fallback prefix; root deploy uses /api directly.
 // [Sync] 2026-09-05: replace Vite-only import.meta fallbacks while keeping startup runtime config authoritative.
 // [Sync] 2026-09-05: guard Next public fallbacks so provider-free browser harnesses do not require a process global.
+// [Sync] 2026-09-14: REST/SSE/files always use the current Next origin; explicit WS config retains its disabled-ASR behavior.
 
 type RuntimeConfig = {
   apiBaseUrl?: string;
@@ -19,10 +20,6 @@ declare global {
 }
 
 const DEFAULT_API_BASE = '';
-
-function nextPublicApiBase(): string | undefined {
-  return typeof process === 'undefined' ? undefined : process.env.NEXT_PUBLIC_API_BASE_URL;
-}
 
 function nextPublicWebSocketBase(): string | undefined {
   return typeof process === 'undefined' ? undefined : process.env.NEXT_PUBLIC_WS_BASE_URL;
@@ -40,9 +37,7 @@ function getRuntimeConfig(): RuntimeConfig {
 }
 
 export function getApiBase(): string {
-  return cleanBaseUrl(
-    getRuntimeConfig().apiBaseUrl || nextPublicApiBase(),
-  ) ?? DEFAULT_API_BASE;
+  return DEFAULT_API_BASE;
 }
 
 export const API_BASE = {

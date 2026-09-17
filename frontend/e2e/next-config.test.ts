@@ -2,6 +2,7 @@
 // [Output] Provider-free project-root, route ownership and cache-header configuration regressions.
 // [Pos] Configuration tests in the existing Playwright runner; no browser/server/database required.
 // [Sync] 2026-09-14: prevent ancestor lockfiles from changing React Client Manifest module identities.
+// [Sync] 2026-09-14: authenticated runtime Route Handlers replace build-time API/auth rewrites.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
@@ -35,18 +36,8 @@ test('ancestor launch cwd cannot change module identities', () => {
   expect(readConfig(dirname(projectRoot)).root).toBe(projectRoot);
 });
 
-test('Python proxy keeps MCP Apps and streaming Agent routes Next-owned', () => {
-  expect(readConfig(projectRoot, { INK_BACKEND_INTERNAL_URL: 'http://backend.example.test:8765///' }).rewrites).toEqual({
-    beforeFiles: [],
-    afterFiles: [
-      { source: '/api/:path((?!mcp-apps(?:/|$)|claude-agent(?:/|$)).*)', destination: 'http://backend.example.test:8765/api/:path' },
-      { source: '/auth/:path*', destination: 'http://backend.example.test:8765/auth/:path*' },
-      { source: '/oauth/google/:path*', destination: 'http://backend.example.test:8765/oauth/google/:path*' },
-      { source: '/oauth/device/code', destination: 'http://backend.example.test:8765/oauth/device/code' },
-      { source: '/oauth/token', destination: 'http://backend.example.test:8765/oauth/token' },
-    ],
-    fallback: [],
-  });
+test('configured backend cannot bypass API/auth Route Handler credentials through rewrites', () => {
+  expect(readConfig(projectRoot, { INK_BACKEND_INTERNAL_URL: 'http://backend.example.test:8765' }).rewrites).toEqual([]);
 });
 
 test('missing backend URL retains no generic rewrite or standalone output', () => {

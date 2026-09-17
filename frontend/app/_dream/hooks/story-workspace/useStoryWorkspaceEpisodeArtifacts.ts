@@ -1,10 +1,12 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Actor-scoped Run plus registry Episode UID, artifact REST surface, and output hints.
 // [Output] Run+Episode-isolated ETag fetch seam, last-good reducer, and polling hook.
 // [Pos] Story Workspace Episode artifact query boundary (U5)
 // [Sync] 2026-09-02: key requests, reducers, ETags, and last-good data by Run+Episode.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import {
   storyWorkspaceParseEpisodeArtifactSurface,
@@ -195,7 +197,7 @@ export function storyWorkspaceShouldCommitEpisodeArtifactsResponse(
 
 export interface StoryWorkspaceEpisodeArtifactsFetchOptions {
   readonly fetchImpl?: typeof fetch;
-  readonly token?: string | null;
+  readonly csrfToken?: string | null;
   readonly etag?: string | null;
   readonly expectedRunId?: string;
   readonly expectedEpisodeId?: string;
@@ -212,7 +214,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   options: StoryWorkspaceEpisodeArtifactsFetchOptions = {},
 ): Promise<StoryWorkspaceEpisodeArtifactsFetchResult> {
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   if (options.etag) headers.set('If-None-Match', storyWorkspaceQuotedEtag(options.etag));
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
@@ -478,7 +480,7 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
 
 export interface StoryWorkspaceEpisodeArtifactsUseOptions {
   readonly fetchImpl?: typeof fetch;
-  readonly token?: string | null;
+  readonly csrfToken?: string | null;
   readonly pollIntervalMs?: number;
 }
 
@@ -534,7 +536,7 @@ export function useStoryWorkspaceEpisodeArtifacts(
       apiUrl(storyWorkspaceEpisodeArtifactsEndpoint(normalizedRunId, normalizedEpisodeId)),
       {
         fetchImpl: options.fetchImpl,
-        token: options.token === undefined ? getAuthToken() : options.token,
+        csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
         etag: lifecycle.etagFor(normalizedRunId, normalizedEpisodeId),
         expectedRunId: normalizedRunId,
         expectedEpisodeId: normalizedEpisodeId,
@@ -587,7 +589,7 @@ export function useStoryWorkspaceEpisodeArtifacts(
           : new Error('Episode artifact request failed.'),
       });
     });
-  }, [lifecycle, normalizedEpisodeId, normalizedRunId, options.fetchImpl, options.token]);
+  }, [lifecycle, normalizedEpisodeId, normalizedRunId, options.fetchImpl, options.csrfToken]);
 
   useEffect(() => {
     lifecycle.activate(normalizedRunId, normalizedEpisodeId);

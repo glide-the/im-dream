@@ -1,0 +1,15 @@
+{
+  "status": "failed",
+  "database": "ink_auth_data_codex_test_792494523a17_acl56",
+  "assertions": 6,
+  "results": [
+    {
+      "label": "Missing published Free rollback",
+      "status": "expected-failure",
+      "sqlstate": "23514"
+    }
+  ],
+  "message": "new row for relation \"ai_providers\" violates check constraint \"ai_providers_adapter_base_url_check\"",
+  "sqlstate": "23514",
+  "normal_database": "untouched"
+}

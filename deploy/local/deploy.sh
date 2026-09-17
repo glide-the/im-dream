@@ -4,8 +4,9 @@
 # [Pos] platform release entry in deploy/local/
 # [Sync] 2026-06-12: add platform-scoped local release helper with help, dry-run, and check modes.
 # [Sync] 2026-08-07: expose the frontend dev server on all network interfaces by default.
-# [Sync] 2026-08-22: source Dream's local database URL from the Admin-owned
-#                    embedded PostgreSQL env file instead of a stale local DSN.
+# [Sync] 2026-09-16: require explicit Next BFF config and reject legacy Dream database credentials.
+# [Sync] 2026-09-16: remove Admin env-file/DSN loading; Dream uses Admin auth/data APIs.
+# [Sync] 2026-09-16: reject retired Dream auth/session secrets before production-path startup.
 # [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 # [Sync] 2026-09-05: select the Next compatibility shell by default with an explicit Vite rollback runtime.
 # [Sync] 2026-09-05: remove source-built Vite rollback; only an explicitly named image may be selected.
@@ -32,7 +33,6 @@ LOCAL_VITE_ROLLBACK_BACKEND_URL="${LOCAL_VITE_ROLLBACK_BACKEND_URL:-${LOCAL_BACK
 LOCAL_VITE_ROLLBACK_API_BASE_URL="${LOCAL_VITE_ROLLBACK_API_BASE_URL-${LOCAL_BACKEND_URL}}"
 LOCAL_VITE_ROLLBACK_WS_BASE_URL="${LOCAL_VITE_ROLLBACK_WS_BASE_URL-}"
 LOCAL_VITE_ROLLBACK_NETWORK="${LOCAL_VITE_ROLLBACK_NETWORK-}"
-LOCAL_ADMIN_ENV_FILE="${LOCAL_ADMIN_ENV_FILE:-${REPO_ROOT}/../ink-admin-memory/.env.local}"
 
 DRY_RUN=0
 COMMAND=""
@@ -73,7 +73,6 @@ Environment overrides:
   LOCAL_VITE_ROLLBACK_NETWORK
                           optional pre-existing Docker network for the rollback container
   LOCAL_RELEASE_LOG_DIR   default: logs/deploy-local
-  LOCAL_ADMIN_ENV_FILE    default: sibling ink-admin-memory/.env.local
   PYTHON_BIN              default: backend/.venv/bin/python, python3, then python
 EOF
 }
@@ -149,9 +148,21 @@ check_prereqs() {
     select_python >/dev/null || { warn "python not found. Set PYTHON_BIN or install Python."; failed=1; }
   fi
   require_file "${BACKEND_DIR}/server.py" || { warn "Missing backend/server.py."; failed=1; }
-  require_file "${BACKEND_DIR}/database.py" || { warn "Missing backend/database.py."; failed=1; }
+  require_file "${BACKEND_DIR}/services/admin_data/config.py" || { warn "Missing backend/services/admin_data/config.py."; failed=1; }
   require_file "${BACKEND_DIR}/.env" || { warn "Missing backend/.env. Copy backend/.env.example first."; failed=1; }
-  require_file "${LOCAL_ADMIN_ENV_FILE}" || { warn "Missing Admin env file at ${LOCAL_ADMIN_ENV_FILE}. Set LOCAL_ADMIN_ENV_FILE or run Admin env:setup."; failed=1; }
+  require_file "${FRONTEND_DIR}/.env.local" || { warn "Missing frontend/.env.local. Copy frontend/.env.example and configure the Admin BFF client."; failed=1; }
+  if [[ -f "${BACKEND_DIR}/.env" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${BACKEND_DIR}/.env"; then
+    warn "backend/.env still contains a Dream database credential; remove it before local production-path startup."
+    failed=1
+  fi
+  if [[ -f "${BACKEND_DIR}/.env" ]] && grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY|AUTH_TOKEN_ENCRYPTION_KEY|COOKIE_SECURE|COOKIE_SAMESITE|INK_DREAM_BFF_COOKIE_SECRET)=[^[:space:]]+' "${BACKEND_DIR}/.env"; then
+    warn "backend/.env contains authentication authority not owned by FastAPI; move Admin secrets to Admin and the BFF cookie key to frontend/.env.local."
+    failed=1
+  fi
+  if [[ -f "${FRONTEND_DIR}/.env.local" ]] && grep -Eq '^(DATABASE_URL|INK_DATABASE_ENV_FILE)=[^[:space:]]+' "${FRONTEND_DIR}/.env.local"; then
+    warn "frontend/.env.local contains a database credential; the Next BFF may only call Admin APIs."
+    failed=1
+  fi
   require_file "${FRONTEND_DIR}/package.json" || { warn "Missing frontend/package.json."; failed=1; }
   case "${LOCAL_FRONTEND_RUNTIME}" in
     next) ;;
@@ -235,7 +246,7 @@ command_build() {
   else
     python_bin="$(select_python)"
   fi
-  run_in_dir "${BACKEND_DIR}" "${python_bin}" -m py_compile server.py database.py
+  run_in_dir "${BACKEND_DIR}" "${python_bin}" -m py_compile server.py services/admin_data/config.py
   if [[ "${LOCAL_FRONTEND_RUNTIME}" == "vite-image" ]]; then
     if [[ "${DRY_RUN}" == "1" ]]; then
       print_cmd docker image inspect "${LOCAL_VITE_ROLLBACK_IMAGE}"
@@ -297,9 +308,6 @@ command_start() {
     "${BACKEND_DIR}" \
     "${BACKEND_PID}" \
     "${BACKEND_LOG}" \
-    env -u DATABASE_URL \
-    INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1 \
-    INK_DATABASE_ENV_FILE="${LOCAL_ADMIN_ENV_FILE}" \
     "${python_bin}" server.py
   if [[ "${LOCAL_FRONTEND_RUNTIME}" == "vite-image" ]]; then
     start_vite_rollback

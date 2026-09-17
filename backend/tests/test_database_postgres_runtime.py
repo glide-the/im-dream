@@ -26,7 +26,7 @@ import pytest
 from psycopg.pq import TransactionStatus
 
 import database
-from persistence.config import require_test_database_url
+from tests.legacy_persistence.config import require_test_database_url
 
 
 class _RollbackOnlyLease:
@@ -204,25 +204,6 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
         assert database.get_reflection_task(task_id, user_id)["sections"] == ["growth"]
         assert database.list_reflection_task_events(task_id, user_id)[0]["event_type"] == "created"
 
-        deck_id = database.create_deck(
-            user_id,
-            "PostgreSQL deck",
-            description="Boolean columns use native PostgreSQL values",
-        )
-        voice_id = database.create_voice(
-            user_id,
-            deck_id,
-            "PostgreSQL voice",
-            "Use the PostgreSQL runtime contract.",
-        )
-        assert database.update_deck(user_id, deck_id, {"enabled": False}) is True
-        assert database.update_voice(user_id, voice_id, {"enabled": False}) is True
-        deck = database.get_deck_with_voices(user_id, deck_id)
-        assert deck is not None
-        assert deck["enabled"] is False
-        assert deck["has_local_changes"] is False
-        assert deck["voices"][0]["enabled"] is False
-        assert deck["voices"][0]["has_local_changes"] is False
     finally:
         database.get_db = original_get_db
         real_lease.rollback()

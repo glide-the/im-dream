@@ -1,0 +1,10 @@
+{
+  "result": "FAIL",
+  "target": "ink_auth_data_codex_test_792494523a17_run72",
+  "step": "owned-source-message",
+  "setup_assertions": 1,
+  "sqlstate": "ERR_ASSERTION",
+  "exception": "AssertionError",
+  "message": "Private diagnostic omitted",
+  "completed_public_seed_commands": []
+}

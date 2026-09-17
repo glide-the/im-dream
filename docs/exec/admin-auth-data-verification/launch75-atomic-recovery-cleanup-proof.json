@@ -1,0 +1,63 @@
+{
+  "result": "PASS",
+  "cleanups": [
+    {
+      "point": "source-thread",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "source-message",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "source-order",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "source-receipt",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "source-audit",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "claim-message",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "claim-receipt",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "claim-audit",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "finish-message",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "finish-receipt",
+      "result": "PASS",
+      "objects_removed": 2
+    },
+    {
+      "point": "finish-audit",
+      "result": "PASS",
+      "objects_removed": 2
+    }
+  ],
+  "owned_active_fault_objects": "none",
+  "normal_services": "untouched",
+  "business_history": "retained"
+}

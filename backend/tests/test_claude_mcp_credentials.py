@@ -7,6 +7,8 @@
 [Sync] 2026-08-20: prove macOS never copies Keychain material and reuses a user secure-store selector.
 [Sync] 2026-08-20: cover detached user MCP definition reads for inventory and Agent injection.
 [Sync] 2026-08-21: prove pre-thread CLI cwd cannot inherit ancestor project MCP config.
+[Sync] 2026-09-16: prove legacy existing-thread synchronization has no implicit
+                   Dream database fallback.
 """
 
 from __future__ import annotations
@@ -323,6 +325,21 @@ def test_existing_thread_sync_skips_missing_workspaces_and_is_user_scoped(tmp_pa
         assert not (tmp_path / "workspaces" / "thread-missing").exists()
 
     asyncio.run(scenario())
+
+
+def test_existing_thread_sync_without_provider_fails_closed(tmp_path: Path) -> None:
+    synchronizer = ClaudeMcpCredentialSynchronizer(
+        _settings(tmp_path),
+        platform_name="linux",
+        workspace_root_provider=lambda: (tmp_path / "workspaces").resolve(),
+    )
+
+    try:
+        asyncio.run(synchronizer.sync_existing_threads("7"))
+    except ClaudeMcpCredentialError as exc:
+        assert "explicit thread provider" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("implicit Dream database access was accepted")
 
 
 def test_malformed_permissions_symlinks_and_unsupported_platform_fail_closed(tmp_path: Path) -> None:

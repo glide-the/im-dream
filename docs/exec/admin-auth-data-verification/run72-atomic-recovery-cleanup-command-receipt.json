@@ -1,0 +1,20 @@
+{
+  "command": "/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/ink-auth-migration-validation/verify-run72-fault-cleanup.py",
+  "cwd": "/Users/dmeck/project/ink-dream-memory",
+  "exit_code": 0,
+  "key_output": {
+    "result": "PASS",
+    "target": "ink_auth_data_codex_test_792494523a17_run72",
+    "assertions": 3,
+    "owned_fault_triggers_remaining": 0,
+    "owned_fault_functions_remaining": 0,
+    "selected_faults_verified": 9,
+    "mutation_performed": false,
+    "original_business_command_exit": 1,
+    "original_business_assertions": 68,
+    "cleanup_helper_fix": "primary-only lexical scope; remaining cleanup check only",
+    "normal_services": "untouched",
+    "business_and_failure_history": "retained"
+  },
+  "evidence_source": "actual primary exec tool completion; no second invocation"
+}

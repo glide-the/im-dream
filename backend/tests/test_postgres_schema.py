@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from schema.catalog import (
+from tests.legacy_schema.catalog import (
     EXPECTED_COUNTS,
     EXPECTED_POSTGRES_COUNTS,
     MANIFEST_PATH,
@@ -9,7 +9,7 @@ from schema.catalog import (
     load_manifest,
     render_manifest,
 )
-from schema.importer import APPROVED_TARGET_INDEXES
+from tests.legacy_schema.importer import APPROVED_TARGET_INDEXES
 
 
 REQUIRED_TABLE_FIELDS = {

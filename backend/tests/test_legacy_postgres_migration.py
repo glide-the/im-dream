@@ -8,10 +8,10 @@ from uuid import UUID
 
 import pytest
 
-import schema.importer as legacy_importer
-from persistence.config import require_test_database_url
-from schema.catalog import load_manifest
-from schema.importer import (
+import tests.legacy_schema.importer as legacy_importer
+from tests.legacy_persistence.config import require_test_database_url
+from tests.legacy_schema.catalog import load_manifest
+from tests.legacy_schema.importer import (
     CONTRACT,
     LegacyMigrationError,
     readonly_snapshot_bundle,
@@ -20,7 +20,7 @@ from schema.importer import (
     transform_value,
     wave_topological_order,
 )
-from script.migrate_legacy_to_postgres import main as migration_cli_main
+from tests.harness.migrate_legacy_to_postgres import main as migration_cli_main
 
 
 def _create_legacy_file(path: Path, source: str) -> None:
@@ -597,7 +597,7 @@ def test_verify_existing_requires_explicit_read_only_target_identity(
 
 def test_migration_sql_has_no_implicit_overwrite_or_destructive_target_statement() -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "schema" / "importer.py"
+        Path(__file__).resolve().parent / "legacy_schema" / "importer.py"
     ).read_text(encoding="utf-8")
     normalized = source.upper()
     assert "ON CONFLICT DO UPDATE" not in normalized

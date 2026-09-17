@@ -1,12 +1,14 @@
 <!-- [Input] Google Cloud deployment scripts, current Next standalone image, and the Admin-owned PostgreSQL schema contract. -->
-<!-- [Output] Historical Cloud Run topology plus the current blocking data/configuration gaps. -->
+<!-- [Output] Historical Cloud Run topology plus the current configuration and acceptance gaps. -->
 <!-- [Pos] Google Cloud deployment record; not a supported production runbook until the documented blockers are migrated and accepted. -->
 # Google Cloud Run 历史部署合同与当前阻塞
 
 <!-- [Sync] 2026-08-31: remove the retired /polycli same-origin fallback. -->
 <!-- [Sync] 2026-09-06: align the frontend image with Next standalone and mark the legacy SQLite/GCS data path unsupported. -->
+<!-- [Sync] 2026-09-16: mark legacy Dream Google/JWT/session/cookie projection retired; Admin owns application authentication. -->
+<!-- [Sync] 2026-09-16: retire the executable Dream SQLite/GCS sync path; shared files use a separate topology. -->
 
-> **当前不是可支持的 Dream 生产发布入口。** `deploy/google-cloud/deploy.sh` 构建的 `frontend/Dockerfile` 已是根 Next.js 16 + pnpm frozen-lock standalone；但脚本仍传入未被 Dockerfile 消费的 `VITE_PUBLIC_SITE_URL`，数据脚本仍依赖 SQLite/GCS，与 Admin-owned PostgreSQL/Drizzle 合同冲突。在数据路径迁移并重验前，下文 Cloud 资源和数据步骤只作历史参考，不得用于真实业务发布。当前分流见 [发布文档入口](README.md)。
+> **当前不是已验收的 Dream 生产发布入口。** `deploy/google-cloud/deploy.sh` 构建的 `frontend/Dockerfile` 已是根 Next.js 16 + pnpm frozen-lock standalone，业务数据只经Admin DTO API；旧SQLite/GCS同步入口已经fail closed。但脚本仍传入未被Dockerfile消费的`VITE_PUBLIC_SITE_URL`，共享文件拓扑与完整发布旅程尚未在Cloud Run重验。下文旧Cloud资源和数据步骤只作历史参考，不得直接用于真实业务发布。当前分流见[发布文档入口](README.md)。
 
 本文档描述历史 Cloud Run 部署架构与操作步骤。对应脚本入口是 [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh)，旧的 `deploy/*.sh` 路径仅保留兼容或作为该入口的辅助脚本；两者都受上述当前阻塞约束。
 
@@ -54,9 +56,9 @@ Google Cloud 部署脚本位于项目根目录下的 `deploy/` 文件夹。优�
 | 脚本 | 执行时机 | 作用 |
 |------|---------|------|
 | `deploy/google-cloud/deploy.sh setup-storage` | **首次部署前**（一次性） | 创建 GCS bucket、服务账号、IAM 授权 |
-| `deploy/google-cloud/deploy.sh setup-env` | **首次部署前及 secrets 变更时** | 配置 Secret Manager secrets、Google OAuth/JWT/session secrets 和 Cloud Run 环境变量 |
-| `deploy/google-cloud/deploy.sh deploy` | **每次发版** | 并行构建镜像、推送到 Artifact Registry、部署前后端并回写后端 OAuth URL、cookie policy 和 CORS origin |
-| `deploy/google-cloud/deploy.sh backup-data` | **停机、修复或同步前** | 下载云端 SQLite/WAL/SHM 到本地 `backend/data/bak_<date>/`，不上传、不重启 |
+| `deploy/google-cloud/deploy.sh setup-env` | **首次部署前及 secrets 变更时** | 配置Dream Runtime、Admin service credential与Next-only BFF cookie Secret引用；backend/frontend使用独立service account和逐secret IAM，不创建Google/JWT/session secret |
+| `deploy/google-cloud/deploy.sh deploy` | **每次发版** | 并行构建镜像、推送到Artifact Registry、部署前后端并回写公开URL与CORS origin |
+| `deploy/google-cloud/deploy.sh backup-data` | 已退役 | fail closed；Dream 不再备份、上传或恢复 SQLite/WAL/SHM |
 | `deploy/deploy.sh` | **兼容入口** | 委托执行 `deploy/google-cloud/deploy.sh deploy` |
 
 ---
@@ -84,8 +86,8 @@ export GCP_PROJECT_ID=your-project-id
 - 在指定区域（默认 `asia-east1`）创建 GCS bucket `ink-memory-data-<PROJECT_ID>`
 - 开启 bucket 版本控制（防止数据意外覆盖）
 - 预建 `file-storage/`、`agent-workspace/` 目录占位符
-- 创建专用服务账号 `ink-backend-sa`，授予 `Storage Object Admin`
-- 将 bucket 名和 SA 邮箱写入根目录 `.storage-env`（已加入 `.gitignore`）
+- 创建独立`ink-backend-sa`与`ink-frontend-sa`；只有backend账号取得bucket的`Storage Object Admin`
+- 将bucket名及两个SA邮箱写入根目录`.storage-env`（已加入`.gitignore`）
 
 ### 2. 配置环境变量
 
@@ -107,37 +109,33 @@ export GCP_PROJECT_ID=your-project-id
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `ink-anthropic-opus-model` | Opus 默认模型 |
 | `AGENT_CWD` | `ink-agent-cwd` | Agent 工作区路径，Cloud Run 默认 `/app/data/agent-workspace` |
 | `FILE_STORAGE_LOCAL_DIR` | `ink-file-storage-dir` | 文件存储路径，Cloud Run 默认 `/app/data/file-storage` |
-| `GOOGLE_CLIENT_SECRET` | `ink-google-client-secret` | Google OAuth Web Client Secret |
-| `JWT_SECRET` | `ink-jwt-secret` | 本系统 access token 签名密钥 |
-| `SESSION_SECRET_KEY` | `ink-session-secret-key` | OAuth state/session cookie 签名密钥 |
-| `OAUTH_TOKEN_ENCRYPTION_KEY` | `ink-oauth-token-encryption-key` | 预留：如后续保存 Google token，必须用于加密 |
+| `INK_ADMIN_DREAM_SERVICE_SECRET` | `${INK_ADMIN_DREAM_SERVICE_SECRET_NAME}`，默认`ink-admin-dream-service-secret` | 注册Dream service credential；按调用方分别绑定backend和Next |
+| `INK_DREAM_BFF_COOKIE_SECRET` | `${INK_DREAM_BFF_COOKIE_SECRET_NAME}`，默认`ink-dream-bff-cookie-secret` | 仅绑定Next service account，不进入FastAPI |
 
 **配置值 → Cloud Run 环境变量**
 
 | 来源 | 默认值/行为 | 说明 |
 |------|-------------|------|
 | `TZ` | `UTC` | `setup-env.sh` 固定写入 `.cloud-env` |
-| `backend/.env` 中非 Secret Manager key | 原值透传 | 除上表交互确认 key 和 `TZ` 外，其他 key 会写入 `.cloud-env` 的 `CLOUD_ENV_VARS` |
-| `GOOGLE_CLIENT_ID` | 来自 `backend/.env` | Google OAuth Web Client ID，非 secret |
-| `WEBUI_URL` | 部署脚本写入 `https://ink-frontend.suoxya.com` | OAuth callback 成功后的前端跳转目标 |
-| `API_BASE_URL` | 部署脚本写入 `https://ink-backend.suoxya.com` | Google OAuth callback URI 构造依据 |
-| `COOKIE_SECURE` | `true` | 生产 HTTPS cookie 必须开启 Secure |
-| `COOKIE_SAMESITE` | `none` | 前后端分域时允许跨站 cookie |
+| `backend/.env` 中非 Secret Manager key | 原值透传 | 排除Secret Manager项、数据库凭据、旧认证authority和部署脚本拥有的公开URL/CORS键后写入`CLOUD_ENV_VARS` |
+| `frontend/.env.local` | 只读取BFF cookie secret作为交互默认 | 不把该文件其余值复制到backend或`.cloud-env`明文 |
+| `WEBUI_URL` | 部署脚本写入 `https://ink-frontend.suoxya.com` | Dream公开页面origin；不承担Google callback |
+| `API_BASE_URL` | 部署脚本写入 `https://ink-backend.suoxya.com` | Dream FastAPI公开origin |
 | `INK_CORS_ALLOW_ORIGINS` | `https://ink-frontend.suoxya.com` | 生产后端只允许可信前端 origin |
-| `INK_CORS_ALLOW_CREDENTIALS` | `true` | Google OAuth cookie 登录需要允许浏览器 credentials |
+| `INK_CORS_ALLOW_CREDENTIALS` | `true` | 仅对明确Dream origin允许浏览器credentials；OAuth token仍单独校验 |
 
-输出写入根目录 `.cloud-env`（已加入 `.gitignore`）。
+输出写入根目录`.cloud-env`（已加入`.gitignore`）：`CLOUD_SECRET_REFS`供backend，`CLOUD_FRONTEND_SECRET_REFS`只含Admin service secret与BFF cookie secret。两个service account只取得其实际引用secret的Secret Manager权限；旧project-wide Secret Accessor会被移除。
 
-`setup-env` 不把 `WEBUI_URL`、`API_BASE_URL`、`COOKIE_SECURE`、`COOKIE_SAMESITE`、`INK_CORS_ALLOW_ORIGINS` / `INK_CORS_ALLOW_CREDENTIALS` 写入 `.cloud-env`。这些变量由 `deploy/google-cloud/deploy.sh deploy` 按固定公开域名更新到后端，避免后续数据同步或普通环境变量刷新把生产 OAuth/CORS/cookie 配置覆盖回本地默认值。
+`setup-env`不把`WEBUI_URL`、`API_BASE_URL`、`INK_CORS_ALLOW_ORIGINS`/`INK_CORS_ALLOW_CREDENTIALS`写入`.cloud-env`；也丢弃旧Dream Google/JWT/Session/OAuth secret和Cookie策略。公开URL/CORS由`deploy/google-cloud/deploy.sh deploy`更新。Google/Better Auth/OAuth authority secret只存在于Admin；Dream只保留注册service credential和Next BFF handle secret。
 
-Google Console 必须配置：
+Google Console配置已迁入Admin Better Auth；历史Dream Cloud Run脚本不再持有Google secret。对应Admin注册值为：
 
 ```text
 Authorized JavaScript origins:
-  https://ink-frontend.suoxya.com
+  https://ink-admin.suoxya.com
 
 Authorized redirect URIs:
-  https://ink-backend.suoxya.com/oauth/google/callback
+  https://ink-admin.suoxya.com/api/auth/callback/google
 ```
 
 ### 3. 部署
@@ -157,10 +155,9 @@ Step 5  并行构建后端镜像 + 前端镜像
 Step 6  并行推送两个镜像
 Step 7  部署后端服务 → 获取 BACKEND_URL（run.app 服务 URL，由容器入口投影为 Next 内部 rewrite fallback）
         部署前端服务（默认注入 API_BASE_URL=https://ink-backend.suoxya.com）
-        回写后端 WEBUI_URL / API_BASE_URL / cookie policy / INK_CORS_ALLOW_ORIGINS
+        回写后端 WEBUI_URL / API_BASE_URL / INK_CORS_ALLOW_ORIGINS
         默认 WEBUI_URL=https://ink-frontend.suoxya.com
         默认 API_BASE_URL=https://ink-backend.suoxya.com
-        默认 COOKIE_SECURE=true, COOKIE_SAMESITE=none
         默认 INK_CORS_ALLOW_ORIGINS=https://ink-frontend.suoxya.com
 ```
 
@@ -205,9 +202,7 @@ export BACKEND_PUBLIC_ORIGIN=https://ink-backend.suoxya.com    # 默认固定后
 export FRONTEND_PUBLIC_ORIGIN=https://ink-frontend.suoxya.com  # 默认固定前端公开域名
 export FRONTEND_API_BASE_URL=https://api.example.com      # 可选覆盖；默认 BACKEND_PUBLIC_ORIGIN
 export BACKEND_CORS_ALLOW_ORIGINS=https://app.example.com # 可选覆盖；默认 FRONTEND_PUBLIC_ORIGIN
-export INK_CORS_ALLOW_CREDENTIALS=true                    # 默认 true，OAuth cookie 登录需要
-export BACKEND_COOKIE_SECURE=true                         # 默认 true
-export BACKEND_COOKIE_SAMESITE=none                       # 默认 none，前后端分域需要
+export INK_CORS_ALLOW_CREDENTIALS=true                    # 默认 true，仅允许已配置Dream origin
 ```
 
 `FRONTEND_PUBLIC_ORIGIN` / `BACKEND_CORS_ALLOW_ORIGINS` 应填写浏览器 Origin（协议 + 主机 + 可选端口），不要包含路径；部署脚本会自动去掉末尾 `/`。

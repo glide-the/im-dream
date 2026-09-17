@@ -1,9 +1,11 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Settings → Plugins (Claude Code) server API contracts.
 // [Output] Typed client for the global Marketplace catalog, shared installations, operations, and Deck plugin refs.
 // [Pos] API layer for claude-plugin-admin components and the Deck editor plugin selector.
 // [Sync] 2026-08-19: add capability-gated global Marketplace reads and entry-ID installs with immutable revision lineage.
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export type ClaudePluginSourceType = 'claude-official' | 'marketplace' | 'github' | 'platform-builtin';
@@ -164,8 +166,8 @@ export class ClaudePluginApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getAuthToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = getBrowserCsrfToken();
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   headers.set('Accept', 'application/json');
   if (init.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
