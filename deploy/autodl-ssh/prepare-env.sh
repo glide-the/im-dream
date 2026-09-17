@@ -2,6 +2,7 @@
 # [Input] Existing Dream/MCP Apps secure env files and explicit AutoDL service mappings.
 # [Output] Mode-0600 Dream backend/Next runtime env using Admin HTTP data/auth credentials.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
+# [Sync] 2026-09-17: derive the opaque iframe sandbox route from the deployment-injected Dream origin.
 # [Sync] 2026-09-16: project deployment-owned Admin DTO/BFF identity with exact issuer/resource/origin values.
 # [Sync] 2026-09-16: stop reading Admin PostgreSQL secrets or projecting DATABASE_URL into Dream.
 # [Sync] 2026-09-16: strip retired Dream auth/session secrets and cookie policy from the runtime projection.
@@ -37,7 +38,7 @@ AUTODL_ADMIN_PUBLIC_ORIGIN="${AUTODL_ADMIN_PUBLIC_ORIGIN:-}"
 AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID="${AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID:-}"
 AUTODL_DREAM_ADMIN_SERVICE_SECRET="${AUTODL_DREAM_ADMIN_SERVICE_SECRET:-}"
 AUTODL_DREAM_BFF_COOKIE_SECRET="${AUTODL_DREAM_BFF_COOKIE_SECRET:-}"
-AUTODL_MCP_APPS_SANDBOX_ORIGIN="${AUTODL_MCP_APPS_SANDBOX_ORIGIN:-}"
+AUTODL_MCP_APPS_SANDBOX_ORIGIN="${AUTODL_MCP_APPS_SANDBOX_ORIGIN:-${AUTODL_DREAM_PUBLIC_ORIGIN}}"
 AUTODL_CLAUDE_CODE_CLI_PATH="${AUTODL_CLAUDE_CODE_CLI_PATH:-/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream}"
 
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
@@ -54,7 +55,7 @@ err() { printf '[error] %s\n' "$*" >&2; exit 1; }
 [[ "${#AUTODL_DREAM_ADMIN_SERVICE_SECRET}" -ge 32 && "${AUTODL_DREAM_ADMIN_SERVICE_SECRET}" != *$'\n'* ]] || err "AUTODL_DREAM_ADMIN_SERVICE_SECRET must contain at least 32 bytes on one line."
 [[ "${#AUTODL_DREAM_BFF_COOKIE_SECRET}" -ge 32 && "${AUTODL_DREAM_BFF_COOKIE_SECRET}" != *$'\n'* ]] || err "AUTODL_DREAM_BFF_COOKIE_SECRET must contain at least 32 bytes on one line."
 [[ "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_MCP_APPS_SANDBOX_ORIGIN must be an exact HTTPS origin."
-[[ "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}" != "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "MCP Apps sandbox must use a separate HTTPS origin."
+[[ "${AUTODL_MCP_APPS_SANDBOX_ORIGIN}" == "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "MCP Apps sandbox route must use the exact Dream public origin."
 
 temp_file="$(mktemp "${SCRIPT_DIR}/.env.XXXXXX")"
 trap 'rm -f "${temp_file}"' EXIT

@@ -38,8 +38,10 @@ printf 'Dream: %s\nAdmin: %s\n' "${AutoDLService6006URL}" "${AutoDLService6008UR
 `AutoDLService6006URL` is the public origin of the Dream frontend (6006) and
 maps to `AUTODL_DREAM_PUBLIC_ORIGIN`; `AutoDLService6008URL` is the public
 origin of Admin (6008) and maps to `AUTODL_ADMIN_PUBLIC_ORIGIN`. Copy both into
-`platform.env` before running `prepare-env.sh`; the MCP Apps sandbox origin is a
-separate mapping to the same 6006 service and stays a distinct HTTPS origin.
+`platform.env` before running `prepare-env.sh`. The MCP Apps sandbox URL is
+derived from the Dream origin at `/mcp-apps-sandbox`; the iframe excludes
+`allow-same-origin`, so its effective document/postMessage origin remains the
+opaque value `null` without a third public service mapping.
 AutoDL's proxy does not reliably forward `Forwarded` / `X-Forwarded-*`, so the
 public origins are configured explicitly instead of being derived per request,
 and moving to a new instance regenerates these URLs — re-run the discovery and

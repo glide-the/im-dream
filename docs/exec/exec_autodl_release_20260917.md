@@ -19,4 +19,5 @@
 - 设备重启后 screen 与 `6006/6008/8765` 均未运行；release 链接与持久数据盘仍存在。
 - 发布顺序：Admin → migration/capability → Dream → 跨服务公开入口。
 - 部署前发现旧 AutoDL 脚本仍要求不存在的 local-core `0.1.9`；当前源码要求已发布 Runtime `0.1.10`。发布脚本改为安装并校验 npm `0.1.10`，不降级源码或复用远端 `0.1.4`。
+- 第一次 Dream 构建在切换前被主动终止，因为运行配置仍使用旧产品域名。当前发布只从环境注入 SeetaCloud 6006/6008 HTTPS 映射；MCP Apps sandbox route 从 Dream origin 派生并依靠 opaque iframe origin 隔离，不再要求第三个公网域名。中止时 `current` 未切换，未删除持久数据。
 - 发布结果在实际执行后追加；本段不声明部署成功。
