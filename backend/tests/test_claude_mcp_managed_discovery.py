@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: define the standard Python MCP SDK discovery contract.
 [Sync] 2026-08-25: prove bounded pagination exhausts all three inventory capabilities on one connection.
 [Sync] 2026-08-25: prove interactive OAuth bypasses ordinary single-flight timeout and remains directly cancellable.
+[Sync] 2026-09-17: prove exact SDK-owned OAuth revision handoff and external-race rejection.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from claude_mcp.contracts import McpAuthKind, McpTransport
+from claude_mcp.contracts import ClaudeMcpError, ClaudeMcpErrorCode, McpAuthKind, McpTransport
 from claude_mcp.inventory import (
     McpDiscoveryCoordinator,
     McpDiscoveryPolicy,
@@ -336,6 +337,111 @@ def test_single_flight_and_exact_revision_cache_invalidation() -> None:
         refreshed = await coordinator.discover_one("7", server.id)
         assert refreshed.config_revision == 2 and refreshed.cached is False
         assert len(factory.calls) == 2
+
+    asyncio.run(scenario())
+
+
+def test_sdk_owned_credential_refresh_rebinds_exact_discovery_revision() -> None:
+    async def scenario():
+        server = replace(
+            _server(1),
+            auth_kind=McpAuthKind.OAUTH,
+            credential_revision=1,
+            credential_id="credential-1",
+            credential_configured=True,
+        )
+        repository = _Repository([server])
+
+        class _ResolvedAuth:
+            def __init__(self):
+                self.transport_auth = object()
+                self.committed_credential_revision = None
+
+        resolved = _ResolvedAuth()
+
+        class _Resolver:
+            async def resolve(self, actor_id, value):
+                assert actor_id == "7" and value == server
+                return resolved
+
+        class _RefreshFactory(_SessionFactory):
+            @asynccontextmanager
+            async def open(self, value, *, auth=None, request_read_timeout_seconds=None):
+                assert auth is resolved.transport_auth
+                resolved.committed_credential_revision = 2
+                repository.servers[value.id] = replace(
+                    value,
+                    credential_revision=2,
+                )
+                async with super().open(
+                    value,
+                    auth=auth,
+                    request_read_timeout_seconds=request_read_timeout_seconds,
+                ) as session:
+                    yield session
+
+        result = await McpDiscoveryCoordinator(
+            repository,
+            _RefreshFactory(),
+            policy=_policy(),
+            auth_resolver=_Resolver(),
+        ).discover_one("7", server.id, force=True)
+
+        assert result.status.value == "complete"
+        assert result.credential_revision == 2
+        assert ("7", server.id, 1, 2) in repository.snapshots
+        assert ("7", server.id, "complete") in repository.saved
+
+    asyncio.run(scenario())
+
+
+def test_later_external_credential_write_rejects_snapshot_without_retry() -> None:
+    async def scenario():
+        server = replace(
+            _server(1),
+            auth_kind=McpAuthKind.OAUTH,
+            credential_revision=1,
+            credential_id="credential-1",
+            credential_configured=True,
+        )
+        repository = _Repository([server])
+
+        class _ResolvedAuth:
+            transport_auth = object()
+            committed_credential_revision = 2
+
+        resolved = _ResolvedAuth()
+
+        class _Resolver:
+            async def resolve(self, *_args):
+                return resolved
+
+        class _RacingFactory(_SessionFactory):
+            @asynccontextmanager
+            async def open(self, value, *, auth=None, request_read_timeout_seconds=None):
+                assert auth is resolved.transport_auth
+                repository.servers[value.id] = replace(
+                    value,
+                    credential_revision=3,
+                )
+                async with super().open(
+                    value,
+                    auth=auth,
+                    request_read_timeout_seconds=request_read_timeout_seconds,
+                ) as session:
+                    yield session
+
+        with pytest.raises(ClaudeMcpError) as raised:
+            await McpDiscoveryCoordinator(
+                repository,
+                _RacingFactory(),
+                policy=_policy(),
+                auth_resolver=_Resolver(),
+            ).discover_one("7", server.id, force=True)
+
+        assert raised.value.code is ClaudeMcpErrorCode.SERVER_REVISION_CONFLICT
+        assert repository.saved == []
+        assert repository.snapshots == {}
 
     asyncio.run(scenario())
 

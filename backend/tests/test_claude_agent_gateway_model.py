@@ -2,15 +2,22 @@
 # [Output] Public Chat model-selection conflict, stale alias and Runtime projection evidence.
 # [Pos] Provider-free Gateway boundary tests; no database, model call or normal account.
 # [Sync] 2026-09-15: model selection consumes an explicitly authorized SystemConfig snapshot.
+# [Sync] 2026-09-17: Dream turns reuse only their current Admin gateway-cli grant for catalog reads.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
 
+from backend.claude_agent import service as service_module
 from backend.routers import claude_agent as route_module
 from backend.services.admin_gateway.models import GatewayModel, GatewayModelCatalog
+from services.admin_data.delegation import RuntimeGrant
+from services.admin_data.errors import AdminDataError
+from services.admin_data.gateway_runtime import AdminGatewayRuntime
 
 
 def model(alias: str = "dream-balanced") -> GatewayModel:
@@ -85,3 +92,60 @@ def test_stale_saved_model_returns_conflict_when_no_callable_default(monkeypatch
         asyncio.run(route_module._resolve_platform_model_alias(7, None, {"model": "dream-retired"}))
     assert captured.value.status_code == 409
     assert captured.value.detail["error_code"] == "GATEWAY_MODEL_SELECTION_STALE"
+
+
+def test_dream_turn_catalog_uses_current_gateway_runtime_grant(monkeypatch) -> None:
+    token = "idg_" + "a" * 43
+    now = datetime.now(timezone.utc)
+    runtime = AdminGatewayRuntime(
+        RuntimeGrant(
+            token=token,
+            purpose="gateway-cli",
+            thread_id="thread-1",
+            run_id="run-1",
+            editor_session_id=None,
+            scopes=("messages:create", "messages:count_tokens", "models:list"),
+            expires_at=now + timedelta(minutes=5),
+            maximum_expires_at=now + timedelta(minutes=10),
+        ),
+        Mock(),
+    )
+    observed_tokens: list[str] = []
+
+    class CatalogClient:
+        def __init__(self, *, access_token: str) -> None:
+            observed_tokens.append(access_token)
+
+        def fetch_catalog(self) -> GatewayModelCatalog:
+            return GatewayModelCatalog((model(),), "dream-balanced")
+
+    monkeypatch.setattr(service_module, "GatewayModelCatalogClient", CatalogClient)
+    request = service_module.ClaudeAgentRunRequest(
+        user_id="7",
+        thread_id="thread-1",
+        admin_gateway_runtime=runtime,
+    )
+    selected = service_module.ClaudeAgentService()._resolve_turn_platform_model(
+        request,
+        {"model": "dream-balanced"},
+    )
+    assert selected.model_alias == "dream-balanced"
+    assert observed_tokens == [token]
+
+
+def test_dream_turn_catalog_fails_closed_without_gateway_runtime(monkeypatch) -> None:
+    monkeypatch.setattr(
+        service_module,
+        "GatewayModelCatalogClient",
+        lambda **_kwargs: pytest.fail("catalog must not open without a runtime owner"),
+    )
+    request = service_module.ClaudeAgentRunRequest(
+        user_id="7",
+        thread_id="thread-1",
+    )
+    with pytest.raises(AdminDataError) as captured:
+        service_module.ClaudeAgentService()._resolve_turn_platform_model(
+            request,
+            {"model": "dream-balanced"},
+        )
+    assert captured.value.code == "ADMIN_CONFIGURATION_INVALID"

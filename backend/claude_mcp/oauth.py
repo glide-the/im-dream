@@ -10,6 +10,7 @@
 [Sync] 2026-08-25: give interactive SDK discovery the OAuth timeout and direct cancellation ownership.
 [Sync] 2026-08-25: persist SDK-discovered authorization metadata inside the encrypted token document so reconstructed providers refresh through the discovered token endpoint.
 [Sync] 2026-09-16: replacement authorization ignores the old envelope until a new token exchange atomically overwrites it.
+[Sync] 2026-09-17: carry only this SDK storage's committed credential revision across discovery persistence.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ class EncryptedMcpTokenStorage(TokenStorage):
         self.server_id = server_id
         self.replacement_mode = replacement_mode
         self._replacement_committed = False
+        self._committed_credential_revision: int | None = None
         self._lock = asyncio.Lock()
         self._pending_client_info: dict[str, Any] | None = None
         self._oauth_context: Any | None = None
@@ -143,17 +145,24 @@ class EncryptedMcpTokenStorage(TokenStorage):
                 expires_at = datetime.now(timezone.utc) + timedelta(
                     seconds=token_payload["expires_in"]
                 )
-            await self.repository.upsert_credential(
+            committed = await self.repository.upsert_credential(
                 self.actor_id,
                 self.server_id,
                 kind="oauth",
                 envelope=envelope,
                 expires_at=expires_at,
             )
+            self._committed_credential_revision = committed.credential_revision
             if key == "tokens":
                 self._replacement_committed = True
             if key == "tokens":
                 self._pending_client_info = None
+
+    @property
+    def committed_credential_revision(self) -> int | None:
+        """Return only the latest revision written by this storage instance."""
+
+        return self._committed_credential_revision
 
     async def get_tokens(self) -> OAuthToken | None:
         payload = (await self._document()).get("tokens")
@@ -200,6 +209,21 @@ class EncryptedMcpTokenStorage(TokenStorage):
             context.oauth_metadata = OAuthMetadata.model_validate(payload)
         except Exception:
             raise McpCredentialIntegrityError() from None
+
+
+@dataclass(frozen=True, repr=False)
+class ManagedMcpResolvedAuth:
+    """Keep transport auth secret while exposing its exact local write revision."""
+
+    transport_auth: Any
+    storage: EncryptedMcpTokenStorage
+
+    @property
+    def committed_credential_revision(self) -> int | None:
+        return self.storage.committed_credential_revision
+
+    def __repr__(self) -> str:
+        return "ManagedMcpResolvedAuth(<redacted>)"
 
 
 class ManagedMcpAuthResolver:
@@ -254,7 +278,7 @@ class ManagedMcpAuthResolver:
             # own refreshAuthorization path without copying the OAuth state
             # machine into Dream.
             provider.context.token_expiry_time = expiry.timestamp()
-        return provider
+        return ManagedMcpResolvedAuth(provider, storage)
 
 
 @dataclass

@@ -139,9 +139,49 @@ Continue the Admin unified authentication/database API and Dream consumer migrat
 
 ## 发布顺序与回滚
 
+## 真实 Dream Turn 模型目录凭据修复规划（2026-09-17）
+
+### Optimized Prompt:
+
+You are the Dream Runtime authentication and model-selection owner. Fix the real public Dream Run failure observed after the Admin DTO/ORM migration: the Run, Thread, Workflow, delegation and `thread-system-config.get` paths all succeed, but `ClaudeAgentService.assemble_context` calls the keyword-only `GatewayModelCatalogClient` through the obsolete positional default factory and raises `TypeError` before model execution. Reuse the already started, Admin-issued, actor/Thread/Run-bound `AdminGatewayRuntime` and pass its current `gateway-cli` access token only to the authenticated Gateway catalog client. Make `resolve_platform_model` and its alias projection require an explicit catalog factory so no caller can silently recreate the invalid unauthenticated default. Keep the token out of browser DTOs, CLI environment, logs, workspaces and persistence. Preserve Admin as OAuth/Token authority, Dream Runtime/SSE/EventBus/turn-resume-cancel behavior, the saved server-owned SystemConfig selection, model runtime metadata and every DTO/ORM database boundary. Add a focused regression that proves the current turn token reaches only the catalog client and that a missing Gateway runtime fails closed before catalog access. Update affected file headers and folder contracts, run focused Python tests plus source-boundary checks, restart only the task-owned Dream backend if needed, then repeat the same real public Dream business flow and record the Run/Thread/Gateway settlement result.
+
+USER REQUIREMENT:
+Continue the consolidated Admin/Dream refactor and real business validation in the two main repository directories without asking for routine confirmation.
+
+### 范围、依赖与验收
+
+| 项目/责任 | 修改与依赖 | 保持不变 | 验收 |
+| --- | --- | --- | --- |
+| Dream Runtime | `admin_gateway/selection.py` 与 `claude_agent/service.py`；依赖当前 `AdminGatewayRuntime` 的可续期 `gateway-cli` grant | Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、模型选择规则 | focused unit 覆盖显式 factory、当前 grant 和缺失 runtime fail closed |
+| Admin | 不改接口、schema、migration 或授权模型；继续签发实体绑定的 Gateway grant | Zod DTO → Service → typed Drizzle Repository/UOW | 真实 Run 中 catalog 与后续持久化请求保持 200 |
+| 协调 | 复用公开 Dream 页面和正常账户/Deck，保留失败 Run 与新回执 | 不直写数据库、不伪造 token、不修改 Allowance | 公开入口创建 Run/Thread，Gateway request/settlement 可在日常 Admin 查询 |
+
+正常流程是 ThreadFactory 先启动 `AdminGatewayRuntime`，`ClaudeAgentService`读取同一 owner 的当前 bearer，使用显式 catalog factory 获取 callable 模型并校验已保存 SystemConfig；随后只把同一 bearer交给 Gateway Runtime 请求。缺少 owner、过期 grant、目录拒绝或选择冲突均在启动模型前返回现有结构化失败，不回退环境密钥、Dream PostgreSQL 或浏览器 token。
+
 Admin expand/API/认证 → Dream兼容消费 → 隔离 backfill/validate → 评审正常部署所需条件 → contract。
 不在当前计划阶段迁移正常 PostgreSQL；不可用环境记录具体缺口并继续不依赖该环境的技术验证。
 没有完整必需回执时 goal 保持 active；任何真实 Google/业务/模型未执行都单独说明。
+
+## Workflow Runtime 插件身份契约修复规划（2026-09-17）
+
+### Optimized Prompt:
+
+You are the cross-project Workflow Runtime contract owner. Fix the real public Dream Run failure observed after model catalog and Managed MCP discovery succeeded: Dream reads a server-controlled `claude-launch/v1` manifest containing two verified plugin package specs, versions and artifact digests, then Admin rejects `workflow-runtime.activate` with `DREAM_RUNTIME_INIT_INVALID`. Determine the exact semantic relationship among the manifest `package_spec`, Admin lock `claude_code_plugin_id`, installation identity and artifact digest before changing code. Keep Pydantic input DTO, Admin Zod DTO, Service, typed Repository and Drizzle transaction ownership aligned; do not compare fields that merely happen to share string values. Preserve exact plugin count, version, digest, manifest-presence, Run/Thread/actor ownership, replay and revision checks. On mismatch, return the existing structured failure without writing activation or materialization rows. Do not weaken validation, map by list order or digest alone, add Dream SQL, or expose paths, credentials or token material. Update affected file headers, folder contracts and the cross-project validation record. Add focused producer/consumer tests for the actual built-in and marketplace plugin identities, run Dream and Admin deterministic tests, restart only owned services, then repeat the public Run and record Admin-visible Run/Thread/Gateway/settlement evidence.
+
+USER REQUIREMENT:
+Continue the consolidated Admin/Dream work in the two primary repositories, following DTO/ORM layering and preserving Dream and Admin user-domain separation without routine confirmation.
+
+### 目标、证据与责任
+
+| 项目/责任 | 已有证据与依赖 | 预计修改范围 | 保持不变 | 验收 |
+| --- | --- | --- | --- | --- |
+| Admin | `workflow-runtime.activate` 返回409；锁仅含Runtime依赖，而完整manifest另含Deck refs | Runtime activation Zod DTO/Service/validator及对应测试、目录文档；仅在证据需要时修改 | Drizzle/UOW事务、actor/Run/Thread权限、replay、锁依赖版本/digest/manifest校验 | 锁中依赖精确匹配；额外已验真Deck ref不进入Runtime持久化；错配仍fail closed且无写入 |
+| Dream | 真实manifest为`claude-launch/v1`，含2个规范化`package_spec` | Pydantic DTO/activation组装、workspace packer或测试；只修改语义源头 | Runtime、Runner、SSE、EventBus、turn/resume/cancel、Workspace Mode、共享文件和`.claude-tmp` | 发送由服务端manifest验证出的DTO；无PostgreSQL路径或客户端自报用户ID |
+| 协调 | Run `run_51e3b0e998ef4c49a986faca96388568`已越过模型目录和MCP阶段 | 契约文档、影响/失败/恢复回执 | 不改现有用户、Deck绑定、Allowance或正常数据库结构 | focused contract通过后，公开Run进入下一业务阶段并留下Admin可查记录 |
+
+正常状态转换为：Admin提供Deck refs与Runtime依赖 → Dream按这些工件生成并验证完整launch manifest → Dream提交显式observed identity/version/digest/manifest状态 → Admin校验actor、Run、Thread，并要求每个锁依赖在完整manifest中精确出现 → 单事务只为Runtime锁条目写activation和materialization → 相同session同值重放返回既有结果。插件缺失、重复、任一manifest缺失、锁依赖版本或digest不符、锁已变、session同键异值或服务不可用时，激活前失败；额外且已本地验真的Deck ref保留为workspace运行输入但不进入Runtime receipt。Dream不得重试非幂等变体、回退本地数据库或继续启动模型。
+
+验证命令至少覆盖Dream Runtime组装与workspace manifest测试、Admin activation Service/DTO/Repository测试、Python compile、TypeScript typecheck和diff检查。真实回归继续使用本机正常Admin、Dream、Gateway与PostgreSQL，只经公开入口；任何后续provider或账户条件失败单独记录，不能用技术测试冒充真实业务验收。
 
 ## 认证边界确定性回归规划（2026-09-15）
 
@@ -189,3 +229,23 @@ Admin聚焦2 files/18 tests、完整provider-free 278 files/2106 tests、TypeScr
 公开Workflow release详情为200且状态`uninstalled`；当前Dream user访问installation列表与runtime-readiness均得到403 `WORKFLOW_PERMISSION_DENIED`，没有`plugin:read/plugin:admin`。独立Admin operator不能冒充Dream Workspace subject。本轮未执行install、enable、binding、Preflight或Run写操作；成功Workflow验收仍需正常产品管理流程先建立ready installation。
 
 设计复核后的Dream聚焦回归命令为`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_admin_gateway_models.py tests/test_gateway_models_router.py tests/test_admin_product_client.py tests/test_product_bff_routes.py tests/test_admin_request_auth.py tests/test_admin_service_token.py`，cwd为Dream `backend`，exit0，58 passed/1个既有FastAPI lifespan弃用warning。它覆盖严格Pydantic Product/Gateway DTO、Browser user bearer与server-only service token边界。4份changed Markdown的最终链接扫描为37个本地链接/0缺失，`git diff --check` exit0；第一次临时内联链接脚本因引号SyntaxError未执行扫描，过度转义的第二版计数无效，最终修正后才采用上述结果。
+
+## Managed MCP OAuth revision 交接修复规划（2026-09-17）
+
+### Optimized Prompt:
+
+You are the Dream managed-MCP OAuth and persistence owner. Fix the real public Dream Run failure where the standard MCP SDK refreshes an expired OAuth credential through the strict Admin DTO API, Admin advances `credential_revision`, and discovery then attempts `managed-mcp.discovery.save` with the pre-refresh Server DTO. Preserve Admin's revision compare-and-swap: do not retry the rejected write, weaken the Repository check, accept an arbitrary 409, or fall back to Dream SQL. Make the SDK TokenStorage retain only the revision returned by its own successful credential upsert, pass the third-party OAuth provider to the transport through a redacted wrapper, then after discovery re-read the actor-owned Server. Rebind the discovery result only when identity, scope, enabled state and `config_revision` are unchanged and the authoritative `credential_revision` exactly equals the revision committed by that same SDK storage. Reject external concurrent changes or any mismatch with `CLAUDE_MCP_SERVER_REVISION_CONFLICT`. Persist through the existing Pydantic DTO → Admin Zod DTO → service → typed Repository → Drizzle transaction chain, with unknown writes still recoverable only by the original request receipt. Add provider-free tests for the exact successful handoff and for a later concurrent credential revision that must fail before snapshot save. Update file headers and the managed-MCP folder contract, run focused discovery/OAuth/runtime/repository tests, restart only the task-owned Dream backend, and repeat the public Run/Thread/Workflow flow without asking for routine confirmation.
+
+USER REQUIREMENT:
+Continue the consolidated Admin/Dream refactor in the two primary repositories, keep Dream and Admin user domains separate, and complete real validation without routine confirmation.
+
+### 范围、依赖与验收
+
+| 项目/责任 | 修改与依赖 | 保持不变 | 验收 |
+| --- | --- | --- | --- |
+| Dream MCP OAuth | `claude_mcp/oauth.py`记录当前SDK storage自身成功写入的credential revision；依赖Admin upsert返回严格DTO | OAuth状态机、PKCE/refresh、Token内容仍归标准SDK；secret不进入日志或快照 | 单元测试证明仅自身提交的revision可交接 |
+| Dream MCP discovery | `claude_mcp/inventory.py`在保存前重新读取Server并执行精确revision/ownership检查 | discovery超时、single-flight、三种transport、CAS与失败语义 | 同次refresh保存成功；外部并发revision继续fail closed且不写snapshot |
+| Admin | 不修改Zod DTO、Service、Drizzle Repository、transaction或409语义 | Admin继续唯一数据库访问与事务执行方 | 真实链路credential upsert与随后snapshot save均通过现有业务接口 |
+| 协调 | 更新目录合同和真实回执，重跑公开Dream Run | Runtime、SSE、turn/resume/cancel、共享文件系统和Agent工作区语义 | Run越过MCP snapshot阶段，失败时继续按实际下一边界修复 |
+
+正常流程为Dream读取Server DTO，标准SDK使用加密TokenStorage刷新OAuth凭据，Admin原子upsert并返回新revision；discovery完成后Dream重新读取同一actor的Server，只有其配置仍为原revision且credential revision恰好等于本次storage提交值时，才以新revision构造严格snapshot DTO并保存。若Server被删除、禁用、换scope、配置更新，或另一并发写入把credential revision再次推进，则不重试、不读取旧快照冒充成功，直接返回revision conflict。验证命令覆盖managed discovery、OAuth storage、Runtime snapshot、Admin DTO repository与既有真实公开业务链；风险集中在第三方SDK一次流程可能多次持久化，因而只采用最后一次成功upsert返回的权威revision。

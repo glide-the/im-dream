@@ -3,6 +3,7 @@
 # [Pos] Server-owned model selection boundary shared by public and internal Dream turns.
 # [Sync] 2026-08-28: retain the selected model runtime metadata instead of dropping it to an alias.
 # [Sync] 2026-09-15: remove the implicit Dream database reader and fail closed without an authorized snapshot.
+# [Sync] 2026-09-17: require an explicit authenticated catalog factory for every selection.
 
 """Server-owned platform model selection for every Claude Agent turn."""
 
@@ -12,7 +13,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from .errors import GatewayInferenceError
-from .models import GatewayModel, GatewayModelCatalog, GatewayModelCatalogClient
+from .models import GatewayModel, GatewayModelCatalog
 
 
 class CatalogClient(Protocol):
@@ -27,7 +28,7 @@ def resolve_platform_model(
     canonical_user_id: int | str,
     client_model_alias: str | None = None,
     *,
-    catalog_client_factory: CatalogClientFactory = GatewayModelCatalogClient,
+    catalog_client_factory: CatalogClientFactory,
     system_config_reader: SystemConfigReader | None = None,
 ) -> GatewayModel:
     """Return the current callable model without trusting browser state.
@@ -59,7 +60,7 @@ def resolve_platform_model_alias(
     canonical_user_id: int | str,
     client_model_alias: str | None = None,
     *,
-    catalog_client_factory: CatalogClientFactory = GatewayModelCatalogClient,
+    catalog_client_factory: CatalogClientFactory,
     system_config_reader: SystemConfigReader | None = None,
 ) -> str:
     """Compatibility projection for callers that only need the selected alias."""

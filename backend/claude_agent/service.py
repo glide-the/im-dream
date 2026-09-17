@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: use the turn-owned gateway-cli grant for authenticated model catalog selection.
 # [Sync] 2026-09-16: project the Admin gateway-cli grant into each Agent execution.
 # [Sync] 2026-09-16: route automatic-repair insertion and settlement through the bound Admin owner.
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
@@ -353,7 +354,11 @@ from services.admin_data.deck_chat_context_data import AdminDeckChatContextResol
 from services.admin_data.deck_workspace_plugins_data import (
     AdminDeckWorkspacePluginsProvider,
 )
-from services.admin_gateway import GatewayModel, resolve_platform_model
+from services.admin_gateway import (
+    GatewayModel,
+    GatewayModelCatalogClient,
+    resolve_platform_model,
+)
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.stream_events import NormalizedAgentEvent
@@ -1647,6 +1652,26 @@ class ClaudeAgentService:
             thread_id=request.thread_id,
         )
 
+    def _resolve_turn_platform_model(
+        self,
+        request: ClaudeAgentRunRequest,
+        system_config: Mapping[str, Any],
+    ) -> GatewayModel | str:
+        if self._platform_model_resolver is not resolve_platform_model:
+            return self._platform_model_resolver(request.user_id, request.model)
+        gateway_runtime = request.admin_gateway_runtime
+        if not isinstance(gateway_runtime, AdminGatewayRuntime):
+            raise configuration_invalid()
+        access_token = gateway_runtime.access_token()
+        return self._platform_model_resolver(
+            request.user_id,
+            request.model,
+            catalog_client_factory=lambda _canonical_user_id: GatewayModelCatalogClient(
+                access_token=access_token,
+            ),
+            system_config_reader=lambda _canonical_user_id: system_config,
+        )
+
     @staticmethod
     async def _thread_record(request: ClaudeAgentRunRequest) -> dict | None:
         persistence = request.admin_turn_persistence
@@ -1748,19 +1773,11 @@ class ClaudeAgentService:
             # the live server-owned alias here so every Dream turn is subject
             # to the same catalog/entitlement boundary immediately before the
             # runner is assembled. Errors intentionally propagate fail-closed.
-            if self._platform_model_resolver is resolve_platform_model:
-                selected_model = await asyncio.to_thread(
-                    self._platform_model_resolver,
-                    request.user_id,
-                    request.model,
-                    system_config_reader=lambda _canonical_user_id: sys_cfg,
-                )
-            else:
-                selected_model = await asyncio.to_thread(
-                    self._platform_model_resolver,
-                    request.user_id,
-                    request.model,
-                )
+            selected_model = await asyncio.to_thread(
+                self._resolve_turn_platform_model,
+                request,
+                sys_cfg,
+            )
             if isinstance(selected_model, GatewayModel):
                 request.model = selected_model.model_alias
                 request.model_runtime_env = selected_model.claude_code_runtime_env()
