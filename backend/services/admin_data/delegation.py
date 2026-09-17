@@ -2,6 +2,7 @@
 # [Output] Immutable entity grants and bearer-only public actions with original-ID receipt recovery.
 # [Pos] Runtime authorization consumer; server creation and public runtime credentials stay separate.
 # [Sync] 2026-09-16: require source-fenced Reflections Gateway delegation capability.
+# [Sync] 2026-09-17: create repeated turn grants from the request-authenticated immutable capability snapshot.
 # [Sync] 2026-09-15: require the published unified Workflow schema in creation/discovery readiness.
 # [Sync] 2026-09-15: let purpose-grant creation require additional exact operation contracts.
 # [Sync] 2026-09-14: consume four frozen special-route contracts without PG or generic-operation emulation.
@@ -167,7 +168,7 @@ class AdminDelegationCreator:
 
     def create(self, requested: DelegationCreateInputDTO, *, access_token: str, request_id: str,
         required_operations: tuple[OperationCapabilityDTO, ...] = ()) -> RuntimeGrant:
-        capabilities = self._client.capabilities(request_id)
+        capabilities = self._client.capabilities_snapshot(request_id)
         advertised = {item.capability: item for item in capabilities.schema_capabilities}
         delegation_capabilities = {item.name: item for item in capabilities.auth.delegations}
         operation_capabilities = {item.name: item for item in capabilities.operations}

@@ -8,6 +8,7 @@
 // [Sync] 2026-09-04: prove a committed assistant remains processed when its
 //                    post-turn Dream synchronization reports a typed failure.
 // [Sync] 2026-09-06: isolate Vite optimization cache and await finite SSE POSTs before reloads.
+// [Sync] 2026-09-17: cover safe actionable feedback for a typed Gateway allowance rejection.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -150,7 +151,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
 
   let agentPostCount = 0;
   let agentPostFinishedCount = 0;
-  let errorMode: 'binding' | 'auto-repair' | 'sync' = 'binding';
+  let errorMode: 'binding' | 'auto-repair' | 'sync' | 'allowance' = 'binding';
   const diagnostics: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(message.text());
@@ -191,10 +192,16 @@ test('binding conflict keeps the submitted text and attachment while reload stay
             errorCode: 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED',
             retryable: false,
           }
-        : {
+        : errorMode === 'sync' ? {
             type: 'error',
             errorText: 'Agent 回复已保存，但 Dream 工作区同步未完成。请重新加载对话核对工作台状态，无需重发消息。',
             errorCode: 'DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT',
+            retryable: false,
+          }
+        : {
+            type: 'error',
+            errorText: 'The current subscription-period Token allowance is insufficient.',
+            errorCode: 'GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED',
             retryable: false,
           };
       const assistantFrames = errorMode === 'sync' ? [
@@ -295,6 +302,23 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     await expect(syncAlert).toHaveCount(0);
     await expect(page.getByText('角色卡已写入 canonical workspace。')).toBeVisible();
     expect(agentPostCount).toBe(3);
+    expect(diagnostics).toEqual([]);
+
+    errorMode = 'allowance';
+    await page.reload();
+    await expect.poll(() => agentPostCount).toBe(4);
+    const allowanceAlert = page.getByRole('alert');
+    await expect(allowanceAlert).toHaveAttribute(
+      'data-chat-turn-error',
+      'gateway-token-allowance-exhausted',
+    );
+    await expect(allowanceAlert).toContainText('当前订阅周期 Token 不足');
+    await expect(allowanceAlert).toContainText('你的消息已经保存');
+    await expect(allowanceAlert).toContainText('模型未能完成回复');
+    await expect(allowanceAlert).not.toContainText('SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED');
+    await expect(allowanceAlert).not.toContainText('provider_detail');
+
+    await expect.poll(() => agentPostFinishedCount).toBe(4);
     expect(diagnostics).toEqual([]);
   } finally {
     await server.close();

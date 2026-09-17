@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Strict Reflections DTOs plus Registry99 frozen Admin operation/schema capabilities.
 # [Output] Production contract binding, OAuth consumer, and service worker with exact receipt recovery.
 # [Pos] Reflections Admin composition boundary; constants match the reviewed Registry99 artifact digest.
@@ -260,7 +261,7 @@ def require_reflection_task_capabilities(
     contracts: ReflectionTaskContracts,
     request_id: str,
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if len(schemas) != len(capabilities.schema_capabilities) or any(
         schemas.get(required.capability) != required

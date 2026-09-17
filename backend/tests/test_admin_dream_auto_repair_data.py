@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry169 Pydantic contracts and controlled Admin client collaborators.
 # [Output] Exact DTO/hash, capability, response-identity and receipt validation evidence.
 # [Pos] Provider-free Dream consumer tests; no PostgreSQL, Runtime or filesystem.
@@ -48,7 +49,7 @@ def input_dto() -> DreamAutoRepairSettleInputDTO:
 
 def boundary():
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     return AdminDreamAutoRepairData(client), client
@@ -105,7 +106,7 @@ def test_settle_executes_once_and_validates_exact_message_status():
 
 def test_capability_drift_stops_before_write():
     data, client = boundary()
-    client.capabilities.return_value = SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot.return_value = SimpleNamespace(schema_capabilities=[])
 
     with pytest.raises(AdminDataError) as error:
         data.settle(input_dto(), "original", access_token="turn-grant")

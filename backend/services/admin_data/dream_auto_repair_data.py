@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry169 descriptor, immutable repair identity and exact turn grant.
 # [Output] Strict automatic-repair settlement DTOs and original-receipt validation.
 # [Pos] Dream consumer boundary; Admin alone owns the message ORM row and transaction.
@@ -89,7 +90,7 @@ def require_dream_auto_repair_capabilities(
     client: AdminDataClient,
     request_id: str,
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {
         item.capability: item for item in capabilities.schema_capabilities
     }

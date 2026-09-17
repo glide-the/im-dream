@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry114 typed client with controlled capability, execute, and receipt collaborators.
 # [Output] View/resource identity checks, present-field wire DTO, and original-request recovery assertions.
 # [Pos] Provider-free Dream catalog consumer test; no FastAPI, PostgreSQL, filesystem, or Runtime process.
@@ -35,7 +36,7 @@ def story(resource_id="story-1"):
 
 def boundary():
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS))
     return AdminStoryWorkspaceCatalogData(client), client
 
@@ -86,7 +87,7 @@ def test_absent_receipt_capability_drift_and_closed_patch_fail_closed():
     assert absent.value.code == "ADMIN_WRITE_RESULT_UNKNOWN" and absent.value.outcome_unknown is True
 
     data, client = boundary()
-    client.capabilities.return_value = SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot.return_value = SimpleNamespace(schema_capabilities=[])
     ensure = StoryWorkspaceCatalogWorkspaceInputDTO.model_validate({"action": "ensure"})
     with pytest.raises(AdminDataError) as capability:
         data.workspace_recovering(ensure, "capability", access_token="oauth")

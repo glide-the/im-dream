@@ -50,6 +50,7 @@
 // [Sync] 2026-09-06: collapse completed live/history process while promoting the MCP App panel outside the disclosure without duplication.
 // [Sync] 2026-09-04: distinguish a typed Dream synchronization failure after
 //                    a committed assistant reply from an unprocessed turn.
+// [Sync] 2026-09-17: render the structured Gateway allowance rejection with safe actionable product copy.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -292,6 +293,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const isDreamAutoRepairFailure = errorCode === 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED';
   const isDreamArtifactSyncFailure = (
     errorCode === 'DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT'
+  );
+  const isGatewayAllowanceExhausted = (
+    errorCode === 'GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED'
   );
   const dreamAutoRepairFailureText = isDreamAutoRepairFailure
     ? readClaudeAgentErrorText(error)
@@ -797,7 +801,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 ? 'dream-auto-repair-failed'
                 : isDreamArtifactSyncFailure
                   ? 'dream-artifact-sync-failed'
-                  : 'generic'
+                  : isGatewayAllowanceExhausted
+                    ? 'gateway-token-allowance-exhausted'
+                    : 'generic'
           }
           style={{
             alignSelf: 'flex-start',
@@ -820,7 +826,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   ? 'chat.turnError.autoRepairFailedTitle'
                   : isDreamArtifactSyncFailure
                     ? 'chat.turnError.artifactSyncFailedTitle'
-                  : 'chat.turnError.genericTitle',
+                    : isGatewayAllowanceExhausted
+                      ? 'chat.turnError.allowanceExhaustedTitle'
+                      : 'chat.turnError.genericTitle',
             )}
           </div>
           <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
@@ -831,7 +839,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   ? 'chat.turnError.autoRepairFailedDescription'
                   : isDreamArtifactSyncFailure
                     ? 'chat.turnError.artifactSyncFailedDescription'
-                  : 'chat.turnError.genericDescription',
+                    : isGatewayAllowanceExhausted
+                      ? 'chat.turnError.allowanceExhaustedDescription'
+                      : 'chat.turnError.genericDescription',
             )}
           </p>
           {onReloadAfterError ? (

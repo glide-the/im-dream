@@ -1,4 +1,5 @@
 # [Sync] 2026-09-17: use the turn-owned gateway-cli grant for authenticated model catalog selection.
+# [Sync] 2026-09-17: project the known Gateway allowance rejection as a safe structured SSE error for actionable Chat feedback.
 # [Sync] 2026-09-16: project the Admin gateway-cli grant into each Agent execution.
 # [Sync] 2026-09-16: route automatic-repair insertion and settlement through the bound Admin owner.
 # [Sync] 2026-09-16: require one Admin owner for every production turn and remove all database fallbacks.
@@ -1365,6 +1366,19 @@ def _format_exception_for_sse(exc: BaseException | None) -> str:
     return " | ".join([base, *rendered_notes])
 
 
+def _error_event_payload(exc: BaseException | None) -> dict[str, Any]:
+    """Map known provider failures to stable public errors and redact internals."""
+
+    formatted = _format_exception_for_sse(exc)
+    if "SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED" in formatted:
+        return {
+            "errorText": "The current subscription-period Token allowance is insufficient.",
+            "errorCode": "GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED",
+            "retryable": False,
+        }
+    return {"errorText": formatted}
+
+
 def _attach_story_workspace_dream_assistant_source(
     assistant_metadata: dict[str, Any],
     request: "ClaudeAgentRunRequest",
@@ -2606,10 +2620,9 @@ class ClaudeAgentService:
             result_error = result.error or RuntimeError(
                 "Claude turn ended without a trustworthy terminal ResultMessage."
             )
-            error_msg = _format_exception_for_sse(result_error)
             if not error_event_emitted:
                 error_event_emitted = True
-                await queue.put(_event("error", {"errorText": error_msg}))
+                await queue.put(_event("error", _error_event_payload(result_error)))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution, turn_status="error")
             await self.mark_auto_repair_failed(execution.request)
@@ -3529,7 +3542,7 @@ class ClaudeAgentService:
     @staticmethod
     def _make_error_cb(queue: asyncio.Queue):
         async def on_error(exc: Exception) -> None:
-            await queue.put(_event("error", {"errorText": _format_exception_for_sse(exc)}))
+            await queue.put(_event("error", _error_event_payload(exc)))
 
         return on_error
 

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry109 typed client with controlled execute, receipt and capability collaborators.
 # [Output] One-shot write, original committed recovery and closed unknown-result behavior.
 # [Pos] Provider-free Dream consumer tests; no FastAPI route, PostgreSQL or Runtime process.
@@ -48,7 +49,7 @@ def output_dto(thread_id: str = "thread-1") -> StoryWorkspaceOutputResultDTO:
 
 def boundary():
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     return AdminStoryWorkspaceOutputData(client), client
@@ -117,7 +118,7 @@ def test_absent_original_receipt_keeps_the_write_outcome_unknown():
 
 def test_capability_drift_stops_before_domain_write():
     data, client = boundary()
-    client.capabilities.return_value = SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot.return_value = SimpleNamespace(schema_capabilities=[])
 
     with pytest.raises(AdminDataError) as error:
         data.store_recovering(
@@ -175,7 +176,7 @@ def test_invalid_committed_thread_stays_unknown_and_nonunknown_error_skips_recei
     assert invalid.value.outcome_unknown is True
 
     client.reset_mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     client.execute.side_effect = AdminDataError(

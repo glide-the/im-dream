@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry120/121 contracts, OAuth bearer or service-only claim identity.
 # [Output] Strict confirmation DTO consumers plus a claim-bound Admin turn owner.
 # [Pos] Dream data port; PostgreSQL, ORM, lifecycle, permissions and durable claims stay in Admin.
@@ -281,7 +282,7 @@ def _validate_dispatch(dispatch: StoryWorkspaceConfirmationDispatchDTO, request_
 def _ensure_capabilities(client: AdminDataClient, request_id: str) -> None:
     capabilities = None
     if not client.capabilities_ready:
-        capabilities = client.capabilities(request_id)
+        capabilities = client.capabilities_snapshot(request_id)
     if capabilities is not None:
         schemas = {item.capability: item for item in capabilities.schema_capabilities}
         if len(schemas) != len(capabilities.schema_capabilities) or any(
@@ -298,7 +299,7 @@ CONFIRMATION_TURN_SCHEMA_REQUIREMENT = SchemaCapabilityDTO(
 
 
 def _ensure_turn_capability(client: AdminDataClient, request_id: str) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if (
         len(schemas) != len(capabilities.schema_capabilities)

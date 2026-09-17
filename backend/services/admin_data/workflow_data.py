@@ -3,6 +3,7 @@
 # [Pos] Workflow read consumer; Admin alone validates retry/source/binding/database facts.
 # [Sync] 2026-09-15: connect public Chat provenance without duplicating the old PG mapper.
 # [Sync] 2026-09-15: share the unchanged identity/unified schema gate with Preflight reads.
+# [Sync] 2026-09-17: validate Workflow calls against the request-authenticated local capability snapshot without another Admin round trip.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ WORKFLOW_SCHEMA_REQUIREMENTS = (
 
 
 def require_workflow_capabilities(client: AdminDataClient, request_id: str) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS):
         raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)

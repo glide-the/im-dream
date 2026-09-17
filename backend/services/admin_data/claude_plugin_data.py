@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Registry175-184 catalog, OAuth or service authority and closed Claude Plugin lifecycle DTOs.
 # [Output] Strict Pydantic projections plus user/background original-request recovery.
 # [Pos] Dream wire boundary; Admin owns Marketplace queries, locks, Drizzle writes and transactions.
@@ -422,7 +423,7 @@ CLAUDE_PLUGIN_SCHEMA_REQUIREMENTS = (
 
 
 def require_claude_plugin_capabilities(client: AdminDataClient, request_id: str) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if len(schemas) != len(capabilities.schema_capabilities) or any(
         schemas.get(item.capability) != item

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry107 DTO consumer, capability catalog and fixed Admin scope responses.
 # [Output] Exact hash, strict selectors, actor/Run/Thread binding and public PG fence evidence.
 # [Pos] Provider-free managed MCP scope contract test; no PostgreSQL, MCP provider or Runtime.
@@ -56,7 +57,7 @@ def _output(**updates) -> WorkflowManagedMcpScopeOutputDTO:
 
 def _data(output=None):
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     client.execute.return_value = output or _output()
@@ -104,7 +105,7 @@ def test_resolve_checks_capability_and_binds_actor_run_thread():
         thread_id="thread-1",
         workflow_run_id=RUN_ID,
     ) == "workspace-1"
-    client.capabilities.assert_called_once_with("scope-request")
+    client.capabilities_snapshot.assert_called_once_with("scope-request")
     client.execute.assert_called_once_with(
         RESOLVE_WORKFLOW_MANAGED_MCP_SCOPE,
         selection,

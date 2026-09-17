@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Actual Admin refs DTOs, current request OAuth and source-bound installation metadata.
 # [Output] Three exact operations and the original public refs projection after local artifact/CLI checks.
 # [Pos] Deck Claude Plugin refs consumer; Admin owns locks/semantic revision/transactions, Dream owns bytes/CLI.
@@ -145,7 +146,7 @@ class AdminDeckRefsData:
         self._client = client
 
     def _execute(self, operation, input_dto, request_id, access_token):
-        capabilities = self._client.capabilities(request_id)
+        capabilities = self._client.capabilities_snapshot(request_id)
         schemas = {item.capability: item for item in capabilities.schema_capabilities}
         if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS):
             raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)

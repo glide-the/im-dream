@@ -3,6 +3,7 @@
 # [Pos] Admin resource domain consumer; composition root owns its lifetime, never the Agent turn.
 # [Sync] 2026-09-14: consume real input/output contract hashes and retain unknown writes by original ID.
 # [Sync] 2026-09-15: serialize policy reads, observer writes and final close; closed owners cannot reopen.
+# [Sync] 2026-09-17: reuse the background client's validated capability snapshot across policy heartbeats.
 """Resource-domain adapter; no SQL, remote UOW, user impersonation or automatic replay."""
 
 from __future__ import annotations
@@ -117,7 +118,7 @@ class AdminResourceData:
     def read_policy(self) -> ResourcePolicyReadOutputDTO:
         with self._writer_lock:
             client = self._get_client()
-            client.capabilities(str(uuid4()))
+            client.capabilities_snapshot(str(uuid4()))
             return client.execute(RESOURCE_POLICY_READ, ResourcePolicyReadInputDTO(), str(uuid4())).root
 
     def publish_observer(self, request_id: str, input_dto: ResourceObserverPublishInputDTO) -> None:
@@ -129,7 +130,7 @@ class AdminResourceData:
                 if isinstance(receipt, AbsentReceiptDTO):
                     raise AdminDataError("ADMIN_WRITE_OUTCOME_UNKNOWN", 503, self._pending.request_id, True)
                 self._pending = None
-            client.capabilities(str(uuid4()))
+            client.capabilities_snapshot(str(uuid4()))
             serialized = json.dumps(input_dto.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
             try:
                 client.execute(RESOURCE_OBSERVER_PUBLISH, input_dto, request_id)

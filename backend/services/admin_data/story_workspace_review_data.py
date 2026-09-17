@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry111 review contracts, current OAuth bearer and original request identity.
 # [Output] Strict Story/Character/Scene DTOs with ordered batch validation and receipt-only recovery.
 # [Pos] Dream review consumer; Admin owns ORM/transactions while Dream owns routes, pages, Runtime, SSE and files.
@@ -232,7 +233,7 @@ def require_story_workspace_review_capabilities(
     client: AdminDataClient,
     request_id: str,
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if len(schemas) != len(capabilities.schema_capabilities) or any(
         schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS

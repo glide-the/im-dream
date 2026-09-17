@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Published Preflight read/execute/original-receipt contracts and current OAuth actor.
 # [Output] Original projection, raw JSON execution and bounded original-receipt recovery.
 # [Pos] Domain consumer; Admin owns stored state, checks, clock and token issuance.
@@ -147,7 +148,7 @@ EXECUTE_PREFLIGHT = DomainOperation(OperationCapabilityDTO(name="workflow-prefli
 
 
 def require_preflight_execution_capabilities(client: AdminDataClient, request_id: str):
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {item.capability: item for item in capabilities.schema_capabilities}
     if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS):
         raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry105 Dream DTO consumer, capability catalog and fixed Admin responses.
 # [Output] Exact hash, strict response binding, fail-closed catalog and request-owner registration evidence.
 # [Pos] Provider-free Admin Deck chat-context consumer contract test.
@@ -64,7 +65,7 @@ def _output(**updates) -> DeckChatContextOutputDTO:
 
 def _data(output: DeckChatContextOutputDTO | None = None):
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     client.execute.return_value = output or _output()
@@ -107,7 +108,7 @@ def test_resolve_checks_capability_and_preserves_the_typed_snapshot():
         deck_id="deck-1",
         voice_id="voice-1",
     ) is client.execute.return_value
-    client.capabilities.assert_called_once_with("deck-context-request")
+    client.capabilities_snapshot.assert_called_once_with("deck-context-request")
     client.execute.assert_called_once_with(
         RESOLVE_DECK_CHAT_CONTEXT,
         selection,
@@ -164,7 +165,7 @@ def test_resolve_preserves_missing_selected_voice_for_dream_policy():
 
 def test_resolve_fails_before_domain_io_when_unified_capability_is_missing():
     data, client = _data()
-    client.capabilities.return_value = SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot.return_value = SimpleNamespace(schema_capabilities=[])
     with pytest.raises(AdminDataError) as caught:
         data.resolve(
             DeckChatContextInputDTO(deck_id="deck-1", voice_id=None),

@@ -1,4 +1,5 @@
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
+# [Sync] 2026-09-17: verify explicit capability refresh failure invalidates the snapshot and the next authenticated request recovers.
 # [Input] Actual public Deck version routes, Admin authentication/DTO transport and static synthetic outputs.
 # [Output] Five-operation, four-capability, CAS/error and exact raw-snapshot projection evidence.
 # [Pos] Provider-free public contract harness; no copied version algorithm, PG, model or user service.
@@ -17,7 +18,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from routers.deck_versions import router
-from services.admin_data import AdminDataClient, AdminDataConfig
+from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.deck_version_data import DECK_VERSION_OPERATIONS, DECK_VERSION_SCHEMA_REQUIREMENTS
 from services.admin_data.deck_version_models import DeckVersionDetailDTO
 from services.admin_data.request_auth import AdminRequestAuth
@@ -233,7 +234,8 @@ def test_capability_refresh_failure_can_recover_on_next_authenticated_request(mo
     with client:
         assert client.get("/api/decks/deck-1/version-state", headers=HEADERS).status_code == 200
         refresh["fail_next"] = True
-        assert client.get("/api/decks/deck-1/version-state", headers=HEADERS).status_code == 503
+        with pytest.raises(AdminDataError):
+            client.app.state.admin_request_auth.client.capabilities(str(UUID(int=0)))
         assert client.get("/api/decks/deck-1/version-state", headers=HEADERS).status_code == 200
     assert len(calls) == 2
 

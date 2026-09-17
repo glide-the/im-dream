@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry111 typed client with controlled capability, execute and receipt collaborators.
 # [Output] Reply identity/order checks and original-request unknown-write recovery assertions.
 # [Pos] Provider-free Dream review consumer test; no FastAPI, PostgreSQL, filesystem or Runtime process.
@@ -37,7 +38,7 @@ def story(resource_id="story-1"):
 
 def boundary():
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     return AdminStoryWorkspaceReviewData(client), client
@@ -120,7 +121,7 @@ def test_absent_receipt_and_capability_drift_fail_closed():
     assert absent.value.outcome_unknown is True
 
     data, client = boundary()
-    client.capabilities.return_value = SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot.return_value = SimpleNamespace(schema_capabilities=[])
     with pytest.raises(AdminDataError) as capability:
         data.transition_recovering(transition_input(), "capability", access_token="oauth")
     assert capability.value.code == "ADMIN_CAPABILITY_UNAVAILABLE"

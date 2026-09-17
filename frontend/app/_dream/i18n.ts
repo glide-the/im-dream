@@ -30,6 +30,7 @@
 // [Sync] 2026-09-04: distinguish a saved Agent reply with incomplete Dream
 //                    synchronization from a message that was not processed.
 // [Sync] 2026-09-06: localize MCP App interactive-view lifecycle and recovery controls.
+// [Sync] 2026-09-17: add safe Chat recovery copy for an exhausted subscription-period Token allowance.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -723,6 +724,8 @@ const resources = {
           autoRepairFailedDescription: 'The one automatic repair attempt did not pass the final workspace validation. Reload the conversation to review the retained repair message and latest state.',
           artifactSyncFailedTitle: 'Reply saved; workbench sync incomplete',
           artifactSyncFailedDescription: 'The Agent reply remains in this conversation, but Dream did not finish synchronizing the workbench. Reload the conversation to reconcile its latest persisted state; this will not resend your message.',
+          allowanceExhaustedTitle: 'Subscription Token allowance is insufficient',
+          allowanceExhaustedDescription: 'Your message was saved, but the model could not complete a reply because this subscription period does not have enough available Tokens. Adjust the subscription allowance or model configuration, then reload the conversation before deciding whether to send again.',
           genericTitle: 'The message was not processed',
           genericDescription: 'Reload the conversation to check its latest state before deciding whether to send again.',
           reload: 'Reload conversation',
@@ -1597,6 +1600,8 @@ const resources = {
           autoRepairFailedDescription: '唯一一次自动修正未通过最终工作区校验。请重新加载对话，查看已保留的修正消息和最新状态。',
           artifactSyncFailedTitle: '回复已保存，工作台同步未完成',
           artifactSyncFailedDescription: 'Agent 回复已保留在当前对话中，但 Dream 未完成工作台同步。请重新加载对话以核对最新持久化状态；这不会重新发送消息。',
+          allowanceExhaustedTitle: '当前订阅周期 Token 不足',
+          allowanceExhaustedDescription: '你的消息已经保存，但当前订阅周期没有足够的可用 Token，模型未能完成回复。请调整订阅额度或模型配置，然后重新加载对话，再决定是否重新发送。',
           genericTitle: '消息处理未完成',
           genericDescription: '请重新加载对话以确认最新状态，再决定是否重新发送。',
           reload: '重新加载对话',

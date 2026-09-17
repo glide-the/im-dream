@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: align provider-free fake clients with reusable validated capability snapshots.
 # [Input] Registry115 Guidance Pydantic consumer and fake Admin transport/capability/receipt outcomes.
 # [Output] Exact hash, identity, dispatch and original-receipt-only recovery assertions.
 # [Pos] Provider-free Dream data-boundary test; no PostgreSQL, Runtime or HTTP server.
@@ -96,7 +97,7 @@ class FakeClient:
         self.execute_error: AdminDataError | None = None
         self.receipt_reply = None
 
-    def capabilities(self, request_id):
+    def capabilities_snapshot(self, request_id):
         return SimpleNamespace(schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS))
 
     def execute(self, operation, input_dto, request_id, *, access_token):

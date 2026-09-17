@@ -1,4 +1,5 @@
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
+# [Sync] 2026-09-17: verify repeated grant creation reuses the authenticated capability snapshot.
 # [Input] Production special-route consumers/keeper and injected HTTP, clock and request identities.
 # [Output] Purpose isolation, published readiness and unknown-renewal recovery without PG/models.
 # [Pos] Provider-free Runtime authorization contracts; no alternate Agent or authentication path.
@@ -82,6 +83,43 @@ def test_create_uses_actual_special_route_and_exact_purpose(config, purpose, sco
     result = AdminDelegationCreator(client, clock=lambda: NOW).create(requested, access_token="user-oauth", request_id="create-1")
     assert len(calls) == 2 and result.scopes == tuple(scopes) and result.editor_session_id == session
     assert TOKEN not in repr(result)
+
+
+def test_create_reuses_prevalidated_capabilities_without_duplicate_discovery(config):
+    requested = DelegationCreateInputDTO(
+        purpose="gateway-cli",
+        thread_id="thread-1",
+        run_id=None,
+        editor_session_id=None,
+        scopes=["messages:create"],
+    )
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        if request.url.path.endswith("/capabilities"):
+            return reply(request, capabilities(config))
+        return reply(request, {
+            **requested.model_dump(),
+            "token": TOKEN,
+            "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+            "maximum_expires_at": (NOW + timedelta(hours=2)).isoformat(),
+        })
+
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client.capabilities("authenticated-request")
+    AdminDelegationCreator(client, clock=lambda: NOW).create(
+        requested,
+        access_token="user-oauth",
+        request_id="create-1",
+    )
+    assert paths == [
+        "/api/internal/dream/v1/capabilities",
+        "/api/internal/dream/v1/runtime-delegations",
+    ]
 
 
 @pytest.mark.parametrize("mutation", [

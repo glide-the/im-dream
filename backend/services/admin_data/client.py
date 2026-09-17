@@ -9,6 +9,7 @@
 # [Sync] 2026-09-16: recover connector-scoped background writes without an OAuth credential.
 # [Sync] 2026-09-16: expose a lock-safe local contract/capability readiness check for managed MCP composition.
 # [Sync] 2026-09-17: authenticate service calls with cached OAuth client_credentials tokens.
+# [Sync] 2026-09-17: reuse one immutable validated capability snapshot across domain calls while retaining explicit forced refresh and fail-closed invalidation.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ class AdminDataClient:
         self._advertised: dict[str, OperationCapabilityDTO] = {}
         self._schema_capabilities: dict[str, SchemaCapabilityDTO] = {}
         self._schema_capabilities_unique = False
+        self._capabilities: CapabilitiesDTO | None = None
         self._capabilities_ready = False
         self._catalog_lock = RLock()
 
@@ -95,10 +97,13 @@ class AdminDataClient:
             input_dto=input_dto, params=params, write=write)
 
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
+        """Force a complete capability refresh and invalidate on any failure."""
+
         with self._catalog_lock:
             self._advertised = {}
             self._schema_capabilities = {}
             self._schema_capabilities_unique = False
+            self._capabilities = None
             self._capabilities_ready = False
             result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
             auth = result.auth
@@ -115,8 +120,17 @@ class AdminDataClient:
             self._schema_capabilities_unique = (
                 len(schemas) == len(result.schema_capabilities)
             )
+            self._capabilities = result
             self._capabilities_ready = True
             return result
+
+    def capabilities_snapshot(self, request_id: str) -> CapabilitiesDTO:
+        """Return the validated immutable catalog, loading it once when absent."""
+
+        with self._catalog_lock:
+            if self._capabilities_ready and self._capabilities is not None:
+                return self._capabilities
+            return self.capabilities(request_id)
 
     def supports(
         self,

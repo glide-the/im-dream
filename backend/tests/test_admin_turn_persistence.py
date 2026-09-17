@@ -977,8 +977,7 @@ def test_thread_system_config_read_uses_exact_grant_and_close_drains_it():
 
     assert closed.is_set() and not errors
     assert configs == [{"workspace_enabled": True}]
-    assert len(calls) == 3
-    assert calls[-2].method == "GET" and calls[-2].url.path.endswith("/capabilities")
+    assert len(calls) == 2
     request = calls[-1]
     assert request.headers["authorization"] == "Bearer " + TOKEN
     assert request.url.path.endswith(GET_THREAD_SYSTEM_CONFIG.capability.name)
@@ -1116,8 +1115,7 @@ def test_recent_sessions_require_exact_runtime_schemas_before_command(schema_ind
         value.recent_sessions(actor_id="42", thread_id="thread-1")
 
     assert error.value.code == "ADMIN_CAPABILITY_UNAVAILABLE"
-    assert len(calls) == before + 1
-    assert calls[-1].method == "GET" and calls[-1].url.path.endswith("/capabilities")
+    assert len(calls) == before
 
 
 def test_recent_sessions_reject_text_when_include_text_is_false():
@@ -1456,3 +1454,4 @@ def test_public_execute_session_persists_original_assistant_parts_with_SQL_fence
     else:
         assert dto["metadata"]["is_partial"] is True
         assert (dto["history_final_text"],dto["history_process_available"],dto["history_projection_version"])==(None,False,None)
+# [Sync] 2026-09-17: verify turn domains reuse the prevalidated capability snapshot without duplicate discovery I/O.

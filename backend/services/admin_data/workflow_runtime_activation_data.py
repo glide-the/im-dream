@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry108 activation contract and one exact server-persistence grant.
 # [Output] Strict Runtime activation DTOs with original-request receipt recovery.
 # [Pos] Dream consumer boundary; Admin owns ORM/transaction and Dream owns verified workspace bytes/Runtime/SSE.
@@ -92,7 +93,7 @@ def require_workflow_runtime_activation_capabilities(
     client: AdminDataClient,
     request_id: str,
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {
         item.capability: item for item in capabilities.schema_capabilities
     }

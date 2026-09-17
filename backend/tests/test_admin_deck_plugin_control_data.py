@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: align provider-free fake clients with reusable validated capability snapshots.
 # [Input] Registry170-174 strict DTOs, fake Admin catalog and closed receipt outcomes.
 # [Output] Exact capability pins, actor-free commands and one-dispatch recovery evidence.
 # [Pos] Provider-free Dream contract test; no PostgreSQL, filesystem or Runtime.
@@ -74,7 +75,7 @@ class FakeClient:
         self.execute_calls = []
         self.receipt_calls = []
 
-    def capabilities(self, request_id):
+    def capabilities_snapshot(self, request_id):
         return SimpleNamespace(
             schema_capabilities=list(DECK_PLUGIN_CONTROL_SCHEMA_REQUIREMENTS)
         )

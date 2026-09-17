@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry185-191 descriptors, OAuth or exact server-persistence grant, and normalized file facts.
 # [Output] Strict authority/lifecycle/Story-index DTOs with original-request receipt recovery.
 # [Pos] Dream consumer boundary; Admin owns ORM/transactions while Dream owns Runtime, SSE and shared files.
@@ -237,7 +238,7 @@ STORY_WORKSPACE_ARTIFACT_OPERATIONS = (
 def require_story_workspace_artifact_capabilities(
     client: AdminDataClient, request_id: str
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {
         item.capability: item for item in capabilities.schema_capabilities
     }

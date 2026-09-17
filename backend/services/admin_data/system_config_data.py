@@ -2,6 +2,7 @@
 # [Output] Closed typed get/patch commands, raw Python JSON decoding and original PATCH receipt recovery.
 # [Pos] Sole SystemConfig data consumer; it owns no database, model catalog, filesystem or Runtime policy.
 # [Sync] 2026-09-15: consume registered80 SystemConfig contracts without numeric re-encoding or database fallback.
+# [Sync] 2026-09-17: reuse the authenticated capability snapshot through the shared Workflow schema gate.
 """Typed Admin SystemConfig operations and fail-closed raw JSON projection."""
 
 from __future__ import annotations

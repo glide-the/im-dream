@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: exercise domain gates through the reusable validated capability snapshot.
 # [Input] Registry106 DTO consumer, capability catalog and fixed Admin metadata responses.
 # [Output] Exact hash, actor/Thread/profile binding, strict status validation and owner registration evidence.
 # [Pos] Provider-free workspace plugin metadata contract test; no PostgreSQL, filesystem or Runtime.
@@ -47,7 +48,7 @@ def _output(**updates) -> DeckWorkspacePluginsOutputDTO:
 
 def _data(output: DeckWorkspacePluginsOutputDTO | None = None):
     client = Mock()
-    client.capabilities.return_value = SimpleNamespace(
+    client.capabilities_snapshot.return_value = SimpleNamespace(
         schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS)
     )
     client.execute.return_value = output or _output()
@@ -105,7 +106,7 @@ def test_resolve_checks_capability_and_binds_actor_thread_profile_and_deck():
         profile="standard",
         deck_id="deck-1",
     ) is client.execute.return_value
-    client.capabilities.assert_called_once_with("workspace-plugin-request")
+    client.capabilities_snapshot.assert_called_once_with("workspace-plugin-request")
     client.execute.assert_called_once_with(
         RESOLVE_DECK_WORKSPACE_PLUGINS,
         selection,

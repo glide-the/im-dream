@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry109 output contract and one exact server-persistence Thread grant.
 # [Output] Strict Story proposal DTOs with original-request receipt recovery.
 # [Pos] Dream consumer boundary; Admin owns ORM/transaction while Dream owns parsing, Runtime, SSE and files.
@@ -113,7 +114,7 @@ def require_story_workspace_output_capabilities(
     client: AdminDataClient,
     request_id: str,
 ) -> None:
-    capabilities = client.capabilities(request_id)
+    capabilities = client.capabilities_snapshot(request_id)
     schemas = {
         item.capability: item for item in capabilities.schema_capabilities
     }

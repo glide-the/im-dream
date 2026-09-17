@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: align provider-free fake clients with reusable validated capability snapshots.
 # [Input] Registry185-191 Pydantic consumer plus fake Admin capabilities, replies and receipts.
 # [Output] Exact DTO hashes, actor/run validation and original-request write recovery evidence.
 # [Pos] Provider-free Dream data-boundary test; no PostgreSQL, Runtime or shared filesystem.
@@ -124,7 +125,7 @@ class FakeClient:
         self.execute_error: AdminDataError | None = None
         self.receipt_reply = None
 
-    def capabilities(self, _request_id):
+    def capabilities_snapshot(self, _request_id):
         return SimpleNamespace(schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS))
 
     def execute(self, operation, input_dto, request_id, *, access_token):
@@ -228,7 +229,7 @@ def test_wrong_operation_or_missing_capability_fails_before_transport() -> None:
             "request-wrong-input",
             access_token="oauth",
         )
-    client.capabilities = lambda _request_id: SimpleNamespace(schema_capabilities=[])
+    client.capabilities_snapshot = lambda _request_id: SimpleNamespace(schema_capabilities=[])
     with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
         data.authority(
             StoryWorkspaceArtifactAuthorityInputDTO(workflow_run_id=RUN),

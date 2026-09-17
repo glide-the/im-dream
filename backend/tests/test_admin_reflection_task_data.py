@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: align provider-free fake clients with reusable validated capability snapshots.
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Frozen Reflections DTO/consumer composition and private snapshot provider.
 # [Output] Deterministic contract-shape, receipt, event-bound and workspace tests without Admin/PG/model.
@@ -172,7 +173,7 @@ class _FakeClient:
         self.execute_result = None
         self.receipt_result = receipt_result
 
-    def capabilities(self, request_id):
+    def capabilities_snapshot(self, request_id):
         return self.capabilities_result
 
     def execute(self, operation, input_dto, request_id, *, access_token=None):

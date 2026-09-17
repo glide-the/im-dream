@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: 说明Chat额度拒绝与Admin capability snapshot延迟行为。 -->
 <!-- [Sync] 2026-09-15: 用户与Thread SystemConfig持久化改用精确Admin合同。 -->
 <!-- [Sync] 2026-09-15: 公开Reflections自定义配置改用registered83 Admin operations。 -->
 <!-- [Sync] 2026-09-15: 公开complete/partial assistant持久化使用绑定的Admin turn owner与原receipt恢复。 -->
@@ -420,6 +421,12 @@ cd backend
 ### 构建仍要求 npm/Vite 文件
 
 当前 Web workspace 使用 Corepack/pnpm、Next、`.next` 和 `frontend/pnpm-lock.yaml`。查找 `frontend/package-lock.json`、`vite.config.ts` 或生产 `dist/index.html` 的 workflow 已过时。
+
+### Chat 提示订阅周期 Token 不足
+
+Dream 会在模型执行前保存用户消息。如果 Chat 显示**当前订阅周期 Token 不足**，表示 Gateway 因本订阅周期无法预留本次请求所需 Token 而拒绝模型请求；这与 Admin DTO 持久化失败无关。请通过 Admin 支持的订阅额度或模型配置进行调整，然后重新加载对话、确认保存状态，再决定是否重新发送。不要连续重试，也不要直接修改订阅账本记录。
+
+Dream 会为各业务调用复用一份经过完整校验的不可变 Admin capability snapshot；每个业务请求仍由 Admin 执行身份认证、权限校验、DTO 校验和事务处理。显式 capability 刷新会先使 snapshot 失效，刷新失败时保持关闭状态。
 
 ### PostgreSQL capability 或模型不可用
 

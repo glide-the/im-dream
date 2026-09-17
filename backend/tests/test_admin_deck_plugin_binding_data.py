@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: align provider-free fake clients with reusable validated capability snapshots.
 # [Input] Registry122-132 binding/launch DTO consumer, fake Admin catalog and closed receipt/error outcomes.
 # [Output] Exact hashes, current/replay identity binding, one-dispatch recovery and registration evidence.
 # [Pos] Provider-free Dream data-boundary test; no PostgreSQL, filesystem or Runtime.
@@ -104,7 +105,7 @@ class FakeClient:
         self.execute_calls = []
         self.receipt_calls = []
 
-    def capabilities(self, request_id):
+    def capabilities_snapshot(self, request_id):
         return SimpleNamespace(schema_capabilities=list(WORKFLOW_SCHEMA_REQUIREMENTS))
 
     def execute(self, operation, input_dto, request_id, *, access_token):

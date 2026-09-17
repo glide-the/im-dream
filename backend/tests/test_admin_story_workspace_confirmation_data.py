@@ -216,9 +216,7 @@ def test_claim_turn_builds_one_exact_admin_turn_owner() -> None:
     assert [request.url.path.rsplit("/", 1)[-1] for request in calls] == [
         "capabilities",
         "story-workspace-confirmation.claim-turn",
-        "capabilities",
         "workflow-context.resolve",
-        "capabilities",
         "deck-chat-context.resolve",
     ]
 
@@ -236,3 +234,4 @@ def test_claim_turn_fails_closed_without_exact_schema_capability() -> None:
     assert [request.url.path.rsplit("/", 1)[-1] for request in calls] == [
         "capabilities"
     ]
+# [Sync] 2026-09-17: verify confirmation owner composition reuses one validated capability snapshot.

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-17: explain Chat allowance rejection and Admin capability snapshot latency behavior. -->
 <!-- [Sync] 2026-09-15: route user and Thread SystemConfig persistence through exact Admin contracts. -->
 <!-- [Sync] 2026-09-15: route public Reflections custom configuration through registered83 Admin operations. -->
 <!-- [Sync] 2026-09-15: public complete/partial assistant persistence uses the bound Admin turn owner and original receipt recovery. -->
@@ -435,6 +436,12 @@ On this migration branch, REST/SSE/files stay on the Next origin and use authent
 ### A build still asks for npm/Vite files
 
 The active Web workspace uses Corepack/pnpm, Next, `.next`, and `frontend/pnpm-lock.yaml`. A workflow looking for `frontend/package-lock.json`, `vite.config.ts`, or production `dist/index.html` is obsolete.
+
+### Chat reports an insufficient subscription Token allowance
+
+Dream saves the user message before model execution. If Chat reports **Subscription Token allowance is insufficient**, Gateway rejected the model request because the current subscription period cannot reserve the requested Tokens; this is separate from Admin DTO persistence. Adjust the supported subscription allowance or model configuration in Admin, then reload the conversation to confirm its saved state before deciding whether to send again. Do not retry repeatedly or edit subscription ledger rows directly.
+
+Dream keeps one fully validated immutable Admin capability snapshot for domain calls and still sends each business request through Admin authentication, authorization, DTO validation, and transaction handling. An explicit capability refresh invalidates the snapshot first and fails closed if refresh cannot complete.
 
 ### PostgreSQL capability or model is unavailable
 

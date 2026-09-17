@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
 # [Sync] 2026-09-16: cover Better Auth scalar and closed resource/userinfo audience-array access tokens.
 # [Sync] 2026-09-17: assert separate user and client_credentials bearer transport.
+# [Sync] 2026-09-17: verify immutable capability snapshots remove duplicate reads while forced refresh still invalidates atomically.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -149,6 +150,36 @@ class PersistNoteOutput(StrictDTO):
 def operation():
     # Technical fixture DTO registered via the real composition API, never deployed.
     return DomainOperation(OperationCapabilityDTO(name="notes.persist", kind="write", user_scope="dream:write", background_scope=None, input_schema_version=1, output_schema_version=1, contract_sha256="a" * 64), PersistNoteInput, PersistNoteOutput)
+
+
+def test_capability_snapshot_reuses_validated_catalog_and_forced_failure_invalidates(config):
+    spec = operation()
+    capability_requests = []
+
+    def handler(request):
+        request_id = request.headers["x-request-id"]
+        capability_requests.append(request_id)
+        if request_id == "forced-failure":
+            raise httpx.ReadTimeout("private catalog detail", request=request)
+        return response(auth_capabilities(config, (spec,)), request_id)
+
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        operations=(spec,),
+    )
+    first = client.capabilities_snapshot("first")
+    second = client.capabilities_snapshot("second")
+    assert first is second
+    assert capability_requests == ["first"]
+
+    with pytest.raises(AdminDataError):
+        client.capabilities("forced-failure")
+    assert not client.capabilities_ready
+
+    recovered = client.capabilities_snapshot("recovered")
+    assert recovered is not first
+    assert capability_requests == ["first", "forced-failure", "recovered"]
 
 
 @pytest.mark.parametrize("refresh_result", ["valid", "missing", "hash", "failure"])

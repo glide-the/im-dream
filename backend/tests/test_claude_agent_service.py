@@ -1,4 +1,5 @@
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
+# [Sync] 2026-09-17: prove Gateway allowance rejection is a stable redacted SSE error.
 # [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
 # [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
 # [Sync] 2026-09-16: inject Notion persistence through the current Admin turn owner.
@@ -2672,6 +2673,25 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
         self.assertEqual(frame["type"], "error")
         self.assertIn("Command failed with exit code 1", frame["errorText"])
         self.assertIn("sandbox_hint", frame["errorText"])
+
+    def test_make_error_cb_redacts_gateway_allowance_details(self):
+        async def scenario():
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            callback = ClaudeAgentService._make_error_cb(queue)
+            await callback(RuntimeError(
+                "Claude SDK AssistantMessage error: unknown | provider_detail: "
+                "API Error: 402 billing_error code=SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED "
+                "available_tokens=76005 required_tokens=102993 private=request"
+            ))
+            return _parse_sse(queue.get_nowait())
+
+        frame = _run(scenario())
+        self.assertEqual(frame, {
+            "type": "error",
+            "errorText": "The current subscription-period Token allowance is insufficient.",
+            "errorCode": "GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED",
+            "retryable": False,
+        })
 
 
 if __name__ == "__main__":
