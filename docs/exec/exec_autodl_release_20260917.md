@@ -18,4 +18,5 @@
 - 远端主机：`autodl-container-ylgygfuaq4-2c9ee25f`。
 - 设备重启后 screen 与 `6006/6008/8765` 均未运行；release 链接与持久数据盘仍存在。
 - 发布顺序：Admin → migration/capability → Dream → 跨服务公开入口。
+- 部署前发现旧 AutoDL 脚本仍要求不存在的 local-core `0.1.9`；当前源码要求已发布 Runtime `0.1.10`。发布脚本改为安装并校验 npm `0.1.10`，不降级源码或复用远端 `0.1.4`。
 - 发布结果在实际执行后追加；本段不声明部署成功。
