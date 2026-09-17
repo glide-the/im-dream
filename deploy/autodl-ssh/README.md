@@ -76,7 +76,10 @@ public health gates pass.
   builds an immutable candidate, verifies it on `16006`/`18765`, switches
   `current`, then removes every old release after public verification succeeds;
   no long-lived rollback release is retained.
-  and versioned release links.
+- Runtime installation uses the published `@glide-the/ink-claude-code-dream@0.1.10`
+  package and verifies its adjacent manifest, SDK `0.2.145` binding, production
+  eligibility, CLI compatibility `2.1.241`, and `plugin` command before build.
+  The retired unpublished AutoDL `0.1.9` local artifact is not a release input.
 - Acceptance checks the standalone server, Node MCP Apps route manifest,
   FastAPI and same-origin health, crawler media/body (including `/llms.txt`),
   built-in Skills, default Deck Plugin, Admin dependency, and public mapping.

@@ -36,6 +36,11 @@ grep -Fq 'smoke_candidate' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'AUTODL_DREAM_SMOKE_FRONTEND_PORT' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'activate_candidate' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'prune_old_releases' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq '@glide-the/ink-claude-code-dream@${AUTODL_CLAUDE_RUNTIME_VERSION}' "${SCRIPT_DIR}/deploy.sh"
+if grep -Eq 'qualified-package|ink-claude-code-dream-0\.1\.9|Runtime 0\.1\.9 local-core' "${SCRIPT_DIR}/deploy.sh"; then
+  printf 'retired unpublished AutoDL Runtime artifact remains\n' >&2
+  exit 1
+fi
 if grep -Eq 'frontend/(package-lock\.json|vite\.config\.ts|dist/index\.html)|npm ci|vite preview|VITE_ALLOWED_HOSTS|VITE_DEV_API_PROXY_TARGET' "${SCRIPT_DIR}/deploy.sh" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh"; then
   printf 'retired Vite/npm/dist deployment assumption remains\n' >&2
   exit 1
