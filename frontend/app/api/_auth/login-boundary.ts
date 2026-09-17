@@ -1,6 +1,7 @@
-// [Input] Explicit Dream public origin/cookie secret and browser login/callback inputs.
+// [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
+// [Sync] 2026-09-17: accept only the configured loopback proxy origin when AutoDL rewrites URL and Host.
 // [Sync] 2026-09-16: accept an exact configured Host when Next normalizes the server-internal request URL.
 // [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
@@ -81,6 +82,7 @@ function readCookie(request: Request, name: string): string | null {
 
 export class BffLoginBoundary {
   readonly publicOrigin: string;
+  readonly internalOrigin: string | null;
   readonly callbackUri: string;
   readonly transactionCookieName: string;
   readonly handleCookieName: string;
@@ -90,8 +92,12 @@ export class BffLoginBoundary {
   readonly #transactionLifetime: number;
   readonly #secure: boolean;
 
-  constructor(config: { publicOrigin: string; callbackUri: string; cookieSecret: string; transactionLifetimeSeconds?: number }, clock: () => number = () => Date.now() / 1_000) {
+  constructor(config: { publicOrigin: string; internalOrigin?: string; callbackUri: string; cookieSecret: string; transactionLifetimeSeconds?: number }, clock: () => number = () => Date.now() / 1_000) {
     this.publicOrigin = exactOrigin(config.publicOrigin);
+    this.internalOrigin = config.internalOrigin ? exactOrigin(config.internalOrigin) : null;
+    if (this.internalOrigin && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(this.internalOrigin).hostname)) {
+      throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
+    }
     try {
       const callback = new URL(config.callbackUri);
       if (callback.origin !== this.publicOrigin || callback.username || callback.password || callback.search || callback.hash || callback.href !== config.callbackUri) throw new Error();
@@ -117,6 +123,7 @@ export class BffLoginBoundary {
     if (!/^[1-9][0-9]*$/.test(rawTTL)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
     return new BffLoginBoundary({
       publicOrigin: environment.INK_DREAM_PUBLIC_ORIGIN ?? '',
+      internalOrigin: environment.INK_DREAM_BFF_INTERNAL_ORIGIN,
       callbackUri: environment.INK_DREAM_BFF_REDIRECT_URI ?? '',
       cookieSecret: environment.INK_DREAM_BFF_COOKIE_SECRET ?? '',
       transactionLifetimeSeconds: Number(rawTTL),
@@ -218,7 +225,8 @@ export class BffLoginBoundary {
   clearHandleCookie(): string { return this.#cookie(this.handleCookieName, '', 0); }
 
   #requestOrigin(request: Request): string {
-    if (new URL(request.url).origin === this.publicOrigin) return this.publicOrigin;
+    const requestOrigin = new URL(request.url).origin;
+    if (requestOrigin === this.publicOrigin || (this.internalOrigin !== null && requestOrigin === this.internalOrigin)) return this.publicOrigin;
     const host = request.headers.get('host');
     if (host && host.toLowerCase() === new URL(this.publicOrigin).host.toLowerCase()) return this.publicOrigin;
     throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);

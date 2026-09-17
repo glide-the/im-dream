@@ -46,6 +46,10 @@ AutoDL's proxy does not reliably forward `Forwarded` / `X-Forwarded-*`, so the
 public origins are configured explicitly instead of being derived per request,
 and moving to a new instance regenerates these URLs — re-run the discovery and
 re-project the runtime env.
+The generated runtime also sets `INK_DREAM_BFF_INTERNAL_ORIGIN` to the exact
+loopback Next listener. The BFF uses it only to map AutoDL-rewritten Route
+Handler URLs back to the configured public origin; non-loopback values fail
+configuration validation.
 
 ## Release
 
