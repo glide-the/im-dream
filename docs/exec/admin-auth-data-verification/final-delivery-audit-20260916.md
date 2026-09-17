@@ -1,6 +1,7 @@
 <!-- [Input] Exact Admin/Dream heads, four published baseline releases, current contracts, CI receipts and private cutover preflight state. -->
 <!-- [Output] Requirement-by-requirement delivery status that separates source proof, normal deployment and real business acceptance. -->
 <!-- [Pos] Final coordinator audit; it is not a production-approval token and contains no credential or business正文. -->
+<!-- [Sync] 2026-09-17: record the Git-candidate database closure gate correction, current Dream CI and post-restart live process boundary. -->
 <!-- [Sync] 2026-09-17: bind the audit to the consolidated primary repositories, current PR heads, green CI and the post-deadlock public Workflow Run. -->
 <!-- [Sync] 2026-09-17: close independent Admin browser login after completing the required local Session TTL configuration. -->
 <!-- [Sync] 2026-09-17: record normal resource-policy desired/effective/revision/LKG and fresh observer parity. -->
@@ -35,7 +36,7 @@ Finish Admin unified authentication and database services, Dream's complete prod
 | 项目 | 实现基线 / 审计分支 | 审查入口 | 状态 |
 | --- | --- | --- | --- |
 | Admin | `92fc88ece6c1945f0e6e29e562fc48e90dd3ca7d` / 主目录`codex/admin-auth-data-unified-20260917`，PR源`codex/admin-auth-data-provider` | [Draft PR #15](https://github.com/glide-the/dream-im-platform/pull/15) | 主目录与原任务worktree提交已合并；两条本地/远端分支指向同一提交，工作区干净。当前HEAD包含DTO/ORM边界、正常ACL、verified Plugin activation与confirmation grant恢复死锁修复 |
-| Dream | `a55f4e6b793ffa1cd028dfc17bd3827ed0553c72` / 主目录`codex/auth-data-coordination`，PR源`codex/dream-admin-auth-data-client` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 主目录与原任务worktree提交已合并；两条本地/远端分支指向同一提交，工作区干净。当前HEAD包含confidential OAuth消费、全生产数据库关闭、Runtime/Gateway revision修复和最新真实回执 |
+| Dream | `0dd39202a742b6a10380612478cfc71ab8b62183` / 主目录`codex/auth-data-coordination`，PR源`codex/dream-admin-auth-data-client` | [Draft PR #63](https://github.com/glide-the/im-dream/pull/63) | 主目录与原任务worktree提交已合并；两条本地/远端分支指向同一实现提交，工作区干净。该实现包含confidential OAuth消费、全生产数据库关闭、Runtime/Gateway revision修复、最新真实回执及忽略运行时工作区/缓存的Git候选源码门禁 |
 
 ## 1. 基线发布
 
@@ -93,7 +94,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 
 当前 Dream 生产图不包含 PostgreSQL credential、driver、SQL、ORM、UOW、DDL、自动建表或 SQLite runtime fallback。`server.py` 不加载数据库 URL或创建 pool；历史数据库实现仅位于 `backend/tests/**` 的明确 fixture/harness。部署模板清空旧数据库变量并只投影 Admin base、issuer/resource、service identity 和 BFF cookie secret。
 
-静态关闭门禁与当前完整 backend suite 已通过：`3538 passed, 24 skipped, 615 subtests passed`。正常服务验证证明Dream Next进程和Python进程均没有`DATABASE_URL`/PostgreSQL/PG credential环境键，两进程到正常PostgreSQL `54329`的实际TCP连接数均为0，Admin、Dream页面和Dream health分别在`3000/5173/8765`返回`200`。后续公开Workflow Run已经通过同源页面创建并由Admin持久化Thread、Run、transition与Agent Session，且Dream进程仍没有PG凭据或连接；静态、运行边界与正向持久化证据共同证明Dream没有数据库旁路。
+静态关闭门禁与当前完整 backend suite 已通过：`3538 passed, 24 skipped, 615 subtests passed`。机器重启后的聚焦复核先发现旧门禁把被Git忽略的`backend/data/`运行时工作区和仅含`__pycache__`的退休目录计为源码；`0dd39202`将清单改为已跟踪加未忽略待提交文件，聚焦门禁`7 passed`，临时加入可提交的退休路径源码仍按预期失败并完成清理。正常服务验证证明Dream Next进程和Python进程均没有`DATABASE_URL`/PostgreSQL/PG credential环境键，两进程到正常PostgreSQL `54329`的实际TCP连接数均为0，Admin登录页、Dream页面和Dream `/api/health`分别在`3000/5173/8765`返回`200`。后续公开Workflow Run已经通过同源页面创建并由Admin持久化Thread、Run、transition与Agent Session，且Dream进程仍没有PG凭据或连接；静态、运行边界与正向持久化证据共同证明Dream没有数据库旁路。
 
 ## 6. 保持的业务语义
 
@@ -118,7 +119,8 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | 正常资源策略/LKG只读验收 | Dream生产Admin client + 正常Admin/PostgreSQL | exit `0`；公开desired为configured revision 4；最新Observer心跳约0.23秒，applied revision、四项effective、effort与desired一致，required-headroom精确，queue dropped为0；未改desired或触发turn |
 | Dream [Frontend CI 35112741361](https://github.com/glide-the/im-dream/actions/runs/35112741361) | GitHub / Dream `4018aabd` | exit `0`；1m10s，frozen pnpm install与Next production build通过 |
 | Dream [Backend CI 35112741412](https://github.com/glide-the/im-dream/actions/runs/35112741412) | GitHub / Dream `4018aabd` | exit `0`；13m51s，生产 Docker image dry-run通过 |
-| Dream current-head CI | GitHub / Dream `a55f4e6b` / [frontend run 35171166363](https://github.com/glide-the/im-dream/actions/runs/35171166363) + [backend run 35171166368](https://github.com/glide-the/im-dream/actions/runs/35171166368) | exit `0`；frontend build-check 1m17s，backend build-check 4m05s |
+| Dream current implementation CI | GitHub / Dream `0dd39202` / [frontend run 35172625767](https://github.com/glide-the/im-dream/actions/runs/35172625767) + [backend run 35172625781](https://github.com/glide-the/im-dream/actions/runs/35172625781) | exit `0`；frontend build-check约1m09s，backend Docker build-check 4m20s |
+| Dream数据库关闭门禁重启后复核 | Dream `backend` / `0dd39202` | 首次旧清单`3 failed, 3 passed`，证实误纳忽略运行时源码与cache-only退休目录；修正后`7 passed in 2.23s`、py_compile和diff-check均exit `0`。未忽略退休路径探针使断言按预期exit `1`且包装器完成清理；Markdown本地链接4项/0 missing |
 | Dream BFF/部署焦点 | 本机 Dream `4018aabd` | exit `0`；BFF boundary、Remote SSH env projection、`git diff --check`通过 |
 | `.venv/bin/python -m pytest -q tests` | Dream `backend`工作分支当前树 | exit `0`；3538 passed、24 skipped、615 subtests passed |
 | Dream OAuth audience与产品边界焦点 | Dream `backend`，当前已提交实现 | exit `0`；81项audience/JWKS合同与117项auth/product边界通过；真实浏览器不再显示`INVALID_TOKEN_RESOURCE` |
@@ -129,7 +131,7 @@ Google、Better Auth Session、service JWT、OAuth access/refresh token 与 OIDC
 | MCP replacement OAuth | 本机 Dream `backend` + 正常页面 | exit `0`；19项provider-free OAuth/credential/service测试；真实 consent/callback 已完成，reload 使用持久化凭据并返回 41 Tools / 25 Resources / 10 Prompts |
 | 文件与真实模型边界 | 正常 Dream Chat、Workflow workspace、Gateway | 两次文件上传、登录读取、未登录 `401`、hash/path/symlink 与 `.claude-tmp 0700` 通过；公开Run `run_d3bac195c4e94dafbe1bda6b70a7163d`越过SystemConfig、Runtime activation与Dream文件读取，随后Gateway请求`req_82d2c64ae8d747fbaa6fee89303da892`因当前周期额度不足返回`402`，新请求预留/扣减均为0且没有ledger entry |
 | 正常备份隔离恢复演练 | 本机独占 PostgreSQL 18.1 / `55493` | 历史切换 exit `0`；真实物理备份54→63、8 capabilities、142 ACL、credential/allow/deny、重复apply、`35/1408/10`计数保持；回执SHA `716646a3bbdc4051742c9e82f570c004fb19892fc60a32591d84d890f5064f94`，副本已停止并删除；0063另以具名可删除数据库完整重放 |
-| 正常数据库与运行边界只读复核 | 本机正常 `ink-memory:54329` | exit `0`；64 migration receipts、9/9 exact发布门槛capabilities、3个受限LOGIN/NOINHERIT角色、Dream NOLOGIN，4项denied privilege均false；Dream两个进程0个PG键、0条54329连接 |
+| 正常数据库与运行边界只读复核 | 本机正常 `ink-memory:54329` | exit `0`；64 migration receipts、9/9 exact发布门槛capabilities、3个受限LOGIN/NOINHERIT角色、Dream NOLOGIN，4项denied privilege均false；重启后Dream两个进程仍为0个PG键、0条54329连接，Admin登录页、Dream页面与Dream `/api/health`均为200 |
 | Markdown local-link checks | 两仓受影响文档 | exit `0`；最终同步3文件0 missing、Admin架构7文件67 links/0 missing、Dream总览2文件15 links/0 missing |
 
 CI 的 Node 20 action deprecation annotation来自 GitHub runner把旧 action runtime强制到 Node 24；没有项目测试或构建失败。
