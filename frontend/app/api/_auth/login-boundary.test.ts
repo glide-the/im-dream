@@ -84,7 +84,8 @@ test('configured loopback proxy origin preserves login and callback when AutoDL 
   const normalized = new Request('http://127.0.0.1:6006/auth/callback?' + params, { headers: { cookie, host: '127.0.0.1:6006' } });
   assert.deepEqual(bff.readTransaction(normalized), tx);
   assert.deepEqual(bff.validateCallback(normalized, 'https://admin.example/api/auth'), tx);
-  assert.throws(() => bff.readTransaction(new Request('http://127.0.0.1:7000/auth/callback', { headers: { cookie } })), BffBoundaryError);
+  assert.deepEqual(bff.readTransaction(new Request('http://localhost:3000/auth/callback', { headers: { cookie } })), tx);
+  assert.throws(() => bff.readTransaction(new Request('http://internal.example:6006/auth/callback', { headers: { cookie } })), BffBoundaryError);
   assert.throws(() => new BffLoginBoundary({
     publicOrigin: 'https://dream.example', internalOrigin: 'https://proxy.example',
     callbackUri: 'https://dream.example/auth/callback', cookieSecret,

@@ -1,7 +1,7 @@
 // [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
-// [Sync] 2026-09-17: accept only the configured loopback proxy origin when AutoDL rewrites URL and Host.
+// [Sync] 2026-09-17: enable loopback proxy mode for Next request URL normalization behind AutoDL.
 // [Sync] 2026-09-16: accept an exact configured Host when Next normalizes the server-internal request URL.
 // [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
@@ -226,7 +226,10 @@ export class BffLoginBoundary {
 
   #requestOrigin(request: Request): string {
     const requestOrigin = new URL(request.url).origin;
-    if (requestOrigin === this.publicOrigin || (this.internalOrigin !== null && requestOrigin === this.internalOrigin)) return this.publicOrigin;
+    const requestUrl = new URL(requestOrigin);
+    const normalizedLoopback = requestUrl.protocol === 'http:'
+      && ['localhost', '127.0.0.1', '[::1]'].includes(requestUrl.hostname);
+    if (requestOrigin === this.publicOrigin || (this.internalOrigin !== null && normalizedLoopback)) return this.publicOrigin;
     const host = request.headers.get('host');
     if (host && host.toLowerCase() === new URL(this.publicOrigin).host.toLowerCase()) return this.publicOrigin;
     throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
