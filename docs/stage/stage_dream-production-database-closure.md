@@ -1,7 +1,7 @@
 <!-- [Input] Current dirty-safe Dream source tree, accepted Admin contract catalog and prior108-entry baseline inventory. -->
 <!-- [Output] Current production DB-access closure implementation, inventory and verification decisions. -->
 <!-- [Pos] Cross-project coordinator evidence for the source cutover and remaining runtime acceptance. -->
-<!-- [Sync] 2026-09-16: close the Dream runtime pool/SQL graph and isolate historical database tooling under tests. -->
+<!-- [Sync] 2026-09-17: make the closure gate audit Git candidate source rather than ignored runtime/cache artifacts. -->
 
 # Dream 生产数据库入口关闭复盘
 
@@ -17,12 +17,40 @@
 
 候选按 production、tests、script/importer 分开。AST SQL 字符串、psycopg/数据库模块 import、连接/事务调用和旧 helper call 分别计数；同名 `execute` 不自动算数据库访问。动态 SQL、工厂注入和 startup/health 另列。迁移时每个调用均关联实际 Admin operation；原子步骤保持 Admin 单事务，Dream 没有 PostgreSQL fallback。
 
-## 现行裁决（2026-09-16）
+## 现行裁决（2026-09-17）
 
-- `backend/tests/test_postgres_runtime_sql_boundaries.py` 扫描完整 `backend` 生产 Python 图及 `frontend/app`、`frontend/packages` 生产脚本，排除的只有 tests/e2e、虚拟环境、构建产物和缓存目录；任何数据库驱动/客户端、旧 `database` import、SQL 语句字面量或 Next 侧数据库 DSN 都会使门禁失败。
+- `backend/tests/test_postgres_runtime_sql_boundaries.py` 以 Git 已跟踪文件和未忽略的待提交文件为源码清单，扫描完整 `backend` 生产 Python 图及 `frontend/app`、`frontend/packages` 生产脚本；tests/e2e、虚拟环境、构建产物、缓存目录与 `backend/data/` 运行时工作区不进入清单。任何可提交的数据库驱动/客户端、旧 `database` import、SQL 语句字面量或 Next 侧数据库 DSN 都会使门禁失败。
 - 原 `backend/database.py`、`backend/persistence/`、`backend/schema/` 与生产 SQL repository 已退出生产图；历史实现只保存在明确命名的测试 fixture/harness。
 - 部署脚本拒绝 Dream 的 `DATABASE_URL`/旧数据库环境文件；运行代码只使用 Admin 严格 DTO 客户端，Admin 使用 Zod DTO、domain Service、typed Repository 与 Drizzle。
 - 本节后续扫描数字与 pending 描述是各 Registry 实施时点的历史回执。它们不覆盖上述现行源码裁决，也不能替代尚未执行的正常库切换和真实业务验收。
+
+## 2026-09-17 门禁源码清单修正
+
+### Optimized Prompt:
+
+You are the Dream production database-closure gate maintainer. Correct the deterministic source inventory after a machine restart without deleting or changing user runtime data. Work only in `/Users/dmeck/project/ink-dream-memory`; preserve concurrent user and Agent changes. Use the Git index plus untracked files that are not excluded by repository ignore rules as the candidate source graph. Continue to scan every candidate backend production Python file and Next server source for database drivers, database abstractions, SQL literals, database credentials, pool lifecycle and retired repository paths. Exclude tests and generated build/cache paths according to the existing contract. Treat `backend/data/` as ignored runtime workspace content rather than repository source. Treat a retired directory containing only ignored bytecode cache as retired, while any tracked or non-ignored file added below that path must fail the gate.
+
+Do not weaken the DTO/ORM architecture rule: Dream production code may call only typed Admin clients; Admin Pydantic/Zod DTO validation, domain Service, typed Repository, Drizzle and Unit of Work remain the persistence path. Do not modify Runtime, Runner, ThreadFactory, EventBus, SSE, turn/resume/cancel, resource-policy LKG/admission/lease, shared filesystem behavior or `CLAUDE_CODE_TMPDIR`. Update the test file header, test folder contract and this stage receipt. Validate with the focused pytest module, Python compilation, Markdown local-link inventory and `git diff --check`. Report the original false-positive categories, exact working directory, commands, exit codes and key counts. A passing static gate is production-source closure evidence; it does not replace normal-service runtime socket/process evidence or real business acceptance.
+
+USER REQUIREMENT:
+继续跨项目认证与数据库接口重构；后续工作只在 Dream 与 Admin 主目录进行，数据库接口遵从 DTO/ORM，不能把忽略的运行时工作区或旧字节码缓存误判为 Dream 生产数据库访问。
+
+### 执行范围与不变量
+
+| 项目 | 责任与依赖 | 修改范围 | 保持不变 | 失败处理 |
+| --- | --- | --- | --- | --- |
+| Dream | Root 维护生产数据库关闭门禁；依赖现有 Admin DTO/ORM 合同已经生效 | `backend/tests/test_postgres_runtime_sql_boundaries.py`、测试目录合同和本阶段回执 | 公开 API、数据库接口、配置、Runtime、SSE、资源策略和共享文件系统 | Git 源码清单不可取得、生产源码出现数据库访问或退休路径重新出现时门禁失败 |
+| Admin | 本轮不改代码；继续作为数据库访问和事务所有者 | 无 | Zod DTO → Service → typed Repository → Drizzle/UOW | Dream 不得以 Admin 不可用或门禁异常为由回退 PostgreSQL |
+
+正常流程是 Git 返回已跟踪与未忽略候选文件，门禁按生产路径和扩展名筛选后执行 AST/文本断言。忽略的运行时文件与缓存不参与结果；新增且可提交的生产文件立即参与。不存在状态迁移、接口、数据库或配置变化。本轮验收命令为 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_postgres_runtime_sql_boundaries.py`、`python -m py_compile`、Markdown 链接检查与 `git diff --check`。风险是过窄清单漏掉新增源码，因此清单同时包含未跟踪但未忽略的文件，并以 `backend/server.py` 存在、`backend/data/` 和 `__pycache__` 不存在的回归断言锁定边界。
+
+### 执行回执
+
+- 修正前在 `backend/` 运行聚焦 pytest，结果为 `3 failed, 3 passed`：磁盘递归把忽略的 `backend/data/agent-workspace/` 中第三方 Skill 源码计为 1,207 个数据库 import 和 10,981 个 SQL literal，并把仅含忽略字节码的 `backend/persistence/`、`backend/schema/` 判作生产目录。这是测试清单错误，不是 Dream 运行路径重新连接数据库。
+- 修正后在相同目录运行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_postgres_runtime_sql_boundaries.py`，exit `0`，`7 passed in 2.23s`。
+- 在 Dream 根临时创建未忽略的 `backend/persistence/codex_database_closure_probe.py` 后只运行退休路径断言，pytest 按预期 exit `1` 并报告 `backend/persistence`；验证包装器清理探针后 exit `0`。该回执证明未提交候选源码仍会 fail closed，没有留下探针文件。
+- `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m py_compile tests/test_postgres_runtime_sql_boundaries.py` 在 `backend/` exit `0`；两份受影响 Markdown 的本地链接检查为 `local_links=4 missing=0`；Dream 根 `git diff --check` exit `0`。
+- 本地 `.venv/bin/ruff` 不存在，随后 `python -m ruff` 也确认模块未安装，分别 exit `127`/`1`；`pyproject.toml` 未声明 Ruff。本轮不把 Ruff 记为通过项，也没有为单文件测试修正改变依赖合同。
 
 ## Optimized Prompt:
 

@@ -1,14 +1,17 @@
 # [Input] Dream backend and Next server source graphs after Admin data-service migration.
 # [Output] Reject database clients, bootstrap, SQL/table access and retired repositories.
 # [Pos] Static production database-closure regression suite.
-# [Sync] 2026-09-16: scan all backend production Python for database imports and SQL.
+# [Sync] 2026-09-17: audit tracked and non-ignored candidate source without runtime workspace/cache false positives.
 
 """Prove Dream production modules can reach persistence only through Admin DTO clients."""
 
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -92,12 +95,43 @@ _FORBIDDEN_STORY_STORAGE_MARKERS = (
 )
 
 
+@lru_cache(maxsize=1)
+def _repository_candidate_files() -> tuple[Path, ...]:
+    """Return tracked files plus untracked files that Git would allow into a commit."""
+
+    completed = subprocess.run(
+        (
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ),
+        cwd=_REPOSITORY_ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    return tuple(
+        sorted(
+            candidate
+            for raw_path in completed.stdout.split(b"\0")
+            if raw_path
+            and (candidate := _REPOSITORY_ROOT / os.fsdecode(raw_path)).is_file()
+        )
+    )
+
+
 def _runtime_python_files() -> tuple[Path, ...]:
     return tuple(
         sorted(
             path
-            for path in _BACKEND_ROOT.rglob("*.py")
-            if not _NON_PRODUCTION_PARTS.intersection(path.relative_to(_BACKEND_ROOT).parts)
+            for path in _repository_candidate_files()
+            if path.suffix == ".py"
+            and path.is_relative_to(_BACKEND_ROOT)
+            and not _NON_PRODUCTION_PARTS.intersection(
+                path.relative_to(_BACKEND_ROOT).parts
+            )
         )
     )
 
@@ -107,8 +141,8 @@ def _frontend_runtime_files() -> tuple[Path, ...]:
     for root in _FRONTEND_ROOTS:
         files.extend(
             path
-            for path in root.rglob("*")
-            if path.is_file()
+            for path in _repository_candidate_files()
+            if path.is_relative_to(root)
             and path.suffix in _FRONTEND_SUFFIXES
             and not _FRONTEND_NON_PRODUCTION_PARTS.intersection(path.relative_to(root).parts)
             and ".test." not in path.name
@@ -164,6 +198,16 @@ def test_runtime_module_graph_has_no_database_driver_or_database_import() -> Non
     assert failures == []
 
 
+def test_source_inventory_excludes_ignored_runtime_and_cache_artifacts() -> None:
+    relative_paths = tuple(
+        path.relative_to(_REPOSITORY_ROOT).as_posix()
+        for path in _repository_candidate_files()
+    )
+    assert "backend/server.py" in relative_paths
+    assert not any(path.startswith("backend/data/") for path in relative_paths)
+    assert not any("/__pycache__/" in f"/{path}" for path in relative_paths)
+
+
 def test_runtime_module_graph_has_no_sql_statements() -> None:
     failures = [
         failure
@@ -210,8 +254,13 @@ def test_story_workspace_runtime_has_no_sql_or_table_access() -> None:
 
 
 def test_replaced_local_database_services_are_retired() -> None:
+    candidate_paths = tuple(
+        path.relative_to(_REPOSITORY_ROOT).as_posix()
+        for path in _repository_candidate_files()
+    )
     assert [
         relative
         for relative in _RETIRED_DATABASE_PATHS
-        if (_REPOSITORY_ROOT / relative).exists()
+        if relative in candidate_paths
+        or any(path.startswith(f"{relative}/") for path in candidate_paths)
     ] == []
