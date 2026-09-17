@@ -1,6 +1,7 @@
 // [Input] Real BFF boundary functions with explicit test-owned origin/secret/clock.
 // [Output] Deterministic cookie/PKCE/callback/return/origin/CSRF validation without services or browser.
 // [Pos] Provider-free Node contracts for Next BFF login security.
+// [Sync] 2026-09-17: cover explicit loopback proxy origin recovery without trusting arbitrary internal URLs.
 // [Sync] 2026-09-16: cover exact public Host recovery from Next's normalized internal request URL.
 // [Sync] 2026-09-14: verify the production helper; no alternative OAuth/session implementation.
 
@@ -70,6 +71,24 @@ test('exact public Host preserves login and callback when Next normalizes the in
   assert.throws(() => bff.readTransaction(new Request(normalized.url, {
     headers: { cookie, host: 'attacker.example' },
   })), BffBoundaryError);
+});
+
+test('configured loopback proxy origin preserves login and callback when AutoDL rewrites URL and Host', () => {
+  const bff = new BffLoginBoundary({
+    publicOrigin: 'https://dream.example', internalOrigin: 'http://127.0.0.1:6006',
+    callbackUri: 'https://dream.example/auth/callback', cookieSecret,
+  });
+  const tx = bff.createTransaction('/story');
+  const cookie = cookieHeader(bff.transactionCookie(tx));
+  const params = new URLSearchParams({ code: 'private-code', state: tx.state, iss: 'https://admin.example/api/auth' });
+  const normalized = new Request('http://127.0.0.1:6006/auth/callback?' + params, { headers: { cookie, host: '127.0.0.1:6006' } });
+  assert.deepEqual(bff.readTransaction(normalized), tx);
+  assert.deepEqual(bff.validateCallback(normalized, 'https://admin.example/api/auth'), tx);
+  assert.throws(() => bff.readTransaction(new Request('http://127.0.0.1:7000/auth/callback', { headers: { cookie } })), BffBoundaryError);
+  assert.throws(() => new BffLoginBoundary({
+    publicOrigin: 'https://dream.example', internalOrigin: 'https://proxy.example',
+    callbackUri: 'https://dream.example/auth/callback', cookieSecret,
+  }), BffBoundaryError);
 });
 
 test('return locations preserve ordinary pages and reject open redirect and nested encoding', () => {

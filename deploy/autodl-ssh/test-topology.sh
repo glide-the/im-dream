@@ -119,6 +119,7 @@ grep -Fx "INK_ADMIN_AUTH_ISSUER=https://admin.example.test/api/auth" "${OUTPUT_E
 grep -Fx "INK_DREAM_API_RESOURCE=https://dream.example.test/api" "${OUTPUT_ENV}"
 grep -Fx "INK_ADMIN_DREAM_SERVICE_CLIENT_ID=ink-dream-service" "${OUTPUT_ENV}"
 grep -Fx "INK_DREAM_PUBLIC_ORIGIN=https://dream.example.test" "${OUTPUT_ENV}"
+grep -Fx "INK_DREAM_BFF_INTERNAL_ORIGIN=http://127.0.0.1:6006" "${OUTPUT_ENV}"
 grep -Fx "INK_DREAM_BFF_REDIRECT_URI=https://dream.example.test/auth/callback" "${OUTPUT_ENV}"
 grep -Fx "INK_MCP_APPS_NODE_SERVICE_TOKEN=test-node-service-token" "${OUTPUT_ENV}"
 grep -Fx "INK_MCP_APPS_PHASE1_PREVIEW=true" "${OUTPUT_ENV}"
