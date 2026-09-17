@@ -7,6 +7,7 @@
 #                    deployment-owned disabled Claude Bash sandbox capability.
 # [Sync] 2026-09-06: require the Next.js/pnpm standalone release, Node MCP
 #                    Apps projection, and removal of Vite/npm/dist assumptions.
+# [Sync] 2026-09-17: assert verification propagates failures and validates the complete artifact store without user identity.
 # [Sync] 2026-09-17: assert release validation expects the npm package-root cli.js entrypoint.
 # [Sync] 2026-09-17: assert the sandbox route follows the deployment-injected Dream origin.
 # [Sync] 2026-09-16: assert exact Admin issuer/resource/BFF projection and no PostgreSQL credential.
@@ -49,6 +50,12 @@ if grep -Eq 'frontend/(package-lock\.json|vite\.config\.ts|dist/index\.html)|npm
 fi
 grep -Fq 'verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq "candidate.name == 'cli.js' and candidate.parent.name == 'ink-claude-code-dream'" "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'verify_plugin_artifacts || return' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'verify_builtin_skills || return' "${SCRIPT_DIR}/deploy.sh"
+if grep -Fq 'resolve_default_deck_plugin_ref()' "${SCRIPT_DIR}/deploy.sh"; then
+  printf 'deployment verifier retained a user-scoped default-plugin call without an installation DTO\n' >&2
+  exit 1
+fi
 grep -Fq 'returned SPA HTML instead of the backend crawler file' "${SCRIPT_DIR}/deploy.sh"
 if grep -F 'screen -dmS "${DREAM_SCREEN}"' -A2 "${SCRIPT_DIR}/runtime/start-ink-memory.sh" | grep -q 'setpriv'; then
   printf 'standalone Dream launcher still drops to a separate service user\n' >&2
