@@ -86,7 +86,7 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 
 server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin，不相信任意forwarded header。BFF mutation校验origin/CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
-当前本机浏览器主路径固定为 Dream `http://localhost:5173`、Admin issuer `http://localhost:3000/api/auth`、Google callback `http://localhost:3000/api/auth/callback/google`、Dream callback `http://localhost:5173/auth/callback` 和 resource `http://localhost:5173/api`。内部 FastAPI 继续使用明确的私有地址；`127.0.0.1` 不参与浏览器 OAuth issuer、redirect、Cookie 或 CSRF origin 比较。部署环境按同一规则提供各自 HTTPS 精确值，gitignored 用户环境不进 commit。
+当前本机浏览器主路径固定为 Dream `http://localhost:5173`、Admin issuer `http://localhost:3000/api/auth`、Google callback `http://localhost:3000/api/auth/callback/google`、Dream callback `http://localhost:5173/auth/callback` 和 resource `http://localhost:5173/api`。内部 FastAPI 继续使用明确的私有地址；`127.0.0.1` 不参与浏览器 OAuth issuer、redirect、Cookie 或 CSRF origin 比较。AutoDL 从当前实例环境把 6006/6008 的 HTTPS 映射分别注入 `AUTODL_DREAM_PUBLIC_ORIGIN` 与 `AUTODL_ADMIN_PUBLIC_ORIGIN`，由生成器派生 callback、issuer、resource、CORS 和 CSRF origin；仓库不固定某个产品域名，实例映射变化后必须重新投影 Admin 与 Dream 的 gitignored 配置。
 
 当前speech recognition按现行业务设计关闭，Python `/ws/speech-recognition` 返回1008。保留显式WS选址，但本迁移不启用语音、不新增WS授权scope或upgrade通道。未来恢复语音能力须另按实际业务/API合同校验origin与用户身份，不能用旧query token或opaque handle冒充OAuth token。
 

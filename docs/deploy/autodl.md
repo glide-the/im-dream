@@ -4,6 +4,7 @@
 [Output] Current Next.js/FastAPI/MCP Apps release, verification, and rollback contract.
 [Pos] AutoDL Dream production runbook.
 [Sync] 2026-09-06: migrate the direct-host release from Vite/npm/dist to standalone Next.js and frozen pnpm.
+[Sync] 2026-09-17: derive the opaque MCP Apps sandbox route from the injected Dream mapping; no third public origin is required.
 [Sync] 2026-09-11: add safe discovery of the AutoDL-injected public mappings (AutoDLService6006URL/AutoDLService6008URL) and how they fill platform.env origins.
 -->
 
@@ -25,9 +26,10 @@ flowchart LR
 Dream 页面构建，server-only Node Runtime 位于
 `frontend/packages/mcp-apps-runtime/**` 并由 Next Route Handler 执行。
 
-MCP Apps sandbox 必须使用与主 Dream 不同的 HTTPS origin，但仍路由到
-6006；主 origin 作为允许的 parent origin。Dream 只消费 Admin 已发布的
-PostgreSQL capability，不执行 migration、DDL、restore 或 SQLite fallback。
+MCP Apps sandbox URL 使用 Dream 同一 HTTPS origin 下的 `/mcp-apps-sandbox`；外层
+iframe 不授予 `allow-same-origin`，因此浏览器中的有效 document/postMessage origin
+仍为 opaque `null`，无需第三个公网映射。Dream 只消费 Admin 已发布的 PostgreSQL
+capability，不执行 migration、DDL、restore 或 SQLite fallback。
 
 ## 配置
 
@@ -45,8 +47,8 @@ printf 'Dream: %s\nAdmin: %s\n' "${AutoDLService6006URL}" "${AutoDLService6008UR
 实例后地址会重新生成，需重新发现并重新投影 runtime env。
 
 从 `deploy/autodl-ssh/platform.env.example` 创建 gitignored
-`platform.env`，设置 SSH、Dream/Admin HTTPS origin、独立 sandbox origin
-和本机 MCP Apps env 文件。然后生成 mode-0600 runtime env：
+`platform.env`，设置 SSH、Dream/Admin HTTPS origin 和本机 MCP Apps env 文件。
+sandbox route 自动从 Dream origin 派生。然后生成 mode-0600 runtime env：
 
 ```bash
 ./deploy/autodl-ssh/prepare-env.sh

@@ -7,6 +7,7 @@
 #                    deployment-owned disabled Claude Bash sandbox capability.
 # [Sync] 2026-09-06: require the Next.js/pnpm standalone release, Node MCP
 #                    Apps projection, and removal of Vite/npm/dist assumptions.
+# [Sync] 2026-09-17: assert the sandbox route follows the deployment-injected Dream origin.
 # [Sync] 2026-09-16: assert exact Admin issuer/resource/BFF projection and no PostgreSQL credential.
 # [Sync] 2026-09-16: prove retired Dream auth/session secrets never enter the projected runtime.
 # [Sync] 2026-09-16: prove the retired Product HS256 signer never enters the projected runtime.
@@ -95,7 +96,6 @@ AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin.example.test \
 AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID=ink-dream-service \
 AUTODL_DREAM_ADMIN_SERVICE_SECRET=dream-service-secret-at-least-thirty-two-bytes \
 AUTODL_DREAM_BFF_COOKIE_SECRET=dream-cookie-secret-at-least-thirty-two-bytes \
-AUTODL_MCP_APPS_SANDBOX_ORIGIN=https://sandbox.example.test \
   "${SCRIPT_DIR}/prepare-env.sh"
 
 grep -Fx "AGENT_CWD=${PROJECTED_DATA_ROOT}/agent-workspaces" "${OUTPUT_ENV}"
@@ -113,7 +113,7 @@ grep -Fx "INK_DREAM_PUBLIC_ORIGIN=https://dream.example.test" "${OUTPUT_ENV}"
 grep -Fx "INK_DREAM_BFF_REDIRECT_URI=https://dream.example.test/auth/callback" "${OUTPUT_ENV}"
 grep -Fx "INK_MCP_APPS_NODE_SERVICE_TOKEN=test-node-service-token" "${OUTPUT_ENV}"
 grep -Fx "INK_MCP_APPS_PHASE1_PREVIEW=true" "${OUTPUT_ENV}"
-grep -Fx "INK_MCP_APPS_SANDBOX_URL=https://sandbox.example.test/mcp-apps-sandbox" "${OUTPUT_ENV}"
+grep -Fx "INK_MCP_APPS_SANDBOX_URL=https://dream.example.test/mcp-apps-sandbox" "${OUTPUT_ENV}"
 grep -Fx "INK_MCP_APPS_PARENT_ORIGINS=https://dream.example.test" "${OUTPUT_ENV}"
 if grep -Eq '^(DATABASE_URL|INK_LOAD_DATABASE_URL_FROM_ENV_FILE|INK_DATABASE_ENV_FILE)=' "${OUTPUT_ENV}"; then
   printf 'Dream runtime retained a PostgreSQL configuration key\n' >&2
@@ -128,7 +128,6 @@ if AUTODL_DREAM_SOURCE_ENV_FILE="${SOURCE_ENV}" AUTODL_MCP_APPS_ENV_FILE="${MCP_
   AUTODL_DREAM_PUBLIC_ORIGIN=https://dream.example.test AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin.example.test \
   AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID=ink-dream-service AUTODL_DREAM_ADMIN_SERVICE_SECRET=short \
   AUTODL_DREAM_BFF_COOKIE_SECRET=dream-cookie-secret-at-least-thirty-two-bytes \
-  AUTODL_MCP_APPS_SANDBOX_ORIGIN=https://sandbox.example.test \
   "${SCRIPT_DIR}/prepare-env.sh" >/dev/null 2>&1; then
   printf 'short Admin service secret was accepted\n' >&2
   exit 1
