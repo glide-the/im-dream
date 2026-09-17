@@ -71,6 +71,6 @@ FastAPI/Next/同源 API、`robots.txt`、`sitemap.xml`、`llms.txt`、内置
 Skills、默认 Deck Plugin、Admin 依赖和公网 origin。全部通过后才推进
 `qualified`。
 
-运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。
+运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。常规 `deploy` 不直接覆盖 `current`：它先生成不可变 `candidate`，在 `16006`/`18765` 运行完整 Next/FastAPI 隔离冒烟，通过后才停止旧 Dream 并原子切换。若启动或公开验证失败，本轮仍可恢复旧应用；验证成功后立即删除旧 release、`previous` 与 `candidate`，不保留长期回滚版本。共享 workspace、Artifact、Plugin Runtime 与 Admin/PostgreSQL 数据不参与 release 清理。
 启动/停止仅处理具名 Dream screen/PID；未知端口占用会 fail closed。回滚只
 切换 Dream release，不回滚 Admin migration、PostgreSQL 数据或 workspace。

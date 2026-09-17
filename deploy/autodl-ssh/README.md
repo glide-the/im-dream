@@ -1,5 +1,5 @@
 <!-- [Input] AutoDL direct-host scripts, current Next.js/pnpm source, and deployment safety contracts. -->
-<!-- [Output] Current release, runtime, safety, verification, and rollback procedure. -->
+<!-- [Output] Current release, runtime, safety, candidate-smoke, atomic-switch, and verification procedure. -->
 <!-- [Pos] AutoDL Dream operator guide for the canonical Next.js/FastAPI topology. -->
 <!-- [Sync] 2026-09-06: migrate AutoDL to Next.js standalone, frozen pnpm, and the Node MCP Apps runtime. -->
 <!-- [Sync] 2026-09-11: restore public-origin discovery through the AutoDL-injected AutoDLService6006URL/AutoDLService6008URL mappings. -->
@@ -72,7 +72,10 @@ public health gates pass.
   rejects the required namespace operations. Approved Bash therefore runs as
   the Dream root service account without bubblewrap filesystem/network
   isolation; the launcher fails if this deployment-owned value changes.
-- Start, stop, and rollback affect only the named Dream process, screen session,
+- Start and stop affect only the named Dream process and screen session. A deploy
+  builds an immutable candidate, verifies it on `16006`/`18765`, switches
+  `current`, then removes every old release after public verification succeeds;
+  no long-lived rollback release is retained.
   and versioned release links.
 - Acceptance checks the standalone server, Node MCP Apps route manifest,
   FastAPI and same-origin health, crawler media/body (including `/llms.txt`),
@@ -82,12 +85,14 @@ public health gates pass.
 
 | File | Current meaning |
 |---|---|
-| `deploy.sh` | Versioned pnpm/Next/FastAPI release, verification, qualification, and rollback |
+| `deploy.sh` | Versioned pnpm/Next/FastAPI candidate build, isolated smoke, atomic activation, verification, and old-release pruning |
 | `prepare-env.sh` | Backend/Admin API, public-origin, sandbox, and MCP Apps runtime projection with database keys removed |
 | `runtime/start-dream.sh` | Next.js and FastAPI supervisor |
 | `runtime/start-ink-memory.sh` | Admin-first idempotent restarter for already-published releases |
 | `runtime/init-dream-data.sh` | Persistent-directory ownership and symlink safety |
 | `test-topology.sh` | Provider-free current topology and env projection test |
 
-Use `status`, `logs`, and `verify` for diagnosis. `rollback` switches only the
+Use `status`, `logs`, and `verify` for diagnosis. `rollback` is available only
+during a failed activation before the successful deploy prunes the temporary
+previous release; it switches only the
 Dream release links and never reverses Admin migrations or user data.

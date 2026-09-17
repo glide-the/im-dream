@@ -32,6 +32,10 @@ grep -Fq '/api/mcp-apps/[serverRef]' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'frontend/server.js' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'frontend/server.js' "${SCRIPT_DIR}/runtime/start-ink-memory.sh"
 grep -Fq 'next_server = str(release_root / "frontend/server.js")' "${SCRIPT_DIR}/runtime/start-dream.sh"
+grep -Fq 'smoke_candidate' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'AUTODL_DREAM_SMOKE_FRONTEND_PORT' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'activate_candidate' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'prune_old_releases' "${SCRIPT_DIR}/deploy.sh"
 if grep -Eq 'frontend/(package-lock\.json|vite\.config\.ts|dist/index\.html)|npm ci|vite preview|VITE_ALLOWED_HOSTS|VITE_DEV_API_PROXY_TARGET' "${SCRIPT_DIR}/deploy.sh" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh"; then
   printf 'retired Vite/npm/dist deployment assumption remains\n' >&2
   exit 1
