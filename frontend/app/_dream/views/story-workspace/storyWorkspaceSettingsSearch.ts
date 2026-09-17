@@ -1,7 +1,7 @@
 // [Input] Searchable settings navigation items and the user's free-text query.
 // [Output] Stable, token-aware navigation matches derived from labels, routes, section keys and aliases.
 // [Pos] Pure search policy for the Story Workspace Settings sidebar; routing remains owned by the page.
-// [Sync] 2026-09-16: index nested Work routes and connector aliases instead of matching top-level labels only.
+// [Sync] 2026-09-17: index Deck Workflow and Claude Code plugin concepts under the shared Plugins route.
 export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
   settings: [
     'settings', 'settings-general', '/story-workspace/settings',
@@ -21,9 +21,10 @@ export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
     '/story-workspace/settings/work?tab=resources', '资源 连接器',
   ],
   'settings-plugins': [
-    'settings-plugins', 'plugins', 'plugin', 'marketplace',
+    'settings-plugins', 'plugins', 'plugin', 'marketplace', 'deck workflow',
+    'deck plugin', 'claude code plugin', 'runtime plugin',
     '/story-workspace/settings/plugins', '/story-workspace/settings/work?tab=plugins',
-    '插件 市场',
+    '插件 市场 工作流 运行时',
   ],
   'settings-model': [
     'settings-model', 'model', 'ai', '/story-workspace/settings/model',

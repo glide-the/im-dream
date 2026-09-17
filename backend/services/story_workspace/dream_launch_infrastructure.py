@@ -1,7 +1,7 @@
 # [Input] Authenticated Admin actor/client, launch command and request-scoped Runtime port.
 # [Output] Admin-owned source/Preflight/Run/dispatch persistence plus Dream-owned Agent turn execution.
 # [Pos] Dream launch composition; contains no PostgreSQL client, SQL, ORM, DDL or database fallback.
-# [Sync] 2026-09-16: replace every production launch persistence path with strict Admin DTO operations.
+# [Sync] 2026-09-17: resolve model eligibility and inject the complete OAuth-bound Admin owner into the launch turn.
 """Production Dream launch orchestration over Admin business operations."""
 
 from __future__ import annotations
@@ -44,7 +44,8 @@ try:
         RunFailInputDTO,
         RunLookupInputDTO,
     )
-    from services.admin_gateway import GatewayInferenceError, resolve_platform_model_alias
+    from services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
+    from services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient, resolve_platform_model_alias
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         story_workspace_canonical_project_fallback_slug,
@@ -85,7 +86,8 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         RunFailInputDTO,
         RunLookupInputDTO,
     )
-    from backend.services.admin_gateway import GatewayInferenceError, resolve_platform_model_alias
+    from backend.services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
+    from backend.services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient, resolve_platform_model_alias
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         story_workspace_canonical_project_fallback_slug,
@@ -244,9 +246,22 @@ class DreamAgentTurnDispatcher:
         if request_factory is None:
             from claude_agent.service import ClaudeAgentRunRequest
             request_factory = ClaudeAgentRunRequest
+        owner = values.get("turn_owner")
+        owner_fields: dict[str, Any] = {}
+        if owner is not None:
+            owner.context_for(
+                workflow_run_id=values["context"].workflow_run_id,
+            )
+            owner_fields = {
+                "model": owner.model_alias,
+                "admin_workflow_resolution": owner.workflow,
+                "admin_turn_persistence": owner.persistence,
+                "admin_gateway_runtime": owner.gateway,
+                "admin_deck_chat_context": owner.deck,
+            }
         return request_factory(user_id=values["actor_id"], thread_id=values["thread_id"], resume=False,
             message_id=values["message_id"], message_parts=values["parts"], message_metadata=values["metadata"],
-            system_prompt=values.get("system_prompt"))
+            system_prompt=values.get("system_prompt"), **owner_fields)
 
     def _selected_factory(self) -> Any:
         if self._factory is not None:
@@ -285,7 +300,7 @@ class AdminDreamLaunchWorkflowOperations:
     """Use strict Admin DTOs for replay, Preflight and Run persistence."""
 
     def __init__(self, client: AdminDataClient, *, actor: AdminRequestActor, runtime_port: DreamLaunchRuntimePort,
-        platform_model_resolver: Callable[[int | str, str | None], str] = resolve_platform_model_alias) -> None:
+        platform_model_resolver: Callable[[int | str, str | None], str] | None = None) -> None:
         if not {"dream:read", "dream:write"} <= actor.scopes:
             raise AdminDataError("DREAM_SCOPE_REQUIRED", 403)
         self._actor = actor
@@ -293,6 +308,7 @@ class AdminDreamLaunchWorkflowOperations:
         self._launch = AdminLaunchMetadataData(client, canonical_user_id=actor.canonical_user_id)
         self._preflight = AdminPreflightData(client, canonical_user_id=actor.canonical_user_id)
         self._runs = AdminRunData(client, canonical_user_id=actor.canonical_user_id)
+        self._system_config = AdminSystemConfigData(client)
         self._platform_model_resolver = platform_model_resolver
         self._replay: Any | None = None
         self._scope: tuple[str, str] | None = None
@@ -308,7 +324,22 @@ class AdminDreamLaunchWorkflowOperations:
             self._replay = result.replay
             self._scope = (actor_id, workspace_id)
             if self._replay is None:
-                await asyncio.to_thread(self._platform_model_resolver, actor_id, None)
+                if self._platform_model_resolver is None:
+                    await asyncio.to_thread(
+                        resolve_platform_model_alias,
+                        actor_id,
+                        None,
+                        catalog_client_factory=lambda _actor_id: GatewayModelCatalogClient(
+                            access_token=self._actor.access_token,
+                        ),
+                        system_config_reader=lambda _actor_id: self._system_config.get_user(
+                            SystemConfigGetInputDTO(),
+                            str(uuid4()),
+                            access_token=self._actor.access_token,
+                        ),
+                    )
+                else:
+                    await asyncio.to_thread(self._platform_model_resolver, actor_id, None)
                 existing = None
             else:
                 existing = {"id": self._replay.workflow_run_id, "source_voice_thread_id": self._replay.thread_id}
@@ -401,13 +432,15 @@ class DreamLaunchEnvelopeDispatcher:
     """Claim/finish launch metadata in Admin and schedule the Dream-owned turn."""
 
     def __init__(self, client: AdminDataClient, *, actor: AdminRequestActor, workspace_id: str,
-        turn_dispatcher: Callable[..., Any], before_claim: Callable[[], Any] | None = None) -> None:
+        turn_dispatcher: Callable[..., Any], before_claim: Callable[[], Any] | None = None,
+        turn_owner_factory: Callable[..., Any] | None = None) -> None:
         self._actor = actor
         self._workspace_id = workspace_id
         self._launch = AdminLaunchMetadataData(client, canonical_user_id=actor.canonical_user_id)
         self._decks = AdminDeckDetailData(client)
         self._turn_dispatcher = turn_dispatcher
         self._before_claim = before_claim
+        self._turn_owner_factory = turn_owner_factory
 
     async def __call__(self, *, actor_id: str, goal: str, source: DreamLaunchSource,
         context: StoryWorkspaceDreamRunContext) -> bool:
@@ -426,17 +459,29 @@ class DreamLaunchEnvelopeDispatcher:
             claim = result.root
             if not claim.claimed:
                 return False
-            system_prompt = await self._system_prompt(context)
-            parts = json.loads(claim.parts_json)
-            metadata = _decode_json_object(claim.metadata_json)
+            turn_owner = None
             try:
+                system_prompt = await self._system_prompt(context)
+                if self._turn_owner_factory is not None:
+                    turn_owner = self._turn_owner_factory(
+                        thread_id=source.thread_id,
+                        workflow_run_id=context.workflow_run_id,
+                    )
+                    if inspect.isawaitable(turn_owner):
+                        turn_owner = await turn_owner
+                parts = json.loads(claim.parts_json)
+                metadata = _decode_json_object(claim.metadata_json)
                 accepted = self._turn_dispatcher(actor_id=actor_id, thread_id=source.thread_id,
                     message_id=source.message_id, parts=parts, metadata=metadata, context=context,
-                    system_prompt=system_prompt, resume=False)
+                    system_prompt=system_prompt, resume=False, turn_owner=turn_owner)
             except Exception:
+                if turn_owner is not None:
+                    await asyncio.to_thread(turn_owner.close)
                 await self._finish(context, source, claim.claim_id, False)
                 raise
             if accepted is False:
+                if turn_owner is not None:
+                    await asyncio.to_thread(turn_owner.close)
                 await self._finish(context, source, claim.claim_id, False)
                 return False
             return await self._finish(context, source, claim.claim_id, True)
@@ -470,7 +515,8 @@ class DreamLaunchEnvelopeDispatcher:
 def build_dream_launch_application_service(client: AdminDataClient, *, actor: AdminRequestActor,
     workspace_id: str, runtime_port: DreamLaunchRuntimePort, turn_dispatcher: Callable[..., Any] | None = None,
     launch_task_registry: DreamLaunchTaskRegistry | None = None, dispatch_before_claim: Callable[[], Any] | None = None,
-    platform_model_resolver: Callable[[int | str, str | None], str] = resolve_platform_model_alias) -> DreamLaunchApplicationService:
+    platform_model_resolver: Callable[[int | str, str | None], str] | None = None,
+    turn_owner_factory: Callable[..., Any] | None = None) -> DreamLaunchApplicationService:
     """Compose one request-scoped launch without a Dream database credential."""
     failure_recorder = DreamLaunchFailureRecorder(client, actor=actor, workspace_id=workspace_id)
     selected_turn_dispatcher = turn_dispatcher or build_dream_agent_turn_dispatcher(
@@ -480,7 +526,8 @@ def build_dream_launch_application_service(client: AdminDataClient, *, actor: Ad
         workflow=AdminDreamLaunchWorkflowOperations(client, actor=actor, runtime_port=runtime_port,
             platform_model_resolver=platform_model_resolver),
         dispatcher=DreamLaunchEnvelopeDispatcher(client, actor=actor, workspace_id=workspace_id,
-            turn_dispatcher=selected_turn_dispatcher, before_claim=dispatch_before_claim),
+            turn_dispatcher=selected_turn_dispatcher, before_claim=dispatch_before_claim,
+            turn_owner_factory=turn_owner_factory),
     )
 
 

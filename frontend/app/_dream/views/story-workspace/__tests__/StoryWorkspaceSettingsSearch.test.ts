@@ -1,7 +1,7 @@
 // [Input] Settings navigation labels, section IDs, paths and nested connector aliases.
 // [Output] Deterministic evidence that sidebar search resolves every indexed route, including MCP resources.
 // [Pos] Pure Settings navigation search regression; no browser, API or persisted configuration.
-// [Sync] 2026-09-16: cover normalized multi-token matching and nested Work destinations.
+// [Sync] 2026-09-17: cover both Deck Workflow and Claude Code plugin aliases on the shared Plugins route.
 import { expect, test } from '@playwright/test';
 import {
   filterStoryWorkspaceSettingsNavigation,
@@ -23,7 +23,7 @@ const items = [
   {
     id: 'settings-plugins',
     path: '/story-workspace/settings/work?tab=plugins',
-    searchKeys: ['Plugins', 'settings-plugins', 'marketplace'],
+    searchKeys: ['Plugins', 'settings-plugins', 'marketplace', 'Deck Workflow', 'Claude Code Plugin'],
   },
 ];
 
@@ -38,6 +38,13 @@ test('normalizes case and requires every query token', () => {
   expect(filterStoryWorkspaceSettingsNavigation(items, 'claude mcp').map(item => item.id))
     .toEqual(['settings-resources']);
   expect(filterStoryWorkspaceSettingsNavigation(items, 'plugin missing')).toEqual([]);
+});
+
+test('maps both plugin domains to the same Work / Plugins destination', () => {
+  expect(filterStoryWorkspaceSettingsNavigation(items, 'deck workflow').map(item => item.id))
+    .toEqual(['settings-plugins']);
+  expect(filterStoryWorkspaceSettingsNavigation(items, 'claude code plugin').map(item => item.id))
+    .toEqual(['settings-plugins']);
 });
 
 test('returns the complete index for an empty query', () => {

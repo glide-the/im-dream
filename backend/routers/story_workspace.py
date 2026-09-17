@@ -2,6 +2,7 @@
 # [Sync] 2026-09-16: remove the unused legacy Run application factory; public Run routes stay on Admin DTOs.
 # [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
 # [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
+# [Sync] 2026-09-17: pass the same request-owned Admin OAuth authority into launch turn-owner composition.
 # [Sync] 2026-09-16: route confirmation fact/submit through Registry120 with current actor and Run DTOs.
 # [Sync] 2026-09-16: route Story Workspace Artifact authority/index access through Registry185-191 DTOs.
 # [Input] Authenticated users, strict Admin Story Workspace DTO consumers, workflow services, and REST requests.
@@ -185,6 +186,7 @@ class DreamLaunchEndpoint(Protocol):
         *,
         actor: dict[str, str],
         admin_client: Any,
+        admin_request_auth: AdminRequestAuth,
         admin_actor: AdminRequestActor,
         runtime_port: AdminDreamLaunchRuntime,
     ) -> Any: ...
@@ -901,6 +903,7 @@ async def story_workspace_start_dream_run(
             request,
             actor=actor,
             admin_client=owner.client,
+            admin_request_auth=owner,
             admin_actor=admin_actor,
             runtime_port=runtime_port,
         )

@@ -2,6 +2,7 @@
 <!-- [Output] Pre-mutation business scope plus append-only command and acceptance receipts for the 2026-09-16 normal cutover. -->
 <!-- [Pos] Real-business acceptance record; contains no password, OAuth token, service credential, transcript body, or database DSN. -->
 <!-- [Sync] 2026-09-17: record independent Admin browser login after adding the required local Session TTL. -->
+<!-- [Sync] 2026-09-17: define the post-reboot real Dream launch retry boundary and preserve the first failed Run. -->
 <!-- [Sync] 2026-09-17: record read-only normal desired/effective resource-policy and fresh observer/LKG parity. -->
 <!-- [Sync] 2026-09-17: record real Chrome Dream logout, client-local revocation, same-subject SSO re-entry and Admin-login isolation. -->
 <!-- [Sync] 2026-09-17: preserve the Chrome control preflight failure and focused 27-test logout/session technical receipt. -->
@@ -222,3 +223,20 @@ Notion后台同步候选使用Dream confidential OAuth client的`client_credenti
 使用Dream生产`AdminResourceData`和confidential service OAuth从正常Admin公开`resource-policy.read`读取desired，再用owner只读查询核对正常`claude_agent_resource_snapshots`中运行中Dream进程发布的最新Observer DTO。没有直接修改数据库、desired或运行配置，也没有启动Agent turn。命令在Dream工作分支以`PYTHONPATH=backend backend/.venv/bin/python`执行，exit `0`。
 
 公开operation返回`configured` revision 4；desired四项值为并发2、run memory 416 MiB、reserve 128 MiB、retry 60秒，effort为`low`。最新正常Observer心跳年龄约0.23秒，`policy_status=applied`，revision、四项effective和effort全部与desired一致；`required_headroom_bytes=(416+128)×1,048,576`精确成立，effective version为64字符SHA-256。数据库当前保留41个实例快照；最新pipeline包含历史write error计数，但当前心跳新鲜、queue dropped为0，未使LKG回滚或传播到turn。该结果证明正常后台refresh/observer路径正在运行，且Agent turn主路径没有为本检查新增远程查询。
+
+### 2026-09-17 重启后真实 Dream Run 重试边界
+
+电脑重启前，Dream 公开页面已经通过正常产品入口创建验收 Deck `Admin 认证数据接口真实验收 2026-09-17`，绑定已安装且 ready 的 `Dream Story Workflow 1.0.0`，并提交一次普通用户可见的最小请求：“围绕电脑重启后服务恢复生成一句中文 logline”。Admin 已成功执行 launch replay lookup、SystemConfig、Gateway catalog、Runtime prepare、source ensure、Preflight、Run create 和 dispatch claim；真实 Run `run_c359797da85a4a6c935f863c5f48f6c1` 与 Thread `1a85c717-7722-5302-a24f-b03d0491a0ab` 保留。该 Turn 在调用模型前因内部 launch dispatcher 未携带既有 Admin Workflow/Deck/persistence/Gateway owner 而失败，属于 Dream composition 缺陷，不是额度、数据库、Plugin 或用户权限失败。
+
+本次重试仍使用同一正常 Dream、Admin、Gateway、PostgreSQL 和现有 Dream 主体，只从可见 Dream 页面提交普通产品话术，不把内部 ID、路径、Hook 或工具命令写入用户消息。先通过确定性测试证明 launch 在 Admin claim 后复用 Guidance 的 Run-bound owner，并由原 ThreadFactory 负责 start/terminal cleanup；再恢复重启后停止的正常服务并新建一次可复核 Run。旧失败 Run、Thread、Gateway/结算及 Admin 日志不清理。
+
+| 事实/表面 | 当前基线 | 本轮预期 | 分类 | 验收证据 |
+| --- | --- | --- | --- | --- |
+| Deck、Plugin、Voice | 既有验收 Deck；Workflow release ready；`验收编排 Agent` | 原值不变 | 必须保持 | 公开 Deck/binding/Plugin DTO 与页面 |
+| Project/Episode/canonical artifact | 本轮请求只要求一句 logline | 不主动改写 Project、Episode 或既有制品 | 不在范围 | Turn 工具/Hook、文件清单与公开页面 |
+| Run/Thread/message | 上述失败 Run/Thread 已持久化 | 新增一个独立真实 Run/Thread/message，旧记录保留 | 变化 | 页面、Admin Run/Thread/Gateway查询 |
+| Agent Runtime/SSE | 原 ThreadFactory、EventBus 与流式消费 | 使用同一路径进入实际模型；终态与错误可见 | 必须保持 | 可见流式状态、持久化消息、终态 |
+| 数据持久化 | Dream 经 Pydantic DTO 调 Admin；Admin Zod/Service/typed Repository/Drizzle | 无 Dream PostgreSQL fallback | 必须保持 | Admin operation日志、源码边界与进程连接证据 |
+| Shared FS 与 `.claude-tmp` | 现有规范化真实 Thread workspace、`0700`、拒绝 symlink | 本请求无文件写入时保持；若Runtime创建目录仍遵守原协议 | 必须保持 | 路径/mode/symlink只读检查 |
+
+正常路径要求公开 launch 返回 `201`，Admin claim 后 Agent 调用 Gateway，SSE/页面进入可解释终态，Run/Thread/Gateway请求和结算能从日常 Admin 路径查询。Admin、Gateway或额度失败时保留明确业务终态且不重试非幂等写；未知提交通过原 request receipt恢复；任何 owner 准备失败必须关闭已创建客户端并把 dispatch claim恢复为未接受状态。页面若出现具体工具确认，只处理本场景明确需要且可见的操作；本请求不预期 Bash、网络或写文件工具，因此未知确认直接判为业务失败，不要求用户参与。

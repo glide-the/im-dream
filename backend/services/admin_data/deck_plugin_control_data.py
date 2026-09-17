@@ -1,6 +1,7 @@
 # [Input] Registry170-174 capability catalog, current OAuth bearer and closed Deck Plugin commands.
 # [Output] Strict control DTOs plus original-request receipt recovery for Admin-owned persistence.
 # [Pos] Dream wire boundary; Admin owns permissions, Drizzle repositories, locks and transactions.
+# [Sync] 2026-09-17: match Admin's write-authorized plan capability while keeping plan itself read-only.
 # [Sync] 2026-09-16: consume the Admin Deck Plugin control aggregate without SQL or actor selectors.
 """Typed Admin consumer for Deck Plugin lifecycle control operations."""
 
@@ -304,12 +305,22 @@ class DeckPluginControlOperationDTO(ChatStrictDTO):
         return value
 
 
-def _operation(name, kind, input_dto, output_dto, hash_value):
+def _operation(
+    name,
+    kind,
+    input_dto,
+    output_dto,
+    hash_value,
+    *,
+    user_scope: Literal["dream:read", "dream:write"] | None = None,
+):
     return DomainOperation(
         OperationCapabilityDTO(
             name=name,
             kind=kind,
-            user_scope="dream:read" if kind == "read" else "dream:write",
+            user_scope=user_scope or (
+                "dream:read" if kind == "read" else "dream:write"
+            ),
             background_scope=None,
             input_schema_version=1,
             output_schema_version=1,
@@ -347,6 +358,7 @@ PLAN_DECK_PLUGIN_CONTROL = _operation(
     DeckPluginControlCommandDTO,
     DeckPluginControlPlanDTO,
     "2e11a56d2e3efb491762cfc5559bd7a2cf1f2aee527632243424a62ef0e38df8",
+    user_scope="dream:write",
 )
 APPLY_DECK_PLUGIN_CONTROL = _operation(
     "deck-plugin-control.apply",

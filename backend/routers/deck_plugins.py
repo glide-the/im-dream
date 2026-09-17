@@ -1,12 +1,14 @@
 # [Input] Current Admin OAuth/profile role, shared default Workspace and Registry170-174 control adapter.
 # [Output] Original permission-scoped Deck Plugin API projections with Admin-owned persistence.
 # [Pos] Logical Deck control-plane ingress; Dream retains product policy and shared-artifact verification.
+# [Sync] 2026-09-17: log unexpected server exceptions before returning the fixed safe runtime-configuration error.
 # [Sync] 2026-09-16: pass the OAuth actor to Admin DTO operations and remove local persistence authority.
 # [Sync] 2026-09-15: consume shared default Workspace and verified current profile role instead of local queries.
 """Logical Deck control-plane routes; domain services retain authoritative state."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Literal, Protocol
 
@@ -35,6 +37,7 @@ except ModuleNotFoundError:
 
 
 router = APIRouter(prefix="/api/deck-plugins", tags=["deck-plugins"])
+logger = logging.getLogger(__name__)
 
 
 class _StrictRequest(BaseModel):
@@ -201,6 +204,7 @@ async def _call(awaitable: Any) -> Any:
             ),
         )
     except Exception:
+        logger.exception("Unexpected Deck Plugin control-plane failure")
         return JSONResponse(
             status_code=503,
             content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),

@@ -1,6 +1,8 @@
 # [Input] Current Admin OAuth actor, Registry170-174 DTO client and server-published artifact targets.
 # [Output] Existing Deck Plugin route projections after local byte/manifest verification and Admin apply.
 # [Pos] Dream control adapter; it owns filesystem evidence but no SQL, ORM, transaction or policy state.
+# [Sync] 2026-09-17: resolve published builtins from the immutable artifact store by Admin-pinned digest.
+# [Sync] 2026-09-17: record safe Admin error metadata before mapping it to the public Deck error registry.
 # [Sync] 2026-09-16: replace Dream PostgreSQL lifecycle persistence with the Admin DTO service.
 """Application adapter for Admin-owned Deck Plugin lifecycle operations."""
 
@@ -8,12 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 try:
     from services.admin_data.deck_plugin_control_data import (
@@ -28,6 +33,9 @@ try:
     )
     from services.admin_data.errors import AdminDataError
     from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+    from services.claude_plugin import artifact_store
+    from services.claude_plugin.artifact_store import ArtifactStoreError
+    from services.claude_plugin.builtin_sources import PLATFORM_BUILTIN_SOURCES
     from services.claude_plugin.install_service import PluginInstallError, read_manifest
     from services.deck.builtin_plugin import (
         plugin_artifact_digest,
@@ -49,6 +57,11 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.services.admin_data.request_auth import (
         AdminRequestActor,
         AdminRequestAuth,
+    )
+    from backend.services.claude_plugin import artifact_store
+    from backend.services.claude_plugin.artifact_store import ArtifactStoreError
+    from backend.services.claude_plugin.builtin_sources import (
+        PLATFORM_BUILTIN_SOURCES,
     )
     from backend.services.claude_plugin.install_service import (
         PluginInstallError,
@@ -106,7 +119,18 @@ def _registered_claude_plugin_path(plugin_id: str, version: str) -> Path | None:
 def _entry_path(entry: Any) -> Path | None:
     builtin = resolve_builtin_source(entry.source_ref)
     if builtin is not None:
-        return builtin.resolve()
+        declaration = PLATFORM_BUILTIN_SOURCES.get(entry.claude_code_plugin_id)
+        if declaration is None:
+            return None
+        try:
+            artifact = artifact_store.get_artifact(
+                declaration["package_name"],
+                declaration["marketplace"],
+                entry.artifact_digest,
+            )
+        except ArtifactStoreError:
+            return None
+        return artifact.path.resolve()
     return _registered_claude_plugin_path(
         entry.claude_code_plugin_id,
         entry.resolved_version,
@@ -163,6 +187,13 @@ class DeckPluginAdminService:
         try:
             return await run_in_threadpool(function, *args, **kwargs)
         except AdminDataError as error:
+            logger.warning(
+                "Admin Deck Plugin operation failed: code=%s status=%s request_id=%s outcome_unknown=%s",
+                error.code,
+                error.status_code,
+                error.request_id,
+                error.outcome_unknown,
+            )
             raise _route_error(error) from None
 
     @staticmethod
@@ -188,6 +219,13 @@ class DeckPluginAdminService:
                     "DECK_PLUGIN_INTEGRITY_FAILED", status_code=409
                 ) from None
             if digest != entry.artifact_digest:
+                logger.warning(
+                    "Deck Plugin artifact digest mismatch: plugin=%s version=%s expected=%s actual=%s",
+                    entry.claude_code_plugin_id,
+                    entry.resolved_version,
+                    entry.artifact_digest,
+                    digest,
+                )
                 raise ApiRouteError(
                     "DECK_PLUGIN_INTEGRITY_FAILED", status_code=409
                 )

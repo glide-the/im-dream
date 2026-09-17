@@ -1,6 +1,7 @@
 # [Input] Public Deck Plugin routes, current OAuth actor and fake Registry170-174 provider.
 # [Output] Scope/actor propagation, local artifact evidence and public failure-shape coverage.
 # [Pos] Provider-free cross-project integration test; no Dream database or alternate business path.
+# [Sync] 2026-09-17: prove published builtins use the Admin-pinned immutable artifact instead of mutable repository bytes.
 # [Sync] 2026-09-16: replace the legacy SQLite lifecycle fixture with the Admin DTO flow.
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -93,8 +95,16 @@ class FakeControlData:
         )
 
 
-def test_gateway_verifies_server_published_bytes_before_admin_apply():
+def test_gateway_verifies_server_published_bytes_before_admin_apply(monkeypatch):
     data = FakeControlData()
+    artifact_calls = []
+    monkeypatch.setattr(
+        "services.deck.admin_gateway.artifact_store.get_artifact",
+        lambda package_name, marketplace, digest: (
+            artifact_calls.append((package_name, marketplace, digest))
+            or SimpleNamespace(path=builtin_plugin_path())
+        ),
+    )
     request_ids = iter(["plan-request", "unused-request"])
     service = DeckPluginAdminService(
         data,
@@ -126,6 +136,9 @@ def test_gateway_verifies_server_published_bytes_before_admin_apply():
     assert evidence.artifact_digest == plugin_artifact_digest()
     assert evidence.materialized_digest == evidence.artifact_digest
     assert evidence.has_manifest is True
+    assert artifact_calls == [
+        ("ink-dream-story", "platform-builtin", evidence.artifact_digest)
+    ]
 
 
 def test_builtin_plugin_source_has_no_release_persistence_path():

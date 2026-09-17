@@ -35,12 +35,14 @@ from services.story_workspace.dream_launch_application_service import (
     DreamLaunchSource,
 )
 from services.story_workspace.dream_launch_infrastructure import (
+    DreamAgentTurnDispatcher,
     DreamLaunchEnvelopeDispatcher,
     DreamLaunchFailureRecorder,
     DreamLaunchTaskRegistry,
     _decode_json_object,
     build_dream_launch_application_service,
 )
+from services.story_workspace import dream_launch_infrastructure as launch_infrastructure
 from services.story_workspace.dream_launch_runtime import PreparedDreamLaunchBinding
 from story_workspace.contracts import StoryWorkspaceDreamLaunchCommand, StoryWorkspaceDreamRunContext
 
@@ -101,8 +103,8 @@ class ApiGateway:
     def __init__(self) -> None:
         self.calls = []
 
-    async def start_dream_run(self, request, *, actor, admin_client, admin_actor, runtime_port):
-        self.calls.append((request, actor, admin_client, admin_actor, runtime_port))
+    async def start_dream_run(self, request, *, actor, admin_client, admin_request_auth, admin_actor, runtime_port):
+        self.calls.append((request, actor, admin_client, admin_request_auth, admin_actor, runtime_port))
         return context()
 
 
@@ -127,10 +129,11 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
         self.assertEqual(payload["status"], "accepted")
         self.assertEqual(payload["workflowRunId"], RUN_ID)
         self.assertFalse(any("_" in key for key in payload))
-        request, route_actor, admin_client, admin_actor, runtime_port = self.gateway.calls[0]
+        request, route_actor, admin_client, request_auth, admin_actor, runtime_port = self.gateway.calls[0]
         self.assertEqual(request.deck_id, DECK_ID)
         self.assertEqual(route_actor, {"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID})
         self.assertIs(admin_client, self.owner.client)
+        self.assertIs(request_auth, self.owner)
         self.assertIs(admin_actor, self.admin_actor)
         self.assertEqual(runtime_port._access_token, "test-access-token")
 
@@ -242,7 +245,7 @@ class FakeRunData:
     def _result(self, thread_id, message_id, message_time):
         return {"workflow_run_id": RUN_ID, "workflow_preflight_id": PREFLIGHT_ID,
             "source_voice_thread_id": thread_id, "source_message_id": message_id,
-            "source_message_time": datetime.fromisoformat(message_time), "created_by": ACTOR_ID,
+            "source_message_time": message_time.replace("+00:00", "Z"), "created_by": ACTOR_ID,
             "workspace_id": WORKSPACE_ID, "deck_plugin_id": PLUGIN_ID, "deck_plugin_version": PLUGIN_VERSION,
             "deck_plugin_binding_id": BINDING_ID, "binding_revision": 1,
             "deck_runtime_snapshot_id": SNAPSHOT_ID, "runtime_plugin_lock_id": LOCK_ID}
@@ -275,6 +278,49 @@ async def test_new_launch_uses_lookup_source_preflight_run_and_dispatch_admin_op
     assert [name for name, _ in runtime.calls] == ["authorize", "prepare"]
     assert runtime.calls[1][1]["existing_run"] is None
     assert turns == []
+
+
+@pytest.mark.asyncio
+async def test_new_launch_reads_admin_system_config_before_oauth_gateway_catalog(monkeypatch):
+    runtime = FakeRuntime()
+    launch = FakeLaunchData(claim=False)
+    preflight = FakePreflightData()
+    runs = FakeRunData()
+    calls = []
+
+    class SystemConfig:
+        def get_user(self, input_dto, request_id, *, access_token):
+            calls.append(("system-config", input_dto.model_dump(), bool(request_id), access_token))
+            return {"model": "dream-balanced"}
+
+    class Catalog:
+        def __init__(self, *, access_token):
+            calls.append(("catalog", access_token))
+
+    def resolver(user_id, client_alias, *, catalog_client_factory, system_config_reader):
+        assert client_alias is None
+        assert system_config_reader(user_id) == {"model": "dream-balanced"}
+        catalog_client_factory(user_id)
+        return "dream-balanced"
+
+    monkeypatch.setattr(launch_infrastructure, "GatewayModelCatalogClient", Catalog)
+    monkeypatch.setattr(launch_infrastructure, "resolve_platform_model_alias", resolver)
+    service = build_dream_launch_application_service(
+        object(),
+        actor=actor(),
+        workspace_id=WORKSPACE_ID,
+        runtime_port=runtime,
+        turn_dispatcher=lambda **_values: True,
+    )
+    wire_fakes(service, launch, preflight, runs)
+    service._workflow._system_config = SystemConfig()
+
+    await service.launch(launch_command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID)
+
+    assert calls == [
+        ("system-config", {}, True, "test-access-token"),
+        ("catalog", "test-access-token"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -312,6 +358,42 @@ async def test_claim_dispatches_dream_turn_then_finishes_in_admin():
     assert [name for name, _ in launch.calls] == [CLAIM_LAUNCH.capability.name, FINISH_LAUNCH.capability.name]
     assert turns[0]["parts"][0]["text"].startswith("目标")
     assert turns[0]["metadata"]["dispatchStatus"] == "dispatched"
+
+
+def test_launch_turn_request_carries_complete_admin_owner():
+    request_values = {}
+
+    class Request:
+        def __init__(self, **values):
+            request_values.update(values)
+
+    owner = SimpleNamespace(
+        workflow=object(),
+        persistence=object(),
+        gateway=object(),
+        deck=object(),
+        model_alias="dream-balanced",
+        context_for=lambda **values: values,
+    )
+    turn_context = context(thread_id="thread-launch-owner")
+    dispatcher = DreamAgentTurnDispatcher(request_factory=Request)
+
+    dispatcher._build_request({
+        "actor_id": ACTOR_ID,
+        "thread_id": "thread-launch-owner",
+        "message_id": "message-launch-owner",
+        "parts": [{"type": "text", "text": "目标"}],
+        "metadata": {"kind": "story-workspace-dream-launch"},
+        "system_prompt": "prompt",
+        "context": turn_context,
+        "turn_owner": owner,
+    })
+
+    assert request_values["model"] == "dream-balanced"
+    assert request_values["admin_workflow_resolution"] is owner.workflow
+    assert request_values["admin_turn_persistence"] is owner.persistence
+    assert request_values["admin_gateway_runtime"] is owner.gateway
+    assert request_values["admin_deck_chat_context"] is owner.deck
 
 
 @pytest.mark.asyncio

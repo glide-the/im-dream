@@ -1,6 +1,7 @@
 # [Input] Registry170-174 strict DTOs, fake Admin catalog and closed receipt outcomes.
 # [Output] Exact capability pins, actor-free commands and one-dispatch recovery evidence.
 # [Pos] Provider-free Dream contract test; no PostgreSQL, filesystem or Runtime.
+# [Sync] 2026-09-17: pin plan to Admin's dream:write authorization requirement.
 # [Sync] 2026-09-16: lock the Admin Deck Plugin control consumer contract.
 from __future__ import annotations
 
@@ -112,6 +113,9 @@ def test_registry170_174_hashes_commands_and_registration_are_exact():
         "2e11a56d2e3efb491762cfc5559bd7a2cf1f2aee527632243424a62ef0e38df8",
         "fba707edfdad4ed88f82b8325d2cfd90a7f52f9ad24a34e07e05021c0978573e",
     ]
+    assert [
+        item.capability.user_scope for item in DECK_PLUGIN_CONTROL_OPERATIONS
+    ] == ["dream:read", "dream:read", "dream:read", "dream:write", "dream:write"]
     for rejected in (
         {**command().model_dump(), "actor_id": "42"},
         {**command().model_dump(), "database": "dream"},

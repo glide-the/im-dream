@@ -1,3 +1,4 @@
+# [Sync] 2026-09-17: compare Admin JSON timestamp DTOs to the canonical source instant before dispatch.
 """Single application use case for starting a Dream workspace run.
 
 Persistence, workflow services, and Agent dispatch are injected at the service
@@ -392,7 +393,15 @@ class DreamLaunchApplicationService:
             "runtime_plugin_lock_id": _field(preflight, "runtime_plugin_lock_id"),
         }
         for name, value in expected.items():
-            cls._require_equal(f"run.{name}", _field(run, name), value)
+            actual = _field(run, name)
+            if name == "source_message_time" and isinstance(actual, str):
+                try:
+                    actual = datetime.fromisoformat(actual.replace("Z", "+00:00"))
+                except ValueError:
+                    raise DreamLaunchProvenanceError(
+                        "run.source_message_time"
+                    ) from None
+            cls._require_equal(f"run.{name}", actual, value)
         run_id = _field(run, "workflow_run_id")
         if not isinstance(run_id, str) or not run_id:
             raise DreamLaunchProvenanceError(

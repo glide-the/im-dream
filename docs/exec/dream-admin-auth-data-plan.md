@@ -1250,3 +1250,22 @@ Dream原登录/注册/Google产品卡片已恢复。页面先从同源`/auth/opt
 Chrome真实旅程从未登录页看到`Welcome Back`、Google、Email、Password、Login与Register，提交指定Dream凭据后到Admin consent，允许后返回`/story-workspace/chat`；用户菜单显示指定Dream账户和既有历史。Dream Next实际记录`/auth/session` 200、多项公开产品读取200；Admin实际记录token、browser-session resolve与`user-profile.current` 200。未启动Agent/模型/Workflow，未改Project/Episode/shared FS。设置搜索已有完整route-derived静态索引，独立Luna复核搜索4/4、Next auth handler10/10、TypeScript exit0；无需重复业务改动。
 
 真实注销在正常服务重启恢复后再次通过公开产品入口执行：Dream `POST /auth/logout` 返回200，Admin `POST /api/internal/dream/v1/browser-sessions/revoke` 在1秒内返回200；随后受保护请求返回401，页面恢复原`Welcome Back`登录卡片。先前约10秒的`BFF_ADMIN_UNAVAILABLE`发生在旧服务/配置切换状态，清洁启动Admin并重启Dream backend后没有复现；本轮没有为掩盖该harness瞬态制造注销业务改动，也没有用清Cookie、直改数据库或忽略撤销替代真实成功。重启后`client_credentials`、capability与领域operation调用均恢复200，Dream注销仍只关闭当前Browser handle/refresh lineage，不影响Admin独立管理Session或中央Better Auth SSO语义。
+
+## 阶段51：剩余真实验收门禁恢复与完成性审计
+
+### Optimized Prompt
+
+作为Admin Gateway结算、Dream产品权限、Deck Plugin与跨项目真实业务验收负责人，在当前Admin `e2a527f8ba35`、Dream `9fbdbf845f1c`、两条CLEAN Draft PR、正常PostgreSQL和本机四服务运行状态上继续完成剩余门禁。已有证据是：指定Dream主体已完成真实credential登录和客户端注销；一次真实Codex请求处于`settlement_failed/usageUnknown`并保留75,006 Token预留，使公开remaining 24,978低于Dream Runtime服务器所有的32,000最小输出预留；唯一发布Workflow release未安装且当前Dream用户缺少`plugin:read/plugin:admin`；自然Browser Session到期尚无真实回执。先读取实际Gateway reservation/settlement/reconciliation状态机、Admin operator产品管理DTO、Dream权限投影、Plugin installation/binding/preflight公开路径、Session/refresh/handle expiry实现和现行设计，不以旧回执或关键字搜索代替当前事实。
+
+结算恢复只能使用已有公开或具名运维业务动作，并保持原Gateway request、Allowance ledger、幂等键、审计和未知提交恢复语义；不得直改余额、删除失败记录、缩小服务器Runtime输出上限或创建影子账户来通过测试。若代码已有合法reconcile/finalize路径，使用正常Admin/Gateway身份恢复原请求并核对reserved/consumed/released恒等式；若缺少必要业务入口，先形成严格Zod DTO → Domain Service → typed Repository → Drizzle/UOW契约与失败状态，再实现最小充分能力。错误Provider回执、重复恢复、已终态请求、权限不足、超时和未知提交都必须稳定处理，非幂等写不盲重试。
+
+Workflow恢复必须保持Admin operator与Dream user业务域分离。先确认是否存在由独立Admin RBAC管理Dream产品角色、Workspace Plugin installation或instance policy的正式入口；有入口时只用公开管理DTO完成明确授权/安装，随后由Dream用户通过公开options、binding、preflight、Run、SSE和历史接口验收。没有正式入口时，按现有产品规则设计Admin管理动作，输入使用canonical业务实体选择器而不接受OAuth subject、SQL、表列或任意权限字符串；权限、幂等receipt、审计、并发和回滚由Admin事务负责。不得把Admin Session当Dream bearer、不得按相同邮箱合并身份、不得直接写Plugin/Deck表来制造ready状态。
+
+Session失效验证区分Better Auth中央Dream identity Session、Dream BFF browser handle、OAuth access/refresh token和独立Admin管理Session。优先复用可控clock的确定性合同验证边界，再通过正常公开入口验证当前配置允许在合理时间内观察的自然失效；不得缩短正常服务TTL、伪造过期数据库值或把主动logout等同自然到期。保持Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、admission/lease、资源策略default/desired/effective/revision/LKG、共享文件系统、sandbox与`CLAUDE_CODE_TMPDIR`不变。
+
+本阶段修改范围由证据决定：Admin负责Gateway恢复、产品管理、Plugin持久化及Drizzle唯一schema/migration；Dream只增加或复用严格Pydantic客户端、产品交互和公开业务编排，不新增PostgreSQL凭据、SQL、ORM、DDL或fallback。先产出当前状态表、接口/事务决策和影响评估，再实现必要缺口。验收包括focused unit/integration/contract、typecheck/lint/build、Dream无数据库路径门禁、Markdown链接与diff检查；具备正常产品条件后执行一次真实受限turn，核对Thread、Run/SSE、Gateway request、Admin可见持久化和结算，并执行合法Workflow bind/preflight/Run。任何仍缺外部产品条件的项目必须保留具体状态、恢复入口和影响，不能宣称全任务完成。
+
+### Optional Enhancers
+
+- 若原`usageUnknown`请求已有Provider端最终事实，记录只含状态、Token计数和request ID的脱敏对账回执，不读取或保存prompt、正文、Token、DSN或Provider secret。
+- 若产品管理动作需要expand migration，先在Admin Drizzle发布capability，再按Admin兼容API → Dream消费 → backfill/validate → contract执行。

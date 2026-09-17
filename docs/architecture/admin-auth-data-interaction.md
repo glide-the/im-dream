@@ -37,6 +37,7 @@
 <!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
 <!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
 <!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
+<!-- [Sync] 2026-09-17: bind shared Claude plugin artifacts to one explicit deployment root across Dream checkouts. -->
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
@@ -44,6 +45,8 @@
 ## 现行实现边界（2026-09-16）
 
 Admin 是唯一认证中心和生产数据库访问服务。Dream 的生产启动、请求处理、后台 worker 与 Agent turn 不读取 PostgreSQL DSN，不创建 pool/UOW，也不执行 SQL、ORM、DDL 或 runtime schema fallback；所有持久化和权限过滤均通过严格 Pydantic DTO 调用 Admin 具名 operation，由 Admin 的 Zod DTO、domain Service、typed Repository 与 Drizzle ORM 完成。Dream 保留页面、业务编排、Runtime、EventBus、SSE、共享文件系统与 `.claude-tmp` 协议。
+
+共享 Claude plugin 存储由 Dream 服务端配置 `INK_CLAUDE_PLUGIN_RUNTIME_ROOT` 选择一个绝对根目录；CLI state、不可变 artifact 与 operation evidence 均位于该根下。Admin 只保存 package、version、digest、状态等数据库事实，不下发服务器路径。Dream 根据同一配置派生路径并重新计算 digest，因此 worktree 或部署目录变化不能隐式切换到新的空存储；根目录缺失、artifact 缺失或摘要不符均在创建 Deck/启动 Runtime 前失败，禁止使用数据库路径字段或 PostgreSQL 回退。
 
 本文中的 Registry 小节按实施日期保留阶段证据。早期小节出现的“仍需迁移”“pending”只描述当时的增量状态，不是现行数据库边界；当前关闭证据以[数据库入口清单](../exec/dream-admin-data-inventory.md)、[数据库权威](../design/database-schema-authority.md)和本节为准。正常本机 Google、Device OAuth、真实模型与完整业务验收仍受部署配置和正常数据库 capability 门禁约束；它们未执行不等于 Dream 可以恢复数据库直连。
 

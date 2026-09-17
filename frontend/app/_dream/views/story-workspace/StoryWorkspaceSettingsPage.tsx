@@ -9,6 +9,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-08-31: constrain connector details to Work / Resources so stale
 //                    detail state cannot override another Settings category.
 // [Sync] 2026-09-16: search the complete Settings route index, including Work tabs and MCP/Notion aliases.
+// [Sync] 2026-09-17: expose Deck Workflow and Claude Code plugin managers together under Work / Plugins.
 /* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
@@ -17,6 +18,7 @@ import AboutView from '../../components/AboutView';
 import { IconMonitor, IconMoon, IconSun } from '../../components/chat/Icons';
 import ClaudeMcpServerDetailPage from '../../components/claude-mcp/ClaudeMcpServerDetailPage';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage';
+import PluginAdminPage from '../../components/plugin-admin/PluginAdminPage';
 import ConnectorNotionDetailPage from '../../components/dashboard/ConnectorNotionDetailPage';
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection';
 import ModelConfigSection from '../../components/dashboard/ModelConfigSection';
@@ -236,7 +238,10 @@ export function StoryWorkspaceSettingsPage({
       onOpenClaudeMcpDetail={onOpenClaudeMcpDetail}
     />
   ) : workTab === 'plugins' ? (
-    <ClaudePluginAdminPage />
+    <div className="story-workspace-work__plugin-stack">
+      <PluginAdminPage isMobile={isMobile} />
+      <ClaudePluginAdminPage />
+    </div>
   ) : workDeckContent;
 
   const content = canShowResourceDetail && claudeMcpDetailServerName ? (
