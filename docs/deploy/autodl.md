@@ -6,6 +6,7 @@
 [Sync] 2026-09-06: migrate the direct-host release from Vite/npm/dist to standalone Next.js and frozen pnpm.
 [Sync] 2026-09-17: derive the opaque MCP Apps sandbox route from the injected Dream mapping; no third public origin is required.
 [Sync] 2026-09-11: add safe discovery of the AutoDL-injected public mappings (AutoDLService6006URL/AutoDLService6008URL) and how they fill platform.env origins.
+[Sync] 2026-09-18: isolate topology fixtures from operator platform.env and link restart-first recovery.
 -->
 
 ## 拓扑与边界
@@ -67,6 +68,10 @@ approved Bash 将以 Dream root 身份运行。
 ./deploy/autodl-ssh/deploy.sh deploy
 ```
 
+`test-topology.sh` 是隔离 fixture，显式使用空 platform file；它只验证投影合同，
+不会读取或替代当前实例的 operator `platform.env`。正式 `prepare-env.sh` 与发布仍
+必须使用当前实例动态发现的两个 origin。
+
 脚本安装固定 Node/pnpm、Claude Runtime 与 Notion CLI，执行 frozen pnpm
 install 和 standalone Next build；release gate 验证 MCP Apps Node routes、
 FastAPI/Next/同源 API、`robots.txt`、`sitemap.xml`、`llms.txt`、内置
@@ -81,3 +86,7 @@ Runtime 由公开 npm `@glide-the/ink-claude-code-dream@0.1.10` 安装。发布�
 运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。常规 `deploy` 不直接覆盖 `current`：它先生成不可变 `candidate`，在 `16006`/`18765` 运行完整 Next/FastAPI 隔离冒烟，通过后才停止旧 Dream 并原子切换。若启动或公开验证失败，本轮仍可恢复旧应用；验证成功后立即删除旧 release、`previous` 与 `candidate`，不保留长期回滚版本。共享 workspace、Artifact、Plugin Runtime 与 Admin/PostgreSQL 数据不参与 release 清理。
 启动/停止仅处理具名 Dream screen/PID；未知端口占用会 fail closed。回滚只
 切换 Dream release，不回滚 Admin migration、PostgreSQL 数据或 workspace。
+
+实例重启后优先复用现有 `current`，按 Admin → Dream 顺序执行 `start`；只有源码、
+Runtime 或配置合同变化时才执行完整 `deploy`。状态、日志和失败恢复见
+[AutoDL 恢复与维护](autodl-recovery.md)。

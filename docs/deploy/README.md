@@ -15,6 +15,7 @@
 [Sync] 2026-09-12: add the explicit NATAPP edge-relay switch, verification, and rollback contract without changing application or data ownership.
 [Sync] 2026-09-16: remove Dream PostgreSQL credentials from local, AutoDL and Alibaba deployment contracts.
 [Sync] 2026-09-16: move Google/Session/JWT secret ownership to Admin, retire Google Cloud SQLite sync, and retain only the server-only Next BFF handle secret in Dream.
+[Sync] 2026-09-18: add the AutoDL restart/redeploy recovery appendix and keep instance public origins deployment-injected.
 -->
 
 ## 定位
@@ -42,6 +43,7 @@
 | [`natapp-edge-relay.md`](natapp-edge-relay.md) | NATAPP 边缘转发文档 | 说明现有公开域名到显式 Dream/Admin relay origins 的原子切换、验证、上游降级识别与回滚 |
 | [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
 | [`autodl.md`](autodl.md) | AutoDL 直宿主部署文档 | 说明 frozen pnpm/standalone Next、Node MCP Apps、FastAPI、固定 sandbox capability、验证与回滚 |
+| [`autodl-recovery.md`](autodl-recovery.md) | AutoDL 恢复与维护 | 说明实例重启后的 Admin-first 恢复、动态 WebUI origin、状态/日志、完整发布和失败处理 |
 | [`release-system-design.md`](release-system-design.md) | 历史发布体系设计 | 保留旧 Vite/npm/nginx/SQLite/GCS 判断；不是当前操作手册 |
 | [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md) | Claude SDK/Runtime 打包发布与 Dream 集成 | PyPI SDK、npm 五包、OIDC、精确版本/哈希、验证和回滚的中文执行手册 |
 | [`claude-registry-release-acceptance.md`](claude-registry-release-acceptance.md) | Claude registry 发布后验收 | provider-free 校验 PyPI/npm 制品身份、安装和 fail-closed 条件 |
@@ -101,23 +103,24 @@ capability）单列在 [AutoDL 手册](autodl.md)，不混入下表的通用容�
 | Claude-agent Bash sandbox | 本机进程使用宿主运行时 | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | Cloud Run 不使用 Docker Compose runtime 权限模型 |
 | 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager；Docker 外层容器是主隔离边界 | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库；Docker 外层容器是主隔离边界 | 不依赖本地端口和本地数据卷 |
 
-## 生产认证配置
+## AutoDL 生产认证配置
 
-发布到 `https://ink-frontend.suoxya.com` / `https://ink-backend.suoxya.com` 时，所有平台必须满足：
+AutoDL 只使用当前实例注入的 SeetaCloud WebUI origin。登录远端后只读取
+`AutoDLService6006URL` 与 `AutoDLService6008URL`，分别投影为 Dream 与
+Admin origin；禁止整体打印 profile，也不使用固定产品域名作为 fallback。
 
-| 项 | 生产值 |
-|----|--------|
-| `INK_DREAM_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` |
-| `INK_DREAM_BFF_REDIRECT_URI` | `https://ink-frontend.suoxya.com/auth/callback` |
-| `INK_ADMIN_DREAM_BASE_URL` | `https://ink-admin.suoxya.com` |
-| `INK_ADMIN_AUTH_ISSUER` | `https://ink-admin.suoxya.com/api/auth` |
-| `INK_DREAM_API_RESOURCE` | `https://ink-frontend.suoxya.com/api` |
-| `INK_DREAM_BFF_COOKIE_SECRET` | 独立的Dream Next服务器secret，不进入浏览器或FastAPI |
-| `INK_CORS_ALLOW_ORIGINS` | `https://ink-frontend.suoxya.com` |
-| `INK_CORS_ALLOW_CREDENTIALS` | `true` |
-| Google callback | `https://ink-admin.suoxya.com/api/auth/callback/google`，由Admin Better Auth处理 |
+| 项 | 动态来源 |
+|----|----------|
+| `INK_DREAM_PUBLIC_ORIGIN` | `AutoDLService6006URL` |
+| `INK_DREAM_BFF_REDIRECT_URI` | `${AutoDLService6006URL}/auth/callback` |
+| `INK_ADMIN_DREAM_BASE_URL` | `AutoDLService6008URL` |
+| `INK_ADMIN_AUTH_ISSUER` | `${AutoDLService6008URL}/api/auth` |
+| `INK_DREAM_API_RESOURCE` | `${AutoDLService6006URL}/api` |
+| Google callback | `${AutoDLService6008URL}/api/auth/callback/google`，由 Admin Better Auth 处理 |
 
-Remote SSH通过mode-0600拓扑文件把Admin issuer、Dream resource、注册service credential与BFF cookie secret分别投给FastAPI/Next；backend Compose把旧Dream Google/JWT/Session/OAuth secret和Next-only BFF key置空，frontend仍取得BFF key。AutoDL共用安全env文件时，FastAPI入口会在导入业务模块前移除BFF key。Google Cloud使用独立backend/frontend service account和逐secret IAM：服务凭据按调用方绑定，BFF cookie secret只绑定Next；旧FastAPI认证绑定会被清除。完整Cloud Run发布重验尚未执行。
+`INK_DREAM_BFF_COOKIE_SECRET` 与 Admin service credential 仍只存在于 mode-0600
+服务端配置。换实例后必须重新运行两端 `prepare-env.sh`，先发布/启动 Admin，
+再发布/启动 Dream。详细恢复顺序见 [AutoDL 恢复手册](autodl-recovery.md)。
 
 ## Docker TUN 出站
 
