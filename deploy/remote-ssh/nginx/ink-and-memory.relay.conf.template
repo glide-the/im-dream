@@ -1,11 +1,11 @@
 # [Input] Explicit Dream relay origin and existing public Dream frontend/backend domains.
-# [Output] Host nginx edge relay with runtime DNS, TLS SNI, WebSocket, and unbuffered SSE support.
+# [Output] Host nginx edge relay with runtime DNS, reusable HTTP upstream connections, TLS SNI, WebSocket, and unbuffered SSE support.
 # [Pos] Rendered by switch-edge-relay.sh; this does not start or configure the upstream application.
-# [Sync] 2026-09-12: add the recoverable NATAPP edge-relay topology.
+# [Sync] 2026-09-18: reuse ordinary HTTP upstream connections so the Cloudflare/NATAPP relay does not exhaust its connection-rate allowance.
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
-    ''      close;
+    ''      '';
 }
 
 resolver 127.0.0.53 valid=30s ipv6=off;

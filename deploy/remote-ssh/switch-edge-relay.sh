@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # [Input] Explicit SSH target, public domains, relay origins, and optional backup directory for rollback.
-# [Output] Atomic two-site nginx relay switch with exact backup, validation, reload, verification, and rollback.
+# [Output] Atomic two-site nginx relay switch with HTTP keepalive, exact backup, validation, reload, verification, and rollback.
 # [Pos] Remote SSH edge-only topology switch; does not deploy, stop, or delete application/data services.
-# [Sync] 2026-09-12: add the recoverable NATAPP relay switch for Dream and Admin.
+# [Sync] 2026-09-18: keep ordinary relay requests on reusable upstream connections while retaining WebSocket upgrade behavior.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

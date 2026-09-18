@@ -49,10 +49,26 @@ export REMOTE_ADMIN_RELAY_ORIGIN=http://<admin-relay-host>
 成功输出中的 `REMOTE_NGINX_BACKUP_DIR` 是精确回滚标识，必须保留在本次发布回执中。
 
 HTTPS 上游通过 SNI 连接并传递其真实 `Host`；面向用户的原始域名通过
-`X-Forwarded-Host` 保留。Dream 与 Admin 都关闭响应缓冲并保留 3600 秒读写超时；
+`X-Forwarded-Host` 保留。Admin NATAPP origin 可继续使用明确配置的 HTTP，不改变
+Cloudflare → 阿里云 Nginx → Cloudflare → NATAPP → 本机链路。普通 HTTP 请求不发送
+`Connection: close`，因此 Nginx 声明的 upstream keepalive 能实际复用连接，避免页面、
+后台请求和登录入口在 OAuth callback 前快速消耗 NATAPP 的连接数额度；WebSocket 请求
+仍发送 `Connection: upgrade`。Dream 与 Admin 都关闭响应缓冲并保留 3600 秒读写超时；
 WebSocket upgrade 与 SSE 长连接不会被边缘配置降级。Dream 模板继续导出
 `suoxya-root` 使用的共享 `ink_backend` upstream，避免只更新目标两份站点时破坏
 apex SEO 路由的跨配置依赖。
+
+Google 仍向公开的 `/api/auth/callback/google` 返回授权码。由于第二层 Cloudflare 对
+`work.suoxya.com` 的这个精确路径加 `state/code` 查询会在到达 NATAPP 前重置连接，
+Admin 站点只在上游转发时将它改写为 `/api/auth/edge-callback/google`。Admin alias
+保留查询参数和请求头，将 pathname 恢复为 Better Auth 的标准 callback 后立即委托
+同一个 handler；state、PKCE、Google 换码、账号关联与 Session 创建没有旁路或复制。
+该精确 location 先把原始查询串放入内部请求头并从第二层 Cloudflare 可见的 URL 中删除；
+Admin alias 在内存中恢复标准 callback query，随后删除内部头。该 location 关闭 access log、
+使用独立的关闭连接并设置 `proxy_next_upstream off`，因此授权码不会写入新的边缘访问日志，
+未知上游结果也不会把同一授权码发送到另一个 Cloudflare 解析地址。Admin alias 对重定向
+响应保留 status、location 和全部 `Set-Cookie`，并输出带明确 `Content-Length` 的短正文，
+避免 HTTP relay 对延迟后的零长度/chunked 重定向产生不完整响应。
 
 ## 验证与回滚
 

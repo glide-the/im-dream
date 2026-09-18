@@ -84,7 +84,7 @@ Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更�
 
 ### 浏览器主拓扑与配置
 
-主拓扑：Dream渲染登录卡片 → 浏览器直接提交Admin受限表单 → Admin Better Auth密码/注册或Google callback建立Dream identity Session → 返回Dream同源BFF `/auth/start` → Admin OAuth authorization/code+PKCE → Dream callback。Dream浏览器handler只构造发往Admin的闭集表单请求，Dream Next/Python不接收密码；action只由服务端配置投影，Admin只接受精确Dream Origin和相对return。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
+主拓扑：Dream渲染登录卡片 → 浏览器以原生顶层POST直接提交Admin受限表单 → Admin Better Auth密码/注册或Google callback建立Dream identity Session → 返回Dream同源BFF `/auth/start` → Admin OAuth authorization/code+PKCE → Dream callback。Dream不以跨域fetch接收认证响应，避免浏览器把Admin的state/Session `Set-Cookie`作为第三方Cookie丢弃；Dream Next/Python不接收密码，action只由服务端配置投影，return只允许相对路径。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie。
 
 server-owned配置明确Dream public origin、Admin public issuer/origin、可选Admin internal transport origin、注册callback URI与内部FastAPI URL。浏览器表单、OAuth authorize、callback校验、JWT `iss`与capability元数据始终使用public authority；Next/Python的DTO、client-credentials和JWKS HTTP请求可通过显式loopback transport发送，响应仍必须声明同一个public issuer/resource。代理按部署配置确定Dream origin；仅当请求URL为已配置的loopback代理入口时，才接受共同组成精确Dream public origin的单值`X-Forwarded-Proto`与`X-Forwarded-Host`，不接受任意或链式forwarded header。BFF mutation继续校验浏览器`Origin`与CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
