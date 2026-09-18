@@ -13,6 +13,7 @@
 # [Sync] 2026-09-16: assert exact Admin issuer/resource/BFF projection and no PostgreSQL credential.
 # [Sync] 2026-09-16: prove retired Dream auth/session secrets never enter the projected runtime.
 # [Sync] 2026-09-16: prove the retired Product HS256 signer never enters the projected runtime.
+# [Sync] 2026-09-18: isolate projector fixtures from the operator-selected platform.env.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,6 +100,7 @@ EOF
 AUTODL_DREAM_SOURCE_ENV_FILE="${SOURCE_ENV}" \
 AUTODL_MCP_APPS_ENV_FILE="${MCP_APPS_ENV}" \
 AUTODL_ENV_FILE="${OUTPUT_ENV}" \
+AUTODL_PLATFORM_ENV_FILE=/dev/null \
 AUTODL_DATA_ROOT="${PROJECTED_DATA_ROOT}" \
 AUTODL_DREAM_PUBLIC_ORIGIN=https://dream.example.test \
 AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin.example.test \
@@ -135,6 +137,7 @@ if grep -Eq '^(GOOGLE_CLIENT_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET_KEY
 fi
 if AUTODL_DREAM_SOURCE_ENV_FILE="${SOURCE_ENV}" AUTODL_MCP_APPS_ENV_FILE="${MCP_APPS_ENV}" \
   AUTODL_ENV_FILE="${OUTPUT_ENV}" AUTODL_DATA_ROOT="${PROJECTED_DATA_ROOT}" \
+  AUTODL_PLATFORM_ENV_FILE=/dev/null \
   AUTODL_DREAM_PUBLIC_ORIGIN=https://dream.example.test AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin.example.test \
   AUTODL_DREAM_ADMIN_SERVICE_CLIENT_ID=ink-dream-service AUTODL_DREAM_ADMIN_SERVICE_SECRET=short \
   AUTODL_DREAM_BFF_COOKIE_SECRET=dream-cookie-secret-at-least-thirty-two-bytes \
