@@ -37,7 +37,7 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 
 - **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
-- **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”使用仓库内 `yue2-skills` Marketplace。
+- **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”组合 YuE2 统筹、编曲师、作词师，并使用本机 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
 - **文件** 保存在 Thread 工作区，继续执行路径规范化、所有权检查和共享文件系统边界。
 - **Resource Links** 连接 Notion 与受管 MCP Server；兼容的 MCP App 可显示在普通工具结果下方。
 

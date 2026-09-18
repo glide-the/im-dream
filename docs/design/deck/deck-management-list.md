@@ -7,7 +7,7 @@
 <!-- [Sync] 2026-08-17: split launcher list into persistent user Available Decks and static System Decks groups. -->
 <!-- [Sync] 2026-08-17: route typed preview examples through the same Chat/Dream launch boundary as the Chat page. -->
 <!-- [Sync] 2026-08-17: use a neutral ink-and-paper preview surface without Deck accent gradients. -->
-<!-- [Sync] 2026-09-19: define multi-template system Deck initialization and per-user editable copies. -->
+<!-- [Sync] 2026-09-19: define multi-template initialization; Music Creation adds coordinator, arranger, lyricist and three exact plugins. -->
 
 # Deck 启用入口与 Work 设置工作台
 
@@ -90,8 +90,13 @@ System Decks
 - 服务端代码注册“剧本创作团队”和“音乐创作”两个系统模板。首次对账在同一事务中确保全局
   `is_system=true` 来源存在，并确保当前用户各有一个 `parent_id` 指向来源的可编辑副本；已有内容完全匹配、
   尚未关联来源的用户 Deck 直接建立父子关系，不重复创建。模板内容、Voice 或精确插件版本冲突时对账失败并保留原数据。
-- “音乐创作”系统来源固定引用 ready 的 `yue2@yue2-skills` 0.4.0 安装；本地 Marketplace 位于
-  `marketplaces/yue2-skills`。缺少 ready 安装时不创建半成品来源或用户副本。
+- 系统模板前向增加 Agent 或插件时，更新固定身份的全局 `is_system` 来源；当前用户的默认副本及其全部 Agent
+  均未发生本地修改时，对账同步来源字段、补齐 Agent 与缺失的系统插件引用，并推进一次草稿 revision。
+  Deck 或任一 Agent 已发生本地修改时完整保留用户 Prompt、Agent 和插件选择，不由系统模板覆盖。
+- “音乐创作”系统来源包含“风格和歌词生成”“编曲师”“作词师”三个 Agent，并固定引用 ready 的
+  `yue2@yue2-skills` 0.4.0、`music-composition@music-composition-skills` 1.0.0、
+  `lyric-writing@lyric-writing-skills` 1.0.0。三个本地 Marketplace 分别位于 `marketplaces/` 下的同名目录；
+  编曲与作词上游源码和许可证原样保留。任一精确版本缺少 ready 安装时，初始化事务失败，不留下半成品来源或用户副本。
 - `Available Decks` 与 `System Decks` 是固定类型区：只要主页面存在正式可用结果，两个分组标题都显示；
   用户组没有符合条件的 Deck 时显示用户组空状态；系统组没有系统 Deck 时显示系统组空状态。
 - 系统内建 Deck 在快捷图标右上显示盾牌角标，在 `System Decks` 分组中显示“系统/System”标签；普通 Deck

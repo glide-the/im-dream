@@ -30,6 +30,7 @@
 # [Sync] 2026-09-17: fail verification explicitly and digest-check every persistent plugin artifact without user authority.
 # [Sync] 2026-09-17: verify backend discovery resolves the npm package-root cli.js entrypoint.
 # [Sync] 2026-09-17: install published Runtime 0.1.10 and smoke an immutable candidate before atomic activation.
+# [Sync] 2026-09-19: accept a checksum-verified Linux x64 frontend artifact built from the same source.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,6 +71,7 @@ AUTODL_SMOKE_SCREEN_NAME="${AUTODL_DREAM_SMOKE_SCREEN_NAME:-${AUTODL_SCREEN_NAME
 AUTODL_NPM_TOKEN="${AUTODL_NPM_TOKEN:-}"
 AUTODL_NPM_REGISTRY="${AUTODL_NPM_REGISTRY:-https://registry.npmjs.org}"
 AUTODL_PYPI_INDEX_URL="${AUTODL_PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+AUTODL_PREBUILT_FRONTEND_ARCHIVE="${AUTODL_PREBUILT_FRONTEND_ARCHIVE:-}"
 DRY_RUN=0
 COMMAND=""
 
@@ -140,7 +142,7 @@ require_config() {
 
 check_local() {
   local failed=0 mode
-  for name in ssh scp rsync git; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
+  for name in ssh scp rsync git shasum; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
   for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${SCRIPT_DIR}/runtime/init-dream-data.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/pnpm-lock.yaml" "${REPO_ROOT}/frontend/pnpm-workspace.yaml" "${REPO_ROOT}/frontend/next.config.js" "${REPO_ROOT}/frontend/packages/mcp-apps-runtime/package.json"; do
     [[ -f "${file}" ]] || { warn "Missing file: ${file}"; failed=1; }
   done
@@ -148,6 +150,10 @@ check_local() {
   if [[ -f "${AUTODL_ENV_FILE}" ]]; then
     mode="$(stat -f '%Lp' "${AUTODL_ENV_FILE}" 2>/dev/null || stat -c '%a' "${AUTODL_ENV_FILE}")"
     [[ "${mode}" == "640" || "${mode}" == "600" ]] || { warn "${AUTODL_ENV_FILE} must be mode 600 or 640, got ${mode}."; failed=1; }
+  fi
+  if [[ -n "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" && ! -f "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" ]]; then
+    warn "Prebuilt frontend archive does not exist: ${AUTODL_PREBUILT_FRONTEND_ARCHIVE}"
+    failed=1
   fi
   [[ "${failed}" == "0" ]]
 }
@@ -168,6 +174,7 @@ AutoDL Dream direct-host release:
   data:            ${AUTODL_DATA_ROOT}
   runtime:         Miniconda Python 3.12 + Node ${AUTODL_NODE_VERSION} + pnpm ${AUTODL_PNPM_VERSION} + screen
   Web source:      frontend/app/_dream + Node MCP Apps runtime
+  prebuilt Web:    ${AUTODL_PREBUILT_FRONTEND_ARCHIVE:-<build on target>}
   Claude pair:     ink-claude-dream-agent-sdk 0.2.145 + published Runtime ${AUTODL_CLAUDE_RUNTIME_VERSION} (CLI compatibility ${AUTODL_CLAUDE_CLI_COMPATIBILITY_VERSION})
   Notion CLI:      ntn ${AUTODL_NOTION_CLI_VERSION}
   excluded:        Docker, nginx, database migration
@@ -276,8 +283,16 @@ sync_files() {
 }
 
 build_release() {
-  local release_id
+  local release_id prebuilt_remote prebuilt_sha256
   release_id="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)-$(date -u +%Y%m%d%H%M%S)"
+  prebuilt_remote=""
+  if [[ -n "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" ]]; then
+    prebuilt_remote="${AUTODL_APP_ROOT}/source/.prebuilt-frontend-linux-x64.tar.gz"
+    prebuilt_sha256="$(shasum -a 256 "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" | awk '{print $1}')"
+    log "Uploading checksum-bound Linux x64 Dream frontend artifacts."
+    scp_file "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" "${prebuilt_remote}"
+    remote "printf '%s  %s\\n' $(quote "${prebuilt_sha256}") $(quote "${prebuilt_remote}") | sha256sum -c - >/dev/null"
+  fi
   log "Building Dream release ${release_id} on AutoDL."
   install_claude_runtime
   remote "set -euo pipefail
@@ -294,9 +309,15 @@ cp $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-dream.sh")
 chmod 0755 \"\${staging}/start-dream.sh\"
 export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
 cd \"\${staging}/frontend-src\"
-pnpm config set registry $(quote "${AUTODL_NPM_REGISTRY}")
-pnpm install --frozen-lockfile
-NODE_OPTIONS=--max-old-space-size=4096 INK_NEXT_OUTPUT=standalone INK_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}") INK_BACKEND_INTERNAL_URL=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} pnpm run build
+prebuilt=$(quote "${prebuilt_remote}")
+if [ -n "\${prebuilt}" ]; then
+  tar -xzf "\${prebuilt}" --no-same-owner
+  rm -f "\${prebuilt}"
+else
+  pnpm config set registry $(quote "${AUTODL_NPM_REGISTRY}")
+  pnpm install --frozen-lockfile
+  NODE_OPTIONS=--max-old-space-size=4096 INK_NEXT_OUTPUT=standalone INK_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}") INK_BACKEND_INTERNAL_URL=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} pnpm run build
+fi
 test -s \"\${staging}/frontend-src/.next/standalone/server.js\"
 grep -Fq '/api/mcp-apps/[serverRef]' \"\${staging}/frontend-src/.next/app-path-routes-manifest.json\"
 grep -Fq '/mcp-apps-sandbox' \"\${staging}/frontend-src/.next/app-path-routes-manifest.json\"

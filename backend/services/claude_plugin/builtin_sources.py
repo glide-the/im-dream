@@ -7,7 +7,7 @@ CLI evidence for them is ``claude plugin validate`` plus the recorded file
 inventory and digest (there is no marketplace install step for a
 repository-owned directory).
 
-[Sync] 2026-09-19: register the repository-owned yue2-skills local marketplace.
+[Sync] 2026-09-19: register the repository-owned Yue2, composition, and lyric local marketplaces.
 """
 
 from __future__ import annotations
@@ -53,6 +53,8 @@ KNOWN_MARKETPLACE_REPOS: dict[str, str] = {
 KNOWN_MARKETPLACE_LOCAL_PATHS: dict[str, str] = {
     "drama-studio": "marketplaces/drama-studio",
     "yue2-skills": "marketplaces/yue2-skills",
+    "music-composition-skills": "marketplaces/music-composition-skills",
+    "lyric-writing-skills": "marketplaces/lyric-writing-skills",
 }
 
 

@@ -5,6 +5,7 @@
 # [Sync] 2026-08-26: keep Admin isolated while running the /root-hosted Dream runtime as root.
 # [Sync] 2026-09-06: recognize only the canonical standalone Next.js Dream
 #                    release while preserving Admin-first startup ownership.
+# [Sync] 2026-09-19: verify the persistent content-addressed plugin artifacts without requiring a user-scoped Admin token.
 set -euo pipefail
 
 ADMIN_ROOT="${INK_AUTODL_ADMIN_ROOT:-/root/ink-autodl/admin}"
@@ -136,7 +137,7 @@ start_dream() {
   log "Dream is ready on frontend 127.0.0.1:${FRONTEND_PORT} and backend 127.0.0.1:${BACKEND_PORT}."
 }
 
-verify_default_plugin() {
+verify_plugin_artifacts() {
   local current_release="${DREAM_ROOT}/current"
   (
     cd "${current_release}/app"
@@ -147,15 +148,27 @@ from dotenv import dotenv_values
 
 env_file = os.environ["INK_AUTODL_DREAM_ENV_FILE"]
 os.environ.update({key: value for key, value in dotenv_values(env_file).items() if value is not None})
-from services.deck.defaults import resolve_default_deck_plugin_ref
-resolve_default_deck_plugin_ref()
+from services.claude_plugin import artifact_store, runtime
+
+paths = [path for path in runtime.get_artifacts_root().iterdir() if path.is_dir()]
+assert paths
+parsed = [path.name.rsplit("@", 2) for path in paths]
+assert all(len(parts) == 3 and parts[2].startswith("sha256-") for parts in parsed)
+assert all(
+    artifact_store.get_artifact(
+        parts[0],
+        parts[1],
+        parts[2].replace("sha256-", "sha256:", 1),
+    ).path == path
+    for path, parts in zip(paths, parsed)
+)
 '
   )
-  log "Default Deck plugin artifact is available."
+  log "Persistent plugin artifacts are available and digest-addressable."
 }
 
 log "Starting an existing Ink & Memory AutoDL deployment; no GPU probe, build, migration, or restore will run."
 start_admin
 start_dream
-verify_default_plugin
+verify_plugin_artifacts
 log "Ink & Memory startup completed."

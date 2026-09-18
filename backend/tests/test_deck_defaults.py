@@ -2,7 +2,7 @@
 # [Output] Default template identity plus artifact/CLI evidence mapping without Dream persistence.
 # [Pos] Pure Deck-default policy test; create/reconcile transactions belong to Admin DTO/ORM operations.
 # [Sync] 2026-09-16: retire legacy Dream Deck/default SQL authority tests.
-# [Sync] 2026-09-19: cover the screenplay and music code-owned system template registry.
+# [Sync] 2026-09-19: cover the screenplay/music registry, three music Agents, and three local plugins.
 
 from __future__ import annotations
 
@@ -71,18 +71,37 @@ def test_screenplay_and_music_are_active_system_templates() -> None:
     music = config.MUSIC_DECK_TEMPLATE
     assert music["id"] == config.MUSIC_SYSTEM_DECK_ID
     assert music["name"] == "音乐创作"
-    assert [voice["name"] for voice in music["voices"]] == ["风格和歌词生成"]
+    assert [voice["name"] for voice in music["voices"]] == [
+        "风格和歌词生成",
+        "编曲师",
+        "作词师",
+    ]
     assert music["plugins"] == (
         {
             "package_name": "yue2",
             "marketplace": "yue2-skills",
             "resolved_version": "0.4.0",
         },
+        {
+            "package_name": "music-composition",
+            "marketplace": "music-composition-skills",
+            "resolved_version": "1.0.0",
+        },
+        {
+            "package_name": "lyric-writing",
+            "marketplace": "lyric-writing-skills",
+            "resolved_version": "1.0.0",
+        },
     )
-    marketplace = resolve_local_marketplace("yue2-skills")
-    assert marketplace is not None
-    assert marketplace.name == "yue2-skills"
-    assert (marketplace / "claude-code" / ".claude-plugin" / "plugin.json").is_file()
+    for marketplace_name, plugin_path in (
+        ("yue2-skills", "claude-code/.claude-plugin/plugin.json"),
+        ("music-composition-skills", "plugins/music-composition/.claude-plugin/plugin.json"),
+        ("lyric-writing-skills", "plugins/lyric-writing/.claude-plugin/plugin.json"),
+    ):
+        marketplace = resolve_local_marketplace(marketplace_name)
+        assert marketplace is not None
+        assert marketplace.name == marketplace_name
+        assert (marketplace / plugin_path).is_file()
 
 
 def test_default_service_resolves_exact_verified_installation(monkeypatch) -> None:
