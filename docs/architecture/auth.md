@@ -86,9 +86,9 @@ Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更�
 
 主拓扑：Dream渲染登录卡片 → 浏览器直接提交Admin受限表单 → Admin Better Auth密码/注册或Google callback建立Dream identity Session → 返回Dream同源BFF `/auth/start` → Admin OAuth authorization/code+PKCE → Dream callback。Dream浏览器handler只构造发往Admin的闭集表单请求，Dream Next/Python不接收密码；action只由服务端配置投影，Admin只接受精确Dream Origin和相对return。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
 
-server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin，不相信任意forwarded header。BFF mutation校验origin/CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
+server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin；仅当请求URL为已配置的loopback代理入口时，才接受共同组成精确Dream public origin的单值`X-Forwarded-Proto`与`X-Forwarded-Host`，不接受任意或链式forwarded header。BFF mutation继续校验浏览器`Origin`与CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
-当前本机浏览器主路径固定为 Dream `http://localhost:5173`、Admin issuer `http://localhost:3000/api/auth`、Google callback `http://localhost:3000/api/auth/callback/google`、Dream callback `http://localhost:5173/auth/callback` 和 resource `http://localhost:5173/api`。内部 FastAPI 继续使用明确的私有地址；`127.0.0.1` 不参与浏览器 OAuth issuer、redirect、Cookie 或 CSRF origin 比较。AutoDL 从当前实例环境把 6006/6008 的 HTTPS 映射分别注入 `AUTODL_DREAM_PUBLIC_ORIGIN` 与 `AUTODL_ADMIN_PUBLIC_ORIGIN`，由生成器派生 callback、issuer、resource、CORS 和 CSRF origin；仓库不固定某个产品域名，实例映射变化后必须重新投影 Admin 与 Dream 的 gitignored 配置。
+本机直接访问配置可使用 Dream `http://localhost:5173` 与 Admin `http://localhost:3000`；启用内网穿透时，浏览器origin、Admin issuer、Google callback、Dream callback与resource必须统一从该次部署的公网Dream/Admin origin派生，不能继续混用localhost。内部Next、FastAPI与Admin监听地址继续使用明确的loopback配置，不参与浏览器OAuth issuer、redirect、Cookie或CSRF origin比较。AutoDL同样从当前实例环境把6006/6008的HTTPS映射分别注入`AUTODL_DREAM_PUBLIC_ORIGIN`与`AUTODL_ADMIN_PUBLIC_ORIGIN`，由生成器派生callback、issuer、resource、CORS和CSRF origin；仓库不固定某个产品域名，实例映射变化后必须重新投影Admin与Dream的gitignored配置。
 
 当前speech recognition按现行业务设计关闭，Python `/ws/speech-recognition` 返回1008。保留显式WS选址，但本迁移不启用语音、不新增WS授权scope或upgrade通道。未来恢复语音能力须另按实际业务/API合同校验origin与用户身份，不能用旧query token或opaque handle冒充OAuth token。
 

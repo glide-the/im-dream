@@ -1,6 +1,7 @@
 // [Input] Real BFF boundary functions with explicit test-owned origin/secret/clock.
 // [Output] Deterministic cookie/PKCE/callback/return/origin/CSRF validation without services or browser.
 // [Pos] Provider-free Node contracts for Next BFF login security.
+// [Sync] 2026-09-18: cover exact forwarded public origin recovery for HTTPS-normalized loopback requests.
 // [Sync] 2026-09-17: cover explicit loopback proxy origin recovery without trusting arbitrary internal URLs.
 // [Sync] 2026-09-16: cover exact public Host recovery from Next's normalized internal request URL.
 // [Sync] 2026-09-14: verify the production helper; no alternative OAuth/session implementation.
@@ -90,6 +91,25 @@ test('configured loopback proxy origin preserves login and callback when AutoDL 
     publicOrigin: 'https://dream.example', internalOrigin: 'https://proxy.example',
     callbackUri: 'https://dream.example/auth/callback', cookieSecret,
   }), BffBoundaryError);
+});
+
+test('configured loopback proxy accepts only the exact forwarded public origin after HTTPS normalization', () => {
+  const bff = new BffLoginBoundary({
+    publicOrigin: 'https://dream.example', internalOrigin: 'http://127.0.0.1:5173',
+    callbackUri: 'https://dream.example/auth/callback', cookieSecret,
+  });
+  const exact = new Request('https://localhost:5173/auth/options', {
+    headers: { host: 'legacy-proxy.example', 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' },
+  });
+  assert.doesNotThrow(() => bff.requireRequestOrigin(exact));
+  for (const headers of [
+    { host: 'legacy-proxy.example', 'x-forwarded-host': 'attacker.example', 'x-forwarded-proto': 'https' },
+    { host: 'legacy-proxy.example', 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'http' },
+    { host: 'legacy-proxy.example', 'x-forwarded-host': 'dream.example, attacker.example', 'x-forwarded-proto': 'https' },
+  ]) assert.throws(() => bff.requireRequestOrigin(new Request(exact.url, { headers })), BffBoundaryError);
+  assert.throws(() => bff.requireRequestOrigin(new Request('https://internal.example:5173/auth/options', {
+    headers: { 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' },
+  })), BffBoundaryError);
 });
 
 test('return locations preserve ordinary pages and reject open redirect and nested encoding', () => {
