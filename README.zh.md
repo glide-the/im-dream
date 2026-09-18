@@ -1,60 +1,9 @@
-<!-- [Sync] 2026-09-17: 说明Chat额度拒绝与Admin capability snapshot延迟行为。 -->
-<!-- [Sync] 2026-09-15: 用户与Thread SystemConfig持久化改用精确Admin合同。 -->
-<!-- [Sync] 2026-09-15: 公开Reflections自定义配置改用registered83 Admin operations。 -->
-<!-- [Sync] 2026-09-15: 公开complete/partial assistant持久化使用绑定的Admin turn owner与原receipt恢复。 -->
-<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
-<!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
-<!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
-<!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
-<!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
-<!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
-<!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
-<!-- [Sync] 2026-09-15: consume full Run read/create/retry domains with scoped original receipts. -->
-<!-- [Sync] 2026-09-15: prepare launch metadata types/source seam and retain production wiring gaps. -->
-<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
-<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
-<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
-<!-- [Sync] 2026-09-15: public Voice mutations consume four Admin commands with raw Memory JSON. -->
-<!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
-<!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
-<!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
-<!-- [Sync] 2026-09-15: Browser session过期响应不修改状态，注销仅成功后清除。 -->
-<!-- [Sync] 2026-09-15: 资源HTTP owner在producer和Factory结束后序列化关闭。 -->
-<!-- [Sync] 2026-09-15: 公开用户偏好使用两项OAuth Admin operation，保持原partial合并与raw JSON投影。 -->
-<!-- [Sync] 2026-09-15: 同步Admin Deck内容版本事务与其余Deck/Runtime消费端迁移边界。 -->
-<!-- [输入] 当前 Dream/Admin/Gateway 拓扑、支持版本与用户可见的 MCP Apps 流程。 -->
-<!-- [输出] 面向普通用户和本机运行者的简明指南，深入工程细节通过链接下沉。 -->
-<!-- [定位] 仓库中文入口指南；README.md 是同结构的英文正文。 -->
-<!-- [同步] 2026-09-15：同步旧standalone认证退役与具名脚本的显式Admin OAuth/账户核对。 -->
-<!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
-<!-- [同步] 2026-09-06：以快速启动和 MCP Apps 用法重组；用分层章节保留精确安装、所有权、安全与验证事实。 -->
-<!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
-<!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
-<!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
-<!-- [同步] 2026-09-15：采用 SDK 0.2.145 与已发布 Runtime 0.1.10 package-root selector 合同。 -->
-<!-- [同步] 2026-09-15：在安装插件前检查 Runtime 0.1.10 的管理命令。 -->
-<!-- [同步] 2026-09-13：记录历史线程恢复的存储边界。 -->
+<!-- [输入] 当前 Dream/Admin 架构、AutoDL 直宿主发布与本机开发合同。 -->
+<!-- [输出] 用户优先的启动、使用、本机配置、验证与恢复入口。 -->
+<!-- [定位] 仓库中文 README；README.md 是同结构的英文正文。 -->
+<!-- [同步] 2026-09-18：将 AutoDL 启动与产品使用前置，恢复细节移入独立手册。 -->
 
-历史 Dream 线程对应的 Claude 会话在当前 Runtime 项目中不可用时，服务端会在
-同一业务线程内创建新 Claude 会话，保留笔记关联和历史消息。数据库和存储访问
-错误仍明确失败。详见[恢复合同与时序图](docs/design/claude-agent/claude-session-resume-resolution.md)。
-<!-- [同步] 2026-09-13：由当前前端入口提供 opaque MCP Apps 沙箱，不再固定额外端口。 -->
-
-<!-- [同步] 2026-09-13：记录 Notion 绑定启动的缺失相对 PATH 兼容和 config 读取诊断。 -->
-<!-- [同步] 2026-09-13：记录 MCP 连接详情的 Server 上报信息显示。 -->
-
-# Ink & Memory
-
-<!-- [Sync] 2026-09-15: 同步Chat Session工具broker与其余后台领域依赖。 -->
-<!-- [Sync] 2026-09-15: 同步公开Session的Admin消费端与独立后台授权依赖。 -->
-<!-- [Sync] 2026-09-15: 同步原子用户预留和Factory管理的服务器持久化委托生命周期。 -->
-<!-- [Sync] 2026-09-16: record the Admin-only production database boundary and retain the incremental migration journal as history. -->
-
-Admin 是统一认证中心和唯一生产数据库访问服务。Dream 启动不接收 PostgreSQL 凭据或连接池；严格 DTO client 调用具名 Admin operation，由 Service 与 typed Drizzle Repository 执行权限、锁、事务和持久化。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)、[数据库权威](docs/design/database-schema-authority.md)与[执行门槛](docs/exec/dream-admin-auth-data-plan.md)。私有 BFF 要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。登录、注册与 Google 认证由 Admin 执行。Dream 保留产品路由、Agent Runtime、SSE 与共享文件系统操作。
-
-服务端 consumer 还要求显式 `INK_ADMIN_DREAM_BASE_URL`、其精确 `INK_ADMIN_AUTH_ISSUER`、`INK_DREAM_API_RESOURCE` 与独立 `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`。在 Admin 中配置同一已注册 public origin/callback 与 resource。Service 凭据只在 BFF/backend 持有；公开 Runtime 续期只接收自身 purpose 委托。
-
-<!-- [同步] 2026-09-14：补充配置文件相对的 Next 编译根目录与停止服务后的缓存备份恢复。 -->
+# Ink & Memory Dream
 
 <p align="center">
   <img src="assets/banner.png" alt="Ink & Memory" width="700" />
@@ -64,97 +13,71 @@ Admin 是统一认证中心和唯一生产数据库访问服务。Dream 启动�
   <a href="README.md">English</a> · 中文
 </p>
 
-Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话，用 Deck 和 Agent 组织可复用能力，连接 Notion 或 MCP Server 等外部工具，并把想法发展成结构化 Dream 工作流和创作资产。
+Ink & Memory Dream 是面向长期对话、故事创作、可复用 Deck/Agent、文件、Notion 与 MCP 工具的 AI 写作工作空间。本仓库负责 Dream Web 应用与 FastAPI 业务 Runtime。
 
-本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
+## 在 AutoDL 启动
 
-## 当前运行边界
+1. 在 AutoDL 控制台打开正在运行的实例。
+2. 点击 **WebUI-6006** 打开 Dream，不需要 SSH 隧道。
+3. 从 Dream 原有登录卡进入。密码与 Google 登录由 Admin 处理，完成后返回原先请求的 Dream 页面。
+4. 打开或创建 Chat，选择 Deck/Agent，然后发送消息。
 
-Dream 生产模块不包含 PostgreSQL driver 或旧 database import；`server.py` 不加载数据库 URL，也不启动 pool。历史 SQL/schema/persistence helper 仅位于 `backend/tests/**`，用于隔离 parity 与 migration rehearsal。Runtime、turn/resume/cancel、资源策略 LKG、共享工作区路径和 `CLAUDE_CODE_TMPDIR` 语义保持不变。源码与确定性验证不能替代真实账户 Google/模型/业务验收。
+AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebUI-6006**，不要把公网主机名保存到源码或文档。**WebUI-6008** 是独立的 Admin 运维后台。
 
-## 迁移记录（历史阶段）
+| 入口 | 内部监听 | 用途 | 使用者 |
+| --- | --- | --- | --- |
+| **WebUI-6006** | Next.js `127.0.0.1:6006` | Dream 页面、同源认证/BFF 与 API 路由 | Dream 用户 |
+| Dream 后端 | FastAPI `127.0.0.1:8765` | Agent Runtime、SSE、业务编排与共享文件 | 私有；由 Next.js 访问 |
+| **WebUI-6008** | Admin `127.0.0.1:6008` | 认证、数据库接口、Gateway 与管理后台 | Admin 运维人员 |
+| 嵌入式 PostgreSQL | `54329` | Admin 管理的认证与业务持久化 | 私有；Dream 没有凭据 |
 
-下方按日期保留增量迁移过程。段落中的“仍需迁移”描述对应历史阶段；现行边界以本节和关联架构文档为准。
+实例重启后 WebUI 不可用时，按 [AutoDL 恢复手册](docs/deploy/autodl-recovery.md)检查。手册覆盖状态、日志、重启与完整发布，不打印 secret，也不删除持久数据。最新发布证据见 [2026-09-18 发布回执](docs/exec/exec_autodl_release_20260918.md)。
 
-资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership、初始 user-message 预留、Editor 持久化及用户/Thread SystemConfig 已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；服务器 user-turn 委托沿用既有 Factory 生命周期；Gateway CLI 凭据、内部 dispatcher 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
+## 使用 Dream
 
-Browser session读取丢弃取消或过期响应。注销使旧read失效，失败保留已验证session；AuthContext只提交当前公开snapshot。
+- **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
+- **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
+- **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。
+- **文件** 保存在 Thread 工作区，继续执行路径规范化、所有权检查和共享文件系统边界。
+- **Resource Links** 连接 Notion 与受管 MCP Server；兼容的 MCP App 可显示在普通工具结果下方。
 
-资源Admin HTTP owner将后台read/observer write/final close串行化；停机先停止producer并drain Factory，再off-turn关闭该owner。关闭后不重开、不发新请求。
+![Dream 写作工作区](assets/writing-area.png)
 
-公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与其余purpose consumer仍需迁移。
+使用 MCP 连接时，打开 **Settings → Resource Links**，新增或选择 Server，完成授权，然后在 usage policy 中启用 **Use App in Chat**。App 关闭或不可用时，普通工具结果仍保留。完整流程见 [MCP Apps 设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)。
 
-公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。公开Agent的Thread读取、SDK-native session ID回写、最近写作Session上下文、Chat Session工具projection和complete/cancelled/error assistant消息都使用该绑定grant。user/session/assistant写共享原receipt恢复，Session仅复用最近一次确认回写。内部dispatcher的assistant写、Reflections后台Session消费者、Gateway凭据及其他数据库领域仍需迁移。
+## 认证与数据边界
 
-公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。同一`session.list`合同为Agent prompt与Chat `get_sessions_range`接受精确绑定Thread的`server-persistence` grant。turn-local私有loopback broker只向user MCP提供strict projection，不传actor、数据库或Admin凭据；child保留原fuzzy、labels、limit与vector接口行为。broker启动失败在Runtime前终止，关闭时先drain在途读取。Reflections后台读取仍需独立授权合同。
+Admin 是认证中心和唯一生产数据库访问服务。Dream 通过 typed DTO client 调用具名且带版本的 Admin operation；Admin Service 与 typed Drizzle Repository 负责权限、事务、锁与持久化。
 
-公开Deck内容state/preview/commit/history/detail已使用五项typed Admin operation与精确schema capability。Admin执行snapshot/hash/CAS/版本事务；Dream还原原rawsnapshot响应，保留安全冲突详情及未知提交ID，不自动重发。其余Deck/Voice操作、插件文件验证与Runtime消费端仍需迁移。
+Dream 产品用户与 Admin 运维账号属于不同业务身份。登录 Dream 不会获得 Admin 管理权限。Google 是 Admin Better Auth 的外部身份来源；Dream 业务接口不接受 Google token 或任意用户 ID 请求头。
 
-公开Deck Claude Plugin refs已使用Admin list/prepare/replace。Dream先复用原制品摘要与CLI兼容检查，再提交绑定来源metadata的evidence；其它Plugin安装/Runtime数据仍需迁移。
+Dream 继续负责产品路由、Agent Runtime、EventBus、SSE、turn/resume/cancel 行为与授权后的共享文件操作。Dream 不持有 PostgreSQL 密码，不存在生产 SQL/ORM 路径、migration、runtime DDL 或数据库 fallback。Admin Drizzle 是唯一 Schema 与 migration 权威。
 
-公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、first-login写与后台偏好上下文仍是独立领域；SystemConfig由下述专用operation处理。
+```mermaid
+flowchart LR
+  Browser["Dream 浏览器"] -->|"WebUI-6006"| Next["Dream Next.js / BFF"]
+  Next -->|"同主机私有路由"| FastAPI["Dream FastAPI"]
+  Next -->|"OAuth / Session"| Admin["Admin Better Auth"]
+  FastAPI -->|"typed DTO operation"| Admin
+  Admin -->|"Drizzle Repository / 事务"| PG[("PostgreSQL")]
+  FastAPI -->|"授权文件操作"| FS[("共享文件系统")]
+```
 
-Settings GET/PUT 已使用 Admin 用户 SystemConfig operation；PUT 确认 patch 后执行一次独立 fresh read。公开 Chat 读取一份 OAuth snapshot，并复用于模型选择和附件。活动 turn 在 prompt、Workspace 或 Runtime 组装前通过精确 Thread persistence grant 读取。配置损坏或不可用时直接失败，不回退 Dream 数据库。Gateway 模型选择必须收到显式授权 snapshot，因此缺少 owner 的内部 dispatcher 仍是明确迁移依赖。
-
-公开 Reflections 配置 GET/PUT/DELETE 已使用三项 OAuth Admin operation。save/delete 响应丢失时只查询原 request receipt，不发送第二次写入。`memory-init` 先通过 Admin 确认 Chat Thread 归属，再读取用户自定义分区配置，与 Dream 静态提示词默认值合并，最后写入共享工作区。缺少长期 owner 的后台 Reflections worker 仍从 Dream 剩余数据库路径读取自定义配置及 task/result 状态。
-
-共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
-
-公开邀请码、好友申请/关系与好友历史图片已使用九项typed Admin operation。Admin执行邀请码policy和原子状态转换；Dream保留整数ID、label、时间、错误及未知写入ID。其它数据库域与正常真实业务验收仍需完成。
-
-公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
-
-公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试保留完整 28 字段及原 200/201。依赖默认 Workspace 的 Workflow 入口已在这些领域前使用注册的 Admin workspace-default.ensure，原文本 ID 保持；初始化要求 OAuth dream:write，服务器尚无 Workspace 的 Run GET 也遵守此要求。未知提交保留原请求 ID，不自动重发。其他 lifecycle/launch 和 internal agent-output 持久化继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
-
-Story Workflow、Deck binding 与 Deck Plugin 的 current-user 依赖已共用 Admin 默认 Workspace resolver。Deck Plugin 角色查询复用当前 Admin profile 的 OAuth read scope/canonical ID 校验，原权限判断保留。其余领域和后台持久化继续待迁移。
-
-已注册 Run fail 与 launch failure-envelope 消费者保留历史 failed 回复、原始错误文本和原 receipt ID。生产 launch recorder 仍需 Admin turn owner，并保持两个独立提交；类型技术验证不等于正常模型验收。详见[失败规则](docs/design/dream-launch-admin-metadata-current.md)。
-
-公开 Workflow Run cancel 已使用注册的 Admin command，保留原 reason、完整 28 字段响应、业务错误和原请求有界 receipt。Agent 取消流程保持原行为。
-
-Launch source/claim/finish类型消费者和原application source adapter已按注册75准备。生产endpoint仍待传递当前OAuth actor，prepare/Voice/failure SQL也仍存在。详见[metadata准备规则](docs/design/dream-launch-admin-metadata-current.md)。
-
-全部公开 Workspace 文件路由在文件系统访问前通过 OAuth 读取当前用户 SystemConfig。content/download 仍先检查 Thread 所有权，再执行 Workspace Mode、路径与文件检查。缺失 Thread 保留 404，配置或 metadata 故障返回安全 503；文件、ZIP 与 no-create 行为保持，其他文件管理数据依赖仍待迁移。
-
-公开Deck详情已读取单项typed Admin aggregate，还原原owner ID、时间和legacy Memory值。Admin producer对空Memory的投影差异仍列为待修正项。
-
-公开Deck update/delete/publication/collection/parent-sync已使用五项Admin command。原结果和依赖冲突反馈保留；Admin执行锁与事务，未知写保留原请求ID。[现行规则](docs/design/deck-mutations-current.md)。
-
-公开Voice create/update/delete/collect已使用四项Admin command。raw Memory JSON及省略/null/empty保持原规则；Admin执行defaults、order、行锁和draft变化。其余Deck及后台数据仍需迁移。
-
-## 你可以做什么
-
-- **写作与回顾**：保存写作会话、浏览时间线并查看反思。
-- **持续对话**：在 Thread 中保留上下文，使用流式回答、工具、计划、文件和 TODO。
-- **预览生成的报告**：在 Chat 内打开工作空间 Markdown 报告和 PNG/JPEG/GIF/WebP 图片链接，图片绑定当前 Thread，下载保留为独立操作。
-- **构建可复用 Agent**：用 Deck 组织提示词、资源、插件与 Agent 行为。
-- **运行 Dream**：通过引导工作流发展剧本、故事板、提示词与生成资产。
-- **连接自己的工具**：在设置中授权 Notion 或受管 MCP Server。
-- **使用交互式 MCP Apps**：兼容工具返回 App 时，可在已折叠的助手过程下方直接操作。
-
-MCP Apps 当前仍是技术预览。当 App 未启用、不可用或加载失败时，普通工具结果仍会保留。生产启用还需要独立的真实账号、外部 Server、OAuth 与运维验收。
-
-## 本机启动
+## 本机运行
 
 ### 环境要求
 
-- macOS 或 glibc Linux，arm64/x64
-- Python `>=3.12` 与 [uv](https://docs.astral.sh/uv/)
-- Node.js `>=22 <25`、Corepack 和 npm
-- Admin 仓库，用于提供 PostgreSQL 与模型 Gateway
-
-已资格化的原生 Runtime 不支持 Windows 和 musl 平台。
-
-### 1. 获取 Dream 与 Admin
+- Dream `develop` 分支；Admin `main` 分支
+- Python `>=3.12` 与 `uv`
+- Node.js `>=22 <25`、Corepack 与 `pnpm@10.28.1`
+- Admin 与 Dream 位于相邻目录
 
 ```bash
 git clone https://github.com/glide-the/im-dream.git ink-dream-memory
 git clone https://github.com/glide-the/dream-im-platform.git ink-admin-memory
 ```
 
-除非经评审的发布版本另有说明，Dream 使用 `develop` 分支，Admin 使用 `main` 分支。
-
-### 2. 准备 Admin、PostgreSQL 与 Gateway
+准备 Admin、嵌入式 PostgreSQL、Gateway 与服务身份：
 
 ```bash
 cd ink-admin-memory
@@ -163,31 +86,19 @@ pnpm env:setup
 pnpm env:check
 pnpm db:migrate
 pnpm db:migrate:check
-```
-
-首次本机安装时，先按 Admin README 配置 `.env.local`，然后创建默认订阅和 Dream 服务身份：
-
-```bash
-pnpm db:data:subscriptions -- --apply
 pnpm product:provision-local-dream
 pnpm gateway:provision-local-dream
+pnpm local:stable
 ```
 
-这些命令会写入 Admin 所有的数据。除非有独立的部署评审，只能对预期的本机数据库执行。
-
-### 3. 安装 Dream 与 Runtime
-
-`develop` 源码合同要求已发布 Runtime `0.1.10`。2026-09-15，五个公开 npm 归档已逐字节核对为同 SHA 四平台 CI 制品，registry `latest` 为 `0.1.10`。不要把当前 Dream 源码与 Runtime `0.1.4` 混用；resolver 会按设计 fail closed。详见[发布与本机采用回执](docs/deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)。
+安装 Dream 与精确版本 Runtime：
 
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
-
 npm install --global @glide-the/ink-claude-code-dream@0.1.10
-export PATH="$(npm prefix --global)/bin:$PATH"
-ink-claude-code-dream --version
-
 npm install --global ntn@0.15.1
+ink-claude-code-dream --version
 ntn --version
 
 cd ../frontend
@@ -195,254 +106,70 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-Runtime 必须输出 `2.1.241 (Claude Code)`。两个 npm 命令 alias 都必须解析到 package-root `cli.js`，其相邻 `release-manifest.json` 必须声明 Runtime `0.1.10`；Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
+Runtime 必须输出 `2.1.241 (Claude Code)`。`uv` 管理 Python SDK，npm 管理原生 Runtime 与 Notion CLI，pnpm 管理 Web workspace；`uv sync` 不会安装 Runtime。
 
-### 4. 配置 Dream
+从示例创建 `backend/.env` 与 `frontend/.env.local`。配置明确的 Admin origin/issuer、Dream resource 以及已注册的 service/BFF identity。Dream env 不得包含 `DATABASE_URL` 或 Provider secret。
 
-从示例创建 `backend/.env`，并配置 Admin API 和你的工作区根目录：
-
-```bash
-cd ../backend
-test -f .env || cp .env.example .env
-```
-
-```dotenv
-INK_GATEWAY_ENABLED=1
-INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
-INK_ADMIN_DREAM_BASE_URL=http://127.0.0.1:3000
-
-AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
-INK_AGENT_SANDBOX_ENABLED=true
-INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
-```
-
-Provider Key 只保留在 Admin，不要复制到 Dream。
-
-### 5. 启动三个服务
-
-终端 A——Admin 与 Gateway：
+分别启动拥有的服务：
 
 ```bash
-cd ink-admin-memory
-pnpm dev
-```
-
-终端 B——Dream 后端：
-
-```bash
+# Dream backend
 cd ink-dream-memory/backend
-.venv/bin/python server.py
-```
+uv run uvicorn server:app --host 127.0.0.1 --port 8765
 
-终端 C——Dream Web：
-
-```bash
+# Dream frontend
 cd ink-dream-memory/frontend
-INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 \
-NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 \
-corepack pnpm run dev --hostname 127.0.0.1 --port 5173
+INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
 
-打开：
-
-- Dream：<http://127.0.0.1:5173>
-- Admin：<http://127.0.0.1:3000/admin>
-- Dream API：<http://127.0.0.1:8765>
-
-## 使用 MCP Apps
-
-### 本机预览服务
-
-沿用现有 Admin、后端与 Next.js 服务。进入连接详情前先启动外部 MCP
-Server；Next.js 已包含 Host。在已有预览与插件策略配置基础上，Next.js 也提供
-`/mcp-apps-sandbox`。地址跟随浏览器当前前端入口的协议、主机名和端口，
-无需额外的沙箱进程或端口。旧 `INK_MCP_APPS_SANDBOX_URL` 与
-`INK_MCP_APPS_PARENT_ORIGINS` 不再使用。
-两层 iframe 及沙箱响应 CSP 均不带 `allow-same-origin`，强制文档使用 opaque
-origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认证与权限规则不变。
-如果发现操作早于 MCP Server 启动，启动后重新进入或刷新详情页；有效的失败
-缓存可能保留至 TTL 到期。如果 App 已降级，在前端与外部 MCP Server 可用后点击
-**Try interactive view again**。详见[本机恢复设计与证据](docs/exec/mcp-apps/local-startup-recovery.md)。
-
-### 添加连接并启用 App
-
-1. 登录 Dream，打开 **设置 → 资源链接**。
-2. 点击 **添加 MCP 服务**，在弹窗中填写受管地址；也可以打开已有连接，然后完成鉴权。
-3. 在连接详情页找到 **使用策略**。
-4. 打开 **在聊天中使用 App**。如有需要，再允许 **低风险工具调用** 和 **向聊天发送消息**。
-5. 修改会自动保存；保存失败时保留你的选择并重试，无需寻找保存按钮。
-
-连接详情在 Server 上报名称和版本时显示这些信息。缺少 Server 信息不会隐藏工具、资源或提示模板。详见[资源连接器现行设计](docs/design/claude-mcp/claude-mcp-resource-connector-current-design.md#7-api-合同)。
-
-以下截图使用安全示例数据和真实生产界面组件，不包含账号信息或密钥。
-
-![填写名称、传输方式和 URL 以添加受管 MCP 连接](assets/mcp-apps-guide/01-add-mcp-connection.png)
-
-*从资源链接打开“添加 MCP 服务”弹窗并填写受管地址。Dream 连接 Server 后会自动判断认证要求。*
-
-![启用 MCP App 并选择允许的交互能力](assets/mcp-apps-guide/02-configure-mcp-app.png)
-
-*同一个使用策略区包含 App 开关与交互选项。当前界面自动保存，已不再显示历史截图中的状态或保存页脚。*
-
-默认策略、你保存的选择与服务端实际状态保持独立。当连接离线、Server 没有声明 App，或服务端预览策略未允许时，开关即使已开启，App 也可能不可用。
-
-### 在 Chat 中调用和使用 App
-
-1. 打开 Chat，选择可使用该连接的 Deck/Agent。
-2. 请 Agent 使用对应 MCP 工具，例如“查一下服务器时间”。
-3. 模型会按正常流程调用工具，并写出回答。
-4. 助手的思考过程和普通工具详情保留在 **查看过程 / 用时…** 折叠区中。
-5. 已验证的交互 App 会显示在折叠区外，因此收起过程不会隐藏 App。
-6. 直接使用 App 里的按钮或输入框。已允许的 App 内工具操作会更新 App，不会启动新的模型 turn；如果 App 向 Chat 发消息，该消息会成为普通用户消息，并启动一个新 Agent turn。
-
-![MCP 工具详情已折叠，但交互 App 仍显示在下方](assets/mcp-apps-guide/03-use-mcp-app-in-chat.png)
-
-*顶部工具详情已经收起；下方官方示例 App 仍可直接操作。*
-
-你可以关闭和重新打开交互视图。刷新、切换 Thread、修改权限或改变连接 revision 时会创建新的受控 session，不会重放原始工具。
-
-Dream 会将原 Runtime 的 SDK MCP 文本、content 数组和 metadata envelope
-结果适配为 App 可用的 content，不解析文本或改变权限。更新 Python 代码后，
-先重启自己拥有的后端，再通过正常 Chat 发起新的工具调用。已丢失 SDK envelope
-的旧记录仍保留普通结果；Dream 不伪造缺失 metadata，也不重放这些工具。
-
-完整工程链路——连接 discovery、模型工具调用、调用关联与结果 DTO 校验、实时/历史恢复、Browser Host、Node 代理、sandbox、权限与 Chat 消息回流——请见 [MCP Apps 与 IM Agent UI 设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)。
+Dream 地址为 <http://127.0.0.1:5173>，Admin 地址为 <http://127.0.0.1:3000/admin>。
 
 ## 支持版本与所有权
 
-| 组件 | 支持版本 / 所有者 |
+| 组件 | 当前合同 |
 | --- | --- |
-| Dream 集成分支 | `develop` |
-| Dream 项目元数据 | backend `0.1.4`、frontend `0.0.4`；API schema 仍为 `2.0.0` |
-| Python | `>=3.12` |
-| Node.js | `>=22 <25`；部署镜像使用 Node 22 |
-| 前端包管理器 | Corepack 提供的 `pnpm@10.28.1` |
-| Next.js / React | `next@16.1.6`、`react@19.1.0`、`react-dom@19.1.0` |
+| Dream metadata | backend `0.1.4`、frontend `0.0.4`、API schema `2.0.0` |
+| Next.js / React | `16.1.6` / `19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| 原生 Runtime | 已发布 `@glide-the/ink-claude-code-dream@0.1.10`；截至 2026-09-15 registry `latest` 为 `0.1.10` |
-| Runtime 兼容输出 | `2.1.241 (Claude Code)` |
+| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.10` |
+| Runtime compatibility | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
-| PostgreSQL schema 与数据访问、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
-| Dream Web、Thread/Run/Workspace 集成 | 本仓库 |
+| 认证、PostgreSQL、Drizzle、Gateway、计费 | Admin 仓库 |
+| Dream Web、Runtime、SSE、Thread/Run 与文件 | 本仓库 |
 
-包所有权是明确分开的：`uv` 管理 Dream Python 环境，npm 发布原生 Runtime 和 Notion CLI，pnpm 管理 `frontend/`。`uv sync` 不会安装或升级原生 Runtime。
-
-遇到 Notion `Failed to read config.json`，应区分文件读取失败和 JSON 损坏，并检查最终 Agent Bash 绑定。Runtime 0.1.10 会拒绝原生 `ntn` 候选之前的相对 PATH 项。Dream 只在该绑定启动的 SDK 环境中移除当前 thread cwd 下已证实不存在的相对目录，保留有效命令顺序和所有严格 shadow 检查；不修改 shell profile、父 PATH、凭证或非 Notion turn。仅 `ntn doctor` exit 0 不足以证明正常：须检查警告，并通过正常 Chat 验证只读请求。
-
-Runtime `0.1.10` 保留唯一原始 `src` 实现（1,902 个内容不变的文件、35 个原始模块目录），删除重复 `restored-src`。默认构建读取 `src/entrypoints/cli.tsx`，不维护第二套 Runtime 实现。source-bound headless、MCP 和 Dream 兼容变换仍位于构建层，制品保留原始版权与用户确认的再分发边界。Dream 精确 Runtime pin 和项目元数据原子更新；本机采用必须另有公开归档验证及明确拥有的后端启动身份，不能仅从源码推断。详见[发布与本机 Dream 接入方案](docs/deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)。
-
-Admin Drizzle 是共享 PostgreSQL migration 的唯一所有者。Dream 只消费精确发布的 capability，缺失时 fail closed。MCP App 连接设置要求先发布 Admin migration `0053_rare_lenny_balinger` 与 capability `dream.mcp-app-connection-settings.v1`，再发布对应 Dream 代码。
-
-## 构建与测试
-
-常用 provider-free 检查：
+## 构建与验证
 
 ```bash
-# 后端
-PYTHONPATH=backend uv run --native-tls --project backend --frozen \
-  --with pytest==9.1.1 --with pytest-asyncio \
-  python -m pytest backend/tests -q
+# Backend provider-free suite
+PYTHONPATH=backend uv run --native-tls --project backend --frozen   --with pytest==9.1.1 --with pytest-asyncio   python -m pytest backend/tests -q
 
-# 前端
+# Frontend checks
 corepack pnpm --dir frontend exec tsc --noEmit --incremental false
 corepack pnpm --dir frontend lint
 NODE_ENV=production corepack pnpm --dir frontend build
 
-# MCP Apps Browser/Node 合同
-corepack pnpm --dir frontend test:mcp-apps-runtime
-corepack pnpm --dir frontend typecheck:mcp-apps
+# 已发布 SDK/Runtime 身份
+python3 scripts/verify_claude_registry_release.py   --sdk-version 0.2.145   --runtime-version 0.1.10   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
-SDK/Runtime 发布后 registry 验收：
-
-```bash
-python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.145 \
-  --runtime-version 0.1.10 \
-  --expected-cli-version '2.1.241 (Claude Code)'
-```
-
-只能从 pnpm/Next workspace 构建 standalone Web 镜像：
-
-```bash
-INK_NEXT_OUTPUT=standalone NODE_ENV=production \
-  corepack pnpm --dir frontend run build:docker
-test -f frontend/.next/standalone/server.js
-```
-
-MCP Apps 聚焦命令与当前 provider-free 证据请见 [MCP Apps 验收回执](docs/exec/mcp-apps/current-candidate-validation.md)。Provider-free 测试是技术检查，不代表生产环境已可用。
-
-## 安全与发布边界
-
-- Secret、Provider Key、MCP 凭据、对话全文和 Workspace 正文不得进入 Git 或 Browser 可见配置。
-- Dream 不会在运行时创建或迁移共享 schema。必须先应用经评审的 Admin Drizzle migration。
-- capability 缺失、Runtime/SDK 版本不匹配、revision 过旧、凭据不可用或策略非法时 fail closed；条件允许时仍保留普通 MCP 结果。
-- Browser MCP App 只连接通过认证的同源 Node 端点。真实 Server 地址与凭据保留在服务端，App 正文运行在受限 iframe sandbox 中。
-- 测试和本机 launcher 只能停止或删除自己创建的资源。
-- 只能回滚到经明确评审的不可变镜像或发布版本；不得恢复已退役的 npm/Vite 构建路径。
-- MCP Apps 在独立真实业务验收改变合同前保持生产关闭（`productionAppsEffective=false`）。
-
-部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 使用同一个 Next.js workspace 与 frozen pnpm lock，包含 server-only MCP Apps Runtime，并先在隔离端口验证不可变候选版本，再执行切换。成功发布会删除旧应用 release，不保留长期回滚版本；持久 Workspace 与共享 Artifact 永远不属于 release 清理范围。旧 Vite/npm/dist 发布路径不再支持。阿里云边缘把现有公开域名转发到显式 NATAPP Dream/Admin origins 时，应使用可恢复的[边缘转发流程](docs/deploy/natapp-edge-relay.md)，不得从 Compose 或历史端口猜测上游。
+Provider-free 检查证明确定性合同。真实 Google、模型与业务验收必须使用正常 Dream/Admin/Gateway/PostgreSQL 服务和已授权真实账号。
 
 ## 故障排查
 
-插件安装需要支持 `plugin` 管理命令的合格 Runtime，不能只看 `--version` 成功。Dream 默认复用 Agent 的 Runtime resolver，并在安装前检查 `plugin --help`，不会回退到 ambient `claude`。`INK_CLAUDE_CLI_PATH` 仍是 plugin-only 显式绝对可执行路径。Runtime `0.1.10` 恢复原有非交互 plugin 与 marketplace 命令。Admin `0.1.1` 与 Dream 已统一 canonical 路径组件摘要排序；Dream 只为已经不可变的 Admin `0.1.0` 回执重算旧整路径顺序，artifact 身份仍使用 canonical digest。见[插件管理合同](docs/design/deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同)。
+- **WebUI 返回 404 或无法打开：** 先确认 AutoDL 实例已运行，再按[恢复手册](docs/deploy/autodl-recovery.md)检查；不要新增隧道或硬编码当前公网主机名。
+- **Unable to check your session：** 验证两个 WebUI 映射，先检查 Admin，并确认 issuer、Dream origin/resource 与 callback 都来自当前实例。
+- **`ADMIN_SERVICE_AUTH_UNAVAILABLE` 或 `ADMIN_TIMEOUT`：** 先验证 Admin 与 PostgreSQL，再重启 Dream；Dream 不得回退数据库连接。
+- **Runtime 未通过 production qualification：** 核对 `command -v ink-claude-code-dream`、package-root `cli.js`、相邻 manifest、Runtime `0.1.10`、compatibility `2.1.241` 与必需 capability。
+- **`uv sync` 删除 pytest：** 使用上面的临时 `uv run --with pytest...` 命令，或单独评审开发依赖。
+- **Chat 提示 Token allowance 不足：** Gateway 拒绝模型 reservation 前，用户消息已保存。先在 Admin 修正订阅/模型额度，重新加载 Thread 后再决定是否发送。
+- **MCP App 没有显示：** 检查连接状态、App advertisement、usage policy 与 Admin capability；普通工具结果是预期 fallback。
 
-如果 Next 报 `Could not find the module ... in the React Client Manifest`，先检查编译根目录与缓存，不要直接改业务模块。`frontend/next.config.js` 从自身文件位置确定 `turbopack.root`，不依赖启动 cwd 或祖先锁文件。停止前端，确认 `.next/dev/lock` 没有活跃进程，再仅将 `frontend/.next` 移到独立备份目录，重新启动生成缓存。不要删除父目录锁文件、重装无关依赖、移动环境/数据库文件或降低 client boundary。配置回归：`corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line`（无需浏览器或服务）。
+## 文档
 
-### App 没有出现
-
-- 确认 MCP 连接已连接，且该工具声明了 App。
-- 打开 **设置 → 资源链接 → 对应连接 → 使用策略**，对比默认策略、你保存的选择与实际状态。
-- 确认 Admin migration `0053_rare_lenny_balinger` 已应用，且 `dream.mcp-app-connection-settings.v1` 已发布。
-- 连接 inventory 刷新后重试 Chat 调用。对于紧凑历史行，首次展开过程会加载已保存详情；加载后再收起，App 仍会保持可见。
-- 策略、鉴权或 sandbox 不可用时，普通结果是预期 fallback。
-
-### `Dream Claude Runtime is not production-qualified`
-
-```bash
-command -v ink-claude-code-dream
-readlink "$(command -v ink-claude-code-dream)"
-ink-claude-code-dream --version
-cd backend
-.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
-```
-
-当前源码要求 Runtime `0.1.10`，并输出 `2.1.241 (Claude Code)`。默认 npm 目标必须解析到 package-root `cli.js`；Dream 会读取同目录 `release-manifest.json`，校验精确版本、`runtime.entrypoint`、stream protocol、14 项必要 capabilities、生产标记和 selector 摘要。另行资格化且禁止再分发的 AutoDL local-core 制品保留精确的 `bin/ink-claude-code-dream` 入口、release-root manifest 和 13 项 baseline capability。Dream 会区分两种布局，而不会把其中一种冒充另一种；旧 registry 包、布局声明不匹配或仅 fixture 的候选证据都会被拒绝。将精确发布版本安装到普通 `PATH`，再只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的绝对路径回滚。
-
-### `uv sync` 删除了 pytest
-
-`uv sync` 会删除未声明包。请使用[构建与测试](#构建与测试)中的临时 `uv run --with pytest...` 命令，或在独立评审中增加开发依赖。
-
-### Web 页面无法连接 API 或语音
-
-本迁移分支的 REST/SSE/文件请求固定 Next 同源并通过认证 Route Handler。以仅服务端的 `INK_BACKEND_INTERNAL_URL`（或 `BACKEND_URL`）配置后端 origin，并检查 Admin service 配置与 BFF cookie。通用 API/auth rewrite 已移除。保留显式语音 WebSocket 配置；后端 speech recognition 继续关闭。
-
-### 构建仍要求 npm/Vite 文件
-
-当前 Web workspace 使用 Corepack/pnpm、Next、`.next` 和 `frontend/pnpm-lock.yaml`。查找 `frontend/package-lock.json`、`vite.config.ts` 或生产 `dist/index.html` 的 workflow 已过时。
-
-### Chat 提示订阅周期 Token 不足
-
-Dream 会在模型执行前保存用户消息。如果 Chat 显示**当前订阅周期 Token 不足**，表示 Gateway 因本订阅周期无法预留本次请求所需 Token 而拒绝模型请求；这与 Admin DTO 持久化失败无关。请通过 Admin 支持的订阅额度或模型配置进行调整，然后重新加载对话、确认保存状态，再决定是否重新发送。不要连续重试，也不要直接修改订阅账本记录。
-
-Dream 会为各业务调用复用一份经过完整校验的不可变 Admin capability snapshot；每个业务请求仍由 Admin 执行身份认证、权限校验、DTO 校验和事务处理。显式 capability 刷新会先使 snapshot 失效，刷新失败时保持关闭状态。
-
-### PostgreSQL capability 或模型不可用
-
-执行 Admin migration check，核对 Admin 所有的环境文件，并在 Admin 中配置 enabled/priced 模型 alias 与 Provider credential。Dream 只接受平台模型 alias，不接受 Browser 提供的 Provider ID 或 Key。
-
-## 更多文档
-
-- [MCP Apps 端到端设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)
-- [MCP Apps 当前技术证据](docs/exec/mcp-apps/current-candidate-validation.md)
-- [仓库维护规则](Agent.md)
-- [Agent 产品行为](docs/Agent.md)
+- [AutoDL 部署](deploy/autodl-ssh/README.md)
+- [AutoDL 恢复](docs/deploy/autodl-recovery.md)
+- [项目架构](docs/architecture/项目架构设计说明.md)
+- [认证与数据合同](docs/architecture/admin-auth-data-interaction.md)
+- [仓库规则](Agent.md)
+- [产品 Agent 行为](docs/Agent.md)
 - [规则索引](docs/rules/README.md)
-- [部署指南](deploy/README.md)
-- [SDK/Runtime 打包](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)
-- [Registry 验收](docs/deploy/claude-registry-release-acceptance.md)
-
-保持 `README.md` 与 `README.zh.md` 结构一致。保留工作区无关改动，同步受影响的文件头与目录合同，并报告精确验证命令和剩余发布动作。
-
-导出多个文件时，Agent 可在工作区根目录用明确的 `.zip` 输出路径和明确的普通输入路径运行 `zip`（例如 `zip -r files/export-bundle.zip files/scene`），再链接生成的真实二进制压缩包；也可链接独立的工作区目录，由下载服务即时打包真实 ZIP。点前缀运行路径、工作区越界、符号链接、宽泛的 `.`/glob 输入和 shell 组合命令仍会被拒绝。生产后端镜像和 AutoDL 直宿主发布均安装 Info-ZIP 以支持这条路径。
