@@ -1,8 +1,9 @@
 # [Input] Frozen Admin resource operation contracts, service identity and existing diagnostics DTO.
-# [Output] Typed HTTP desired-policy reader and serialized observer writer with receipt recovery.
+# [Output] Typed HTTP desired-policy reader and serialized idempotent observer writer with receipt recovery.
 # [Pos] Admin resource domain consumer; composition root owns its lifetime, never the Agent turn.
 # [Sync] 2026-09-14: consume real input/output contract hashes and retain unknown writes by original ID.
 # [Sync] 2026-09-15: serialize policy reads, observer writes and final close; closed owners cannot reopen.
+# [Sync] 2026-09-18: resume an absent unknown observer write with its exact request ID and immutable DTO.
 # [Sync] 2026-09-17: reuse the background client's validated capability snapshot across policy heartbeats.
 """Resource-domain adapter; no SQL, remote UOW, user impersonation or automatic replay."""
 
@@ -87,6 +88,7 @@ RESOURCE_OPERATIONS = (RESOURCE_POLICY_READ, RESOURCE_OBSERVER_PUBLISH)
 class _PendingObserverWrite:
     request_id: str
     input_sha256: str
+    input_dto: ResourceObserverPublishInputDTO
 
 
 class AdminResourceData:
@@ -128,7 +130,20 @@ class AdminResourceData:
             if self._pending is not None:
                 receipt = client.receipt(RESOURCE_OBSERVER_PUBLISH, self._pending.request_id)
                 if isinstance(receipt, AbsentReceiptDTO):
-                    raise AdminDataError("ADMIN_WRITE_OUTCOME_UNKNOWN", 503, self._pending.request_id, True)
+                    # This observer operation is explicitly idempotent at the
+                    # Admin receipt boundary: the same request ID is guarded by
+                    # an advisory transaction lock and the same immutable DTO
+                    # digest. Re-dispatching that exact pair either waits for
+                    # the original transaction and reads its receipt, or safely
+                    # performs the previously absent upsert. A later snapshot
+                    # is intentionally dropped; the capacity-one publisher
+                    # supplies the latest value on its next interval.
+                    serialized = json.dumps(self._pending.input_dto.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                    if sha256(serialized.encode()).hexdigest() != self._pending.input_sha256:
+                        raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 503, self._pending.request_id, True)
+                    client.execute(RESOURCE_OBSERVER_PUBLISH, self._pending.input_dto, self._pending.request_id)
+                    self._pending = None
+                    return
                 self._pending = None
             client.capabilities_snapshot(str(uuid4()))
             serialized = json.dumps(input_dto.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -136,5 +151,9 @@ class AdminResourceData:
                 client.execute(RESOURCE_OBSERVER_PUBLISH, input_dto, request_id)
             except AdminDataError as error:
                 if error.outcome_unknown:
-                    self._pending = _PendingObserverWrite(request_id, sha256(serialized.encode()).hexdigest())
+                    self._pending = _PendingObserverWrite(
+                        request_id,
+                        sha256(serialized.encode()).hexdigest(),
+                        input_dto,
+                    )
                 raise

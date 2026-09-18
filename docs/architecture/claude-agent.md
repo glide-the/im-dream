@@ -197,7 +197,7 @@ SDK 的 Provider/Gateway 连接使用服务端允许的 `ANTHROPIC_*` 投影；`
 
 Admin 持有的 PostgreSQL desired 仅由独立 HTTP provider/refresher 在 composition root 周期读取，不进入 turn 主路径。合法更高 revision 无需重启即可通过公开 replacement 应用于后续 acquire；same revision/same config 不重复 replace，只刷新 diagnostics 状态与加载时间。invalid、Admin/capability/PG unavailable、revision 回滚、same revision/different config 或后台异常均保留 LKG effective/revision，且不改变现有 lease、admission 判断顺序、Runner、ThreadFactory、service、EventBus、SSE 或 turn/resume/cancel 状态机。
 
-资源首批生产代码已接 `resource-policy.read` 和 `resource-observer.publish`：strict Pydantic 与 Admin 实际 input/output 版本及 SHA256 匹配后才调用。read 区分 configured/not_configured/invalid，响应或连接失败为 unavailable。observer 保留原 capacity-one 最新队列、timeout 隔离和单 worker；Admin 负责 DB clock、TTL、业务/审计/receipt 同事务，Dream unknown 写按原 request_id 查询回执，absent 时暂停后续 snapshot 写入。文件/类中的 `PostgresSink` 历史标识不代表仍有 SQL。该代码接入不是正常本机 Admin 已部署证据，其他生产 DB/旧 token authority 仍待迁移。详见 [交互设计](admin-auth-data-interaction.md) 和 [执行计划](../exec/dream-admin-auth-data-plan.md)。
+资源首批生产代码已接 `resource-policy.read` 和 `resource-observer.publish`：strict Pydantic 与 Admin 实际 input/output 版本及 SHA256 匹配后才调用。read 区分 configured/not_configured/invalid，响应或连接失败为 unavailable。observer 保留原 capacity-one 最新队列、timeout 隔离和单 worker；Admin 负责 DB clock、TTL、业务/审计/receipt 同事务。Dream unknown 写先按原 request ID 查询回执；committed 直接完成，absent 则只重发相同 request ID 与保存的 immutable DTO，Admin 的 advisory transaction lock、input digest 和 receipt 使并发中的原请求与恢复请求串行且不重复副作用。恢复完成前不发送更新快照，其他业务写入仍禁止重发。文件/类中的 `PostgresSink` 历史标识不代表仍有 SQL。详见 [交互设计](admin-auth-data-interaction.md) 和 [执行计划](../exec/dream-admin-auth-data-plan.md)。
 
 ### 5.3 功能配置
 
