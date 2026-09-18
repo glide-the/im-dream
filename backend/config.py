@@ -5,6 +5,7 @@
 # [Sync] 2026-08-14: define the screenplay-creation Deck template, retire legacy
 #                    system Deck defaults, and select drama-forge v1.0.1 for new Decks.
 # [Sync] 2026-08-31: remove retired daily-picture generation tuning.
+# [Sync] 2026-09-19: add the music-creation team to the code-owned system Deck template registry.
 """Voice archetypes and product-default configuration."""
 
 import os
@@ -25,6 +26,7 @@ DEFAULT_SYSTEM_DECK_ID = os.getenv(
     "INK_DEFAULT_SYSTEM_DECK_ID",
     "screenplay_creation_deck",
 ).strip()
+MUSIC_SYSTEM_DECK_ID = "music_creation_deck"
 RETIRED_SYSTEM_DECK_IDS = _csv_env(
     "INK_RETIRED_SYSTEM_DECK_IDS",
     "introspection_deck,scholar_deck,philosophy_deck",
@@ -96,6 +98,41 @@ SCREENPLAY_DECK_TEMPLATE = {
         },
     ),
 }
+
+MUSIC_DECK_TEMPLATE = {
+    "id": MUSIC_SYSTEM_DECK_ID,
+    "name": "音乐创作",
+    "name_zh": None,
+    "name_en": None,
+    "description": "Describe your deck here",
+    "description_zh": None,
+    "description_en": None,
+    "icon": "brain",
+    "color": "blue",
+    "voices": (
+        {
+            "id": "music_style_lyrics_creator",
+            "name": "风格和歌词生成",
+            "name_zh": None,
+            "name_en": None,
+            "system_prompt": "You are a helpful assistant.",
+            "icon": "brain",
+            "color": "blue",
+        },
+    ),
+    "plugins": (
+        {
+            "package_name": "yue2",
+            "marketplace": "yue2-skills",
+            "resolved_version": "0.4.0",
+        },
+    ),
+}
+
+SYSTEM_DECK_TEMPLATES = (
+    SCREENPLAY_DECK_TEMPLATE,
+    MUSIC_DECK_TEMPLATE,
+)
 
 # Runtime model routing and credentials are intentionally absent here. Every
 # inference entrypoint resolves an Admin-published alias through

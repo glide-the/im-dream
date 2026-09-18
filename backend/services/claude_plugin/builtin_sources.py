@@ -6,6 +6,8 @@ digest → immutable artifact → pack pipeline as marketplace installs; the rea
 CLI evidence for them is ``claude plugin validate`` plus the recorded file
 inventory and digest (there is no marketplace install step for a
 repository-owned directory).
+
+[Sync] 2026-09-19: register the repository-owned yue2-skills local marketplace.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ KNOWN_MARKETPLACE_REPOS: dict[str, str] = {
 # (drama-forge-workspace-init-design §3.3 / C8).
 KNOWN_MARKETPLACE_LOCAL_PATHS: dict[str, str] = {
     "drama-studio": "marketplaces/drama-studio",
+    "yue2-skills": "marketplaces/yue2-skills",
 }
 
 

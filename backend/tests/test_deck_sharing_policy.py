@@ -7,6 +7,7 @@
 [Sync] 2026-09-15: public mutation cases use actual FastAPI/Admin DTO owner.
 [Sync] 2026-09-15: community list case uses the current OAuth/DTO HTTP owner.
 [Sync] 2026-08-14: add My Published Decks permission coverage.
+[Sync] 2026-09-19: include the music system Deck and its exact legacy-copy fingerprint.
 """
 
 from __future__ import annotations
@@ -46,13 +47,33 @@ def _screenplay_fallback() -> dict:
     }
 
 
+def _music_fallback() -> dict:
+    template = config.MUSIC_DECK_TEMPLATE
+    return {
+        "id": "legacy-music",
+        "name": template["name"],
+        "name_zh": template["name_zh"],
+        "name_en": template["name_en"],
+        "is_system": False,
+        "parent_id": None,
+        "has_local_changes": False,
+        "voice_count": len(template["voices"]),
+        "voices": [
+            {"name": voice["name"], "has_local_changes": False}
+            for voice in template["voices"]
+        ],
+    }
+
+
 @pytest.mark.parametrize(
     "deck",
     [
         {"is_system": True},
         {"is_system": False, "parent_id": config.DEFAULT_SYSTEM_DECK_ID},
+        {"is_system": False, "parent_id": config.MUSIC_SYSTEM_DECK_ID},
         {"is_system": False, "parent_id": config.RETIRED_SYSTEM_DECK_IDS[0]},
         _screenplay_fallback(),
+        _music_fallback(),
     ],
 )
 def test_system_initialized_decks_are_not_publishable(deck: dict) -> None:

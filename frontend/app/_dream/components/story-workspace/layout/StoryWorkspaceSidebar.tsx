@@ -10,6 +10,7 @@
 //                    sidebar positions, reusing the retained production routes.
 // [Sync] 2026-08-15: group restored Writing, Timeline, and Analysis under an
 //                    accessible More disclosure below Chat, Dream, and Decks.
+// [Sync] 2026-09-18: render the same navigation as a thumb-reachable bottom bar and More sheet on mobile.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { IconType } from 'react-icons';
@@ -104,9 +105,16 @@ export function StoryWorkspaceSidebar({
     toggleTheme();
   };
 
+  const handleNavigate = (path: string) => {
+    setShowMoreNavigation(false);
+    setShowUserMenu(false);
+    onNavigate(path);
+  };
+
   return (
     <div
       className={`story-workspace-sidebar${collapsed ? ' story-workspace-sidebar--collapsed' : ''}`}
+      data-mobile-more-open={showMoreNavigation ? 'true' : 'false'}
     >
       <style>{`
         .story-workspace-sidebar {
@@ -492,7 +500,7 @@ export function StoryWorkspaceSidebar({
               aria-current={isCurrent ? 'page' : undefined}
               className="story-workspace-sidebar__nav-button"
               key={item.view}
-              onClick={() => onNavigate(item.path)}
+              onClick={() => handleNavigate(item.path)}
               title={collapsed ? item.label : undefined}
               type="button"
             >
@@ -506,6 +514,7 @@ export function StoryWorkspaceSidebar({
           aria-expanded={showMoreNavigation}
           aria-label={collapsed ? t('nav.more') : undefined}
           className="story-workspace-sidebar__nav-button story-workspace-sidebar__more-button"
+          aria-current={showMoreNavigation || currentPath === storyWorkspaceMainNavPaths.writing || currentPath === storyWorkspaceMainNavPaths.timeline || currentPath === storyWorkspaceMainNavPaths.analysis ? 'page' : undefined}
           onClick={() => setShowMoreNavigation((visible) => !visible)}
           title={collapsed ? t('nav.more') : undefined}
           type="button"
@@ -537,7 +546,7 @@ export function StoryWorkspaceSidebar({
                   aria-current={isCurrent ? 'page' : undefined}
                   className="story-workspace-sidebar__nav-button"
                   key={item.view}
-                  onClick={() => onNavigate(item.path)}
+                  onClick={() => handleNavigate(item.path)}
                   title={collapsed ? item.label : undefined}
                   type="button"
                 >
@@ -566,7 +575,7 @@ export function StoryWorkspaceSidebar({
         <button
           aria-current={currentPath.startsWith('/story-workspace/settings') ? 'page' : undefined}
           className="story-workspace-sidebar__settings-button"
-          onClick={() => onNavigate('/story-workspace/settings')}
+          onClick={() => handleNavigate('/story-workspace/settings')}
           title={collapsed ? '设置' : undefined}
           type="button"
         >

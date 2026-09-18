@@ -3,6 +3,7 @@
 <!-- [Pos] AutoDL Dream operator guide for the canonical Next.js/FastAPI topology. -->
 <!-- [Sync] 2026-09-06: migrate AutoDL to Next.js standalone, frozen pnpm, and the Node MCP Apps runtime. -->
 <!-- [Sync] 2026-09-11: restore public-origin discovery through the AutoDL-injected AutoDLService6006URL/AutoDLService6008URL mappings. -->
+<!-- [Sync] 2026-09-18: allow the configured proxy boundary to recover the Dream public origin after an outer tunnel rewrites the transport host. -->
 
 # AutoDL direct-host deployment
 
@@ -47,9 +48,10 @@ public origins are configured explicitly instead of being derived per request,
 and moving to a new instance regenerates these URLs — re-run the discovery and
 re-project the runtime env.
 The generated runtime also sets `INK_DREAM_BFF_INTERNAL_ORIGIN` to the exact
-loopback Next listener. Its presence enables mapping of Next-normalized HTTP
-loopback Route Handler URLs back to the configured public origin; non-loopback
-configuration and request URLs remain denied.
+loopback Next listener. Its presence enables proxy mode: a Next-normalized
+listener URL or an outer tunnel URL may map back to the configured public origin
+only when single-value `X-Forwarded-Proto` and `X-Forwarded-Host` form that exact
+origin. Mismatched or chained forwarded values remain denied.
 
 ## Release
 

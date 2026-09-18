@@ -23,6 +23,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
 // [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 // [Sync] 2026-09-04: include backend-owned common Skills in slash suggestions without requiring a Deck.
+// [Sync] 2026-09-18: keep the mobile send action visible and make Enter send while Shift+Enter inserts a line break.
 import {
   useCallback,
   useEffect,
@@ -53,6 +54,7 @@ import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
+import './AIInputDock.css';
 import {
   filterInstalledSkillCommands,
   loadAvailableSkillCommands,
@@ -112,21 +114,13 @@ function revokeObjectPreviewUrl(url?: string) {
 }
 
 function shouldSendWithKeyboard(
-  mode: AIInputDockMode,
   event: KeyboardEvent<HTMLElement>,
 ): boolean {
-  if (event.nativeEvent.isComposing) {
-    return false;
-  }
-  if (mode === 'full') {
-    return shouldSendMessageOnKeyDown({
-      key: event.key,
-      metaKey: event.metaKey || event.ctrlKey,
-      shiftKey: event.shiftKey,
-      isComposing: event.nativeEvent.isComposing,
-    });
-  }
-  return event.key === 'Enter' && !event.shiftKey;
+  return shouldSendMessageOnKeyDown({
+    key: event.key,
+    shiftKey: event.shiftKey,
+    isComposing: event.nativeEvent.isComposing,
+  });
 }
 
 function buildToolChoiceOptions(t: TFunction): { value: ToolChoice; label: string; title: string }[] {
@@ -456,7 +450,7 @@ export default function AIInputDock({
   );
 
   const handleSend = useCallback(() => {
-    if (loading) {
+    if (loading || disabled) {
       return;
     }
     if (uploadedFiles.some((file) => file.isUploading)) {
@@ -479,6 +473,7 @@ export default function AIInputDock({
     setUploadedFiles([]);
   }, [
     resolvedFullAccessEnabled,
+    disabled,
     toolChoice,
     loading,
     onSendMessage,
@@ -496,6 +491,7 @@ export default function AIInputDock({
 
   return (
     <div
+      className="ai-input-dock"
       data-mode={mode}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -603,7 +599,7 @@ export default function AIInputDock({
       ) : null}
 
       {(showUploadHint || mode === 'full') ? (
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
+        <div className="ai-input-dock__hint-row" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
           {showUploadHint ? <span id="chat-upload-hint">{t('chat.inputDock.uploadHint')}</span> : null}
           {mode === 'full' ? <span style={{ marginLeft: 'auto', letterSpacing: '0.01em' }}>{t('chat.inputDock.sendShortcut')}</span> : null}
         </div>
@@ -649,7 +645,7 @@ export default function AIInputDock({
               return;
             }
           }
-          if (!shouldSendWithKeyboard(mode, event)) {
+          if (!shouldSendWithKeyboard(event)) {
             return;
           }
           event.preventDefault();
@@ -707,9 +703,10 @@ export default function AIInputDock({
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+      <div className="ai-input-dock__action-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
+        <div className="ai-input-dock__leading-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
           <button
+            className="ai-input-dock__attachment-button"
             type="button"
             aria-label={t('chat.inputDock.addAttachmentAria')}
             onClick={openAttachmentDialog}
@@ -793,6 +790,7 @@ export default function AIInputDock({
 
         {loading && onStop ? (
           <button
+            className="ai-input-dock__send-button"
             type="button"
             onClick={() => { void onStop(); }}
             disabled={stopPending}
@@ -818,6 +816,7 @@ export default function AIInputDock({
           </button>
         ) : loading ? (
           <button
+            className="ai-input-dock__send-button"
             type="button"
             disabled
             title={loadingLabel ?? t('chat.inputDock.generating')}
@@ -838,6 +837,7 @@ export default function AIInputDock({
           </button>
         ) : (
           <button
+            className="ai-input-dock__send-button"
             type="button"
             onClick={handleSend}
             disabled={!canSend}

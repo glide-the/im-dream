@@ -2,6 +2,7 @@
 
 > 聊天侧边栏、会话导航、文件入口和设置入口的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
 > **[Sync] 2026-06-28**: 当前 ChatView 不再使用左侧 rail/展开侧栏；历史对话由右上角「更多」菜单打开右侧 HistorySidePanel，搜索由面板标题栏按钮打开居中 HistorySearchDialog。
+> **[Sync] 2026-09-18**: Story Workspace 在移动端改用底部 Chat、Dream、Decks、More 导航；More 展开层承载 Writing、Timeline、Analysis、主题、设置和账户。桌面端侧边栏语义不变。
 
 ## 1. 文档范围
 
@@ -125,10 +126,11 @@ ChatSidePanels
 
 ## 7. 移动端适配
 
-- 不固定 280px 侧栏。
+- Story Workspace 不保留竖向侧栏，底部导航固定展示 Chat、Dream、Decks 和 More，同时保留文字标签和当前页语义。
+- More 展开层提供 Writing、Timeline、Analysis、主题、设置和账户；选择路由后关闭展开层。
+- 主内容使用完整视口宽度，底部预留导航和安全区高度，不得产生水平滚动或遮挡 Chat 输入区。
 - HistorySidePanel 在移动端优先变为右侧抽屉或全屏面板。
 - HistorySearchDialog 在移动端接近全屏，保留搜索输入和关闭按钮。
-- 优先使用顶部轻导航、底部 tab 或抽屉。
 - 抽屉打开时使用 `color.bg.overlay` 遮罩。
 - 输入 Dock 始终优先于侧栏入口，不被遮挡。
 

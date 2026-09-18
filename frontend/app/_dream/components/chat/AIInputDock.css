@@ -1,0 +1,53 @@
+/* [Input] AIInputDock semantic tokens and the Story Workspace mobile viewport. */
+/* [Output] Responsive composer controls that keep attachment, mode, and send actions reachable. */
+/* [Pos] Local responsive presentation contract for the shared Chat input dock. */
+/* [Sync] 2026-09-18: add wrapping mobile controls and persistent 44px send/attachment targets. */
+
+.ai-input-dock:focus-within {
+  border-color: var(--color-border-focus) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-border-focus) 18%, transparent),
+    0 2px 8px var(--color-shadow-soft) !important;
+}
+
+.ai-input-dock__send-button {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.ai-input-dock__attachment-button {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 767px) {
+  .ai-input-dock {
+    padding: 0.7rem 0.75rem !important;
+    border-radius: 1rem !important;
+  }
+
+  .ai-input-dock__hint-row {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+  }
+
+  .ai-input-dock__hint-row > :last-child {
+    margin-left: 0 !important;
+  }
+
+  .ai-input-dock__action-row {
+    align-items: flex-end !important;
+  }
+
+  .ai-input-dock__leading-actions {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .ai-input-dock__send-button {
+    position: relative;
+    z-index: 1;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+  }
+}

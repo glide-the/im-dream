@@ -4,6 +4,7 @@
 [Output] Derive publish eligibility and reject default-Deck publishing, self-collection,
          and collection of non-public Decks.
 [Pos] Shared Deck sharing policy used by list DTO decoration and mutation boundaries.
+[Sync] 2026-09-19: recognize every code-owned system Deck template and initialized user copy.
 [Sync] 2026-08-14: add the server-owned sharing policy for My Published Decks.
 """
 
@@ -47,25 +48,25 @@ def is_default_initialized_deck(deck: Mapping[str, Any]) -> bool:
         return True
 
     system_template_ids = {
-        config.DEFAULT_SYSTEM_DECK_ID,
+        *(template["id"] for template in config.SYSTEM_DECK_TEMPLATES),
         *config.RETIRED_SYSTEM_DECK_IDS,
     }
     if deck.get("parent_id") in system_template_ids:
         return True
 
-    template = config.SCREENPLAY_DECK_TEMPLATE
     voice_count = deck.get("total_voice_count", deck.get("voice_count"))
     voices = deck.get("voices")
     if isinstance(voices, list):
         voice_count = len(voices)
 
-    return (
-        deck.get("parent_id") is None
-        and not _enabled(deck.get("has_local_changes"))
-        and deck.get("name") == template["name"]
+    return deck.get("parent_id") is None and not _enabled(
+        deck.get("has_local_changes")
+    ) and any(
+        deck.get("name") == template["name"]
         and deck.get("name_zh") == template["name_zh"]
         and deck.get("name_en") == template["name_en"]
         and voice_count == len(template["voices"])
+        for template in config.SYSTEM_DECK_TEMPLATES
     )
 
 

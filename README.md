@@ -37,7 +37,7 @@ If a WebUI entry is unavailable after an instance restart, use the [AutoDL recov
 
 - **Chat** keeps Thread history and streams Agent output. Resume, cancel and retry keep the same production path.
 - **Dream and Story Workspace** develop stories, characters, scenes, scripts and generated artifacts.
-- **Decks and Agents** package reusable instructions, tools, resources and Claude plugins.
+- **Decks and Agents** package reusable instructions, tools, resources and Claude plugins. Registered users receive editable copies of the code-owned Screenplay Creation Team and Music Creation system Decks; Music Creation uses the repository-owned `yue2-skills` Marketplace.
 - **Files** stay in the Thread workspace and use normalized paths, ownership checks and the shared filesystem boundary.
 - **Resource Links** connect Notion and managed MCP Servers. Compatible MCP Apps can render below an ordinary tool result.
 

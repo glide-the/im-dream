@@ -1,6 +1,7 @@
 // [Input] Real Chromium input against the production AIInputDock module with mocked Skill catalog and system-config APIs.
 // [Output] Regression coverage for the user-visible slash shortcut menu: draft trigger, listbox rendering, keyboard selection, dismissal, and silent catalog-failure degrade.
 // [Pos] AIInputDock slash menu regression contract in frontend/app/_dream/components/chat/__tests__.
+// [Sync] 2026-09-18: cover Enter send, Shift+Enter newline, IME composition, disabled/loading states, and mobile send visibility.
 
 import { expect, test, type Page } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -39,16 +40,23 @@ function harnessModule(sentLogKey: string): string {
     import { createRoot } from 'react-dom/client';
     import i18n from '/app/_dream/i18n.ts';
     import AIInputDock from '/app/_dream/components/chat/AIInputDock.tsx';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/index.css';
 
     window.${sentLogKey} = [];
     void i18n.changeLanguage('en');
 
     function Harness() {
       const [sentCount, setSentCount] = useState(0);
+      const [disabled, setDisabled] = useState(false);
+      const [loading, setLoading] = useState(false);
       return React.createElement(
         'main',
-        null,
+        { style: { width: '100%', maxWidth: '52rem', margin: '0 auto' } },
         React.createElement(AIInputDock, {
+          disabled,
+          loading,
+          mode: 'full',
           onSendMessage: (message) => {
             window.${sentLogKey}.push(message);
             setSentCount((current) => current + 1);
@@ -56,6 +64,8 @@ function harnessModule(sentLogKey: string): string {
           placeholder: 'Ask Ink & Memory…',
         }),
         React.createElement('output', { 'data-testid': 'sent-count' }, String(sentCount)),
+        React.createElement('button', { 'data-testid': 'toggle-disabled', onClick: () => setDisabled((value) => !value) }, 'Toggle disabled'),
+        React.createElement('button', { 'data-testid': 'toggle-loading', onClick: () => setLoading((value) => !value) }, 'Toggle loading'),
       );
     }
 
@@ -201,6 +211,92 @@ test('keeps the composer usable without a menu when the Skill catalog fails', as
     await expect(page.getByRole('listbox')).toHaveCount(0);
     await expect(editor).toContainText('/');
     await expect(page.getByTestId('sent-count')).toHaveText('0');
+  } finally {
+    await server.close();
+  }
+});
+
+test('uses Enter to send without breaking newline, IME, empty, loading, disabled, or mobile button rules', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const sentLogKey = 'keyboardPolicySentMessages';
+  const server = await startHarness(page, { catalogStatus: 503, sentLogKey });
+  try {
+    const editor = page.locator('#chat-input');
+    const sendButton = page.locator('.ai-input-dock__send-button');
+    await expect(editor).toBeVisible();
+    await expect(sendButton).toBeVisible();
+    await expect(sendButton).toHaveAccessibleName('Send message');
+    await expect(sendButton).toBeDisabled();
+    await page.screenshot({
+      path: fileURLToPath(new URL('../../../../../test-results/mobile-chat-390x844.png', import.meta.url)),
+      fullPage: true,
+    });
+
+    await editor.press('Enter');
+    await expect(page.getByTestId('sent-count')).toHaveText('0');
+
+    await editor.fill('first line');
+    await editor.press('Shift+Enter');
+    await editor.pressSequentially('second line');
+    await expect(page.getByTestId('sent-count')).toHaveText('0');
+    expect(await editor.innerText()).toContain('first line\nsecond line');
+
+    await editor.dispatchEvent('compositionstart', { data: '拼音' });
+    await editor.dispatchEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await expect(page.getByTestId('sent-count')).toHaveText('0');
+    await editor.dispatchEvent('compositionend', { data: '拼音' });
+
+    await page.getByTestId('toggle-loading').click();
+    await expect(sendButton).toBeDisabled();
+    await editor.press('Enter');
+    await expect(page.getByTestId('sent-count')).toHaveText('0');
+    await page.getByTestId('toggle-loading').click();
+
+    await page.getByTestId('toggle-disabled').click();
+    await expect(editor).toHaveAttribute('aria-disabled', 'true');
+    await expect(sendButton).toBeDisabled();
+    await page.getByTestId('toggle-disabled').click();
+
+    await editor.press('Enter');
+    await expect(page.getByTestId('sent-count')).toHaveText('1');
+    const sentMessages = await page.evaluate(
+      (key) => (window as unknown as Record<string, string[]>)[key] ?? [],
+      sentLogKey,
+    );
+    expect(sentMessages).toEqual(['first line  \nsecond line']);
+
+    const viewportMetrics = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+    expect(viewportMetrics.documentWidth).toBeLessThanOrEqual(viewportMetrics.viewportWidth);
+    const sendBox = await sendButton.boundingBox();
+    expect(sendBox).not.toBeNull();
+    expect(sendBox!.x + sendBox!.width).toBeLessThanOrEqual(390);
+    expect(sendBox!.width).toBeGreaterThanOrEqual(44);
+    expect(sendBox!.height).toBeGreaterThanOrEqual(44);
+
+    await page.setViewportSize({ width: 430, height: 932 });
+    await expect(sendButton).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(430);
+    await page.screenshot({
+      path: fileURLToPath(new URL('../../../../../test-results/mobile-chat-430x932.png', import.meta.url)),
+      fullPage: true,
+    });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(sendButton).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+    await page.screenshot({
+      path: fileURLToPath(new URL('../../../../../test-results/mobile-chat-desktop-1440x900.png', import.meta.url)),
+      fullPage: true,
+    });
   } finally {
     await server.close();
   }

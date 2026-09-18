@@ -7,6 +7,7 @@
 <!-- [Sync] 2026-08-17: split launcher list into persistent user Available Decks and static System Decks groups. -->
 <!-- [Sync] 2026-08-17: route typed preview examples through the same Chat/Dream launch boundary as the Chat page. -->
 <!-- [Sync] 2026-08-17: use a neutral ink-and-paper preview surface without Deck accent gradients. -->
+<!-- [Sync] 2026-09-19: define multi-template system Deck initialization and per-user editable copies. -->
 
 # Deck 启用入口与 Work 设置工作台
 
@@ -86,6 +87,11 @@ System Decks
 - 系统内建 Deck 不存在用户启用/禁用概念，默认进入主页面 `System Decks` 分组；即使没有用户内容版本号，也显示为静态系统项。
 - 快捷图标保持 API 顺序并截取前 14 个；下方列表显示满足条件的完整集合。
 - 系统内建 Deck 包括服务端 `is_system=true` 或 sharing policy 标记为 `default_initialized` 的注册默认 Deck。
+- 服务端代码注册“剧本创作团队”和“音乐创作”两个系统模板。首次对账在同一事务中确保全局
+  `is_system=true` 来源存在，并确保当前用户各有一个 `parent_id` 指向来源的可编辑副本；已有内容完全匹配、
+  尚未关联来源的用户 Deck 直接建立父子关系，不重复创建。模板内容、Voice 或精确插件版本冲突时对账失败并保留原数据。
+- “音乐创作”系统来源固定引用 ready 的 `yue2@yue2-skills` 0.4.0 安装；本地 Marketplace 位于
+  `marketplaces/yue2-skills`。缺少 ready 安装时不创建半成品来源或用户副本。
 - `Available Decks` 与 `System Decks` 是固定类型区：只要主页面存在正式可用结果，两个分组标题都显示；
   用户组没有符合条件的 Deck 时显示用户组空状态；系统组没有系统 Deck 时显示系统组空状态。
 - 系统内建 Deck 在快捷图标右上显示盾牌角标，在 `System Decks` 分组中显示“系统/System”标签；普通 Deck

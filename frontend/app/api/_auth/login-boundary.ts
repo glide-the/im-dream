@@ -1,7 +1,7 @@
 // [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
-// [Sync] 2026-09-18: recover the public origin only from exact forwarded proto/host on configured loopback proxy requests.
+// [Sync] 2026-09-18: recover the configured public origin from exact proxy headers even when a tunnel rewrites the transport host.
 // [Sync] 2026-09-17: enable loopback proxy mode for Next request URL normalization behind AutoDL.
 // [Sync] 2026-09-16: accept an exact configured Host when Next normalizes the server-internal request URL.
 // [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
@@ -235,7 +235,7 @@ export class BffLoginBoundary {
     if (host && host.toLowerCase() === new URL(this.publicOrigin).host.toLowerCase()) return this.publicOrigin;
     const forwardedHost = request.headers.get('x-forwarded-host');
     const forwardedProto = request.headers.get('x-forwarded-proto');
-    if (this.internalOrigin !== null && requestIsLoopback
+    if (this.internalOrigin !== null
       && forwardedHost !== null && !forwardedHost.includes(',')
       && forwardedProto !== null && !forwardedProto.includes(',')
       && `${forwardedProto.toLowerCase()}://${forwardedHost.toLowerCase()}` === this.publicOrigin.toLowerCase()) {

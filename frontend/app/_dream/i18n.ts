@@ -31,6 +31,7 @@
 //                    synchronization from a message that was not processed.
 // [Sync] 2026-09-06: localize MCP App interactive-view lifecycle and recovery controls.
 // [Sync] 2026-09-17: add safe Chat recovery copy for an exhausted subscription-period Token allowance.
+// [Sync] 2026-09-18: align the visible Chat shortcut hint with Enter send and Shift+Enter newline behavior.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -698,7 +699,7 @@ const resources = {
           waitForUpload: 'Please wait for file uploads to finish',
           deleteFileAria: 'Delete file {{name}}',
           uploadHint: 'Upload: paste · drag & drop · click to browse',
-          sendShortcut: '⌘ / Ctrl + Enter to send',
+          sendShortcut: 'Enter to send · Shift+Enter for a new line',
           inputAria: 'Chat input',
           addAttachmentAria: 'Add attachment',
           addAttachment: '+ Attachment',
@@ -1575,7 +1576,7 @@ const resources = {
           waitForUpload: '请等待文件上传完成',
           deleteFileAria: '删除文件 {{name}}',
           uploadHint: '上传方式：粘贴 · 拖拽 · 点击选择',
-          sendShortcut: '⌘ / Ctrl + Enter 发送',
+          sendShortcut: 'Enter 发送 · Shift+Enter 换行',
           inputAria: '聊天输入',
           addAttachmentAria: '添加附件',
           addAttachment: '+ 附件',
