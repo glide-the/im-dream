@@ -78,7 +78,7 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 
 内部 Admin 数据调用有两种凭据形态。background operation 把 service access token 放在 `Authorization`；用户 operation 把用户 access token 放在 `Authorization`，Next/Python 服务端另加私有 `X-Ink-Dream-Service-Authorization` service bearer。浏览器 API 代理会剥离该私有头的输入和输出，旧静态 service ID/secret 头不再发送。Admin 分别校验 confidential client 与 Dream 用户主体；任一 token 缺失、scope/resource 不符或映射失败都关闭请求，不回退 Dream PostgreSQL。无副作用读取（包括使用POST承载的typed read operation与receipt查询）仅在未取得HTTP响应的transport error后重建请求一次，第二次超时上限2秒；HTTP状态拒绝不重试。写操作只派发一次，超时后仅以原`request_id`查询receipt，不重放业务写入。
 
-Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更新后的`globalThis`实例；短期service access token和并发中的token兑换由该实例统一缓存/合并。Route Handler不能为每个浏览器API请求重新创建client，否则会把一次页面加载放大为多次`client_credentials`兑换并增加Admin认证数据库与网络延迟。配置值变化时丢弃旧实例并按新配置创建。
+Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更新后的`globalThis`实例；短期service access token和并发中的token兑换由该实例统一缓存/合并。Route Handler不能为每个浏览器API请求重新创建client，否则会把一次页面加载放大为多次`client_credentials`兑换并增加Admin认证数据库与网络延迟。public Admin origin/issuer负责浏览器跳转、Token声明和capability核对；可选server-only transport origin只改变DTO、client-credentials与JWKS的网络目的地，不能改变`iss`、resource或回调。配置值变化时丢弃旧实例并按新配置创建。
 
 业务数据继续遵守 strict Pydantic DTO → Admin Zod DTO → Domain Service → typed Drizzle Repository → transaction。Dream 不携带 SQL、表列、事务或 caller-selected user ID；Admin Repository 执行权限过滤、锁、幂等 receipt 和持久化，Dream 保留 Runtime、SSE、业务编排和共享文件系统。
 
@@ -86,7 +86,7 @@ Dream Next BFF 在进程内复用同一个`AdminBffClient`，包括开发热更�
 
 主拓扑：Dream渲染登录卡片 → 浏览器直接提交Admin受限表单 → Admin Better Auth密码/注册或Google callback建立Dream identity Session → 返回Dream同源BFF `/auth/start` → Admin OAuth authorization/code+PKCE → Dream callback。Dream浏览器handler只构造发往Admin的闭集表单请求，Dream Next/Python不接收密码；action只由服务端配置投影，Admin只接受精确Dream Origin和相对return。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
 
-server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin；仅当请求URL为已配置的loopback代理入口时，才接受共同组成精确Dream public origin的单值`X-Forwarded-Proto`与`X-Forwarded-Host`，不接受任意或链式forwarded header。BFF mutation继续校验浏览器`Origin`与CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
+server-owned配置明确Dream public origin、Admin public issuer/origin、可选Admin internal transport origin、注册callback URI与内部FastAPI URL。浏览器表单、OAuth authorize、callback校验、JWT `iss`与capability元数据始终使用public authority；Next/Python的DTO、client-credentials和JWKS HTTP请求可通过显式loopback transport发送，响应仍必须声明同一个public issuer/resource。代理按部署配置确定Dream origin；仅当请求URL为已配置的loopback代理入口时，才接受共同组成精确Dream public origin的单值`X-Forwarded-Proto`与`X-Forwarded-Host`，不接受任意或链式forwarded header。BFF mutation继续校验浏览器`Origin`与CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
 本机直接访问配置可使用 Dream `http://localhost:5173` 与 Admin `http://localhost:3000`；启用内网穿透时，浏览器origin、Admin issuer、Google callback、Dream callback与resource必须统一从该次部署的公网Dream/Admin origin派生，不能继续混用localhost。内部Next、FastAPI与Admin监听地址继续使用明确的loopback配置，不参与浏览器OAuth issuer、redirect、Cookie或CSRF origin比较。AutoDL同样从当前实例环境把6006/6008的HTTPS映射分别注入`AUTODL_DREAM_PUBLIC_ORIGIN`与`AUTODL_ADMIN_PUBLIC_ORIGIN`，由生成器派生callback、issuer、resource、CORS和CSRF origin；仓库不固定某个产品域名，实例映射变化后必须重新投影Admin与Dream的gitignored配置。
 

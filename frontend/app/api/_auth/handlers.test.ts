@@ -1,6 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
+// [Sync] 2026-09-18: verify public browser authority with a separate loopback server transport.
 // [Sync] 2026-09-17: verify configured Admin form actions and confidential-client transport.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -10,8 +11,9 @@ import { createBffHandlers } from './handlers.ts';
 
 const publicOrigin = 'https://dream.example';
 const adminOrigin = 'https://admin.example';
+const adminTransportOrigin = 'http://127.0.0.1:3000';
 const browserHandle = 'dbr_' + 'h'.repeat(43);
-const env = { INK_ADMIN_DREAM_BASE_URL: adminOrigin, INK_ADMIN_AUTH_ISSUER: adminOrigin + '/api/auth',
+const env = { INK_ADMIN_DREAM_BASE_URL: adminOrigin, INK_ADMIN_DREAM_TRANSPORT_BASE_URL: adminTransportOrigin, INK_ADMIN_AUTH_ISSUER: adminOrigin + '/api/auth',
   INK_DREAM_API_RESOURCE: publicOrigin + '/api', INK_ADMIN_DREAM_SERVICE_CLIENT_ID: 'dream-service', INK_ADMIN_DREAM_SERVICE_SECRET: 's'.repeat(32) };
 
 function fixture() {
@@ -28,7 +30,9 @@ function fixture() {
     '/operations/user-profile.current': { user: { id: '9223372036854775807', email: 'actor@example.com', display_name: null, avatar_url: null, role: 'user', created_at: '2026-09-14T00:00:00.123456Z', updated_at: null, auth_providers: ['credential'] } },
   };
   const transport: typeof fetch = async (url, init) => {
-    const path = new URL(String(url)).pathname.replace('/api/internal/dream/v1', '');
+    const parsedUrl = new URL(String(url));
+    assert.equal(parsedUrl.origin, adminTransportOrigin);
+    const path = parsedUrl.pathname.replace('/api/internal/dream/v1', '');
     const headers = new Headers(init?.headers);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body, headers, init: init! });
@@ -158,6 +162,7 @@ test('default service token provider performs client_credentials once and caches
   let tokenCalls = 0; let apiCalls = 0;
   const transport: typeof fetch = async (url, init) => {
     const parsed = new URL(String(url));
+    assert.equal(parsed.origin, adminTransportOrigin);
     if (parsed.pathname === '/api/auth/oauth2/token') {
       tokenCalls++;
       assert.match(new Headers(init?.headers).get('authorization') ?? '', /^Basic /);

@@ -1,6 +1,7 @@
-# [Input] Server-owned Admin origin, issuer, resource, credential and transport settings.
+# [Input] Server-owned Admin public authority, optional internal transport origin, resource, credential and transport settings.
 # [Output] Immutable validated configuration, excluding PG and environment-name switches.
 # [Pos] Configuration source of truth for the unified Admin data/authentication client.
+# [Sync] 2026-09-18: separate public issuer identity from an exact server-only Admin transport origin.
 # [Sync] 2026-09-14: consume the Admin v0.1 protocol without enabled/fallback modes.
 """Authentication/data-service settings; secret values never appear in errors."""
 
@@ -71,6 +72,7 @@ class AdminDataConfig:
     resource: str
     service_secret: str = field(repr=False)
     service_client_id: str
+    transport_base_url: str | None = None
     timeout_seconds: float = 10.0
     max_response_bytes: int = 1_048_576
     jwks_cache_seconds: int = 300
@@ -80,6 +82,7 @@ class AdminDataConfig:
         if (
             _origin(self.base_url) != self.base_url
             or self.issuer != self.base_url + AUTH_PATH
+            or (self.transport_base_url is not None and _origin(self.transport_base_url) != self.transport_base_url)
             or not self.resource or any(c.isspace() or ord(c) < 32 for c in self.resource)
             or len(self.service_secret.encode("utf-8")) < 32
             or not self.service_client_id or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in self.service_client_id)
@@ -95,6 +98,18 @@ class AdminDataConfig:
     def jwks_uri(self) -> str:
         return self.issuer + "/jwks"
 
+    @property
+    def transport_origin(self) -> str:
+        return self.transport_base_url or self.base_url
+
+    @property
+    def transport_issuer(self) -> str:
+        return self.transport_origin + AUTH_PATH
+
+    @property
+    def transport_jwks_uri(self) -> str:
+        return self.transport_issuer + "/jwks"
+
     def __repr__(self) -> str:
         return "AdminDataConfig(<server-owned values redacted>)"
 
@@ -107,6 +122,8 @@ class AdminDataConfig:
             resource=_required(env, "INK_DREAM_API_RESOURCE"),
             service_secret=_required(env, "INK_ADMIN_DREAM_SERVICE_SECRET"),
             service_client_id=_required(env, "INK_ADMIN_DREAM_SERVICE_CLIENT_ID"),
+            transport_base_url=_origin(env["INK_ADMIN_DREAM_TRANSPORT_BASE_URL"].strip())
+                if env.get("INK_ADMIN_DREAM_TRANSPORT_BASE_URL", "").strip() else None,
             timeout_seconds=_number(env, "INK_ADMIN_DREAM_TIMEOUT_SECONDS", 10.0),
             max_response_bytes=_integer(env, "INK_ADMIN_DREAM_MAX_RESPONSE_BYTES", 1_048_576),
             jwks_cache_seconds=_integer(env, "INK_ADMIN_JWKS_CACHE_SECONDS", 300),

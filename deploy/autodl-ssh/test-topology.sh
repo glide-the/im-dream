@@ -117,6 +117,7 @@ grep -Fx "CLAUDE_CODE_CLI_PATH=/root/ink-autodl/runtime/npm/bin/ink-claude-code-
 grep -Fx "INK_AGENT_SANDBOX_ENABLED=false" "${OUTPUT_ENV}"
 grep -Fx "INK_PUBLIC_SITE_URL=https://dream.example.test" "${OUTPUT_ENV}"
 grep -Fx "INK_ADMIN_DREAM_BASE_URL=https://admin.example.test" "${OUTPUT_ENV}"
+grep -Fx "INK_ADMIN_DREAM_TRANSPORT_BASE_URL=http://127.0.0.1:6008" "${OUTPUT_ENV}"
 grep -Fx "INK_ADMIN_AUTH_ISSUER=https://admin.example.test/api/auth" "${OUTPUT_ENV}"
 grep -Fx "INK_DREAM_API_RESOURCE=https://dream.example.test/api" "${OUTPUT_ENV}"
 grep -Fx "INK_ADMIN_DREAM_SERVICE_CLIENT_ID=ink-dream-service" "${OUTPUT_ENV}"

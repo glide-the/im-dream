@@ -1,6 +1,7 @@
-// [Input] Explicit Admin confidential-client configuration and canonical v1 browser/principal/profile DTOs.
+// [Input] Explicit Admin public authority, optional internal transport origin, confidential client and canonical v1 DTOs.
 // [Output] Process-shared bounded server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
+// [Sync] 2026-09-18: keep browser/issuer URLs public while routing server-only Admin calls through an exact internal origin.
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 // [Sync] 2026-09-17: share the client across Next route invocations so token cache/flight coalescing are effective.
@@ -52,7 +53,7 @@ const profileCapability = {
 const errorDto = z.strictObject({ request_id: identifier, error: z.strictObject({ code: identifier, message: z.string() }) });
 export type BrowserResolution = z.infer<typeof resolvedDto>;
 export type AdminBffConfig = Readonly<{
-  origin: string; issuer: string; resource: string; serviceId: string; serviceSecret: string;
+  origin: string; transportOrigin: string; issuer: string; resource: string; serviceId: string; serviceSecret: string;
   timeoutMilliseconds: number; maxResponseBytes: number;
 }>;
 export type ServiceTokenProvider = (signal?: AbortSignal) => Promise<string>;
@@ -71,13 +72,18 @@ function required(environment: Readonly<Record<string, string | undefined>>, key
   return value;
 }
 
+function exactServerOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (value !== url.origin || url.username || url.password
+      || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error();
+    return url.origin;
+  } catch { throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503); }
+}
+
 export function publicAdminAuthority(environment: Readonly<Record<string, string | undefined>> = process.env): Readonly<{ origin: string; issuer: string; resource: string }> {
   const origin = required(environment, 'INK_ADMIN_DREAM_BASE_URL');
-  try {
-    const url = new URL(origin);
-    if (origin !== url.origin || url.username || url.password
-      || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error();
-  } catch { throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503); }
+  exactServerOrigin(origin);
   const issuer = required(environment, 'INK_ADMIN_AUTH_ISSUER');
   const resource = required(environment, 'INK_DREAM_API_RESOURCE');
   if (issuer !== origin + '/api/auth' || /\s/.test(resource)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
@@ -86,6 +92,7 @@ export function publicAdminAuthority(environment: Readonly<Record<string, string
 
 export function adminBffConfig(environment: Readonly<Record<string, string | undefined>> = process.env): AdminBffConfig {
   const { origin, issuer, resource } = publicAdminAuthority(environment);
+  const transportOrigin = exactServerOrigin(environment.INK_ADMIN_DREAM_TRANSPORT_BASE_URL?.trim() || origin);
   const serviceId = required(environment, 'INK_ADMIN_DREAM_SERVICE_CLIENT_ID');
   const serviceSecret = required(environment, 'INK_ADMIN_DREAM_SERVICE_SECRET');
   const timeoutMilliseconds = Math.ceil(Number(environment.INK_ADMIN_DREAM_TIMEOUT_SECONDS ?? '10') * 1_000);
@@ -94,7 +101,7 @@ export function adminBffConfig(environment: Readonly<Record<string, string | und
     || Buffer.byteLength(serviceSecret) < 32 || !Number.isSafeInteger(timeoutMilliseconds)
     || timeoutMilliseconds < 1 || timeoutMilliseconds > 2_147_483_647
     || !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
-  return Object.freeze({ origin, issuer, resource, serviceId, serviceSecret, timeoutMilliseconds, maxResponseBytes });
+  return Object.freeze({ origin, transportOrigin, issuer, resource, serviceId, serviceSecret, timeoutMilliseconds, maxResponseBytes });
 }
 
 export class AdminBffClient {
@@ -124,7 +131,7 @@ export class AdminBffClient {
       try {
         const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
         const authorization = Buffer.from(`${encodeURIComponent(this.#config.serviceId)}:${encodeURIComponent(this.#config.serviceSecret)}`, 'utf8').toString('base64');
-        response = await this.#fetch(this.issuer + '/oauth2/token', {
+        response = await this.#fetch(this.#config.transportOrigin + '/api/auth/oauth2/token', {
           method: 'POST',
           headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${authorization}` },
           body: new URLSearchParams({ grant_type: 'client_credentials', resource: this.resource }),
@@ -155,7 +162,7 @@ export class AdminBffClient {
     let raw: string;
     try {
       const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
-      response = await this.#fetch(this.origin + '/api/internal/dream/v1' + path, {
+      response = await this.#fetch(this.#config.transportOrigin + '/api/internal/dream/v1' + path, {
         method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body),
         cache: 'no-store', redirect: 'manual', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
@@ -229,7 +236,7 @@ type AdminBffGlobal = typeof globalThis & {
 };
 
 function sameConfig(left: AdminBffConfig, right: AdminBffConfig): boolean {
-  return left.origin === right.origin && left.issuer === right.issuer
+  return left.origin === right.origin && left.transportOrigin === right.transportOrigin && left.issuer === right.issuer
     && left.resource === right.resource && left.serviceId === right.serviceId
     && left.serviceSecret === right.serviceSecret
     && left.timeoutMilliseconds === right.timeoutMilliseconds

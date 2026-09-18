@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
 # [Sync] 2026-09-16: cover Better Auth scalar and closed resource/userinfo audience-array access tokens.
 # [Sync] 2026-09-17: assert separate user and client_credentials bearer transport.
+# [Sync] 2026-09-18: verify public issuer claims with internal DTO, token and JWKS transport URLs.
 # [Sync] 2026-09-17: recover one read-only transport failure while writes remain single-dispatch.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
@@ -59,6 +60,29 @@ def test_separate_service_identity_user_delegation_and_canonical_mapping(config)
     assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
     assert request.headers["authorization"] == "Bearer admin-user-token"
     assert "user_id" not in request.url.query.decode()
+
+
+def test_internal_transport_preserves_public_authority_for_token_data_and_jwks(config, signing_key):
+    split = AdminDataConfig(**{
+        **config.__dict__, "transport_base_url": "http://127.0.0.1:3000",
+    })
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if request.url.path == "/api/auth/jwks":
+            return httpx.Response(200, json={"keys": [jwk(signing_key)]})
+        return response(principal())
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = AdminDataClient(split, client=http)
+    assert client.principal("user.access.token", "request-1").canonical_user_id == "42"
+    verifier = AdminJWTVerifier(split, client=http)
+    assert verifier.verify(token(split, signing_key)).subject == "ba-opaque-user"
+    assert [str(call.url) for call in calls] == [
+        "http://127.0.0.1:3000/api/internal/dream/v1/principal",
+        "http://127.0.0.1:3000/api/auth/jwks",
+    ]
+    assert split.issuer == "https://admin.example/api/auth"
+    assert split.jwks_uri == "https://admin.example/api/auth/jwks"
 
 
 @pytest.mark.parametrize("mutation", [lambda d: d.update(canonical_user_id=42), lambda d: d.update(user_id="42"), lambda d: d.update(status="disabled"), lambda d: d.update(canonical_user_id="9223372036854775808")])
@@ -389,7 +413,7 @@ def test_write_timeout_recovers_only_original_receipt(config, committed):
     assert len(calls) == 3  # bootstrap, one write, explicit receipt; no hidden repeat write
 
 
-@pytest.mark.parametrize("field,value", [("base_url", "http://remote.example"), ("issuer", "https://other.example/api/auth"), ("service_secret", "short"), ("service_client_id", "client\r\nheader"), ("timeout_seconds", float("nan"))])
+@pytest.mark.parametrize("field,value", [("base_url", "http://remote.example"), ("transport_base_url", "http://remote.example"), ("issuer", "https://other.example/api/auth"), ("service_secret", "short"), ("service_client_id", "client\r\nheader"), ("timeout_seconds", float("nan"))])
 def test_server_configuration_fail_closed_and_redacted(config, field, value):
     from dataclasses import asdict
     values = asdict(config); values[field] = value

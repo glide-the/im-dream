@@ -1,6 +1,7 @@
 # [Input] Production OAuthClientCredentialsTokenSource with a deterministic fake Admin transport.
 # [Output] Basic client auth, exact grant/resource body, cache reuse, bounded transport recovery and redacted failure evidence.
 # [Pos] Provider-free OAuth machine-token protocol tests; no database or external HTTP.
+# [Sync] 2026-09-18: verify machine-token transport may use loopback while issuer identity remains public.
 # [Sync] 2026-09-17: validate one transport-only recovery without retrying an HTTP rejection.
 
 from __future__ import annotations
@@ -50,6 +51,25 @@ def test_client_credentials_uses_basic_auth_exact_resource_and_cache() -> None:
     clock[0] = 100.0
     assert source.access_token() == "issued.service.token"
     assert len(calls) == 1
+
+
+def test_client_credentials_uses_internal_transport_without_changing_public_issuer() -> None:
+    config = AdminDataConfig(**{
+        **_config().__dict__, "transport_base_url": "http://127.0.0.1:3000",
+    })
+    calls: list[httpx.Request] = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={
+            "access_token": "issued.service.token", "token_type": "Bearer",
+            "expires_in": 300, "scope": "capabilities:read",
+        })
+    source = OAuthClientCredentialsTokenSource(
+        config, httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert source.access_token() == "issued.service.token"
+    assert str(calls[0].url) == "http://127.0.0.1:3000/api/auth/oauth2/token"
+    assert config.issuer == "https://admin.example/api/auth"
 
 
 @pytest.mark.parametrize("response", [

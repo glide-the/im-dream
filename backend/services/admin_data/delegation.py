@@ -158,7 +158,7 @@ class RuntimeHttpConfig:
 
     @classmethod
     def from_server_config(cls, config: AdminDataConfig) -> RuntimeHttpConfig:
-        return cls(config.base_url, config.timeout_seconds, config.max_response_bytes)
+        return cls(config.transport_origin, config.timeout_seconds, config.max_response_bytes)
 
 
 class AdminDelegationCreator:
