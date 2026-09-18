@@ -9,6 +9,7 @@
 # [Sync] 2026-09-16: recover connector-scoped background writes without an OAuth credential.
 # [Sync] 2026-09-16: expose a lock-safe local contract/capability readiness check for managed MCP composition.
 # [Sync] 2026-09-17: authenticate service calls with cached OAuth client_credentials tokens.
+# [Sync] 2026-09-18: use the configured internal transport origin while validating public issuer metadata unchanged.
 # [Sync] 2026-09-17: reuse one immutable validated capability snapshot across domain calls while retaining explicit forced refresh and fail-closed invalidation.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
@@ -90,7 +91,7 @@ class AdminDataClient:
         if access_token is not None:
             headers["x-ink-dream-service-authorization"] = "Bearer " + service_token
         return request_admin_dto(self._http, method=method,
-            url=self._config.base_url + ADMIN_INTERNAL_PREFIX + path,
+            url=self._config.transport_origin + ADMIN_INTERNAL_PREFIX + path,
             request_id=request_id, output_type=output_type, headers=headers,
             timeout_seconds=self._config.timeout_seconds,
             max_response_bytes=self._config.max_response_bytes,

@@ -1,6 +1,7 @@
 # [Input] AdminDataConfig, Admin OAuth ES256 access tokens and the fixed issuer JWKS.
 # [Output] Immutable verified OAuth claims; canonical users.id still requires Admin principal.
 # [Pos] Dream Resource Server signature/scope boundary using PyJWT's JWK and JWT validation.
+# [Sync] 2026-09-18: fetch the fixed public issuer JWKS through the configured internal Admin transport origin.
 # [Sync] 2026-09-14: cached, rate-limited JWKS lookup with no token-selected network URLs.
 # [Sync] 2026-09-16: accept only the scalar Dream resource or Better Auth's closed resource/userinfo audience array.
 """Validate Admin OAuth access tokens; never issue or silently renew tokens."""
@@ -57,7 +58,7 @@ class _HttpJWKClient(jwt.PyJWKClient):
     """Reuse PyJWT parsing/cache; constrain fetches to one configured HTTP origin."""
 
     def __init__(self, config: AdminDataConfig, client: httpx.Client, clock: Callable[[], float]) -> None:
-        super().__init__(config.jwks_uri, cache_keys=False, cache_jwk_set=True, lifespan=config.jwks_cache_seconds)
+        super().__init__(config.transport_jwks_uri, cache_keys=False, cache_jwk_set=True, lifespan=config.jwks_cache_seconds)
         self._config = config
         self._http = client
         self._clock = clock

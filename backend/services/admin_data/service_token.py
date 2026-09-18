@@ -1,6 +1,7 @@
 # [Input] Server-owned OAuth client ID/secret, Admin issuer/resource and bounded HTTP transport.
 # [Output] Cached short-lived client_credentials bearer with one bounded transport recovery or a redacted AdminDataError.
 # [Pos] Confidential service-token source shared by the sole Admin DTO client.
+# [Sync] 2026-09-18: obtain public-issuer tokens through the configured internal Admin transport origin.
 # [Sync] 2026-09-17: recover one stale/closed token transport without retrying HTTP responses or business DTO calls.
 """Fetch and cache an Admin-issued machine token without exposing credentials."""
 
@@ -56,7 +57,7 @@ class OAuthClientCredentialsTokenSource:
                 timeout = self._config.timeout_seconds if attempt == 0 else min(2.0, self._config.timeout_seconds)
                 request = httpx.Request(
                     "POST",
-                    self._config.issuer + "/oauth2/token",
+                    self._config.transport_issuer + "/oauth2/token",
                     headers={
                         "accept": "application/json",
                         "content-type": "application/x-www-form-urlencoded",

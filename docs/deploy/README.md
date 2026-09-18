@@ -114,6 +114,7 @@ Admin origin；禁止整体打印 profile，也不使用固定产品域名作为
 | `INK_DREAM_PUBLIC_ORIGIN` | `AutoDLService6006URL` |
 | `INK_DREAM_BFF_REDIRECT_URI` | `${AutoDLService6006URL}/auth/callback` |
 | `INK_ADMIN_DREAM_BASE_URL` | `AutoDLService6008URL` |
+| `INK_ADMIN_DREAM_TRANSPORT_BASE_URL` | `http://127.0.0.1:6008`，只供同机Dream服务调用 |
 | `INK_ADMIN_AUTH_ISSUER` | `${AutoDLService6008URL}/api/auth` |
 | `INK_DREAM_API_RESOURCE` | `${AutoDLService6006URL}/api` |
 | Google callback | `${AutoDLService6008URL}/api/auth/callback/google`，由 Admin Better Auth 处理 |
@@ -151,8 +152,9 @@ Docker 和 Remote SSH Compose 默认包含 `tun-proxy` 服务，使用
 
 回滚只需回滚本次 Dream frontend/backend 版本；没有数据回滚或 schema contract 操作。该 provider-free 故障注入不能替代真实业务发布验收。
 
-- 本地 Dream 不启动或连接 PostgreSQL；先运行 Admin `pnpm dev`，Dream 通过
-  `INK_ADMIN_DREAM_BASE_URL` 和注册的服务/OAuth 配置调用 Admin API。
+- 本地 Dream 不启动或连接 PostgreSQL；先运行 Admin `pnpm dev`。Dream 保留
+  `INK_ADMIN_DREAM_BASE_URL`/`INK_ADMIN_AUTH_ISSUER`作为浏览器与Token公开标识，并可用
+  `INK_ADMIN_DREAM_TRANSPORT_BASE_URL`把服务端DTO、Token和JWKS请求送到同机Admin监听地址。
 - 修改发布路径、脚本参数、配置来源或验证流程时，同步更新本目录文档。
 - 修改 `deploy/` 脚本时，同步更新 [`../../deploy/.folder.md`](../../deploy/.folder.md)、对应平台目录 `.folder.md` 和相关发布文档。
 - 不把项目 ID、bucket、主机、服务名、镜像仓库、密钥值写死到文档示例之外；示例必须标明通过环境变量或部署参数覆盖。
