@@ -2,6 +2,7 @@
 # [Output] Resource state/LKG, wire identity, capability failure and unknown-write recovery evidence.
 # [Pos] Provider-free resource domain tests; no PG, real account or model access.
 # [Sync] 2026-09-14: exercise actual production adapters after the composition root cutover.
+# [Sync] 2026-09-18: verify exact-ID/DTO observer replay clears an absent unknown write.
 # [Sync] 2026-09-17: verify resource-policy background calls use OAuth client_credentials.
 
 from __future__ import annotations
@@ -102,30 +103,31 @@ def observer_input(started=0):
     return ResourceObserverPublishInputDTO(instance_id=UUID("11dda993-ff18-4294-af40-8f4af39fd853"), process_started_at=datetime(2026, 9, 14, tzinfo=timezone.utc), sampled_at=snapshot.sample.sampled_at, snapshot=snapshot)
 
 
-def test_unknown_write_waits_for_original_receipt_before_later_snapshot(config):
-    seen = []; committed = False
+def test_unknown_observer_write_replays_exact_original_after_absent_receipt(config):
+    seen = []; original_attempts = 0
     def handler(request):
+        nonlocal original_attempts
         seen.append(request)
         request_id = request.headers["x-request-id"]
         if "/receipts/" in request.url.path:
             assert request.url.path.endswith("/receipts/write-1")
             assert request.url.params["operation"] == "resource-observer.publish"
-            data = {"status": "committed" if committed else "absent", "operation": "resource-observer.publish", "request_id": "write-1"}
-            if committed: data["result"] = {"accepted": True, "heartbeat_at": "2026-09-14T00:00:01Z", "sampled_at": None}
-            return httpx.Response(200, json={"request_id": request_id, "data": data})
+            return httpx.Response(200, json={"request_id": request_id, "data": {
+                "status": "absent", "operation": "resource-observer.publish", "request_id": "write-1"}})
         body = json.loads(request.content)
         assert body["input"]["sampled_at"] == body["input"]["snapshot"]["sample"]["sampled_at"]
-        if request_id == "write-1": raise httpx.ReadTimeout("commit unknown", request=request)
+        if request_id == "write-1":
+            original_attempts += 1
+            assert body["input"]["snapshot"]["turns"]["started_total"] == 1
+            if original_attempts == 1:
+                raise httpx.ReadTimeout("commit unknown", request=request)
         return httpx.Response(200, json={"request_id": request_id, "data": {"accepted": True, "heartbeat_at": "2026-09-14T00:00:02Z", "sampled_at": None}})
     data = adapter(config, handler)
     with pytest.raises(AdminDataError) as first:
         data.publish_observer("write-1", observer_input(1))
     assert first.value.outcome_unknown
-    with pytest.raises(AdminDataError) as unresolved:
-        data.publish_observer("write-2", observer_input(2))
-    assert unresolved.value.request_id == "write-1" and unresolved.value.outcome_unknown
-    assert len(seen) == 2
-    committed = True
+    data.publish_observer("write-2", observer_input(2))
+    assert data._pending is None and original_attempts == 2
     data.publish_observer("write-3", observer_input(3))
     assert [request.headers["x-request-id"] for request in seen] == ["write-1", "write-1", "write-1", "write-3"]
 
