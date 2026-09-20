@@ -14,6 +14,10 @@
 # [Sync] 2026-09-16: prove retired Dream auth/session secrets never enter the projected runtime.
 # [Sync] 2026-09-16: prove the retired Product HS256 signer never enters the projected runtime.
 # [Sync] 2026-09-18: isolate projector fixtures from the operator-selected platform.env.
+# [Sync] 2026-09-19: require the active Gateway service-key gate before env replacement and qualification.
+# [Sync] 2026-09-19: require repository-owned plugin marketplaces in immutable Dream releases.
+# [Sync] 2026-09-19: require caller-selected SSH transport overrides to win over platform defaults.
+# [Sync] 2026-09-19: keep the remote Gateway-key gate free of optional Python packages.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,9 +32,13 @@ PROJECTED_DATA_ROOT="/root/autodl-tmp/ink-memory"
 CURRENT_USER="$(id -un)"
 CURRENT_GROUP="$(id -gn)"
 
+grep -Fq 'CALLER_AUTODL_SSH_CONTROL_PATH="${AUTODL_SSH_CONTROL_PATH-}"' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'AUTODL_SSH_CONTROL_PATH="${CALLER_AUTODL_SSH_CONTROL_PATH}"' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'DREAM_SERVICE_USER="${INK_AUTODL_DREAM_SERVICE_USER:-root}"' "${SCRIPT_DIR}/runtime/start-ink-memory.sh"
 grep -Fq 'pnpm install --frozen-lockfile' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'source/marketplaces/' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'staging}/marketplaces/' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'INK_NEXT_OUTPUT=standalone' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq '/api/mcp-apps/[serverRef]' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'frontend/server.js' "${SCRIPT_DIR}/deploy.sh"
@@ -55,6 +63,13 @@ grep -Fq 'verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origi
 grep -Fq "candidate.name == 'cli.js' and candidate.parent.name == 'ink-claude-code-dream'" "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'verify_plugin_artifacts || return' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'verify_builtin_skills || return' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'verify_gateway_service_key || return' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'verify-gateway-key.py' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'GATEWAY_SUBJECT_TOKEN_INVALID' "${SCRIPT_DIR}/verify-gateway-key.py"
+if grep -Fq 'from dotenv' "${SCRIPT_DIR}/verify-gateway-key.py"; then
+  printf 'Gateway key release gate depends on optional python-dotenv\n' >&2
+  exit 1
+fi
 if grep -Fq 'resolve_default_deck_plugin_ref()' "${SCRIPT_DIR}/deploy.sh"; then
   printf 'deployment verifier retained a user-scoped default-plugin call without an installation DTO\n' >&2
   exit 1

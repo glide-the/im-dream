@@ -1,6 +1,7 @@
 # [Input] Consume an Admin-issued OAuth or entity-delegation bearer and the server-only Gateway key.
 # [Output] Provide strict server-only model capabilities and Claude Code Runtime settings.
 # [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
+# [Sync] 2026-09-19: log safe upstream Gateway error codes without credentials or response bodies.
 # [Sync] 2026-09-16: replace Dream-signed subject JWTs with Admin-issued bearers.
 
 """Strict server-only client for the Admin public Gateway model catalog."""
@@ -8,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 from typing import Any, Mapping, Protocol
 
@@ -28,6 +30,8 @@ _AVAILABILITY = frozenset({
     "maintenance",
 })
 _CLAUDE_CODE_RUNTIME_INTEGER_MAX = 2_147_483_647
+_SAFE_GATEWAY_ERROR_CODE = re.compile(r"^GATEWAY_[A-Z0-9_]{1,79}$")
+logger = logging.getLogger(__name__)
 
 
 class CatalogTransport(Protocol):
@@ -218,6 +222,14 @@ class GatewayModelCatalogClient:
             raise GatewayInferenceError("GATEWAY_UNAVAILABLE", 503) from exc
         if response.status_code != 200:
             status = int(response.status_code)
+            upstream_code = None
+            try:
+                payload = response.json()
+                candidate = payload.get("error", {}).get("code")
+                if isinstance(candidate, str) and _SAFE_GATEWAY_ERROR_CODE.fullmatch(candidate):
+                    upstream_code = candidate
+            except Exception:
+                pass
             code = {
                 401: "GATEWAY_UNAUTHORIZED",
                 402: "GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED",
@@ -227,6 +239,13 @@ class GatewayModelCatalogClient:
                 502: "GATEWAY_PROVIDER_FAILED",
                 503: "GATEWAY_UNAVAILABLE",
             }.get(status, "GATEWAY_REQUEST_FAILED")
+            logger.warning(
+                "claude_agent_failure stage=model_catalog "
+                "status=%s mapped_code=%s upstream_code=%s",
+                status,
+                code,
+                upstream_code or "unavailable",
+            )
             raise GatewayInferenceError(code, status)
         try:
             payload = response.json()

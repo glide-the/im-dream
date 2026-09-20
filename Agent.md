@@ -1,6 +1,7 @@
 <!-- [Input] Repository governance, README contract, package-manager boundaries, and the Dream SDK/Runtime compatibility model. -->
 <!-- [Output] Mandatory maintenance rules for humans and coding agents working in this repository. -->
 <!-- [Pos] Root operational rulebook; product-level Agent interaction behavior remains in docs/Agent.md. -->
+<!-- [Sync] 2026-09-19: require a full Claude Agent send-path release gate for every related change. -->
 <!-- [Sync] 2026-08-28: define README parity, atomic Runtime versions, and authenticated model-capability ownership. -->
 
 # Repository Agent Rules
@@ -95,3 +96,17 @@ Before completing a relevant change:
 Runtime request tuning must preserve explicit ownership. Global effort comes from the resource-policy last-known-good snapshot. Auto-compact, max context, and model max output come from the final authenticated Admin model-catalog selection. Missing values are omitted; browser input, user env, Deck, Plugin, workspace settings, and ambient parent env must not override these server-owned values.
 
 `ai_models.max_output_tokens` is the existing model capability and must reach the CLI through the vendor-scoped `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS` projection. Do not infer third-party capability by matching model IDs, and do not rewrite `max_tokens` in Gateway. The official `CLAUDE_CODE_MAX_OUTPUT_TOKENS` remains a standalone CLI override, but Dream must scrub ambient/user copies before launching its managed Runtime.
+
+## 8. Claude Agent send-path release gate
+
+Any change that can affect `POST /api/claude-agent` must not be published or deployed until the complete send path has passed. This includes Chat/Thread code, authentication, Admin DTOs, Gateway/model catalog, Deck/Agent/Plugin context, Runtime launch, persistence, frontend transport, deployment environment projection, credentials, and release scripts.
+
+The mandatory gate is:
+
+1. Run focused deterministic tests for every changed boundary, including a regression for the reported failure; delegate these checks to the configured `luna_test_runner` when available.
+2. Exercise the production entry sequence `create Thread -> POST /api/claude-agent -> authenticated model catalog -> accepted SSE response` against the target deployment topology. A health endpoint, Deck rendering, plugin installation, or Thread creation alone is not sufficient.
+3. For a production release, verify the target deployment with its actual Admin/Gateway/PostgreSQL path and a user-authorized account. Do not substitute a mock catalog, synthetic bearer, or provider-free result for this acceptance.
+4. Record the exact command/request, HTTP status, stable safe error code, exit code, and target release in the release evidence. Never record credentials, message bodies, transcripts, or provider secrets.
+5. If any stage fails or is skipped, do not publish, activate, mark qualified, or prune the previous release. Fix the failure and rerun the entire gate.
+
+All `POST /api/claude-agent` authentication and pre-stream preparation failures must emit a safe structured server log containing the stage, HTTP status, and stable error code. Logs must omit OAuth tokens, Gateway keys, cookies, request bodies, user text, and upstream response messages.

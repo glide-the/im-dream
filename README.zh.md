@@ -1,6 +1,7 @@
 <!-- [输入] 当前 Dream/Admin 架构、AutoDL 直宿主发布与本机开发合同。 -->
 <!-- [输出] 用户优先的启动、使用、本机配置、验证与恢复入口。 -->
 <!-- [定位] 仓库中文 README；README.md 是同结构的英文正文。 -->
+<!-- [同步] 2026-09-19：记录 Gateway service key 与 Claude Agent 完整发送链路发布门禁。 -->
 <!-- [同步] 2026-09-18：将 AutoDL 启动与产品使用前置，恢复细节移入独立手册。 -->
 
 # Ink & Memory Dream
@@ -162,6 +163,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - **Runtime 未通过 production qualification：** 核对 `command -v ink-claude-code-dream`、package-root `cli.js`、相邻 manifest、Runtime `0.1.10`、compatibility `2.1.241` 与必需 capability。
 - **`uv sync` 删除 pytest：** 使用上面的临时 `uv run --with pytest...` 命令，或单独评审开发依赖。
 - **Chat 提示 Token allowance 不足：** Gateway 拒绝模型 reservation 前，用户消息已保存。先在 Admin 修正订阅/模型额度，重新加载 Thread 后再决定是否发送。
+- **Chat 返回 `GATEWAY_API_KEY_INVALID`：** Dream service key 与 Admin 当前 active canonical-subject Gateway key 不匹配。AutoDL 现在会在替换运行环境前阻断 sync 和 qualified。必须通过 Admin 所有的发布操作恢复或轮换 Key，仅重启 Dream 以重新读取私有环境，然后完整重跑真实 `create Thread -> POST /api/claude-agent -> SSE` 验收后才能发布。
 - **MCP App 没有显示：** 检查连接状态、App advertisement、usage policy 与 Admin capability；普通工具结果是预期 fallback。
 
 ## 文档

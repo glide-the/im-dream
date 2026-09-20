@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# [Sync] 2026-09-19: verify safe upstream Gateway error-code logging without body or credential disclosure.
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,6 +106,31 @@ def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
             configuration=configuration(),
             transport=malformed,
         ).list_models()
+
+
+def test_catalog_logs_safe_upstream_authentication_code(caplog: pytest.LogCaptureFixture) -> None:
+    transport = RecordingTransport(FakeResponse(401, {
+        "error": {
+            "type": "authentication_error",
+            "code": "GATEWAY_API_KEY_INVALID",
+            "message": "private upstream text must not be logged",
+        },
+    }))
+
+    with pytest.raises(GatewayInferenceError, match="GATEWAY_UNAUTHORIZED"):
+        GatewayModelCatalogClient(
+            access_token=ACCESS_TOKEN,
+            configuration=configuration(),
+            transport=transport,
+        ).fetch_catalog()
+
+    assert "claude_agent_failure stage=model_catalog" in caplog.text
+    assert "status=401" in caplog.text
+    assert "mapped_code=GATEWAY_UNAUTHORIZED" in caplog.text
+    assert "upstream_code=GATEWAY_API_KEY_INVALID" in caplog.text
+    assert "private upstream text" not in caplog.text
+    assert ACCESS_TOKEN not in caplog.text
+    assert SERVICE_KEY not in caplog.text
 
 
 def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:

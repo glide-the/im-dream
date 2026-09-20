@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # [Input] AutoDL SSH settings, generated Dream env, Dream source, and a qualified Linux x64 Runtime package built from authorized 2.1.88 source.
-# [Output] Versioned direct-host Next.js/FastAPI Dream release using the published Runtime 0.1.10 and screen.
+# [Output] Versioned direct-host Next.js/FastAPI Dream release with Gateway-key validation using the published Runtime 0.1.10 and screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
 # [Sync] 2026-08-26: run Dream as root so /root-hosted workspace protocol paths remain fully traversable.
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 beside the backend-owned
@@ -31,15 +31,23 @@
 # [Sync] 2026-09-17: verify backend discovery resolves the npm package-root cli.js entrypoint.
 # [Sync] 2026-09-17: install published Runtime 0.1.10 and smoke an immutable candidate before atomic activation.
 # [Sync] 2026-09-19: accept a checksum-verified Linux x64 frontend artifact built from the same source.
+# [Sync] 2026-09-19: select prebuilt frontend extraction with an explicit boolean instead of empty shell quoting.
+# [Sync] 2026-09-19: package repository-owned plugin marketplaces inside each immutable Dream release.
+# [Sync] 2026-09-19: reject inactive Gateway service keys before env replacement and release qualification.
+# [Sync] 2026-09-19: preserve explicit caller SSH transport overrides when loading platform defaults.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 AUTODL_PLATFORM_ENV_FILE="${AUTODL_PLATFORM_ENV_FILE:-${SCRIPT_DIR}/platform.env}"
+CALLER_AUTODL_SSH_CONTROL_PATH="${AUTODL_SSH_CONTROL_PATH-}"
+CALLER_AUTODL_SSH_BATCH_MODE="${AUTODL_SSH_BATCH_MODE-}"
 if [[ -f "${AUTODL_PLATFORM_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090 -- the operator explicitly selects this local platform file.
   source "${AUTODL_PLATFORM_ENV_FILE}"
 fi
+[[ -n "${CALLER_AUTODL_SSH_CONTROL_PATH}" ]] && AUTODL_SSH_CONTROL_PATH="${CALLER_AUTODL_SSH_CONTROL_PATH}"
+[[ -n "${CALLER_AUTODL_SSH_BATCH_MODE}" ]] && AUTODL_SSH_BATCH_MODE="${CALLER_AUTODL_SSH_BATCH_MODE}"
 AUTODL_SSH_HOST="${AUTODL_SSH_HOST:-}"
 AUTODL_SSH_USER="${AUTODL_SSH_USER:-root}"
 AUTODL_SSH_PORT="${AUTODL_SSH_PORT:-22}"
@@ -143,7 +151,7 @@ require_config() {
 check_local() {
   local failed=0 mode
   for name in ssh scp rsync git shasum; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
-  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${SCRIPT_DIR}/runtime/init-dream-data.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/pnpm-lock.yaml" "${REPO_ROOT}/frontend/pnpm-workspace.yaml" "${REPO_ROOT}/frontend/next.config.js" "${REPO_ROOT}/frontend/packages/mcp-apps-runtime/package.json"; do
+  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/verify-gateway-key.py" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${SCRIPT_DIR}/runtime/init-dream-data.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/pnpm-lock.yaml" "${REPO_ROOT}/frontend/pnpm-workspace.yaml" "${REPO_ROOT}/frontend/next.config.js" "${REPO_ROOT}/frontend/packages/mcp-apps-runtime/package.json"; do
     [[ -f "${file}" ]] || { warn "Missing file: ${file}"; failed=1; }
   done
   [[ -d "${REPO_ROOT}/frontend/app/_dream" ]] || { warn "Missing canonical Dream App Router source: ${REPO_ROOT}/frontend/app/_dream"; failed=1; }
@@ -279,14 +287,16 @@ sync_files() {
   remote "set -e; install -o root -g root -m 0755 $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-ink-memory.sh") $(quote "${AUTODL_STACK_START_SCRIPT}"); install -o root -g root -m 0755 $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/init-dream-data.sh") $(quote "${AUTODL_DATA_INIT_SCRIPT}"); INK_AUTODL_DATA_ROOT=$(quote "${AUTODL_DATA_ROOT}") INK_AUTODL_SERVICE_USER=$(quote "${AUTODL_SERVICE_USER}") $(quote "${AUTODL_DATA_INIT_SCRIPT}")"
   sync_plugin_artifacts
   scp_file "${AUTODL_ENV_FILE}" "${AUTODL_APP_ROOT}/config/dream.env.next"
-  remote "set -e; group=\$(id -gn $(quote "${AUTODL_SERVICE_USER}")); chown root:\"\${group}\" $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); chmod 0640 $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); mv -f $(quote "${AUTODL_APP_ROOT}/config/dream.env.next") $(quote "${AUTODL_APP_ROOT}/config/dream.env")"
+  remote "set -e; group=\$(id -gn $(quote "${AUTODL_SERVICE_USER}")); chown root:\"\${group}\" $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); chmod 0640 $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); $(quote "${AUTODL_PYTHON}") $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/verify-gateway-key.py") $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); mv -f $(quote "${AUTODL_APP_ROOT}/config/dream.env.next") $(quote "${AUTODL_APP_ROOT}/config/dream.env")"
 }
 
 build_release() {
-  local release_id prebuilt_remote prebuilt_sha256
+  local release_id prebuilt_enabled prebuilt_remote prebuilt_sha256
   release_id="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)-$(date -u +%Y%m%d%H%M%S)"
+  prebuilt_enabled=0
   prebuilt_remote=""
   if [[ -n "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" ]]; then
+    prebuilt_enabled=1
     prebuilt_remote="${AUTODL_APP_ROOT}/source/.prebuilt-frontend-linux-x64.tar.gz"
     prebuilt_sha256="$(shasum -a 256 "${AUTODL_PREBUILT_FRONTEND_ARCHIVE}" | awk '{print $1}')"
     log "Uploading checksum-bound Linux x64 Dream frontend artifacts."
@@ -299,18 +309,21 @@ build_release() {
 staging=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}.staging")
 release=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}")
 rm -rf \"\${staging}\"
-install -d \"\${staging}/app\" \"\${staging}/frontend-src\" \"\${staging}/frontend\"
+install -d \"\${staging}/app\" \"\${staging}/frontend-src\" \"\${staging}/frontend\" \"\${staging}/marketplaces\"
 $(quote "${AUTODL_PYTHON}") -m venv \"\${staging}/venv\"
 \"\${staging}/venv/bin/python\" -m pip install --upgrade pip >/dev/null
 PIP_INDEX_URL=$(quote "${AUTODL_PYPI_INDEX_URL}") PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10 \"\${staging}/venv/bin/python\" -m pip install --require-hashes --extra-index-url https://pypi.org/simple -r $(quote "${AUTODL_APP_ROOT}/source/backend/requirements.txt")
 rsync -a --exclude '.env' --exclude '.venv*' --exclude 'data/' $(quote "${AUTODL_APP_ROOT}/source/backend/") \"\${staging}/app/\"
+rsync -a $(quote "${AUTODL_APP_ROOT}/source/marketplaces/") \"\${staging}/marketplaces/\"
 rsync -a --exclude '.env*' --exclude '.next/' --exclude 'node_modules/' $(quote "${AUTODL_APP_ROOT}/source/frontend/") \"\${staging}/frontend-src/\"
 cp $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-dream.sh") \"\${staging}/start-dream.sh\"
 chmod 0755 \"\${staging}/start-dream.sh\"
 export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
 cd \"\${staging}/frontend-src\"
+prebuilt_enabled=$(quote "${prebuilt_enabled}")
 prebuilt=$(quote "${prebuilt_remote}")
-if [ -n "\${prebuilt}" ]; then
+if [ "\${prebuilt_enabled}" = 1 ]; then
+  test -s "\${prebuilt}"
   tar -xzf "\${prebuilt}" --no-same-owner
   rm -f "\${prebuilt}"
 else
@@ -387,6 +400,10 @@ verify_builtin_skills() {
   remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.builtin_skill_packages import COMMON_SKILL_NAMESPACE, discover_builtin_skill_packages, read_builtin_skill_file; from libs.claude_agent_kit.server.workspace import init_workspace; packages = discover_builtin_skill_packages((COMMON_SKILL_NAMESPACE,)); assert packages; workspace = init_workspace(\"deploy-skill-verification\"); assert all((workspace / \"skills\" / package.skill_id / \"SKILL.md\").read_bytes() == read_builtin_skill_file(package, \"SKILL.md\") and (workspace / \"skills\" / package.skill_id).is_symlink() == (not package.is_archive) and (workspace / \".claude\" / \"skills\" / package.skill_id).is_symlink() and (workspace / \".claude\" / \"skills\" / package.skill_id).resolve() == (workspace / \"skills\" / package.skill_id).resolve() for package in packages); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
 }
 
+verify_gateway_service_key() {
+  remote "set -e; $(quote "${AUTODL_PYTHON}") $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/verify-gateway-key.py") $(quote "${AUTODL_APP_ROOT}/config/dream.env")"
+}
+
 verify_seo_origin() {
   local origin="$1" label="$2" endpoint expected_type marker content_type body
   while IFS='|' read -r endpoint expected_type marker; do
@@ -413,7 +430,8 @@ verify() {
   verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin" || return
   verify_plugin_artifacts || return
   verify_builtin_skills || return
-  log "Dream ${topology} topology, Node MCP Apps build, SEO crawler files, built-in Skills, plugin artifact store, Admin dependency, screen supervisor, and public mapping passed."
+  verify_gateway_service_key || return
+  log "Dream ${topology} topology, Gateway service key, Node MCP Apps build, SEO crawler files, built-in Skills, plugin artifact store, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 mark_current_qualified() {

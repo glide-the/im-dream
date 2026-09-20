@@ -1,6 +1,7 @@
 <!-- [Input] Current Dream/Admin architecture, AutoDL direct-host release, and local development contracts. -->
 <!-- [Output] User-first startup, usage, local setup, verification, and recovery entry guide. -->
 <!-- [Pos] Canonical English repository README; README.zh.md is the faithful Chinese mirror. -->
+<!-- [Sync] 2026-09-19: document the Gateway service-key and Claude Agent send-path release gates. -->
 <!-- [Sync] 2026-09-18: put AutoDL startup and product use first; move recovery details to a dedicated runbook. -->
 
 # Ink & Memory Dream
@@ -162,6 +163,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 - **Runtime is not production-qualified:** verify `command -v ink-claude-code-dream`, the package-root `cli.js`, adjacent manifest, Runtime `0.1.10`, compatibility `2.1.241`, and required capabilities.
 - **`uv sync` removed pytest:** use the ephemeral `uv run --with pytest...` command above or add a reviewed development dependency.
 - **Chat reports insufficient Token allowance:** the user message is saved before Gateway rejects the model reservation. Fix the subscription/model allowance in Admin, reload the Thread, then decide whether to send again.
+- **Chat returns `GATEWAY_API_KEY_INVALID`:** the Dream service key no longer matches Admin's active canonical-subject Gateway key. AutoDL sync and qualification now stop before replacing the runtime env when this binding is invalid. Recover or rotate the key through the Admin-owned release operation, restart only Dream so it reloads the private env, and rerun the real `create Thread -> POST /api/claude-agent -> SSE` acceptance before publishing.
 - **MCP App does not appear:** check connection status, App advertisement, usage policy and Admin capability. The ordinary tool result is the expected fallback.
 
 ## Documentation
