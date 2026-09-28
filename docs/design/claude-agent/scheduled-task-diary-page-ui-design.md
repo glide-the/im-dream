@@ -1,4 +1,4 @@
-<!-- [Input] scheduled-task-diary-page-prd.md、scheduled-task-loop-interaction-design.md、files/workspace/2_structure_sketch.md、files/workspace/3_hierarchy_logic.md、files/workspace/4_ui_design.md 和 files/inputs/target_image.png。 -->
+<!-- [Input] docs/prd/claude-agent 下的正式 PRD/页面骨架图、scheduled-task-loop-interaction-design.md 和 html-design-workflow Stage 2–4 产物。 -->
 <!-- [Output] 日记日期弹窗的正式 UI 设计，包含结构草图、层级逻辑、视觉规范、响应式与可访问性规则，以及可运行 HTML/Tailwind 评审原型。 -->
 <!-- [Pos] Claude Agent 定时任务的现行 UI 设计合同；用于生产实现映射与评审，不是生产页面实现。 -->
 <!-- [Sync] 2026-09-29: CalendarPopup 最小纵向切片和四条生产组件 E2E 关闭评审 P0；原型继续作为设计证据，不替代生产代码。 -->
@@ -9,7 +9,8 @@
 
 ## 文档导航
 
-- [正式产品 PRD](./scheduled-task-diary-page-prd.md)
+- [正式产品 PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)
+- [产品页面骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)
 - [定时任务系统交互与执行设计](./scheduled-task-loop-interaction-design.md)
 - [2026-09-29 日记页独立复评与实现关闭回执](../../exec/scheduled-task-diary-prd-review-20260929.md)
 - [2026-09-28 阶段三评审（历史阶段）](../../exec/scheduled-task-phase3-design-review-20260928.md)

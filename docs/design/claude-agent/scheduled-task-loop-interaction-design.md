@@ -1,4 +1,4 @@
-<!-- [Input] docs/exec/scheduled-task-phase1-source-assessment-20260928.md、docs/exec/scheduled-task-phase3-design-review-20260928.md、docs/exec/scheduled-task-diary-prd-review-20260929.md、scheduled-task-diary-page-prd.md、现有 Chat/CalendarPopup、Admin Drizzle 和 Notion 主页面证据。 -->
+<!-- [Input] docs/exec 下阶段评审、docs/prd/claude-agent 下正式页面 PRD/骨架图、现有 Chat/CalendarPopup、Admin Drizzle 和 Notion 主页面证据。 -->
 <!-- [Output] 首期单次与每日定时任务的交互、业务时序、执行、配置版本、失败反馈及可验证的实施门槛。 -->
 <!-- [Pos] Claude Agent 定时任务现行设计；阶段二原文保存在 scheduled-task-loop-interaction-design-20260928-phase2-history.md。 -->
 <!-- [Sync] 2026-09-29: 日记页最小纵向切片和四条生产组件 E2E 关闭评审 P0；正常 capability 发布与真实业务验收仍独立。 -->
@@ -11,7 +11,8 @@
 
 ## 文档导航
 
-- [日记日期弹窗 PRD](./scheduled-task-diary-page-prd.md)
+- [日记日期弹窗 PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)
+- [日记日期弹窗页面骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)
 - [日记日期弹窗 UI 设计与原型](./scheduled-task-diary-page-ui-design.md)
 - [2026-09-29 日记页独立复评与实现关闭回执](../../exec/scheduled-task-diary-prd-review-20260929.md)
 - [2026-09-28 阶段三评审（历史阶段）](../../exec/scheduled-task-phase3-design-review-20260928.md)
@@ -21,7 +22,7 @@
 
 > **当前门禁：最小纵向切片技术验收通过。** Dream Tool、worker、CalendarPopup、移动入口、普通 Chat 回归和隔离 PostgreSQL 跨仓旅程已有通过回执。正常 PostgreSQL capability 发布、Admin 提交归位、真实账户/模型及部署验收仍是独立交付门禁。
 
-页面产品行为以[日记日期弹窗 PRD](./scheduled-task-diary-page-prd.md)为准，页面结构、状态层级、响应式、无障碍和可运行评审原型见[日记日期弹窗 UI 设计](./scheduled-task-diary-page-ui-design.md)。本稿负责跨 Chat Tool、Dream、Admin、PostgreSQL、ThreadFactory 和 Claude Runtime 的系统行为；三份现行文档必须保持同一 operation、状态与失败语义。
+页面产品行为以[日记日期弹窗 PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)为准，结构分区与状态展开见[页面骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)，视觉、响应式、无障碍和可运行评审原型见[日记日期弹窗 UI 设计](./scheduled-task-diary-page-ui-design.md)。本稿负责跨 Chat Tool、Dream、Admin、PostgreSQL、ThreadFactory 和 Claude Runtime 的系统行为；四份现行文档必须保持同一 operation、状态与失败语义。
 
 ## 背景与问题
 
