@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # [Sync] 2026-09-28: add wait_threads as an in-turn tool wait and retire automatic task-result injection/read cards.
 # [Sync] 2026-09-29: project an owner-checked, compact user-turn navigation index for long Chat histories.
+# [Sync] 2026-09-28: expose authenticated scheduled Chat date/history/revision actions through exact Admin DTOs.
 # [Sync] 2026-09-28: replace model task-session commands with authorized create/list/read/send Thread Tools.
 # [Sync] 2026-09-27: project a task's saved completed assistant result separately from its launch/runtime state.
 # [Sync] 2026-09-27: expose owner-filtered task-session navigation links for Chat.
@@ -76,6 +77,7 @@ import asyncio
 import base64
 import binascii
 from hashlib import sha256
+from functools import partial
 import json
 import logging
 import math
@@ -152,6 +154,13 @@ from services.story_workspace.dream_auto_repair_service import (
 )
 
 from services.admin_data.chat_data import AdminChatData
+from services.admin_data.scheduled_task_data import (
+    AdminScheduledTaskData, CREATE_TASK, DAY_TASK, GET_TASK, HISTORY_TASK, EDIT_TASK,
+    PAUSE_TASK, RESUME_TASK, DELETE_TASK, RESTORE_TASK, RUN_TASK,
+    DayScheduledTaskInputDTO, ScheduledTaskIdInputDTO, HistoryScheduledTaskInputDTO,
+    EditScheduledTaskInputDTO, ScheduledTaskRevisionInputDTO, RunScheduledTaskInputDTO,
+    CreateScheduledTaskInputDTO, OnceRuleDTO, DailyRuleDTO,
+)
 from services.admin_data import chat_models as chat_dto
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
@@ -1034,6 +1043,17 @@ async def claude_agent_stream(
     chat: AdminChatData = Depends(get_admin_chat_data),
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
+    return await _claude_agent_stream_impl(body, current_user, chat, owner)
+
+
+async def _claude_agent_stream_impl(
+    body: ClaudeAgentRequestBody,
+    current_user: dict,
+    chat: AdminChatData,
+    owner: AdminRequestAuth,
+    *,
+    scheduled_dispatch=None,
+):
     """SSE streaming endpoint for Claude Agent.
 
     Returns ``text/event-stream``; each frame is a JSON object:
@@ -1072,6 +1092,15 @@ async def claude_agent_stream(
                 "message": "The message identifier uses a reserved namespace.",
             },
         )
+
+    if scheduled_dispatch is not None and (body.reconnect or body.resume):
+        raise HTTPException(status_code=400, detail={"error_code": "SCHEDULE_TURN_INVALID"})
+    if scheduled_dispatch is not None and (
+        scheduled_dispatch.trigger.target_thread_id != thread_id
+        or scheduled_dispatch.trigger.input_message_id != message_id
+        or str(user_id) != scheduled_dispatch.canonical_user_id
+    ):
+        raise HTTPException(status_code=403, detail={"error_code": "SCHEDULE_AUTHORITY_MISMATCH"})
 
     if body.reconnect:
         snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
@@ -1233,7 +1262,8 @@ async def claude_agent_stream(
         user_id,
         body.model,
         system_config,
-        access_token=actor.access_token,
+        access_token=(scheduled_dispatch.gateway_runtime.access_token()
+                      if scheduled_dispatch is not None else actor.access_token),
     )
     if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
@@ -1351,18 +1381,21 @@ async def claude_agent_stream(
         if effective_deck_id or effective_voice_id
         else None
     )
+    if scheduled_dispatch is not None:
+        message_metadata = {
+            "kind": "scheduled-chat",
+            "triggerId": scheduled_dispatch.trigger.id,
+            "claimId": scheduled_dispatch.claim_id,
+        }
     message_id = message_id or str(uuid4())
 
     # Construct long-turn owners only after all fallible request preparation.
     # Factory starts active keepers after admission and owns terminal cleanup.
     gateway_request_id = str(uuid4())
     try:
-        gateway_runtime = await run_in_threadpool(
-            owner.gateway_runtime,
-            actor,
-            workflow_resolution,
-            gateway_request_id,
-        )
+        gateway_runtime = (scheduled_dispatch.gateway_runtime if scheduled_dispatch is not None
+                           else await run_in_threadpool(owner.gateway_runtime, actor,
+                                                        workflow_resolution, gateway_request_id))
     except AdminDataError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -1374,12 +1407,9 @@ async def claude_agent_stream(
         ) from None
     persistence_request_id = str(uuid4())
     try:
-        turn_persistence = await run_in_threadpool(
-            owner.turn_persistence,
-            actor,
-            workflow_resolution,
-            persistence_request_id,
-        )
+        turn_persistence = (scheduled_dispatch.turn_persistence if scheduled_dispatch is not None
+                            else await run_in_threadpool(owner.turn_persistence, actor,
+                                                         workflow_resolution, persistence_request_id))
     except AdminDataError as exc:
         await run_in_threadpool(gateway_runtime.close)
         raise HTTPException(
@@ -1394,18 +1424,15 @@ async def claude_agent_stream(
     turn_persistence.bind_thread_tool_provider(_ThreadToolTurnProvider(
         loop=asyncio.get_running_loop(), current_user=current_user, chat=chat,
         owner=owner, source_thread_id=thread_id, source_message_id=message_id,
+        turn_persistence=turn_persistence,
         timeout_seconds=owner.session_broker_settings.timeout_seconds,
     ))
 
     editor_request_id = str(uuid4())
     try:
-        editor_runtime = await run_in_threadpool(
-            owner.editor_runtime,
-            actor,
-            workflow_resolution,
-            editor_request_id,
-            initial_session_id=editor_session_id,
-        )
+        editor_runtime = (None if scheduled_dispatch is not None else await run_in_threadpool(
+            owner.editor_runtime, actor, workflow_resolution, editor_request_id,
+            initial_session_id=editor_session_id))
     except AdminDataError as exc:
         await run_in_threadpool(gateway_runtime.close)
         await run_in_threadpool(turn_persistence.close)
@@ -1418,7 +1445,7 @@ async def claude_agent_stream(
             },
         ) from None
 
-    if message_id is not None:
+    if message_id is not None and scheduled_dispatch is None:
         # One Admin transaction guards the control record, reserves the user
         # message and fills only a missing title. Service reuses this known
         # reservation, retaining the original command and request identity.
@@ -1463,6 +1490,9 @@ async def claude_agent_stream(
             else body.system_prompt or None
         ),
         message_metadata=message_metadata,
+        user_message_pre_persisted=scheduled_dispatch is not None,
+        scheduled_turn_id=(scheduled_dispatch.turn_id if scheduled_dispatch is not None else None),
+        inherit_cached_editor_state=scheduled_dispatch is None,
         # NOTE (2026-08-02, deck-integration-delta): Deck plugin
         # settings/paths are no longer passed here.  The thread-locked Deck's
         # plugin installations are packed into the thread workspace by the
@@ -1470,11 +1500,86 @@ async def claude_agent_stream(
         # --plugin-dir from the server-controlled launch manifest.
     )
 
-    async def generate():
-        async for frame in claude_agent_thread_factory.run_streaming(request):
+    if scheduled_dispatch is None:
+        # Public SSE keeps its original lazy Factory entry: the turn begins
+        # only when the HTTP response is consumed.
+        async def generate_public():
+            async for frame in claude_agent_thread_factory.run_streaming(request):
+                yield frame
+
+        return streaming_sse_response(generate_public())
+
+    stream = claude_agent_thread_factory.run_streaming(request)
+
+    async def generate_scheduled():
+        async for frame in stream:
             yield frame
 
-    return streaming_sse_response(generate())
+    response = streaming_sse_response(generate_scheduled())
+    response.scheduled_owner_completion = stream.owner_completion
+    return response
+
+
+async def _scheduled_user_operation(current_user: dict, owner: AdminRequestAuth, operation, input_dto):
+    result = await invoke_admin_operation(
+        current_user, partial(AdminScheduledTaskData(owner.client).execute, operation), input_dto,
+    )
+    return result.model_dump(mode="json")
+
+
+@router.get("/api/claude-agent/scheduled-tasks/day")
+async def claude_agent_scheduled_day(
+    local_date: str, display_time_zone: str,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    return await _scheduled_user_operation(
+        current_user, owner, DAY_TASK,
+        DayScheduledTaskInputDTO(local_date=local_date, display_time_zone=display_time_zone),
+    )
+
+
+@router.get("/api/claude-agent/scheduled-tasks/{task_id}")
+async def claude_agent_scheduled_get(
+    task_id: str, current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    return await _scheduled_user_operation(current_user, owner, GET_TASK, ScheduledTaskIdInputDTO(task_id=task_id))
+
+
+@router.get("/api/claude-agent/scheduled-tasks/{task_id}/history")
+async def claude_agent_scheduled_history(
+    task_id: str, limit: int = 50, before_created_at: str | None = None,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    return await _scheduled_user_operation(
+        current_user, owner, HISTORY_TASK,
+        HistoryScheduledTaskInputDTO(task_id=task_id, limit=limit, before_created_at=before_created_at),
+    )
+
+
+@router.post("/api/claude-agent/scheduled-tasks/{task_id}/{action}")
+async def claude_agent_scheduled_action(
+    task_id: str, action: Literal["edit", "pause", "resume", "delete", "restore", "run"],
+    body: dict[str, Any], current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    operation, input_type = {
+        "edit": (EDIT_TASK, EditScheduledTaskInputDTO),
+        "pause": (PAUSE_TASK, ScheduledTaskRevisionInputDTO),
+        "resume": (RESUME_TASK, ScheduledTaskRevisionInputDTO),
+        "delete": (DELETE_TASK, ScheduledTaskRevisionInputDTO),
+        "restore": (RESTORE_TASK, ScheduledTaskRevisionInputDTO),
+        "run": (RUN_TASK, RunScheduledTaskInputDTO),
+    }[action]
+    try:
+        input_dto = input_type.model_validate({"task_id": task_id, **body})
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error_code": "SCHEDULE_INPUT_INVALID"}) from None
+    if input_dto.task_id != task_id:
+        raise HTTPException(status_code=422, detail={"error_code": "SCHEDULE_TASK_ID_MISMATCH"})
+    return await _scheduled_user_operation(current_user, owner, operation, input_dto)
 
 
 @router.get("/api/claude-agent/chat-history")
@@ -2061,13 +2166,14 @@ class _ThreadToolTurnProvider:
     def __init__(self, *, loop: asyncio.AbstractEventLoop, current_user: dict,
                  chat: AdminChatData, owner: AdminRequestAuth,
                  source_thread_id: str, source_message_id: str,
-                 timeout_seconds: float) -> None:
+                 timeout_seconds: float, turn_persistence=None) -> None:
         self._loop = loop
         self._current_user = current_user
         self._chat = chat
         self._owner = owner
         self._source_thread_id = source_thread_id
         self._source_message_id = source_message_id
+        self._turn_persistence = turn_persistence
         self._timeout_seconds = timeout_seconds
 
     def refresh_authorization(self, current_user: dict) -> None:
@@ -2116,6 +2222,38 @@ class _ThreadToolTurnProvider:
         source = self._source_thread_id
         user = self._current_user
         chat = self._chat
+
+        if request.operation == "schedule.create":
+            if self._turn_persistence is None:
+                raise AdminDataError("SCHEDULE_AUTHORIZATION_UNAVAILABLE", 503, request.request_id)
+            rule_data = request.schedule_rule or {}
+            try:
+                rule = (OnceRuleDTO if rule_data.get("kind") == "once" else DailyRuleDTO).model_validate(rule_data)
+            except ValueError:
+                raise HTTPException(status_code=422, detail={"error_code": "SCHEDULE_RULE_INVALID"}) from None
+            request_key = str(uuid5(NAMESPACE_URL,
+                f"scheduled-task:{source}:{self._source_message_id}:{request.tool_call_id}"))
+            token = self._turn_persistence.current_grant(
+                actor_id=str(user["user_id"]), thread_id=source,
+            ).token
+            result = await run_in_threadpool(
+                AdminScheduledTaskData(self._owner.client).execute,
+                CREATE_TASK,
+                CreateScheduledTaskInputDTO(
+                    source_thread_id=source, create_request_key=request_key,
+                    title=str(request.title).strip(), prompt=str(request.prompt).strip(), rule=rule,
+                ),
+                request_key,
+                access_token=token,
+            )
+            task = result.task
+            return ThreadToolCommandResultDTO(
+                status="ok", scheduled_task={
+                    "id": task.id, "title": task.title, "rule": task.rule.model_dump(mode="json"),
+                    "next_run_at": task.next_run_at, "status": task.status,
+                    "revision": task.revision,
+                },
+            )
 
         if request.operation == "thread.create":
             prompt = str(request.prompt).strip()

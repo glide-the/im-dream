@@ -1,6 +1,7 @@
 # [Input] Explicit broker settings, strict projections and synthetic loopback peers/providers.
 # [Output] Capability, framing, timeout, close and in-flight drain contract evidence.
 # [Pos] Provider-free Session projection transport tests; no PG, Admin service or model.
+# [Sync] 2026-09-28: cover schedule.create through the same strict broker dispatch as Thread Tools.
 # [Sync] 2026-09-28: cover wait_threads long-poll read timeout beyond the ordinary broker timeout.
 # [Sync] 2026-09-28: cover strict Thread Tool command/result routing and unbound-provider denial.
 # [Sync] 2026-09-15: cover the private Chat Session broker boundary.
@@ -173,6 +174,32 @@ def test_thread_tool_commands_use_bound_provider_and_reject_unbound_owner():
         assert denied.value.code == "THREAD_TOOL_UNAVAILABLE"
     finally:
         unbound.close()
+
+
+def test_schedule_create_uses_the_same_strict_turn_tool_broker():
+    seen = []
+
+    class ThreadProvider:
+        def perform_thread_tool(self, request):
+            seen.append(request)
+            return ThreadToolCommandResultDTO(
+                status="ok", scheduled_task={"id": "task-1", "revision": 1},
+            )
+
+    broker = SessionProjectionBroker(_Provider(), settings=SessionProjectionBrokerSettings(timeout_seconds=1, max_bytes=4096))
+    broker.bind_thread_tool_provider(ThreadProvider())
+    broker.start()
+    try:
+        result = _client(broker.child_env()).thread_command(
+            operation="schedule.create", tool_call_id="mcp-schedule-1",
+            title="Daily note", prompt="Write a note",
+            schedule_rule={"kind": "daily", "local_time": "09:00", "time_zone": "Asia/Shanghai"},
+        )
+        assert result.scheduled_task == {"id": "task-1", "revision": 1}
+        assert len(seen) == 1 and seen[0].operation == "schedule.create"
+        assert "user_id" not in seen[0].model_dump()
+    finally:
+        broker.close()
 
 
 def test_wait_threads_extends_only_the_call_read_timeout():

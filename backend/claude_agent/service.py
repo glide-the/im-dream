@@ -1,3 +1,4 @@
+# [Sync] 2026-09-28: accept an Admin-bound scheduled turn ID and pre-persisted input; derive its final message ID from that same turn for verified settlement.
 # [Sync] 2026-09-28: let server result turns suppress a stale browser Editor snapshot without erasing the Thread cache.
 # [Sync] 2026-09-27: carry a server-owned task-result claim through pre-persisted source input and final assistant metadata.
 # [Sync] 2026-09-26: queued turns require the saved Claude session and SDK terminal evidence before settlement.
@@ -275,7 +276,7 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from claude_agent_sdk.types import ResultMessage
 from claude_agent.context_builder import ClaudeAgentContextBuilder
@@ -1472,6 +1473,9 @@ class ClaudeAgentRunRequest:
     # A server-owned task-result claim fixes the logical turn identity before
     # its source input is persisted. Public request DTOs cannot set this.
     task_result_turn_id: str | None = field(default=None, repr=False)
+    # A separately authorized scheduled trigger binds its target turn before
+    # the Factory can start the model. It is never a task-result source turn.
+    scheduled_turn_id: str | None = field(default=None, repr=False)
     # Immutable Registry105 data snapshot. Browser DTOs cannot author it; the
     # public route resolves it before persistence, admission, workspace or SSE.
     admin_deck_chat_context: AdminDeckChatContextResolution | None = field(
@@ -2918,6 +2922,17 @@ class ClaudeAgentService:
             ):
                 return
             metadata = execution.request.message_metadata
+            if execution.request.scheduled_turn_id is not None:
+                if (
+                    execution.request.scheduled_turn_id == execution.state.current_turn_id
+                    and isinstance(execution.request.message_id, str)
+                    and isinstance(metadata, dict)
+                    and metadata.get("kind") == "scheduled-chat"
+                    and isinstance(metadata.get("triggerId"), str)
+                    and isinstance(metadata.get("claimId"), str)
+                ):
+                    return
+                raise ValueError("Invalid pre-persisted scheduled input")
             if execution.request.task_result_turn_id is not None:
                 if (
                     isinstance(execution.request.message_id, str)
@@ -3159,7 +3174,8 @@ class ClaudeAgentService:
         persistence.persist_assistant(
             actor_id=request.user_id,
             thread_id=request.thread_id,
-            message_id=str(uuid4()),
+            message_id=(str(uuid5(NAMESPACE_URL, f"scheduled-final:{request.thread_id}:{request.scheduled_turn_id}"))
+                        if request.scheduled_turn_id is not None else str(uuid4())),
             parts=parts,
             metadata=metadata,
             history_final_text=history_final_text,

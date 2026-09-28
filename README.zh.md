@@ -10,6 +10,8 @@
 <!-- [同步] 2026-09-28：将 Chat 任务导航指向现行“任务与进度”需求稿。 -->
 <!-- [同步] 2026-09-28：独立任务改用创建、列表、读取和发送 Dream Thread 工具。 -->
 <!-- [同步] 2026-09-28：独立任务通过当前父轮次的 wait_threads Tool 回执完成等待。 -->
+<!-- [同步] 2026-09-28：索引定时任务评审设计、注明尚未实现，并修复任务与进度 PRD 链接。 -->
+<!-- [同步] 2026-09-28：记录定时 Chat 消费端、日历操作与 Admin capability 部署门槛。 -->
 <!-- [同步] 2026-09-27：记录任务导航在用户消息和助手回复中的位置。 -->
 <!-- [同步] 2026-09-18：将 AutoDL 启动与产品使用前置，恢复细节移入独立手册。 -->
 
@@ -49,6 +51,7 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 - **Chat 轮次导航** 为当前 Thread 中每条已发送的用户消息显示紧凑的动态刻度。悬浮或聚焦可预览该次交互，选中后定位原消息，包括较早的历史分页；窄屏改用可展开的消息列表。详见[轮次导航 PRD](docs/prd/chat/turn-navigation.md)。
 - **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
+- **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，规则为带 IANA 时区的单次当地日期时间或每日当地钟点。日历显示定义、执行历史及关联 Chat，支持编辑、暂停、恢复、立即运行、软删除和撤销删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 后台消费端复用现有 Chat Runtime。目标数据库发布 Admin Drizzle 0069–0072 的 schema capability 和精确操作合同后才能运行。技术性空闲轮询间隔由 `INK_SCHEDULED_TASK_POLL_SECONDS` 配置，默认 `2` 秒。详见[定时任务设计](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)。
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
 - **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”组合 YuE2 统筹、编曲师、作词师，并使用本机 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
 - **文件** 保存在 Thread 工作区，继续执行路径规范化、所有权检查和共享文件系统边界。
@@ -185,6 +188,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - [AutoDL 恢复](docs/deploy/autodl-recovery.md)
 - [项目架构](docs/architecture/项目架构设计说明.md)
 - [认证与数据合同](docs/architecture/admin-auth-data-interaction.md)
+- [定时任务设计与实施门槛](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)（[独立评审](docs/exec/scheduled-task-phase3-design-review-20260928.md)、[隔离技术回执](docs/exec/scheduled-task-phase4-consumer-receipt-20260928.md)；Admin capability 部署仍是前置条件）
 - [仓库规则](Agent.md)
 - [产品 Agent 行为](docs/Agent.md)
 - [规则索引](docs/rules/README.md)

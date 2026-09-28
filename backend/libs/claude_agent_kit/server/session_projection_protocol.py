@@ -2,6 +2,7 @@
 # [Output] Strict broker DTOs plus synchronous Session/current-Run/Thread child clients without Admin or database dependency.
 # [Pos] Neutral turn projection protocol shared by the host broker and stdio children.
 # [Sync] 2026-09-28: add Codex-style wait_threads wire types and a per-call long-poll read timeout.
+# [Sync] 2026-09-28: carry a strictly shaped scheduled-task creation request and receipt over the existing host broker.
 # [Sync] 2026-09-28: replace model task-session commands with create/list/read/send Thread wire types.
 # [Sync] 2026-09-15: define the bounded private Session broker protocol.
 # [Sync] 2026-09-16: add a selector-free current WorkflowRun projection for Story Workspace filesystem writes.
@@ -14,7 +15,7 @@ import json
 import math
 import re
 import socket
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -178,6 +179,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
     capability: _Capability = Field(repr=False)
     request_id: _Identifier
     operation: Literal[
+        "schedule.create",
         "thread.create",
         "thread.list",
         "thread.read",
@@ -197,10 +199,36 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
         max_length=8,
     )
     timeout_ms: int | None = Field(default=None, ge=0, le=120_000)
+    schedule_rule: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_command(self):
-        if self.operation == "thread.create":
+        if self.operation == "schedule.create":
+            rule = self.schedule_rule or {}
+            required = ({"kind", "local_date", "local_time", "time_zone", "selected_offset_minutes"}
+                        if rule.get("kind") == "once" else {"kind", "local_time", "time_zone"})
+            rule_valid = (
+                rule.get("kind") in ("once", "daily")
+                and set(rule) == required
+                and isinstance(rule.get("time_zone"), str) and bool(rule["time_zone"].strip())
+                and isinstance(rule.get("local_time"), str)
+                and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", rule["local_time"]) is not None
+                and (rule.get("kind") != "once" or (
+                    isinstance(rule.get("local_date"), str)
+                    and re.fullmatch(r"\d{4}-\d{2}-\d{2}", rule["local_date"]) is not None
+                    and (rule["selected_offset_minutes"] is None
+                         or (type(rule["selected_offset_minutes"]) is int
+                             and -840 <= rule["selected_offset_minutes"] <= 840))
+                ))
+            )
+            valid = (
+                bool(self.prompt and self.prompt.strip())
+                and bool(self.title and self.title.strip())
+                and rule_valid
+                and self.query is None and self.limit is None and self.thread_id is None
+                and self.message_limit is None and self.targets is None and self.timeout_ms is None
+            )
+        elif self.operation == "thread.create":
             valid = (
                 bool(self.prompt and self.prompt.strip())
                 and (self.title is None or bool(self.title.strip()))
@@ -210,6 +238,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
                 and self.message_limit is None
                 and self.targets is None
                 and self.timeout_ms is None
+                and self.schedule_rule is None
             )
         elif self.operation == "thread.list":
             valid = (
@@ -220,6 +249,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
                 and self.message_limit is None
                 and self.targets is None
                 and self.timeout_ms is None
+                and self.schedule_rule is None
             )
         elif self.operation == "thread.read":
             valid = (
@@ -230,6 +260,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
                 and self.limit is None
                 and self.targets is None
                 and self.timeout_ms is None
+                and self.schedule_rule is None
             )
         elif self.operation == "thread.send":
             valid = (
@@ -241,6 +272,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
                 and self.message_limit is None
                 and self.targets is None
                 and self.timeout_ms is None
+                and self.schedule_rule is None
             )
         else:
             target_ids = [item.thread_id for item in (self.targets or [])]
@@ -253,6 +285,7 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
                 and self.limit is None
                 and self.thread_id is None
                 and self.message_limit is None
+                and self.schedule_rule is None
             )
         if not valid:
             raise ValueError("Thread Tool command shape is invalid")
@@ -290,6 +323,7 @@ class ThreadToolCommandResultDTO(_StrictDTO):
     updates: list[ThreadToolWaitUpdateDTO] | None = None
     errors: list[ThreadToolWaitErrorDTO] | None = None
     error_code: str | None = None
+    scheduled_task: dict[str, Any] | None = None
 
 
 class ThreadToolCommandResponseDTO(_StrictDTO):
@@ -539,6 +573,7 @@ class SessionProjectionBrokerClient:
         self,
         *,
         operation: Literal[
+            "schedule.create",
             "thread.create",
             "thread.list",
             "thread.read",
@@ -554,6 +589,7 @@ class SessionProjectionBrokerClient:
         message_limit: int | None = None,
         targets: list[ThreadToolWaitTargetDTO] | None = None,
         timeout_ms: int | None = None,
+        schedule_rule: dict[str, Any] | None = None,
     ) -> ThreadToolCommandResultDTO:
         request_id = str(uuid4())
         try:
@@ -563,6 +599,7 @@ class SessionProjectionBrokerClient:
                 prompt=prompt, title=title, query=query, limit=limit,
                 thread_id=thread_id, message_limit=message_limit,
                 targets=targets, timeout_ms=timeout_ms,
+                schedule_rule=schedule_rule,
             )
         except ValidationError:
             raise SessionProjectionProtocolError("THREAD_TOOL_INPUT_INVALID", 400, request_id) from None

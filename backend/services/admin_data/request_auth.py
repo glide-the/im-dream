@@ -1,4 +1,5 @@
 # [Sync] 2026-09-27: register exact task-result operations for optional capability-gated completion handoff.
+# [Sync] 2026-09-28: register Admin-owned scheduled Chat definitions and trigger operations without changing ordinary Chat readiness.
 # [Sync] 2026-09-27: compose one service-only task-result worker for source Thread continuations.
 # [Sync] 2026-09-16: create Admin-owned gateway-cli grants for public Agent turns.
 # [Sync] 2026-09-16: register Registry185-191 Story Workspace Artifact operations.
@@ -53,6 +54,7 @@ from threading import RLock
 
 from .chat_data import CHAT_OPERATIONS
 from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWorkerData
+from .scheduled_task_data import SCHEDULED_TASK_OPERATIONS
 from .client import AdminDataClient
 from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
@@ -148,6 +150,7 @@ class AdminRequestAuth:
             operations=(
                 *CHAT_OPERATIONS,
                 *TASK_RESULT_OPERATIONS,
+                *SCHEDULED_TASK_OPERATIONS,
                 *SESSION_OPERATIONS,
                 *DECK_VERSION_OPERATIONS,
                 *PREFERENCES_OPERATIONS,

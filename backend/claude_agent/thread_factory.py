@@ -1,3 +1,4 @@
+# [Sync] 2026-09-28: use the Admin-bound scheduled turn ID under the ordinary Thread lock before entering the shared Service.
 # [Sync] 2026-09-27: bind a claimed task-result source turn to its persisted Admin identity.
 # [Sync] 2026-09-28: expose source-input generations so wait_threads wakes when a user queues new input.
 # [Sync] 2026-09-28: expose the owning Factory task's completion so task-result grants remain live through queued follow-up turns.
@@ -429,7 +430,18 @@ class ClaudeAgentThreadFactory:
                     or not isinstance(metadata.get("claimId"), str)
                 ):
                     raise ValueError("Invalid claimed task-result turn")
-            state.current_turn_id = request.task_result_turn_id or str(uuid4())
+            if request.scheduled_turn_id is not None:
+                metadata = request.message_metadata
+                if (
+                    request.task_result_turn_id is not None
+                    or not request.user_message_pre_persisted
+                    or not isinstance(metadata, dict)
+                    or metadata.get("kind") != "scheduled-chat"
+                    or not isinstance(metadata.get("triggerId"), str)
+                    or not isinstance(metadata.get("claimId"), str)
+                ):
+                    raise ValueError("Invalid scheduled turn binding")
+            state.current_turn_id = request.scheduled_turn_id or request.task_result_turn_id or str(uuid4())
             state.current_dream_context = None
             state.current_message_metadata = (
                 dict(request.message_metadata)

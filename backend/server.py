@@ -9,6 +9,7 @@
 # [Sync] 2026-09-28: retire background task-result source turns; parent agents now wait through wait_threads.
 # [Historical Sync] 2026-09-27: reconciled Admin task results into source Thread turns before Factory shutdown.
 # [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
+# [Sync] 2026-09-28: own one isolated scheduled Chat claim worker and drain it before Factory shutdown.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules.
@@ -389,6 +390,20 @@ async def story_workspace_startup_dream_confirmation_coordinator():
 
 
 @app.on_event("startup")
+async def startup_scheduled_chat_coordinator():
+    """Consume only Admin-authorized claims; absent capability leaves normal Chat running."""
+    from claude_agent.scheduled_task_coordinator import ScheduledTaskCoordinator
+    from config import scheduled_task_poll_seconds
+
+    owner = getattr(app.state, "admin_request_auth", None)
+    if owner is None:
+        raise RuntimeError("Admin request/data owner is unavailable")
+    coordinator = ScheduledTaskCoordinator(owner, poll_interval_seconds=scheduled_task_poll_seconds())
+    app.state.scheduled_chat_coordinator = coordinator
+    coordinator.start()
+
+
+@app.on_event("startup")
 async def story_workspace_startup_dream_launch_dispatches():
     """Enable process-owned launch turn drains."""
 
@@ -426,6 +441,13 @@ async def story_workspace_shutdown_dream_confirmation_coordinator():
     """Stop reconciliation before closing the Claude Agent factory."""
 
     await story_workspace_get_dream_confirmation_coordinator().stop()
+
+
+@app.on_event("shutdown")
+async def shutdown_scheduled_chat_coordinator():
+    coordinator = getattr(app.state, "scheduled_chat_coordinator", None)
+    if coordinator is not None:
+        await coordinator.stop()
 
 
 @app.on_event("shutdown")

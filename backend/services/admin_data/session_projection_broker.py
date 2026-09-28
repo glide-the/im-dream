@@ -1,3 +1,4 @@
+# [Sync] 2026-09-28: dispatch schedule.create through the same strict turn-local Thread Tool provider.
 # [Sync] 2026-09-28: route wait_threads long polls through the current turn's private host provider.
 # [Sync] 2026-09-28: route create/list/read/send Thread Tool commands through the current turn's private host provider.
 # [Input] Bound Session/current-Run projection providers, strict loopback DTOs and server transport bounds.
@@ -146,7 +147,10 @@ class SessionProjectionBroker:
             untrusted = json.loads(raw)
             if not isinstance(untrusted, dict):
                 raise ValueError("Broker request must be an object")
-            if isinstance(untrusted.get("operation"), str) and untrusted["operation"].startswith("thread."):
+            if isinstance(untrusted.get("operation"), str) and (
+                untrusted["operation"].startswith("thread.")
+                or untrusted["operation"] == "schedule.create"
+            ):
                 request = ThreadToolCommandRequestDTO.model_validate(untrusted, strict=True)
                 request_id = request.request_id
                 if not hmac.compare_digest(request.capability, self._capability):
