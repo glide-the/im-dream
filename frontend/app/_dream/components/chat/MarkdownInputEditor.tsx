@@ -7,8 +7,8 @@
 // [Sync] 2026-09-11: create the Tiptap editor only after client mount
 //                    (immediatelyRender: false) so Next.js SSR never renders or
 //                    hydrates the composer before the browser runtime exists.
-// [Sync] 2026-09-18: run the composer's key policy in capture phase before Tiptap keymaps mutate the document.
-import { useEffect, type FocusEventHandler, type KeyboardEventHandler } from 'react';
+// [Sync] 2026-09-27: suppress repeated Tiptap DOM-observer updates before they can re-enter controlled composer state.
+import { useEffect, useRef, type FocusEventHandler, type KeyboardEventHandler } from 'react';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -46,6 +46,11 @@ export default function MarkdownInputEditor({
   onFocus,
   onBlur,
 }: MarkdownInputEditorProps) {
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -66,11 +71,17 @@ export default function MarkdownInputEditor({
       },
     },
     onUpdate: ({ editor: currentEditor }) => {
-      onChange(currentEditor.getMarkdown());
+      const markdown = currentEditor.getMarkdown();
+      if (markdown === valueRef.current) {
+        return;
+      }
+      valueRef.current = markdown;
+      onChangeRef.current(markdown);
     },
   }, [placeholder]);
 
   useEffect(() => {
+    valueRef.current = value;
     if (!editor || editor.getMarkdown() === value) {
       return;
     }

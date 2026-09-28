@@ -1,6 +1,8 @@
 # [Input] Explicit broker settings, strict projections and synthetic loopback peers/providers.
 # [Output] Capability, framing, timeout, close and in-flight drain contract evidence.
 # [Pos] Provider-free Session projection transport tests; no PG, Admin service or model.
+# [Sync] 2026-09-28: cover wait_threads long-poll read timeout beyond the ordinary broker timeout.
+# [Sync] 2026-09-28: cover strict Thread Tool command/result routing and unbound-provider denial.
 # [Sync] 2026-09-15: cover the private Chat Session broker boundary.
 # [Sync] 2026-09-16: cover the selector-free current WorkflowRun projection on the same capability.
 from __future__ import annotations
@@ -8,6 +10,7 @@ from __future__ import annotations
 import json
 import socket
 import socketserver
+import time
 from datetime import datetime, timezone
 from threading import Event, Thread
 
@@ -24,6 +27,8 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     SESSION_BROKER_TIMEOUT_ENV,
     SessionProjectionBrokerClient,
     SessionProjectionProtocolError,
+    ThreadToolCommandResultDTO,
+    ThreadToolWaitTargetDTO,
 )
 from services.admin_data.session_models import SessionListResultDTO
 from services.admin_data.session_projection_broker import (
@@ -124,6 +129,85 @@ def _started(
 
 def _client(env: dict[str, str]) -> SessionProjectionBrokerClient:
     return SessionProjectionBrokerClient.from_env(env)
+
+
+def test_thread_tool_commands_use_bound_provider_and_reject_unbound_owner():
+    class ThreadProvider:
+        def __init__(self):
+            self.requests = []
+
+        def perform_thread_tool(self, request):
+            self.requests.append(request)
+            return ThreadToolCommandResultDTO(
+                thread_id="thread-1", status="starting"
+            )
+
+    broker = SessionProjectionBroker(_Provider(), settings=SessionProjectionBrokerSettings(timeout_seconds=1, max_bytes=4096))
+    provider = ThreadProvider()
+    broker.bind_thread_tool_provider(provider)
+    broker.start()
+    try:
+        result = _client(broker.child_env()).thread_command(
+            operation="thread.create", tool_call_id="mcp-call-1",
+            title="独立任务", prompt="先检查代码",
+        )
+        assert result.thread_id == "thread-1"
+        assert len(provider.requests) == 1
+        assert provider.requests[0].tool_call_id == "mcp-call-1"
+        assert "user_id" not in provider.requests[0].model_dump()
+        with pytest.raises(SessionProjectionProtocolError) as invalid:
+            _client(broker.child_env()).thread_command(
+                operation="thread.create", tool_call_id="mcp-call-2",
+                title="任务", prompt="", thread_id="forged",
+            )
+        assert invalid.value.code == "THREAD_TOOL_INPUT_INVALID"
+    finally:
+        broker.close()
+
+    unbound = SessionProjectionBroker(_Provider(), settings=SessionProjectionBrokerSettings(timeout_seconds=1, max_bytes=4096))
+    unbound.start()
+    try:
+        with pytest.raises(SessionProjectionProtocolError) as denied:
+            _client(unbound.child_env()).thread_command(
+                operation="thread.read", tool_call_id="mcp-call-3", thread_id="thread-1")
+        assert denied.value.code == "THREAD_TOOL_UNAVAILABLE"
+    finally:
+        unbound.close()
+
+
+def test_wait_threads_extends_only_the_call_read_timeout():
+    class ThreadProvider:
+        def refresh_authorization(self, _current_user):
+            pass
+
+        def perform_thread_tool(self, request):
+            assert request.operation == "thread.wait"
+            time.sleep(0.06)
+            return ThreadToolCommandResultDTO(
+                status="ok",
+                wait_reason="timeout",
+                updates=[],
+            )
+
+    broker = SessionProjectionBroker(
+        _Provider(),
+        settings=SessionProjectionBrokerSettings(
+            timeout_seconds=0.02,
+            max_bytes=4096,
+        ),
+    )
+    broker.bind_thread_tool_provider(ThreadProvider())
+    broker.start()
+    try:
+        result = _client(broker.child_env()).thread_command(
+            operation="thread.wait",
+            tool_call_id="mcp-call-wait",
+            targets=[ThreadToolWaitTargetDTO(thread_id="thread-one")],
+            timeout_ms=100,
+        )
+        assert result.wait_reason == "timeout"
+    finally:
+        broker.close()
 
 
 def test_child_env_is_exact_loopback_tuple_with_256_bit_capability():

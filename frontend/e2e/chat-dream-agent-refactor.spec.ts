@@ -14,6 +14,8 @@
 //                    process folding before the same-thread next turn.
 // [Sync] 2026-09-04: prove common Skills appear through slash and submit as the ordinary user message.
 // [Sync] 2026-09-13: distinguish Edit Session SSE cleanup aborts from failed business requests.
+// [Sync] 2026-09-28: address the existing environment-information entry after task controls were embedded there.
+// [Sync] 2026-09-28: use the current cookie-session DTO, fixture task navigation, and fail on retired task-results polling.
 
 import { expect, test } from '@playwright/test';
 
@@ -180,10 +182,23 @@ test('Dream active Deck context → workbench → Chat active tab → production
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'chat-dream-agent-refactor-token');
     localStorage.setItem('migration_completed', 'true');
     localStorage.setItem('ink-language', 'zh');
   });
+
+  await page.route(/^https?:\/\/unpkg\.com\/react-grab\/.*/, async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    headers: { 'access-control-allow-origin': '*' },
+    body: '',
+  }));
+
+  await page.route(`${WEB_BASE}/auth/session`, async (route) => route.fulfill({
+    json: {
+      user: { id: '314', email: 'dream-e2e@example.test', display_name: 'Dream E2E', avatar_url: null, role: 'user', created_at: null },
+      csrf_token: 'a'.repeat(43),
+    },
+  }));
 
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const request = route.request();
@@ -400,6 +415,15 @@ test('Dream active Deck context → workbench → Chat active tab → production
         },
       });
     }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/task-links`) {
+      return route.fulfill({ json: { source: null, created: [] } });
+    }
+    if (/^\/api\/claude-agent\/threads\/[^/]+\/inputs$/.test(pathname) && request.method() === 'GET') {
+      return route.fulfill({ json: { entries: [], local_owner: false } });
+    }
+    if (/^\/api\/claude-agent\/threads\/[^/]+\/task-links$/.test(pathname) && request.method() === 'GET') {
+      return route.fulfill({ json: { source: null, created: [] } });
+    }
     if (pathname === '/api/claude-agent' && request.method() === 'POST') {
       historicalChatTurnBody = request.postDataJSON() as Record<string, unknown>;
       return route.fulfill({
@@ -471,12 +495,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('历史思考链仅在展开后挂载。')).toHaveCount(0);
   await expect(agentSelector).toHaveCount(0);
-  const historicalDeckContext = page.getByRole('button', { name: 'Deck 元信息' });
+  const historicalDeckContext = page.getByRole('button', { name: '环境信息' });
   await expect(historicalDeckContext).toBeVisible();
   await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await expect(historicalDeckContext).not.toContainText('drama-forge');
   await historicalDeckContext.click();
-  const deckMetadataDialog = page.getByRole('dialog', { name: 'Deck 元信息' });
+  const deckMetadataDialog = page.getByRole('dialog', { name: '环境信息' });
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
   await expect(deckMetadataDialog.getByRole('button', { name: '故事导演，当前 Agent' })).toBeDisabled();
   await deckMetadataDialog.getByRole('button', { name: '切换到 结构顾问' }).click();
@@ -573,10 +597,15 @@ test('Dream active Deck context → workbench → Chat active tab → production
 
 test('Dream home reaches the final run at a narrow low-height viewport', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'chat-dream-agent-refactor-token');
     localStorage.setItem('migration_completed', 'true');
     localStorage.setItem('ink-language', 'zh');
   });
+  await page.route(`${WEB_BASE}/auth/session`, async (route) => route.fulfill({
+    json: {
+      user: { id: '314', email: 'dream-e2e@example.test', display_name: 'Dream E2E', avatar_url: null, role: 'user', created_at: null },
+      csrf_token: 'a'.repeat(43),
+    },
+  }));
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === '/api/me') return route.fulfill({ json: { id: 314, email: 'dream-e2e@example.test', display_name: 'Dream E2E' } });

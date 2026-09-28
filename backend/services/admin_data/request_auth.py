@@ -1,3 +1,5 @@
+# [Sync] 2026-09-27: register exact task-result operations for optional capability-gated completion handoff.
+# [Sync] 2026-09-27: compose one service-only task-result worker for source Thread continuations.
 # [Sync] 2026-09-16: create Admin-owned gateway-cli grants for public Agent turns.
 # [Sync] 2026-09-16: register Registry185-191 Story Workspace Artifact operations.
 # [Sync] 2026-09-16: register Registry175-184 including service-only builtin reconciliation.
@@ -50,6 +52,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 
 from .chat_data import CHAT_OPERATIONS
+from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWorkerData
 from .client import AdminDataClient
 from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
@@ -144,6 +147,7 @@ class AdminRequestAuth:
             config,
             operations=(
                 *CHAT_OPERATIONS,
+                *TASK_RESULT_OPERATIONS,
                 *SESSION_OPERATIONS,
                 *DECK_VERSION_OPERATIONS,
                 *PREFERENCES_OPERATIONS,
@@ -332,6 +336,13 @@ class AdminRequestAuth:
         self,
     ) -> AdminStoryWorkspaceConfirmationWorkerData:
         return AdminStoryWorkspaceConfirmationWorkerData(
+            self.client,
+            runtime_http_config=self._runtime_http_config,
+            session_broker_settings=self._session_broker_settings,
+        )
+
+    def task_result_worker(self) -> AdminTaskResultWorkerData:
+        return AdminTaskResultWorkerData(
             self.client,
             runtime_http_config=self._runtime_http_config,
             session_broker_settings=self._session_broker_settings,

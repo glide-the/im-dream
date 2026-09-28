@@ -1,3 +1,9 @@
+# [Sync] 2026-09-27: bind a claimed task-result source turn to its persisted Admin identity.
+# [Sync] 2026-09-28: expose source-input generations so wait_threads wakes when a user queues new input.
+# [Sync] 2026-09-28: expose the owning Factory task's completion so task-result grants remain live through queued follow-up turns.
+# [Sync] 2026-09-28: resolve owner completion on prelaunch stream rejection so result claims can settle after cleanup.
+# [Sync] 2026-09-28: refresh Thread Tool authorization before settling an authenticated confirmation.
+# [Sync] 2026-09-26: own the process-local durable input queue claim and selected-message interrupt path.
 # [Input] Consume claude_agent/thread_pool.py, claude_agent/service.py,
 #         claude_agent/event_bus.py, claude_agent/admission.py,
 #         libs/claude_agent_kit/runner.py, claude_agent/observer.py.
@@ -31,11 +37,16 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import json
+from collections import deque
+from dataclasses import dataclass, replace
 import logging
 import os
 from typing import Any, AsyncGenerator, AsyncIterator, Callable, Mapping, Optional
 from uuid import uuid4
+
+from services.admin_data import chat_models as chat_dto
+from services.admin_data.chat_data import AdminChatData
 
 from claude_agent.admission import (
     AgentAdmissionLease,
@@ -194,15 +205,17 @@ class _ChatTurnCompletionTracker:
 
 
 class _ChatTurnStream(AsyncIterator[str]):
-    """One Chat SSE iterator plus the completion of that exact same turn."""
+    """One Chat SSE iterator plus turn and optional owning task completion."""
 
     def __init__(
         self,
         source: AsyncGenerator[str, None],
         completion: asyncio.Future[_ChatTurnCompletion],
+        owner_completion: asyncio.Future[None] | None,
     ) -> None:
         self._source = source
         self.completion = completion
+        self.owner_completion = owner_completion
 
     def __aiter__(self) -> _ChatTurnStream:
         return self
@@ -219,6 +232,15 @@ def build_session_id(request: ClaudeAgentRunRequest) -> str:
     sid = request.thread_id
     _validate_session_id(sid)
     return sid
+
+
+@dataclass(frozen=True)
+class _QueuedThreadInput:
+    message_id: str
+    parts: list[dict[str, Any]]
+    metadata: dict[str, Any] | None
+    tool_choice: str
+    queue_sequence: int
 
 
 class ClaudeAgentThreadFactory:
@@ -251,6 +273,12 @@ class ClaudeAgentThreadFactory:
         self._closing = False
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
+        self._input_queues: dict[str, deque[_QueuedThreadInput]] = {}
+        self._input_locks: dict[str, asyncio.Lock] = {}
+        self._input_accepting: set[str] = set()
+        self._input_templates: dict[str, ClaudeAgentRunRequest] = {}
+        self._input_generations: dict[str, int] = {}
+        self._input_events: dict[str, asyncio.Event] = {}
 
     def start(self) -> None:
         self._require_accepting_runs()
@@ -328,21 +356,36 @@ class ClaudeAgentThreadFactory:
         completion: asyncio.Future[_ChatTurnCompletion] = (
             asyncio.get_running_loop().create_future()
         )
+        owner_completion: asyncio.Future[None] | None = (
+            None if request.reconnect else asyncio.get_running_loop().create_future()
+        )
         return _ChatTurnStream(
-            self._run_streaming_frames(request, completion),
+            self._run_streaming_frames(request, completion, owner_completion),
             completion,
+            owner_completion,
         )
 
     async def _run_streaming_frames(
         self,
         request: ClaudeAgentRunRequest,
         completion: asyncio.Future[_ChatTurnCompletion],
+        owner_completion: asyncio.Future[None] | None,
     ) -> AsyncGenerator[str, None]:
         """Private implementation for the canonical Chat turn stream."""
 
-        self._require_accepting_runs()
+        try:
+            self._require_accepting_runs()
+        except BaseException:
+            if owner_completion is not None and not owner_completion.done():
+                owner_completion.set_result(None)
+            raise
         tracker = _ChatTurnCompletionTracker()
-        session_id = build_session_id(request)
+        try:
+            session_id = build_session_id(request)
+        except BaseException:
+            if owner_completion is not None and not owner_completion.done():
+                owner_completion.set_result(None)
+            raise
         if request.reconnect:
             adapter = ChatStreamAdapter()
             try:
@@ -356,7 +399,12 @@ class ClaudeAgentThreadFactory:
 
         adapter = ChatStreamAdapter()
         lock = self._pool.get_lock(session_id)
-        await lock.acquire()
+        try:
+            await lock.acquire()
+        except BaseException:
+            if owner_completion is not None and not owner_completion.done():
+                owner_completion.set_result(None)
+            raise
         release_lock_on_exit = True
         state: AgentRunState | None = None
         try:
@@ -369,7 +417,18 @@ class ClaudeAgentThreadFactory:
                     f"Session {session_id!r} is already running; use reconnect instead"
                 )
 
-            state.current_turn_id = str(uuid4())
+            if request.task_result_turn_id is not None:
+                metadata = request.message_metadata
+                if (
+                    not request.user_message_pre_persisted
+                    or not isinstance(metadata, dict)
+                    or metadata.get("kind") != "task-session-result"
+                    or metadata.get("sourceTurnId") != request.task_result_turn_id
+                    or not isinstance(metadata.get("taskResultNotificationId"), str)
+                    or not isinstance(metadata.get("claimId"), str)
+                ):
+                    raise ValueError("Invalid claimed task-result turn")
+            state.current_turn_id = request.task_result_turn_id or str(uuid4())
             state.current_dream_context = None
             state.current_message_metadata = (
                 dict(request.message_metadata)
@@ -388,6 +447,11 @@ class ClaudeAgentThreadFactory:
                 self._run_turn_task(request, state, bus, lock),
                 name=f"claude-agent-session-{session_id}",
             )
+            if owner_completion is not None:
+                bg_task.add_done_callback(
+                    lambda _task: owner_completion.set_result(None)
+                    if not owner_completion.done() else None
+                )
             state.bg_task = bg_task
             # _run_turn_task releases the lock when the turn ends (or on early
             # disconnect the task keeps running and still owns lock release).
@@ -411,8 +475,193 @@ class ClaudeAgentThreadFactory:
                     if state.lifecycle == AgentRunLifecycle.RUNNING:
                         state.mark_idle()
                 lock.release()
+                if owner_completion is not None and not owner_completion.done():
+                    owner_completion.set_result(None)
             if not completion.done():
                 completion.set_result(tracker.result())
+
+    def _input_lock(self, thread_id: str) -> asyncio.Lock:
+        lock = self._input_locks.get(thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._input_locks[thread_id] = lock
+        return lock
+
+    async def enqueue_input(
+        self, *, thread_id: str, user_id: str, message_id: str,
+        parts: list[dict[str, Any]], title_candidate: str, tool_choice: str,
+        chat: AdminChatData, access_token: str,
+    ) -> chat_dto.QueueEntryDTO:
+        """Atomically persist a message before notifying its local owner."""
+
+        _validate_session_id(thread_id)
+        async with self._input_lock(thread_id):
+            existing = await asyncio.to_thread(
+                chat.list_inputs, chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+                str(uuid4()), access_token=access_token,
+            )
+            for item in existing.entries:
+                if item.message_id == message_id:
+                    if item.text != title_candidate:
+                        raise RuntimeError("CHAT_MESSAGE_IDENTITY_CONFLICT")
+                    return item
+            template = self._input_templates.get(thread_id)
+            state = self._pool.get(thread_id)
+            if (thread_id not in self._input_accepting or template is None
+                or state is None or state.lifecycle != AgentRunLifecycle.RUNNING
+                or template.user_id != user_id):
+                raise RuntimeError("CHAT_INPUT_OWNER_UNAVAILABLE")
+            metadata = template.message_metadata
+            input_dto = chat_dto.QueueEnqueueInputDTO(
+                thread_id=thread_id, message_id=message_id,
+                parts_json=json.dumps(parts, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
+                metadata_json=(json.dumps(metadata, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                               if metadata is not None else None),
+                title_candidate=title_candidate,
+            )
+            result = await asyncio.to_thread(
+                chat.enqueue_input, input_dto, str(uuid4()), access_token=access_token,
+            )
+            entry = result.entry
+            if entry.status == "queued":
+                queue = self._input_queues.setdefault(thread_id, deque())
+                if not any(item.message_id == message_id for item in queue):
+                    queue.append(_QueuedThreadInput(
+                        message_id=message_id, parts=parts,
+                        metadata=metadata, tool_choice=tool_choice,
+                        queue_sequence=int(entry.queue_sequence),
+                    ))
+                    self._input_generations[thread_id] = (
+                        self._input_generations.get(thread_id, 0) + 1
+                    )
+                    self._input_events.setdefault(thread_id, asyncio.Event()).set()
+            return entry
+
+    def input_generation(self, thread_id: str) -> int:
+        """Return the process-local count of newly accepted inputs for one owner."""
+
+        _validate_session_id(thread_id)
+        return self._input_generations.get(thread_id, 0)
+
+    async def wait_for_input_after(
+        self,
+        thread_id: str,
+        generation: int,
+        *,
+        timeout_seconds: float,
+    ) -> bool:
+        """Wait until a new input is accepted after ``generation``.
+
+        The generation check before and after clearing the event closes the
+        enqueue-between-snapshot-and-wait race. This signal never claims that an
+        input was consumed; the durable queue state remains authoritative.
+        """
+
+        _validate_session_id(thread_id)
+        if self._input_generations.get(thread_id, 0) > generation:
+            return True
+        event = self._input_events.setdefault(thread_id, asyncio.Event())
+        event.clear()
+        if self._input_generations.get(thread_id, 0) > generation:
+            return True
+        if timeout_seconds <= 0:
+            return False
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            return False
+        return self._input_generations.get(thread_id, 0) > generation
+
+    async def _claim_next_input(
+        self, request: ClaudeAgentRunRequest, state: AgentRunState,
+    ) -> tuple[_QueuedThreadInput, chat_dto.QueueEntryDTO] | None:
+        thread_id = request.thread_id
+        async with self._input_lock(thread_id):
+            queued = self._input_queues.get(thread_id)
+            if not queued:
+                self._input_accepting.discard(thread_id)
+                return None
+            persistence = request.admin_turn_persistence
+            if persistence is None:
+                self._input_accepting.discard(thread_id)
+                raise RuntimeError("CHAT_INPUT_PERSISTENCE_UNAVAILABLE")
+            entries = await asyncio.to_thread(
+                persistence.list_queued_inputs,
+                actor_id=request.user_id, thread_id=thread_id,
+            )
+            by_id = {entry.message_id: entry for entry in entries}
+            candidates = [
+                (item, by_id[item.message_id])
+                for item in queued
+                if item.message_id in by_id
+                and by_id[item.message_id].status in ("queued", "selected")
+            ]
+            if not candidates:
+                self._input_accepting.discard(thread_id)
+                return None
+            selected = [pair for pair in candidates if pair[1].status == "selected"]
+            item, entry = min(selected or candidates, key=lambda pair: pair[0].queue_sequence)
+            turn_id = str(uuid4())
+            claim = await asyncio.to_thread(
+                persistence.transition_queued_input,
+                actor_id=request.user_id, thread_id=thread_id,
+                message_id=item.message_id, expected_revision=entry.revision,
+                action="claim", dispatch_turn_id=turn_id,
+            )
+            queued.remove(item)
+            return item, claim
+
+    async def select_input(
+        self, *, thread_id: str, user_id: str, message_id: str,
+        expected_revision: int,
+    ) -> tuple[chat_dto.QueueEntryDTO, bool]:
+        """Select one queued input and request an SDK interrupt from its owner."""
+
+        _validate_session_id(thread_id)
+        async with self._input_lock(thread_id):
+            state = self._pool.get(thread_id)
+            template = self._input_templates.get(thread_id)
+            queued = self._input_queues.get(thread_id)
+            if (
+                thread_id not in self._input_accepting or state is None
+                or state.lifecycle != AgentRunLifecycle.RUNNING
+                or template is None or template.user_id != user_id
+                or queued is None
+                or not any(item.message_id == message_id for item in queued)
+            ):
+                raise RuntimeError("CHAT_INPUT_OWNER_UNAVAILABLE")
+            persistence = template.admin_turn_persistence
+            if persistence is None:
+                raise RuntimeError("CHAT_INPUT_PERSISTENCE_UNAVAILABLE")
+            entry = await asyncio.to_thread(
+                persistence.transition_queued_input,
+                actor_id=user_id, thread_id=thread_id,
+                message_id=message_id, expected_revision=expected_revision,
+                action="select", dispatch_turn_id=None,
+            )
+            try:
+                if state.runner is None:
+                    raise RuntimeError("CHAT_INPUT_SDK_OWNER_UNAVAILABLE")
+                await state.runner.interrupt()
+            except Exception:
+                logger.exception("Selected input interrupt not confirmed: thread_id=%s", thread_id)
+                try:
+                    entry = await asyncio.to_thread(
+                        persistence.transition_queued_input,
+                        actor_id=user_id, thread_id=thread_id,
+                        message_id=message_id, expected_revision=entry.revision,
+                        action="fail", dispatch_turn_id=None,
+                    )
+                    queued = self._input_queues.get(thread_id)
+                    if queued is not None:
+                        queued = deque(item for item in queued if item.message_id != message_id)
+                        self._input_queues[thread_id] = queued
+                except Exception:
+                    # The outcome is uncertain; do not dispatch any more local inputs.
+                    self._input_accepting.discard(thread_id)
+                    logger.exception("Selected input failure state could not be persisted: thread_id=%s", thread_id)
+                return entry, False
+            return entry, True
 
     async def subscribe_stream(self, session_id: str) -> AsyncGenerator[str, None]:
         """Subscribe to an in-flight turn using the public Chat SSE adapter."""
@@ -459,6 +708,7 @@ class ClaudeAgentThreadFactory:
         session_started = False
         admission_lease: AgentAdmissionLease | None = None
         current_request = request
+        active_queue_claim: chat_dto.QueueEntryDTO | None = None
         try:
             admission_lease = self._admission.try_acquire(session_id)
             if request.admin_turn_persistence is not None:
@@ -469,6 +719,9 @@ class ClaudeAgentThreadFactory:
                 request.editor_state is not None or state.editor_state is not None
             ):
                 request.admin_editor_runtime.start()
+            async with self._input_lock(session_id):
+                self._input_templates[session_id] = request
+                self._input_accepting.add(session_id)
             await self._observers.emit_before_context_assembly(
                 session_id,
                 {"resume": current_request.resume},
@@ -519,8 +772,49 @@ class ClaudeAgentThreadFactory:
                 continuation: ClaudeAgentTurnContinuation | None = (
                     await self._service.execute_session(execution)
                 )
+                if active_queue_claim is not None:
+                    if execution.user_response_committed:
+                        queue_action = "consume"
+                    elif execution.queue_result_failed:
+                        queue_action = "fail"
+                    else:
+                        queue_action = "mark_unknown"
+                    await asyncio.to_thread(
+                        request.admin_turn_persistence.transition_queued_input,
+                        actor_id=request.user_id,
+                        thread_id=session_id,
+                        message_id=active_queue_claim.message_id,
+                        expected_revision=active_queue_claim.revision,
+                        action=queue_action,
+                        dispatch_turn_id=active_queue_claim.dispatch_turn_id,
+                    )
+                    active_queue_claim = None
                 if continuation is None:
-                    break
+                    if not execution.sdk_terminal_received:
+                        # A missing SDK terminal leaves consumption uncertain.  Keep
+                        # the durable queue intact for explicit reconciliation.
+                        self._input_accepting.discard(session_id)
+                        break
+                    next_input = await self._claim_next_input(request, state)
+                    if next_input is None:
+                        break
+                    item, active_queue_claim = next_input
+                    state.mark_turn_continued()
+                    state.current_turn_id = active_queue_claim.dispatch_turn_id
+                    bus = create_event_bus(session_id, state.current_turn_id)
+                    state.event_bus = bus
+                    current_request = replace(
+                        request,
+                        resume=True,
+                        message_id=item.message_id,
+                        message_parts=item.parts,
+                        message_metadata=item.metadata,
+                        tool_choice=item.tool_choice,
+                        user_message_pre_persisted=True,
+                        queued_input_claim=active_queue_claim,
+                        attachments=None,
+                    )
+                    continue
                 state.mark_turn_continued()
                 # The EventBus remains the externally observed workflow stream,
                 # while tool confirmations and diagnostics receive a fresh
@@ -605,6 +899,25 @@ class ClaudeAgentThreadFactory:
                         session_id,
                     )
         finally:
+            if active_queue_claim is not None and request.admin_turn_persistence is not None:
+                try:
+                    await asyncio.to_thread(
+                        request.admin_turn_persistence.transition_queued_input,
+                        actor_id=request.user_id, thread_id=session_id,
+                        message_id=active_queue_claim.message_id,
+                        expected_revision=active_queue_claim.revision,
+                        action="mark_unknown",
+                        dispatch_turn_id=active_queue_claim.dispatch_turn_id,
+                    )
+                except Exception:
+                    logger.exception("Unable to reconcile dispatched queue input: thread_id=%s message_id=%s", session_id, active_queue_claim.message_id)
+            async with self._input_lock(session_id):
+                self._input_accepting.discard(session_id)
+                self._input_templates.pop(session_id, None)
+                self._input_queues.pop(session_id, None)
+                self._input_locks.pop(session_id, None)
+                self._input_generations.pop(session_id, None)
+                self._input_events.pop(session_id, None)
             if request.admin_turn_persistence is not None:
                 # Cleanup belongs to Phase 4 and survives SSE disconnect or
                 # repeated cancellation. Register before dropping bg ownership
@@ -659,6 +972,7 @@ class ClaudeAgentThreadFactory:
         answers: Optional[dict[str, Any]] = None,
         *,
         actor_id: str,
+        authorization_context: dict[str, Any] | None = None,
     ) -> ToolConfirmationResolution | None:
         _validate_session_id(session_id)
         state = self._pool.get(session_id)
@@ -675,6 +989,12 @@ class ClaudeAgentThreadFactory:
         turn_id = state.current_turn_id
         if not turn_id:
             return None
+        if authorization_context is not None:
+            template = self._input_templates.get(session_id)
+            persistence = template.admin_turn_persistence if template is not None else None
+            refresh = getattr(persistence, "refresh_thread_tool_authorization", None)
+            if callable(refresh):
+                refresh(authorization_context)
         return await self._service.confirm_tool(
             state,
             tool_call_id,
@@ -765,6 +1085,9 @@ class ClaudeAgentThreadFactory:
 
     def session_snapshot(self, session_id: str) -> Optional[dict[str, Any]]:
         return self._pool.snapshot_session(session_id)
+
+    def accepting_input(self, thread_id: str) -> bool:
+        return thread_id in self._input_accepting
 
     def tool_confirmation_snapshot(self, session_id: str) -> dict[str, Any]:
         """Return the Generic Chat runtime's pending confirmation identities.

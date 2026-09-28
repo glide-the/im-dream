@@ -1,7 +1,9 @@
 // [Input] Real ChatPanel Stop button, Browser session/CSRF state and a delayed same-origin Stop response.
-// [Output] Executable request-policy, strict DTO and component-remount delivery regressions.
+// [Output] Executable request-policy, strict DTO, compact queue-error feedback and component-remount delivery regressions.
 // [Pos] Provider-free Browser acceptance seam for main-turn cancellation.
 // [Sync] 2026-09-17: prove one Stop POST survives ChatPanel unmount and validates the current Thread receipt.
+// [Sync] 2026-09-27: verify queue capability failure preserves the draft, status check recovers, and Stop returns after clearing.
+// [Sync] 2026-09-28: clear the Tiptap draft with user keyboard input before asserting the single Stop action.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -120,7 +122,7 @@ test('Stop transport sends the Browser credential policy and accepts only the cu
   }
 });
 
-test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ page }) => {
+test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ page }, testInfo) => {
   const harnessModule = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -195,6 +197,7 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   let stopCount = 0;
   let stopFinishedCount = 0;
   let stopHeaders: Record<string, string> = {};
+  let queueReady = false;
   let releaseStop!: () => void;
   const stopRelease = new Promise<void>((resolve) => { releaseStop = resolve; });
   let markStopStarted!: () => void;
@@ -239,6 +242,17 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"data":{}}' });
       return;
     }
+    if (path === `/api/claude-agent/threads/${THREAD_ID}/inputs`) {
+      const unavailable = request.method() === 'POST' || !queueReady;
+      await route.fulfill({
+        status: unavailable ? 503 : 200,
+        contentType: 'application/json',
+        body: unavailable
+          ? JSON.stringify({ detail: { error_code: 'DREAM_DATA_SCHEMA_NOT_READY' } })
+          : JSON.stringify({ entries: [], local_owner: true }),
+      });
+      return;
+    }
     if (path.startsWith('/api/')) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
       return;
@@ -249,6 +263,28 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   try {
     await server.listen();
     await page.goto(`${origin}/chat-stop-control`);
+    const editor = page.locator('#chat-input');
+    await editor.fill('keep this queued draft');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    const queueError = page.getByRole('alert').filter({ hasText: 'Messages cannot be queued right now' });
+    await expect(queueError).toBeVisible();
+    await expect(editor).toHaveText('keep this queued draft');
+    const errorBox = await queueError.boundingBox();
+    const dockBox = await page.locator('.ai-input-dock').boundingBox();
+    expect(errorBox).not.toBeNull();
+    expect(dockBox).not.toBeNull();
+    expect(errorBox!.x).toBeGreaterThanOrEqual(dockBox!.x);
+    expect(errorBox!.x + errorBox!.width).toBeLessThanOrEqual(dockBox!.x + dockBox!.width);
+    await queueError.screenshot({ path: testInfo.outputPath('queue-capability-error.png') });
+    await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0);
+    queueReady = true;
+    await page.getByRole('button', { name: 'Check queue status' }).click();
+    await expect(queueError).toHaveCount(0);
+    await expect(editor).toHaveText('keep this queued draft');
+    await editor.click();
+    await editor.press('ControlOrMeta+A');
+    await editor.press('Backspace');
+    await expect(editor).toBeEmpty();
     const stopButton = page.getByRole('button', { name: 'Stop generating' });
     await expect(stopButton).toBeVisible();
     await stopButton.click();

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-28: add wait_threads as an in-turn tool wait and retire automatic task-result injection/read cards.
+# [Sync] 2026-09-28: replace model task-session commands with authorized create/list/read/send Thread Tools.
+# [Sync] 2026-09-27: project a task's saved completed assistant result separately from its launch/runtime state.
+# [Sync] 2026-09-27: expose owner-filtered task-session navigation links for Chat.
+# [Sync] 2026-09-27: refresh long-running Tool authorization from the authenticated confirmation request.
+# [Sync] 2026-09-27: authorize per-card cancellation and side-task transfer.
+# [Sync] 2026-09-26: authorize durable Thread input listing, enqueue and selected-message guidance.
 # [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
@@ -67,22 +74,33 @@
 import asyncio
 import base64
 import binascii
+from hashlib import sha256
 import json
 import logging
 import math
 import os
 import re
 from datetime import datetime, timezone
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, List, Literal, Mapping, Optional
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from agent_factory import claude_agent_thread_factory
+from libs.claude_agent_kit.server.session_projection_protocol import (
+    ThreadToolCommandRequestDTO,
+    ThreadToolCommandResultDTO,
+    ThreadToolMessageDTO,
+    ThreadToolThreadDTO,
+    ThreadToolWaitErrorDTO,
+    ThreadToolWaitTargetDTO,
+    ThreadToolWaitUpdateDTO,
+)
 from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import (
     _build_mcp_apps_tool_result_projection,
@@ -852,6 +870,10 @@ class ClaudeAgentRequestBody(BaseModel):
         return _extract_message_text(self.message)
 
 
+class QueueSelectBody(BaseModel):
+    expected_revision: int = Field(gt=0)
+
+
 class ToolConfirmRequestBody(BaseModel):
     thread_id: str
     tool_call_id: str
@@ -976,6 +998,34 @@ async def claude_agent_stream(
                 yield frame
 
         return streaming_sse_response(generate_reconnect())
+
+    accepting_input = getattr(claude_agent_thread_factory, "accepting_input", None)
+    if callable(accepting_input) and accepting_input(thread_id):
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "CHAT_INPUT_USE_QUEUE"},
+        )
+    # A lost process owner must not let the ordinary Chat path overtake a
+    # durable queued or uncertain input.  Older Admin deployments without the
+    # queue capability still serve their existing single-turn Chat contract.
+    list_inputs = getattr(chat, "list_inputs", None)
+    if callable(list_inputs):
+        try:
+            queue_snapshot = await _chat_invoke(
+                current_user, list_inputs,
+                chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+            )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            if detail.get("error_code") != "ADMIN_CAPABILITY_UNAVAILABLE":
+                raise
+        else:
+            if any(entry.status in ("queued", "selected", "dispatching", "state_unknown")
+                   for entry in queue_snapshot.entries):
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error_code": "CHAT_INPUT_RECONCILIATION_REQUIRED"},
+                )
 
     message_text = body.get_message_text()
     if not message_text:
@@ -1248,6 +1298,12 @@ async def claude_agent_stream(
                 "outcome_unknown": exc.outcome_unknown,
             },
         ) from None
+
+    turn_persistence.bind_thread_tool_provider(_ThreadToolTurnProvider(
+        loop=asyncio.get_running_loop(), current_user=current_user, chat=chat,
+        owner=owner, source_thread_id=thread_id, source_message_id=message_id,
+        timeout_seconds=owner.session_broker_settings.timeout_seconds,
+    ))
 
     editor_request_id = str(uuid4())
     try:
@@ -1658,6 +1714,775 @@ async def claude_agent_thread_stream(
     return streaming_sse_response(generate())
 
 
+@router.get("/api/claude-agent/threads/{thread_id}/inputs")
+async def claude_agent_thread_inputs(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    if await _admin_thread(current_user, chat, thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    result = await _chat_invoke(
+        current_user, chat.list_inputs,
+        chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+    )
+    return {
+        "entries": [entry.model_dump() for entry in result.entries],
+        "local_owner": claude_agent_thread_factory.accepting_input(thread_id),
+    }
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/inputs")
+async def claude_agent_thread_enqueue_input(
+    thread_id: str,
+    body: ClaudeAgentRequestBody,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    thread = await _admin_thread(current_user, chat, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if body.get_thread_id() not in (None, thread_id):
+        raise HTTPException(status_code=422, detail={"error_code": "CHAT_INPUT_THREAD_MISMATCH"})
+    if body.reconnect or body.attachments or body.editor_state is not None:
+        raise HTTPException(status_code=422, detail={"error_code": "CHAT_INPUT_UNSUPPORTED_PAYLOAD"})
+    if body.deck_id is not None and body.deck_id != thread.get("deck_id"):
+        raise HTTPException(status_code=409, detail={"error_code": "CHAT_DECK_IMMUTABLE"})
+    if body.voice_id is not None and body.voice_id != thread.get("voice_id"):
+        raise HTTPException(status_code=409, detail={"error_code": "CHAT_AGENT_CONFLICT"})
+    message = body.message if isinstance(body.message, dict) else None
+    message_id = message.get("id") if message else None
+    parts = message.get("parts") if message else None
+    text = body.get_message_text()
+    if (
+        not isinstance(message_id, str) or not message_id
+        or message_id.startswith(_SERVER_MESSAGE_ID_PREFIXES)
+        or not isinstance(parts, list) or len(parts) != 1
+        or not all(isinstance(part, dict) and part.get("type") == "text"
+                   and isinstance(part.get("text"), str) for part in parts)
+        or not text.strip()
+    ):
+        raise HTTPException(status_code=422, detail={"error_code": "CHAT_INPUT_INVALID"})
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail={"error_code": "ADMIN_CONFIGURATION_INVALID"})
+    try:
+        entry = await claude_agent_thread_factory.enqueue_input(
+            thread_id=thread_id, user_id=str(current_user["user_id"]),
+            message_id=message_id, parts=parts, title_candidate=text,
+            tool_choice=body.tool_choice, chat=chat, access_token=actor.access_token,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={
+            "error_code": exc.code, "request_id": exc.request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        }) from None
+    except RuntimeError as exc:
+        if str(exc) == "CHAT_INPUT_OWNER_UNAVAILABLE":
+            raise HTTPException(status_code=409, detail={"error_code": str(exc)}) from None
+        raise
+    return entry.model_dump()
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/inputs/{message_id}/select")
+async def claude_agent_thread_select_input(
+    thread_id: str,
+    message_id: str,
+    body: QueueSelectBody,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    if await _admin_thread(current_user, chat, thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    try:
+        entry, interrupt_signalled = await claude_agent_thread_factory.select_input(
+            thread_id=thread_id, user_id=str(current_user["user_id"]),
+            message_id=message_id, expected_revision=body.expected_revision,
+        )
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={
+            "error_code": exc.code, "request_id": exc.request_id,
+            "outcome_unknown": exc.outcome_unknown,
+        }) from None
+    except RuntimeError as exc:
+        if str(exc) in ("CHAT_INPUT_OWNER_UNAVAILABLE", "CHAT_INPUT_PERSISTENCE_UNAVAILABLE"):
+            raise HTTPException(status_code=409, detail={"error_code": str(exc)}) from None
+        raise
+    return {"entry": entry.model_dump(), "interrupt_signalled": interrupt_signalled}
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/inputs/{message_id}/cancel")
+async def claude_agent_thread_cancel_input(
+    thread_id: str,
+    message_id: str,
+    body: QueueSelectBody,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    """Cancel only one queued input under Admin's owner and revision checks."""
+    if await _admin_thread(current_user, chat, thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    snapshot = await _chat_invoke(
+        current_user, chat.list_inputs,
+        chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+    )
+    current = next((item for item in snapshot.entries if item.message_id == message_id), None)
+    if current is None:
+        raise HTTPException(status_code=404, detail={"error_code": "CHAT_INPUT_NOT_FOUND"})
+    if current.status != "queued" or current.revision != body.expected_revision:
+        raise HTTPException(status_code=409, detail={"error_code": "CHAT_INPUT_STATE_CONFLICT"})
+    result = await _chat_invoke(
+        current_user, chat.transition_input,
+        chat_dto.QueueTransitionInputDTO(
+            thread_id=thread_id,
+            message_id=message_id,
+            expected_revision=body.expected_revision,
+            action="cancel",
+            dispatch_turn_id=None,
+        ),
+    )
+    return result.entry.model_dump()
+
+
+_task_session_stream_drains: set[asyncio.Task[None]] = set()
+
+
+async def _drain_task_session_stream(response, *, thread_id: str) -> None:
+    """Keep the public child Thread SSE iterator alive without a browser owner."""
+    try:
+        async for _frame in response.body_iterator:
+            pass
+    except Exception:
+        logger.exception("Task-session stream ended unexpectedly: thread_id=%s", thread_id)
+
+
+async def _task_session_detail(current_user: dict, chat: AdminChatData, source_thread_id: str, task_id: str):
+    if await _admin_thread(current_user, chat, source_thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    result = await _chat_invoke(current_user, chat.get_task_session,
+        chat_dto.TaskSessionGetInputDTO(source_thread_id=source_thread_id, task_id=task_id))
+    if result.task is None:
+        raise HTTPException(status_code=404, detail={"error_code": "TASK_SESSION_NOT_FOUND"})
+    return result.task
+
+
+async def _task_session_status(current_user: dict, chat: AdminChatData,
+                               task: chat_dto.TaskSessionDTO) -> tuple[str, bool, str | None, str | None]:
+    """Project a committed final assistant result without inferring it from text."""
+    if task.launch_status in ("pending", "failed"):
+        return task.launch_status, False, None, None
+    runtime = claude_agent_thread_factory.session_snapshot(task.thread_id)
+    if runtime and runtime.get("lifecycle") == "running":
+        return "running", True, None, None
+    page = await _chat_invoke(current_user, chat.message_page,
+        chat_dto.MessagePageInputDTO(thread_id=task.thread_id, limit=1, before=None))
+    latest = page.messages[-1] if page.messages else None
+    if (latest is not None and latest.role == "assistant"
+        and not latest.metadata_decode_error
+        and isinstance(latest.metadata, dict)
+        and latest.metadata.get("turnStatus") == "completed"
+        and latest.metadata.get("is_partial") is not True
+        and latest.history_projection_version == 1
+        and isinstance(latest.history_final_text, str)
+        and latest.history_final_text.strip()):
+        return "completed", False, latest.id, latest.history_final_text
+    if runtime and runtime.get("lifecycle") == "idle":
+        target = await _admin_thread(current_user, chat, task.thread_id)
+        if target and target.get("claude_session_id"):
+            return "idle", False, None, None
+    return "state_unknown", False, None, None
+
+
+async def _task_session_launch_initial(
+    *, task: chat_dto.TaskSessionDTO, current_user: dict, chat: AdminChatData,
+    owner: AdminRequestAuth,
+) -> dict:
+    claim = await _chat_invoke(current_user, chat.launch_task_session,
+        chat_dto.TaskSessionLaunchInputDTO(
+            source_thread_id=task.source_thread_id, task_id=task.task_id,
+            action="claim", error_code=None,
+        ))
+    if not claim.changed:
+        return {"task_id": task.task_id, "thread_id": task.thread_id,
+                "launch_status": claim.task.launch_status,
+                "dispatch_started": False}
+    try:
+        response = await claude_agent_stream(
+            ClaudeAgentRequestBody(
+                thread_id=task.thread_id, resume=False,
+                message={"id": task.initial_message_id, "role": "user",
+                         "parts": [{"type": "text", "text": task.initial_message}]},
+            ), current_user=current_user, chat=chat, owner=owner,
+        )
+    except Exception as exc:
+        code = "TASK_SESSION_LAUNCH_FAILED"
+        if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
+            candidate = exc.detail.get("error_code")
+            if isinstance(candidate, str) and candidate:
+                code = candidate
+        try:
+            await _chat_invoke(current_user, chat.launch_task_session,
+                chat_dto.TaskSessionLaunchInputDTO(
+                    source_thread_id=task.source_thread_id, task_id=task.task_id,
+                    action="fail", error_code=code,
+                ))
+        except Exception:
+            logger.exception("Task-session launch failure state could not be saved: task_id=%s", task.task_id)
+            return {"task_id": task.task_id, "thread_id": task.thread_id,
+                    "launch_status": "starting", "dispatch_started": False,
+                    "error_code": "TASK_SESSION_STATE_UNKNOWN"}
+        return {"task_id": task.task_id, "thread_id": task.thread_id,
+                "launch_status": "failed", "dispatch_started": False,
+                "error_code": code}
+    drain = asyncio.create_task(_drain_task_session_stream(response, thread_id=task.thread_id),
+                                name=f"task-session-stream-{task.task_id}")
+    _task_session_stream_drains.add(drain)
+    drain.add_done_callback(_task_session_stream_drains.discard)
+    return {"task_id": task.task_id, "thread_id": task.thread_id,
+            "launch_status": "starting", "dispatch_started": True}
+
+
+class _ThreadToolTurnProvider:
+    """Host-only bridge from one MCP turn to the authorized Chat/Thread path."""
+
+    def __init__(self, *, loop: asyncio.AbstractEventLoop, current_user: dict,
+                 chat: AdminChatData, owner: AdminRequestAuth,
+                 source_thread_id: str, source_message_id: str,
+                 timeout_seconds: float) -> None:
+        self._loop = loop
+        self._current_user = current_user
+        self._chat = chat
+        self._owner = owner
+        self._source_thread_id = source_thread_id
+        self._source_message_id = source_message_id
+        self._timeout_seconds = timeout_seconds
+
+    def refresh_authorization(self, current_user: dict) -> None:
+        """Accept only a fresh request actor for the same canonical user."""
+
+        actor = current_user.get("_admin_actor")
+        if (
+            not isinstance(actor, AdminRequestActor)
+            or str(current_user.get("user_id") or "")
+            != str(self._current_user.get("user_id") or "")
+            or actor.canonical_user_id != str(current_user.get("user_id"))
+        ):
+            raise AdminDataError("THREAD_TOOL_AUTHORIZATION_INVALID", 403)
+        self._current_user = current_user
+
+    def perform_thread_tool(self, request: ThreadToolCommandRequestDTO) -> ThreadToolCommandResultDTO:
+        future = asyncio.run_coroutine_threadsafe(self._perform(request), self._loop)
+        wait_seconds = (
+            ((request.timeout_ms if request.timeout_ms is not None else 120_000) / 1000.0)
+            if request.operation == "thread.wait"
+            else 0.0
+        )
+        try:
+            return future.result(timeout=self._timeout_seconds + wait_seconds)
+        except FutureTimeoutError:
+            if request.operation == "thread.wait":
+                # Waiting is read-only. Stop the orphaned coroutine after the
+                # transport deadline; the caller receives no invented result.
+                future.cancel()
+                raise AdminDataError(
+                    "THREAD_WAIT_STATE_UNKNOWN", 503, request.request_id
+                ) from None
+            # A mutation may already have committed. Never cancel and retry it.
+            raise AdminDataError("THREAD_TOOL_STATE_UNKNOWN", 503, request.request_id) from None
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            code = detail.get("error_code") if isinstance(detail.get("error_code"), str) else "THREAD_TOOL_UNAVAILABLE"
+            raise AdminDataError(code, exc.status_code, request.request_id) from None
+        except RuntimeError as exc:
+            code = str(exc)
+            if code in ("CHAT_INPUT_OWNER_UNAVAILABLE", "CHAT_INPUT_PERSISTENCE_UNAVAILABLE"):
+                raise AdminDataError(code, 409, request.request_id) from None
+            raise
+
+    async def _perform(self, request: ThreadToolCommandRequestDTO) -> ThreadToolCommandResultDTO:
+        source = self._source_thread_id
+        user = self._current_user
+        chat = self._chat
+
+        if request.operation == "thread.create":
+            prompt = str(request.prompt).strip()
+            title = str(request.title).strip() if request.title is not None else prompt
+            created = await _chat_invoke(user, chat.create_task_session,
+                chat_dto.TaskSessionCreateInputDTO(
+                    source_thread_id=source,
+                    request_key=f"tool:{self._source_message_id}:{request.tool_call_id}:create",
+                    title=title, initial_message=prompt,
+                    source_message_id=None, expected_revision=None,
+                ))
+            if created.task is None:
+                raise HTTPException(status_code=503, detail={"error_code": "THREAD_CREATE_UNAVAILABLE"})
+            launched = await _task_session_launch_initial(
+                task=created.task, current_user=user, chat=chat, owner=self._owner)
+            return ThreadToolCommandResultDTO(
+                thread_id=created.task.thread_id,
+                title=created.task.title,
+                status=launched["launch_status"],
+                error_code=launched.get("error_code"),
+            )
+
+        if request.operation == "thread.list":
+            limit = request.limit or 20
+            if request.query is None:
+                listed = await _chat_invoke(
+                    user,
+                    chat.list_threads,
+                    chat_dto.ThreadListInputDTO(deck_id=None, limit=limit, offset=0),
+                )
+                rows = [item.model_dump() for item in listed.threads]
+            else:
+                candidates = await _chat_invoke(
+                    user, chat.search_threads, chat_dto.ThreadSearchInputDTO(deck_id=None)
+                )
+                config = build_chat_thread_search_config(
+                    query=request.query,
+                    retrieval_mode="fuzzy",
+                    search_scope="all",
+                    limit=limit,
+                )
+                if config is None:
+                    raise HTTPException(status_code=400, detail={"error_code": "THREAD_QUERY_INVALID"})
+                outcome = search_chat_threads(
+                    [item.model_dump() for item in candidates.threads], config
+                )
+                if not outcome.ok:
+                    raise HTTPException(status_code=503, detail={"error_code": "THREAD_SEARCH_UNAVAILABLE"})
+                rows = outcome.threads
+            return ThreadToolCommandResultDTO(
+                status="ok",
+                threads=[
+                    ThreadToolThreadDTO(
+                        thread_id=str(row["id"]),
+                        title=row.get("title"),
+                        created_at=row.get("created_at"),
+                        updated_at=row.get("updated_at"),
+                    )
+                    for row in rows
+                ],
+            )
+
+        if request.operation == "thread.wait":
+            return await self._wait_threads(request)
+
+        target_thread_id = str(request.thread_id)
+        target = await _admin_thread(user, chat, target_thread_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail={"error_code": "THREAD_NOT_FOUND"})
+        runtime = claude_agent_thread_factory.session_snapshot(target_thread_id)
+        running = bool(runtime and runtime.get("lifecycle") == "running")
+
+        if request.operation == "thread.read":
+            saved = await _chat_invoke(
+                user, chat.list_messages, chat_dto.ThreadIdInputDTO(thread_id=target_thread_id)
+            )
+            limit = request.message_limit or 20
+            recent = saved.messages[-limit:]
+            if running:
+                status = "running"
+            elif target.get("claude_session_id"):
+                status = "idle"
+            else:
+                links = await _chat_invoke(
+                    user,
+                    chat.list_task_session_links,
+                    chat_dto.ThreadIdInputDTO(thread_id=target_thread_id),
+                )
+                if links.source is not None and links.source.launch_status == "failed":
+                    status = "failed"
+                elif links.source is not None:
+                    status = "starting"
+                else:
+                    status = "not_started"
+            return ThreadToolCommandResultDTO(
+                status=status,
+                thread_id=target_thread_id,
+                title=target.get("title"),
+                running=running,
+                messages=[
+                    ThreadToolMessageDTO(
+                        message_id=item.id,
+                        role=item.role,
+                        text=_extract_message_text(item.model_dump()),
+                        created_at=item.created_at,
+                    )
+                    for item in recent
+                ],
+            )
+
+        if request.operation != "thread.send":
+            raise HTTPException(status_code=400, detail={"error_code": "THREAD_TOOL_OPERATION_INVALID"})
+        text = str(request.prompt).strip()
+        message_id = str(uuid5(NAMESPACE_URL,
+            f"thread-tool:{source}:{self._source_message_id}:{request.tool_call_id}:{target_thread_id}:send"))
+        existing = await _chat_invoke(user, chat.list_messages,
+            chat_dto.ThreadIdInputDTO(thread_id=target_thread_id))
+        if any(item.id == message_id for item in existing.messages):
+            queued = await _chat_invoke(user, chat.list_inputs,
+                chat_dto.ThreadIdInputDTO(thread_id=target_thread_id))
+            known = next((item for item in queued.entries if item.message_id == message_id), None)
+            return ThreadToolCommandResultDTO(
+                thread_id=target_thread_id,
+                status=known.status if known else "state_unknown",
+                message_id=message_id,
+                error_code=None if known else "THREAD_MESSAGE_ALREADY_SUBMITTED",
+            )
+        actor = user.get("_admin_actor")
+        if not isinstance(actor, AdminRequestActor):
+            raise HTTPException(status_code=503, detail={"error_code": "ADMIN_CONFIGURATION_INVALID"})
+        if claude_agent_thread_factory.accepting_input(target_thread_id):
+            entry = await claude_agent_thread_factory.enqueue_input(
+                thread_id=target_thread_id, user_id=str(user["user_id"]),
+                message_id=message_id, parts=[{"type": "text", "text": text}],
+                title_candidate=text, tool_choice="auto", chat=chat,
+                access_token=actor.access_token,
+            )
+            return ThreadToolCommandResultDTO(
+                thread_id=target_thread_id, status=entry.status, message_id=message_id
+            )
+        if running:
+            raise HTTPException(status_code=409, detail={"error_code": "THREAD_OWNER_UNAVAILABLE"})
+        if not target.get("claude_session_id"):
+            raise HTTPException(status_code=409, detail={"error_code": "THREAD_NOT_READY"})
+        response = await claude_agent_stream(
+            ClaudeAgentRequestBody(thread_id=target_thread_id, resume=True,
+                message={"id": message_id, "role": "user", "parts": [{"type": "text", "text": text}]}),
+            current_user=user, chat=chat, owner=self._owner,
+        )
+        drain = asyncio.create_task(
+            _drain_task_session_stream(response, thread_id=target_thread_id),
+            name=f"thread-tool-send-{target_thread_id}",
+        )
+        _task_session_stream_drains.add(drain)
+        drain.add_done_callback(_task_session_stream_drains.discard)
+        return ThreadToolCommandResultDTO(
+            thread_id=target_thread_id, status="dispatching", message_id=message_id
+        )
+
+    @staticmethod
+    def _wait_cursor(
+        *,
+        thread_id: str,
+        status: str,
+        final_message_id: str | None,
+        pending_tool_call_ids: list[str],
+        turn_count: int | None,
+    ) -> str:
+        material = json.dumps(
+            {
+                "thread_id": thread_id,
+                "status": status,
+                "final_message_id": final_message_id,
+                "pending_tool_call_ids": pending_tool_call_ids,
+                "turn_count": turn_count,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return sha256(material.encode("utf-8")).hexdigest()
+
+    async def _wait_update(
+        self,
+        target: ThreadToolWaitTargetDTO,
+        thread: dict,
+    ) -> ThreadToolWaitUpdateDTO:
+        thread_id = target.thread_id
+        runtime = claude_agent_thread_factory.session_snapshot(thread_id)
+        running = bool(runtime and runtime.get("lifecycle") == "running")
+        confirmation = claude_agent_thread_factory.tool_confirmation_snapshot(thread_id)
+        pending_ids = (
+            list(confirmation.get("pending_tool_call_ids") or [])
+            if confirmation.get("tool_confirmation_observation") == "known"
+            else []
+        )
+        final_message_id: str | None = None
+        final_text: str | None = None
+
+        if running and pending_ids:
+            status = "needs_attention"
+        elif running:
+            status = "running"
+        else:
+            page = await _chat_invoke(
+                self._current_user,
+                self._chat.message_page,
+                chat_dto.MessagePageInputDTO(
+                    thread_id=thread_id,
+                    limit=1,
+                    before=None,
+                ),
+            )
+            latest = page.messages[-1] if page.messages else None
+            metadata = (
+                latest.metadata
+                if latest is not None
+                and not latest.metadata_decode_error
+                and isinstance(latest.metadata, dict)
+                else {}
+            )
+            turn_status = metadata.get("turnStatus")
+            if (
+                latest is not None
+                and latest.role == "assistant"
+                and turn_status == "completed"
+                and metadata.get("is_partial") is not True
+                and latest.history_projection_version == 1
+                and isinstance(latest.history_final_text, str)
+                and latest.history_final_text.strip()
+            ):
+                status = "completed"
+                final_message_id = latest.id
+                final_text = latest.history_final_text
+            elif latest is not None and turn_status in {
+                "error",
+                "failed",
+                "cancelled",
+                "stopped",
+            }:
+                status = "failed"
+                final_message_id = latest.id
+            elif runtime and runtime.get("lifecycle") == "idle" and thread.get(
+                "claude_session_id"
+            ):
+                status = "idle"
+            else:
+                links = await _chat_invoke(
+                    self._current_user,
+                    self._chat.list_task_session_links,
+                    chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+                )
+                if links.source is not None and links.source.launch_status == "failed":
+                    status = "failed"
+                elif links.source is not None:
+                    status = "starting"
+                elif thread.get("claude_session_id"):
+                    status = "idle"
+                else:
+                    status = "not_started"
+
+        cursor = self._wait_cursor(
+            thread_id=thread_id,
+            status=status,
+            final_message_id=final_message_id,
+            pending_tool_call_ids=pending_ids,
+            turn_count=(
+                int(runtime.get("turn_count", 0)) if runtime is not None else None
+            ),
+        )
+        return ThreadToolWaitUpdateDTO(
+            thread_id=thread_id,
+            title=thread.get("title"),
+            status=status,
+            cursor=cursor,
+            final_message_id=final_message_id,
+            final_text=(
+                final_text
+                if final_text is not None and cursor != target.after_cursor
+                else None
+            ),
+            pending_tool_call_ids=pending_ids or None,
+        )
+
+    async def _wait_threads(
+        self,
+        request: ThreadToolCommandRequestDTO,
+    ) -> ThreadToolCommandResultDTO:
+        """Keep this parent tool call open until a target changes meaningfully."""
+
+        targets = list(request.targets or [])
+        valid: list[tuple[ThreadToolWaitTargetDTO, dict]] = []
+        errors: list[ThreadToolWaitErrorDTO] = []
+        for target in targets:
+            if target.thread_id == self._source_thread_id:
+                errors.append(
+                    ThreadToolWaitErrorDTO(
+                        thread_id=target.thread_id,
+                        error_code="THREAD_WAIT_TARGET_INVALID",
+                    )
+                )
+                continue
+            try:
+                thread = await _admin_thread(
+                    self._current_user,
+                    self._chat,
+                    target.thread_id,
+                )
+            except Exception:
+                errors.append(
+                    ThreadToolWaitErrorDTO(
+                        thread_id=target.thread_id,
+                        error_code="THREAD_WAIT_TARGET_UNAVAILABLE",
+                    )
+                )
+                continue
+            if thread is None:
+                errors.append(
+                    ThreadToolWaitErrorDTO(
+                        thread_id=target.thread_id,
+                        error_code="THREAD_NOT_FOUND",
+                    )
+                )
+                continue
+            valid.append((target, thread))
+
+        if not valid:
+            return ThreadToolCommandResultDTO(
+                status="ok",
+                wait_reason="error",
+                updates=[],
+                errors=errors,
+            )
+
+        timeout_ms = request.timeout_ms if request.timeout_ms is not None else 120_000
+        deadline = self._loop.time() + (timeout_ms / 1000.0)
+        source_generation = claude_agent_thread_factory.input_generation(
+            self._source_thread_id
+        )
+
+        while True:
+            try:
+                updates = list(
+                    await asyncio.gather(
+                        *(self._wait_update(target, thread) for target, thread in valid)
+                    )
+                )
+            except Exception:
+                return ThreadToolCommandResultDTO(
+                    status="ok",
+                    wait_reason="error",
+                    updates=[],
+                    errors=[
+                        *errors,
+                        *[
+                            ThreadToolWaitErrorDTO(
+                                thread_id=target.thread_id,
+                                error_code="THREAD_WAIT_TARGET_UNAVAILABLE",
+                            )
+                            for target, _thread in valid
+                        ],
+                    ],
+                )
+
+            by_id = {target.thread_id: target for target, _thread in valid}
+            changed_terminal = next(
+                (
+                    update
+                    for update in updates
+                    if update.status in {"completed", "needs_attention", "failed"}
+                    and update.cursor != by_id[update.thread_id].after_cursor
+                ),
+                None,
+            )
+            if changed_terminal is not None:
+                return ThreadToolCommandResultDTO(
+                    status="ok",
+                    wait_reason=(
+                        "error"
+                        if changed_terminal.status == "failed"
+                        else changed_terminal.status
+                    ),
+                    updates=updates,
+                    errors=(
+                        [
+                            *errors,
+                            ThreadToolWaitErrorDTO(
+                                thread_id=changed_terminal.thread_id,
+                                error_code="THREAD_TARGET_FAILED",
+                            ),
+                        ]
+                        if changed_terminal.status == "failed"
+                        else errors or None
+                    ),
+                )
+
+            remaining = deadline - self._loop.time()
+            if timeout_ms == 0 or remaining <= 0:
+                return ThreadToolCommandResultDTO(
+                    status="ok",
+                    wait_reason="timeout",
+                    updates=updates,
+                    errors=errors or None,
+                )
+
+            input_received = await claude_agent_thread_factory.wait_for_input_after(
+                self._source_thread_id,
+                source_generation,
+                timeout_seconds=min(0.5, remaining),
+            )
+            if input_received:
+                return ThreadToolCommandResultDTO(
+                    status="ok",
+                    wait_reason="input_received",
+                    updates=updates,
+                    errors=errors or None,
+                )
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/inputs/{message_id}/side-task")
+async def claude_agent_thread_input_side_task(
+    thread_id: str, message_id: str, body: QueueSelectBody,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    """Atomically move one queued message into a new independent task Thread."""
+    if await _admin_thread(current_user, chat, thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    listed = await _chat_invoke(current_user, chat.list_inputs,
+        chat_dto.ThreadIdInputDTO(thread_id=thread_id))
+    entry = next((item for item in listed.entries if item.message_id == message_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail={"error_code": "CHAT_INPUT_NOT_FOUND"})
+    if not ((entry.status == "queued" and entry.revision == body.expected_revision)
+            or (entry.status == "cancelled" and entry.revision == body.expected_revision + 1)):
+        raise HTTPException(status_code=409, detail={"error_code": "CHAT_INPUT_STATE_CONFLICT"})
+    created = await _chat_invoke(current_user, chat.create_task_session,
+        chat_dto.TaskSessionCreateInputDTO(
+            source_thread_id=thread_id, request_key=f"side:{message_id}",
+            title=entry.text, initial_message=entry.text,
+            source_message_id=message_id, expected_revision=body.expected_revision,
+        ))
+    if created.task is None:
+        raise HTTPException(status_code=503, detail={"error_code": "TASK_SESSION_CREATE_UNAVAILABLE"})
+    return await _task_session_launch_initial(task=created.task, current_user=current_user,
+                                               chat=chat, owner=owner)
+
+
+@router.get("/api/claude-agent/threads/{source_thread_id}/tasks/{task_id}")
+async def claude_agent_task_session_get(
+    source_thread_id: str, task_id: str,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    task = await _task_session_detail(current_user, chat, source_thread_id, task_id)
+    status, running, result_message_id, result_text = await _task_session_status(current_user, chat, task)
+    return {"task_id": task.task_id, "thread_id": task.thread_id, "title": task.title,
+            "launch_status": task.launch_status, "error_code": task.launch_error_code,
+            "status": status, "running": running,
+            "result_message_id": result_message_id, "result_text": result_text}
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/task-links")
+async def claude_agent_task_session_links(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    """Return owner-filtered business Thread relations used by Chat navigation."""
+    if await _admin_thread(current_user, chat, thread_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    result = await _chat_invoke(
+        current_user,
+        chat.list_task_session_links,
+        chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+    )
+    return result.model_dump()
+
+
 @router.get("/api/claude-agent/threads/{thread_id}/status")
 async def claude_agent_thread_status(
     thread_id: str,
@@ -1913,6 +2738,7 @@ async def claude_agent_tool_confirm(
             reason=body.reason,
             answers=body.answers,
             actor_id=str(user_id),
+            authorization_context=current_user,
         )
     except ToolConfirmationError as exc:
         raise HTTPException(

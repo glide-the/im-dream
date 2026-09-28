@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- [Input] Chat task-session navigation PRD and the two user-provided layout references. -->
+<!-- [Output] Responsive sample with the source action above a user bubble and tasks above assistant actions. -->
+<!-- [Pos] Chat module visual sample; production UI remains in frontend/app/_dream/components/chat. -->
+<!-- [Sync] 2026-09-27: align both navigation placements and compact task rows with production message components. -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dream Chat 独立任务会话导航</title>
+  <style>
+    :root { color-scheme: dark; --app:#1d1916; --surface:#2a241f; --surface2:#342d27; --line:#4a4238; --text:#f3e8d8; --muted:#b9aa99; --accent:#ead8bd; --danger:#ff8a7f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--app); color:var(--text); font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"PingFang SC",sans-serif; }
+    .chat { width:min(920px,100%); margin:auto; padding:48px 24px 64px; }
+    .source { margin:0 0 4px auto; width:max-content; max-width:85%; min-height:44px; display:flex; align-items:center; gap:10px; border:0; background:transparent; color:var(--muted); padding:10px 12px; border-radius:12px; cursor:pointer; }
+    .source:hover,.source:focus-visible { background:var(--surface); color:var(--text); outline:1px solid var(--line); }
+    .source strong { color:inherit; font-weight:600; }
+    .messages { display:grid; gap:26px; min-height:360px; }
+    .user-message { justify-self:end; width:100%; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+    .message { max-width:78%; padding:14px 18px; border-radius:22px; background:var(--surface); }
+    .message.user { background:#43382e; }
+    .assistant-message { width:100%; display:flex; flex-direction:column; gap:8px; }
+    .assistant-body { padding:4px 0; }
+    .tasks { width:100%; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:color-mix(in srgb,var(--surface) 72%,transparent); }
+    .tasks h2 { margin:0; padding:9px 12px 6px; color:var(--muted); font-size:13px; font-weight:600; }
+    .task { min-height:56px; display:grid; grid-template-columns:32px minmax(0,1fr) auto; gap:10px; align-items:center; padding:6px 10px; border-top:1px solid var(--line); }
+    .icon { width:32px; height:32px; display:grid; place-items:center; border-radius:10px; background:var(--surface2); color:var(--accent); }
+    .task-title { min-width:0; }
+    .task-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .meta { color:var(--muted); font-size:13px; }
+    .meta.failed { color:var(--danger); }
+    .open { min-height:44px; padding:0 14px; border:1px solid var(--line); border-radius:12px; background:transparent; color:var(--text); font:inherit; font-weight:600; cursor:pointer; }
+    .open:hover,.open:focus-visible { border-color:var(--accent); outline:none; background:var(--surface2); }
+    .actions { display:flex; gap:8px; align-items:center; color:var(--muted); }
+    .actions button { width:32px; height:32px; border:0; border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
+    @media (max-width:520px) { .chat{padding:24px 12px 40px}.source{align-items:flex-start;text-align:left}.message{max-width:90%}.task{grid-template-columns:32px minmax(0,1fr) auto;gap:8px}.open{padding:0 8px}.task-title strong{font-size:14px;} }
+  </style>
+</head>
+<body>
+  <main class="chat">
+    <section class="messages" aria-label="对话消息">
+      <div class="user-message">
+        <button class="source" type="button" aria-label="返回来源对话"><span aria-hidden="true">↩</span><span>由另一项任务创建 · <strong>运行中消息队列与任务会话</strong></span><span aria-hidden="true">›</span></button>
+        <div class="message user">检查队列行为并运行完整测试。</div>
+      </div>
+      <div class="assistant-message">
+        <div class="assistant-body">已完成目标 Thread 的检查，并保留了可回到来源对话的关系。</div>
+        <section class="tasks" aria-label="此对话创建的任务">
+          <h2>此对话创建的任务 · 2</h2>
+          <article class="task"><span class="icon" aria-hidden="true">↗</span><div class="task-title"><strong>复核 Dream 队列与任务会话</strong><span class="meta">已创建 · 刚刚</span></div><button class="open" type="button">打开聊天</button></article>
+          <article class="task"><span class="icon" aria-hidden="true">↗</span><div class="task-title"><strong>验证独立 Claude 会话恢复</strong><span class="meta failed">启动失败 · 2 分钟前</span></div><button class="open" type="button">打开聊天</button></article>
+        </section>
+        <div class="actions" aria-label="消息操作"><button type="button" aria-label="复制">▢</button><button type="button" aria-label="分享">↗</button></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,6 +1,8 @@
-# [Input] Turn-local loopback environment and the Session list wire projection.
-# [Output] Strict broker DTOs plus synchronous Session and current-Run child clients with no Admin or database dependency.
+# [Input] Turn-local loopback environment, Session projections and Dream Thread Tool requests.
+# [Output] Strict broker DTOs plus synchronous Session/current-Run/Thread child clients without Admin or database dependency.
 # [Pos] Neutral turn projection protocol shared by the host broker and stdio children.
+# [Sync] 2026-09-28: add Codex-style wait_threads wire types and a per-call long-poll read timeout.
+# [Sync] 2026-09-28: replace model task-session commands with create/list/read/send Thread wire types.
 # [Sync] 2026-09-15: define the bounded private Session broker protocol.
 # [Sync] 2026-09-16: add a selector-free current WorkflowRun projection for Story Workspace filesystem writes.
 """Strict private protocol for retrieving turn-owned projections over loopback."""
@@ -116,6 +118,192 @@ class WorkflowRunProjectionRequestDTO(_StrictDTO):
     operation: Literal["workflow-run.current"]
 
 
+class ThreadToolThreadDTO(_StrictDTO):
+    thread_id: _Identifier
+    title: str | None
+    created_at: str | None
+    updated_at: str | None
+    _timestamps = field_validator("created_at", "updated_at")(_validate_timestamp)
+
+
+class ThreadToolMessageDTO(_StrictDTO):
+    message_id: _Identifier
+    role: Literal["user", "assistant"]
+    text: str
+    created_at: str | None
+    _timestamp = field_validator("created_at")(_validate_timestamp)
+
+
+class ThreadToolWaitTargetDTO(_StrictDTO):
+    thread_id: _Identifier
+    after_cursor: Annotated[
+        str,
+        Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    ] | None = None
+
+
+class ThreadToolWaitUpdateDTO(_StrictDTO):
+    thread_id: _Identifier
+    title: str | None = None
+    status: Literal[
+        "starting",
+        "running",
+        "idle",
+        "not_started",
+        "completed",
+        "needs_attention",
+        "failed",
+        "state_unknown",
+    ]
+    cursor: Annotated[
+        str,
+        Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    ]
+    final_message_id: _Identifier | None = None
+    final_text: str | None = None
+    pending_tool_call_ids: list[_Identifier] | None = None
+
+
+class ThreadToolWaitErrorDTO(_StrictDTO):
+    thread_id: _Identifier
+    error_code: Annotated[
+        str,
+        Field(min_length=1, max_length=128, pattern=r"^[A-Z0-9_]+$"),
+    ]
+
+
+class ThreadToolCommandRequestDTO(_StrictDTO):
+    """A model Thread Tool command with identity bound only by the host broker."""
+
+    capability: _Capability = Field(repr=False)
+    request_id: _Identifier
+    operation: Literal[
+        "thread.create",
+        "thread.list",
+        "thread.read",
+        "thread.send",
+        "thread.wait",
+    ]
+    tool_call_id: _Identifier
+    prompt: str | None = None
+    title: str | None = None
+    query: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=100)
+    thread_id: _Identifier | None = None
+    message_limit: int | None = Field(default=None, ge=1, le=100)
+    targets: list[ThreadToolWaitTargetDTO] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+    )
+    timeout_ms: int | None = Field(default=None, ge=0, le=120_000)
+
+    @model_validator(mode="after")
+    def validate_command(self):
+        if self.operation == "thread.create":
+            valid = (
+                bool(self.prompt and self.prompt.strip())
+                and (self.title is None or bool(self.title.strip()))
+                and self.query is None
+                and self.limit is None
+                and self.thread_id is None
+                and self.message_limit is None
+                and self.targets is None
+                and self.timeout_ms is None
+            )
+        elif self.operation == "thread.list":
+            valid = (
+                self.prompt is None
+                and self.title is None
+                and (self.query is None or bool(self.query.strip()))
+                and self.thread_id is None
+                and self.message_limit is None
+                and self.targets is None
+                and self.timeout_ms is None
+            )
+        elif self.operation == "thread.read":
+            valid = (
+                self.thread_id is not None
+                and self.prompt is None
+                and self.title is None
+                and self.query is None
+                and self.limit is None
+                and self.targets is None
+                and self.timeout_ms is None
+            )
+        elif self.operation == "thread.send":
+            valid = (
+                self.thread_id is not None
+                and bool(self.prompt and self.prompt.strip())
+                and self.title is None
+                and self.query is None
+                and self.limit is None
+                and self.message_limit is None
+                and self.targets is None
+                and self.timeout_ms is None
+            )
+        else:
+            target_ids = [item.thread_id for item in (self.targets or [])]
+            valid = (
+                bool(target_ids)
+                and len(target_ids) == len(set(target_ids))
+                and self.prompt is None
+                and self.title is None
+                and self.query is None
+                and self.limit is None
+                and self.thread_id is None
+                and self.message_limit is None
+            )
+        if not valid:
+            raise ValueError("Thread Tool command shape is invalid")
+        return self
+
+
+class ThreadToolCommandResultDTO(_StrictDTO):
+    status: Literal[
+        "ok",
+        "starting",
+        "running",
+        "idle",
+        "not_started",
+        "queued",
+        "selected",
+        "dispatching",
+        "consumed",
+        "cancelled",
+        "failed",
+        "state_unknown",
+    ]
+    thread_id: _Identifier | None = None
+    title: str | None = None
+    running: bool | None = None
+    message_id: _Identifier | None = None
+    threads: list[ThreadToolThreadDTO] | None = None
+    messages: list[ThreadToolMessageDTO] | None = None
+    wait_reason: Literal[
+        "completed",
+        "needs_attention",
+        "timeout",
+        "input_received",
+        "error",
+    ] | None = None
+    updates: list[ThreadToolWaitUpdateDTO] | None = None
+    errors: list[ThreadToolWaitErrorDTO] | None = None
+    error_code: str | None = None
+
+
+class ThreadToolCommandResponseDTO(_StrictDTO):
+    ok: bool
+    result: ThreadToolCommandResultDTO | None = None
+    error: SessionProjectionErrorDTO | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.ok == (self.result is None) or self.ok == (self.error is not None):
+            raise ValueError("Thread Tool response shape is invalid")
+        return self
+
+
 class SessionProjectionDTO(_StrictDTO):
     id: Annotated[str, Field(min_length=1)]
     name: str | None
@@ -224,13 +412,24 @@ class SessionProjectionBrokerClient:
                 "SESSION_BROKER_CONFIGURATION_INVALID", 503
             ) from None
 
-    def _round_trip(self, request: _StrictDTO, request_id: str) -> bytes:
+    def _round_trip(
+        self,
+        request: _StrictDTO,
+        request_id: str,
+        *,
+        read_timeout_seconds: float | None = None,
+    ) -> bytes:
+        timeout_seconds = (
+            self._timeout_seconds
+            if read_timeout_seconds is None
+            else max(self._timeout_seconds, read_timeout_seconds)
+        )
         try:
             encoded = request.model_dump_json().encode("utf-8") + b"\n"
             with socket.create_connection(
                 (self._host, self._port), timeout=self._timeout_seconds
             ) as connection:
-                connection.settimeout(self._timeout_seconds)
+                connection.settimeout(timeout_seconds)
                 connection.sendall(encoded)
                 reader = connection.makefile("rb")
                 raw = reader.readline(self._max_response_bytes + 1)
@@ -336,6 +535,57 @@ class SessionProjectionBrokerClient:
             )
         return result.run
 
+    def thread_command(
+        self,
+        *,
+        operation: Literal[
+            "thread.create",
+            "thread.list",
+            "thread.read",
+            "thread.send",
+            "thread.wait",
+        ],
+        tool_call_id: str,
+        prompt: str | None = None,
+        title: str | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        thread_id: str | None = None,
+        message_limit: int | None = None,
+        targets: list[ThreadToolWaitTargetDTO] | None = None,
+        timeout_ms: int | None = None,
+    ) -> ThreadToolCommandResultDTO:
+        request_id = str(uuid4())
+        try:
+            request = ThreadToolCommandRequestDTO(
+                capability=self._capability, request_id=request_id,
+                operation=operation, tool_call_id=tool_call_id,
+                prompt=prompt, title=title, query=query, limit=limit,
+                thread_id=thread_id, message_limit=message_limit,
+                targets=targets, timeout_ms=timeout_ms,
+            )
+        except ValidationError:
+            raise SessionProjectionProtocolError("THREAD_TOOL_INPUT_INVALID", 400, request_id) from None
+        raw = self._round_trip(
+            request,
+            request_id,
+            read_timeout_seconds=(
+                None
+                if operation != "thread.wait"
+                else ((timeout_ms if timeout_ms is not None else 120_000) / 1000.0)
+                + self._timeout_seconds
+            ),
+        )
+        try:
+            response = ThreadToolCommandResponseDTO.model_validate_json(raw)
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
+            raise SessionProjectionProtocolError("THREAD_TOOL_RESPONSE_INVALID", 503, request_id) from None
+        if not response.ok:
+            self._raise_remote_error(response.error, request_id)
+        if response.result is None:
+            raise SessionProjectionProtocolError("THREAD_TOOL_RESPONSE_INVALID", 503, request_id)
+        return response.result
+
 
 __all__ = [
     "SESSION_BROKER_CAPABILITY_ENV",
@@ -355,6 +605,14 @@ __all__ = [
     "SessionProjectionRequestDTO",
     "SessionProjectionResponseDTO",
     "SessionProjectionResultDTO",
+    "ThreadToolCommandRequestDTO",
+    "ThreadToolCommandResultDTO",
+    "ThreadToolCommandResponseDTO",
+    "ThreadToolMessageDTO",
+    "ThreadToolThreadDTO",
+    "ThreadToolWaitErrorDTO",
+    "ThreadToolWaitTargetDTO",
+    "ThreadToolWaitUpdateDTO",
     "WorkflowRunProjectionRequestDTO",
     "WorkflowRunProjectionResponseDTO",
     "WorkflowRunProjectionResultDTO",

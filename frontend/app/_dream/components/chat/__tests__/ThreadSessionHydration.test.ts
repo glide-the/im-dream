@@ -2,6 +2,7 @@
 // [Output] Exact private-row and visible-part filtering contract.
 // [Pos] Shared thread hydration visibility regression seam.
 // [Sync] 2026-09-06: require exact-id process reads to bypass stale browser caches.
+// [Sync] 2026-09-28: hide server task-result input only when persisted as a user row.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -273,6 +274,17 @@ test('preserves every Dream business row and drops only zero-visible-part rows',
     type: 'text',
     text: '{"action":"confirm_and_continue","run":"run_abc"}',
   }]);
+});
+
+test('hides only the server task-result continuation user message', () => {
+  const visible = filterClaudeThreadVisibleMessages([
+    { ...message('technical', [{ type: 'text', text: 'Server task result input' }], {
+      kind: 'task-session-result', taskResultNotificationId: 'notification-one',
+    }), role: 'user' as const },
+    { ...message('ordinary', [{ type: 'text', text: 'My next question' }], { kind: 'ordinary-user' }), role: 'user' as const },
+    message('other-protocol', [{ type: 'text', text: 'Keep exact other protocol' }], { kind: 'story-workspace-guidance' }),
+  ]);
+  expect(visible.map((item) => item.id)).toEqual(['ordinary', 'other-protocol']);
 });
 
 test('only the exact persisted internal command can settle an idle pre-mounted observer', () => {

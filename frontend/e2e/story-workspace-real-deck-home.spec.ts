@@ -9,6 +9,7 @@
 // [Sync] 2026-08-17: verify registered system-default Decks are grouped, static, and visible by default.
 // [Sync] 2026-08-17: verify real Chat preview prefill read-only and leave Dream Demo mutation to provider-free coverage.
 // [Sync] 2026-08-17: verify real multi-Agent context; select inside an eligible historical Thread when one exists.
+// [Sync] 2026-09-28: address the existing environment-information entry after its content consolidation.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -325,10 +326,10 @@ test('real Deck home hides drafts while Work preserves complete inventory withou
     await page.getByTitle(realThreadTitle).first().click();
     await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
     const threadUrl = page.url();
-    const realDeckContext = page.getByRole('button', { name: 'Deck 元信息' });
+    const realDeckContext = page.getByRole('button', { name: '环境信息' });
     await expect(realDeckContext).toContainText(agentSwitchCandidate.deck.name);
     await realDeckContext.click();
-    const realDeckDialog = page.getByRole('dialog', { name: 'Deck 元信息' });
+    const realDeckDialog = page.getByRole('dialog', { name: '环境信息' });
     if (agentSwitchCandidate.current) {
       await expect(realDeckDialog.getByRole('button', {
         name: `${agentSwitchCandidate.current.name}，当前 Agent`,
@@ -348,10 +349,10 @@ test('real Deck home hides drafts while Work preserves complete inventory withou
     await realDeckContext.click();
   } else {
     await page.goto(`${WEB_BASE}/story-workspace/chat?deck=${realMultiAgentDeck!.id}`);
-    const realDeckContext = page.getByRole('button', { name: 'Deck 元信息' });
+    const realDeckContext = page.getByRole('button', { name: '环境信息' });
     await expect(realDeckContext).toContainText(realMultiAgentDeck!.name);
     await realDeckContext.click();
-    const realDeckDialog = page.getByRole('dialog', { name: 'Deck 元信息' });
+    const realDeckDialog = page.getByRole('dialog', { name: '环境信息' });
     const realEnabledVoices = (realMultiAgentDeck!.voices ?? []).filter((item) => item.enabled);
     for (const [index, voice] of realEnabledVoices.entries()) {
       const accessibleName = index === 0

@@ -1,3 +1,6 @@
+# [Sync] 2026-09-27: project owner-filtered task-session source/created navigation DTOs.
+# [Sync] 2026-09-27: project strict independent task-session create/get/launch DTOs.
+# [Sync] 2026-09-26: project strict queued input statuses, revisions and text previews.
 # [Sync] 2026-09-15: share the existing present-fields serializer for optional Editor/Voice wire DTOs.
 # [Input] Admin chatThreadDto.ts closed wire projections and the shared final-history validator.
 # [Output] Strict Thread/message DTOs, preserving ISO microseconds and decimal canonical IDs.
@@ -175,6 +178,116 @@ class MessagePageInputDTO(ThreadIdInputDTO):
 
 class MessageDetailInputDTO(ThreadIdInputDTO):
     message_id: EntityId
+
+
+QueueStatus = Literal["queued", "selected", "dispatching", "consumed", "cancelled", "failed", "state_unknown"]
+
+
+class QueueEntryDTO(ChatStrictDTO):
+    message_id: EntityId
+    thread_id: EntityId
+    queue_sequence: Annotated[str, Field(pattern=r"^[1-9][0-9]{0,18}$")]
+    status: QueueStatus
+    revision: PositiveSafeInteger
+    dispatch_turn_id: str | None
+    created_at: str
+    text: str
+    _timestamp = field_validator("created_at")(validate_timestamp_text)
+
+
+class QueueEnqueueInputDTO(ThreadIdInputDTO):
+    message_id: EntityId
+    parts_json: str
+    metadata_json: str | None
+    title_candidate: str
+
+
+class QueueTransitionInputDTO(ThreadIdInputDTO):
+    message_id: EntityId
+    expected_revision: PositiveSafeInteger
+    action: Literal["select", "claim", "consume", "cancel", "fail", "mark_unknown"]
+    dispatch_turn_id: str | None
+
+
+class QueueEntryResultDTO(ChatStrictDTO):
+    entry: QueueEntryDTO
+
+
+class QueueListResultDTO(ChatStrictDTO):
+    entries: list[QueueEntryDTO]
+
+
+class TaskSessionDTO(ChatStrictDTO):
+    task_id: EntityId
+    source_thread_id: EntityId
+    thread_id: EntityId
+    title: str
+    initial_message_id: EntityId
+    initial_message: str
+    launch_status: Literal["pending", "starting", "failed"]
+    launch_error_code: str | None
+    created_at: str
+    _timestamp = field_validator("created_at")(validate_timestamp_text)
+
+
+class TaskSessionCreateInputDTO(ChatStrictDTO):
+    source_thread_id: EntityId
+    request_key: EntityId
+    title: str = Field(min_length=1)
+    initial_message: str = Field(min_length=1)
+    source_message_id: EntityId | None
+    expected_revision: PositiveSafeInteger | None
+
+    @model_validator(mode="after")
+    def require_source_pair(self):
+        if (self.source_message_id is None) != (self.expected_revision is None):
+            raise ValueError("Source message and revision must appear together")
+        return self
+
+
+class TaskSessionGetInputDTO(ChatStrictDTO):
+    source_thread_id: EntityId
+    task_id: EntityId
+
+
+class TaskSessionLaunchInputDTO(TaskSessionGetInputDTO):
+    action: Literal["claim", "fail"]
+    error_code: str | None
+
+    @model_validator(mode="after")
+    def require_error_shape(self):
+        if (self.action == "claim") != (self.error_code is None):
+            raise ValueError("Launch error code does not match action")
+        return self
+
+
+class TaskSessionResultDTO(ChatStrictDTO):
+    task: TaskSessionDTO | None
+
+
+class TaskSessionLaunchResultDTO(ChatStrictDTO):
+    task: TaskSessionDTO
+    changed: bool
+
+
+class TaskSessionLinkDTO(ChatStrictDTO):
+    task_id: EntityId
+    source_thread_id: EntityId
+    thread_id: EntityId
+    title: str
+    launch_status: Literal["pending", "starting", "failed"]
+    launch_error_code: str | None
+    created_at: str
+    _timestamp = field_validator("created_at")(validate_timestamp_text)
+
+
+class TaskSessionSourceLinkDTO(TaskSessionLinkDTO):
+    source_title: str | None
+
+
+class TaskSessionLinksResultDTO(ChatStrictDTO):
+    source: TaskSessionSourceLinkDTO | None
+    created: list[TaskSessionLinkDTO]
 
 
 class ThreadResultDTO(ChatStrictDTO):

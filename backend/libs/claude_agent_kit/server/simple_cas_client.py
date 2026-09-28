@@ -1,3 +1,4 @@
+# [Sync] 2026-09-26: queued resumes reject missing-session fallback and expose active-client interrupt.
 # [Input] Consume IClaudeAgentSDKClient contract from libs/claude_agent_kit/types.py.
 # [Output] Provide SimpleClaudeAgentSDKClient backed by ClaudeSDKClient.
 # [Pos] adapter node in libs/claude_agent_kit/server
@@ -59,6 +60,17 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
     server/server/simple-cas-client.ts.
     """
 
+    def __init__(self) -> None:
+        self._active_client: ClaudeSDKClient | None = None
+        self.require_existing_session = False
+
+    async def interrupt(self) -> None:
+        """Signal the current SDK client; its response reader must drain ResultMessage."""
+        client = self._active_client
+        if client is None:
+            raise RuntimeError("CHAT_INPUT_SDK_OWNER_UNAVAILABLE")
+        await client.interrupt()
+
     async def query_stream(
         self,
         prompt: Any,
@@ -101,6 +113,7 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
                             or getattr(effective_options, "session_store", None) is not None
                             or getattr(effective_options, "continue_conversation", False)
                             or getattr(effective_options, "fork_session", False)
+                            or self.require_existing_session
                             or not (missing_reported or marker in str(exc))
                         ):
                             raise
@@ -115,10 +128,15 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
                             raise
                         effective_options.resume = None
                         continue
-                    await client.query(prompt)
-                    async for message in client.receive_response():
-                        yield message
-                    return
+                    self._active_client = client
+                    try:
+                        await client.query(prompt)
+                        async for message in client.receive_response():
+                            yield message
+                        return
+                    finally:
+                        if self._active_client is client:
+                            self._active_client = None
         finally:
             effective_options.stderr = original_stderr
 

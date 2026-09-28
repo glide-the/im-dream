@@ -34,6 +34,7 @@
 //                    chat.toolConfirmation namespace (en + zh) via useTranslation.
 // [Sync] 2026-08-04: replace Agent/Task internal output envelopes with a task
 //                    button that opens the matching subagent sidebar item.
+// [Sync] 2026-09-27: render Agent task facts without a button when the current Chat shell owns the sole detail entry.
 // [Sync] 2026-08-22: bind assistant/user Markdown workspace:// references to this
 //                    list's already-owned Thread ID.
 // [Sync] 2026-08-31: replace raw turn exceptions with accessible structured error cards and reload recovery.
@@ -51,6 +52,8 @@
 // [Sync] 2026-09-04: distinguish a typed Dream synchronization failure after
 //                    a committed assistant reply from an unprocessed turn.
 // [Sync] 2026-09-17: render the structured Gateway allowance rejection with safe actionable product copy.
+// [Sync] 2026-09-27: attach created-Thread source navigation to the first user bubble; retain access while older history is unloaded.
+// [Sync] 2026-09-27: place the settled created-task list inside the latest assistant reply, before its actions.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -58,6 +61,8 @@ import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import UserMessagePart from './UserMessagePart';
+import { CreatedTaskSessionList, TaskSessionSourceMarker } from './TaskSessionNavigation';
+import type { TaskSessionLink, TaskSessionLinksSnapshot } from './taskSessionLinks';
 import ToolMessagePart from './ToolMessagePart';
 import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 import { isEditorWriteTool, parseEditorWriteResult } from './editorWriteTools';
@@ -88,10 +93,10 @@ interface ChatMessageListProps {
   sendUserMessage?: (message: ChatUserMessage) => Promise<void>;
   /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  onOpenSubagentTask?: (toolCallId: string) => void;
   settledToolCallIds?: ReadonlySet<string>;
   onToolConfirmationSettled?: (toolCallId: string) => void;
   /** Opens the right-side task panel for an Agent/Task tool invocation. */
-  onOpenSubagentTask?: (toolCallId: string) => void;
   /** Message IDs loaded from persisted history rather than the current live turn. */
   historicalMessageIds?: ReadonlySet<string>;
   historyHasMore?: boolean;
@@ -99,6 +104,9 @@ interface ChatMessageListProps {
   historyError?: Error | null;
   historyEmpty?: boolean;
   onLoadOlder?: () => void | Promise<void>;
+  sourceThread?: TaskSessionLinksSnapshot['source'];
+  onNavigateThread?: (threadId: string) => void;
+  createdTaskLinks?: TaskSessionLink[];
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -278,7 +286,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -300,6 +308,14 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const dreamAutoRepairFailureText = isDreamAutoRepairFailure
     ? readClaudeAgentErrorText(error)
     : null;
+  const sourceMessageIndex = sourceThread && !historyHasMore
+    ? messages.findIndex((message) => message.role === 'user'
+      && message.parts?.some((part) => part.type === 'text' && Boolean(part.text)))
+    : -1;
+  const createdTaskMessageIndex = createdTaskLinks?.length
+    ? messages.reduce((last, message, index) => message.role === 'assistant'
+      && message.parts?.some((part) => part.type === 'text' && Boolean(part.text)) ? index : last, -1)
+    : -1;
 
   useEffect(() => {
     const controllers = historicalProcessControllers.current;
@@ -393,6 +409,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
 
         ) : null}
       </div>
+      {sourceMessageIndex < 0 ? (
+        <TaskSessionSourceMarker source={sourceThread ?? null} onNavigateThread={onNavigateThread} />
+      ) : null}
       {messages.map((persistedMessage, index) => {
         const processDetailKey = `${threadId}:${persistedMessage.id}`;
         const processDetail = historicalProcessDetails[processDetailKey];
@@ -412,6 +431,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
             ? 'chat.autoRepair.failed'
             : 'chat.autoRepair.source')
           : undefined;
+        const lastTextPartIndex = message.parts.reduce((last, part, partIndex) =>
+          part.type === 'text' && part.text ? partIndex : last, -1);
         const summaryProjection = historicalMessageIds.has(persistedMessage.id)
           ? projectHistoricalAssistantTurn(persistedMessage)
           : null;
@@ -499,6 +520,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       text={part.text}
                       workspaceSessionId={threadId}
                       sourceLabel={autoRepairSourceLabel}
+                      leadingAction={index === sourceMessageIndex
+                        && partIndex === message.parts.findIndex((candidate) => candidate.type === 'text' && Boolean(candidate.text))
+                        ? <TaskSessionSourceMarker source={sourceThread ?? null} onNavigateThread={onNavigateThread} />
+                        : undefined}
                     />
                   );
                 }
@@ -519,6 +544,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       setMessages={setMessages}
                       sendMessage={sendUserMessage}
                       workspaceSessionId={threadId}
+                      afterContent={index === createdTaskMessageIndex
+                        && partKind !== 'process'
+                        && partIndex === lastTextPartIndex
+                        ? <CreatedTaskSessionList links={createdTaskLinks ?? []} onNavigateThread={onNavigateThread} />
+                        : undefined}
                     />
                   </div>
                 );
@@ -607,7 +637,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 }
 
                 // Agent output is an internal launch/result envelope. Replace it
-                // with a navigational task chip instead of exposing the raw
+                // with a task summary instead of exposing the raw
                 // "Async agent launched successfully" metadata in the chat.
                 if (isSubagentTool) {
                   const rawInput = readToolInput(toolPart);
@@ -789,6 +819,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
           </div>
         );
       })}
+
+      {createdTaskMessageIndex < 0 && createdTaskLinks?.length ? (
+        <CreatedTaskSessionList links={createdTaskLinks} onNavigateThread={onNavigateThread} />
+      ) : null}
 
       {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
       {error ? (

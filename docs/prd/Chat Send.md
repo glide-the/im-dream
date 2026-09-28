@@ -5,10 +5,13 @@
 > **[Sync] 2026-06-09**: 长对话上滑阅读历史时，AIInputDock 上方显示悬浮到底部箭头；按钮由 ChatPanel 根据消息滚动位置控制，不改变输入 Dock 内部布局。
 > **[Sync] 2026-06-13**: 完全访问模式下 AskUserQuestion 类工具仍显示前端问答表单；「完全访问」只隐藏全局逐步确认切换，不隐藏问题确认窗口。
 > **[Sync] 2026-09-18**: Enter 发送，Shift+Enter 换行；输入法组合输入期间的 Enter 不发送。移动端操作行允许附件、Agent 和工具模式控件换行，发送按钮始终保留在可见范围。
+> **[Sync] 2026-09-27**: 运行中继续发送、输入框上方的排队卡片与逐条操作见 [Chat Queued Input](./chat/queued-input.md)；右端单一操作位按草稿内容在发送与停止间切换。
 
 ## 1. 文档范围
 
 Chat Send 覆盖用户输入文本、添加附件、键盘发送、发送前校验、发送中反馈、发送后消息展示，以及输入 Dock 与消息流的视觉一致性。
+
+运行中消息的排队、引导、编辑、取消及侧边独立聊天由 [Chat Queued Input](./chat/queued-input.md) 定义。
 
 ## 2. 设计目标
 
@@ -31,7 +34,9 @@ ChatPanel
         ├── AddButton
         ├── PermissionMode
         ├── ShortcutHint
-        └── SendButton
+        └── PrimaryAction（单一操作位）
+            ├── 有草稿：SendButton
+            └── 空草稿且主轮次运行：StopButton
 ```
 
 ## 4. AIInputDock 视觉规范
@@ -85,6 +90,7 @@ ChatPanel
 - 不可发送时使用 `color.disabled.bg` 和禁用光标。
 - 发送中显示 spinner 或省略号，不改变按钮尺寸。
 - 点击反馈使用 `active: scale(0.96)` 等轻量压感。
+- 当前轮次运行时，输入文本仍可提交到当前 Thread 的持久化队列。右端只有一个按钮：有草稿显示发送，草稿为空且主轮次运行显示停止；空闲且无草稿显示禁用发送。详见 [运行中排队 PRD](./chat/queued-input.md)。
 
 ## 6. 发送前校验
 
@@ -119,11 +125,11 @@ ChatPanel
 | Typing | 显示字符计数和可发送按钮。 |
 | Attachment Added | AttachmentTray 展开，输入区高度稳定。 |
 | Uploading | 附件卡显示进度，发送按钮禁用。 |
-| Sending | 输入内容转入 pending 消息，按钮显示加载。 |
+| Sending | 首条消息沿既有流提交；运行中提交队列时草稿暂时清空，当前主轮次仍运行则操作位显示停止。队列拒绝后恢复草稿，操作位回到发送。 |
 | Sent | 清空输入区和附件托盘，消息进入历史。 |
 | Failed | 输入 Dock 或消息旁显示错误和重试。 |
 | Disabled | 输入区整体降级，但保留原因说明。 |
-| Reading History | 用户上滑查看历史消息时，Dock 上方出现到底部按钮；发送/停止/附件控件继续保持原位。 |
+| Reading History | 用户上滑查看历史消息时，Dock 上方出现到底部按钮；当前发送或停止操作位与附件控件继续保持原位。 |
 
 ## 9. 色彩规范
 

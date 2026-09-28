@@ -1,3 +1,8 @@
+// [Sync] 2026-09-27: localize task-session source navigation and created-task lists.
+// [Sync] 2026-09-27: localize consolidated Chat information and server-reported task states.
+// [Sync] 2026-09-28: localize completed task status and durable result notification states.
+// [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
+// [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
 // [Input] User locale and product-facing translation keys.
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
 // [Pos] Frontend i18next resource registry.
@@ -513,6 +518,7 @@ const resources = {
           close: 'Close'
         },
         historyTurn: {
+          loading: 'Loading conversation…',
           duration: 'Took {{duration}}',
           viewProcess: 'View process',
           expandAria: 'Expand process, {{label}}',
@@ -717,6 +723,45 @@ const resources = {
         },
         panel: {
           scrollToBottom: 'Scroll to bottom'
+        },
+        inputQueue: {
+          region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
+          consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
+          ownerUnverified: 'Current server cannot verify', guide: 'Adjust direction',
+          delete: 'Remove queued message', more: 'More options', edit: 'Edit message',
+          save: 'Save', cancelEdit: 'Cancel editing', sideChat: 'Open in side chat',
+          closeQueue: 'Close queue',
+          sideChatLaunchFailed: 'The side chat was created, but its first response could not start. Open it to review the state.',
+          closeSideChat: 'Close side chat',
+          editDraftSaved: 'The original queue item was removed. Your edited draft is saved here.',
+          retryEdit: 'Retry queuing this draft',
+          guideFailed: 'Interrupt failed. This message was not sent to Claude; send it again if needed.',
+          textOnly: 'Only text messages can be queued while the Agent is running.',
+          accessDenied: 'You cannot access this conversation.', ownerUnavailable: 'The Agent is no longer running here. Reload the conversation.',
+          stateChanged: 'The message state changed. Reload the queue and try again.',
+          unavailable: 'Messages cannot be queued right now. Your draft is kept.',
+          stateUnknown: 'Queue status is uncertain. Your draft is kept; check the queue before sending again.',
+          checkStatus: 'Check queue status', checkingStatus: 'Checking…',
+          sendFailed: 'The message could not be queued. Your draft is kept.'
+        },
+        taskSessionNavigation: {
+          fromSource: 'Created from another task',
+          fromNamedSource: 'Created from “{{title}}”',
+          backToSourceAria: 'Open the source conversation',
+          listTitle: 'Tasks created by this conversation',
+          listCount_one: 'Task created by this conversation · {{count}}',
+          listCount_other: 'Tasks created by this conversation · {{count}}',
+          created: 'Created',
+          failed: 'Start failed',
+          openChat: 'Open chat',
+          unavailable: 'Task relationships are temporarily unavailable.',
+          retry: 'Reload'
+        },
+        taskActivity: {
+          activityTitle: 'Task activity', sectionsAria: 'Tasks and agents', createdTasks: 'Tasks created',
+          noTasks: 'No tasks created in this conversation.', loading: 'Loading tasks…',
+          unavailable: 'Tasks could not be loaded.', retry: 'Reload', refresh: 'Refresh',
+          status: { pending: 'Pending', failed: 'Start failed', running: 'Running', idle: 'Ended', completed: 'Completed', state_unknown: 'Status unavailable' }
         },
         turnError: {
           bindingConflictTitle: 'This conversation cannot continue the Dream yet',
@@ -1390,6 +1435,7 @@ const resources = {
           close: '关闭'
         },
         historyTurn: {
+          loading: '正在加载对话…',
           duration: '用时 {{duration}}',
           viewProcess: '查看过程',
           expandAria: '展开执行过程，{{label}}',
@@ -1593,6 +1639,44 @@ const resources = {
         },
         panel: {
           scrollToBottom: '滚动到底部'
+        },
+        inputQueue: {
+          region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
+          consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',
+          ownerUnverified: '当前节点无法核实', guide: '调整方向',
+          delete: '删除排队消息', more: '更多操作', edit: '编辑消息',
+          save: '保存', cancelEdit: '取消编辑', sideChat: '在侧边聊天中打开',
+          closeQueue: '关闭排队',
+          sideChatLaunchFailed: '侧边聊天已创建，但首轮未能启动。请在侧边栏查看状态。',
+          closeSideChat: '关闭侧边聊天',
+          editDraftSaved: '原排队消息已移除，修改后的草稿保留在此。',
+          retryEdit: '重试加入队列',
+          guideFailed: '中断请求失败；这条消息未提交给 Claude，需要时请重新发送。',
+          textOnly: 'Agent 运行期间的排队消息目前只支持文字。',
+          accessDenied: '无权访问当前对话。', ownerUnavailable: 'Agent 已不在当前节点运行，请重新加载对话。',
+          stateChanged: '消息状态已变化，请刷新队列后重试。',
+          unavailable: '暂时无法排队，草稿已保留。',
+          stateUnknown: '排队结果待核对，草稿已保留；再次发送前请先检查队列。',
+          checkStatus: '检查队列状态', checkingStatus: '检查中…',
+          sendFailed: '消息未能排队，草稿已保留。'
+        },
+        taskSessionNavigation: {
+          fromSource: '由另一项任务创建',
+          fromNamedSource: '由“{{title}}”创建',
+          backToSourceAria: '打开来源对话',
+          listTitle: '此对话创建的任务',
+          listCount: '此对话创建的任务 · {{count}}',
+          created: '已创建',
+          failed: '启动失败',
+          openChat: '打开聊天',
+          unavailable: '任务关系暂时无法读取。',
+          retry: '重新加载'
+        },
+        taskActivity: {
+          activityTitle: '任务与进度', sectionsAria: '任务与子智能体', createdTasks: '已创建的任务',
+          noTasks: '此对话尚未创建任务。', loading: '正在加载任务…',
+          unavailable: '暂时无法读取任务。', retry: '重新加载', refresh: '刷新',
+          status: { pending: '待启动', failed: '启动失败', running: '运行中', idle: '已结束', completed: '已完成', state_unknown: '状态待核对' }
         },
         turnError: {
           bindingConflictTitle: '当前对话暂时无法继续创作',

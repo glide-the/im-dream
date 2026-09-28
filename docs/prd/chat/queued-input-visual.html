@@ -1,0 +1,211 @@
+<!doctype html>
+<!-- [Input] Chat queued-input PRD and the html_design_skill four-stage design artifacts. -->
+<!-- [Output] Standalone visual sample of the Dream running-turn queue and composer. -->
+<!-- [Pos] Documentation-only Chat sample; the product uses existing React components. -->
+<!-- [Sync] 2026-09-27: show queue cards, per-card menu, compact error, and one draft-dependent Send/Stop button. -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dream Chat · 运行中消息排队</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1d1916;
+      --paper: #2a241f;
+      --surface: #302820;
+      --border: #5a4d3d;
+      --text: #f3e9db;
+      --muted: #baaa96;
+      --danger: #ff8a7f;
+      --accent: #e7ad76;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "微软雅黑", system-ui, sans-serif;
+      line-height: 1.5;
+    }
+    button, textarea, summary { font: inherit; }
+    button:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    .frame {
+      min-height: 100dvh;
+      max-width: 1000px;
+      margin: auto;
+      padding: 28px clamp(14px, 3vw, 32px) 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .heading h1 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: .04em; }
+    .heading span { color: var(--muted); font-size: .78rem; }
+    .thread { flex: 1; display: flex; flex-direction: column; gap: 28px; padding: 28px 2px; }
+    .bubble { align-self: flex-end; max-width: 72%; padding: 12px 17px; border-radius: 19px; background: #3e352b; }
+    .response { max-width: 76%; color: var(--text); }
+    .response .label { display: block; margin-bottom: 10px; color: var(--muted); font-size: .76rem; }
+    .cursor { display: inline-block; width: 6px; height: 1em; margin-left: 3px; vertical-align: -.15em; background: var(--accent); }
+    .queue-stack { display: grid; gap: 7px; }
+    .queue-card {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      min-height: 52px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      background: var(--surface);
+      box-shadow: 0 6px 20px #0002;
+    }
+    .queue-card .arrow { color: var(--muted); }
+    .queue-card .message { flex: 1 1 150px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .queue-card .state { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+    .queue-card .actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    .queue-card button, .queue-card summary {
+      min-height: 36px;
+      border: 0;
+      border-radius: 8px;
+      padding: 6px 9px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .queue-card button:hover, .queue-card summary:hover { background: #493c30; }
+    .queue-card .guide { color: var(--accent); }
+    .queue-card .icon { width: 36px; padding: 0; font-size: 1.1rem; }
+    .queue-card button:disabled { opacity: .45; cursor: default; }
+    .more { position: relative; }
+    .more summary { display: grid; place-items: center; list-style: none; width: 36px; }
+    .more summary::-webkit-details-marker { display: none; }
+    .menu {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 9px);
+      z-index: 2;
+      min-width: 215px;
+      padding: 6px;
+      display: grid;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--paper);
+      box-shadow: 0 12px 30px #0008;
+    }
+    .menu button { width: 100%; text-align: left; }
+    .notice {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid var(--danger);
+      border-radius: 10px;
+      padding: 8px 12px;
+      background: var(--paper);
+      color: var(--danger);
+      font-size: .82rem;
+    }
+    .notice button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 700; }
+    .dock { border: 1px solid var(--border); border-radius: 22px; padding: 13px 16px 15px; background: var(--paper); }
+    .dock:focus-within { border-color: var(--accent); }
+    .hint { display: flex; justify-content: flex-end; color: var(--muted); font-size: .74rem; }
+    .dock textarea {
+      display: block;
+      width: 100%;
+      min-height: 94px;
+      resize: vertical;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      padding: 12px 0;
+    }
+    .dock textarea::placeholder { color: var(--muted); }
+    .dock-actions { display: flex; align-items: center; gap: 12px; }
+    .leading { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .leading button { min-height: 40px; border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; color: var(--text); background: transparent; }
+    .leading .active { background: #f3e9db; color: #2a241f; }
+    .trailing { display: flex; flex: 0 0 auto; margin-left: auto; }
+    .trailing button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; cursor: pointer; font-size: 1.15rem; }
+    .stop { background: var(--danger); color: #221b18; }
+    .send { background: #f3e9db; color: #221b18; }
+    @media (max-width: 560px) {
+      .frame { padding: 14px 10px; }
+      .thread { padding: 24px 2px; gap: 18px; }
+      .response { max-width: 94%; }
+      .bubble { max-width: 92%; }
+      .queue-card .message { flex-basis: calc(100% - 48px); }
+      .queue-card .state { margin-left: 20px; }
+      .queue-card .actions { width: auto; }
+      .dock { padding: 10px 12px 12px; }
+      .dock textarea { min-height: 86px; }
+      .menu { right: 0; min-width: min(215px, calc(100vw - 30px)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <header class="heading"><h1>Dream Agent · 剧本对话</h1><span>正在回复</span></header>
+    <section class="thread" aria-label="对话">
+      <div class="bubble">先帮我梳理第三幕的转折。</div>
+      <div class="response"><span class="label">Dream Agent 正在回复</span>第三幕可以从主角发现线索开始，让之前埋下的选择在此刻产生后果。接下来我会把场景拆成几个可写的段落<span class="cursor" aria-hidden="true"></span></div>
+    </section>
+    <section id="queue-stack" class="queue-stack" aria-label="待处理消息">
+      <article class="queue-card">
+        <span class="arrow" aria-hidden="true">↳</span><span class="message" title="让冲突更克制一些，保留角色之间的张力">让冲突更克制一些，保留角色之间的张力</span>
+        <span class="state">排队中</span>
+        <div class="actions">
+          <button class="guide" type="button">↳ 调整方向</button>
+          <button class="icon" type="button" aria-label="删除这条排队消息">🗑</button>
+          <details id="queue-more" class="more">
+            <summary aria-label="更多操作">···</summary>
+            <div class="menu" role="menu">
+              <button type="button" role="menuitem">✎　编辑消息</button>
+              <button type="button" role="menuitem">⊕　在侧边聊天中打开</button>
+              <button type="button" role="menuitem">↳　关闭排队</button>
+            </div>
+          </details>
+        </div>
+      </article>
+      <article id="queue-second" class="queue-card" hidden>
+        <span class="arrow" aria-hidden="true">↳</span><span class="message" title="最后一场戏让她自己做决定">最后一场戏让她自己做决定</span>
+        <span class="state">已选中 · 等待切换</span>
+        <div class="actions"><button class="guide" type="button" disabled>↳ 调整方向</button><button class="icon" type="button" disabled aria-label="不可删除">🗑</button><button class="icon" type="button" aria-label="更多操作">···</button></div>
+      </article>
+    </section>
+    <div id="queue-error" class="notice" role="alert" hidden><span>暂时无法排队，草稿已保留。</span><button type="button">检查队列状态</button></div>
+    <section class="dock" aria-label="输入消息">
+      <div class="hint">Enter 发送 · Shift+Enter 换行</div>
+      <textarea id="composer-draft" aria-label="消息草稿" placeholder="随心输入">再加一处伏笔，呼应开场的对白。</textarea>
+      <div class="dock-actions">
+        <div class="leading"><button type="button">+ 附件</button><button class="active" type="button">自动</button><button type="button">逐步确认</button></div>
+        <div class="trailing"><button id="composer-action" class="send" type="button" aria-label="发送消息">↑</button></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    // Documentation variants: ?state=menu, ?state=multiple, or ?state=error.
+    const state = new URLSearchParams(location.search).get('state');
+    if (state === 'menu') document.getElementById('queue-more').open = true;
+    if (state === 'multiple') document.getElementById('queue-second').hidden = false;
+    if (state === 'error') {
+      document.getElementById('queue-stack').hidden = true;
+      document.getElementById('queue-error').hidden = false;
+    }
+    const draft = document.getElementById('composer-draft');
+    const action = document.getElementById('composer-action');
+    draft.addEventListener('input', () => {
+      const send = draft.value.trim().length > 0;
+      action.className = send ? 'send' : 'stop';
+      action.setAttribute('aria-label', send ? '发送消息' : '停止生成');
+      action.textContent = send ? '↑' : '■';
+    });
+  </script>
+</body>
+</html>

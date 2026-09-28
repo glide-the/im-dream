@@ -1,6 +1,12 @@
 # [Input] Public production Chat routes with the real Admin DTO transport and explicit fake auth/runtime providers.
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
+# [Sync] 2026-09-28: exercise wait_threads completion/cursor/input wake and ordinary non-returning Thread creation.
+# [Sync] 2026-09-28: exercise create/list/read/send Thread Tool host behavior and stable running-Thread sends.
+# [Sync] 2026-09-27: running or incomplete task messages cannot be projected as completed results.
+# [Sync] 2026-09-27: verify owner-filtered task-session navigation links through the public Thread route.
+# [Sync] 2026-09-27: verify side-task first-turn no-resume launch and retry-safe single claim.
+# [Sync] 2026-09-26: expose an empty Admin queue snapshot and reject orphaned inputs before ordinary Chat dispatch.
 # [Sync] 2026-09-17: carry user OAuth and confidential service OAuth as separate Bearers.
 # [Sync] 2026-09-15: verify exact Editor grant creation and pre-SSE owner cleanup on failure.
 # [Sync] 2026-09-15: verify Admin Workflow read precedes message/SSE and supplies immutable Service snapshot.
@@ -10,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import sys
 import types
 from datetime import datetime, timedelta, timezone
@@ -94,6 +101,8 @@ def boundary(monkeypatch):
         "chat-thread.list": {"threads": [summary]}, "chat-thread.search": {"threads": [{**summary, "messages_text": "Saved conversation"}]},
         "chat-thread.delete": {"changed": True}, "chat-message.list": {"messages": [message_value()]},
         "chat-message.persist": {"message_id": "public-message-1"},
+        "chat-input.list": {"entries": []},
+        "chat-input.transition": {"entry": {"message_id": "queued-message", "thread_id": "owned-thread", "queue_sequence": "1", "status": "cancelled", "revision": 2, "dispatch_turn_id": None, "created_at": "2026-09-26T00:00:00Z", "text": "new work"}},
         "workflow-context.resolve": {"context": None},
         "user-system-config.get": {"config_json": '{"model":"explicit-fake-model","workspace_enabled":true}'},
         "chat-user-message.persist": {"message_id": "public-message-1", "confirmation_preserved": False},
@@ -153,6 +162,412 @@ def boundary(monkeypatch):
     app.state.admin_request_auth = AdminRequestAuth(config, client=client, verifier=StaticVerifier())
     app.include_router(routes.router)
     return TestClient(app), outputs, calls, factory
+
+
+def test_queue_card_cancel_and_side_task_use_owned_admin_operations(boundary, monkeypatch):
+    from routers import claude_agent as routes
+    client, outputs, calls, _factory = boundary
+    queued = {"message_id": "queued-message", "thread_id": "owned-thread", "queue_sequence": "1", "status": "queued", "revision": 1,
+              "dispatch_turn_id": None, "created_at": "2026-09-26T00:00:00Z", "text": "new work"}
+    outputs["chat-input.list"] = {"entries": [queued]}
+    auth = {"Authorization": "Bearer read-write"}
+    cancelled = client.post("/api/claude-agent/threads/owned-thread/inputs/queued-message/cancel",
+                            headers=auth, json={"expected_revision": 1})
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert next(input_dto for operation, input_dto, _ in calls if operation == "chat-input.transition")["action"] == "cancel"
+    async def launch(*, task, current_user, chat, owner):
+        assert task.task_id == "task-one"
+        assert str(current_user["user_id"]) == "42"
+        return {"task_id": task.task_id, "thread_id": task.thread_id, "launch_status": "starting", "dispatch_started": True}
+    monkeypatch.setattr(routes, "_task_session_launch_initial", launch)
+    outputs["task-session.create"] = {"task": {"task_id": "task-one", "source_thread_id": "owned-thread", "thread_id": "child-thread",
+        "title": "new work", "initial_message_id": "child-message", "initial_message": "new work", "launch_status": "pending",
+        "launch_error_code": None, "created_at": "2026-09-26T00:00:00Z"}}
+    moved = client.post("/api/claude-agent/threads/owned-thread/inputs/queued-message/side-task",
+                        headers=auth, json={"expected_revision": 1})
+    assert moved.status_code == 200
+    assert moved.json()["thread_id"] == "child-thread"
+    create = next(input_dto for operation, input_dto, _ in calls if operation == "task-session.create")
+    assert create["source_message_id"] == "queued-message"
+    assert create["request_key"] == "side:queued-message"
+
+
+def test_task_session_links_use_current_thread_authorization_and_safe_projection(boundary):
+    client, outputs, calls, _factory = boundary
+    link = {"task_id": "task-one", "source_thread_id": "owned-thread", "thread_id": "child-thread",
+            "title": "Review task", "launch_status": "starting", "launch_error_code": None,
+            "created_at": "2026-09-27T00:00:00Z"}
+    outputs["task-session.links"] = {
+        "source": {**link, "source_title": "Saved conversation"},
+        "created": [link],
+    }
+    response = client.get(
+        "/api/claude-agent/threads/owned-thread/task-links",
+        headers={"Authorization": "Bearer read-only"},
+    )
+    assert response.status_code == 200
+    assert response.json() == outputs["task-session.links"]
+    operation, input_dto, _ = next(call for call in calls if call[0] == "task-session.links")
+    assert operation == "task-session.links"
+    assert input_dto == {"thread_id": "owned-thread"}
+    assert "user_id" not in json.dumps(response.json())
+
+    links_before = len([call for call in calls if call[0] == "task-session.links"])
+    original = outputs["chat-thread.get"]
+    outputs["chat-thread.get"] = lambda input_dto, _request_id: (
+        original if input_dto["thread_id"] == "owned-thread" else {"thread": None}
+    )
+    denied = client.get(
+        "/api/claude-agent/threads/not-owned/task-links",
+        headers={"Authorization": "Bearer read-only"},
+    )
+    assert denied.status_code == 404
+    assert len([call for call in calls if call[0] == "task-session.links"]) == links_before
+
+
+def test_side_task_first_launch_has_no_resume_and_replay_does_not_launch_twice(boundary, monkeypatch):
+    from routers import claude_agent as routes
+    client, outputs, calls, _factory = boundary
+    queued = {"message_id": "queued-message", "thread_id": "owned-thread", "queue_sequence": "1", "status": "queued", "revision": 1,
+              "dispatch_turn_id": None, "created_at": "2026-09-26T00:00:00Z", "text": "new work"}
+    outputs["chat-input.list"] = {"entries": [queued]}
+    task = {"task_id": "task-one", "source_thread_id": "owned-thread", "thread_id": "child-thread",
+            "title": "new work", "initial_message_id": "child-message", "initial_message": "new work",
+            "launch_status": "pending", "launch_error_code": None, "created_at": "2026-09-26T00:00:00Z"}
+    outputs["task-session.create"] = {"task": task}
+    claims = []
+    def launch(input_dto, _request_id):
+        claims.append(input_dto["action"])
+        return {"task": {**task, "launch_status": "starting"}, "changed": len(claims) == 1}
+    outputs["task-session.launch"] = launch
+    launches = []
+    async def stream(body, *, current_user, chat, owner):
+        launches.append(body)
+        assert str(current_user["user_id"]) == "42"
+        async def frames():
+            yield ": child started\n\n"
+        return types.SimpleNamespace(body_iterator=frames())
+    monkeypatch.setattr(routes, "claude_agent_stream", stream)
+    auth = {"Authorization": "Bearer read-write"}
+    path = "/api/claude-agent/threads/owned-thread/inputs/queued-message/side-task"
+    first = client.post(path, headers=auth, json={"expected_revision": 1})
+    assert first.status_code == 200 and first.json()["dispatch_started"] is True
+    outputs["chat-input.list"] = {"entries": [{**queued, "status": "cancelled", "revision": 2}]}
+    replay = client.post(path, headers=auth, json={"expected_revision": 1})
+    assert replay.status_code == 200 and replay.json()["dispatch_started"] is False
+    assert claims == ["claim", "claim"]
+    assert len(launches) == 1
+    assert launches[0].thread_id == "child-thread"
+    assert launches[0].resume is False
+    assert launches[0].message["id"] == "child-message"
+    assert len([call for call in calls if call[0] == "task-session.create"]) == 2
+
+
+def test_thread_tool_host_reuses_owned_running_thread_for_send_and_read(boundary, monkeypatch):
+    from routers import claude_agent as routes
+    from libs.claude_agent_kit.server.session_projection_protocol import ThreadToolCommandRequestDTO
+    from services.admin_data import chat_models as dto
+    _client, _outputs, _calls, factory = boundary
+    async def owned(_user, _chat, thread_id):
+        assert thread_id == "child-thread"
+        return {"id": thread_id, "title": "Child", "claude_session_id": "real-child-session"}
+    monkeypatch.setattr(routes, "_admin_thread", owned)
+    factory.session_snapshot = lambda _thread_id: {"lifecycle": "running"}
+    factory.accepting_input = lambda _thread_id: True
+    submitted = []
+    async def enqueue_input(**kwargs):
+        submitted.append(kwargs)
+        return types.SimpleNamespace(status="queued")
+    factory.enqueue_input = enqueue_input
+    class Actor:
+        canonical_user_id = "42"
+
+        def __init__(self, access_token="bound-user-token"):
+            self.access_token = access_token
+    monkeypatch.setattr(routes, "AdminRequestActor", Actor)
+    class Chat:
+        def list_messages(self): pass
+        def list_inputs(self): pass
+    chat = Chat()
+    async def invoke(_user, operation, _input):
+        if operation.__name__ == "list_messages":
+            messages = []
+            if submitted:
+                messages.append(dto.ChatMessageDTO(
+                    id=submitted[0]["message_id"], role="assistant",
+                    parts=[{"type": "text", "text": "saved result"}], metadata=None,
+                    metadata_decode_error=False, created_at="2026-09-28T00:00:00Z",
+                    history_final_text="saved result", history_process_available=False,
+                    history_projection_version=1,
+                ))
+            return types.SimpleNamespace(messages=messages)
+        if operation.__name__ == "list_inputs":
+            return types.SimpleNamespace(entries=[types.SimpleNamespace(message_id=submitted[0]["message_id"], status="queued")])
+        raise AssertionError(operation.__name__)
+    monkeypatch.setattr(routes, "_chat_invoke", invoke)
+    def command(operation, **kwargs):
+        return ThreadToolCommandRequestDTO(
+            capability="c" * 43, request_id="request-one", operation=operation,
+            tool_call_id="call-one", thread_id="child-thread", **kwargs
+        )
+    async def run():
+        provider = routes._ThreadToolTurnProvider(loop=asyncio.get_running_loop(),
+            current_user={"user_id": "42", "_admin_actor": Actor()}, chat=chat, owner=None,
+            source_thread_id="owned-thread", source_message_id="source-message", timeout_seconds=2)
+        provider.refresh_authorization({"user_id": "42", "_admin_actor": Actor("fresh-user-token")})
+        first = await provider._perform(command("thread.send", prompt="continue"))
+        replay = await provider._perform(command("thread.send", prompt="continue"))
+        read = await provider._perform(command("thread.read"))
+        assert first.status == replay.status == "queued"
+        assert first.message_id == replay.message_id
+        assert read.status == "running" and read.running is True
+        assert read.messages and read.messages[0].text == "saved result"
+    asyncio.run(run())
+    assert len(submitted) == 1
+    assert submitted[0]["thread_id"] == "child-thread"
+    assert submitted[0]["access_token"] == "fresh-user-token"
+
+
+def test_thread_tool_host_creates_related_thread_and_lists_owned_threads(boundary, monkeypatch):
+    from routers import claude_agent as routes
+    from libs.claude_agent_kit.server.session_projection_protocol import ThreadToolCommandRequestDTO
+    from services.admin_data import chat_models as dto
+    _client, _outputs, _calls, _factory = boundary
+    task = dto.TaskSessionDTO(
+        task_id="task-one", source_thread_id="owned-thread", thread_id="child-thread",
+        title="Review", initial_message_id="child-message", initial_message="Inspect",
+        launch_status="pending", launch_error_code=None, created_at="2026-09-28T00:00:00Z",
+    )
+    class Actor:
+        canonical_user_id = "42"
+        access_token = "bound-user-token"
+    class Chat:
+        def create_task_session(self): pass
+        def list_threads(self): pass
+    chat = Chat()
+    async def invoke(_user, operation, input_dto):
+        if operation.__name__ == "create_task_session":
+            assert input_dto.source_thread_id == "owned-thread"
+            assert input_dto.initial_message == "Inspect"
+            return dto.TaskSessionResultDTO(task=task)
+        if operation.__name__ == "list_threads":
+            assert input_dto.limit == 3
+            return dto.ThreadListResultDTO(threads=[dto.ChatThreadSummaryDTO(
+                id="child-thread", title="Review", deck_id=None, voice_id=None,
+                created_at="2026-09-28T00:00:00Z", updated_at=None,
+            )])
+        raise AssertionError(operation.__name__)
+    async def launch(**_kwargs):
+        return {"launch_status": "starting", "dispatch_started": True}
+    monkeypatch.setattr(routes, "_chat_invoke", invoke)
+    monkeypatch.setattr(routes, "_task_session_launch_initial", launch)
+    def command(operation, **kwargs):
+        return ThreadToolCommandRequestDTO(
+            capability="c" * 43, request_id="request-one", operation=operation,
+            tool_call_id="call-one", **kwargs,
+        )
+    async def run():
+        provider = routes._ThreadToolTurnProvider(
+            loop=asyncio.get_running_loop(),
+            current_user={"user_id": "42", "_admin_actor": Actor()},
+            chat=chat, owner=None, source_thread_id="owned-thread",
+            source_message_id="source-message", timeout_seconds=2,
+        )
+        created = await provider._perform(
+            command("thread.create", prompt="Inspect", title="Review")
+        )
+        listed = await provider._perform(command("thread.list", limit=3))
+        assert created.thread_id == "child-thread"
+        assert created.status == "starting"
+        assert listed.status == "ok"
+        assert listed.threads and listed.threads[0].thread_id == "child-thread"
+    asyncio.run(run())
+
+
+def test_wait_threads_returns_completion_suppresses_replayed_final_and_wakes_on_input(
+    boundary,
+    monkeypatch,
+):
+    from routers import claude_agent as routes
+    from libs.claude_agent_kit.server.session_projection_protocol import (
+        ThreadToolCommandRequestDTO,
+        ThreadToolWaitTargetDTO,
+    )
+
+    _client, _outputs, _calls, _factory = boundary
+
+    class Actor:
+        canonical_user_id = "42"
+        access_token = "bound-user-token"
+
+    class Chat:
+        def message_page(self):
+            pass
+
+        def list_task_session_links(self):
+            pass
+
+    chat = Chat()
+    final = types.SimpleNamespace(
+        id="final-message",
+        role="assistant",
+        metadata_decode_error=False,
+        metadata={"turnStatus": "completed", "finalPartIndex": 0},
+        history_projection_version=1,
+        history_final_text="child result",
+    )
+
+    async def admin_thread(_user, _chat, thread_id):
+        if thread_id == "missing-thread":
+            return None
+        return {
+            "id": thread_id,
+            "title": "Child task",
+            "claude_session_id": "saved-session",
+        }
+
+    async def invoke(_user, operation, _input_dto):
+        if operation.__name__ == "message_page":
+            return types.SimpleNamespace(messages=[final])
+        if operation.__name__ == "list_task_session_links":
+            return types.SimpleNamespace(source=None)
+        raise AssertionError(operation.__name__)
+
+    class Factory:
+        input_received = False
+        running = False
+        pending_tool_call_ids = []
+
+        def session_snapshot(self, _thread_id):
+            return (
+                {"lifecycle": "running", "turn_count": 2}
+                if self.running
+                else None
+            )
+
+        def tool_confirmation_snapshot(self, _thread_id):
+            return {
+                "pending_tool_call_ids": self.pending_tool_call_ids,
+                "tool_confirmation_observation": "known",
+            }
+
+        @staticmethod
+        def input_generation(_thread_id):
+            return 7
+
+        async def wait_for_input_after(self, _thread_id, _generation, *, timeout_seconds):
+            assert timeout_seconds > 0
+            return self.input_received
+
+    factory = Factory()
+    monkeypatch.setattr(routes, "_admin_thread", admin_thread)
+    monkeypatch.setattr(routes, "_chat_invoke", invoke)
+    monkeypatch.setattr(routes, "claude_agent_thread_factory", factory)
+
+    def command(*, after_cursor=None, timeout_ms=0):
+        return ThreadToolCommandRequestDTO(
+            capability="c" * 43,
+            request_id="request-wait",
+            operation="thread.wait",
+            tool_call_id="call-wait",
+            targets=[
+                ThreadToolWaitTargetDTO(
+                    thread_id="child-thread",
+                    after_cursor=after_cursor,
+                )
+            ],
+            timeout_ms=timeout_ms,
+        )
+
+    async def run():
+        provider = routes._ThreadToolTurnProvider(
+            loop=asyncio.get_running_loop(),
+            current_user={"user_id": "42", "_admin_actor": Actor()},
+            chat=chat,
+            owner=None,
+            source_thread_id="source-thread",
+            source_message_id="source-message",
+            timeout_seconds=2,
+        )
+        completed = await provider._perform(command())
+        assert completed.wait_reason == "completed"
+        assert completed.updates and completed.updates[0].final_text == "child result"
+        cursor = completed.updates[0].cursor
+
+        partially_available = await provider._perform(
+            ThreadToolCommandRequestDTO(
+                capability="c" * 43,
+                request_id="request-wait-multiple",
+                operation="thread.wait",
+                tool_call_id="call-wait-multiple",
+                targets=[
+                    ThreadToolWaitTargetDTO(thread_id="missing-thread"),
+                    ThreadToolWaitTargetDTO(thread_id="child-thread"),
+                ],
+                timeout_ms=0,
+            )
+        )
+        assert partially_available.wait_reason == "completed"
+        assert partially_available.errors
+        assert partially_available.errors[0].thread_id == "missing-thread"
+        assert partially_available.errors[0].error_code == "THREAD_NOT_FOUND"
+
+        repeated = await provider._perform(command(after_cursor=cursor))
+        assert repeated.wait_reason == "timeout"
+        assert repeated.updates and repeated.updates[0].final_text is None
+
+        factory.running = True
+        factory.pending_tool_call_ids = ["tool-call-one"]
+        attention = await provider._perform(command())
+        assert attention.wait_reason == "needs_attention"
+        assert attention.updates and attention.updates[0].pending_tool_call_ids == [
+            "tool-call-one"
+        ]
+
+        factory.running = False
+        factory.pending_tool_call_ids = []
+        final.metadata = {"turnStatus": "failed"}
+        failed = await provider._perform(command(timeout_ms=1_000))
+        assert failed.wait_reason == "error"
+        assert failed.updates and failed.updates[0].status == "failed"
+        assert failed.errors and failed.errors[0].error_code == "THREAD_TARGET_FAILED"
+
+        failed_repeated = await provider._perform(
+            command(after_cursor=failed.updates[0].cursor)
+        )
+        assert failed_repeated.wait_reason == "timeout"
+        assert failed_repeated.errors is None
+
+        final.metadata = {"turnStatus": "pending"}
+        factory.input_received = True
+        interrupted = await provider._perform(command(timeout_ms=1_000))
+        assert interrupted.wait_reason == "input_received"
+        assert interrupted.updates and interrupted.updates[0].status == "idle"
+
+    asyncio.run(run())
+
+
+def test_task_session_get_rechecks_source_thread_and_reports_unknown_owner(boundary):
+    client, outputs, _calls, factory = boundary
+    outputs["task-session.get"] = {"task": {"task_id": "task-one", "source_thread_id": "owned-thread", "thread_id": "child-thread",
+        "title": "new work", "initial_message_id": "child-message", "initial_message": "new work", "launch_status": "starting",
+        "launch_error_code": None, "created_at": "2026-09-26T00:00:00Z"}}
+    outputs["chat-message.page"] = {"messages": [{"id": "pending-user", "role": "user",
+        "parts": [{"type": "text", "text": "still waiting"}], "metadata": None,
+        "metadata_decode_error": False, "created_at": "2026-09-27T00:00:00Z",
+        "history_final_text": None, "history_process_available": False,
+        "history_projection_version": None}], "has_more": False,
+        "latest_message_id": "pending-user"}
+    factory.session_snapshot = lambda _thread_id: None
+    auth = {"Authorization": "Bearer read-write"}
+    response = client.get("/api/claude-agent/threads/owned-thread/tasks/task-one", headers=auth)
+    assert response.status_code == 200
+    assert response.json()["status"] == "state_unknown"
+    assert "claude_session_id" not in response.json()
+    outputs["chat-thread.get"] = {"thread": None}
+    denied = client.get("/api/claude-agent/threads/foreign-thread/tasks/task-one", headers=auth)
+    assert denied.status_code == 404
 
 
 def request(client, method, path, **kwargs):
@@ -275,13 +690,61 @@ def test_stream_reserves_original_user_identity_through_admin_before_runtime(bou
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
     assert response.text == ": explicit-fake-runtime\n\n"
-    assert [call[0] for call in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create", "chat-user-message.persist"]
+    assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create", "chat-user-message.persist"]
     assert calls[-3][1] == {"purpose": "gateway-cli", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["messages:create", "messages:count_tokens", "models:list"]}
     assert calls[-2][1] == {"purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["dream:read", "dream:write"]}
     assert calls[-1][1] == {"thread_id": "owned-thread", "message_id": "public-message-1", "parts_json": '[{"type":"text","text":"Original user message"}]', "metadata_json": None, "title_candidate": "Original user message"}
     assert len(factory.run_requests) == 1 and factory.run_requests[0].message_id == "public-message-1"
     resolution = factory.run_requests[0].admin_workflow_resolution
     assert resolution is not None and resolution.context_for(actor_id="42", thread_id="owned-thread") is None
+
+
+def test_orphaned_queue_blocks_new_chat_turn_before_runtime(boundary):
+    client, outputs, calls, factory = boundary
+    outputs["chat-input.list"] = {"entries": [{
+        "message_id": "queued-message", "thread_id": "owned-thread",
+        "queue_sequence": "1", "status": "queued", "revision": 1,
+        "dispatch_turn_id": None, "created_at": "2026-09-26T00:00:00Z",
+        "text": "waiting",
+    }]}
+    response = request(client, "POST", "/api/claude-agent", json={
+        "id": "owned-thread",
+        "message": {"id": "new-message", "parts": [{"type": "text", "text": "new"}]},
+    })
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_code"] == "CHAT_INPUT_RECONCILIATION_REQUIRED"
+    assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list"]
+    assert not factory.run_requests
+
+
+@pytest.mark.parametrize("method,path,json_body", [
+    ("GET", "/api/claude-agent/threads/not-owned/inputs", None),
+    ("POST", "/api/claude-agent/threads/not-owned/inputs", {
+        "id": "not-owned", "message": {"id": "new-message", "parts": [{"type": "text", "text": "queued"}]},
+    }),
+    ("POST", "/api/claude-agent/threads/not-owned/inputs/new-message/select", {"expected_revision": 1}),
+])
+def test_queue_routes_reject_foreign_thread_before_runtime(boundary, method, path, json_body):
+    client, outputs, calls, factory = boundary
+    outputs["chat-thread.get"] = {"thread": None}
+    response = request(client, method, path, json=json_body)
+    assert response.status_code == 404
+    assert [call[0] for call in calls] == ["chat-thread.get"]
+    assert not factory.run_requests
+
+
+@pytest.mark.parametrize("method,path,json_body", [
+    ("GET", "/api/claude-agent/threads/owned-thread/inputs", None),
+    ("POST", "/api/claude-agent/threads/owned-thread/inputs", {
+        "id": "owned-thread", "message": {"id": "new-message", "parts": [{"type": "text", "text": "queued"}]},
+    }),
+    ("POST", "/api/claude-agent/threads/owned-thread/inputs/new-message/select", {"expected_revision": 1}),
+])
+def test_queue_routes_require_authenticated_user(boundary, method, path, json_body):
+    client, _, calls, factory = boundary
+    response = client.request(method, path, json=json_body)
+    assert response.status_code == 401
+    assert not calls and not factory.run_requests
 
 
 def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
@@ -299,7 +762,7 @@ def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
     assert response.status_code == 409 and not factory.run_requests
     assert response.json()["detail"]["error_code"] == "CHAT_MESSAGE_IDENTITY_CONFLICT"
     assert response.json()["detail"]["message"] == "The message identifier is already bound."
-    assert len(calls) == 6 and calls[-1][0] == "chat-user-message.persist"
+    assert len(calls) == 7 and calls[-1][0] == "chat-user-message.persist"
     assert closed == ["turn", "editor"]
 
 
@@ -324,6 +787,7 @@ def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
     assert response.status_code == 200 and len(factory.run_requests) == 1
     assert [item[0] for item in calls] == [
         "chat-thread.get",
+        "chat-input.list",
         "user-system-config.get",
         "workflow-context.resolve",
         "runtime-delegation.create",
@@ -331,7 +795,7 @@ def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
         "runtime-delegation.create",
         "chat-user-message.persist",
     ]
-    assert calls[5][1] == {
+    assert calls[6][1] == {
         "purpose": "editor-stdio",
         "thread_id": "owned-thread",
         "run_id": None,
@@ -380,7 +844,7 @@ def test_workflow_read_failure_precedes_message_reservation_and_sse(boundary, co
     outputs["workflow-context.resolve"] = (status, code)
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == status and response.json()["detail"]["error_code"] == code
-    assert [item[0] for item in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve"]
+    assert [item[0] for item in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve"]
     assert not factory.run_requests
 
 
@@ -399,7 +863,7 @@ def test_server_grant_failure_precedes_message_or_runtime(boundary):
     outputs["runtime-delegation.create"] = created
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 403 and not factory.run_requests
-    assert [item[0] for item in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create"]
+    assert [item[0] for item in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create"]
 
 
 def test_atomic_reservation_unknown_is_not_retried_or_started(boundary):

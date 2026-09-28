@@ -1,3 +1,6 @@
+# [Sync] 2026-09-28: let server result turns suppress a stale browser Editor snapshot without erasing the Thread cache.
+# [Sync] 2026-09-27: carry a server-owned task-result claim through pre-persisted source input and final assistant metadata.
+# [Sync] 2026-09-26: queued turns require the saved Claude session and SDK terminal evidence before settlement.
 # [Sync] 2026-09-17: use the turn-owned gateway-cli grant for authenticated model catalog selection.
 # [Sync] 2026-09-17: project the known Gateway allowance rejection as a safe structured SSE error for actionable Chat feedback.
 # [Sync] 2026-09-16: project the Admin gateway-cli grant into each Agent execution.
@@ -1451,6 +1454,10 @@ class ClaudeAgentRunRequest:
     admin_turn_persistence: AdminAgentTurnPersistence | None = field(default=None, repr=False)
     admin_gateway_runtime: AdminGatewayRuntime | None = field(default=None, repr=False)
     admin_editor_runtime: AdminEditorRuntime | None = field(default=None, repr=False)
+    # Server-authored continuations that deliberately have no Editor grant can
+    # suppress the process-local browser snapshot for this turn. The cached
+    # snapshot remains available to the next ordinary user request.
+    inherit_cached_editor_state: bool = field(default=True, repr=False)
     # A reviewed internal dispatcher may supply a detached snapshot when its
     # authority intentionally excludes managed-MCP reads. Public DTOs cannot
     # author this field. Reflections uses the exact empty snapshot.
@@ -1458,6 +1465,10 @@ class ClaudeAgentRunRequest:
     # The confirmation coordinator sets this only after Admin returns an exact
     # durable claim for the already-visible user message.
     user_message_pre_persisted: bool = field(default=False, repr=False)
+    queued_input_claim: Any | None = field(default=None, repr=False)
+    # A server-owned task-result claim fixes the logical turn identity before
+    # its source input is persisted. Public request DTOs cannot set this.
+    task_result_turn_id: str | None = field(default=None, repr=False)
     # Immutable Registry105 data snapshot. Browser DTOs cannot author it; the
     # public route resolves it before persistence, admission, workspace or SSE.
     admin_deck_chat_context: AdminDeckChatContextResolution | None = field(
@@ -2090,6 +2101,13 @@ class ClaudeAgentService:
             if request.resume and _has_usable_claude_resume(existing_session)
             else None
         )
+        stored_session_binding = str((existing_session or {}).get("claude_session_id") or "").strip()
+        if stored_session_binding and not request.resume:
+            raise RuntimeError("CLAUDE_RESUME_REQUIRED_FOR_BOUND_THREAD")
+        if request.resume and stored_session_binding and resume_existing_session is None:
+            raise RuntimeError("CLAUDE_RESUME_SESSION_UNAVAILABLE")
+        if request.queued_input_claim is not None and resume_existing_session is None:
+            raise RuntimeError("CHAT_INPUT_SESSION_UNAVAILABLE")
         if resume_existing_session is not None:
             candidate_session_id = str(
                 resume_existing_session.get("claude_session_id") or ""
@@ -2101,12 +2119,7 @@ class ClaudeAgentService:
                 config_home=claude_config_home,
             )
             if not located_session_path:
-                logger.warning(
-                    "Claude session transcript missing locally; falling back "
-                    "to a fresh SDK session. thread_id=%s",
-                    request.thread_id,
-                )
-                resume_existing_session = None
+                raise RuntimeError("CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE")
 
         stored_claude_session_id: Optional[str] = (
             resume_existing_session.get("claude_session_id") if resume_existing_session else None
@@ -2187,7 +2200,11 @@ class ClaudeAgentService:
         # Resolve the active editor_state: prefer the freshly provided snapshot; fall
         # back to the flyweight cache so a resumed turn without a snapshot still sees
         # document context.
-        active_editor_state = request.editor_state if request.editor_state is not None else state.editor_state
+        active_editor_state = (
+            request.editor_state
+            if request.editor_state is not None
+            else state.editor_state if request.inherit_cached_editor_state else None
+        )
         editor_session_id: str = (active_editor_state or {}).get("id") or ""
         editor_runtime = request.admin_editor_runtime
         if editor_runtime is not None and not isinstance(editor_runtime, AdminEditorRuntime):
@@ -2242,6 +2259,7 @@ class ClaudeAgentService:
                 else None
             ),
             resume=effective_resume,
+            require_existing_session=effective_resume,
             model=request.model,
             cwd=cwd or None,
             claude_tmp_workspace=claude_tmp_workspace,
@@ -2534,6 +2552,8 @@ class ClaudeAgentService:
             )
             raise
 
+        execution.sdk_terminal_received = getattr(result, "sdk_terminal_received", None) is True
+
         if result.success and getattr(result, "protocol_completed", None) is not False:
             full_text = result.full_text
             # A completed Claude Turn is an immutable conversation fact even
@@ -2541,6 +2561,7 @@ class ClaudeAgentService:
             # or ultimately fails.  Commit the exact collected SSE parts first;
             # the Hook may mutate projection state, never Chat history truth.
             await self._persist_assistant_turn(execution, result)
+            execution.user_response_committed = True
             dream_artifact_turn_ticket = getattr(
                 execution,
                 "dream_artifact_turn_ticket",
@@ -2625,6 +2646,7 @@ class ClaudeAgentService:
                 await queue.put(_event("error", _error_event_payload(result_error)))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution, turn_status="error")
+            execution.queue_result_failed = execution.sdk_terminal_received
             await self.mark_auto_repair_failed(execution.request)
             terminal = _event("finish", {"finishReason": "error"})
 
@@ -2859,7 +2881,29 @@ class ClaudeAgentService:
         cancelled mid-flight (e.g. the user switches threads).
         """
         if execution.request.user_message_pre_persisted:
+            claim = execution.request.queued_input_claim
+            if (
+                claim is not None
+                and getattr(claim, "status", None) == "dispatching"
+                and getattr(claim, "message_id", None) == execution.request.message_id
+                and getattr(claim, "thread_id", None) == execution.request.thread_id
+                and getattr(claim, "dispatch_turn_id", None) == execution.state.current_turn_id
+            ):
+                return
             metadata = execution.request.message_metadata
+            if execution.request.task_result_turn_id is not None:
+                if (
+                    isinstance(execution.request.message_id, str)
+                    and isinstance(metadata, dict)
+                    and metadata.get("kind") == "task-session-result"
+                    and metadata.get("sourceTurnId") == execution.request.task_result_turn_id
+                    and isinstance(metadata.get("taskResultNotificationId"), str)
+                    and bool(metadata["taskResultNotificationId"])
+                    and isinstance(metadata.get("claimId"), str)
+                    and bool(metadata["claimId"])
+                ):
+                    return
+                raise ValueError("Invalid pre-persisted task-result input")
             if not (
                 isinstance(execution.request.message_id, str)
                 and execution.request.message_id.startswith("dream_confirm_")
@@ -2966,6 +3010,8 @@ class ClaudeAgentService:
         ).strip()
         if session_id == resumed_session_id:
             return
+        if resumed_session_id:
+            raise RuntimeError("CLAUDE_RESUME_SESSION_MISMATCH")
         try:
             await self._save_sdk_session(execution.request, session_id)
         except Exception:
@@ -2973,6 +3019,7 @@ class ClaudeAgentService:
                 "Failed to persist observed Claude Session: thread_id=%s",
                 execution.request.thread_id,
             )
+            raise
 
     async def _persist_assistant_turn(
         self, execution: "_TurnExecution", result: Any
@@ -2995,6 +3042,14 @@ class ClaudeAgentService:
             asst_metadata: dict = {}
             final_part_index = _completed_turn_final_part_index(asst_parts)
             asst_metadata["turnId"] = execution.state.current_turn_id
+            source_metadata = execution.request.message_metadata
+            if (
+                execution.request.task_result_turn_id == execution.state.current_turn_id
+                and isinstance(source_metadata, dict)
+                and source_metadata.get("kind") == "task-session-result"
+                and isinstance(source_metadata.get("taskResultNotificationId"), str)
+            ):
+                asst_metadata["taskResultNotificationId"] = source_metadata["taskResultNotificationId"]
             if final_part_index is not None:
                 asst_metadata["turnStatus"] = "completed"
                 asst_metadata["finalPartIndex"] = final_part_index
@@ -3607,6 +3662,9 @@ class _TurnExecution:
     # The DB row used to source claude_session_id for resume / persistence;
     # None on the first turn of a session.
     resume_existing_session: Optional[dict] = None
+    user_response_committed: bool = False
+    queue_result_failed: bool = False
+    sdk_terminal_received: bool = False
 
 
 # ---------------------------------------------------------------------------

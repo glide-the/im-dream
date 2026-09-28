@@ -32,6 +32,9 @@
 > [Sync] 2026-09-04: actor-bound, strictly parsed notion-cli read API commands
 > leave the Dream-surface mutation guard for the existing network/full-access/
 > frontend-confirmation decision chain; no direct Bash allow was added.
+> [Sync] 2026-09-28: `create_thread` and `send_message_to_thread` follow the
+> authorized business Thread service in Auto/full-access mode without a second
+> confirmation; manual mode still confirms each call.
 
 # Claude-Agent Permission Policy
 
@@ -85,7 +88,7 @@ Current auto-allow inventory:
 | Built-in read/search | `Read`, `Glob`, `Grep`, `LS`, `NotebookRead` only when resolved inside the current thread workspace; `TodoRead`, `WebFetch`, `WebSearch`, `BashOutput` |
 | MCP resource query | `ListMcpResources`, `ReadMcpResource` |
 | Workspace files area | `Read` / `Write` / `Edit` / `MultiEdit` only when the resolved target is inside `{cwd}/files/**` |
-| Session query | `mcp__user__get_sessions_range` |
+| Session and Thread orchestration | `mcp__user__get_sessions_range`, `mcp__user__list_threads`, `mcp__user__read_thread`, `mcp__user__create_thread`, `mcp__user__send_message_to_thread` |
 | Memory query | `mcp__memory__recall_shared_stories` |
 | Necklace query | `mcp__necklace__*` names returned by `allowed_necklace_tool_names()` |
 | Editor context switch | `mcp__editor__switch_editor` |
@@ -95,6 +98,15 @@ Current auto-allow inventory:
 | Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
+
+`create_thread` and `send_message_to_thread` are business Thread orchestration
+commands. The loopback MCP process cannot supply an actor, Claude session ID,
+process handle, or service credential. The turn-owned host provider derives the
+actor and source Thread, rechecks target ownership through Admin, persists an
+idempotent command, and then enters the same ThreadFactory and admission path as
+Chat. Auto mode therefore executes them without a duplicate confirmation.
+Manual mode continues to route both commands through the visible confirmation
+dock.
 
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
 
@@ -206,6 +218,7 @@ This remains true in full-access mode.
 | `Write` outside `{cwd}/files/**` | Confirm | Confirm | Not exposed |
 | `Skill` | Allow | Confirm | Not exposed |
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
+| `mcp__user__create_thread` / `mcp__user__send_message_to_thread` | Allow | Confirm | Not exposed |
 | `EnterPlanMode` / `ExitPlanMode` | Allow | Confirm | Not exposed |
 | `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |

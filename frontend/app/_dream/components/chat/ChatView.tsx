@@ -1,3 +1,7 @@
+// [Sync] 2026-09-27: navigate between source and created task-session Threads from Chat content.
+// [Sync] 2026-09-27: open selected queue messages in an independent right-side task Thread.
+// [Sync] 2026-09-27: group task sessions, subagents, plans and todos in the existing Plan/Todo activity popover.
+// [Sync] 2026-09-28: keep PluginReceiptBadge Environment info unchanged and show activity only when content exists.
 // [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, Deck capability type,
 //         actor-scoped Dream re-entry/launch hooks, auth token, and AI SDK messages.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
@@ -109,7 +113,8 @@ import {
 import type { UIMessage } from 'ai';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
-import { SubagentButton, SubagentSidebar } from './SubagentPanel';
+import { SubagentSidebar } from './SubagentPanel';
+import TaskSessionSidebar from './TaskSessionSidebar';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
@@ -325,7 +330,17 @@ function ChatViewContent({
   const { workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
-  const [focusedSubagentToolCallId, setFocusedSubagentToolCallId] = useState<string | null>(null);
+  const [sideTaskThreadId, setSideTaskThreadId] = useState<string | null>(null);
+  useEffect(() => {
+    const selected = new URLSearchParams(window.location.search).get('task_thread');
+    if (selected) setSideTaskThreadId(selected);
+  }, []);
+  const closeSideTask = useCallback(() => {
+    setSideTaskThreadId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('task_thread');
+    window.history.replaceState(window.history.state, '', url);
+  }, []);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
@@ -1167,27 +1182,24 @@ function ChatViewContent({
               <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
               <span>{isCreatingThread ? t('chat.history.creating') : t('chat.history.newShort')}</span>
             </button>
-
-            {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
-            {activeThreadId ? <PlanButton threadId={activeThreadId} /> : null}
-
             {activeThreadId ? (
-              <SubagentButton
+              <PlanButton
                 threadId={activeThreadId}
-                open={subagentSidebarOpen}
-                onToggle={() => {
+                subagentSidebarOpen={subagentSidebarOpen}
+                onNavigateThread={(taskThreadId) => {
+                  closeSideTask();
+                  handleSelectThread(taskThreadId);
+                }}
+                onToggleSubagents={() => {
+                  closeSideTask();
                   setSubagentSidebarOpen((current) => {
                     const next = !current;
-                    if (next) {
-                      setFileSidebarOpen(false);
-                      setFocusedSubagentToolCallId(null);
-                    }
+                    if (next) setFileSidebarOpen(false);
                     return next;
                   });
                 }}
               />
             ) : null}
-
             {/* 更多 */}
             <div style={{ position: 'relative' }}>
               <button
@@ -1297,10 +1309,17 @@ function ChatViewContent({
                   editorState={editorState}
                   ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
-                  onOpenSubagentTask={(toolCallId) => {
-                    setFocusedSubagentToolCallId(toolCallId);
+                  onOpenTaskThread={(taskThreadId) => {
+                    setSideTaskThreadId(taskThreadId);
                     setFileSidebarOpen(false);
-                    setSubagentSidebarOpen(true);
+                    setSubagentSidebarOpen(false);
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('task_thread', taskThreadId);
+                    window.history.replaceState(window.history.state, '', url);
+                  }}
+                  onNavigateThread={(taskThreadId) => {
+                    closeSideTask();
+                    handleSelectThread(taskThreadId);
                   }}
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
@@ -1773,11 +1792,20 @@ function ChatViewContent({
         {activeThreadId ? (
           <SubagentSidebar
             threadId={activeThreadId}
-            open={subagentSidebarOpen}
-            focusToolCallId={focusedSubagentToolCallId}
+            open={subagentSidebarOpen && !sideTaskThreadId}
             onClose={() => setSubagentSidebarOpen(false)}
           />
         ) : null}
+
+        {sideTaskThreadId ? <TaskSessionSidebar threadId={sideTaskThreadId} onClose={closeSideTask} onOpenTaskThread={(taskThreadId) => {
+          setSideTaskThreadId(taskThreadId);
+          const url = new URL(window.location.href);
+          url.searchParams.set('task_thread', taskThreadId);
+          window.history.replaceState(window.history.state, '', url);
+        }} onNavigateThread={(taskThreadId) => {
+          closeSideTask();
+          handleSelectThread(taskThreadId);
+        }} /> : null}
 
         <ChatShareDialog
           open={shareDialogOpen}

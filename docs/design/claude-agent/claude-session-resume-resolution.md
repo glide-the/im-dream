@@ -1,9 +1,14 @@
+<!-- [Sync] 2026-09-26: bound Dream Threads now fail closed instead of creating a second Claude session. -->
 <!-- [Input] Authorized Dream thread, SDK receipts, and qualified Runtime session storage. -->
 <!-- [Output] Historical-session diagnosis, minimal recovery contract, and acceptance scope. -->
 <!-- [Pos] Current resume decision contract; supplements context assembly and persistence. -->
 <!-- [Sync] 2026-09-13: record completed technical gates and three normal local business turns with settled Gateway receipts. -->
 
 # Claude 历史会话恢复判定
+
+## 2026-09-26 现行规则增补
+
+本节更新当前行为；下文 2026-09-13 的调查、方案和真实业务回执保留为历史记录。Dream Thread 一旦保存了 SDK `init.session_id`，后续公开 Chat 和队列消息必须使用这个 ID 恢复。请求显式 `resume=false`、已保存记录的合同不可用、当前项目转录缺失、SDK 初始化返回另一 ID、或 SDK connect 报告会话不存在时，Service/SDK adapter 返回失败，不把原 Thread 改绑到新 Claude 顶层会话。无 Claude ID 的旧 Thread 仍可创建首次会话。前端断开只影响订阅；进程重启后仍要以已保存 ID 和可读取的转录重新进入。当前实现与测试范围详见 [Dream Agent 运行中输入与 Thread 队列](claude-agent-streaming-thread-queue.md)。
 
 ## 背景与问题
 

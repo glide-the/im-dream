@@ -1,5 +1,5 @@
-// [Input] User-authored text message part from the chat message stream/history.
-// [Output] Right-aligned user chat bubble with GFM Markdown rendering and a bottom-right copy action.
+// [Input] User-authored text message part from the chat message stream/history and an optional leading action.
+// [Output] Right-aligned user chat bubble with an anchored provenance action, GFM Markdown and copy.
 // [Pos] user-message-part component node in frontend/app/_dream/components/chat
 // [Sync] 2026-06-02: created to render user prompt text as Markdown in ChatMessageList.
 // [Sync] 2026-07-20: Markdown rendering delegated to shared ChatMarkdown so user messages
@@ -8,7 +8,8 @@
 //                    and shared IconCopy/IconCheck, matching the assistant action style.
 // [Sync] 2026-08-22: accept the owning Chat Thread for explicit workspace:// rendering.
 // [Sync] 2026-09-01: render a lightweight source label for persisted Dream auto-repair messages.
-import { memo } from 'react';
+// [Sync] 2026-09-27: anchor a created Thread's source navigation above its first user bubble.
+import { memo, type ReactNode } from 'react';
 import { useCopy } from '../../hooks/useCopy';
 import { IconCheck, IconCopy } from './Icons';
 import ChatMarkdown from './ChatMarkdown';
@@ -17,13 +18,15 @@ interface UserMessagePartProps {
   text: string;
   workspaceSessionId?: string;
   sourceLabel?: string;
+  leadingAction?: ReactNode;
 }
 
-export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel }: UserMessagePartProps) {
+export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel, leadingAction }: UserMessagePartProps) {
   const { copied, copy } = useCopy();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+      {leadingAction}
       {sourceLabel ? (
         <span
           style={{

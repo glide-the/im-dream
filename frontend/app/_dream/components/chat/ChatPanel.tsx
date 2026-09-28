@@ -1,5 +1,17 @@
+// [Sync] 2026-09-28: render created-task links inside the owning assistant reply above its action row.
+// [Sync] 2026-09-27: show task-session source navigation and settled created-task lists.
+// [Sync] 2026-09-27: pass the source relation into ChatMessageList so its first user bubble owns the marker.
+// [Sync] 2026-09-27: keep shell-level task management and pass contextual created-task links into the assistant reply; retain the target Thread source marker.
+// [Sync] 2026-09-28: remove task-result cards; wait_threads returns child completion inside the active parent turn.
+// [Sync] 2026-09-27: keep queue failure feedback compact, aligned with the composer, and refreshable without resending.
+// [Sync] 2026-09-27: show actionable queue cards and move one queued message to an independent side Chat.
+// [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
+import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
+import ThreadInputQueueCard from './ThreadInputQueueCard';
+import { TaskSessionLinksFailure } from './TaskSessionNavigation';
+import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSessionLinks';
 // [Input] Consume ClaudeAgentChatTransport, WorkspaceContext, chat schema/types, file proxy utilities, AIInputDock/helpers, ChatMessageList, and Browser session and CSRF.
 //         reconnectStreamNonce from ChatView; claude-agent-sse-utils for stream replay.
 // [Output] Coordinate chat transport, pending attachments/tool choice, message state, scrolling, and input/message layout.
@@ -35,10 +47,10 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 //                    frames route to the useThreadPlan store (claude-plan feature).
 // [Sync] 2026-07-20: forward todo-updated SSE frames to the useThreadTodos store
 //                    on the reconnect path (claude-todo §5.6).
-// [Sync] 2026-07-20: derive pendingConfirmation from messages and swap AIInputDock for
-//                    ToolConfirmationDock while a confirmation is pending (the composer
-//                    hides until the user decides); inline approval/askuser UIs removed
-//                    from the message list (design: claude-agent-tool-confirmation-flow.md §8).
+// [Sync] 2026-07-20: derive pendingConfirmation from messages and display
+//                    ToolConfirmationDock for pending approvals; inline approval/askuser
+//                    UIs were removed from the message list. The 2026-09-26 queue
+//                    feature keeps the composer visible beside that dock.
 // [Sync] 2026-07-20: i18n — scroll-to-bottom aria/title resolves through chat.panel.scrollToBottom.
 // [Sync] 2026-07-23: SandboxPermissionRequest — pendingConfirmation carries the backend
 //                    networkRequest metadata for kind==='sandbox-network' so ToolConfirmationDock
@@ -203,8 +215,12 @@ interface ChatPanelProps {
   ensureEditorSessionPersisted?: () => Promise<void>;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
-  /** Opens the right-side subagent detail panel for a chat tool invocation. */
+  /** Optional task focus action for hosts that keep message-level subagent navigation. */
   onOpenSubagentTask?: (toolCallId: string) => void;
+  /** Opens an independently owned task Thread in the right-hand chat. */
+  onOpenTaskThread?: (threadId: string) => void;
+  /** Replaces the current canonical Chat Thread after following a persisted task relation. */
+  onNavigateThread?: (threadId: string) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
   voiceSystemPrompt?: string;
   /** Immutable Deck selection for this thread. */
@@ -266,6 +282,8 @@ export default function ChatPanel({
   ensureEditorSessionPersisted,
   onEditorWriteConfirmed,
   onOpenSubagentTask,
+  onOpenTaskThread,
+  onNavigateThread,
   voiceSystemPrompt,
   deckId,
   voiceId,
@@ -276,6 +294,12 @@ export default function ChatPanel({
     toolChoice: ToolChoice;
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
+  const [threadInputs, setThreadInputs] = useState<ThreadInputEntry[]>([]);
+  const [inputOwnerLocal, setInputOwnerLocal] = useState(false);
+  const [threadInputError, setThreadInputError] = useState<string | null>(null);
+  const [queueCheckPending, setQueueCheckPending] = useState(false);
+  const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
+  const pendingInputIdsRef = useRef(new Map<string, string>());
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -309,6 +333,9 @@ export default function ChatPanel({
   const [olderHistoryError, setOlderHistoryError] = useState<Error | null>(null);
   const olderHistoryAbortRef = useRef<AbortController | null>(null);
   const [runtimeRunning, setRuntimeRunning] = useState(initialRuntimeRunning);
+  const [taskSessionLinks, setTaskSessionLinks] = useState<TaskSessionLinksSnapshot>({ source: null, created: [] });
+  const [taskSessionLinksFailed, setTaskSessionLinksFailed] = useState(false);
+  const taskSessionLinksRequestRef = useRef(0);
   const [reconnectRetryNonce, setReconnectRetryNonce] = useState(0);
   const reconnectRetryTimerRef = useRef<number | null>(null);
   const reconnectRecoveryAttemptRef = useRef(0);
@@ -378,6 +405,7 @@ export default function ChatPanel({
 
   const getPendingData = () => pendingDataRef.current;
   const imFullAccessEnabled = systemConfig?.im_full_access_enabled === true;
+  const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
   const requestContextRef = useRef({
     deckId,
     voiceId,
@@ -917,6 +945,151 @@ export default function ChatPanel({
   const agentBusy = canStopMainTurn || isStopping;
   const chatLoading = agentBusy || isLoading;
 
+  const refreshTaskSessionLinks = useCallback(async () => {
+    const request = taskSessionLinksRequestRef.current + 1;
+    taskSessionLinksRequestRef.current = request;
+    try {
+      const next = await fetchTaskSessionLinks(threadId);
+      if (chatPanelMountedRef.current && taskSessionLinksRequestRef.current === request) {
+        setTaskSessionLinks(next);
+        setTaskSessionLinksFailed(false);
+      }
+    } catch {
+      if (chatPanelMountedRef.current && taskSessionLinksRequestRef.current === request) {
+        setTaskSessionLinksFailed(true);
+      }
+    }
+  }, [threadId]);
+
+  useEffect(() => {
+    setTaskSessionLinks({ source: null, created: [] });
+    setTaskSessionLinksFailed(false);
+    void refreshTaskSessionLinks();
+  }, [refreshTaskSessionLinks]);
+
+  const previousTaskSessionBusyRef = useRef(agentBusy);
+  useEffect(() => {
+    const wasBusy = previousTaskSessionBusyRef.current;
+    previousTaskSessionBusyRef.current = agentBusy;
+    if (wasBusy && !agentBusy) void refreshTaskSessionLinks();
+  }, [agentBusy, refreshTaskSessionLinks]);
+
+  const refreshThreadInputs = useCallback(async () => {
+    const snapshot = await fetchThreadInputs(threadId);
+    setThreadInputs(snapshot.entries);
+    setInputOwnerLocal(snapshot.local_owner);
+  }, [threadId]);
+
+  const inputFailureText = useCallback((error: unknown) => {
+    if (error instanceof ThreadInputError) {
+      if (error.outcomeUnknown) return t('chat.inputQueue.stateUnknown');
+      if (error.status === 403 || error.status === 404) return t('chat.inputQueue.accessDenied');
+      if (error.code === 'CHAT_INPUT_OWNER_UNAVAILABLE') return t('chat.inputQueue.ownerUnavailable');
+      if (error.status === 409) return t('chat.inputQueue.stateChanged');
+      if (error.status === 503) return t('chat.inputQueue.unavailable');
+    }
+    if (error instanceof TypeError) return t('chat.inputQueue.unavailable');
+    return t('chat.inputQueue.sendFailed');
+  }, [t]);
+
+  const checkThreadInputStatus = useCallback(async () => {
+    setQueueCheckPending(true);
+    try {
+      await refreshThreadInputs();
+      setThreadInputError(null);
+    } catch (error) {
+      setThreadInputError(inputFailureText(error));
+    } finally {
+      setQueueCheckPending(false);
+    }
+  }, [inputFailureText, refreshThreadInputs]);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const snapshot = await fetchThreadInputs(threadId);
+        if (active) {
+          setThreadInputs(snapshot.entries);
+          setInputOwnerLocal(snapshot.local_owner);
+        }
+      } catch {
+        // The queue capability is deployed separately; ordinary history remains usable.
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [threadId]);
+
+  const selectQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
+    try {
+      const receipt = await selectThreadInput(threadId, entry);
+      setThreadInputs((current) => current.map((item) => item.message_id === entry.message_id ? receipt.entry : item));
+      setThreadInputError(receipt.interrupt_signalled ? null : t('chat.inputQueue.guideFailed'));
+      await refreshThreadInputs();
+    } catch (error) {
+      setThreadInputError(inputFailureText(error));
+      void refreshThreadInputs();
+    }
+  }, [inputFailureText, refreshThreadInputs, t, threadId]);
+
+  const cancelQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
+    try {
+      const updated = await cancelThreadInput(threadId, entry);
+      setThreadInputs((current) => current.map((item) => item.message_id === entry.message_id ? updated : item));
+      setThreadInputError(null);
+      await refreshThreadInputs();
+    } catch (error) {
+      setThreadInputError(inputFailureText(error));
+      void refreshThreadInputs();
+      throw error;
+    }
+  }, [inputFailureText, refreshThreadInputs, threadId]);
+
+  const editQueuedInput = useCallback(async (entry: ThreadInputEntry, text: string) => {
+    await cancelQueuedInput(entry);
+    const newMessageId = crypto.randomUUID();
+    try {
+      await enqueueThreadInput(threadId, newMessageId, text, effectiveToolChoice, deckId, voiceId);
+      setEditDraftRecovery(null);
+      setThreadInputError(null);
+      await refreshThreadInputs();
+    } catch (error) {
+      setEditDraftRecovery({ id: newMessageId, text });
+      setThreadInputError(inputFailureText(error));
+      void refreshThreadInputs();
+      throw error;
+    }
+  }, [cancelQueuedInput, deckId, effectiveToolChoice, inputFailureText, refreshThreadInputs, threadId, voiceId]);
+
+  const retryEditedInput = useCallback(async () => {
+    if (!editDraftRecovery) return;
+    try {
+      await enqueueThreadInput(threadId, editDraftRecovery.id, editDraftRecovery.text,
+        effectiveToolChoice, deckId, voiceId);
+      setEditDraftRecovery(null);
+      setThreadInputError(null);
+      await refreshThreadInputs();
+    } catch (error) {
+      setThreadInputError(inputFailureText(error));
+      void refreshThreadInputs();
+    }
+  }, [deckId, editDraftRecovery, effectiveToolChoice, inputFailureText, refreshThreadInputs, threadId, voiceId]);
+
+  const openQueuedInputInSideChat = useCallback(async (entry: ThreadInputEntry) => {
+    try {
+      const task = await moveThreadInputToSideTask(threadId, entry);
+      await refreshThreadInputs();
+      setThreadInputError(task.error_code ? t('chat.inputQueue.sideChatLaunchFailed') : null);
+      onOpenTaskThread?.(task.thread_id);
+    } catch (error) {
+      setThreadInputError(inputFailureText(error));
+      void refreshThreadInputs();
+      throw error;
+    }
+  }, [inputFailureText, onOpenTaskThread, refreshThreadInputs, t, threadId]);
+
   const markToolConfirmationSettled = useCallback((toolCallId: string) => {
     setSettledToolCallIds((current) => {
       if (current.has(toolCallId)) return current;
@@ -978,9 +1151,9 @@ export default function ChatPanel({
     }
   }, [abortLocalReaders, canStopMainTurn, isStopping, recoverAfterStop, threadId]);
   const historyIsEmpty = initialMessages !== undefined && visibleMessages.length === 0 && !chatLoading;
-  const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading || historyIsEmpty;
+  const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading || historyIsEmpty
+    || taskSessionLinks.source !== null || taskSessionLinksFailed;
 
-  const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
 
   // Derive the earliest tool part that is waiting on a user decision. The
   // confirmation UI (approve/reject or AskUserQuestion form) floats above the
@@ -1086,6 +1259,9 @@ export default function ChatPanel({
           <ChatMessageList
             messages={visibleMessages}
             threadId={threadId}
+            sourceThread={taskSessionLinks.source}
+            createdTaskLinks={taskSessionLinks.created}
+            onNavigateThread={onNavigateThread}
             isLoading={chatLoading}
             error={error}
             onReloadAfterError={handleReloadAfterError}
@@ -1106,6 +1282,9 @@ export default function ChatPanel({
             historyEmpty={historyIsEmpty}
             onLoadOlder={loadOlderHistory}
           />
+          {!agentBusy && taskSessionLinksFailed ? (
+            <TaskSessionLinksFailure onRetry={() => { void refreshTaskSessionLinks(); }} />
+          ) : null}
           <div aria-hidden="true" />
         </div>
       ) : null}
@@ -1118,11 +1297,12 @@ export default function ChatPanel({
           boxSizing: 'border-box',
           margin: '0.75rem 0 0',
           minHeight: pendingConfirmation ? 0 : undefined,
-          maxHeight: pendingConfirmation ? 'min(46vh, 24rem)' : undefined,
+          maxHeight: pendingConfirmation ? 'min(66vh, 40rem)' : undefined,
           flexShrink: pendingConfirmation ? 1 : 0,
           display: pendingConfirmation ? 'flex' : undefined,
           flexDirection: pendingConfirmation ? 'column' : undefined,
-          overflow: pendingConfirmation ? 'hidden' : undefined,
+          overflowY: pendingConfirmation ? 'auto' : undefined,
+          gap: pendingConfirmation ? '0.5rem' : undefined,
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)',
         }}
       >
@@ -1153,9 +1333,46 @@ export default function ChatPanel({
             <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
           </button>
         ) : null}
+        {threadInputs.some((entry) => !['consumed', 'cancelled'].includes(entry.status)) ? (
+          <div aria-label={t('chat.inputQueue.region')} style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0 0.75rem', display: 'grid', gap: '0.3rem' }}>
+            {threadInputs.filter((entry) => !['consumed', 'cancelled'].includes(entry.status)).map((entry) => (
+              <ThreadInputQueueCard
+                key={entry.message_id}
+                entry={entry}
+                localOwner={inputOwnerLocal}
+                onGuide={selectQueuedInput}
+                onCancel={cancelQueuedInput}
+                onEdit={editQueuedInput}
+                onSideChat={openQueuedInputInSideChat}
+              />
+            ))}
+          </div>
+        ) : null}
+        {threadInputError ? (
+          <div role="alert" className="chat-input-queue-error" style={{
+            boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.35rem 0.75rem',
+            padding: '0.45rem 0.75rem', border: '1px solid var(--color-state-danger)',
+            borderRadius: '0.65rem', color: 'var(--color-state-danger)',
+            background: 'var(--color-bg-surface-solid)', fontSize: '0.82rem', lineHeight: 1.4,
+          }}>
+            <span>{threadInputError}</span>
+            {threadInputError !== t('chat.inputQueue.accessDenied')
+              && threadInputError !== t('chat.inputQueue.textOnly') ? (
+              <button type="button" disabled={queueCheckPending} onClick={() => { void checkThreadInputStatus(); }}
+                style={{ flexShrink: 0, border: 0, background: 'transparent', color: 'inherit',
+                  font: 'inherit', fontWeight: 700, textDecoration: 'underline', cursor: queueCheckPending ? 'wait' : 'pointer' }}>
+                {queueCheckPending ? t('chat.inputQueue.checkingStatus') : t('chat.inputQueue.checkStatus')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {editDraftRecovery ? <div role="status" style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', color: 'var(--color-text-primary)' }}>
+          <span>{t('chat.inputQueue.editDraftSaved')}</span>
+          <p style={{ margin: '0.3rem 0', whiteSpace: 'pre-wrap' }}>{editDraftRecovery.text}</p>
+          <button type="button" onClick={() => { void retryEditedInput(); }}>{t('chat.inputQueue.retryEdit')}</button>
+        </div> : null}
         {pendingConfirmation ? (
-          // While a tool confirmation is pending, the input dock is replaced by
-          // the confirmation panel — the composer returns once the user decides.
           <ToolConfirmationDock
             key={`${pendingConfirmation.partKey}-${pendingConfirmation.toolCallId}`}
             confirmation={pendingConfirmation}
@@ -1163,14 +1380,37 @@ export default function ChatPanel({
             addToolResult={addToolResult}
             onSettled={markToolConfirmationSettled}
           />
-        ) : (
-          <AIInputDock
+        ) : null}
+        <AIInputDock
             deckId={deckId}
             threadId={threadId}
             workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
             openFileDialogSignal={openFileDialogSignal}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
+              if (agentBusy || inputOwnerLocal) {
+                if (uploadedFiles.length > 0) {
+                  setThreadInputError(t('chat.inputQueue.textOnly'));
+                  throw new Error('CHAT_INPUT_UNSUPPORTED_PAYLOAD');
+                }
+                const text = message.trim();
+                if (!text) return;
+                const id = pendingInputIdsRef.current.get(text) ?? crypto.randomUUID();
+                pendingInputIdsRef.current.set(text, id);
+                try {
+                  const entry = await enqueueThreadInput(threadId, id, text, toolChoice, deckId, voiceId);
+                  pendingInputIdsRef.current.delete(text);
+                  setThreadInputs((current) => current.some((item) => item.message_id === entry.message_id)
+                    ? current.map((item) => item.message_id === entry.message_id ? entry : item)
+                    : [...current, entry]);
+                  setThreadInputError(null);
+                  void refreshThreadInputs();
+                  return;
+                } catch (error) {
+                  setThreadInputError(inputFailureText(error));
+                  throw error;
+                }
+              }
               const validFiles = uploadedFiles.filter((file) => file.storageKey);
               const parts: Array<FileUIPart | TextUIPart> = validFiles.map((file) => ({
                 type: 'file',
@@ -1195,8 +1435,7 @@ export default function ChatPanel({
             stopPending={isStopping}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}
             mode="full"
-          />
-        )}
+        />
       </div>
     </div>
   );

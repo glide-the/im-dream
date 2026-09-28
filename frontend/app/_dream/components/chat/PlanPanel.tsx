@@ -1,12 +1,10 @@
 // [Input] useThreadPlan store（planMode / exists / content / truncated / updatedAt）、
 //         useThreadTodos store（source / exists / todos / truncated / updatedAt）与
 //         hydrateThreadPlan / hydrateThreadTodos 全量拉取。
-// [Output] ChatView 顶部右侧浮动控制栏内的「计划与待办」按钮 + 锚定弹层：默认不渲染，仅当
-//          planMode 为 planning/exited、plan.exists 或 todos.exists 时出现；点击切换弹层，
-//          弹层内上方为计划区（Markdown 计划内容、planMode 徽标、updatedAt 相对时间、截断时的
-//          「加载完整」入口），下方为待办区（三态 Todo 清单、owner、blocked_by 提示、空态占位）；
-//          点击外部 / Esc 收起，threadId 切换时收起并重置未读指示。
-// [Pos] claude-plan + claude-todo button+popover component in frontend/app/_dream/components/chat
+// [Output] ChatView 顶部右侧的任务活动按钮与 Todo-style 卡片组：独立任务会话、子智能体、
+//          计划和待办各占一张卡片，点击外部 / Esc 收起，threadId 切换时收起并重置未读指示。
+// [Pos] Current-Thread activity button+popover component in frontend/app/_dream/components/chat.
+// [Sync] 2026-09-28: keep PluginReceiptBadge Environment info unchanged and host task sessions/subagents here.
 // [Sync] 2026-07-20: 初版 — 依据 docs/design/claude-agent/claude-plan.md §5.6 实现；
 //                    复用 CollapsibleSection 与 AssistMessagePart 的 ReactMarkdown 渲染链。
 // [Sync] 2026-07-20: 交互方案变更 — 取消常驻面板，改为浮动控制栏内的「计划」按钮 +
@@ -36,7 +34,7 @@
 //                    key falls back to the index when todo.id is absent.
 // [Sync] 2026-08-22: bind plan Markdown workspace:// references to the panel Thread.
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { IconChevronDown, IconChevronUp, IconList, IconPlanTasks } from './Icons';
@@ -44,15 +42,23 @@ import ChatMarkdown from './ChatMarkdown';
 import { hydrateThreadPlan, useThreadPlan, type ThreadPlanMode, type ThreadPlanState } from '../../hooks/useThreadPlan';
 import { useThreadTodos, type ThreadTodoItem, type ThreadTodoState, type ThreadTodoStatus } from '../../hooks/useThreadTodos';
 import { getDateLocale } from '../../i18n';
+import TaskActivityContent from './TaskActivityContent';
+import { fetchTaskSessionLinks } from './taskSessionLinks';
+import { hydrateThreadSubagents, useThreadSubagents } from '../../hooks/useThreadSubagents';
 
 interface PlanButtonProps {
   threadId: string;
+  subagentSidebarOpen: boolean;
+  onToggleSubagents: () => void;
+  onNavigateThread: (threadId: string) => void;
 }
 
 const PLAN_MODE_BADGE: Record<Exclude<ThreadPlanMode, 'none'>, { labelKey: string; color: string }> = {
   planning: { labelKey: 'chat.planPanel.planning', color: '#f9a875' },
   exited: { labelKey: 'chat.planPanel.exited', color: '#52c77e' },
 };
+
+const ACTIVITY_REFRESH_INTERVAL_MS = 8000;
 
 /** 弹层双卡片（计划 / 待办）共享的卡片样式：圆角纸面 + 细边 + 柔和投影。 */
 const POPOVER_CARD_STYLE: CSSProperties = {
@@ -302,10 +308,13 @@ function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
   );
 }
 
-export default function PlanButton({ threadId }: PlanButtonProps) {
+export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSubagents, onNavigateThread }: PlanButtonProps) {
   const { t, i18n } = useTranslation();
+  const panelId = useId();
   const plan = useThreadPlan(threadId);
   const todos = useThreadTodos(threadId);
+  const subagents = useThreadSubagents(threadId);
+  const [hasTaskSessions, setHasTaskSessions] = useState(false);
   const [open, setOpen] = useState(false);
   // 按钮 hover 态：驱动「计划与待办」悬浮 tooltip（弹层打开时不显示）。
   const [hovered, setHovered] = useState(false);
@@ -317,6 +326,32 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
   useEffect(() => {
     setOpen(false);
     setSeenUpdatedAt({ plan: null, todos: null });
+  }, [threadId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHasTaskSessions(false);
+    const refreshActivity = async () => {
+      const [links] = await Promise.allSettled([
+        fetchTaskSessionLinks(threadId),
+        hydrateThreadSubagents(threadId),
+      ]);
+      if (cancelled) return;
+      if (links.status === 'fulfilled') setHasTaskSessions(links.value.created.length > 0);
+    };
+    void refreshActivity();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshActivity();
+    }, ACTIVITY_REFRESH_INTERVAL_MS);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void refreshActivity();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [threadId]);
 
   // 点击弹层外部或按 Esc 收起。
@@ -340,11 +375,10 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
     };
   }, [open]);
 
-  // 可见性规则：计划被触发（planning/exited）、计划文件存在或待办存在时渲染按钮。
-  const visible = plan.exists || plan.planMode !== 'none' || todos.exists;
-  if (!visible) {
-    return null;
-  }
+  const hasPlan = plan.exists || plan.planMode !== 'none';
+  const hasTodos = todos.exists;
+  const visible = hasTaskSessions || subagents.exists || hasPlan || hasTodos;
+  if (!visible) return null;
 
   const hasUnseenUpdate =
     !open &&
@@ -383,7 +417,9 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
           transition: 'background 0.14s ease, color 0.14s ease',
           position: 'relative',
         }}
-        aria-label={t('chat.planPanel.buttonAria')}
+        aria-label={t('chat.taskActivity.activityTitle')}
+        title={t('chat.taskActivity.activityTitle')}
+        aria-controls={panelId}
         aria-expanded={open}
         onMouseEnter={(e) => { setHovered(true); e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
         onMouseLeave={(e) => { setHovered(false); if (!open) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}
@@ -424,24 +460,39 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
             pointerEvents: 'none',
           }}
         >
-          {t('chat.planPanel.tooltip')}
+          {t('chat.taskActivity.activityTitle')}
         </div>
       ) : null}
 
-      {open ? (
-        <div
+      <div
+          id={panelId}
+          role="dialog"
+          aria-label={t('chat.taskActivity.activityTitle')}
+          hidden={!open}
           style={{
             position: 'absolute',
             top: '2.4rem',
             right: 0,
             zIndex: 20,
             width: 'min(26rem, calc(100vw - 1.5rem))',
-            display: 'flex',
+            maxHeight: 'min(42rem, calc(100vh - 5rem))',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            padding: '0.25rem',
+            display: open ? 'flex' : 'none',
             flexDirection: 'column',
             gap: '0.75rem',
           }}
         >
-          <div style={POPOVER_CARD_STYLE}>
+          <TaskActivityContent
+            active={open}
+            threadId={threadId}
+            subagentSidebarOpen={subagentSidebarOpen}
+            onRequestClose={() => setOpen(false)}
+            onToggleSubagents={onToggleSubagents}
+            onNavigateThread={onNavigateThread}
+          />
+          {hasPlan ? <div className="task-activity__plan-card" style={POPOVER_CARD_STYLE}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
               <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.planPanel.planTitle')}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -454,8 +505,8 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
               </div>
             </div>
             <PlanPopoverContent threadId={threadId} plan={plan} />
-          </div>
-          <div style={POPOVER_CARD_STYLE}>
+          </div> : null}
+          {hasTodos ? <div className="task-activity__todo-card" style={POPOVER_CARD_STYLE}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
               <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.planPanel.todosTitle')}</span>
               {todos.updatedAt ? (
@@ -465,9 +516,8 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
               ) : null}
             </div>
             <TodoPopoverContent todos={todos} />
-          </div>
+          </div> : null}
         </div>
-      ) : null}
     </div>
   );
 }

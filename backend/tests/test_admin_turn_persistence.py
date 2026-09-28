@@ -1,3 +1,4 @@
+# [Sync] 2026-09-26: unknown SDK init persistence fails before cancellation is reported as a terminal result.
 # [Sync] 2026-09-16: validate Registry169 settlement on the shared unknown-write barrier.
 # [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
 # [Sync] 2026-09-16: authorize injected managed-MCP loaders with the current persistence grant in tests.
@@ -1235,18 +1236,28 @@ def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fen
         execution = service_module._TurnExecution(request=request, state=AgentRunState(session_id="thread-1"),
             runner=CancelRunner(), run_options=Mock(), turn_context=service_module._TurnContext(queue=queue, confirmation_store=ToolConfirmationStore()),
             dream_artifact_turn_ticket=Mock())
-        with pytest.raises(asyncio.CancelledError):
-            await service.execute_session(execution)
+        if lose_session:
+            with pytest.raises(AdminDataError, match="ADMIN_TIMEOUT"):
+                await service.execute_session(execution)
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await service.execute_session(execution)
         frames = []
         while not queue.empty():
             frames.append(queue.get_nowait())
-        assert frames[-1] is None
-        assert frames[-2].payload() == {"type": "finish", "finishReason": "stop", "cancelled": True}
+        if lose_session:
+            assert not any(frame is not None and frame.type == "finish" for frame in frames)
+        else:
+            assert frames[-1] is None
+            assert frames[-2].payload() == {"type": "finish", "finishReason": "stop", "cancelled": True}
         metadata = next(frame for frame in frames if frame is not None and frame.type == "message-metadata")
         assert metadata.data["turnId"]
     asyncio.run(scenario())
-    partial.assert_awaited_once()
-    assert partial.await_args.kwargs["turn_status"] == "cancelled"
+    if lose_session:
+        partial.assert_not_awaited()
+    else:
+        partial.assert_awaited_once()
+        assert partial.await_args.kwargs["turn_status"] == "cancelled"
     assert [item.url.path.rsplit("/", 1)[-1] for item in calls[1:]] == [PERSIST_USER_MESSAGE.capability.name, UPDATE_SESSION.capability.name]
     if lose_session:
         with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):

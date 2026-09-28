@@ -1,3 +1,5 @@
+# [Sync] 2026-09-28: verify Auto/full-access Thread orchestration without duplicate confirmation; manual mode still confirms.
+# [Sync] 2026-09-28: verify create/list/read/send/wait Thread registration and legacy task_session_* permission removal.
 # [Sync] 2026-09-15: verify isolated user stdio clears to broker/policy values before package imports.
 # [Sync] 2026-09-15: verify user stdio gets only Session broker/policy values plus credential tombstones.
 # [Sync] 2026-09-15: verify Editor stdio receives only its local broker tuple, without DATABASE_URL or actor identity.
@@ -3514,6 +3516,75 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             },
         )
 
+    async def test_auto_thread_orchestration_is_allowed_without_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=temp_dir,
+                    tool_choice="auto",
+                    im_full_access_enabled=full_access,
+                    on_tool_confirmation_request=confirm,
+                )
+
+                for index, tool_name in enumerate((
+                    "mcp__user__create_thread",
+                    "mcp__user__send_message_to_thread",
+                )):
+                    result = await hook(
+                        {"tool_name": tool_name, "tool_input": {"value": index}},
+                        f"call-thread-tool-{int(full_access)}-{index}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "allow",
+                    )
+
+        self.assertEqual(confirmation_requests, [])
+
+    async def test_manual_thread_orchestration_still_uses_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                tool_choice="manual",
+                im_full_access_enabled=False,
+                on_tool_confirmation_request=confirm,
+            )
+
+            for index, tool_name in enumerate((
+                "mcp__user__create_thread",
+                "mcp__user__send_message_to_thread",
+            )):
+                result = await hook(
+                    {"tool_name": tool_name, "tool_input": {"value": index}},
+                    f"call-thread-tool-manual-{index}",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertEqual(
+                    _hook_specific(result, {}).get("permissionDecision"),
+                    "allow",
+                )
+
+        self.assertEqual(
+            [request["tool_name"] for request in confirmation_requests],
+            [
+                "mcp__user__create_thread",
+                "mcp__user__send_message_to_thread",
+            ],
+        )
+
     async def test_full_access_mcp_ask_user_still_uses_confirmation_form(self):
         confirmation_requests: list[dict] = []
 
@@ -3742,7 +3813,7 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
         self.assertNotIn("INK_AGENT_THREAD_ID", env)
         self.assertNotIn("CUSTOM_KEY", env)
 
-    async def test_user_mcp_exposes_only_session_retrieval(self):
+    async def test_user_mcp_exposes_session_retrieval_and_thread_tools(self):
         from mcp import types as mcp_types
         from libs.claude_agent_kit.server.mcp_server import (
             USER_MCP_TOOL_NAMES,
@@ -3754,7 +3825,10 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
         result = await handler(mcp_types.ListToolsRequest())
         tool_names = {tool.name for tool in result.root.tools}
 
-        self.assertEqual(tool_names, {"get_sessions_range"})
+        self.assertEqual(tool_names, {
+            "get_sessions_range", "create_thread", "list_threads",
+            "read_thread", "send_message_to_thread", "wait_threads",
+        })
         self.assertEqual(tool_names, set(USER_MCP_TOOL_NAMES))
 
     async def test_default_run_does_not_register_notion_mcp(self):
@@ -3798,6 +3872,10 @@ class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
             "mcp__user__get_sessions_range",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
+        for name in ("create_thread", "list_threads", "read_thread", "send_message_to_thread"):
+            self.assertIn(f"mcp__user__{name}", agent_runner_module.DEFAULT_ALLOWED_TOOLS)
+        for name in ("task_session_create", "task_session_get", "task_session_send", "task_session_stop"):
+            self.assertNotIn(f"mcp__user__{name}", agent_runner_module.DEFAULT_ALLOWED_TOOLS)
 
     def test_legacy_mcp_flags_default_off(self):
         with patch.dict(os.environ, {}, clear=True):

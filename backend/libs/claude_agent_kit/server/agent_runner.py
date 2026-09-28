@@ -1,3 +1,6 @@
+# [Sync] 2026-09-28: auto-allow authorized Thread orchestration in Auto/full-access mode; manual mode still confirms.
+# [Sync] 2026-09-28: register create/list/read/send Thread Tools and remove task_session_* permissions.
+# [Sync] 2026-09-26: expose one ResultMessage receipt and forward strict queue resume to the SDK adapter.
 # [Sync] 2026-09-15: clear inherited user-stdio env in isolated Python before package imports.
 # [Sync] 2026-09-15: project only the Session broker tuple and retrieval policy to user stdio.
 # [Sync] 2026-09-16: project the same turn broker tuple to Story Workspace stdio for current-Run reads.
@@ -304,6 +307,7 @@ from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
+from .thread_tool import THREAD_TOOL_SPECS
 from .session_projection_protocol import (
     SESSION_BROKER_ENV_NAMES,
     SESSION_USER_MCP_ENV_NAMES,
@@ -378,6 +382,7 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "BashOutput",
     "Skill",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
+    *(f"mcp__user__{name}" for name in THREAD_TOOL_SPECS),
     *allowed_editor_tool_names(),
     *story_workspace_allowed_tool_names(),
 ]
@@ -567,13 +572,20 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     "ReadMcpResource",
     # Product-owned read-only MCP tools.
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
+    "mcp__user__list_threads",
+    "mcp__user__read_thread",
+    "mcp__user__wait_threads",
+    # Business Thread orchestration is re-authorized by the host provider
+    # against the current actor and source/target ownership. Auto mode follows
+    # the non-blocking task contract; manual mode still confirms below.
+    "mcp__user__create_thread",
+    "mcp__user__send_message_to_thread",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     # Editor context-switch — no-op MCP handler; state update happens in
     # PostToolUse hook. Agent declares which document it's working on.
     f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}",
 })
-
 # Shell metacharacters that would make a Bash command unsafe for auto-allow.
 _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
 _NOTION_CLI_API_SEGMENT_PATTERN = r"[A-Za-z0-9_%~-]+"
@@ -3089,6 +3101,12 @@ class ClaudeAgentRunner:
             sdk_client or SimpleClaudeAgentSDKClient()
         )
 
+    async def interrupt(self) -> None:
+        interrupt = getattr(self._sdk_client, "interrupt", None)
+        if not callable(interrupt):
+            raise RuntimeError("CHAT_INPUT_SDK_INTERRUPT_UNAVAILABLE")
+        await interrupt()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -3124,6 +3142,8 @@ class ClaudeAgentRunner:
         turn_runtime = dict(opts.turn_runtime or {})
 
         include_partial_messages = True
+        if isinstance(self._sdk_client, SimpleClaudeAgentSDKClient):
+            self._sdk_client.require_existing_session = opts.require_existing_session
 
         # Accumulators
         messages: list[Any] = []
@@ -4186,6 +4206,7 @@ class ClaudeAgentRunner:
             protocol_completed=protocol_completed,
             duration_ms=result_duration_ms,
             terminal_stop_reason=terminal_stop_reason,
+            sdk_terminal_received=result_message_count == 1,
         )
 
     async def load_messages(self, session_id: str) -> list[Any]:
