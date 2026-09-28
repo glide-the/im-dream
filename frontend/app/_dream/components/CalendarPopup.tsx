@@ -1,7 +1,7 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive date workspace with scheduled-task summary/actions before independent diary entries.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
-// [Sync] 2026-09-29: implement the reviewed diary PRD hierarchy, effective/draft conflicts, attention focus, server-owned run concurrency, and dialog/menu accessibility.
+// [Sync] 2026-09-29: add cursor history, bounded visible-page refresh, and explicit daylight-saving validation feedback.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
@@ -38,6 +38,10 @@ type EditDraft = {
 type EditField = 'title' | 'prompt' | 'localDate' | 'localTime' | 'timeZone';
 
 const UNRESOLVED_TRIGGER_STATES = new Set<ScheduledTrigger['status']>(['claimed', 'queued', 'running', 'state_unknown']);
+const ACTIVE_TRIGGER_STATES = new Set<ScheduledTrigger['status']>(['claimed', 'queued', 'running']);
+const SCHEDULED_HISTORY_PAGE_SIZE = 20;
+const SCHEDULED_ACTIVE_REFRESH_INTERVAL_MS = 2_000;
+const SCHEDULED_ACTIVE_REFRESH_MAXIMUM = 15;
 
 class ScheduledTaskConflictError extends Error {
   constructor(readonly latest: ScheduledTask) { super('SCHEDULE_REVISION_CONFLICT'); }
@@ -138,22 +142,45 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<ScheduledTrigger[] | null>(null);
   const [historyError, setHistoryError] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyLoadMoreError, setHistoryLoadMoreError] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const editing = draft !== null;
   const dirty = editing && !draftsEqual(draft, defaultDraft);
 
   const loadHistory = useCallback(async () => {
-    setHistoryError(false);
+    setHistoryError(false); setHistoryLoadMoreError(false);
     try {
-      const result = await getScheduledHistory(task.id);
+      const result = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE);
       setHistory(result.triggers);
+      setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
       return result.triggers;
     } catch { setHistoryError(true); return null; }
   }, [task.id]);
 
+  const loadOlderHistory = useCallback(async () => {
+    if (!history?.length || historyLoadingMore) return;
+    setHistoryLoadingMore(true); setHistoryLoadMoreError(false);
+    try {
+      const oldestCreatedAt = [...history].sort((left, right) => triggerTimestamp(left) - triggerTimestamp(right))[0]?.created_at;
+      if (!oldestCreatedAt) { setHistoryHasMore(false); return; }
+      const result = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE, oldestCreatedAt);
+      setHistory((current) => {
+        const merged = new Map((current ?? []).map((trigger) => [trigger.id, trigger]));
+        result.triggers.forEach((trigger) => merged.set(trigger.id, trigger));
+        return [...merged.values()];
+      });
+      setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
+    } catch { setHistoryLoadMoreError(true); }
+    finally { setHistoryLoadingMore(false); }
+  }, [history, historyLoadingMore, task.id]);
+
   useEffect(() => {
     let active = true;
-    getScheduledHistory(task.id).then((result) => { if (active) setHistory(result.triggers); })
+    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((result) => { if (active) {
+      setHistory(result.triggers); setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
+    } })
       .catch(() => { if (active) setHistoryError(true); });
     return () => { active = false; };
   }, [task.id, task.revision]);
@@ -251,8 +278,15 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, 
     } catch (cause) {
       if (cause instanceof ScheduledTaskConflictError && action === 'edit') {
         setConflictLatest(cause.latest); setError(t('calendar.scheduledConflict'));
+      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_LOCAL_TIME_MISSING') {
+        setError(t('calendar.scheduledLocalTimeMissing'));
+      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_REQUIRED') {
+        setError(t('calendar.scheduledOffsetRequired'));
+      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_INVALID') {
+        setError(t('calendar.scheduledOffsetInvalid'));
       } else if (cause instanceof ScheduledTaskApiError
-        && (cause.code === 'SCHEDULE_INPUT_INVALID' || cause.code === 'SCHEDULE_RULE_INVALID')) {
+        && ['SCHEDULE_INPUT_INVALID', 'SCHEDULE_RULE_INVALID', 'SCHEDULE_DATE_INVALID',
+          'SCHEDULE_TIME_INVALID', 'SCHEDULE_TIME_ZONE_INVALID'].includes(cause.code)) {
         setError(t('calendar.scheduledInputInvalid'));
       } else if (action === 'run' && !(cause instanceof ScheduledTaskApiError)) {
         setRunOutcomeUnknown(true); setError(t('calendar.scheduledRunOutcomeUnknown'));
@@ -420,6 +454,17 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, 
               className="calendar-popup__button calendar-popup__button--quiet" aria-label={actionLabel(t('calendar.scheduledOpenThread'))}
               onClick={() => onOpenThread(trigger.target_thread_id!)}>{t('calendar.scheduledOpenThread')}</button> : null}
           </li>)}</ol>}
+      {!historyError && history !== null && historyHasMore ? <button type="button"
+        className="calendar-popup__button calendar-popup__button--secondary calendar-popup__history-more"
+        disabled={historyLoadingMore} aria-label={actionLabel(t('calendar.scheduledLoadOlder'))}
+        onClick={() => void loadOlderHistory()}>
+        {historyLoadingMore ? t('calendar.scheduledLoadingOlder') : t('calendar.scheduledLoadOlder')}
+      </button> : null}
+      {historyLoadMoreError ? <div className="calendar-popup__alert" role="alert">
+        {t('calendar.scheduledOlderHistoryUnavailable')}
+        <button type="button" aria-label={actionLabel(t('calendar.scheduledRetry'))}
+          onClick={() => void loadOlderHistory()}>{t('calendar.scheduledRetry')}</button>
+      </div> : null}
     </section> : null}
     {runOutcomeUnknown ? <button type="button" className="calendar-popup__refresh-link" onClick={onRefresh}>
       {t('calendar.scheduledRefreshDate')}</button> : null}
@@ -444,6 +489,9 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const [scheduledError, setScheduledError] = useState(false);
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [scheduledRefresh, setScheduledRefresh] = useState(0);
+  const [documentVisible, setDocumentVisible] = useState(() => typeof document === 'undefined'
+    || document.visibilityState === 'visible');
+  const [activeRefreshExhausted, setActiveRefreshExhausted] = useState(false);
   const monthPrevRef = useRef<HTMLButtonElement>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingDateFocusRef = useRef<string | null>(null);
@@ -451,13 +499,16 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const dirtyDraftsRef = useRef(new Map<string, boolean>());
   const taskCardRefs = useRef(new Map<string, HTMLElement>());
   const manualRequestKeys = useRef(new Map<string, string>());
+  const activeRefreshCountRef = useRef(0);
 
   useEffect(() => {
-    if (!isAuthenticated || !selectedDate) {
-      setScheduledTasks([]); setScheduledTriggers([]); setScheduledError(false); setScheduledLoading(false); return;
-    }
+    setScheduledTasks([]); setScheduledTriggers([]); setScheduledError(false); setScheduledLoading(false);
+  }, [isAuthenticated, selectedDate, timezone]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !selectedDate) return;
     let active = true;
-    setScheduledTasks([]); setScheduledTriggers([]); setScheduledError(false); setScheduledLoading(true);
+    setScheduledError(false); setScheduledLoading(true);
     getScheduledDay(selectedDate, timezone).then(async (result) => {
       const known = new Set(result.tasks.map((task) => task.id));
       const historicalIds = [...new Set(result.triggers.map((trigger) => trigger.task_id))].filter((id) => !known.has(id));
@@ -471,6 +522,30 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   }, [isAuthenticated, selectedDate, timezone, scheduledRefresh]);
 
   const refreshScheduled = useCallback(() => setScheduledRefresh((value) => value + 1), []);
+  const activeTriggerKey = scheduledTriggers.filter((trigger) => ACTIVE_TRIGGER_STATES.has(trigger.status))
+    .map((trigger) => trigger.id).sort().join('|');
+
+  useEffect(() => {
+    const onVisibilityChange = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    activeRefreshCountRef.current = 0;
+    setActiveRefreshExhausted(false);
+  }, [activeTriggerKey, selectedDate, timezone]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !selectedDate || !documentVisible || scheduledLoading || !activeTriggerKey
+      || activeRefreshCountRef.current >= SCHEDULED_ACTIVE_REFRESH_MAXIMUM) return;
+    const timer = window.setTimeout(() => {
+      activeRefreshCountRef.current += 1;
+      if (activeRefreshCountRef.current >= SCHEDULED_ACTIVE_REFRESH_MAXIMUM) setActiveRefreshExhausted(true);
+      refreshScheduled();
+    }, SCHEDULED_ACTIVE_REFRESH_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeTriggerKey, documentVisible, isAuthenticated, refreshScheduled, scheduledLoading, selectedDate, timezone]);
   const actOnTask = useCallback(async (task: ScheduledTask, action: ScheduledTaskAction,
     desired?: ScheduledTaskDesired): Promise<ScheduledTaskActionResult> => {
     const manualRequestKey = action === 'run' ? (manualRequestKeys.current.get(task.id) ?? crypto.randomUUID()) : null;
@@ -689,6 +764,12 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
               <button type="button" onClick={refreshScheduled}>{t('calendar.scheduledRetry')}</button></div> : null}
             {!scheduledLoading && !scheduledError && scheduledTasks.length === 0
               ? <p className="calendar-popup__empty">{t('calendar.scheduledEmpty')}</p> : null}
+            {activeRefreshExhausted && activeTriggerKey ? <div className="calendar-popup__hint" aria-live="polite">
+              <span>{t('calendar.scheduledAutoRefreshPaused')}</span>
+              <button type="button" className="calendar-popup__refresh-link" onClick={() => {
+                activeRefreshCountRef.current = 0; setActiveRefreshExhausted(false); refreshScheduled();
+              }}>{t('calendar.scheduledRefreshDate')}</button>
+            </div> : null}
             <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
               task={task} triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)} onAction={actOnTask}
               onOpenThread={onOpenTaskThread} onRefresh={refreshScheduled} onLayerChange={onLayerChange}

@@ -3,9 +3,7 @@
 // [Output] Provider-free Chrome receipts for the reviewed CalendarPopup desktop/mobile journeys
 // without database, model, scheduled worker, or diary mutation.
 // [Pos] Technical isolated scheduled-task browser journey in frontend/e2e.
-// [Sync] 2026-09-29: cover reviewed hierarchy, menu/keyboard semantics, conflict recovery,
-// deterministic and uncertain manual-run retries, state_unknown, exhausted, Thread navigation,
-// delete/restore, task-free dates, ordinary diary coexistence, and responsive containment.
+// [Sync] 2026-09-29: add cursor history, bounded active-run refresh, and explicit DST rejection/recovery coverage.
 
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
@@ -45,6 +43,10 @@ type FixtureOptions = {
   initialTriggerStatus?: TriggerStatus;
   initialTriggerHasThread?: boolean;
   firstRunOutcome?: 'server_error' | 'network_unknown' | 'success';
+  firstEditConflict?: boolean;
+  editErrorCodes?: string[];
+  historyCount?: number;
+  runningCompletesAfterDayReads?: number;
 };
 
 function baseTask(status: TaskStatus = 'active'): Task {
@@ -80,15 +82,26 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
   let task = baseTask(options.taskStatus);
   let triggers: Trigger[] = options.initialTriggerStatus
     ? [baseTrigger(task, options.initialTriggerStatus, options.initialTriggerHasThread)] : [];
-  let firstEditConflict = true;
+  let firstEditConflict = options.firstEditConflict ?? true;
+  const editErrorCodes = [...(options.editErrorCodes ?? [])];
   let firstRunPending = options.firstRunOutcome !== 'success';
+  let dayReadCount = 0;
   const unexpected: string[] = [];
   const manualRequestKeys: string[] = [];
   const definitionRequests: Array<{ action: string; revision: unknown }> = [];
+  const editBodies: Array<Record<string, unknown>> = [];
+  const historyRequests: string[] = [];
   const targetThreadRequests: string[] = [];
+  const configuredHistory = options.historyCount === undefined ? null
+    : Array.from({ length: options.historyCount }, (_, index) => {
+        const createdAt = new Date(Date.UTC(2026, 8, 28, 9, 30 - index)).toISOString();
+        return { ...baseTrigger(task, 'succeeded', true), id: `trigger_history_${index}`,
+          created_at: createdAt, updated_at: createdAt };
+      });
 
   page.on('console', (message) => {
-    const expectedResponse = message.text().includes('409 (Conflict)') || message.text().includes('503 (Service Unavailable)');
+    const expectedResponse = message.text().includes('409 (Conflict)') || message.text().includes('503 (Service Unavailable)')
+      || (Boolean(options.editErrorCodes?.length) && message.text().includes('400 (Bad Request)'));
     const expectedUnknownRun = options.firstRunOutcome === 'network_unknown'
       && message.text() === 'Failed to load resource: net::ERR_CONNECTION_RESET';
     if (message.type() === 'error' && !message.text().includes('react-grab.com')
@@ -145,6 +158,16 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
       if (suffix === '/day') {
         const selectedDate = url.searchParams.get('local_date');
         const visible = !options.empty && (selectedDate === TASK_DATE || selectedDate === TASK_ONLY_DATE);
+        if (visible) {
+          dayReadCount += 1;
+          if (options.runningCompletesAfterDayReads !== undefined
+            && dayReadCount >= options.runningCompletesAfterDayReads) {
+            triggers = triggers.map((trigger) => trigger.status === 'running'
+              ? { ...trigger, status: 'succeeded', target_thread_id: TARGET_THREAD_ID,
+                  final_message_id: 'message_schedule_final', updated_at: '2026-09-28T09:03:00Z' }
+              : trigger);
+          }
+        }
         await route.fulfill({ json: { tasks: visible ? [task] : [], triggers: visible ? triggers : [] } });
         return;
       }
@@ -153,7 +176,12 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
         return;
       }
       if (suffix === `/${TASK_ID}/history`) {
-        await route.fulfill({ json: { triggers } });
+        historyRequests.push(url.search);
+        const before = url.searchParams.get('before_created_at');
+        const limit = Number(url.searchParams.get('limit') ?? 50);
+        const source = configuredHistory ?? triggers;
+        const page = source.filter((trigger) => !before || trigger.created_at < before).slice(0, limit);
+        await route.fulfill({ json: { triggers: page } });
         return;
       }
       const action = suffix.split('/').at(-1);
@@ -161,6 +189,12 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
         const body = request.postDataJSON() as Record<string, unknown>;
         if (action === 'edit') {
           definitionRequests.push({ action, revision: body.expected_revision });
+          editBodies.push(body);
+          const editErrorCode = editErrorCodes.shift();
+          if (editErrorCode) {
+            await route.fulfill({ status: 400, json: { detail: { error_code: editErrorCode } } });
+            return;
+          }
           if (firstEditConflict) {
             firstEditConflict = false;
             task = { ...task, title: '服务端更新后的复盘', revision: task.revision + 1, updated_at: '2026-09-28T09:02:00Z' };
@@ -254,6 +288,9 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
     getUnexpected: () => unexpected,
     getManualRequestKeys: () => manualRequestKeys,
     getDefinitionRequests: () => definitionRequests,
+    getEditBodies: () => editBodies,
+    getHistoryRequests: () => historyRequests,
+    getDayReadCount: () => dayReadCount,
     getTargetThreadRequests: () => targetThreadRequests,
   };
 }
@@ -393,5 +430,64 @@ test('task-free date omits the scheduled-task group while preserving diary conte
   await expect(dialog.locator('.calendar-popup__task-section')).toHaveCount(0);
   await expect(dialog.getByRole('heading', { name: '日记' })).toBeVisible();
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('active execution refreshes to a terminal result and history loads older pages by cursor', async ({ page }) => {
+  const fixture = await installFixtures(page, {
+    initialTriggerStatus: 'running', initialTriggerHasThread: true,
+    runningCompletesAfterDayReads: 2, historyCount: 21, firstRunOutcome: 'success',
+  });
+  const { dialog } = await openCalendar(page);
+  const card = dialog.locator('.calendar-popup__task').first();
+
+  await expect(card).toContainText('执行中');
+  await expect(card).toContainText('已完成', { timeout: 7_000 });
+  expect(fixture.getDayReadCount()).toBeGreaterThanOrEqual(2);
+  const settledReadCount = fixture.getDayReadCount();
+  await page.waitForTimeout(2_300);
+  expect(fixture.getDayReadCount()).toBe(settledReadCount);
+
+  await openMore(card);
+  await card.getByRole('menuitem', { name: /历史/ }).click();
+  const history = card.locator('.calendar-popup__history');
+  await expect(history.getByRole('listitem')).toHaveCount(20);
+  await history.getByRole('button', { name: /加载更早记录/ }).click();
+  await expect(history.getByRole('listitem')).toHaveCount(21);
+  await expect(history.getByRole('button', { name: /加载更早记录/ })).toHaveCount(0);
+  expect(fixture.getHistoryRequests().some((search) => search.includes('before_created_at='))).toBe(true);
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('edit keeps the desired draft and explains repeated or missing daylight-saving times', async ({ page }) => {
+  const fixture = await installFixtures(page, {
+    firstEditConflict: false,
+    editErrorCodes: ['SCHEDULE_OFFSET_REQUIRED', 'SCHEDULE_LOCAL_TIME_MISSING'],
+    firstRunOutcome: 'success',
+  });
+  const { dialog } = await openCalendar(page);
+  const card = dialog.locator('.calendar-popup__task').first();
+
+  await openMore(card);
+  await card.getByRole('menuitem', { name: /编辑/ }).click();
+  await card.getByLabel('计划').selectOption('once');
+  await card.getByLabel('日期').fill('2026-11-01');
+  await card.getByLabel('时间').fill('01:30');
+  await card.getByLabel('时区').fill('America/New_York');
+  await card.getByRole('button', { name: /保存：/ }).click();
+  await expect(card.getByRole('alert')).toContainText('该当地时间因时钟调整会出现两次');
+  await expect(card.getByLabel('时间')).toHaveValue('01:30');
+
+  await card.getByLabel('日期').fill('2026-03-08');
+  await card.getByLabel('时间').fill('02:30');
+  await card.getByRole('button', { name: /保存：/ }).click();
+  await expect(card.getByRole('alert')).toContainText('这个当地时间因时钟调整而不存在');
+  await expect(card.getByLabel('时间')).toHaveValue('02:30');
+
+  await card.getByLabel('时间').fill('03:30');
+  await card.getByRole('button', { name: /保存：/ }).click();
+  await expect(card).toContainText('2026-03-08 03:30 (America/New_York)');
+  expect(fixture.getEditBodies().slice(0, 2).map((body) => (body.rule as TaskRule).kind === 'once'
+    ? (body.rule as Extract<TaskRule, { kind: 'once' }>).selected_offset_minutes : 'daily')).toEqual([null, null]);
   expect(fixture.getUnexpected()).toEqual([]);
 });

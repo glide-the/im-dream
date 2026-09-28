@@ -2,7 +2,7 @@
 // [Output] Typed date/history reads and revision-checked actions for CalendarPopup.
 // [Pos] Scheduled Chat browser transport; Admin remains the plan and trigger owner.
 // [Sync] 2026-09-28: consume once/daily task projections without browser OAuth or local schedule calculation.
-// [Sync] 2026-09-29: type definition mutations and manual runs as distinct action/result contracts.
+// [Sync] 2026-09-29: add the Admin-owned history cursor while keeping schedule calculation out of the browser.
 import { browserRequestHeaders } from '../lib/browserSession';
 import { API_BASE } from '../lib/apiBase';
 
@@ -73,8 +73,9 @@ export function getScheduledTask(taskId: string) {
   return request<{ task: ScheduledTask | null }>(`/${encodeURIComponent(taskId)}`);
 }
 
-export function getScheduledHistory(taskId: string, limit = 50) {
+export function getScheduledHistory(taskId: string, limit = 50, beforeCreatedAt?: string) {
   const search = new URLSearchParams({ limit: String(limit) });
+  if (beforeCreatedAt) search.set('before_created_at', beforeCreatedAt);
   return request<{ triggers: ScheduledTrigger[] }>(`/${encodeURIComponent(taskId)}/history?${search}`);
 }
 

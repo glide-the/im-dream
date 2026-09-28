@@ -2,6 +2,7 @@
 <!-- [Output] Actual phase-four commands, outcomes, business-path evidence and remaining acceptance boundaries. -->
 <!-- [Pos] Dream scheduled Chat technical receipt; no normal-account or real-model claim. -->
 <!-- [Sync] 2026-09-28: record repeated isolated Admin/Dream journey, broad Chat regression and Calendar browser fixture. -->
+<!-- [Sync] 2026-09-29: rerun the cross-repository proof from Admin main and Dream develop; add cursor history, bounded active-state refresh, explicit DST feedback and six Calendar journeys. -->
 
 # 定时 Chat 消费端与隔离验证回执
 
@@ -47,3 +48,24 @@ Dream 首期定时任务需要消费 Admin 所有的定义和触发记录，经�
 | `git diff --check` | 0 | 无空白错误。 |
 
 Admin 的隔离 PostgreSQL 集成测试另验证到期计算、暂停/删除后的领取限制、租约回收、错误 turn final 拒绝及历史保留。完整公开入口与真实模型、正常业务账户的验收须遵守仓库的本机真实业务测试协议；本回执不代表该阶段已经执行。
+
+## 2026-09-29 主分支归位与 P1 关闭追加回执
+
+Admin 定时任务提交 `9ed8fc0` 已 fast-forward 进入 `/Users/dmeck/project/ink-admin-memory` 的 `main`；Dream 既有 PRD、页面骨架、系统设计、消费端和日期弹窗纵向切片已进入 `/Users/dmeck/project/ink-dream-memory` 的 `develop`。本轮继续消费既有 `scheduled-task.history` cursor，在已有日期弹窗内加入历史追加、有非终态触发时的有界刷新，以及 Admin DST 稳定错误码对应的表单反馈，没有新增页面、调度器、状态机或数据库 schema。
+
+| 命令 | 退出码 | 关键输出与覆盖 |
+| --- | ---: | --- |
+| `cd frontend && pnpm exec tsc --noEmit --incremental false` | 0 | 最新页面、API 与 E2E fixture 类型通过。 |
+| `cd frontend && pnpm exec eslint app/_dream/api/scheduledTaskApi.ts app/_dream/components/CalendarPopup.tsx app/_dream/i18n.ts e2e/scheduled-task-calendar.spec.ts` | 0 | 0 error。 |
+| `cd frontend && pnpm build` | 0 | Next.js 生产构建和静态页面生成通过。 |
+| `E2E_WEB_BASE=http://127.0.0.1:55173 pnpm exec playwright test e2e/scheduled-task-calendar.spec.ts --reporter=line --workers=1` | 0 | `6 passed`；新增覆盖 running 自动刷新到终态并停止、20+1 历史 cursor 分页、DST 重复/缺失时刻保留 desired 后恢复提交。 |
+| `PYTHONPATH=backend uv run --native-tls --project backend --frozen --with pytest==9.1.1 --with pytest-asyncio python -m pytest backend/tests/test_scheduled_task_consumer.py backend/tests/test_session_projection_broker.py backend/tests/test_thread_tool.py backend/tests/test_admin_chat_routes.py -q` | 0 | `77 passed`；覆盖 Tool、broker、消费端和 Admin Chat 路由。 |
+| `INK_SCHEDULED_TEST_ADMIN_ROOT=/Users/dmeck/project/ink-admin-memory INK_SCHEDULED_TEST_PYTHON=/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python INK_SCHEDULED_TEST_RESOURCE=http://localhost:8765/api INK_SCHEDULED_TEST_ADMIN_ENV_FILE=/Users/dmeck/project/ink-admin-memory/.env.local node scripts/run-scheduled-chat-isolated-e2e.mjs` | 0 | `status=passed`、`manual_request_deduplicated=true`、`due_once_trigger_settled=true`、`restart_did_not_repeat_model=true`、`model_calls=2`；随机数据库 `ink_scheduled_cross_service_test_64e389481c7b` 已清理。 |
+| Admin `pnpm exec tsc --noEmit --incremental false && pnpm --filter @ink-memory/db typecheck` | 0 | Admin 应用与数据库包类型检查通过。 |
+| Admin 五个定时任务目标单元文件 | 0 | `5 files passed, 10 tests passed`。 |
+| Admin 隔离 migration + `chatScheduledTaskPostgres.integration.test.ts` | 0 | `73/73` migration，`4 tests passed`；命名数据库 `ink_scheduled_chat_test_20260929_goal` 已清理。 |
+| Admin `pnpm build` | 0 | 数据库包和 Next.js 生产构建通过。 |
+
+首次 Admin 集成复跑在北京时间凌晨暴露测试夹具错误：测试把含 `+08:00` 的 `manual.created_at` 直接截为日期，再以 UTC 查询，可能落在前一天。修正为先用 `new Date(manual.created_at).toISOString()` 归一化 UTC 日期后，4/4 通过。产品查询、断言强度和状态机没有被放宽。
+
+以上仍是隔离 PostgreSQL、公开生产入口和可控模型替身的技术验证。用户没有要求真实业务测试，本轮也没有读取或修改正常业务数据库、真实账户、账本或模型调用记录。
