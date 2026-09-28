@@ -1,6 +1,7 @@
 // [Sync] 2026-09-27: localize task-session source navigation and created-task lists.
 // [Sync] 2026-09-27: localize consolidated Chat information and server-reported task states.
 // [Sync] 2026-09-28: localize completed task status and durable result notification states.
+// [Sync] 2026-09-28: localize scheduled Chat cards, revision conflicts and date-query recovery.
 // [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
 // [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
 // [Input] User locale and product-facing translation keys.
@@ -405,7 +406,28 @@ const resources = {
         next: 'Next →',
         noEntriesForDate: 'No entries for this date',
         todayLabel: 'Today',
-        deleteError: 'Failed to delete entry'
+        deleteError: 'Failed to delete entry',
+        scheduledLoading: 'Loading tasks…',
+        scheduledUnavailable: 'Tasks are temporarily unavailable.',
+        scheduledRetry: 'Retry',
+        scheduledConflict: 'This task changed. The latest version is shown; review your edits and save again.',
+        scheduledActionError: 'Could not update this task. Try again.',
+        scheduledTitle: 'Title', scheduledPrompt: 'Prompt', scheduledRule: 'Schedule',
+        scheduledOnce: 'Once', scheduledDaily: 'Daily', scheduledDate: 'Date',
+        scheduledTime: 'Time', scheduledTimeZone: 'Time zone',
+        scheduledOffset: 'UTC offset in minutes if this local time repeats',
+        scheduledNext: 'Next run', scheduledSave: 'Save', scheduledCancel: 'Cancel',
+        scheduledEdit: 'Edit', scheduledPause: 'Pause', scheduledResume: 'Resume',
+        scheduledRun: 'Run now', scheduledDelete: 'Delete', scheduledRestore: 'Undo delete',
+        scheduledHistory: 'History', scheduledManual: 'Manual run',
+        scheduledFailure: 'This run failed. Check the plan before trying again.',
+        scheduledUnknown: 'The result is being checked. Open the conversation for details.',
+        scheduledOpenThread: 'Open conversation',
+        scheduledStatus: {
+          active: 'Scheduled', paused: 'Paused', exhausted: 'Completed schedule',
+          deleted: 'Deleted', claimed: 'Claimed', queued: 'Preparing', running: 'Running',
+          succeeded: 'Completed', failed: 'Failed', state_unknown: 'Checking status', skipped: 'Skipped'
+        }
       },
       friends: {
         myFriends: 'My Friends',
@@ -1323,7 +1345,28 @@ const resources = {
         next: '下个月 →',
         noEntriesForDate: '这一天暂无记录',
         todayLabel: '今天',
-        deleteError: '删除失败'
+        deleteError: '删除失败',
+        scheduledLoading: '正在加载任务…',
+        scheduledUnavailable: '任务暂不可用。',
+        scheduledRetry: '重试',
+        scheduledConflict: '任务已变化。已显示最新版本，请检查修改后重试。',
+        scheduledActionError: '任务更新失败，请重试。',
+        scheduledTitle: '标题', scheduledPrompt: '执行提示词', scheduledRule: '计划',
+        scheduledOnce: '单次', scheduledDaily: '每天', scheduledDate: '日期',
+        scheduledTime: '时间', scheduledTimeZone: '时区',
+        scheduledOffset: '如当地时间重复，请填写 UTC 偏移分钟数',
+        scheduledNext: '下次执行', scheduledSave: '保存', scheduledCancel: '取消',
+        scheduledEdit: '编辑', scheduledPause: '暂停', scheduledResume: '恢复',
+        scheduledRun: '立即运行', scheduledDelete: '删除', scheduledRestore: '撤销删除',
+        scheduledHistory: '历史', scheduledManual: '手动执行',
+        scheduledFailure: '本次执行失败。请检查计划后再试。',
+        scheduledUnknown: '执行结果正在核查。可打开关联会话查看详情。',
+        scheduledOpenThread: '打开会话',
+        scheduledStatus: {
+          active: '待执行', paused: '已暂停', exhausted: '计划已完成',
+          deleted: '已删除', claimed: '已领取', queued: '准备中', running: '执行中',
+          succeeded: '已完成', failed: '失败', state_unknown: '状态待核对', skipped: '已跳过'
+        }
       },
       friends: {
         myFriends: '我的好友',

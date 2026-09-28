@@ -1,4 +1,5 @@
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
+// [Sync] 2026-09-28: open a scheduled task's persisted target Thread through the mounted ChatView navigation props.
 // [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
 // [Output] Render the authenticated Story Workspace shell, writing canvas, and canonical Chat surfaces.
 // [Pos] frontend app-root node in frontend/app/_dream
@@ -1173,6 +1174,13 @@ export default function App() {
     setWritingChatPanelOpen(false);
   }, []);
 
+  const handleCalendarTaskThreadRequest = useCallback((threadId: string) => {
+    handleStoryWorkspaceChatThreadRequest(threadId);
+    setShowCalendarPopup(false);
+    window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, [handleStoryWorkspaceChatThreadRequest]);
+
   // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
   // The URL carries only stable selection intent; Chat reloads server-derived facts.
   const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice, input?: string) => {
@@ -2344,6 +2352,7 @@ export default function App() {
           currentEntryId={state?.id}
           onEntryDeleted={handleCalendarEntryDeleted}
           onClose={() => setShowCalendarPopup(false)}
+          onOpenTaskThread={handleCalendarTaskThreadRequest}
           timezone={userTimezone}
           initialDateKey={getLocalDayKey(state?.createdAt, userTimezone) ?? getTodayKeyInTimezone(userTimezone)}
         />

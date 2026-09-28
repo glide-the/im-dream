@@ -6,9 +6,22 @@
 #                    system Deck defaults, and select drama-forge v1.0.1 for new Decks.
 # [Sync] 2026-08-31: remove retired daily-picture generation tuning.
 # [Sync] 2026-09-19: add the music-creation team, arranger, lyricist, and exact plugin set to the code-owned registry.
+# [Sync] 2026-09-28: centralize the scheduled Chat worker's technical poll interval.
 """Voice archetypes and product-default configuration."""
 
 import os
+import math
+
+
+def scheduled_task_poll_seconds() -> float:
+    """Bound the idle Admin claim polling interval without changing schedule rules."""
+    try:
+        value = float(os.getenv("INK_SCHEDULED_TASK_POLL_SECONDS", "2"))
+    except (TypeError, ValueError):
+        raise ValueError("INK_SCHEDULED_TASK_POLL_SECONDS must be positive") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("INK_SCHEDULED_TASK_POLL_SECONDS must be positive")
+    return value
 
 
 def _csv_env(name: str, fallback: str) -> tuple[str, ...]:

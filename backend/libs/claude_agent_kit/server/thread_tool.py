@@ -1,7 +1,8 @@
 # [Input] Model-provided Dream Thread prompt/query/id and the current MCP request identity.
-# [Output] Five strict Thread Tool calls, including wait_threads, through the private turn broker.
+# [Output] Strict Thread and scheduled-task Tool calls through the private turn broker.
 # [Pos] User MCP Thread adapter; actor, source Thread and Claude session handles stay in the Dream host.
 # [Sync] 2026-09-28: expose Codex-style wait_threads so a parent turn consumes child completion as a tool result.
+# [Sync] 2026-09-28: let an authorized Chat turn create one once/daily Admin schedule with an explicit IANA time zone.
 # [Sync] 2026-09-28: expose create/list/read/send Thread semantics and retire model-facing task_session_* names.
 """Dream Thread Tools backed by the current host turn owner."""
 
@@ -19,6 +20,32 @@ from .session_projection_protocol import (
 
 
 THREAD_TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
+    "create_scheduled_task": (
+        "仅在用户明确要求定时执行时创建 Dream 任务。必须提供提示词、单次本地日期时间或每日本地钟点，以及 IANA 时区；单次重复时刻须明确偏移。",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "任务标题。"},
+                "prompt": {"type": "string", "description": "到期时新会话的首条输入。"},
+                "rule": {
+                    "oneOf": [
+                        {"type": "object", "properties": {
+                            "kind": {"const": "once"}, "local_date": {"type": "string", "description": "YYYY-MM-DD"},
+                            "local_time": {"type": "string", "description": "HH:MM"},
+                            "time_zone": {"type": "string", "description": "IANA 时区，例如 Asia/Shanghai"},
+                            "selected_offset_minutes": {"type": ["integer", "null"], "description": "重复本地时刻选择的 UTC 偏移分钟；普通时刻填 null。"},
+                        }, "required": ["kind", "local_date", "local_time", "time_zone", "selected_offset_minutes"], "additionalProperties": False},
+                        {"type": "object", "properties": {
+                            "kind": {"const": "daily"}, "local_time": {"type": "string", "description": "每天的 HH:MM"},
+                            "time_zone": {"type": "string", "description": "IANA 时区，例如 Asia/Shanghai"},
+                        }, "required": ["kind", "local_time", "time_zone"], "additionalProperties": False},
+                    ],
+                },
+            },
+            "required": ["title", "prompt", "rule"],
+            "additionalProperties": False,
+        },
+    ),
     "create_thread": (
         "仅在用户明确要求新建独立会话时创建 Dream Thread，并非阻塞启动首轮。",
         {
@@ -116,6 +143,7 @@ THREAD_TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
 }
 
 _THREAD_OPERATIONS = {
+    "create_scheduled_task": "schedule.create",
     "create_thread": "thread.create",
     "list_threads": "thread.list",
     "read_thread": "thread.read",
@@ -125,6 +153,19 @@ _THREAD_OPERATIONS = {
 
 
 def _valid_arguments(name: str, values: dict[str, Any]) -> bool:
+    if name == "create_scheduled_task":
+        rule = values.get("rule")
+        if (set(values) != {"title", "prompt", "rule"}
+            or not all(isinstance(values[key], str) and values[key].strip() for key in ("title", "prompt"))
+            or not isinstance(rule, dict)):
+            return False
+        required = ({"kind", "local_date", "local_time", "time_zone", "selected_offset_minutes"}
+                    if rule.get("kind") == "once" else {"kind", "local_time", "time_zone"})
+        if set(rule) != required or rule.get("kind") not in ("once", "daily"):
+            return False
+        if not all(isinstance(rule.get(key), str) and rule[key].strip() for key in required - {"kind", "selected_offset_minutes"}):
+            return False
+        return rule.get("kind") != "once" or rule["selected_offset_minutes"] is None or type(rule["selected_offset_minutes"]) is int
     if name == "create_thread":
         return (
             set(values) <= {"prompt", "title"}
@@ -232,6 +273,7 @@ def handle_thread_tool(
             message_limit=values.get("message_limit"),
             targets=wait_targets,
             timeout_ms=values.get("timeoutMs"),
+            schedule_rule=values.get("rule"),
         )
         return json.dumps(
             {"ok": True, **result.model_dump(exclude_none=True)},
