@@ -2,6 +2,8 @@
 <!-- [Output] Visual decisions for the queued-input PRD and its standalone sample. -->
 <!-- [Pos] Chat module UI appendix; production components remain under frontend/app/_dream/components/chat/. -->
 <!-- [Sync] 2026-09-27: replace the Stage 4 two-button layout with the user-specified single Send/Stop action. -->
+<!-- [Sync] 2026-09-28: queue cards leave the composer at dispatch; uncertain outcomes use the separate feedback row. -->
+<!-- [Sync] 2026-09-28: acknowledged Adjust direction stops the old reply without a generic resend alert. -->
 
 # Dream Chat 运行中输入：UI 视觉决策
 
@@ -13,6 +15,8 @@
 
 - 同一 Chat 主列内依次显示消息、已确认的排队卡片、紧凑错误和输入 Dock；宽度变化时各层使用同一左右轴线。
 - 排队卡片可读、可辨状态、可访问菜单；错误是独立反馈，不伪装成已入队卡片。
+- 服务端确认开始派发后，消息离开卡片列；失败不会把不可操作的卡片放回输入区，处理结果待核对时由独立反馈行提供状态检查。
+- “调整方向”引起的旧回复取消不显示“消息未处理／重新发送”的通用错误卡；选中消息按其服务端状态继续显示或进入对话。真实运行错误仍在消息区显示，选中阶段的中断请求失败在输入区反馈。
 - Dock 右端只有一个操作位：有草稿显示发送，草稿为空且主轮次运行显示停止；当前按钮保持完整点击区域和准确名称。
 - [运行中队列样稿](./queued-input-visual.html) 默认展示一条待处理卡片；`?state=menu`、`?state=multiple`、`?state=error` 分别展示菜单、多条消息和错误状态。样稿只演示视觉结构；真实状态更新仍由现有 Chat 组件根据服务端回执处理。
 
@@ -34,7 +38,7 @@
 Chat 主列
 ├─ 现有消息列表
 └─ 底部堆叠区
-   ├─ QueueCardList：两个已确认队列卡片，限高滚动
+   ├─ QueueCardList：仍为 queued 或 selected 的卡片，限高滚动
    │  └─ QueueCard：正文 / 状态 / 调整方向 / 删除 / 更多
    │     └─ Menu：编辑消息 / 在侧边聊天中打开 / 关闭排队
    ├─ InlineQueueError：短文案 + 操作
@@ -54,4 +58,4 @@ Chat 主列
 
 ### 实现映射
 
-在现有 `ChatPanel` 排队区、`ThreadInputQueueCard` 和 `AIInputDock` 内复用 Dream token 与业务状态；样稿没有引入外部 CSS、字体或图标 CDN。真实系统仅在服务端确认 `queued` 后显示卡片；提交失败保留草稿并继续显示发送，提交成功清空草稿后若主轮次仍运行则显示停止；`selected`、`dispatching`、`state_unknown` 的操作可用性依 [主 PRD](./queued-input.md) 更新。菜单中的侧边打开必须等待服务端完成消息转移后再显示新 Thread。
+在现有 `ChatPanel` 排队区、`ThreadInputQueueCard` 和 `AIInputDock` 内复用 Dream token 与业务状态；样稿没有引入外部 CSS、字体或图标 CDN。真实系统仅在服务端确认 `queued` 或 `selected` 时显示卡片；确认 `dispatching` 时移除卡片，即使后续轮次失败也不恢复不可操作的卡片。处理结果待核对时显示独立反馈行。提交失败保留草稿并继续显示发送，提交成功清空草稿后若主轮次仍运行则显示停止。菜单中的侧边打开必须等待服务端完成消息转移后再显示新 Thread。

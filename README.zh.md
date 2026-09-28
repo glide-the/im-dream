@@ -4,6 +4,9 @@
 <!-- [同步] 2026-09-27：说明运行中消息队列依赖目标数据库的 Admin Drizzle 0064–0066。 -->
 <!-- [同步] 2026-09-19：记录 Gateway service key 与 Claude Agent 完整发送链路发布门禁。 -->
 <!-- [同步] 2026-09-27：记录 Chat 输入队列、独立任务 Thread 工具及 Admin capability 门禁。 -->
+<!-- [同步] 2026-09-28：说明消息开始派发后及轮次失败时不再占用输入区队列控制栏。 -->
+<!-- [同步] 2026-09-29：说明“调整方向”确认中断仅取消旧回复，选中消息另行处理。 -->
+<!-- [同步] 2026-09-28：将 Chat 任务导航指向现行“任务与进度”需求稿。 -->
 <!-- [同步] 2026-09-28：独立任务改用创建、列表、读取和发送 Dream Thread 工具。 -->
 <!-- [同步] 2026-09-28：独立任务通过当前父轮次的 wait_threads Tool 回执完成等待。 -->
 <!-- [同步] 2026-09-28：索引定时任务评审设计、注明尚未实现，并修复任务与进度 PRD 链接。 -->
@@ -44,7 +47,7 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 ## 使用 Dream
 
 - **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
-- **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口，来源会话顶部“任务与进度”面板汇总所创建的任务、子智能体和计划。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
+- **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
 - **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，规则为带 IANA 时区的单次当地日期时间或每日当地钟点。日历显示定义、执行历史及关联 Chat，支持编辑、暂停、恢复、立即运行、软删除和撤销删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 后台消费端复用现有 Chat Runtime。目标数据库发布 Admin Drizzle 0069–0072 的 schema capability 和精确操作合同后才能运行。技术性空闲轮询间隔由 `INK_SCHEDULED_TASK_POLL_SECONDS` 配置，默认 `2` 秒。详见[定时任务设计](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)。
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。

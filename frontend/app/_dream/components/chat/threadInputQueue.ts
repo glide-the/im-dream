@@ -5,6 +5,7 @@
 // [Sync] 2026-09-27: cancel a single queued message by revision for card deletion and editing.
 // [Sync] 2026-09-27: preserve Admin's outcome_unknown receipt for ambiguous queue submissions.
 // [Sync] 2026-09-27: reject malformed queue receipts before they can corrupt Chat render state.
+// [Sync] 2026-09-28: only queued and selected inputs belong in the composer queue controls.
 import { browserRequestHeaders } from '../../lib/browserSession';
 import { API_BASE } from '../../lib/apiBase';
 
@@ -30,6 +31,10 @@ export interface ThreadInputSnapshot {
 
 export function canGuideThreadInput(entry: ThreadInputEntry, localOwner: boolean): boolean {
   return localOwner && entry.status === 'queued';
+}
+
+export function isThreadInputQueueCard(entry: ThreadInputEntry): boolean {
+  return entry.status === 'queued' || entry.status === 'selected';
 }
 
 export class ThreadInputError extends Error {

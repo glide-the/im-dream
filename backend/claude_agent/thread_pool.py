@@ -26,6 +26,8 @@
 #                    creation so queued same-thread turns cannot bypass it.
 # [Sync] 2026-09-01: count one server-owned Dream repair continuation while
 #                    retaining the same RUNNING lifecycle and factory lock.
+# [Sync] 2026-09-28: identify the exact turn whose SDK interrupt was acknowledged
+#                    for a selected queued input.
 
 """Claude Agent Thread Session Pool.
 
@@ -185,6 +187,8 @@ class AgentRunState:
     event_bus: Optional[Any] = field(default=None, repr=False)
     # Stable ID for the current inference turn (used as Redis Stream key suffix).
     current_turn_id: str = field(default_factory=lambda: str(uuid4()), repr=False)
+    # An acknowledged selected-input interrupt applies only to this turn.
+    guide_interrupt_turn_id: Optional[str] = field(default=None, repr=False)
     # Background asyncio.Task running execute_session for this turn.
     # Used by close_thread to cancel in-flight inference.
     bg_task: Optional[Any] = field(default=None, repr=False)
@@ -217,6 +221,7 @@ class AgentRunState:
         if self.lifecycle == AgentRunLifecycle.RUNNING:
             self.turn_count += 1
         self.lifecycle = AgentRunLifecycle.IDLE
+        self.guide_interrupt_turn_id = None
         self._last_active_ts = time.monotonic()
 
     def mark_turn_continued(self) -> None:
@@ -227,6 +232,7 @@ class AgentRunState:
                 f"Cannot continue non-RUNNING session {self.session_id!r}"
             )
         self.turn_count += 1
+        self.guide_interrupt_turn_id = None
         self._last_active_ts = time.monotonic()
 
     def mark_destroyed(self) -> None:
@@ -236,6 +242,7 @@ class AgentRunState:
         self.callbacks = None
         self.run_options = None
         self.event_bus = None
+        self.guide_interrupt_turn_id = None
         self.current_dream_context = None
         self.current_message_metadata = None
         self.current_message_id = None

@@ -1,5 +1,6 @@
 # [Sync] 2026-09-28: server result turns can ignore, but do not erase, the cached browser Editor snapshot.
 # [Sync] 2026-09-26: bound Thread resume missing/false/contract-mismatch cases fail closed.
+# [Sync] 2026-09-28: distinguish acknowledged guide interruption from an unrelated SDK failure.
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
 # [Sync] 2026-09-17: prove Gateway allowance rejection is a stable redacted SSE error.
 # [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
@@ -2446,6 +2447,109 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
 
 
 class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
+    def test_acknowledged_guide_terminal_cancels_only_its_own_turn(self):
+        async def scenario(
+            *, guide_acknowledged: bool, sdk_error: bool = False,
+            guide_turn_matches: bool = True,
+        ):
+            from claude_agent_sdk.types import ResultMessage
+
+            service = ClaudeAgentService(dream_artifact_turn_hook=unittest.mock.Mock())
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            state = AgentRunState(session_id="thread-guide-terminal")
+            if guide_acknowledged:
+                state.guide_interrupt_turn_id = (
+                    state.current_turn_id if guide_turn_matches else "other-turn"
+                )
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id=state.session_id,
+                message_parts=[{"type": "text", "text": "first"}],
+            )
+            terminal = ResultMessage(
+                subtype="error_during_execution",
+                duration_ms=1,
+                duration_api_ms=0,
+                is_error=True,
+                num_turns=1,
+                session_id="sdk-session",
+            )
+            if not hasattr(terminal, "is_error"):
+                terminal.is_error = True
+
+            class _InterruptedRunner:
+                async def run_streaming(self, opts, callbacks):
+                    del opts, callbacks
+                    return AgentRunResult(
+                        full_text="partial",
+                        session_id="sdk-session",
+                        success=not sdk_error,
+                        error=RuntimeError("provider failed") if sdk_error else None,
+                        messages=[terminal],
+                        protocol_completed=False,
+                        sdk_terminal_received=True,
+                    )
+
+            execution = service_module._TurnExecution(
+                request=request,
+                state=state,
+                runner=_InterruptedRunner(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+            )
+            with (
+                unittest.mock.patch.object(
+                    service, "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service, "_persist_partial_assistant",
+                    new=unittest.mock.AsyncMock(),
+                ) as persist_partial,
+            ):
+                await service.execute_session(execution)
+            frames = []
+            while not queue.empty():
+                frame = queue.get_nowait()
+                if frame is not None:
+                    frames.append(_parse_sse(frame))
+            return execution, state, persist_partial, frames
+
+        interrupted, state, partial, frames = _run(scenario(guide_acknowledged=True))
+        self.assertIsNone(state.guide_interrupt_turn_id)
+        self.assertTrue(interrupted.sdk_terminal_received)
+        self.assertFalse(interrupted.queue_result_failed)
+        self.assertEqual(partial.await_args.kwargs["turn_status"], "cancelled")
+        self.assertFalse(any(frame["type"] == "error" for frame in frames))
+        self.assertEqual(frames[-1]["finishReason"], "stop")
+        self.assertIs(frames[-1]["cancelled"], True)
+
+        failed, state, partial, frames = _run(scenario(guide_acknowledged=False))
+        self.assertIsNone(state.guide_interrupt_turn_id)
+        self.assertTrue(failed.queue_result_failed)
+        self.assertEqual(partial.await_args.kwargs["turn_status"], "error")
+        self.assertTrue(any(frame["type"] == "error" for frame in frames))
+        self.assertEqual(frames[-1]["finishReason"], "error")
+
+        failed, _state, partial, frames = _run(scenario(
+            guide_acknowledged=True, guide_turn_matches=False,
+        ))
+        self.assertTrue(failed.queue_result_failed)
+        self.assertEqual(partial.await_args.kwargs["turn_status"], "error")
+        self.assertTrue(any(frame["type"] == "error" for frame in frames))
+        self.assertEqual(frames[-1]["finishReason"], "error")
+
+        failed, state, partial, frames = _run(scenario(guide_acknowledged=True, sdk_error=True))
+        self.assertIsNone(state.guide_interrupt_turn_id)
+        self.assertTrue(failed.queue_result_failed)
+        self.assertEqual(partial.await_args.kwargs["turn_status"], "error")
+        self.assertTrue(any(frame["type"] == "error" for frame in frames))
+        self.assertEqual(frames[-1]["finishReason"], "error")
+
     def test_execute_session_emits_one_error_when_runner_also_calls_on_error(self):
         async def scenario():
             artifact_hook = unittest.mock.Mock()

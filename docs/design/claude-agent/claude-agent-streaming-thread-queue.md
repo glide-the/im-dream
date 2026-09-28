@@ -4,6 +4,8 @@
 <!-- [Sync] 2026-09-27: record Admin 0064-0067 schema/ACL publication and the live-turn acceptance boundary before final E2E. -->
 <!-- [Sync] 2026-09-27: link the implemented task-session v2 capability and four Tools while keeping the per-Thread queue design distinct. -->
 <!-- [Sync] 2026-09-27: close the live-turn acceptance boundary with normal-account Chrome, real SDK and normal-database evidence. -->
+<!-- [Sync] 2026-09-28: distinguish durable queue outcomes from composer card visibility once dispatch begins. -->
+<!-- [Sync] 2026-09-28: classify an acknowledged selected-input interrupt against the old turn's SDK terminal. -->
 <!-- [Sync] 2026-09-26: distinguish durable queue requirements from the current process-local turn and message contracts. -->
 
 # Dream Agent 运行中输入与 Thread 队列
@@ -64,15 +66,17 @@
 
 selected 是选中待引导、尚未提交 SDK 的状态；dispatching 是 Admin claim 已持久化且即将或正在发送。SDK query 返回不等于 consumed。失败或取消的消息不能再次选择；如需重发，必须创建新的用户消息和新 ID。普通停止仅停止当前响应，队列消息保留 queued；关闭业务任务需要独立业务操作。
 
+前端输入区只为 `queued` 和 `selected` 显示队列卡片。Admin claim 将状态推进到 `dispatching` 后，该消息退出输入控制栏，由已保存的用户消息和原对话回复承接显示；之后的 `consumed`、`failed`、`cancelled` 不重新生成卡片。`state_unknown` 通过输入区独立反馈提示核对并提供只读队列刷新。此展示规则不删除 Admin 记录、不改变状态转换，也不把卡片消失解释为 SDK 消费成功。已派发轮次失败仍由对话错误呈现；选中阶段的中断失败由操作错误呈现。已确认引导中断的旧轮次保存部分回复为 `cancelled`，不在消息区显示普通发送失败；选中的消息仍由自己的后续轮次给出结果。
+
 ## 推荐架构与接口
 
 Admin 提供原子 enqueue、list、select、claim、settle、cancel，并将 message_id、thread_id、用户消息、排序序号、revision、状态和派发轮次留在 PostgreSQL。Dream route 复用现有认证、Thread 所有权与消息 DTO；ThreadFactory 负责本地唯一 owner、队列唤醒、锁和 admission；Service 继续负责上下文、SDK 消息、权限确认与 assistant 持久化。Runner 每轮用新的 SDK 客户端，旧轮收到唯一 ResultMessage 后关闭；后续轮按已保存 session_id 恢复。EventBus 仍发布当前轮次事件；前端通过授权队列 GET 轮询恢复状态。
 
 公开协议：POST /api/claude-agent/threads/{thread_id}/inputs 接受原 Chat message.id 与单个非空文字 part，返回 message_id、queue_sequence、status、revision、text；GET 同路径返回授权队列与当前进程是否拥有 owner；POST /inputs/{message_id}/select 接受 expected_revision，返回新状态与 interrupt_signalled。首轮继续走原 POST /api/claude-agent；运行中前端改走输入端点。附件和 Editor 快照暂不进入排队路径；前端保留草稿并显示拒绝。现有 stop 路由继续返回 stop_requested 与核实后的 lifecycle。HTTP 接收成功只代表已排队，不代表 SDK 消费。
 
-首条消息创建 Thread 的现有 API 可复用。首轮不传 resume；SDK init 回执保存到 Admin。队列默认在旧轮唯一 ResultMessage 被接收且 Service 完成持久化后按序领取。新轮的 Service 必须找到已保存的 session_id 与本地转录；SDK connect 不能把缺失的 resume 降级为新会话。主动引导只能由本地 owner 操作：Admin 先选中，Runner interrupt 发控制请求，旧轮读取者继续等待唯一 ResultMessage；只有终态可核实时唯一消费者领取 selected。中断调用失败则把 selected 记为 failed；状态写入失败则停止本地消费。SDK 流断裂或进程 owner 消失时不得从 SSE 片段推断成功。
+首条消息创建 Thread 的现有 API 可复用。首轮不传 resume；SDK init 回执保存到 Admin。队列默认在旧轮唯一 ResultMessage 被接收且 Service 完成持久化后按序领取。新轮的 Service 必须找到已保存的 session_id 与本地转录；SDK connect 不能把缺失的 resume 降级为新会话。主动引导只能由本地 owner 操作：Admin 先选中，Runner interrupt 发控制请求，收到控制回执后将当前 turn_id 记为引导中断目标；旧轮读取者继续等待唯一 ResultMessage。Service 仅当该 turn_id 匹配、Runner 收到唯一 `error_during_execution` ResultMessage、未报告其他运行错误且终态校验未通过时，将旧轮部分回复持久化为 `cancelled` 并发送 `finish(cancelled=true)`，不发送通用 `error`。该判断只归类旧轮次，不代表 selected 已交给 SDK；唯一消费者仍须等旧轮终态后领取。其他 SDK 错误按原失败路径处理。中断调用失败则把 selected 记为 failed；状态写入失败则停止本地消费。SDK 流断裂或进程 owner 消失时不得从 SSE 片段推断成功。
 
-前端沿用 ChatPanel、AIInputDock、ChatMessageList 和现有 API 客户端。运行中发送成功后显示排队条目及其状态，且不触发第二个 useChat 推理流；选择仅对 queued 且有本地 owner 的记录可用。刷新时读历史和队列，并按现有运行状态决定是否重连 SSE；轮询只读取队列状态，不启动推理。队列不可用时保持草稿和同一重试消息 ID，展示明确失败。队列 capability 可用时，普通 Chat 请求先查询本 Thread 是否还有 queued、selected、dispatching 或 state_unknown；若有则返回 CHAT_INPUT_RECONCILIATION_REQUIRED，不能越过孤儿消息。服务端不把 Claude session_id、进程 ID、转录位置或取消句柄投影到浏览器。
+前端沿用 ChatPanel、AIInputDock、ChatMessageList 和现有 API 客户端。运行中发送成功后显示排队条目；卡片在服务端确认 `dispatching` 后退出输入区，且不触发第二个 useChat 推理流。选择仅对 queued 且有本地 owner 的记录可用。刷新时读历史和队列，并按现有运行状态决定是否重连 SSE；轮询只读取队列状态，不启动推理。队列不可用时保持草稿和同一重试消息 ID，展示明确失败。队列 capability 可用时，普通 Chat 请求先查询本 Thread 是否还有 queued、selected、dispatching 或 state_unknown；若有则返回 CHAT_INPUT_RECONCILIATION_REQUIRED，不能越过孤儿消息。服务端不把 Claude session_id、进程 ID、转录位置或取消句柄投影到浏览器。
 
 ## 四参与者时序
 

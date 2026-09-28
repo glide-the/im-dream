@@ -2,6 +2,8 @@
 # [Sync] 2026-09-28: let server result turns suppress a stale browser Editor snapshot without erasing the Thread cache.
 # [Sync] 2026-09-27: carry a server-owned task-result claim through pre-persisted source input and final assistant metadata.
 # [Sync] 2026-09-26: queued turns require the saved Claude session and SDK terminal evidence before settlement.
+# [Sync] 2026-09-28: treat an acknowledged selected-input SDK interruption as a
+#                    cancelled old turn only when its terminal result matches.
 # [Sync] 2026-09-17: use the turn-owned gateway-cli grant for authenticated model catalog selection.
 # [Sync] 2026-09-17: project the known Gateway allowance rejection as a safe structured SSE error for actionable Chat feedback.
 # [Sync] 2026-09-16: project the Admin gateway-cli grant into each Agent execution.
@@ -276,6 +278,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from claude_agent_sdk.types import ResultMessage
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from libs.claude_agent_kit.server.sdk_env import resolve_claude_config_home
@@ -2557,6 +2560,24 @@ class ClaudeAgentService:
             raise
 
         execution.sdk_terminal_received = getattr(result, "sdk_terminal_received", None) is True
+        guide_interrupt_acknowledged = (
+            execution.state.guide_interrupt_turn_id == execution.state.current_turn_id
+        )
+        if guide_interrupt_acknowledged:
+            execution.state.guide_interrupt_turn_id = None
+        guide_interrupt_terminal = (
+            guide_interrupt_acknowledged
+            and execution.sdk_terminal_received
+            and result.success
+            and result.error is None
+            and getattr(result, "protocol_completed", None) is False
+            and any(
+                isinstance(message, ResultMessage)
+                and message.subtype == "error_during_execution"
+                and getattr(message, "is_error", False) is True
+                for message in result.messages
+            )
+        )
 
         if result.success and getattr(result, "protocol_completed", None) is not False:
             full_text = result.full_text
@@ -2641,6 +2662,12 @@ class ClaudeAgentService:
             if story_output is not None:
                 await queue.put(_event("story-workspace-output", story_output))
             terminal = _event("finish", {"finishReason": "stop"})
+        elif guide_interrupt_terminal:
+            # The selected input is still only selected. Factory claims it
+            # after this SDK terminal and starts its own normal turn.
+            await self._persist_partial_assistant(execution, turn_status="cancelled")
+            await self.mark_auto_repair_failed(execution.request)
+            terminal = _event("finish", {"finishReason": "stop", "cancelled": True})
         else:
             result_error = result.error or RuntimeError(
                 "Claude turn ended without a trustworthy terminal ResultMessage."
