@@ -1,3 +1,5 @@
+# [Sync] 2026-09-28: bind the Thread Tool host provider before the current turn broker starts and refresh its request authorization at confirmation time.
+# [Sync] 2026-09-26: queue claim/list/settle reuse the bound Thread persistence grant.
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
 # [Output] Atomic turn/auto-repair persistence, delegated Notion DTO store, and provider-bound Session/current-Run broker.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
@@ -38,6 +40,7 @@ from .session_models import SessionListInputDTO, SessionListResultDTO, SessionPr
 from .session_projection_broker import (
     SessionProjectionBroker,
     SessionProjectionBrokerSettings,
+    ThreadToolCommandProvider,
 )
 from .run_data import AdminRunData, RunLookupInputDTO
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
@@ -199,6 +202,7 @@ class AdminTurnPersistence(
             settings=session_broker_settings,
             workflow_run_provider=self._session_projection_provider,
         )
+        self._thread_tool_provider: ThreadToolCommandProvider | None = None
 
     def start(self) -> None:
         with self._lock:
@@ -266,6 +270,36 @@ class AdminTurnPersistence(
                     raise AdminDataError("CHAT_MESSAGE_IDENTITY_CONFLICT", 409, known.request_id)
                 return known.result
             return self._write(PERSIST_USER_MESSAGE, input_dto, grant)
+
+    def list_queued_inputs(self, *, actor_id: str, thread_id: str):
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._chat.list_inputs(
+                ThreadIdInputDTO(thread_id=thread_id),
+                self._request_id_factory(),
+                access_token=grant.token,
+            ).entries
+
+    def transition_queued_input(
+        self, *, actor_id: str, thread_id: str, message_id: str,
+        expected_revision: int, action: str, dispatch_turn_id: str | None,
+    ):
+        from .chat_models import QueueTransitionInputDTO
+
+        input_dto = QueueTransitionInputDTO(
+            thread_id=thread_id,
+            message_id=message_id,
+            expected_revision=expected_revision,
+            action=action,
+            dispatch_turn_id=dispatch_turn_id,
+        )
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._chat.transition_input(
+                input_dto,
+                self._request_id_factory(),
+                access_token=grant.token,
+            ).entry
 
     def thread(self, *, actor_id: str, thread_id: str) -> ChatThreadDTO | None:
         with self._write_lock:
@@ -665,6 +699,21 @@ class AdminTurnPersistence(
         """Return only the started broker tuple for the user MCP child."""
 
         return self._session_projection_broker.child_env()
+
+    def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
+        """Bind one server-owned actor/turn before starting the child broker."""
+        self._session_projection_broker.bind_thread_tool_provider(provider)
+        with self._lock:
+            self._thread_tool_provider = provider
+
+    def refresh_thread_tool_authorization(self, current_user: dict) -> None:
+        """Replace the Thread Tool's expiring OAuth actor from an authenticated confirmation."""
+
+        with self._lock:
+            if self._closed or self._thread_tool_provider is None:
+                raise AdminDataError("THREAD_TOOL_UNAVAILABLE", 503)
+            provider = self._thread_tool_provider
+        provider.refresh_authorization(current_user)
 
     def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
         metadata: dict | None, history_final_text: str | None = None,

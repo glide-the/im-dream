@@ -8,6 +8,8 @@
 > - `backend/claude_agent/thread_factory.py` — 当前 turn 取消与完成确认
 > - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾
 
+> **[Sync 2026-09-27 / current composer behavior]** Chat 运行中输入和单一发送/停止操作位以 [Chat 排队输入 PRD](../../prd/chat/queued-input.md) 为准：有草稿显示发送，空草稿且主轮次运行显示停止。本文保留 Stop API 与当前 turn 取消语义。
+
 > **[Sync 2026-08-11 / current deployment boundary]** Stop 仍是拥有 active turn 的
 > `ClaudeAgentThreadFactory` 进程内控制操作。active-turn registry、`/status`、pending
 > confirmation Future 和 HTTP stream routing 都没有迁入 Redis。Redis EventBus 只为
@@ -64,8 +66,8 @@
 
 | 状态 | 触发 | UI |
 |---|---|---|
-| `running` | `useChat.status` 为 `submitted/streaming` 或 reconnect 中 | 显示停止按钮 |
-| `stopping` | 用户点击停止，stop API 请求未返回 | 停止按钮禁用，显示加载图标，输入保持不可发送 |
+| `running` | `useChat.status` 为 `submitted/streaming` 或 reconnect 中 | 空草稿显示停止按钮；有草稿显示发送按钮并进入当前 Thread 队列 |
+| `stopping` | 用户点击停止，stop API 请求未返回 | 空草稿时停止按钮禁用并显示加载图标；有草稿时按队列入口的服务端回执决定是否接受，失败保留草稿 |
 | `stopped` | history/status 恢复证明当前主 turn 已 idle/terminal | 停止按钮消失，恢复输入 |
 | `failed/uncertain` | stop API 非 2xx、超时、响应畸形或 `running=true` | 保持输入锁；立即读取 status 并重连当前 thread stream，直到权威 idle/terminal 后才声明 cancelled |
 

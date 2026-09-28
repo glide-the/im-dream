@@ -1,5 +1,5 @@
 // [Input] Thread-keyed useThreadSubagents store and ChatView-controlled sidebar state.
-// [Output] Compact subagent task header entry plus FileSidebar-shaped right detail panel.
+// [Output] Information-card subagent entry, host-selected Agent tool summary, and FileSidebar-shaped right detail panel.
 // [Pos] claude-subagent summary/detail component in frontend/app/_dream/components/chat
 // [Sync] 2026-08-04: task summary entry, chat-row task button, and focused active/completed/ended sidebar.
 // [Sync] 2026-08-05: render the latest result through the shared ChatMarkdown/prose chain.
@@ -8,8 +8,12 @@
 // [Sync] 2026-08-31: reuse the shared right-panel resize hook without changing Subagent presentation.
 // [Sync] 2026-09-02: share the existing localized duration presentation with
 //                    historical assistant turns through the pure chatDuration helper.
+// [Sync] 2026-09-27: render the existing summary trigger at task-activity card row size.
+// [Sync] 2026-09-27: render the canonical Chat message chip as passive while preserving other hosts' task-focus callback.
+// [Sync] 2026-09-28: match the existing Todo card density when rendered in task activity.
+// [Sync] 2026-09-28: let the task-activity host own refresh polling while retaining standalone defaults.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../../i18n';
 import { useResizableRightPanel } from '../../hooks/useResizableRightPanel';
@@ -36,6 +40,8 @@ interface SubagentButtonProps {
   threadId: string;
   open: boolean;
   onToggle: () => void;
+  inInfoCard?: boolean;
+  autoRefresh?: boolean;
 }
 
 interface SubagentSidebarProps {
@@ -184,17 +190,18 @@ function TaskDetail({ task }: { task: ThreadSubagentTask }) {
   );
 }
 
-export function SubagentButton({ threadId, open, onToggle }: SubagentButtonProps) {
+export function SubagentButton({ threadId, open, onToggle, inInfoCard = false, autoRefresh = true }: SubagentButtonProps) {
   const { t } = useTranslation();
   const state = useThreadSubagents(threadId);
 
   useEffect(() => {
+    if (!autoRefresh) return undefined;
     void hydrateThreadSubagents(threadId);
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void hydrateThreadSubagents(threadId);
     }, SUBAGENT_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [threadId]);
+  }, [autoRefresh, threadId]);
 
   const recentTasks = useMemo(() => {
     const byAgent = new Map<string, ThreadSubagentTask>();
@@ -222,7 +229,9 @@ export function SubagentButton({ threadId, open, onToggle }: SubagentButtonProps
       aria-label={t('chat.subagents.buttonAria', { summary })}
       title={t('chat.subagents.title')}
       style={{
-        height: '2rem',
+        minHeight: inInfoCard ? '2.75rem' : '2rem',
+        height: inInfoCard ? 'auto' : '2rem',
+        width: inInfoCard ? '100%' : undefined,
         minWidth: '2rem',
         border: '1px solid transparent',
         borderRadius: '0.55rem',
@@ -231,9 +240,9 @@ export function SubagentButton({ threadId, open, onToggle }: SubagentButtonProps
         cursor: 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '0.38rem',
-        padding: '0 0.45rem',
-        fontSize: '0.75rem',
+        gap: inInfoCard ? '0.65rem' : '0.38rem',
+        padding: inInfoCard ? '0.4rem 0.45rem' : '0 0.45rem',
+        fontSize: inInfoCard ? '0.9rem' : '0.75rem',
         transition: 'background 0.14s ease, color 0.14s ease',
       }}
       onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-surface)'; event.currentTarget.style.color = 'var(--color-text-primary)'; }}
@@ -285,14 +294,7 @@ export function SubagentToolButton({
   const statusLabel = task
     ? t(`chat.subagents.status.${task.status}`)
     : t('chat.subagents.launched');
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label={t('chat.subagents.openTask', { task: description })}
-      style={{
+  const style: CSSProperties = {
         maxWidth: '100%',
         width: 'fit-content',
         minHeight: '2.35rem',
@@ -304,21 +306,10 @@ export function SubagentToolButton({
         background: 'var(--color-bg-surface)',
         color: 'var(--color-text-primary)',
         padding: '0.28rem 0.72rem 0.28rem 0.32rem',
-        cursor: onClick ? 'pointer' : 'default',
         font: 'inherit',
         textAlign: 'left',
-        transition: 'background 0.14s ease, border-color 0.14s ease, transform 0.14s ease',
-      }}
-      onMouseEnter={(event) => {
-        if (!onClick) return;
-        event.currentTarget.style.background = 'var(--color-bg-hover)';
-        event.currentTarget.style.borderColor = 'var(--color-action-link)';
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.background = 'var(--color-bg-surface)';
-        event.currentTarget.style.borderColor = 'var(--color-border-paper)';
-      }}
-    >
+  };
+  const content = <>
       <AgentAvatar task={displayTask} size="1.45rem" />
       <span style={{ minWidth: 0, maxWidth: '22rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.86rem', fontWeight: 600 }}>
         {description}
@@ -326,9 +317,9 @@ export function SubagentToolButton({
       <span style={{ flexShrink: 0, color: task ? STATUS_COLORS[task.status] : 'var(--color-text-muted)', fontSize: '0.78rem' }}>
         {statusLabel}
       </span>
-      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>›</span>
-    </button>
-  );
+  </>;
+  if (!onClick) return <div title={description} style={style}>{content}</div>;
+  return <button type="button" onClick={onClick} aria-label={t('chat.subagents.openTask', { task: description })} style={{ ...style, cursor: 'pointer' }}>{content}</button>;
 }
 
 export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: SubagentSidebarProps) {

@@ -2,6 +2,8 @@
 // [Output] Dream shell composition of the canonical ChatPanel/session contract.
 // [Pos] Business-surface adapter only; owns no transport, parser, or live reducer.
 // [Sync] 2026-09-02: pass the shared message-page cursor through hydration/recovery.
+// [Sync] 2026-09-27: navigate persisted source/created task relations within the Story Workspace Chat rail.
+// [Sync] 2026-09-27: open a queued message in an independent task Chat sidebar from the shared Dream panel.
 // [Sync] 2026-09-07: provide the shared Workspace capability state to direct Dream ChatPanel hosts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -10,6 +12,7 @@ import ChatPanel, {
   type ChatPanelRecoverySnapshot,
 } from '../../chat/ChatPanel';
 import { SubagentSidebar } from '../../chat/SubagentPanel';
+import TaskSessionSidebar from '../../chat/TaskSessionSidebar';
 import {
   claudeThreadExpectedDispatchIsTerminal,
   claudeThreadHydrationRetryDelayMs,
@@ -40,6 +43,7 @@ export function StoryWorkspaceDreamThreadChat({
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
   const [terminalHistoryGeneration, setTerminalHistoryGeneration] = useState(0);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
+  const [sideTaskThreadId, setSideTaskThreadId] = useState<string | null>(null);
   const [focusedSubagentToolCallId, setFocusedSubagentToolCallId] = useState<string | null>(null);
   const generationRef = useRef(0);
   const hydratedThreadIdRef = useRef<string | null>(null);
@@ -78,6 +82,7 @@ export function StoryWorkspaceDreamThreadChat({
     setIsLoading(true);
     setHydrationFailed(false);
     setSubagentSidebarOpen(false);
+    setSideTaskThreadId(null);
     setFocusedSubagentToolCallId(null);
     const generation = generationRef.current;
     let observationTimer: number | null = null;
@@ -217,6 +222,15 @@ export function StoryWorkspaceDreamThreadChat({
           onOpenSubagentTask={(toolCallId) => {
             setFocusedSubagentToolCallId(toolCallId);
             setSubagentSidebarOpen(true);
+            setSideTaskThreadId(null);
+          }}
+          onOpenTaskThread={(taskThreadId) => {
+            setSubagentSidebarOpen(false);
+            setSideTaskThreadId(taskThreadId);
+          }}
+          onNavigateThread={(taskThreadId) => {
+            setSubagentSidebarOpen(false);
+            setSideTaskThreadId(taskThreadId === threadId ? null : taskThreadId);
           }}
           onReconnectComplete={recover}
           reconnectStreamNonce={chatReconnectNonceForHydratedThread(
@@ -230,6 +244,9 @@ export function StoryWorkspaceDreamThreadChat({
           open={subagentSidebarOpen}
           threadId={threadId}
         />
+        {sideTaskThreadId ? <TaskSessionSidebar threadId={sideTaskThreadId}
+          onClose={() => setSideTaskThreadId(null)} onOpenTaskThread={setSideTaskThreadId}
+          onNavigateThread={(taskThreadId) => setSideTaskThreadId(taskThreadId === threadId ? null : taskThreadId)} /> : null}
       </div>
     </WorkspaceProvider>
   );

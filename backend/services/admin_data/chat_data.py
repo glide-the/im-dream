@@ -1,3 +1,7 @@
+# [Sync] 2026-09-27: bind returning task creation to Admin's separate operation without changing side-task defaults.
+# [Sync] 2026-09-27: bind task-session source/created navigation to its exact Admin operation hash.
+# [Sync] 2026-09-27: bind task-session create/get/launch to exact Admin operation hashes.
+# [Sync] 2026-09-26: bind queue enqueue/list/transition to exact Admin operation hashes.
 # [Input] Exact Admin chat operation artifact and strict domain DTOs, with explicit user/turn credentials.
 # [Output] Named typed Chat HTTP operations; original request IDs and receipt lookup remain explicit.
 # [Pos] Chat domain consumer; never accepts user IDs, database rows, SQL or remote transaction handles.
@@ -93,8 +97,56 @@ LATEST_MESSAGE = DomainOperation(
         contract_sha256='d14f4edbe51b5c61f71c77f8200646cb5f9a2ea9d006743ff0586d2b39c5893a'),
     dto.ThreadIdInputDTO, dto.LatestMessageResultDTO,
 )
+ENQUEUE_INPUT = DomainOperation(
+    OperationCapabilityDTO(name='chat-input.enqueue', kind='write', user_scope='dream:write',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='eb7bb85cd5e3726660264d5e8ff7ff94fdfbb7ebd9aa885a63473d74e639e087'),
+    dto.QueueEnqueueInputDTO, dto.QueueEntryResultDTO,
+)
+LIST_INPUTS = DomainOperation(
+    OperationCapabilityDTO(name='chat-input.list', kind='read', user_scope='dream:read',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='d672093facd591589bd2ee3099a9bbc4009b21a28292b1563f6fae38a19d5196'),
+    dto.ThreadIdInputDTO, dto.QueueListResultDTO,
+)
+TRANSITION_INPUT = DomainOperation(
+    OperationCapabilityDTO(name='chat-input.transition', kind='write', user_scope='dream:write',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='b79ef9d4c8c82de0ae9f7759b06300ac4585a90707661be5d1b5be6afe56edb4'),
+    dto.QueueTransitionInputDTO, dto.QueueEntryResultDTO,
+)
+CREATE_TASK_SESSION = DomainOperation(
+    OperationCapabilityDTO(name='task-session.create', kind='write', user_scope='dream:write',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='50a550fee373c57761d97b2cd56eada5fd4dfdcad4eaefa846b759ae29dcbefb'),
+    dto.TaskSessionCreateInputDTO, dto.TaskSessionResultDTO,
+)
+CREATE_RETURNING_TASK_SESSION = DomainOperation(
+    OperationCapabilityDTO(name='task-session.create-returning', kind='write', user_scope='dream:write',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='1bfce994c2c010b1fc0502c83622a261ef822c33662de32db983cc2b7b3564cf'),
+    dto.TaskSessionCreateInputDTO, dto.TaskSessionResultDTO,
+)
+GET_TASK_SESSION = DomainOperation(
+    OperationCapabilityDTO(name='task-session.get', kind='read', user_scope='dream:read',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='442e68f7fd93ae7f285eaf5ccc591d3211fc07fb498c3a73fc53eaa2de127184'),
+    dto.TaskSessionGetInputDTO, dto.TaskSessionResultDTO,
+)
+LIST_TASK_SESSION_LINKS = DomainOperation(
+    OperationCapabilityDTO(name='task-session.links', kind='read', user_scope='dream:read',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='f9c1bcfec4308aa6fc8f0bc977a48f34b95cb719b143b0544f6b1178edb7f1b3'),
+    dto.ThreadIdInputDTO, dto.TaskSessionLinksResultDTO,
+)
+LAUNCH_TASK_SESSION = DomainOperation(
+    OperationCapabilityDTO(name='task-session.launch', kind='write', user_scope='dream:write',
+        background_scope=None, input_schema_version=1, output_schema_version=1,
+        contract_sha256='03dd117fe923da921eb81f2e22241c6971bbeb3942231f65a5996ca2267e1dcd'),
+    dto.TaskSessionLaunchInputDTO, dto.TaskSessionLaunchResultDTO,
+)
 
-CHAT_OPERATIONS = (CREATE_THREAD, GET_THREAD, LIST_THREADS, SEARCH_THREADS, DELETE_THREAD, BIND_DECK, SELECT_VOICE, UPDATE_TITLE, UPDATE_SESSION, PERSIST_MESSAGE, LIST_MESSAGES, MESSAGE_PAGE, PROCESS_DETAIL, LATEST_MESSAGE,)
+CHAT_OPERATIONS = (CREATE_THREAD, GET_THREAD, LIST_THREADS, SEARCH_THREADS, DELETE_THREAD, BIND_DECK, SELECT_VOICE, UPDATE_TITLE, UPDATE_SESSION, PERSIST_MESSAGE, LIST_MESSAGES, MESSAGE_PAGE, PROCESS_DETAIL, LATEST_MESSAGE, ENQUEUE_INPUT, LIST_INPUTS, TRANSITION_INPUT, CREATE_TASK_SESSION, CREATE_RETURNING_TASK_SESSION, GET_TASK_SESSION, LIST_TASK_SESSION_LINKS, LAUNCH_TASK_SESSION,)
 
 
 class AdminChatData:
@@ -152,3 +204,27 @@ class AdminChatData:
 
     def latest_message(self, input_dto: dto.ThreadIdInputDTO, request_id: str, *, access_token: str) -> dto.LatestMessageResultDTO:
         return self._client.execute(LATEST_MESSAGE, input_dto, request_id, access_token=access_token)
+
+    def enqueue_input(self, input_dto: dto.QueueEnqueueInputDTO, request_id: str, *, access_token: str) -> dto.QueueEntryResultDTO:
+        return self._client.execute(ENQUEUE_INPUT, input_dto, request_id, access_token=access_token)
+
+    def list_inputs(self, input_dto: dto.ThreadIdInputDTO, request_id: str, *, access_token: str) -> dto.QueueListResultDTO:
+        return self._client.execute(LIST_INPUTS, input_dto, request_id, access_token=access_token)
+
+    def transition_input(self, input_dto: dto.QueueTransitionInputDTO, request_id: str, *, access_token: str) -> dto.QueueEntryResultDTO:
+        return self._client.execute(TRANSITION_INPUT, input_dto, request_id, access_token=access_token)
+
+    def create_task_session(self, input_dto: dto.TaskSessionCreateInputDTO, request_id: str, *, access_token: str) -> dto.TaskSessionResultDTO:
+        return self._client.execute(CREATE_TASK_SESSION, input_dto, request_id, access_token=access_token)
+
+    def create_returning_task_session(self, input_dto: dto.TaskSessionCreateInputDTO, request_id: str, *, access_token: str) -> dto.TaskSessionResultDTO:
+        return self._client.execute(CREATE_RETURNING_TASK_SESSION, input_dto, request_id, access_token=access_token)
+
+    def get_task_session(self, input_dto: dto.TaskSessionGetInputDTO, request_id: str, *, access_token: str) -> dto.TaskSessionResultDTO:
+        return self._client.execute(GET_TASK_SESSION, input_dto, request_id, access_token=access_token)
+
+    def list_task_session_links(self, input_dto: dto.ThreadIdInputDTO, request_id: str, *, access_token: str) -> dto.TaskSessionLinksResultDTO:
+        return self._client.execute(LIST_TASK_SESSION_LINKS, input_dto, request_id, access_token=access_token)
+
+    def launch_task_session(self, input_dto: dto.TaskSessionLaunchInputDTO, request_id: str, *, access_token: str) -> dto.TaskSessionLaunchResultDTO:
+        return self._client.execute(LAUNCH_TASK_SESSION, input_dto, request_id, access_token=access_token)

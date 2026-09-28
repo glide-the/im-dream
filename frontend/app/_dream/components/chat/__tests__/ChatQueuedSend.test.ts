@@ -4,6 +4,7 @@
 // [Sync] 2026-08-24: serve the shell's read-only Dream Run collection, classify
 //                    its StrictMode cleanup abort, and retain strict failure.
 // [Sync] 2026-09-05: serve the shell's read-only common Skill command catalog.
+// [Sync] 2026-09-27: fixture the queue snapshot while proving first-turn streamed text remains visible.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -203,6 +204,14 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
           pending_tool_call_ids: [],
           tool_confirmation_observation: 'known',
         }),
+      });
+      return;
+    }
+    if (path === '/api/claude-agent/threads/thread-single-send/inputs' && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ entries: [], local_owner: false }),
       });
       return;
     }

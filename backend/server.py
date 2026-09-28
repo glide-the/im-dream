@@ -6,6 +6,8 @@
 # [Sync] 2026-09-16: isolate FastAPI from retired auth secrets and the Next-only BFF cookie key.
 # [Sync] 2026-09-16: seed builtin Claude Plugins through Registry183-184 without Dream database access.
 # [Sync] 2026-09-16: bind the Registry121 claim-turn owner before confirmation reconciliation.
+# [Sync] 2026-09-28: retire background task-result source turns; parent agents now wait through wait_threads.
+# [Historical Sync] 2026-09-27: reconciled Admin task results into source Thread turns before Factory shutdown.
 # [Sync] 2026-09-16: compose managed MCP with the application-owned AdminDataClient at startup.
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.

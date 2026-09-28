@@ -1,3 +1,5 @@
+# [Sync] 2026-09-28: route wait_threads long polls through the current turn's private host provider.
+# [Sync] 2026-09-28: route create/list/read/send Thread Tool commands through the current turn's private host provider.
 # [Input] Bound Session/current-Run projection providers, strict loopback DTOs and server transport bounds.
 # [Output] A turn-local capability broker that stops acceptance and drains dispatched reads on close.
 # [Pos] Server-only turn projection transport; child processes receive no Admin or database credential.
@@ -33,6 +35,9 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     WorkflowRunProjectionRequestDTO,
     WorkflowRunProjectionResponseDTO,
     WorkflowRunProjectionResultDTO,
+    ThreadToolCommandRequestDTO,
+    ThreadToolCommandResultDTO,
+    ThreadToolCommandResponseDTO,
 )
 
 from models.workflow_run import WorkflowRun
@@ -56,6 +61,12 @@ class WorkflowRunProjectionProvider(Protocol):
     """Host provider whose identity and current Run are fixed before startup."""
 
     def current_workflow_run(self, request_id: str) -> WorkflowRun: ...
+
+
+class ThreadToolCommandProvider(Protocol):
+    def refresh_authorization(self, current_user: dict) -> None: ...
+
+    def perform_thread_tool(self, request: ThreadToolCommandRequestDTO) -> ThreadToolCommandResultDTO: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +103,7 @@ class SessionProjectionBroker:
     ) -> None:
         self._provider = provider
         self._workflow_run_provider = workflow_run_provider
+        self._thread_tool_provider: ThreadToolCommandProvider | None = None
         self._settings = settings
         self._capability = secrets.token_urlsafe(32)
         TypeAdapter(SessionProjectionRequestDTO).validate_python(
@@ -134,7 +146,23 @@ class SessionProjectionBroker:
             untrusted = json.loads(raw)
             if not isinstance(untrusted, dict):
                 raise ValueError("Broker request must be an object")
-            if untrusted.get("operation") == "workflow-run.current":
+            if isinstance(untrusted.get("operation"), str) and untrusted["operation"].startswith("thread."):
+                request = ThreadToolCommandRequestDTO.model_validate(untrusted, strict=True)
+                request_id = request.request_id
+                if not hmac.compare_digest(request.capability, self._capability):
+                    raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
+                with self._action_lock:
+                    with self._lock:
+                        if self._closed:
+                            raise AdminDataError("SESSION_BROKER_UNAVAILABLE", 503, request_id)
+                        provider = self._thread_tool_provider
+                    if provider is None:
+                        raise AdminDataError("THREAD_TOOL_UNAVAILABLE", 503, request_id)
+                    result = provider.perform_thread_tool(request)
+                if type(result) is not ThreadToolCommandResultDTO:
+                    raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
+                payload = ThreadToolCommandResponseDTO(ok=True, result=result).model_dump_json().encode("utf-8") + b"\n"
+            elif untrusted.get("operation") == "workflow-run.current":
                 request = WorkflowRunProjectionRequestDTO.model_validate(
                     untrusted, strict=True
                 )
@@ -221,6 +249,12 @@ class SessionProjectionBroker:
                 "SESSION_BROKER_RESPONSE_TOO_LARGE", 503, request_id
             )
         return payload if len(payload) <= self._settings.max_bytes else b""
+
+    def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
+        with self._lock:
+            if self._closed or self._server is not None or self._thread_tool_provider is not None:
+                raise AdminDataError("THREAD_TOOL_BINDING_INVALID", 503)
+            self._thread_tool_provider = provider
 
     def start(self) -> None:
         with self._lock:

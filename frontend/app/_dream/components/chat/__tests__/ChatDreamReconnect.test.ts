@@ -10,6 +10,11 @@
 //                    the observed GET must reach the test-owned middleware.
 // [Sync] 2026-09-07: split metadata from the first text frame so a running
 //                    re-entry proves callback churn cannot abort live replay.
+// [Sync] 2026-09-28: verify shell task navigation without the retired task-result card/polling path.
+//                    across source and child Threads without another Chat POST.
+// [Sync] 2026-09-28: an already-open idle source Chat hydrates a later child result and attaches a running return turn without reload or another POST.
+// [Sync] 2026-09-28: source Chat renders its created-task list inside the assistant reply and the
+//                    separate task-activity popover while Deck metadata remains unchanged.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -55,6 +60,9 @@ test('refresh reconnects the same running turn without duplicate POST or message
   const ordinaryChatRequests: Array<Record<string, unknown>> = [];
   let reconnectStarted = false;
   let reconnectFinished = false;
+  const childResultDelivered = false;
+  const secondChildDispatching = false;
+  let secondChildDelivered = false;
   let reconnectStreamRequests = 0;
   const harnessPort = await reserveEphemeralPort();
   const server = await createServer({
@@ -90,6 +98,22 @@ test('refresh reconnects the same running turn without duplicate POST or message
               response.statusCode = 409;
               response.setHeader('Content-Type', 'application/json');
               response.end('{"detail":"Thread is not running"}');
+              return;
+            }
+            if (reconnectStreamRequests === 3) {
+              response.statusCode = 200;
+              response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+              response.setHeader('Cache-Control', 'no-cache, no-transform');
+              response.write('data: {"type":"message-metadata","turnId":"return-turn-two"}\n\n');
+              secondChildDelivered = true;
+              response.end([
+                'data: {"type":"text-start","id":"return-two-text"}',
+                'data: {"type":"text-delta","id":"return-two-text","delta":"Second child result arrived"}',
+                'data: {"type":"text-end","id":"return-two-text"}',
+                'data: {"type":"message-final","text":"Second child result arrived"}',
+                'data: {"type":"finish","finishReason":"stop"}',
+                '',
+              ].join('\n\n'));
               return;
             }
             response.statusCode = 200;
@@ -130,7 +154,10 @@ test('refresh reconnects the same running turn without duplicate POST or message
             requestPath === '/api/claude-agent/threads/thread-dream-chat/messages'
             && streamRequest.method === 'GET'
           ) {
-            const latestMessageId = reconnectFinished ? 'dream-assistant' : 'dream-user';
+            const latestMessageId = secondChildDelivered ? 'return-two-final'
+              : secondChildDispatching ? 'return-two-input'
+                : childResultDelivered ? 'return-final'
+                  : reconnectFinished ? 'dream-assistant' : 'dream-user';
             const knownLatestMessageId = new URL(
               requestUrl,
               'http://127.0.0.1',
@@ -155,6 +182,31 @@ test('refresh reconnects the same running turn without duplicate POST or message
               metadata: {},
               created_at: '2026-08-11T00:00:01Z',
             });
+            if (childResultDelivered) messages.push({
+              id: 'return-input',
+              role: 'user',
+              parts: [{ type: 'text', text: 'Technical task handoff input' }],
+              metadata: { kind: 'task-session-result' },
+              created_at: '2026-08-11T00:00:02Z',
+            }, {
+              id: 'return-final',
+              role: 'assistant',
+              parts: [{ type: 'text', text: 'I reviewed the child result' }],
+              metadata: { turnStatus: 'completed', taskResultNotificationId: 'notice-child' },
+              created_at: '2026-08-11T00:00:04Z',
+            });
+            if (secondChildDispatching) messages.push({
+              id: 'return-two-input', role: 'user',
+              parts: [{ type: 'text', text: 'Second technical handoff input' }],
+              metadata: { kind: 'task-session-result' },
+              created_at: '2026-08-11T00:00:05Z',
+            });
+            if (secondChildDelivered) messages.push({
+              id: 'return-two-final', role: 'assistant',
+              parts: [{ type: 'text', text: 'Second child result arrived' }],
+              metadata: { turnStatus: 'completed', taskResultNotificationId: 'notice-two' },
+              created_at: '2026-08-11T00:00:06Z',
+            });
             response.statusCode = 200;
             response.setHeader('Content-Type', 'application/json');
             response.end(JSON.stringify({
@@ -173,17 +225,117 @@ test('refresh reconnects the same running turn without duplicate POST or message
             return;
           }
           if (
+            requestPath === '/api/claude-agent/threads/thread-child-task/messages'
+            && streamRequest.method === 'GET'
+          ) {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              thread: {
+                id: 'thread-child-task', title: 'Inspect the note',
+                created_at: '2026-08-11T00:00:02Z', updated_at: '2026-08-11T00:00:03Z',
+              },
+              messages: [{
+                id: 'child-user', role: 'user',
+                parts: [{ type: 'text', text: 'Please inspect the note' }],
+                metadata: {}, created_at: '2026-08-11T00:00:02Z',
+              }, {
+                id: 'child-final', role: 'assistant',
+                parts: [{ type: 'text', text: 'The note was reviewed' }],
+                metadata: {}, created_at: '2026-08-11T00:00:03Z',
+              }],
+              next_cursor: null, has_more: false,
+              latest_message_id: 'child-final', unchanged: false,
+            }));
+            return;
+          }
+          if (
             requestPath === '/api/claude-agent/threads/thread-dream-chat/status'
             && streamRequest.method === 'GET'
           ) {
             response.statusCode = 200;
             response.setHeader('Content-Type', 'application/json');
             response.end(JSON.stringify({
-              running: !reconnectFinished,
-              lifecycle: reconnectFinished ? 'idle' : 'running',
+              running: !reconnectFinished || (secondChildDispatching && !secondChildDelivered),
+              lifecycle: !reconnectFinished || (secondChildDispatching && !secondChildDelivered)
+                ? 'running' : 'idle',
               turn_count: reconnectFinished ? 1 : 0,
               pending_tool_call_ids: [],
               tool_confirmation_observation: 'known',
+            }));
+            return;
+          }
+          if (requestPath === '/api/claude-agent/threads/thread-child-task/status') {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              running: false, lifecycle: 'idle', turn_count: 1,
+              pending_tool_call_ids: [], tool_confirmation_observation: 'known',
+            }));
+            return;
+          }
+          if (requestPath.endsWith('/task-links')) {
+            const relation = {
+              task_id: 'task-child', source_thread_id: 'thread-dream-chat',
+              thread_id: 'thread-child-task', title: 'Inspect the note',
+              launch_status: 'starting', launch_error_code: null,
+              created_at: '2026-08-11T00:00:02Z',
+            };
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify(requestPath.includes('/thread-child-task/')
+              ? { source: { ...relation, source_title: 'Dream source thread' }, created: [] }
+              : { source: null, created: [relation] }));
+            return;
+          }
+          if (requestPath === '/api/claude-agent/threads/thread-dream-chat/tasks/task-child') {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              task_id: 'task-child', thread_id: 'thread-child-task',
+              title: 'Inspect the note', launch_status: 'starting',
+              error_code: null, status: 'completed', running: false,
+              result_message_id: 'child-final', result_text: 'The note was reviewed',
+            }));
+            return;
+          }
+          if (requestPath.endsWith('/task-results')) {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              results: requestPath.includes('/thread-child-task/') ? [] : [{
+                notification_id: 'notice-child',
+                task_id: 'task-child',
+                source_thread_id: 'thread-dream-chat',
+                target_thread_id: 'thread-child-task',
+                target_turn_id: 'child-turn',
+                target_final_message_id: 'child-final',
+                title: 'Inspect the note',
+                final_text: 'The note was reviewed',
+                status: childResultDelivered ? 'delivered' : 'pending',
+                revision: childResultDelivered ? 3 : 1,
+                claim_id: 'claim-child', source_turn_id: 'return-turn',
+                source_input_message_id: 'return-input',
+                source_final_message_id: 'return-final',
+                error_code: null,
+                created_at: '2026-08-11T00:00:03Z',
+                updated_at: '2026-08-11T00:00:04Z',
+              }, ...(secondChildDispatching ? [{
+                notification_id: 'notice-two', task_id: 'task-two',
+                source_thread_id: 'thread-dream-chat',
+                target_thread_id: 'thread-child-task',
+                target_turn_id: 'child-turn-two',
+                target_final_message_id: 'child-final-two',
+                title: 'Inspect another note', final_text: 'A second note was reviewed',
+                status: secondChildDelivered ? 'delivered' : 'dispatching',
+                revision: secondChildDelivered ? 3 : 2,
+                claim_id: 'claim-two', source_turn_id: 'return-turn-two',
+                source_input_message_id: 'return-two-input',
+                source_final_message_id: secondChildDelivered ? 'return-two-final' : null,
+                error_code: null,
+                created_at: '2026-08-11T00:00:05Z',
+                updated_at: '2026-08-11T00:00:06Z',
+              }] : [])],
             }));
             return;
           }
@@ -238,7 +390,10 @@ test('refresh reconnects the same running turn without duplicate POST or message
   const diagnostics: string[] = [];
   const observedApiRequests: string[] = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') diagnostics.push(message.text());
+    if (message.type() !== 'error') return;
+    if (reconnectFinished
+      && message.text() === 'Failed to load resource: the server responded with a status of 409 (Conflict)') return;
+    diagnostics.push(message.text());
   });
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
@@ -246,7 +401,6 @@ test('refresh reconnects the same running turn without duplicate POST or message
     if (
       requestPath === '/api/claude-agent/threads/thread-dream-chat/stream'
       && request.failure()?.errorText === 'net::ERR_ABORTED'
-      && !reconnectFinished
     ) return;
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
@@ -287,6 +441,9 @@ test('refresh reconnects the same running turn without duplicate POST or message
     await expect(page.getByText('Dream terminal persisted in Chat', { exact: true })).toBeVisible();
     await expect(page.getByText('Dream source message', { exact: true })).toHaveCount(1);
     await expect(page.getByText('Dream terminal persisted in Chat', { exact: true })).toHaveCount(1);
+    await expect(page.getByRole('region', { name: 'Task result' })).toHaveCount(0);
+    expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
+      .toHaveLength(0);
 
     const input = page.getByRole('textbox', { name: 'Chat input' });
     await expect(input).toBeEnabled();
@@ -305,6 +462,19 @@ test('refresh reconnects the same running turn without duplicate POST or message
     expect(observedApiRequests.filter((request) => (
       request === 'GET /api/claude-agent/threads/thread-dream-chat/stream'
     ))).toHaveLength(2);
+    expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
+      .toHaveLength(1);
+    expect(observedApiRequests.some((request) => request.endsWith('/task-results'))).toBe(false);
+    await expect(page.getByRole('region', { name: 'Tasks created by this conversation' }))
+      .toContainText('Inspect the note');
+    await page.getByRole('button', { name: 'Task activity' }).click();
+    await expect(page.getByRole('dialog', { name: 'Task activity' })).toContainText('Inspect the note');
+    await expect(page.getByRole('dialog', { name: 'Task activity' })).toContainText('Completed');
+    await page.getByRole('button', { name: 'Inspect the note Completed' }).click();
+    await expect(page.getByText('Please inspect the note', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Open the source conversation' }).click();
+    await expect(page.getByText('Dream source message', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Task result' })).toHaveCount(0);
     expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
       .toHaveLength(1);
     expect(diagnostics).toEqual([]);

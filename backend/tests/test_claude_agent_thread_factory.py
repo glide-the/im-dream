@@ -16,6 +16,8 @@
 # [Sync] 2026-09-16: cover Admin-owned confirmation turn lifecycle while the
 #                    existing per-Thread Runtime lock serializes execution.
 # [Sync] 2026-09-16: retire the service-level Dream SQL binding error after Admin moved conflicts to ingress.
+# [Sync] 2026-09-28: distinguish first-turn completion from the Factory owner's queued-input lifecycle.
+# [Sync] 2026-09-28: resolve owner completion even when shutdown rejects a stream before starting its turn.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -480,6 +482,53 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
 
         self.assertTrue(frames)
         self.assertTrue(completion.saw_finish)
+
+    def test_owner_completion_waits_past_first_turn_until_queue_drain_exits(self):
+        async def collect():
+            release = asyncio.Event()
+            checking_queue = asyncio.Event()
+
+            original_execute = self.factory._service.execute_session
+
+            async def completed_execute(execution):
+                await original_execute(execution)
+                execution.sdk_terminal_received = True
+                return None
+
+            self.factory._service.execute_session = completed_execute
+
+            async def delayed_claim(_request, _state):
+                checking_queue.set()
+                await release.wait()
+                return None
+
+            self.factory._claim_next_input = delayed_claim
+            stream = self.factory.run_streaming(_make_request("owner-completion"))
+            frames = [frame async for frame in stream]
+            await asyncio.wait_for(checking_queue.wait(), timeout=1)
+            first_completed = (await stream.completion).saw_finish
+            owner_still_running = not stream.owner_completion.done()
+            release.set()
+            await asyncio.wait_for(stream.owner_completion, timeout=1)
+            return frames, first_completed, owner_still_running
+
+        with unittest.mock.patch(
+            "claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner,
+        ):
+            frames, first_completed, owner_still_running = _run(collect())
+        self.assertTrue(frames)
+        self.assertTrue(first_completed)
+        self.assertTrue(owner_still_running)
+
+    def test_rejected_stream_resolves_owner_completion_without_starting_turn(self):
+        async def collect():
+            await self.factory.aclose()
+            stream = self.factory.run_streaming(_make_request("rejected-owner"))
+            with self.assertRaisesRegex(RuntimeError, "is closing"):
+                await anext(stream)
+            return stream.owner_completion.done()
+
+        self.assertTrue(_run(collect()))
 
     def test_runner_reused_on_second_turn(self):
         req = _make_request("user_runner_2")

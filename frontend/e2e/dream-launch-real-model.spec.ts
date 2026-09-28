@@ -5,6 +5,7 @@
 //                    an enabled visible recovery action.
 // [Sync] 2026-08-25: launch a Dream from the canonical Chat composer instead of
 //                    the read-only Dream inventory route.
+// [Sync] 2026-09-28: address the existing environment-information entry after its content consolidation.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -223,7 +224,7 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   await expectPageFitsViewport(page);
   const chatInput = page.getByRole('textbox', { name: '聊天输入' });
   await expect(chatInput).toBeInViewport();
-  await expect(page.getByRole('button', { name: 'Deck 元信息' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '环境信息' })).toBeVisible();
   const humanProjectName = `雨夜末班车·${new Date().toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour12: false,

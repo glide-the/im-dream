@@ -2,6 +2,8 @@
 // [Output] Regression coverage for the user-visible slash shortcut menu: draft trigger, listbox rendering, keyboard selection, dismissal, and silent catalog-failure degrade.
 // [Pos] AIInputDock slash menu regression contract in frontend/app/_dream/components/chat/__tests__.
 // [Sync] 2026-09-18: cover Enter send, Shift+Enter newline, IME composition, disabled/loading states, and mobile send visibility.
+// [Sync] 2026-09-26: verify the real composer accepts input beside Stop and restores a rejected queued draft in local Chrome.
+// [Sync] 2026-09-27: assert the single trailing action switches between Stop and Send with draft state and stays within narrow columns.
 
 import { expect, test, type Page } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -10,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer as createNetServer } from 'node:net';
 import { createServer, type ViteDevServer } from 'vite';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chrome' });
 
 const HARNESS_PATH = '/ai-input-dock-slash-menu';
 
@@ -50,14 +52,18 @@ function harnessModule(sentLogKey: string): string {
       const [sentCount, setSentCount] = useState(0);
       const [disabled, setDisabled] = useState(false);
       const [loading, setLoading] = useState(false);
+      const [activeTurn, setActiveTurn] = useState(false);
+      const [rejectSend, setRejectSend] = useState(false);
       return React.createElement(
         'main',
         { style: { width: '100%', maxWidth: '52rem', margin: '0 auto' } },
         React.createElement(AIInputDock, {
           disabled,
           loading,
+          onStop: activeTurn ? () => {} : undefined,
           mode: 'full',
           onSendMessage: (message) => {
+            if (rejectSend) return Promise.reject(new Error('queue rejected'));
             window.${sentLogKey}.push(message);
             setSentCount((current) => current + 1);
           },
@@ -66,6 +72,8 @@ function harnessModule(sentLogKey: string): string {
         React.createElement('output', { 'data-testid': 'sent-count' }, String(sentCount)),
         React.createElement('button', { 'data-testid': 'toggle-disabled', onClick: () => setDisabled((value) => !value) }, 'Toggle disabled'),
         React.createElement('button', { 'data-testid': 'toggle-loading', onClick: () => setLoading((value) => !value) }, 'Toggle loading'),
+        React.createElement('button', { 'data-testid': 'toggle-active-turn', onClick: () => setActiveTurn((value) => !value) }, 'Toggle active turn'),
+        React.createElement('button', { 'data-testid': 'toggle-reject-send', onClick: () => setRejectSend((value) => !value) }, 'Toggle rejection'),
       );
     }
 
@@ -172,6 +180,61 @@ test('suggests installed Skills for a standalone slash draft and inserts the sel
       sentLogKey,
     );
     expect(sentMessages).toEqual(['/plot-twist']);
+  } finally {
+    await server.close();
+  }
+});
+
+test('accepts a second draft during an active turn and restores it when queue submission fails', async ({ page }, testInfo) => {
+  const server = await startHarness(page, { catalogStatus: 503, sentLogKey: 'runningQueueSentMessages' });
+  try {
+    const editor = page.locator('#chat-input');
+    await page.getByTestId('toggle-active-turn').click();
+    await page.getByTestId('toggle-loading').click();
+    const send = page.getByRole('button', { name: 'Send message' });
+    const stop = page.getByRole('button', { name: 'Stop generating' });
+    await expect(stop).toBeVisible();
+    await expect(send).toHaveCount(0);
+    await expect(page.locator('.ai-input-dock__trailing-actions button')).toHaveCount(1);
+    await editor.fill('queued while running');
+    await expect(send).toBeEnabled();
+    await expect(stop).toHaveCount(0);
+    for (const width of [2598, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const dock = await page.locator('.ai-input-dock').boundingBox();
+      const sendBox = await send.boundingBox();
+      expect(dock).not.toBeNull();
+      expect(sendBox).not.toBeNull();
+      expect(sendBox!.width).toBeGreaterThanOrEqual(44);
+      expect(sendBox!.x + sendBox!.width).toBeLessThanOrEqual(dock!.x + dock!.width - 8);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await page.locator('.ai-input-dock').screenshot({ path: testInfo.outputPath(`active-turn-send-${width}.png`) });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('main').evaluate((node) => { node.style.maxWidth = '360px'; });
+    const narrowDock = await page.locator('.ai-input-dock').boundingBox();
+    const narrowSend = await send.boundingBox();
+    expect(narrowDock).not.toBeNull();
+    expect(narrowSend).not.toBeNull();
+    expect(narrowSend!.x + narrowSend!.width).toBeLessThanOrEqual(narrowDock!.x + narrowDock!.width - 8);
+    await send.click();
+    await expect(page.getByTestId('sent-count')).toHaveText('1');
+    await expect(editor).toBeEmpty();
+    await expect(stop).toBeVisible();
+    await expect(send).toHaveCount(0);
+    const narrowStop = await stop.boundingBox();
+    expect(narrowStop).not.toBeNull();
+    expect(narrowStop!.x + narrowStop!.width).toBeLessThanOrEqual(narrowDock!.x + narrowDock!.width - 8);
+    await page.locator('.ai-input-dock').screenshot({ path: testInfo.outputPath('active-turn-stop-narrow.png') });
+
+    await page.getByTestId('toggle-reject-send').click();
+    await editor.fill('keep my queued draft');
+    await expect(stop).toHaveCount(0);
+    await send.click();
+    await expect(editor).toHaveText('keep my queued draft');
+    await expect(send).toBeVisible();
+    await expect(page.locator('.ai-input-dock__trailing-actions button')).toHaveCount(1);
+    await expect(page.getByTestId('sent-count')).toHaveText('1');
   } finally {
     await server.close();
   }

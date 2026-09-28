@@ -3,6 +3,8 @@
 #          factory is initialised, request/response models are correct, and
 #          authentication is enforced.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-27: keep the route-level persistence fake aligned with task-session provider binding and authorization refresh.
+# [Sync] 2026-09-28: verify task-result claims stop before Factory close and settlements drain afterward.
 # [Sync] 2026-09-17: fail attachment metadata persistence closed before Runtime start.
 # [Sync] 2026-09-16: assert Admin HTTP owner ordering after removing Dream PostgreSQL lifecycle.
 # [Sync] 2026-09-13: expect the package-root Runtime 0.1.9 identity in startup diagnostics.
@@ -352,6 +354,14 @@ class _FakeTurnPersistence(_FakeClosable):
         super().__init__()
         self.persist_user_calls: list[dict] = []
         self._persist_user = persist_user
+        self.thread_tool_provider = None
+        self.thread_tool_user: dict | None = None
+
+    def bind_thread_tool_provider(self, provider) -> None:
+        self.thread_tool_provider = provider
+
+    def refresh_thread_tool_authorization(self, current_user: dict) -> None:
+        self.thread_tool_user = current_user
 
     def persist_user(self, **kwargs):
         self.persist_user_calls.append(kwargs)
@@ -363,6 +373,7 @@ class _FakeTurnPersistence(_FakeClosable):
 class _FakeRouteOwner:
     def __init__(self, *, persistence_factory=None) -> None:
         self.client = object()
+        self.session_broker_settings = types.SimpleNamespace(timeout_seconds=1.0)
         self._persistence_factory = persistence_factory or _FakeTurnPersistence
         self.persistences: list[_FakeTurnPersistence] = []
         self.gateways: list[_FakeClosable] = []
@@ -2293,6 +2304,7 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
             reason="user declined",
             answers=None,
             actor_id="7",
+            authorization_context=_admin_user(),
         )
         self.assertEqual(response, {"ok": True, "approved": False})
 
@@ -2715,6 +2727,13 @@ class TestFactoryLifecycle(unittest.TestCase):
             ),
             shutdown_names.index("shutdown_claude_agent"),
         )
+
+    def test_background_task_result_injection_is_not_registered(self):
+        startup_names = [h.__name__ for h in self.srv.app.router.on_startup]
+        shutdown_names = [h.__name__ for h in self.srv.app.router.on_shutdown]
+        self.assertNotIn("startup_task_result_coordinator", startup_names)
+        self.assertNotIn("shutdown_task_result_coordinator", shutdown_names)
+        self.assertNotIn("shutdown_task_result_dispatches", shutdown_names)
 
     def test_event_bus_startup_validation_is_strict_and_redis_is_pinged(self):
         validate = unittest.mock.AsyncMock()

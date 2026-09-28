@@ -1,3 +1,5 @@
+// [Sync] 2026-09-27: use one trailing action: Send for a draft, Stop for an empty active turn.
+// [Sync] 2026-09-26: allow a running turn to accept a new draft and restore it after queue rejection.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Consume file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
@@ -68,7 +70,7 @@ interface AIInputDockProps {
     message: string,
     files?: UploadedFile[],
     toolChoice?: ToolChoice,
-  ) => void;
+  ) => void | Promise<void>;
   placeholder?: string;
   disabled?: boolean;
   loading?: boolean;
@@ -450,7 +452,7 @@ export default function AIInputDock({
   );
 
   const handleSend = useCallback(() => {
-    if (loading || disabled) {
+    if (disabled || (loading && !onStop)) {
       return;
     }
     if (uploadedFiles.some((file) => file.isUploading)) {
@@ -463,19 +465,29 @@ export default function AIInputDock({
       return;
     }
 
-    onSendMessage(
-      trimmedQuery,
-      uploadedFiles.length > 0 ? uploadedFiles : undefined,
-      resolvedFullAccessEnabled ? 'auto' : toolChoice,
-    );
     setQuery('');
-    uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
     setUploadedFiles([]);
+    const restoreDraft = () => {
+      setQuery((current) => current || trimmedQuery);
+      setUploadedFiles((current) => current.length > 0 ? current : uploadedFiles);
+    };
+    try {
+      void Promise.resolve(onSendMessage(
+        trimmedQuery,
+        uploadedFiles.length > 0 ? uploadedFiles : undefined,
+        resolvedFullAccessEnabled ? 'auto' : toolChoice,
+      )).then(() => {
+        uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
+      }, restoreDraft);
+    } catch {
+      restoreDraft();
+    }
   }, [
     resolvedFullAccessEnabled,
     disabled,
-    toolChoice,
     loading,
+    onStop,
+    toolChoice,
     onSendMessage,
     query,
     uploadedFiles,
@@ -483,10 +495,12 @@ export default function AIInputDock({
   ]);
 
   const hasUploadingFiles = uploadedFiles.some((file) => file.isUploading);
+  const hasDraftContent = query.trim().length > 0 || uploadedFiles.length > 0;
+  const showStopAction = loading && Boolean(onStop) && !hasDraftContent;
   const showUploadHint = shouldShowUploadHint(query, isInputFocused);
   const canSend = useMemo(
-    () => !loading && !disabled && !hasUploadingFiles && (query.trim().length > 0 || uploadedFiles.length > 0),
-    [disabled, hasUploadingFiles, loading, query, uploadedFiles.length],
+    () => !disabled && (!loading || Boolean(onStop)) && !hasUploadingFiles && hasDraftContent,
+    [disabled, loading, onStop, hasUploadingFiles, hasDraftContent],
   );
 
   return (
@@ -788,11 +802,12 @@ export default function AIInputDock({
           )}
         </div>
 
-        {loading && onStop ? (
+        <div className="ai-input-dock__trailing-actions">
+        {showStopAction ? (
           <button
             className="ai-input-dock__send-button"
             type="button"
-            onClick={() => { void onStop(); }}
+            onClick={() => { void onStop?.(); }}
             disabled={stopPending}
             title={stopPending ? t('chat.inputDock.stopping') : t('chat.inputDock.stopGenerating')}
             aria-label={stopPending ? t('chat.inputDock.stopping') : t('chat.inputDock.stopGenerating')}
@@ -814,7 +829,7 @@ export default function AIInputDock({
               <IconStop style={{ width: '0.9rem', height: '0.9rem' }} />
             )}
           </button>
-        ) : loading ? (
+        ) : loading && !onStop ? (
           <button
             className="ai-input-dock__send-button"
             type="button"
@@ -839,7 +854,7 @@ export default function AIInputDock({
           <button
             className="ai-input-dock__send-button"
             type="button"
-            onClick={handleSend}
+            onClick={() => { void handleSend(); }}
             disabled={!canSend}
             title={hasUploadingFiles ? t('chat.inputDock.waitingUpload') : t('chat.inputDock.send')}
             aria-label={t('chat.inputDock.sendAria')}
@@ -863,6 +878,7 @@ export default function AIInputDock({
             )}
           </button>
         )}
+        </div>
       </div>
     </div>
   );

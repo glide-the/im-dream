@@ -1,3 +1,5 @@
+# [Sync] 2026-09-28: server result turns can ignore, but do not erase, the cached browser Editor snapshot.
+# [Sync] 2026-09-26: bound Thread resume missing/false/contract-mismatch cases fail closed.
 # [Sync] 2026-09-16: prove claimed confirmation user/assistant persistence never calls Dream PostgreSQL.
 # [Sync] 2026-09-17: prove Gateway allowance rejection is a stable redacted SSE error.
 # [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
@@ -483,12 +485,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             "claude_session_id": claude_id,
             "agent_contract_version": service_module._AGENT_RUNTIME_CONTRACT_VERSION,
         }
-        for resume, stored, located, expected in (
-            (True, {}, None, False),
-            (True, row, None, False),
-            (True, row, "/verified-transcript", True),
-            (False, row, "/verified-transcript", False),
-            (True, {**row, "agent_contract_version": "old"}, None, False),
+        for resume, stored, located, expected, failure in (
+            (True, {}, None, False, None),
+            (True, row, None, False, "CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE"),
+            (True, row, "/verified-transcript", True, None),
+            (False, row, "/verified-transcript", False, "CLAUDE_RESUME_REQUIRED_FOR_BOUND_THREAD"),
+            (True, {**row, "agent_contract_version": "old"}, None, False, "CLAUDE_RESUME_SESSION_UNAVAILABLE"),
         ):
             with self.subTest(resume=resume, stored=stored, located=located):
                 builder = _FakeContextBuilder()
@@ -510,11 +512,22 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
                     unittest.mock.patch.object(session_files, "locate_resumable_session", return_value=located) as probe,
                 ):
-                    execution = await service.assemble_context(
-                        request, state=AgentRunState(session_id=request.thread_id),
-                        bus=_FakeBus(), runner=unittest.mock.Mock(),
-                    )
+                    if failure is None:
+                        execution = await service.assemble_context(
+                            request, state=AgentRunState(session_id=request.thread_id),
+                            bus=_FakeBus(), runner=unittest.mock.Mock(),
+                        )
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, f"^{failure}$"):
+                            await service.assemble_context(
+                                request, state=AgentRunState(session_id=request.thread_id),
+                                bus=_FakeBus(), runner=unittest.mock.Mock(),
+                            )
                 loader.assert_called_once_with(request.thread_id, 7)
+                if failure is not None:
+                    if not resume or stored.get("agent_contract_version") == "old":
+                        probe.assert_not_called()
+                    continue
                 self.assertEqual(execution.run_options.resume, expected)
                 self.assertEqual(execution.run_options.thread_id, claude_id if expected else None)
                 self.assertEqual(builder.user_message_calls[0]["thread_id"], request.thread_id)
@@ -1280,6 +1293,51 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(execution.run_options.notion_credential_home)
         self.assertEqual(builder.user_message_calls[0]["cwd"], "")
+        managed_loader.load.assert_awaited_once_with("7", None)
+
+    async def test_server_continuation_suppresses_cached_editor_without_erasing_it(self):
+        builder = _FakeContextBuilder()
+        managed_loader = _managed_loader()
+        service = ClaudeAgentService(
+            context_builder=builder,
+            managed_mcp_runtime_snapshot_loader=managed_loader,
+        )
+        state = AgentRunState(session_id="thread_server_continuation")
+        cached_editor = {"id": "browser-editor-session"}
+        state.with_editor_state(cached_editor, 7)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=state.session_id,
+            inherit_cached_editor_state=False,
+            message_parts=[{"type": "text", "text": "task result"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                _db,
+                "get_chat_thread",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_server_continuation"),
+            ),
+        ):
+            await service.assemble_context(
+                request,
+                state=state,
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        self.assertEqual(state.editor_state, cached_editor)
+        self.assertEqual(builder.user_message_calls[0]["editor_session_id"], "")
         managed_loader.load.assert_awaited_once_with("7", None)
 
     async def test_workspace_mode_disabled_injects_managed_mcp_snapshot(self):

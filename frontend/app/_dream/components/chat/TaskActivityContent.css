@@ -1,0 +1,155 @@
+/* [Input] TaskActivityContent task relations and existing Dream Plan/Todo popover tokens. */
+/* [Output] Separate task-session and subagent cards with keyboard-visible actions. */
+/* [Pos] Content styles inside PlanButton; this file owns no popover geometry or trigger. */
+/* [Sync] 2026-09-28: keep independent task sessions and subagents separate from Environment info. */
+
+.task-activity__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.task-activity__section {
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 1rem;
+  background: var(--color-bg-surface-solid);
+  box-shadow: 0 8px 24px var(--color-shadow-medium);
+}
+
+.task-activity__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.45rem;
+  color: var(--color-text-secondary);
+  font-size: 0.86rem;
+}
+
+.task-activity__section-heading h3 {
+  margin: 0;
+  font: inherit;
+  font-weight: 650;
+}
+
+.task-activity__section-toggle {
+  min-height: 2rem;
+  padding: 0 0.15rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-activity__section-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.task-activity__section-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.task-activity__chevron {
+  width: 0.95rem;
+  height: 0.95rem;
+  transition: transform 0.14s ease;
+}
+
+.task-activity__chevron--open {
+  transform: rotate(180deg);
+}
+
+.task-activity__tasks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-activity__task {
+  display: grid;
+  grid-template-columns: 1.1rem minmax(0, 1fr) auto 0.85rem;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.45rem 0.35rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-activity__status-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+}
+
+.task-activity__task:hover {
+  background: var(--color-bg-hover);
+}
+
+.task-activity__task-title {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-activity__task-status {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.task-activity__note {
+  margin: 0;
+  padding: 0.45rem 0.2rem;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.task-activity__failure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+.task-activity__failure button {
+  border: 0;
+  background: transparent;
+  color: var(--color-action-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.task-activity__content button:focus-visible {
+  outline: 2px solid var(--color-action-link);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .task-activity__task {
+    gap: 0.4rem;
+  }
+}

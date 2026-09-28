@@ -1,6 +1,7 @@
 # [Input] Production session probe and SDK adapter with isolated filesystem/client fixtures.
 # [Output] Verify identity/layout/access boundaries and connect-only bounded recovery.
 # [Pos] Provider-free resume regression tests; never touches business data.
+# [Sync] 2026-09-26: bound-Thread adapter calls deny fresh fallback on missing-session connect.
 # [Sync] 2026-09-13: cover legacy layouts, access failures, and initialization races.
 
 import asyncio
@@ -115,7 +116,7 @@ class ResumeStorageTests(unittest.TestCase):
 
 
 class ResumeConnectTests(unittest.IsolatedAsyncioTestCase):
-    async def run_case(self, *, failure_stage="connect", marker=True, record=None, twice=False):
+    async def run_case(self, *, failure_stage="connect", marker=True, record=None, twice=False, strict=False):
         options = SimpleNamespace(resume=CLAUDE_ID, cwd="/isolated", env={}, stderr=None)
         calls = []
         connects = []
@@ -158,7 +159,9 @@ class ResumeConnectTests(unittest.IsolatedAsyncioTestCase):
                          side_effect=record if isinstance(record, BaseException) else None) as probe,
         ):
             try:
-                output = [item async for item in adapter.SimpleClaudeAgentSDKClient().query_stream("one prompt", options)]
+                sdk = adapter.SimpleClaudeAgentSDKClient()
+                sdk.require_existing_session = strict
+                output = [item async for item in sdk.query_stream("one prompt", options)]
                 self.assertEqual(output, ["sdk-result"])
             except BaseException as exc:
                 error = exc
@@ -171,6 +174,13 @@ class ResumeConnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["one prompt"])
         self.assertIsNone(error)
         self.assertEqual(probes, 1)
+
+    async def test_bound_thread_missing_connect_never_creates_new_session(self):
+        connects, calls, error, probes = await self.run_case(strict=True)
+        self.assertEqual(connects, [CLAUDE_ID])
+        self.assertEqual(calls, [])
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(probes, 0)
 
     async def test_second_missing_connect_is_terminal(self):
         connects, calls, error, probes = await self.run_case(twice=True)

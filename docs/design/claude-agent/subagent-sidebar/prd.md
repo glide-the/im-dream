@@ -1,4 +1,8 @@
+<!-- [Sync] 2026-09-28: move the summary entry into the existing Chat environment-information card while preserving the read-only sidebar design. -->
+
 # 「子智能体任务」侧边栏入口与右侧详情面板 PRD 草案
+
+> 当前入口位置：子智能体摘要位于 Chat 顶部[任务与进度弹层](../task-activity-popover.md)的独立卡片，点击后仍打开本文定义的只读右侧详情面板。下文关于独立按钮紧邻 PlanButton 的描述是原始布局记录。
 
 > 2026-08-05 交互重构结论：本文件原有“列表与任务可见性”能力继续保留；单任务详情从“元信息卡 + 最新结果 + activity 调试轴”升级为“紧凑身份栏 + 统一只读消息时间线”。以下增量规范优先于后文旧详情描述。
 

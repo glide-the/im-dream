@@ -1,5 +1,5 @@
-// [Input] Assistant text message part from the chat message stream/history.
-// [Output] Assistant message body with GFM Markdown (Mermaid diagrams included) plus message actions.
+// [Input] Assistant text message part from the chat message stream/history and optional post-reply content.
+// [Output] Assistant Markdown, post-reply content, and message actions in one aligned column.
 // [Pos] assistant-message-part component node in frontend/app/_dream/components/chat
 // [Sync] 2026-07-20: Markdown rendering delegated to shared ChatMarkdown, which routes ```mermaid
 //                    blocks to MermaidBlock and unwraps their <pre> wrapper (fixes the
@@ -9,6 +9,7 @@
 // [Sync] 2026-08-22: pass the owning Chat Thread into shared Markdown so historical
 //                    workspace:// references resolve without persisted credentials.
 // [Sync] 2026-09-06: route retry sends through the same Chat-owned user-message coordinator.
+// [Sync] 2026-09-27: place created-task navigation between a settled reply and its action row.
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -30,6 +31,7 @@ interface AssistMessagePartProps {
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: (message: ChatUserMessage) => Promise<void>;
   workspaceSessionId?: string;
+  afterContent?: ReactNode;
 }
 
 function IconRefresh() {
@@ -64,6 +66,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
   sendMessage,
   isLoading: isStreamLoading,
   workspaceSessionId,
+  afterContent,
 }: AssistMessagePartProps) {
   const { copied, copy } = useCopy();
   const [isRetrying, setIsRetrying] = useState(false);
@@ -133,6 +136,8 @@ export const AssistMessagePart = memo(function AssistMessagePart({
         </div>
       </div>
 
+      {afterContent}
+
       {showActions ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
           <ActionButton title="Copy" onClick={() => copy(part.text)}>
@@ -155,7 +160,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
       ) : null}
     </div>
   );
-}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly && prev.workspaceSessionId === next.workspaceSessionId);
+}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly && prev.workspaceSessionId === next.workspaceSessionId && prev.afterContent === next.afterContent);
 
 function ActionButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (

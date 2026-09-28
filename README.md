@@ -1,7 +1,12 @@
 <!-- [Input] Current Dream/Admin architecture, AutoDL direct-host release, and local development contracts. -->
 <!-- [Output] User-first startup, usage, local setup, verification, and recovery entry guide. -->
 <!-- [Pos] Canonical English repository README; README.zh.md is the faithful Chinese mirror. -->
+<!-- [Sync] 2026-09-27: explain that running-turn queue availability requires Admin Drizzle 0064-0066 on the target database. -->
 <!-- [Sync] 2026-09-19: document the Gateway service-key and Claude Agent send-path release gates. -->
+<!-- [Sync] 2026-09-27: document Chat input queue and independent task Thread tools with Admin capability gates. -->
+<!-- [Sync] 2026-09-28: expose independent task control as create/list/read/send Dream Thread tools. -->
+<!-- [Sync] 2026-09-28: complete independent task waiting through the same parent turn's wait_threads Tool result. -->
+<!-- [Sync] 2026-09-27: place task navigation beside its user and assistant messages. -->
 <!-- [Sync] 2026-09-18: put AutoDL startup and product use first; move recovery details to a dedicated runbook. -->
 
 # Ink & Memory Dream
@@ -37,6 +42,8 @@ If a WebUI entry is unavailable after an instance restart, use the [AutoDL recov
 ## Use Dream
 
 - **Chat** keeps Thread history and streams Agent output. Resume, cancel and retry keep the same production path.
+- **Chat while an Agent runs** accepts further text into a durable per-Thread queue. Queue cards above the composer can guide, edit, cancel, or move one pending message into an independent side Chat. Agents use `create_thread`, `list_threads`, `read_thread`, and `send_message_to_thread` for independent Dream Threads; stop remains a page/API action. Each created Thread shows a return link above its first user message, and the source's Conversation info panel groups created tasks, subagents, and the plan. The Admin schema capabilities must be applied before these operations are available. Running-owner controls currently require the same Dream process. See the [Conversation info PRD](docs/prd/chat/session-info.md).
+- **Thread task waiting** exposes the Codex-style `wait_threads` Tool contract. A parent Agent keeps its current SDK turn open, waits for up to eight authorized Dream Threads, and consumes a saved completion, a tool-confirmation request, a timeout snapshot, or a newly queued parent input as the Tool result before producing its normal reply. Chat does not inject a synthetic result message or render a separate result card. See [task-session completion design](docs/design/claude-agent/task-session-completion-handoff.md).
 - **Dream and Story Workspace** develop stories, characters, scenes, scripts and generated artifacts.
 - **Decks and Agents** package reusable instructions, tools, resources and Claude plugins. Registered users receive editable copies of the code-owned Screenplay Creation Team and Music Creation system Decks; Music Creation combines a YuE2 coordinator, Music Arranger, and Lyricist with the local `yue2-skills`, `music-composition-skills`, and `lyric-writing-skills` Marketplaces.
 - **Files** stay in the Thread workspace and use normalized paths, ownership checks and the shared filesystem boundary.
@@ -163,6 +170,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 - **Runtime is not production-qualified:** verify `command -v ink-claude-code-dream`, the package-root `cli.js`, adjacent manifest, Runtime `0.1.10`, compatibility `2.1.241`, and required capabilities.
 - **`uv sync` removed pytest:** use the ephemeral `uv run --with pytest...` command above or add a reviewed development dependency.
 - **Chat reports insufficient Token allowance:** the user message is saved before Gateway rejects the model reservation. Fix the subscription/model allowance in Admin, reload the Thread, then decide whether to send again.
+- **Chat says the message queue is unavailable:** check the target Admin PostgreSQL for `chat_input_queue`, `chat_task_session`, and `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` schema capabilities. Admin Drizzle migrations 0064–0066 supply them; until the approved Admin migration is applied, Dream retains the draft and refuses queued input. Provider-free tests against an isolated database do not qualify the normal business database.
 - **Chat returns `GATEWAY_API_KEY_INVALID`:** the Dream service key no longer matches Admin's active canonical-subject Gateway key. AutoDL sync and qualification now stop before replacing the runtime env when this binding is invalid. Recover or rotate the key through the Admin-owned release operation, restart only Dream so it reloads the private env, and rerun the real `create Thread -> POST /api/claude-agent -> SSE` acceptance before publishing.
 - **MCP App does not appear:** check connection status, App advertisement, usage policy and Admin capability. The ordinary tool result is the expected fallback.
 

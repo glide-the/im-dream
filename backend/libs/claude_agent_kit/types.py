@@ -1,3 +1,4 @@
+# [Sync] 2026-09-26: expose SDK terminal receipt and strict queued-session resume options.
 # [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
@@ -238,6 +239,8 @@ class AgentRunOptions:
     gateway_idempotency_key: Optional[str] = None
     # Whether to resume an existing conversation.
     resume: bool = False
+    # A persisted queued message must never turn a missing resume into a new session.
+    require_existing_session: bool = False
     # Model to use.
     model: Optional[str] = None
     # Working directory for the agent.
@@ -380,6 +383,8 @@ class AgentRunResult:
     duration_ms: Optional[int] = None
     # Latest typed terminal stop reason observed from the SDK stream.
     terminal_stop_reason: Optional[str] = None
+    # Exactly one SDK ResultMessage was drained by this invocation.
+    sdk_terminal_received: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------

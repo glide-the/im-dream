@@ -9,6 +9,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 //                    detail by owned thread/message identity on explicit expansion.
 // [Sync] 2026-09-06: bypass browser caches for exact process reads because fresh
 //                    MCP descriptor bindings can add a safe App projection.
+// [Sync] 2026-09-27: omit server task-result continuation inputs from visible Chat history.
 
 import { isToolUIPart, type UIMessage } from 'ai';
 
@@ -109,12 +110,17 @@ export function claudeThreadPartIsVisible(part: unknown): boolean {
   }
 }
 
-/** Preserve the shared Dream/Chat transcript and drop only empty render rows. */
+/** Preserve ordinary user input while hiding the exact server continuation protocol row. */
 export function filterClaudeThreadVisibleMessages<T extends UIMessage>(
   messages: readonly T[],
 ): T[] {
   return filterStoryWorkspaceControlMessages(messages).filter(
-    (message) => (message.parts ?? []).some(claudeThreadPartIsVisible),
+    (message) => !(message.role === 'user'
+      && message.metadata
+      && typeof message.metadata === 'object'
+      && !Array.isArray(message.metadata)
+      && (message.metadata as Record<string, unknown>).kind === 'task-session-result')
+      && (message.parts ?? []).some(claudeThreadPartIsVisible),
   );
 }
 

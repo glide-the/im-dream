@@ -7,6 +7,9 @@ injectable business sink.  The Chat EventBus remains the sole conversation
 stream and existing domain services remain the sole workflow truth owners.
 """
 
+# [Sync] 2026-09-28: optionally wait for the Factory owner after the initial turn when claim grants cover queued follow-up input.
+# [Sync] 2026-09-28: wait for that owner after a stream read error before result claims can settle.
+
 from __future__ import annotations
 
 import asyncio
@@ -107,6 +110,7 @@ async def drain_chat_agent_turn(
     request: Any,
     *,
     on_event: Callable[[NormalizedAgentEvent], Any] | None = None,
+    wait_for_factory_owner: bool = False,
 ) -> NormalizedTurnResult:
     """Drain the canonical Chat stream through its terminal frame.
 
@@ -129,19 +133,30 @@ async def drain_chat_agent_turn(
 
         adapter = ChatStreamAdapter()
 
-    async for frame in stream:
-        if adapter is None:
-            continue
-        event = adapter.decode(frame)
-        if on_event is not None:
-            observed = on_event(event)
-            if inspect.isawaitable(observed):
-                await observed
-        if completion is None:
-            classifier.observe(event)
+    try:
+        async for frame in stream:
+            if adapter is None:
+                continue
+            event = adapter.decode(frame)
+            if on_event is not None:
+                observed = on_event(event)
+                if inspect.isawaitable(observed):
+                    await observed
+            if completion is None:
+                classifier.observe(event)
+    except Exception:
+        if wait_for_factory_owner:
+            owner_completion = getattr(stream, "owner_completion", None)
+            if not isinstance(owner_completion, asyncio.Future):
+                raise RuntimeError("Factory owner completion is unavailable") from None
+            await asyncio.shield(owner_completion)
+        raise
 
     if completion is None:
-        return classifier.result()
+        result = classifier.result()
+        if wait_for_factory_owner:
+            raise RuntimeError("Factory owner completion is unavailable")
+        return result
 
     settled = await completion
     if settled.cancelled:
@@ -154,12 +169,18 @@ async def drain_chat_agent_turn(
         outcome = NormalizedTurnOutcome.CANCELLED
     else:
         outcome = NormalizedTurnOutcome.INCOMPLETE
-    return NormalizedTurnResult(
+    result = NormalizedTurnResult(
         outcome=outcome,
         saw_message_final=settled.saw_message_final,
         saw_finish=settled.saw_finish,
         finish_reason=settled.finish_reason,
     )
+    if wait_for_factory_owner:
+        owner_completion = getattr(stream, "owner_completion", None)
+        if not isinstance(owner_completion, asyncio.Future):
+            raise RuntimeError("Factory owner completion is unavailable")
+        await asyncio.shield(owner_completion)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
