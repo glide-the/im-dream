@@ -4,6 +4,7 @@
 # [Sync] 2026-09-26: exercise the real per-Thread owner and queue transitions.
 # [Sync] 2026-09-28: verify a result-owned Factory turn drains a queued user input before owner completion.
 # [Sync] 2026-09-28: verify wait_threads can wake on a newly accepted source input without claiming consumption.
+# [Sync] 2026-09-28: verify selection records only an acknowledged, turn-scoped interrupt.
 from __future__ import annotations
 
 import asyncio
@@ -149,6 +150,7 @@ async def test_selection_signals_current_owner_and_failed_interrupt_does_not_cla
     selected, signalled = await factory.select_input(thread_id=request.thread_id, user_id="42",
                                                       message_id="message-a", expected_revision=1)
     assert (selected.status, signalled, provider.interrupted) == ("selected", True, 1)
+    assert state.guide_interrupt_turn_id == state.current_turn_id
     item, claim = await factory._claim_next_input(request, state)
     assert (item.message_id, claim.status) == ("message-a", "dispatching")
 
@@ -164,6 +166,7 @@ async def test_selection_signals_current_owner_and_failed_interrupt_does_not_cla
                                                             user_id="42", message_id="message-b",
                                                             expected_revision=1)
     assert (failed.status, signalled) == ("failed", False)
+    assert failed_state.guide_interrupt_turn_id is None
     assert await failing_factory._claim_next_input(failed_request, failed_state) is None
 
 

@@ -4,6 +4,7 @@
 # [Sync] 2026-09-28: resolve owner completion on prelaunch stream rejection so result claims can settle after cleanup.
 # [Sync] 2026-09-28: refresh Thread Tool authorization before settling an authenticated confirmation.
 # [Sync] 2026-09-26: own the process-local durable input queue claim and selected-message interrupt path.
+# [Sync] 2026-09-28: scope an acknowledged selected-input interrupt to its current turn.
 # [Input] Consume claude_agent/thread_pool.py, claude_agent/service.py,
 #         claude_agent/event_bus.py, claude_agent/admission.py,
 #         libs/claude_agent_kit/runner.py, claude_agent/observer.py.
@@ -643,6 +644,7 @@ class ClaudeAgentThreadFactory:
                 if state.runner is None:
                     raise RuntimeError("CHAT_INPUT_SDK_OWNER_UNAVAILABLE")
                 await state.runner.interrupt()
+                state.guide_interrupt_turn_id = state.current_turn_id
             except Exception:
                 logger.exception("Selected input interrupt not confirmed: thread_id=%s", thread_id)
                 try:

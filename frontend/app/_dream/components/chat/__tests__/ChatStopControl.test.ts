@@ -4,6 +4,7 @@
 // [Sync] 2026-09-17: prove one Stop POST survives ChatPanel unmount and validates the current Thread receipt.
 // [Sync] 2026-09-27: verify queue capability failure preserves the draft, status check recovers, and Stop returns after clearing.
 // [Sync] 2026-09-28: clear the Tiptap draft with user keyboard input before asserting the single Stop action.
+// [Sync] 2026-09-28: verify real ChatPanel removes dispatched/failed queue cards and preserves another queued action.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -198,6 +199,8 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   let stopFinishedCount = 0;
   let stopHeaders: Record<string, string> = {};
   let queueReady = false;
+  let queueReadCount = 0;
+  let queueEntries: Array<Record<string, unknown>> = [];
   let releaseStop!: () => void;
   const stopRelease = new Promise<void>((resolve) => { releaseStop = resolve; });
   let markStopStarted!: () => void;
@@ -244,12 +247,13 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     }
     if (path === `/api/claude-agent/threads/${THREAD_ID}/inputs`) {
       const unavailable = request.method() === 'POST' || !queueReady;
+      if (request.method() === 'GET' && queueReady) queueReadCount += 1;
       await route.fulfill({
         status: unavailable ? 503 : 200,
         contentType: 'application/json',
         body: unavailable
           ? JSON.stringify({ detail: { error_code: 'DREAM_DATA_SCHEMA_NOT_READY' } })
-          : JSON.stringify({ entries: [], local_owner: true }),
+          : JSON.stringify({ entries: queueEntries, local_owner: true }),
       });
       return;
     }
@@ -278,9 +282,46 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     await queueError.screenshot({ path: testInfo.outputPath('queue-capability-error.png') });
     await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0);
     queueReady = true;
+    queueEntries = [
+      {
+        message_id: 'queued-one', thread_id: THREAD_ID, queue_sequence: '1',
+        status: 'queued', revision: 1, dispatch_turn_id: null,
+        created_at: '2026-09-28T00:00:00Z', text: 'first queued message',
+      },
+      {
+        message_id: 'queued-two', thread_id: THREAD_ID, queue_sequence: '2',
+        status: 'queued', revision: 1, dispatch_turn_id: null,
+        created_at: '2026-09-28T00:00:01Z', text: 'second queued message',
+      },
+    ];
     await page.getByRole('button', { name: 'Check queue status' }).click();
     await expect(queueError).toHaveCount(0);
     await expect(editor).toHaveText('keep this queued draft');
+    const cards = page.getByTestId('thread-input-queue-card');
+    await expect(cards).toHaveCount(2);
+    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
+      ? { ...entry, status: 'dispatching', revision: 2, dispatch_turn_id: 'turn-one' } : entry);
+    const readsBeforeDispatch = queueReadCount;
+    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeDispatch);
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText('second queued message');
+    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
+      ? { ...entry, status: 'failed', revision: 3 } : entry);
+    const readsBeforeFailure = queueReadCount;
+    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeFailure);
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first().getByRole('button', { name: 'Adjust direction' })).toBeEnabled();
+    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
+      ? { ...entry, status: 'state_unknown', revision: 4 } : entry);
+    const readsBeforeUnknown = queueReadCount;
+    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeUnknown);
+    await expect(cards).toHaveCount(1);
+    await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toBeVisible();
+    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
+      ? { ...entry, status: 'failed', revision: 5 } : entry);
+    const readsBeforeReconciled = queueReadCount;
+    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeReconciled);
+    await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toHaveCount(0);
     await editor.click();
     await editor.press('ControlOrMeta+A');
     await editor.press('Backspace');

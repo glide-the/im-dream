@@ -1,4 +1,5 @@
 // [Sync] 2026-09-28: render created-task links inside the owning assistant reply above its action row.
+// [Sync] 2026-09-28: remove dispatched and failed inputs from queue controls; surface uncertain outcomes separately.
 // [Sync] 2026-09-27: show task-session source navigation and settled created-task lists.
 // [Sync] 2026-09-27: pass the source relation into ChatMessageList so its first user bubble owns the marker.
 // [Sync] 2026-09-27: keep shell-level task management and pass contextual created-task links into the assistant reply; retain the target Thread source marker.
@@ -8,7 +9,7 @@
 // [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
-import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
+import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
 import { TaskSessionLinksFailure } from './TaskSessionNavigation';
 import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSessionLinks';
@@ -295,6 +296,8 @@ export default function ChatPanel({
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
   const [threadInputs, setThreadInputs] = useState<ThreadInputEntry[]>([]);
+  const queueCardEntries = threadInputs.filter(isThreadInputQueueCard);
+  const queueOutcomeUnknown = threadInputs.some((entry) => entry.status === 'state_unknown');
   const [inputOwnerLocal, setInputOwnerLocal] = useState(false);
   const [threadInputError, setThreadInputError] = useState<string | null>(null);
   const [queueCheckPending, setQueueCheckPending] = useState(false);
@@ -1333,9 +1336,9 @@ export default function ChatPanel({
             <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
           </button>
         ) : null}
-        {threadInputs.some((entry) => !['consumed', 'cancelled'].includes(entry.status)) ? (
+        {queueCardEntries.length > 0 ? (
           <div aria-label={t('chat.inputQueue.region')} style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0 0.75rem', display: 'grid', gap: '0.3rem' }}>
-            {threadInputs.filter((entry) => !['consumed', 'cancelled'].includes(entry.status)).map((entry) => (
+            {queueCardEntries.map((entry) => (
               <ThreadInputQueueCard
                 key={entry.message_id}
                 entry={entry}
@@ -1348,7 +1351,7 @@ export default function ChatPanel({
             ))}
           </div>
         ) : null}
-        {threadInputError ? (
+        {threadInputError || queueOutcomeUnknown ? (
           <div role="alert" className="chat-input-queue-error" style={{
             boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center',
             justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.35rem 0.75rem',
@@ -1356,7 +1359,7 @@ export default function ChatPanel({
             borderRadius: '0.65rem', color: 'var(--color-state-danger)',
             background: 'var(--color-bg-surface-solid)', fontSize: '0.82rem', lineHeight: 1.4,
           }}>
-            <span>{threadInputError}</span>
+            <span>{threadInputError ?? t('chat.inputQueue.dispatchedStateUnknown')}</span>
             {threadInputError !== t('chat.inputQueue.accessDenied')
               && threadInputError !== t('chat.inputQueue.textOnly') ? (
               <button type="button" disabled={queueCheckPending} onClick={() => { void checkThreadInputStatus(); }}

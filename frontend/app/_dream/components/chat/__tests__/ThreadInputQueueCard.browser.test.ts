@@ -2,6 +2,7 @@
 // [Output] Verify screenshot actions, queued-only guards, keyboard menu and mobile card width.
 // [Pos] Isolated browser presentation test for the Chat composer queue card.
 // [Sync] 2026-09-27: capture the production card/menu at desktop and mobile sizes while checking screenshot actions.
+// [Sync] 2026-09-28: dispatched and failed messages leave the composer controls while queued messages remain actionable.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error This browser harness imports Node APIs outside the application tsconfig.
@@ -50,6 +51,7 @@ test('queue card exposes the pictured per-message actions and guards selected me
           import { createRoot } from 'react-dom/client';
           import i18n from '/app/_dream/i18n.ts';
           import Card from '/app/_dream/components/chat/ThreadInputQueueCard.tsx';
+          import { isThreadInputQueueCard } from '/app/_dream/components/chat/threadInputQueue.ts';
           import '/app/_dream/styles/tokens.css';
           import '/app/_dream/index.css';
           void i18n.changeLanguage('zh');
@@ -61,10 +63,14 @@ test('queue card exposes the pictured per-message actions and guards selected me
             const record = (action, text) => { window.queueActions.push({ action, text }); return Promise.resolve(); };
             return React.createElement('main', { style: { maxWidth: '52rem', minHeight: '80vh', margin: '2rem auto', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' } },
               React.createElement('section', { style: { maxHeight: '5rem', overflowY: 'auto' } },
-                React.createElement(Card, { entry, localOwner: true,
+                isThreadInputQueueCard(entry) ? React.createElement(Card, { entry, localOwner: true,
                   onGuide: () => record('guide'), onCancel: () => record('cancel'),
-                  onEdit: (_entry, text) => record('edit', text), onSideChat: () => record('side') })),
-              React.createElement('button', { 'data-testid': 'select-state', onClick: () => setStatus('selected') }, 'Select state'));
+                  onEdit: (_entry, text) => record('edit', text), onSideChat: () => record('side') }) : null),
+              React.createElement('button', { 'data-testid': 'select-state', onClick: () => setStatus('selected') }, 'Select state'),
+              React.createElement('button', { 'data-testid': 'dispatch-state', onClick: () => setStatus('dispatching') }, 'Dispatch state'),
+              React.createElement('button', { 'data-testid': 'failed-state', onClick: () => setStatus('failed') }, 'Failed state'),
+              React.createElement('button', { 'data-testid': 'unknown-state', onClick: () => setStatus('state_unknown') }, 'Unknown state'),
+              React.createElement('button', { 'data-testid': 'queued-state', onClick: () => setStatus('queued') }, 'Queued state'));
           }
           createRoot(document.querySelector('#root')).render(React.createElement(Harness));
         `;
@@ -104,6 +110,14 @@ test('queue card exposes the pictured per-message actions and guards selected me
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     await expect(card.getByRole('button', { name: '更多操作' })).toBeFocused();
+    await page.getByTestId('dispatch-state').click();
+    await expect(card).toHaveCount(0);
+    await page.getByTestId('failed-state').click();
+    await expect(card).toHaveCount(0);
+    await page.getByTestId('unknown-state').click();
+    await expect(card).toHaveCount(0);
+    await page.getByTestId('queued-state').click();
+    await expect(card.getByRole('button', { name: '调整方向' })).toBeEnabled();
   } finally {
     await server.close();
   }

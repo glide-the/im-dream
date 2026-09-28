@@ -2,6 +2,7 @@
 // [Sync] 2026-09-27: localize consolidated Chat information and server-reported task states.
 // [Sync] 2026-09-28: localize completed task status and durable result notification states.
 // [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
+// [Sync] 2026-09-28: explain uncertain dispatched inputs separately from retained unsent drafts.
 // [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
 // [Input] User locale and product-facing translation keys.
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
@@ -741,6 +742,7 @@ const resources = {
           stateChanged: 'The message state changed. Reload the queue and try again.',
           unavailable: 'Messages cannot be queued right now. Your draft is kept.',
           stateUnknown: 'Queue status is uncertain. Your draft is kept; check the queue before sending again.',
+          dispatchedStateUnknown: 'This message entered the conversation, but its result needs review. Check the conversation before sending it again.',
           checkStatus: 'Check queue status', checkingStatus: 'Checking…',
           sendFailed: 'The message could not be queued. Your draft is kept.'
         },
@@ -1657,6 +1659,7 @@ const resources = {
           stateChanged: '消息状态已变化，请刷新队列后重试。',
           unavailable: '暂时无法排队，草稿已保留。',
           stateUnknown: '排队结果待核对，草稿已保留；再次发送前请先检查队列。',
+          dispatchedStateUnknown: '消息已进入对话，但处理结果待核对；再次发送前请先检查对话。',
           checkStatus: '检查队列状态', checkingStatus: '检查中…',
           sendFailed: '消息未能排队，草稿已保留。'
         },

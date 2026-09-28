@@ -4,11 +4,13 @@
 // [Sync] 2026-09-26: active turn input uses an authenticated queue receipt rather than a second Chat stream.
 // [Sync] 2026-09-27: retain ambiguous Admin outcomes so the UI asks for a status check before retry.
 // [Sync] 2026-09-27: malformed success receipts fail closed before reaching Chat state.
+// [Sync] 2026-09-28: queue controls exclude dispatched, terminal, and uncertain input states.
 
 import { expect, test } from '@playwright/test';
 import { clearBrowserSession, loadBrowserSession } from '../../../lib/browserSession';
 import {
   canGuideThreadInput, cancelThreadInput, enqueueThreadInput, fetchThreadInputs,
+  isThreadInputQueueCard,
   moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry,
 } from '../threadInputQueue';
 
@@ -23,6 +25,12 @@ test('only a queued entry with the local owner can be selected for guidance', ()
     expect(canGuideThreadInput({ ...entry, status }, false)).toBe(false);
     expect(canGuideThreadInput({ ...entry, status }, true)).toBe(status === 'queued');
   }
+});
+
+test('composer queue controls end when a message starts dispatching', () => {
+  const statuses = ['queued', 'selected', 'dispatching', 'consumed', 'cancelled', 'failed', 'state_unknown'] as const;
+  expect(statuses.filter((status) => isThreadInputQueueCard({ ...entry, status })))
+    .toEqual(['queued', 'selected']);
 });
 
 test('queue adapter exposes an unknown write outcome without inventing a queued entry', async () => {
