@@ -3,10 +3,13 @@
 > 聊天侧边栏、会话导航、文件入口和设置入口的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
 > **[Sync] 2026-06-28**: 当前 ChatView 不再使用左侧 rail/展开侧栏；历史对话由右上角「更多」菜单打开右侧 HistorySidePanel，搜索由面板标题栏按钮打开居中 HistorySearchDialog。
 > **[Sync] 2026-09-18**: Story Workspace 在移动端改用底部 Chat、Dream、Decks、More 导航；More 展开层承载 Writing、Timeline、Analysis、主题、设置和账户。桌面端侧边栏语义不变。
+> **[Sync] 2026-09-29**: 当前 Thread 的用户消息刻度属于 Chat 消息阅读区，详见[轮次导航 PRD](./chat/turn-navigation.md)；右侧历史面板仍负责 Thread 切换。
 
 ## 1. 文档范围
 
 Chat Sidebar 覆盖对话工作区中的历史会话面板、文件入口和移动端替代导航。当前 Chat 工作区不再使用左侧固定 rail；会话历史通过右上角「更多」菜单打开右侧 HistorySidePanel，文件通过同一菜单打开 FileSidebar。
+
+当前 Thread 内的用户消息刻度位于消息滚动区左缘，不是全局会话侧边栏；其悬浮摘要与消息定位由[轮次导航 PRD](./chat/turn-navigation.md)定义。
 
 旧稿中的“玫瑰金”“高级灰调极简主义”“侧边栏设置 HTML 原型”不作为当前项目规范。
 

@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
+<!-- [Sync] 2026-09-29: document owner-scoped Chat turn-navigation excerpts and no-store response. -->
 <!-- [Sync] 2026-09-15: document Registry101 aggregate import, calendar recovery and first-login completion. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -677,6 +678,23 @@ Paged responses add `next_cursor`, `has_more`, `latest_message_id`, and
 `unchanged`. An unchanged probe returns no messages and does not read
 `parts`/`metadata`; a changed probe returns a replacement latest page. Invalid,
 expired-version, or cross-Thread cursors return HTTP 400. Ownership remains 404.
+
+### GET `/api/claude-agent/threads/{thread_id}/turn-navigation`
+
+Read the current user's compact user-message navigation index for one Thread.
+The route checks Thread ownership before calling the existing Admin full-history
+read, projects public text/file previews, and pairs each user input with a final
+assistant result only before the next user row. Server-authored repair,
+confirmation, hidden, and task-result inputs do not become markers. The response
+is `private, no-store`; unknown or unowned Threads return 404.
+
+**Response:** `items[]` in conversation order. Each item has `message_id`,
+`user_preview`, `has_attachment`, `assistant_preview` (nullable), and `status`
+(`answered`, `failed`, `cancelled`, `no_reply`, or `state_unknown`). Previews are display excerpts;
+the canonical message body and paged Chat rendering remain unchanged. This
+projection currently reads Admin's legacy complete-history DTO on the server;
+it does not add a database index or replace the keyset message pages used for
+the main conversation.
 
 ### GET `/api/claude-agent/threads/{thread_id}/messages/{message_id}/process`
 

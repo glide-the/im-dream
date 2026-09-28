@@ -1,4 +1,5 @@
 // [Sync] 2026-09-27: localize task-session source navigation and created-task lists.
+// [Sync] 2026-09-29: localize per-user-message turn navigation, previews, loading, and locate feedback.
 // [Sync] 2026-09-27: localize consolidated Chat information and server-reported task states.
 // [Sync] 2026-09-28: localize completed task status and durable result notification states.
 // [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
@@ -724,6 +725,27 @@ const resources = {
         },
         panel: {
           scrollToBottom: 'Scroll to bottom'
+        },
+        turnNavigation: {
+          label: 'Messages in this conversation',
+          itemAria: 'User message {{index}}: {{preview}}',
+          summary: 'Interaction summary',
+          attachment: 'Attachment sent',
+          emptyInput: 'Message content unavailable',
+          mobileTitle: 'Messages in this conversation ({{count}})',
+          locating: 'Finding message…',
+          locateFailed: 'Could not find this message.',
+          loadingIndex: 'Loading earlier message navigation…',
+          partial: 'Only loaded messages are shown. Retry loading the full list.',
+          retryIndex: 'Retry loading message navigation',
+          status: {
+            answered: 'Reply',
+            running: 'Reply in progress',
+            failed: 'This turn failed',
+            cancelled: 'This turn was stopped',
+            no_reply: 'No reply yet',
+            state_unknown: 'Reply status needs checking'
+          }
         },
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
@@ -1641,6 +1663,27 @@ const resources = {
         },
         panel: {
           scrollToBottom: '滚动到底部'
+        },
+        turnNavigation: {
+          label: '本对话的消息导航',
+          itemAria: '第 {{index}} 条用户消息：{{preview}}',
+          summary: '交互摘要',
+          attachment: '已发送附件',
+          emptyInput: '消息内容不可用',
+          mobileTitle: '本对话消息（{{count}}）',
+          locating: '正在定位消息…',
+          locateFailed: '暂时无法定位这条消息。',
+          loadingIndex: '正在加载更早消息的导航…',
+          partial: '目前只显示已加载的消息，点击重试完整列表。',
+          retryIndex: '重试加载消息导航',
+          status: {
+            answered: '已有回复',
+            running: '正在回复',
+            failed: '本轮失败',
+            cancelled: '本轮已停止',
+            no_reply: '暂无回复',
+            state_unknown: '回复状态待核对'
+          }
         },
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',

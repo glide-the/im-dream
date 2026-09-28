@@ -1,6 +1,7 @@
 # Chat History PRD
 
-> 对话历史消息流、工具步骤、Terminal 输出和会话统计的视觉与交互规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
+> 对话历史消息流、工具步骤、Terminal 输出和会话统计的视觉与交互规范。本文引用 [Color System](<./color_system/README.md>)，与前端实现保持同步。
+> **[Sync] 2026-09-29**: 当前 Thread 的每条用户输入可通过消息阅读区左缘刻度定位；摘要、分页与响应式规则见[轮次导航 PRD](./chat/turn-navigation.md)。
 
 ## 1. 文档范围
 

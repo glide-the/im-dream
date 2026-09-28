@@ -82,6 +82,7 @@ import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSess
 // [Sync] 2026-09-06: retain live turn identity only for recovery merging; completed turns use the shared collapsed-process layout.
 // [Sync] 2026-09-07: keep live turn identities in a ref so metadata replay cannot
 //                    recreate the recovery callback and abort an active reconnect stream.
+// [Sync] 2026-09-29: pair a compact full-Thread turn index with the paged message scroller and left navigation rail.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -109,6 +110,13 @@ import {
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
+import TurnNavigation from './TurnNavigation';
+import {
+  fetchTurnNavigation,
+  mergeTurnNavigation,
+  projectVisibleTurnNavigation,
+  type ChatTurnNavigationItem,
+} from './chatTurnNavigationModel';
 import ToolConfirmationDock from './ToolConfirmationDock';
 import {
   deriveSettledToolCallIdsFromKnownPending,
@@ -307,6 +315,16 @@ export default function ChatPanel({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
+  const navigationAbortRef = useRef<AbortController | null>(null);
+  const navigationHighlightTimerRef = useRef<number | null>(null);
+  const [indexedTurns, setIndexedTurns] = useState<ChatTurnNavigationItem[]>([]);
+  const [navigationIndexLoading, setNavigationIndexLoading] = useState(false);
+  const [navigationIndexError, setNavigationIndexError] = useState(false);
+  const [navigationIndexNonce, setNavigationIndexNonce] = useState(0);
+  const [activeTurnMessageId, setActiveTurnMessageId] = useState<string | null>(null);
+  const [locatingMessageId, setLocatingMessageId] = useState<string | null>(null);
+  const [failedLocateMessageId, setFailedLocateMessageId] = useState<string | null>(null);
+  const [locatedMessageId, setLocatedMessageId] = useState<string | null>(null);
   const hasInitializedRef = useRef(false);
   const turnGenerationRef = useRef(0);
   const lastQueuedNonceRef = useRef<number | undefined>(undefined);
@@ -360,6 +378,12 @@ export default function ChatPanel({
       reconnectAbortRef.current = null;
       olderHistoryAbortRef.current?.abort();
       olderHistoryAbortRef.current = null;
+      navigationAbortRef.current?.abort();
+      navigationAbortRef.current = null;
+      if (navigationHighlightTimerRef.current !== null) {
+        window.clearTimeout(navigationHighlightTimerRef.current);
+        navigationHighlightTimerRef.current = null;
+      }
       for (const timerRef of [
         reconnectRetryTimerRef,
         localCompletionRetryTimerRef,
@@ -551,6 +575,18 @@ export default function ChatPanel({
     livePresentedTurnIdsRef.current = new Set<string>();
     setOlderHistoryError(null);
     setIsLoadingOlderHistory(false);
+    navigationAbortRef.current?.abort();
+    navigationAbortRef.current = null;
+    if (navigationHighlightTimerRef.current !== null) {
+      window.clearTimeout(navigationHighlightTimerRef.current);
+      navigationHighlightTimerRef.current = null;
+    }
+    setIndexedTurns([]);
+    setNavigationIndexError(false);
+    setActiveTurnMessageId(null);
+    setLocatingMessageId(null);
+    setFailedLocateMessageId(null);
+    setLocatedMessageId(null);
   // ChatView keys panels by threadId; the explicit reset also keeps direct
   // consumers safe if they reuse an instance for another thread.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -947,6 +983,32 @@ export default function ChatPanel({
   const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting);
   const agentBusy = canStopMainTurn || isStopping;
   const chatLoading = agentBusy || isLoading;
+  const visibleTurnNavigation = useMemo(
+    () => projectVisibleTurnNavigation(visibleMessages, agentBusy),
+    [visibleMessages, agentBusy],
+  );
+  const turnNavigationItems = useMemo(
+    () => mergeTurnNavigation(indexedTurns, visibleTurnNavigation),
+    [indexedTurns, visibleTurnNavigation],
+  );
+  const latestVisibleMessageId = visibleMessages.at(-1)?.id ?? null;
+  const partialTurnNavigation = historyPage.hasMore
+    && (indexedTurns.length === 0 || navigationIndexError);
+
+  useEffect(() => {
+    if (!latestVisibleMessageId) return undefined;
+    const controller = new AbortController();
+    setNavigationIndexLoading(true);
+    setNavigationIndexError(false);
+    void fetchTurnNavigation(threadId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setIndexedTurns(items);
+    }).catch(() => {
+      if (!controller.signal.aborted) setNavigationIndexError(true);
+    }).finally(() => {
+      if (!controller.signal.aborted) setNavigationIndexLoading(false);
+    });
+    return () => controller.abort();
+  }, [threadId, latestVisibleMessageId, agentBusy, navigationIndexNonce]);
 
   const refreshTaskSessionLinks = useCallback(async () => {
     const request = taskSessionLinksRequestRef.current + 1;
@@ -1212,14 +1274,119 @@ export default function ChatPanel({
     setShowScrollToBottom(isScrollable && !isNearBottom);
   }, []);
 
+  const updateActiveTurn = useCallback((element: HTMLDivElement) => {
+    const nodes = element.querySelectorAll<HTMLElement>('[data-chat-user-message-id]');
+    if (nodes.length === 0) return;
+    const readingLine = element.getBoundingClientRect().top + Math.min(element.clientHeight * 0.3, 140);
+    let next = nodes[0].dataset.chatUserMessageId ?? null;
+    nodes.forEach((node) => {
+      if (node.getBoundingClientRect().top <= readingLine) {
+        next = node.dataset.chatUserMessageId ?? next;
+      }
+    });
+    setActiveTurnMessageId((current) => current === next ? current : next);
+  }, []);
+
+  const navigateToTurn = useCallback(async (messageId: string) => {
+    navigationAbortRef.current?.abort();
+    const controller = new AbortController();
+    navigationAbortRef.current = controller;
+    setLocatingMessageId(messageId);
+    setFailedLocateMessageId(null);
+    const findTarget = () => [...(chatContainerRef.current?.querySelectorAll<HTMLElement>('[data-chat-user-message-id]') ?? [])]
+      .find((node) => node.dataset.chatUserMessageId === messageId);
+    const scrollToTarget = () => {
+      const scroller = chatContainerRef.current;
+      const target = findTarget();
+      if (!scroller || !target || controller.signal.aborted) return false;
+      const top = scroller.scrollTop + target.getBoundingClientRect().top
+        - scroller.getBoundingClientRect().top - 16;
+      isNearBottomRef.current = false;
+      scroller.scrollTo({
+        top,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+      setActiveTurnMessageId(messageId);
+      setLocatedMessageId(messageId);
+      if (navigationHighlightTimerRef.current !== null) {
+        window.clearTimeout(navigationHighlightTimerRef.current);
+      }
+      navigationHighlightTimerRef.current = window.setTimeout(() => {
+        setLocatedMessageId((current) => current === messageId ? null : current);
+        navigationHighlightTimerRef.current = null;
+      }, 1800);
+      return true;
+    };
+    try {
+      if (scrollToTarget()) return;
+      olderHistoryAbortRef.current?.abort();
+      olderHistoryAbortRef.current = null;
+      let cursor = historyPage.nextCursor;
+      let hasMore = historyPage.hasMore;
+      let loaded: UIMessage[] = [];
+      let found = false;
+      while (hasMore && cursor && !controller.signal.aborted) {
+        const page = await fetchClaudeThreadMessages(threadId, { cursor, signal: controller.signal });
+        loaded = prependUniqueOlderMessages(loaded, page.messages);
+        found = page.messages.some((message) => message.id === messageId);
+        if (page.hasMore && page.nextCursor === cursor) throw new Error('History cursor did not advance.');
+        cursor = page.nextCursor;
+        hasMore = page.hasMore;
+        if (found) break;
+      }
+      if (controller.signal.aborted) return;
+      if (!found) {
+        setFailedLocateMessageId(messageId);
+        return;
+      }
+      isNearBottomRef.current = false;
+      setMessagesRef.current?.((current) => prependUniqueOlderMessages(current, loaded));
+      setHistoricalMessageIds((current) => {
+        const next = new Set(current);
+        loaded.forEach((message) => next.add(message.id));
+        return next;
+      });
+      if (toolConfirmationKnown) {
+        const settled = deriveSettledToolCallIdsFromKnownPending(
+          loaded,
+          runtimePendingToolCallIds,
+        );
+        setSettledToolCallIds((current) => {
+          const next = new Set(current);
+          settled.forEach((toolCallId) => next.add(toolCallId));
+          return next.size === current.size ? current : next;
+        });
+      }
+      setHistoryPage((current) => ({
+        nextCursor: cursor,
+        hasMore,
+        latestMessageId: current.latestMessageId,
+      }));
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (!scrollToTarget() && !controller.signal.aborted) setFailedLocateMessageId(messageId);
+          resolve();
+        }));
+      });
+    } catch {
+      if (!controller.signal.aborted) setFailedLocateMessageId(messageId);
+    } finally {
+      if (navigationAbortRef.current === controller) {
+        navigationAbortRef.current = null;
+        setLocatingMessageId(null);
+      }
+    }
+  }, [historyPage.hasMore, historyPage.nextCursor, runtimePendingToolCallIds, threadId, toolConfirmationKnown]);
+
   const handleScroll = useCallback(() => {
     const element = chatContainerRef.current;
     if (!element) {
       return;
     }
     updateScrollToBottomVisibility(element);
-    if (element.scrollTop <= 0) void loadOlderHistory();
-  }, [loadOlderHistory, updateScrollToBottomVisibility]);
+    updateActiveTurn(element);
+    if (element.scrollTop <= 0 && navigationAbortRef.current === null) void loadOlderHistory();
+  }, [loadOlderHistory, updateActiveTurn, updateScrollToBottomVisibility]);
 
   const handleScrollToBottom = useCallback(() => {
     const element = chatContainerRef.current;
@@ -1241,54 +1408,71 @@ export default function ChatPanel({
       setShowScrollToBottom(false);
       const frameId = requestAnimationFrame(() => {
         element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+        updateActiveTurn(element);
       });
       return () => cancelAnimationFrame(frameId);
     }
     const frameId = requestAnimationFrame(() => {
       updateScrollToBottomVisibility(element);
+      updateActiveTurn(element);
     });
     return () => cancelAnimationFrame(frameId);
-  }, [messages, status, shouldShowMessageSurface, updateScrollToBottomVisibility]);
+  }, [messages, status, shouldShowMessageSurface, updateActiveTurn, updateScrollToBottomVisibility]);
 
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {shouldShowMessageSurface ? (
-        <div
-          data-chat-scroll-region="messages"
-          ref={chatContainerRef}
-          onScroll={handleScroll}
-          style={{ minWidth: 0, minHeight: 0, flex: 1, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}
-        >
-          <ChatMessageList
-            messages={visibleMessages}
-            threadId={threadId}
-            sourceThread={taskSessionLinks.source}
-            createdTaskLinks={taskSessionLinks.created}
-            onNavigateThread={onNavigateThread}
-            isLoading={chatLoading}
-            error={error}
-            onReloadAfterError={handleReloadAfterError}
-            isReloadingAfterError={isReloadingAfterError}
-            addToolResult={addToolResult}
-            shouldShowLoadingIndicator={shouldShowLoadingIndicator}
-            toolChoice={effectiveToolChoice}
-            setMessages={setMessages}
-            sendUserMessage={sendUserMessage}
-            onEditorWriteConfirmed={onEditorWriteConfirmed}
-            onOpenSubagentTask={onOpenSubagentTask}
-            settledToolCallIds={settledToolCallIds}
-            onToolConfirmationSettled={markToolConfirmationSettled}
-            historicalMessageIds={historicalMessageIds}
-            historyHasMore={historyPage.hasMore}
-            historyLoading={isLoadingOlderHistory}
-            historyError={olderHistoryError}
-            historyEmpty={historyIsEmpty}
-            onLoadOlder={loadOlderHistory}
-          />
-          {!agentBusy && taskSessionLinksFailed ? (
-            <TaskSessionLinksFailure onRetry={() => { void refreshTaskSessionLinks(); }} />
-          ) : null}
-          <div aria-hidden="true" />
+        <div className="chat-turn-reading">
+          <div className="chat-turn-reading__layout">
+            <TurnNavigation
+              items={turnNavigationItems}
+              activeMessageId={activeTurnMessageId}
+              loadingIndex={navigationIndexLoading}
+              partialIndex={partialTurnNavigation}
+              locatingMessageId={locatingMessageId}
+              failedMessageId={failedLocateMessageId}
+              onNavigate={(messageId) => { void navigateToTurn(messageId); }}
+              onRetryIndex={() => setNavigationIndexNonce((current) => current + 1)}
+            />
+            <div
+              data-chat-scroll-region="messages"
+              ref={chatContainerRef}
+              onScroll={handleScroll}
+              style={{ minWidth: 0, minHeight: 0, flex: 1, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}
+            >
+              <ChatMessageList
+                messages={visibleMessages}
+                threadId={threadId}
+                sourceThread={taskSessionLinks.source}
+                createdTaskLinks={taskSessionLinks.created}
+                onNavigateThread={onNavigateThread}
+                isLoading={chatLoading}
+                error={error}
+                onReloadAfterError={handleReloadAfterError}
+                isReloadingAfterError={isReloadingAfterError}
+                addToolResult={addToolResult}
+                shouldShowLoadingIndicator={shouldShowLoadingIndicator}
+                toolChoice={effectiveToolChoice}
+                setMessages={setMessages}
+                sendUserMessage={sendUserMessage}
+                onEditorWriteConfirmed={onEditorWriteConfirmed}
+                onOpenSubagentTask={onOpenSubagentTask}
+                settledToolCallIds={settledToolCallIds}
+                onToolConfirmationSettled={markToolConfirmationSettled}
+                historicalMessageIds={historicalMessageIds}
+                historyHasMore={historyPage.hasMore}
+                historyLoading={isLoadingOlderHistory}
+                historyError={olderHistoryError}
+                historyEmpty={historyIsEmpty}
+                onLoadOlder={loadOlderHistory}
+                locatedMessageId={locatedMessageId}
+              />
+              {!agentBusy && taskSessionLinksFailed ? (
+                <TaskSessionLinksFailure onRetry={() => { void refreshTaskSessionLinks(); }} />
+              ) : null}
+              <div aria-hidden="true" />
+            </div>
+          </div>
         </div>
       ) : null}
 

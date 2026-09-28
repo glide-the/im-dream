@@ -2,6 +2,7 @@
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
 # [Sync] 2026-09-28: exercise wait_threads completion/cursor/input wake and ordinary non-returning Thread creation.
+# [Sync] 2026-09-29: require owner-scoped user-turn navigation to pair only public messages in their own range.
 # [Sync] 2026-09-28: exercise create/list/read/send Thread Tool host behavior and stable running-Thread sends.
 # [Sync] 2026-09-27: running or incomplete task messages cannot be projected as completed results.
 # [Sync] 2026-09-27: verify owner-filtered task-session navigation links through the public Thread route.
@@ -620,6 +621,80 @@ def test_history_preserves_canonical_parts_without_dream_pg(boundary):
     assert response.status_code == 200
     assert len(response.json()["messages"][0]["parts"]) == 2
     assert [call[0] for call in calls] == ["chat-thread.get", "chat-message.list"]
+
+
+def test_turn_navigation_pairs_public_user_messages_without_crossing_turns(boundary):
+    client, outputs, calls, _ = boundary
+
+    def row(message_id, role, parts, metadata=None, final_text=None):
+        return {
+            **message_value(message_id=message_id),
+            "role": role,
+            "parts": parts,
+            "metadata": metadata or {},
+            "history_final_text": final_text,
+        }
+
+    outputs["chat-message.list"] = {"messages": [
+        row("user-1", "user", [{"type": "text", "text": "First question"}]),
+        row("answer-1", "assistant", [{"type": "text", "text": "First answer"}],
+            {"turnStatus": "completed", "turnId": "turn-1", "finalPartIndex": 0}, "First answer"),
+        row("user-2", "user", [{"type": "text", "text": "Second question"}]),
+        row("auto", "user", [{"type": "text", "text": "Internal repair input"}],
+            {"kind": "story-workspace-dream-auto-repair"}),
+        row("auto-answer", "assistant", [{"type": "text", "text": "Repair result"}],
+            {"turnStatus": "completed", "turnId": "turn-auto", "finalPartIndex": 0}, "Repair result"),
+        row("user-3", "user", [{"type": "file", "filename": "notes.pdf", "mediaType": "application/pdf", "url": "https://example.test/file"}]),
+        row("answer-3", "assistant", [{"type": "text", "text": "Could not finish"}],
+            {"turnStatus": "error", "turnId": "turn-3", "is_partial": True}),
+    ]}
+    response = request(client, "GET", "/api/claude-agent/threads/owned-thread/turn-navigation")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["items"] == [
+        {"message_id": "user-1", "user_preview": "First question", "has_attachment": False,
+         "assistant_preview": "First answer", "status": "answered"},
+        {"message_id": "user-2", "user_preview": "Second question", "has_attachment": False,
+         "assistant_preview": None, "status": "no_reply"},
+        {"message_id": "user-3", "user_preview": "notes.pdf", "has_attachment": True,
+         "assistant_preview": None, "status": "failed"},
+    ]
+    assert [call[0] for call in calls] == ["chat-thread.get", "chat-message.list"]
+    outputs["chat-thread.get"] = {"thread": None}
+    assert request(client, "GET", "/api/claude-agent/threads/another-thread/turn-navigation").status_code == 404
+    assert calls[-1][0] == "chat-thread.get"
+
+
+def test_turn_navigation_keeps_legacy_reply_and_reports_unresolved_or_failed_turns(boundary):
+    client, outputs, _, _ = boundary
+
+    def row(message_id, role, text, metadata=None):
+        return {
+            **message_value(message_id=message_id),
+            "role": role,
+            "parts": [{"type": "text", "text": text}],
+            "metadata": metadata or {},
+            "history_final_text": None,
+            "history_projection_version": None,
+            "history_process_available": False,
+        }
+
+    outputs["chat-message.list"] = {"messages": [
+        row("legacy-user", "user", "Older question"),
+        row("legacy-answer", "assistant", "Older reply"),
+        row("unknown-user", "user", "Needs review"),
+        row("unknown-answer", "assistant", "Diagnostic text", {"turnId": "turn-unknown", "turnStatus": "completed"}),
+        row("failed-user", "user", "Could not dispatch", {"dispatch_status": "failed"}),
+    ]}
+
+    response = request(client, "GET", "/api/claude-agent/threads/owned-thread/turn-navigation")
+    assert response.status_code == 200
+    assert [(item["message_id"], item["assistant_preview"], item["status"])
+            for item in response.json()["items"]] == [
+        ("legacy-user", "Older reply", "answered"),
+        ("unknown-user", None, "state_unknown"),
+        ("failed-user", None, "failed"),
+    ]
 
 
 def test_page_cursor_preserves_microseconds_and_thread_binding(boundary):

@@ -1,6 +1,7 @@
 <!-- [输入] 当前 Dream/Admin 架构、AutoDL 直宿主发布与本机开发合同。 -->
 <!-- [输出] 用户优先的启动、使用、本机配置、验证与恢复入口。 -->
 <!-- [定位] 仓库中文 README；README.md 是同结构的英文正文。 -->
+<!-- [同步] 2026-09-29：记录 Thread 内用户消息导航及需求稿。 -->
 <!-- [同步] 2026-09-27：说明运行中消息队列依赖目标数据库的 Admin Drizzle 0064–0066。 -->
 <!-- [同步] 2026-09-19：记录 Gateway service key 与 Claude Agent 完整发送链路发布门禁。 -->
 <!-- [同步] 2026-09-27：记录 Chat 输入队列、独立任务 Thread 工具及 Admin capability 门禁。 -->
@@ -45,6 +46,7 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 ## 使用 Dream
 
 - **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
+- **Chat 轮次导航** 为当前 Thread 中每条已发送的用户消息显示紧凑的动态刻度。悬浮或聚焦可预览该次交互，选中后定位原消息，包括较早的历史分页；窄屏改用可展开的消息列表。详见[轮次导航 PRD](docs/prd/chat/turn-navigation.md)。
 - **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。

@@ -54,6 +54,7 @@
 // [Sync] 2026-09-17: render the structured Gateway allowance rejection with safe actionable product copy.
 // [Sync] 2026-09-27: attach created-Thread source navigation to the first user bubble; retain access while older history is unloaded.
 // [Sync] 2026-09-27: place the settled created-task list inside the latest assistant reply, before its actions.
+// [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -77,6 +78,7 @@ import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
 import { fetchClaudeThreadMessageProcess } from './threadSessionHydration';
 import type { ChatUserMessage } from './chatUserMessageIngress';
 import { parseSavedMcpAppToolCall } from './mcp-apps/result';
+import { isNavigableUserMessage } from './chatTurnNavigationModel';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -107,6 +109,7 @@ interface ChatMessageListProps {
   sourceThread?: TaskSessionLinksSnapshot['source'];
   onNavigateThread?: (threadId: string) => void;
   createdTaskLinks?: TaskSessionLink[];
+  locatedMessageId?: string | null;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -286,7 +289,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -779,6 +782,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
           <div
             key={message.id}
             data-chat-message-id={message.id}
+            data-chat-user-message-id={isNavigableUserMessage(message) ? message.id : undefined}
+            className={locatedMessageId === message.id ? 'chat-turn-message--located' : undefined}
             style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}
           >
             {projection ? (

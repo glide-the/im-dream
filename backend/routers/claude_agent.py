@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # [Sync] 2026-09-28: add wait_threads as an in-turn tool wait and retire automatic task-result injection/read cards.
+# [Sync] 2026-09-29: project an owner-checked, compact user-turn navigation index for long Chat histories.
 # [Sync] 2026-09-28: replace model task-session commands with authorized create/list/read/send Thread Tools.
 # [Sync] 2026-09-27: project a task's saved completed assistant result separately from its launch/runtime state.
 # [Sync] 2026-09-27: expose owner-filtered task-session navigation links for Chat.
@@ -87,7 +88,7 @@ from pathlib import Path
 from typing import Annotated, Any, List, Literal, Mapping, Optional
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
@@ -654,6 +655,97 @@ def _project_chat_message_for_client(
         exclude_unset=True,
         mode="json",
     )
+
+
+_CHAT_TURN_NAVIGATION_PREVIEW_CHARS = 320
+_CHAT_TURN_NON_USER_KINDS = frozenset({
+    "story-workspace-dream-auto-repair",
+    "story-workspace-dream-confirmation",
+    "task-session-result",
+})
+
+
+def _chat_turn_navigation_preview(value: str) -> str:
+    """Bound a display excerpt without changing the canonical message body."""
+
+    return re.sub(r"\s+", " ", value).strip()[:_CHAT_TURN_NAVIGATION_PREVIEW_CHARS]
+
+
+def _project_chat_turn_navigation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair public user inputs with final replies within the same turn range."""
+
+    entries: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for message in messages:
+        public = _project_chat_message_for_client(message)
+        role = public.get("role")
+        parts = public.get("parts")
+        metadata = public.get("metadata")
+        if not isinstance(parts, list) or not isinstance(metadata, dict):
+            continue
+        if role == "user":
+            # Any user row ends the previous range, including a server-authored
+            # row that does not itself earn a navigation marker.
+            current = None
+            if (metadata.get("kind") in _CHAT_TURN_NON_USER_KINDS
+                or metadata.get("visibility") == "system-hidden"):
+                continue
+            texts = [part.get("text") for part in parts
+                     if isinstance(part, dict) and part.get("type") == "text"
+                     and isinstance(part.get("text"), str)]
+            files = [part.get("filename") for part in parts
+                     if isinstance(part, dict) and part.get("type") == "file"]
+            if not any(text.strip() for text in texts) and not files:
+                continue
+            preview = _chat_turn_navigation_preview(" ".join(texts))
+            filename = next((name for name in files if isinstance(name, str) and name.strip()), None)
+            current = {
+                "message_id": public.get("id"),
+                "user_preview": preview or _chat_turn_navigation_preview(filename or ""),
+                "has_attachment": bool(files),
+                "assistant_preview": None,
+                "status": "failed" if metadata.get("dispatch_status") == "failed" else "no_reply",
+            }
+            if isinstance(current["message_id"], str) and current["message_id"]:
+                entries.append(current)
+            else:
+                current = None
+            continue
+        if role != "assistant" or current is None:
+            continue
+        final_text = message.get("history_final_text")
+        public_texts = [part.get("text") for part in parts
+                        if isinstance(part, dict) and part.get("type") == "text"]
+        if not isinstance(final_text, str) or final_text not in public_texts:
+            final_part_index = metadata.get("finalPartIndex")
+            if (metadata.get("turnStatus") == "completed"
+                and isinstance(final_part_index, int)
+                and not isinstance(final_part_index, bool)
+                and 0 <= final_part_index < len(parts)
+                and isinstance(parts[final_part_index], dict)
+                and parts[final_part_index].get("type") == "text"):
+                final_text = parts[final_part_index].get("text")
+            elif (
+                not any(key in metadata for key in (
+                    "turnId", "turnStatus", "finalPartIndex", "turnProjectionInvalid"
+                ))
+                and len(parts) == 1
+                and isinstance(parts[0], dict)
+                and parts[0].get("type") == "text"
+            ):
+                final_text = parts[0].get("text")
+        if (metadata.get("turnProjectionInvalid") is not True
+            and isinstance(final_text, str) and final_text.strip()
+            and final_text in public_texts):
+            current["assistant_preview"] = _chat_turn_navigation_preview(final_text)
+            current["status"] = "answered"
+        elif metadata.get("turnStatus") == "error":
+            current["status"] = "failed"
+        elif metadata.get("turnStatus") == "cancelled":
+            current["status"] = "cancelled"
+        elif metadata.get("turnProjectionInvalid") is True:
+            current["status"] = "state_unknown"
+    return entries
 
 
 async def _load_current_user_mcp_app_resource_bindings(
@@ -1536,6 +1628,27 @@ async def claude_agent_list_threads(
         payload["error"] = outcome.error
         payload["detail"] = outcome.detail
     return payload
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/turn-navigation")
+async def claude_agent_thread_turn_navigation(
+    thread_id: str,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    chat: AdminChatData = Depends(get_admin_chat_data),
+):
+    """Return a compact, owner-scoped index for navigation across all turns."""
+
+    thread = await _admin_thread(current_user, chat, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    response.headers["Cache-Control"] = "private, no-store"
+    result = await _chat_invoke(
+        current_user, chat.list_messages, chat_dto.ThreadIdInputDTO(thread_id=thread_id)
+    )
+    return {"items": _project_chat_turn_navigation(
+        [message.model_dump() for message in result.messages]
+    )}
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/messages")
