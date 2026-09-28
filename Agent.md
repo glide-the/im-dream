@@ -1,6 +1,7 @@
 <!-- [Input] Repository governance, README contract, package-manager boundaries, and the Dream SDK/Runtime compatibility model. -->
-<!-- [Output] Mandatory maintenance rules for humans and coding agents working in this repository. -->
+<!-- [Output] Mandatory maintenance, release-gate, and product-design rules for humans and coding agents working in this repository. -->
 <!-- [Pos] Root operational rulebook; product-level Agent interaction behavior remains in docs/Agent.md. -->
+<!-- [Sync] 2026-09-29: require a reviewed current PRD and interaction design before user-visible feature implementation. -->
 <!-- [Sync] 2026-09-19: require a full Claude Agent send-path release gate for every related change. -->
 <!-- [Sync] 2026-08-28: define README parity, atomic Runtime versions, and authenticated model-capability ownership. -->
 
@@ -110,3 +111,20 @@ The mandatory gate is:
 5. If any stage fails or is skipped, do not publish, activate, mark qualified, or prune the previous release. Fix the failure and rerun the entire gate.
 
 All `POST /api/claude-agent` authentication and pre-stream preparation failures must emit a safe structured server log containing the stage, HTTP status, and stable error code. Logs must omit OAuth tokens, Gateway keys, cookies, request bodies, user text, and upstream response messages.
+
+## 9. 产品 PRD 与交互设计前置门禁
+
+任何新增用户可见业务流程或改变既有用户可见行为的需求，必须在编写功能代码**之前**创建或更新现行产品 PRD。PRD 及其链接的交互设计必须包含：
+
+1. 涉及 UI 时的页面信息架构；
+2. 完整用户流程和业务交互时序图；
+3. 状态、状态转换、失败反馈与恢复行为；
+4. 数据所有权、公开接口、身份认证、权限校验、幂等与并发规则；
+5. 涉及 UI 时的响应式与可访问性行为；
+6. 验收条件，以及“需求 → 设计 → 实现 → 测试”追踪矩阵。
+
+实施前必须完成一次独立设计评审，且结论明确为可实施。仓库存在适用设计技能时，先运行该技能，并把可复核产物保存到仓库或由现行设计文档建立链接；只有临时 workspace 产物不构成现行产品合同。
+
+发现功能代码先于 PRD 时，停止继续扩展该功能；先补齐或修正现行 PRD，完成独立评审并记录设计与代码的剩余差距。差距未闭合或未明确记录为阻塞项前，不得宣称功能完成。
+
+纯重构或不改变用户可见行为的缺陷修复无需新增 PRD，但仍须同步受影响的现行设计文档、文件头、目录清单和相关验收证据。

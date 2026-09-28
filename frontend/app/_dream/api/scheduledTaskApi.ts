@@ -2,6 +2,7 @@
 // [Output] Typed date/history reads and revision-checked actions for CalendarPopup.
 // [Pos] Scheduled Chat browser transport; Admin remains the plan and trigger owner.
 // [Sync] 2026-09-28: consume once/daily task projections without browser OAuth or local schedule calculation.
+// [Sync] 2026-09-29: type definition mutations and manual runs as distinct action/result contracts.
 import { browserRequestHeaders } from '../lib/browserSession';
 import { API_BASE } from '../lib/apiBase';
 
@@ -79,9 +80,39 @@ export function getScheduledHistory(taskId: string, limit = 50) {
 
 export type ScheduledTaskAction = 'edit' | 'pause' | 'resume' | 'delete' | 'restore' | 'run';
 
-export function updateScheduledTask(taskId: string, action: ScheduledTaskAction,
-  body: { expected_revision: number } | { title: string; prompt: string; rule: ScheduledRule; expected_revision: number } | { manual_request_key: string }) {
-  return request<{ task?: ScheduledTask; trigger?: ScheduledTrigger }>(
+export type ScheduledTaskDefinitionAction = Exclude<ScheduledTaskAction, 'run' | 'edit'>;
+export type ScheduledTaskEditBody = {
+  title: string;
+  prompt: string;
+  rule: ScheduledRule;
+  expected_revision: number;
+};
+export type ScheduledTaskRevisionBody = { expected_revision: number };
+export type ScheduledTaskRunBody = { manual_request_key: string };
+export type ScheduledTaskDefinitionResult = { task: ScheduledTask };
+export type ScheduledTaskRunResult = { trigger: ScheduledTrigger };
+
+export function updateScheduledTask(
+  taskId: string,
+  action: 'edit',
+  body: ScheduledTaskEditBody,
+): Promise<ScheduledTaskDefinitionResult>;
+export function updateScheduledTask(
+  taskId: string,
+  action: ScheduledTaskDefinitionAction,
+  body: ScheduledTaskRevisionBody,
+): Promise<ScheduledTaskDefinitionResult>;
+export function updateScheduledTask(
+  taskId: string,
+  action: 'run',
+  body: ScheduledTaskRunBody,
+): Promise<ScheduledTaskRunResult>;
+export function updateScheduledTask(
+  taskId: string,
+  action: ScheduledTaskAction,
+  body: ScheduledTaskEditBody | ScheduledTaskRevisionBody | ScheduledTaskRunBody,
+) {
+  return request<ScheduledTaskDefinitionResult | ScheduledTaskRunResult>(
     `/${encodeURIComponent(taskId)}/${action}`, body,
   );
 }

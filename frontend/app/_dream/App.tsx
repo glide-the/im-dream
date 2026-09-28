@@ -1,5 +1,6 @@
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
 // [Sync] 2026-09-28: open a scheduled task's persisted target Thread through the mounted ChatView navigation props.
+// [Sync] 2026-09-29: expose the shared Calendar date workspace from the existing 44px mobile Writing toolbar.
 // [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
 // [Output] Render the authenticated Story Workspace shell, writing canvas, and canonical Chat surfaces.
 // [Pos] frontend app-root node in frontend/app/_dream
@@ -1826,6 +1827,35 @@ export default function App() {
               zIndex: 1000
             }}>
               <button
+                type="button"
+                onClick={() => setShowCalendarPopup(true)}
+                aria-label="Calendar"
+                title="Calendar"
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  border: 'none',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--color-bg-surface-solid)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 6px var(--color-shadow-medium)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </button>
+              <button
+                type="button"
                 onClick={handleNewSessionClick}
                 title="New Session"
                 style={{
@@ -1856,6 +1886,7 @@ export default function App() {
                 +
               </button>
               <button
+                type="button"
                 onClick={handleInsertAgent}
                 title="Insert Agent Chat"
                 style={{
