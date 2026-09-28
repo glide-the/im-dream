@@ -6,6 +6,7 @@
 <!-- [同步] 2026-09-27：记录 Chat 输入队列、独立任务 Thread 工具及 Admin capability 门禁。 -->
 <!-- [同步] 2026-09-28：独立任务改用创建、列表、读取和发送 Dream Thread 工具。 -->
 <!-- [同步] 2026-09-28：独立任务通过当前父轮次的 wait_threads Tool 回执完成等待。 -->
+<!-- [同步] 2026-09-28：索引定时任务评审设计、注明尚未实现，并修复任务与进度 PRD 链接。 -->
 <!-- [同步] 2026-09-27：记录任务导航在用户消息和助手回复中的位置。 -->
 <!-- [同步] 2026-09-18：将 AutoDL 启动与产品使用前置，恢复细节移入独立手册。 -->
 
@@ -42,7 +43,7 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 ## 使用 Dream
 
 - **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
-- **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口，来源会话顶部“会话信息”面板汇总所创建的任务、子智能体和计划。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[会话信息 PRD](docs/prd/chat/session-info.md)。
+- **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口，来源会话顶部“任务与进度”面板汇总所创建的任务、子智能体和计划。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
 - **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”组合 YuE2 统筹、编曲师、作词师，并使用本机 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
@@ -180,6 +181,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - [AutoDL 恢复](docs/deploy/autodl-recovery.md)
 - [项目架构](docs/architecture/项目架构设计说明.md)
 - [认证与数据合同](docs/architecture/admin-auth-data-interaction.md)
+- [定时任务设计与实施门槛](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)（[独立评审](docs/exec/scheduled-task-phase3-design-review-20260928.md)；定时调度尚未实现）
 - [仓库规则](Agent.md)
 - [产品 Agent 行为](docs/Agent.md)
 - [规则索引](docs/rules/README.md)

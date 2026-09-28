@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-27: document Chat input queue and independent task Thread tools with Admin capability gates. -->
 <!-- [Sync] 2026-09-28: expose independent task control as create/list/read/send Dream Thread tools. -->
 <!-- [Sync] 2026-09-28: complete independent task waiting through the same parent turn's wait_threads Tool result. -->
+<!-- [Sync] 2026-09-28: index the reviewed scheduled-task design, mark its implementation pending, and repair the task-activity PRD link. -->
 <!-- [Sync] 2026-09-27: place task navigation beside its user and assistant messages. -->
 <!-- [Sync] 2026-09-18: put AutoDL startup and product use first; move recovery details to a dedicated runbook. -->
 
@@ -42,7 +43,7 @@ If a WebUI entry is unavailable after an instance restart, use the [AutoDL recov
 ## Use Dream
 
 - **Chat** keeps Thread history and streams Agent output. Resume, cancel and retry keep the same production path.
-- **Chat while an Agent runs** accepts further text into a durable per-Thread queue. Queue cards above the composer can guide, edit, cancel, or move one pending message into an independent side Chat. Agents use `create_thread`, `list_threads`, `read_thread`, and `send_message_to_thread` for independent Dream Threads; stop remains a page/API action. Each created Thread shows a return link above its first user message, and the source's Conversation info panel groups created tasks, subagents, and the plan. The Admin schema capabilities must be applied before these operations are available. Running-owner controls currently require the same Dream process. See the [Conversation info PRD](docs/prd/chat/session-info.md).
+- **Chat while an Agent runs** accepts further text into a durable per-Thread queue. Queue cards above the composer can guide, edit, cancel, or move one pending message into an independent side Chat. Agents use `create_thread`, `list_threads`, `read_thread`, and `send_message_to_thread` for independent Dream Threads; stop remains a page/API action. Each created Thread shows a return link above its first user message, and the source's task activity panel groups created tasks, subagents, and the plan. The Admin schema capabilities must be applied before these operations are available. Running-owner controls currently require the same Dream process. See the [task activity PRD](docs/prd/chat/task-activity.md).
 - **Thread task waiting** exposes the Codex-style `wait_threads` Tool contract. A parent Agent keeps its current SDK turn open, waits for up to eight authorized Dream Threads, and consumes a saved completion, a tool-confirmation request, a timeout snapshot, or a newly queued parent input as the Tool result before producing its normal reply. Chat does not inject a synthetic result message or render a separate result card. See [task-session completion design](docs/design/claude-agent/task-session-completion-handoff.md).
 - **Dream and Story Workspace** develop stories, characters, scenes, scripts and generated artifacts.
 - **Decks and Agents** package reusable instructions, tools, resources and Claude plugins. Registered users receive editable copies of the code-owned Screenplay Creation Team and Music Creation system Decks; Music Creation combines a YuE2 coordinator, Music Arranger, and Lyricist with the local `yue2-skills`, `music-composition-skills`, and `lyric-writing-skills` Marketplaces.
@@ -180,6 +181,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 - [AutoDL recovery](docs/deploy/autodl-recovery.md)
 - [Architecture](docs/architecture/项目架构设计说明.md)
 - [Authentication and data contract](docs/architecture/admin-auth-data-interaction.md)
+- [Scheduled-task design and implementation gates](docs/design/claude-agent/scheduled-task-loop-interaction-design.md) ([independent review](docs/exec/scheduled-task-phase3-design-review-20260928.md); scheduling is not yet implemented)
 - [Repository rules](Agent.md)
 - [Product Agent behavior](docs/Agent.md)
 - [Rules index](docs/rules/README.md)
