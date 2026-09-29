@@ -4,7 +4,7 @@
 // [Sync] 2026-09-02: created for final-first history hydration and on-demand canonical process rendering.
 // [Sync] 2026-09-06: prove the exact MCP App panel is a persistent sibling outside the collapsible process.
 // [Sync] 2026-09-29: auto-recover historical Tool results so persisted scheduled-task markers survive reload.
-// [Sync] 2026-09-29: verify the entire scheduled-task marker is the single detail-opening button.
+// [Sync] 2026-09-29: use the production top-level scheduled-task Tool receipt and verify the entire marker opens details.
 // [Sync] 2026-09-29: verify task information, source/run Conversations and task schedule stay in the scheduled detail sidebar.
 
 import { expect, test } from '@playwright/test';
@@ -313,17 +313,15 @@ test('persisted successful create_scheduled_task result restores a marker in its
         role: 'assistant',
         parts: [
           {
-            type: 'dynamic-tool', toolName: 'create_scheduled_task', toolCallId: 'schedule-1',
+            type: 'tool-invocation', toolName: 'mcp__user__create_scheduled_task', toolCallId: 'schedule-1',
             state: 'output-available', input: { title: '晨间复盘' },
             output: {
               ok: true,
-              result: {
-                status: 'ok',
-                scheduled_task: {
-                  id: 'st_1', title: '晨间复盘', status: 'active', revision: 1,
-                  next_run_at: '2026-09-30T01:00:00Z',
-                  rule: { kind: 'daily', local_time: '09:00', time_zone: 'Asia/Shanghai' },
-                },
+              status: 'ok',
+              scheduled_task: {
+                id: 'st_1', title: '晨间复盘', status: 'active', revision: 1,
+                next_run_at: '2026-09-30T01:00:00Z',
+                rule: { kind: 'daily', local_time: '09:00', time_zone: 'Asia/Shanghai' },
               },
             },
           },

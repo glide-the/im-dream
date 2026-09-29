@@ -1,7 +1,7 @@
 // [Input] A completed create_scheduled_task Tool part output from the live turn or persisted process detail.
 // [Output] A strict, display-safe scheduled-task snapshot or null when the Tool/result contract does not match.
 // [Pos] Shared scheduled-task Tool decoder for Chat markers; it does not infer tasks from assistant prose.
-// [Sync] 2026-09-29: decode only successful create_scheduled_task result envelopes for persisted Chat markers.
+// [Sync] 2026-09-29: mirror the production mcp__user__ Tool name and top-level ok/status/scheduled_task receipt instead of synthetic test shapes.
 
 export type ScheduledTaskMarkerRule =
   | { kind: 'once'; local_date: string; local_time: string; time_zone: string }
@@ -15,6 +15,11 @@ export type ScheduledTaskMarkerSnapshot = {
   status: 'active' | 'paused' | 'exhausted' | 'deleted';
   revision: number;
 };
+
+const CREATE_SCHEDULED_TASK_TOOL_NAMES = new Set([
+  'create_scheduled_task',
+  'mcp__user__create_scheduled_task',
+]);
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -31,12 +36,11 @@ function nonempty(value: unknown): value is string {
 }
 
 export function decodeScheduledTaskMarker(toolName: string, output: unknown): ScheduledTaskMarkerSnapshot | null {
-  if (toolName !== 'create_scheduled_task') return null;
+  if (!CREATE_SCHEDULED_TASK_TOOL_NAMES.has(toolName)) return null;
   const envelope = parseOutput(output);
   if (!envelope || envelope.ok !== true) return null;
-  const result = objectValue(envelope.result);
-  if (!result || result.status !== 'ok') return null;
-  const task = objectValue(result.scheduled_task);
+  if (envelope.status !== 'ok') return null;
+  const task = objectValue(envelope.scheduled_task);
   const rule = objectValue(task?.rule);
   if (!task || !rule || !nonempty(task.id) || !nonempty(task.title)
     || !Number.isSafeInteger(task.revision) || (task.revision as number) < 1
