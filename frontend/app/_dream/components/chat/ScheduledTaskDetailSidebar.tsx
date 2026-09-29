@@ -1,7 +1,7 @@
 // [Input] A scheduled-task id, optional creation snapshot, and authenticated scheduled-task APIs.
-// [Output] Read-only right detail sidebar with effective configuration, latest run, retry, and exact Thread navigation.
+// [Output] Read-only right detail sidebar with task information, owned conversations, schedule, retry, and exact Thread navigation.
 // [Pos] Chat-owned scheduled-task detail surface, mutually exclusive with file/subagent/task-session sidebars.
-// [Sync] 2026-09-29: add persisted task detail and latest-trigger navigation for Chat task markers.
+// [Sync] 2026-09-29: separate task information, scheduled-run Conversations, and the task schedule in the Chat sidebar.
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -37,7 +37,9 @@ export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, 
     finally { setLoading(false); }
   }, [taskId]);
   useEffect(() => { void load(); }, [load]);
-  const latest = useMemo(() => [...triggers].sort((left, right) => timestamp(right) - timestamp(left))[0] ?? null, [triggers]);
+  const conversations = useMemo(() => [...triggers]
+    .filter((trigger) => Boolean(trigger.target_thread_id))
+    .sort((left, right) => timestamp(right) - timestamp(left)), [triggers]);
   const title = task?.title ?? snapshot?.title ?? t('chat.scheduledTask.detailTitle');
   const rule = task?.rule ?? snapshot?.rule;
   const ruleText = rule?.kind === 'once'
@@ -56,19 +58,30 @@ export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, 
       {error ? <div className="scheduled-task-detail__error" role="alert"><span>{t('chat.scheduledTask.unavailable')}</span>
         <button type="button" onClick={() => void load()}>{t('calendar.scheduledRetry')}</button></div> : null}
       {!loading && !error ? <>
-        <section><h3>{t('chat.scheduledTask.details')}</h3><dl>
+        <section><h3>{t('chat.scheduledTask.taskInfo')}</h3><dl>
           <div><dt>{t('calendar.scheduledStatusLabel')}</dt><dd>{status ? t(`calendar.scheduledStatus.${status}`, { defaultValue: status }) : '—'}</dd></div>
+        </dl>{task?.prompt ? <p className="scheduled-task-detail__prompt">{task.prompt}</p> : null}</section>
+        <section><h3>{t('chat.scheduledTask.conversations')}</h3>
+          <div className="scheduled-task-detail__conversations">
+            {task?.source_thread_id ? <button type="button" onClick={() => onOpenThread(task.source_thread_id)}>
+              <span><strong>{t('chat.scheduledTask.sourceConversation')}</strong><small>{title}</small></span>
+              <span aria-hidden="true">›</span>
+            </button> : null}
+            {conversations.map((trigger) => <button type="button" key={trigger.id}
+              onClick={() => onOpenThread(trigger.target_thread_id!)}>
+              <span><strong>{t('chat.scheduledTask.runConversation')}</strong>
+                <small>{formatDate(trigger.scheduled_at ?? trigger.created_at)} · {t(`calendar.scheduledStatus.${trigger.status}`, { defaultValue: trigger.status })}</small></span>
+              <span aria-hidden="true">›</span>
+            </button>)}
+            {!task?.source_thread_id && conversations.length === 0
+              ? <p>{t('chat.scheduledTask.noConversations')}</p> : null}
+          </div>
+        </section>
+        <section><h3>{t('chat.scheduledTask.taskCycle')}</h3><dl>
           <div><dt>{t('calendar.scheduledRule')}</dt><dd>{ruleText}</dd></div>
           <div><dt>{t('calendar.scheduledNext')}</dt><dd>{formatDate(task?.next_run_at ?? snapshot?.nextRunAt)}</dd></div>
         </dl></section>
-        {task?.prompt ? <section><h3>{t('calendar.scheduledPrompt')}</h3><p className="scheduled-task-detail__prompt">{task.prompt}</p></section> : null}
-        <section><h3>{t('calendar.scheduledRecent')}</h3>{latest ? <dl>
-          <div><dt>{t('calendar.scheduledStatusLabel')}</dt><dd>{t(`calendar.scheduledStatus.${latest.status}`, { defaultValue: latest.status })}</dd></div>
-          <div><dt>{t('calendar.scheduledRunAt')}</dt><dd>{formatDate(latest.scheduled_at ?? latest.created_at)}</dd></div>
-        </dl> : <p>{t('calendar.scheduledNeverRun')}</p>}</section>
       </> : null}
     </div>
-    {latest?.target_thread_id ? <footer><button type="button" onClick={() => onOpenThread(latest.target_thread_id!)}>
-      {t('calendar.scheduledOpenThread')}</button></footer> : null}
   </aside>;
 }

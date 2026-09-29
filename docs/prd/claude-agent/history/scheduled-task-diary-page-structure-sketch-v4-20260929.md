@@ -1,9 +1,9 @@
 <!-- [Input] 现行定时任务 PRD、四张用户参考图和 html-design-workflow Stage 2 结构产物。 -->
 <!-- [Output] Calendar/Chat 定时任务列表、结果、编辑和详情侧栏的宽窄屏骨架及滚动/焦点边界。 -->
 <!-- [Pos] docs/prd/claude-agent 下的现行页面结构图；正式视觉规范见 docs/design/claude-agent/scheduled-task-diary-page-ui-design.md。 -->
-<!-- [Sync] 2026-09-29: v5 将 scheduled run Conversations 收入详情栏，并从通用 TaskSession 列表排除。 -->
+<!-- [Sync] 2026-09-29: 发布 v4 Calendar 与 Chat 定时任务结构骨架。 -->
 
-# Ink & Memory 定时任务完整交互页面结构草图 v5（现行）
+# Ink & Memory 定时任务完整交互页面结构草图 v4（现行）
 
 > 输入：`files/workspace/1_prd_draft.md`、`files/inputs/target_image.png`、`files/inputs/topic.txt` 与 topic 中三张辅助参考图
 > 输出用途：为 Stage 3 层级与状态映射、Stage 4 UI 规格提供结构底稿
@@ -17,7 +17,7 @@
 2. **Calendar 最近结果态**：点击任务行后，只替换任务纸面的正文；月历与 Diary 保持原位。结果正文使用同一 trigger 的 `target_thread_id` 与 `final_message_id`。
 3. **编辑 Modal**：从铅笔进入独立模态层；编辑区不在列表内展开，也不改变三张纸面的尺寸。
 4. **Chat 任务标记**：`create_scheduled_task` Tool 成功后，在对应助手 turn 内插入可恢复的任务标记卡。
-5. **Chat 任务详情侧栏**：点击标记后打开既有右侧栏位置，依次展示任务信息、Conversations、任务周期；普通 Chat 仍可独立滚动和输入。
+5. **Chat 任务详情侧栏**：点击标记后打开既有右侧栏位置，读取当前 effective 配置与最近 trigger；普通 Chat 仍可独立滚动和输入。
 
 核心结构规则：
 
@@ -25,7 +25,6 @@
 - 任务纸面正文只有 `LIST` 与 `RESULT(taskId)` 两种互斥模式。
 - 编辑 Modal、行尾菜单是覆盖层，不参与 Calendar grid 高度计算。
 - Chat 右侧任务详情与文件、TaskSession、子代理等既有侧栏互斥。
-- scheduled trigger 复用的 TaskSession 不进入通用 created-task 列表；该执行 Thread 只出现在 H7 Conversations。
 - 所有“打开聊天”都使用对应 trigger 的 `target_thread_id`，不使用 source Thread 或最近浏览 Thread 代替。
 
 ---
@@ -276,23 +275,29 @@ M5 API_ERR   capability/network fail  desired 保留；表单级重试
 │ │ Chat title                                               │ │ 定时任务                  [×] │ │
 │ ├───────────────────────────────────────────────────────────┤ ├──────────────────────────────┤ │
 │ │ ┌─ H1.2 Message scroller ───────────────────────────────┐ │ │ ┌─ H4.1 Sidebar scroller ─┐ │ │
-│ │ │ user message                                          │ │ │ │ H6 任务信息              │ │ │
-│ │ │ assistant turn                                       │ │ │ │ 状态 / 完整 prompt       │ │ │
-│ │ │ ├─ assistant Markdown                                │ │ │ ├──────────────────────────┤ │ │
-│ │ │ ├─ Tool part                                         │ │ │ │ H7 Conversations         │ │ │
-│ │ │ ├─ H2 Scheduled marker group                         │ │ │ │ 创建任务的会话       [›] │ │ │
-│ │ │ │ ┌─ H3 Marker button ─────────────────────────────┐ │ │ │ │ 9 月 29 日执行会话    [›] │ │ │
-│ │ │ │ │ [◷] 每日整理笔记                   [打开]     │ │ │ ├──────────────────────────┤ │ │
-│ │ │ │ │     每天 09:00 · Asia/Shanghai                │ │ │ │ H8 任务周期              │ │ │
-│ │ │ │ └───────────────────────────────────────────────┘ │ │ │ │ 频率 / 时间 / 时区       │ │ │
-│ │ │ └─ message actions                                  │ │ │ │ 下次执行                 │ │ │
-│ │ └───────────────────────────────────────────────────────┘ │ │ └──────────────────────────┘ │ │
-│ ├───────────────────────────────────────────────────────────┤ └──────────────────────────────┘ │
-│ │ H1.3 Existing Chat composer                              │                                  │
+│ │ │ user message                                          │ │ │ │ H6 Detail group          │ │ │
+│ │ │                                                       │ │ │ │ 状态          已启用     │ │ │
+│ │ │ assistant turn                                       │ │ │ │ 标题      每日整理笔记   │ │ │
+│ │ │ ├─ assistant Markdown                                │ │ │ │ 提示词    完整 prompt    │ │ │
+│ │ │ ├─ Tool part                                         │ │ │ │ 来源      当前会话      │ │ │
+│ │ │ ├─ H2 Scheduled marker group                         │ │ │ ├──────────────────────────┤ │ │
+│ │ │ │ ┌─ H3 Marker button ─────────────────────────────┐ │ │ │ │ H7 Frequency group       │ │ │
+│ │ │ │ │ [◷] 每日整理笔记                   [打开]     │ │ │ │ │ 频率          每天       │ │ │
+│ │ │ │ │     每天 09:00 · Asia/Shanghai                │ │ │ │ │ 时间          09:00      │ │ │
+│ │ │ │ └───────────────────────────────────────────────┘ │ │ │ │ 时区   Asia/Shanghai      │ │ │
+│ │ │ │ ┌─ H3 Marker button / optional second task ─────┐ │ │ │ │ 下次执行      9 月 30 日 │ │ │
+│ │ │ │ └───────────────────────────────────────────────┘ │ │ │ ├──────────────────────────┤ │ │
+│ │ │ └─ message actions                                  │ │ │ │ H8 Latest run group      │ │ │
+│ │ │                                                       │ │ │ │ 状态          已完成     │ │ │
+│ │ │ next messages                                         │ │ │ │ 时间      9 月 29 日     │ │ │
+│ │ └───────────────────────────────────────────────────────┘ │ │ │ 结果摘要 / 错误反馈      │ │ │
+│ ├───────────────────────────────────────────────────────────┤ │ │ [打开聊天] *            │ │ │
+│ │ H1.3 Existing Chat composer                              │ │ └──────────────────────────┘ │ │
+│ │ [＋ 随心输入……………………………………… model  mic  send] │ └──────────────────────────────┘ │
 │ └───────────────────────────────────────────────────────────┘                                  │
 └───────────────────────────────────────────────────────────────────────────────────────────────┘
 
-* H7 首项使用 task.source_thread_id；后续项只使用拥有 target_thread_id 的 trigger，并按 created_at 倒序。
+* H8 所示最新 trigger 有 target_thread_id 时显示。
 ```
 
 ### 6.2 标记卡结构与识别边界
@@ -329,7 +334,6 @@ Chat side panel slot = exactly one of
 - H5 关闭后焦点返回打开它的 H3。
 - H4 的 API 失败只替换 H4.1 为错误与重试；H1.2 和 H1.3 继续工作。
 - H4 为只读详情；本轮不在侧栏复制编辑表单。
-- 通用 `CreatedTaskSessionList` 只接收普通 TaskSession；scheduled trigger task session 由 Admin links 查询排除。
 
 ---
 
@@ -344,9 +348,9 @@ Chat side panel slot = exactly one of
 │ │ │ H5 定时任务                         [×] │ │ │
 │ │ ├─────────────────────────────────────────┤ │ │
 │ │ │ H4.1 drawer scroller                    │ │ │
-│ │ │ H6 任务信息：状态 / prompt              │ │ │
-│ │ │ H7 Conversations：source / trigger      │ │ │
-│ │ │ H8 任务周期：规则 / 时间 / IANA 时区    │ │ │
+│ │ │ H6 状态 / 标题 / prompt                 │ │ │
+│ │ │ H7 once|daily / 日期|时间 / IANA 时区   │ │ │
+│ │ │ H8 最近运行 / 错误或结果 / 打开聊天     │ │ │
 │ │ └─────────────────────────────────────────┘ │ │
 │ └─────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────┘
@@ -466,11 +470,11 @@ H3 marker -> H5 heading/close -> close -> same H3
 | H1 | H0 | Conversation Column | Thread、消息与输入 | 既有 Chat 动作 | Thread/messages/SSE |
 | H2 | assistant turn | Marker Group | 将成功任务锚定到 owning turn | 无独立动作 | 实时 Tool parts 或有界 message-process 读取 |
 | H3 | H2 | Marker Button | 展示创建快照并选择 task ID | click/Enter/Space 打开详情 | strict Tool success decoder |
-| H4 | H0 | Scheduled Detail Sidebar | 展示任务信息、Conversations、任务周期 | 关闭、重试、打开会话 | get task + history |
+| H4 | H0 | Scheduled Detail Sidebar | 展示当前 effective 与最近 trigger | 关闭、重试、打开聊天 | get task + history |
 | H5 | H4 | Sidebar Header | 命名与关闭 | 关闭 | selected task state |
-| H6 | H4 | Task Information | 状态、标题、prompt | 只读 | ScheduledTask effective |
-| H7 | H4 | Conversations | source 与各 trigger target Thread | 打开精确会话 | task.source_thread_id + ScheduledTrigger |
-| H8 | H4 | Task Cycle | once/daily、日期/时间/时区、下次执行 | 只读 | ScheduledTask rule |
+| H6 | H4 | Detail Group | 状态、标题、prompt、来源 | 只读 | ScheduledTask effective |
+| H7 | H4 | Frequency Group | once/daily、日期/时间/时区、下次执行 | 只读 | ScheduledTask rule |
+| H8 | H4 | Latest Run Group | 最近 trigger、错误或结果入口 | 打开聊天（条件式） | ScheduledTrigger |
 | HM1 | H0 | Mobile Drawer | 窄屏任务详情覆盖层 | 关闭、Escape | existing side panel responsive shell |
 
 ### 10.1 Calendar 子模块索引

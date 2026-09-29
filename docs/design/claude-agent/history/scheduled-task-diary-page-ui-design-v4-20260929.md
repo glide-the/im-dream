@@ -1,9 +1,9 @@
-<!-- [Input] 现行 v5 PRD、结构草图、层级逻辑和用户参考图。 -->
+<!-- [Input] 现行 v4 PRD、结构草图、层级逻辑和四张用户参考图。 -->
 <!-- [Output] Calendar/Chat 定时任务完整交互的视觉规范、生产映射与 HTML/Tailwind/CSS 原型。 -->
 <!-- [Pos] docs/design/claude-agent 下的现行 UI 设计；业务规则以 docs/prd/claude-agent/scheduled-task-diary-page-prd.md 为准。 -->
-<!-- [Sync] 2026-09-29: html-design-workflow v5 将详情栏固定为任务信息、Conversations、任务周期，并隔离通用 TaskSession 列表。 -->
+<!-- [Sync] 2026-09-29: 通过 html-design-workflow Stage 4 发布列表、结果、编辑 Modal、Chat 标记与详情侧栏。 -->
 
-# Ink & Memory 定时任务完整 UI 设计 v5（现行）
+# Ink & Memory 定时任务完整 UI 设计 v4（现行）
 
 > 产物类型：实施级 UI 规范 + 可独立审阅的 HTML5 原型
 > 输入：`1_prd_draft.md`、`2_structure_sketch.md`、`3_hierarchy_logic.md`、主图与三张辅助参考图
@@ -90,7 +90,7 @@ Z0 被遮罩的现有应用页面
 | C8 | Latest Result | `.calendar-popup__task-result` | header/footer 固定，正文独立滚动 |
 | C9 | Edit Form in shared Modal | `.scheduled-task-edit-modal` | effective 初始化 desired；保存携带 revision |
 | H2/H3 | Marker Group / Marker | `.chat-scheduled-markers` / `.chat-scheduled-marker` | 单一 button；从严格 Tool success 投影 |
-| H4 | Detail Sidebar | `.chat-scheduled-detail` | 读取 current effective 与 trigger Conversations；只读 |
+| H4 | Detail Sidebar | `.chat-scheduled-detail` | 读取 current effective 与 latest trigger；只读 |
 | HM1 | Mobile Drawer | `.chat-scheduled-detail--drawer` | 覆盖式右 Drawer；限制焦点并锁定背景滚动 |
 
 ### 4.1 建议组件树
@@ -178,11 +178,8 @@ ChatWorkspace
 ### 5.7 Chat 详情栏 / Drawer H4
 
 - 桌面宽度建议 `380–430px`，边界由既有 side panel shell 提供；详情自身滚动，不改变 composer 高度。
-- 信息分组顺序固定为：任务信息 → Conversations → 任务周期。组内使用 label/value 行，不套多层边框盒。
-- 任务信息显示状态和完整 prompt；标题保留在侧栏头部。
-- Conversations 首项打开 source Thread，后续按时间倒序展示具备 target Thread 的 trigger；每一行打开自身精确 Thread。
-- scheduled trigger 复用的 TaskSession 不进入通用 `CreatedTaskSessionList`；普通独立 TaskSession 继续保留。
-- 任务周期显示 once/daily、日期、时间、IANA 时区和下次执行。
+- 信息分组：任务定义 → 执行规则 → 最近运行。组内使用 label/value 行，不套多层边框盒。
+- 最近 trigger 有 target Thread 时显示“打开聊天”，并使用当前分组所示 trigger。
 - 窄屏复用同一内容，投影为右侧 Drawer；宽度 `min(92vw,420px)`，带 backdrop、focus trap 和 Escape 关闭。
 
 ---
@@ -248,7 +245,7 @@ ChatWorkspace
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ink & Memory · 定时任务 UI v5</title>
+  <title>Ink & Memory · 定时任务 UI v4</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -440,11 +437,6 @@ ChatWorkspace
     .detail-row:first-of-type { border-top:0; }
     .detail-row dt { color:var(--muted); font-size:13px; }
     .detail-row dd { margin:0; overflow-wrap:anywhere; text-align:right; font-size:13px; font-weight:500; }
-    .conversation-link { display:grid; width:100%; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:13px 14px; border:1px solid var(--hairline); border-radius:14px; background:var(--paper); color:var(--ink); text-align:left; cursor:pointer; }
-    .conversation-link + .conversation-link { margin-top:8px; }
-    .conversation-link span:first-child { display:grid; min-width:0; gap:3px; }
-    .conversation-link strong,.conversation-link small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .conversation-link small { color:var(--muted); }
     .status-pill { display:inline-flex; align-items:center; gap:6px; color:var(--sage); }
     .prompt-block { margin-top:10px; font-size:13px; line-height:1.65; }
     .drawer-backdrop { display:none; }
@@ -615,19 +607,19 @@ ChatWorkspace
         <aside class="detail-sidebar" aria-labelledby="detail-title">
           <header class="detail-head"><div><div class="eyebrow">Scheduled task</div><h2 id="detail-title" class="serif">任务详情</h2></div><button class="icon-button" type="button" data-close-detail aria-label="关闭任务详情"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
           <div class="detail-scroll">
-            <section class="detail-group" aria-labelledby="task-info-heading">
-              <h3 id="task-info-heading">任务信息</h3>
-              <dl><div class="detail-row"><dt>状态</dt><dd><span class="status-pill"><i class="fa-solid fa-circle text-xs" aria-hidden="true"></i>已启用</span></dd></div></dl>
+            <section class="detail-group" aria-labelledby="definition-heading">
+              <h3 id="definition-heading">任务定义</h3>
+              <dl><div class="detail-row"><dt>状态</dt><dd><span class="status-pill"><i class="fa-solid fa-circle text-xs" aria-hidden="true"></i>已启用</span></dd></div><div class="detail-row"><dt>标题</dt><dd>每日回顾明日计划</dd></div></dl>
               <p class="prompt-block">整理今天的工作记录，提炼未完成事项，并生成明日优先行动清单。</p>
             </section>
-            <section class="detail-group" aria-labelledby="conversations-heading">
-              <h3 id="conversations-heading">Conversations</h3>
-              <button class="conversation-link" type="button" data-open-chat><span><strong>创建任务的会话</strong><small>整理工作记录与明日计划</small></span><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
-              <button class="conversation-link" type="button" data-open-chat><span><strong>任务运行会话</strong><small>今天 09:00 · 已完成</small></span><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
-            </section>
-            <section class="detail-group" aria-labelledby="cycle-heading">
-              <h3 id="cycle-heading">任务周期</h3>
+            <section class="detail-group" aria-labelledby="frequency-heading">
+              <h3 id="frequency-heading">执行规则</h3>
               <dl><div class="detail-row"><dt>频率</dt><dd>每天</dd></div><div class="detail-row"><dt>时间</dt><dd>21:30</dd></div><div class="detail-row"><dt>时区</dt><dd>Asia/Shanghai</dd></div><div class="detail-row"><dt>下次执行</dt><dd>今天 21:30</dd></div></dl>
+            </section>
+            <section class="detail-group" aria-labelledby="run-heading">
+              <h3 id="run-heading">最近运行</h3>
+              <dl><div class="detail-row"><dt>状态</dt><dd>已完成</dd></div><div class="detail-row"><dt>时间</dt><dd>今天 09:00</dd></div></dl>
+              <button class="secondary-button mt-4 w-full" type="button" data-open-chat>打开聊天</button>
             </section>
           </div>
         </aside>

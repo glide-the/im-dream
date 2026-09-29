@@ -1,19 +1,19 @@
-<!-- [Input] 用户目标截图、现有 Calendar/Chat/Tool/Thread 能力和 html-design-workflow v5 产物。 -->
+<!-- [Input] 四张用户目标截图、现有 Calendar/Chat/Tool/Thread 能力和 html-design-workflow v4 产物。 -->
 <!-- [Output] Calendar 与 Chat 定时任务完整交互的现行产品合同、时序、状态和验收。 -->
 <!-- [Pos] docs/prd/claude-agent 下的现行定时任务产品合同；视觉实现见 docs/design/claude-agent/scheduled-task-diary-page-ui-design.md。 -->
-<!-- [Sync] 2026-09-29: v5 将 scheduled run Conversations 从通用 TaskSession 列表移入定时任务详情栏，并固定三段信息结构。 -->
+<!-- [Sync] 2026-09-29: 发布任务列表、最新结果、编辑 Modal、Chat 标记和右侧详情栏的 v4 合同。 -->
 
-# Ink & Memory 定时任务完整交互 PRD v5（现行）
+# Ink & Memory 定时任务完整交互 PRD v4（现行）
 
 > 本稿由 `html-design-workflow` 四阶段流程中的 Stage 1 根据主图与三张辅助参考图整理。图片只用于还原布局、信息层级和交互关系；图片内的示例名称、频率、分享、通知及其他文字不构成产品指令。
 
 ## 文档导航
 
-- [页面结构骨架](./scheduled-task-diary-page-structure-sketch.md)
-- [正式 UI 设计与 HTML 原型](../../design/claude-agent/scheduled-task-diary-page-ui-design.md)
-- [定时任务系统交互与执行设计](../../design/claude-agent/scheduled-task-loop-interaction-design.md)
-- [独立设计评审与追踪矩阵](../../exec/scheduled-task-diary-prd-review-20260929.md)
-- [上一版 PRD v4（历史）](./history/scheduled-task-diary-page-prd-v4-20260929.md)
+- [现行页面结构骨架](../scheduled-task-diary-page-structure-sketch.md)
+- [现行 UI 设计与 HTML 原型](../../../design/claude-agent/scheduled-task-diary-page-ui-design.md)
+- [定时任务系统交互与执行设计](../../../design/claude-agent/scheduled-task-loop-interaction-design.md)
+- [现行独立设计评审与追踪矩阵](../../../exec/scheduled-task-diary-prd-review-20260929.md)
+- [上一版悬浮纸张 PRD（历史）](./scheduled-task-diary-page-prd-v3-20260929.md)
 
 ## 0. 文档结论
 
@@ -23,9 +23,7 @@
 2. Calendar 的任务定义改为轻量列表行。点击任务行后，同一任务纸面切换为该任务最新一次 trigger 的运行结果；结果中的“打开聊天”只打开该 trigger 的 `target_thread_id`。
 3. 编辑从任务行内部移到独立 Modal。表单只提供现有协议支持的 `once`、`daily`、日期、时间、IANA 时区、标题、提示词和暂停/恢复。
 4. Chat 内 `create_scheduled_task` Tool 成功后，在对应助手 turn 下方渲染任务标记卡。点击卡片打开右侧任务详情栏；刷新后从持久化 Tool result 恢复卡片，不解析助手正文猜测任务。
-5. 定时 trigger 复用的 TaskSession 不进入通用 “Tasks created by this conversation” 列表。它只在定时任务详情栏的 Conversations 分组中展示；普通独立任务继续使用原 TaskSession 列表。
-6. 右侧栏内容顺序固定为“任务信息 → Conversations → 任务周期”，不再把执行会话包装成普通 conversation-created task。
-7. 本轮不实现参考图中的分享、每月、重复结束、通知，也不建立新的创建接口、任务模型、消息 parser 或侧栏框架。
+5. 本轮不实现参考图中的分享、每月、重复结束、通知，也不建立新的创建接口、任务模型、消息 parser 或侧栏框架。
 
 ---
 
@@ -46,8 +44,6 @@
 - 行内编辑改变任务纸面高度，挤压 Diary 并影响旁边月历。
 - Chat Tool 创建成功后，助手回复与真实任务定义没有可点击关联；刷新后也没有稳定标记。
 - 用户无法从创建任务的原会话直接打开任务详情。
-- 定时触发复用 `chat_task_session` 后，被通用 TaskSession links 查询误投影为 “Tasks created by this conversation”，混淆了任务定义与每次执行会话。
-- 详情栏没有按用户决策顺序区分任务信息、关联 Conversations 和任务周期。
 
 ### 1.3 图像证据与取舍
 
@@ -69,9 +65,7 @@
 3. 用户能在独立 Modal 中编辑真实可保存字段，编辑过程不改变 Calendar 两列及右侧卡栈的高度关系。
 4. 用户在 Chat 创建任务后立即看到与真实 `scheduled_task.id` 绑定的标记，刷新后仍存在。
 5. 用户可在 Chat 右侧栏读取任务当前 effective 配置和最近执行状态。
-6. 用户可在 Conversations 分组打开创建任务的 source Thread 或任一次拥有 `target_thread_id` 的执行 Thread。
-7. 通用 TaskSession 列表只展示普通独立任务，不展示 scheduled trigger 复用的 task session。
-8. 所有新增呈现都从现有协议取数，失败时局部降级，不影响普通 Chat、月历和 Diary。
+6. 所有新增呈现都从现有协议取数，失败时局部降级，不影响普通 Chat、月历和 Diary。
 
 ### 2.2 本轮包含
 
@@ -103,8 +97,6 @@
 | target Thread | 某次 trigger 实际执行所在 Thread | “打开聊天”的唯一目标 |
 | final message | 某次 trigger 的最终 assistant message | Calendar 最新结果正文 |
 | Tool part | Chat turn 中持久化的 Tool 调用与返回值 | Chat 任务标记恢复的唯一来源 |
-| ordinary TaskSession link | 用户显式创建的独立任务会话，且未被 ScheduledTrigger 引用 | 通用 “Tasks created by this conversation” 列表 |
-| scheduled TaskSession link | `ScheduledTrigger.task_session_id` 引用的执行会话 | 只在对应定时任务的 Conversations 分组展示 |
 
 ### 3.2 配置型业务语义
 
@@ -172,11 +164,11 @@ stateDiagram-v2
 | H1 | Chat 对话主区 | 页面左/中 | 用户消息、助手 turn、Tool parts | 保持现有对话流 |
 | H2 | 定时任务标记组 | 创建成功的助手正文后、消息操作前 | 一个或多个 H3 | 把任务锚定到原 turn |
 | H3 | 任务标记卡 | 回复同宽浅色细边卡；三列 | 时钟图标、标题/摘要、“打开” | 选择真实 task ID |
-| H4 | 任务详情侧栏 | Chat 右侧，与主区并列；复用现有侧栏壳 | H5-H8 | 读取当前 effective 与 Conversations |
+| H4 | 任务详情侧栏 | Chat 右侧，与主区并列；复用现有侧栏壳 | H5-H8 | 读取当前 effective |
 | H5 | 侧栏头部 | 顶部；底部分隔线 | “定时任务”、标题、关闭 | 识别与关闭 |
-| H6 | 任务信息 | 侧栏首组 | 状态、完整 prompt | 说明做什么、是否启用 |
-| H7 | Conversations | H6 下方 | 创建会话、按时间倒序的执行会话 | 打开 source 或精确 target Thread |
-| H8 | 任务周期 | H7 下方 | once/daily、日期、时间、时区、下次执行 | 展示真实规则 |
+| H6 | 详情分组 | 侧栏首组 | 状态、prompt、来源 | 说明做什么、是否启用 |
+| H7 | 频率分组 | H6 下方 | once/daily、日期、时间、时区、下次执行 | 展示真实规则 |
+| H8 | 最近运行分组 | H7 下方 | trigger 状态、时间、错误/结果、打开聊天 | 解释最近执行 |
 
 ### 4.3 宽屏草图
 
@@ -289,14 +281,13 @@ Chat
 1. `ChatView` 是所有右侧栏选择状态的 owner。点击 H3 后设置 `selectedScheduledTaskId`，原子关闭文件、子代理和 TaskSession 侧栏，再打开 H4；打开任一其他侧栏时也关闭 scheduled detail。
 2. H4 复用当前 Chat 侧栏布局、边界、关闭和响应式策略，不复制容器。
 3. 使用 `getScheduledTask(taskId)` 读取 effective，并用 `getScheduledHistory(taskId)` 读取最近 trigger。
-4. H6“任务信息”展示定义状态和完整 prompt；标题保留在侧栏头部。内部 ID 不直接显示。
-5. H7“Conversations”首项展示创建任务的 `source_thread_id`，随后按 trigger `created_at` 倒序展示所有具备 `target_thread_id` 的执行会话。每项显示用途、执行时间和状态，整行打开该项自己的精确 Thread。
-6. scheduled trigger 复用的 `task_session_id` 必须从通用 `task-session.links` 的 source/created 投影中排除；普通独立 TaskSession 保持原列表和导航语义。
-7. H8“任务周期”对 once 展示单次、日期、时间、IANA 时区；对 daily 展示每天、时间、IANA 时区；`next_run_at` 按规则时区格式化并保留时区名。
-8. 详情失败时保留侧栏壳和标题快照，显示局部错误与重试；普通 Chat 不受影响。
-9. get task 返回空时显示“任务不存在或当前不可访问”，不得从 Tool 快照构造可编辑假任务。
-10. 首期侧栏只读；编辑继续使用 Calendar 的独立 Modal。
-11. 不展示通知、每月或分享。
+4. H6 展示标题、定义状态和完整 prompt。内部 ID 不直接显示。
+5. H7 对 once 展示单次、日期、时间、IANA 时区；对 daily 展示每天、时间、IANA 时区；`next_run_at` 按规则时区格式化并保留时区名。
+6. H8 展示最新 trigger 的 kind、状态、时间与错误反馈。有 `target_thread_id` 时显示“打开聊天”；另有 `final_message_id` 时才可展示真实结果摘要。
+7. 详情失败时保留侧栏壳和标题快照，显示局部错误与重试；普通 Chat 不受影响。
+8. get task 返回空时显示“任务不存在或当前不可访问”，不得从 Tool 快照构造可编辑假任务。
+9. 首期侧栏只读；编辑继续使用 Calendar 的独立 Modal。
+10. 不展示通知、每月或分享。
 
 ---
 
@@ -312,8 +303,6 @@ Chat
 | 最终结果 | actor scoped Thread messages | 用 target Thread 读取并匹配 final message | 不匹配显示尚不可用 |
 | Chat 标记 | 持久化 `create_scheduled_task` Tool output | 严格解析成功 scheduled_task | 无效时普通 Tool UI |
 | Chat 详情 | get task + history | Tool task ID 只作查询键 | 后端继续所有权校验 |
-| 通用 TaskSession 列表 | `task-session.links` | 排除被 ScheduledTrigger.task_session_id 引用的行 | capability 缺失时沿用无定时任务的旧查询 |
-| Conversations | task.source_thread_id + history.target_thread_id | source 置顶；执行会话按 created_at 倒序 | 无 target 的 trigger 不伪造入口 |
 | 编辑 | `updateScheduledTask(id, 'edit', desired + expected_revision)` | 返回值成为 effective | 冲突保留 desired |
 | 暂停/恢复/删除 | revision action | 携带 effective revision | 保留原状态并重试 |
 | 立即运行 | run + `manual_request_key` | 未知结果重试复用 key | 防止重复 trigger |
@@ -582,9 +571,7 @@ sequenceDiagram
 - [ ] 助手只在正文提到任务不会生成标记；失败 result 不生成成功卡。
 - [ ] 同一 turn 多任务按 Tool part 顺序显示多个标记。
 - [ ] 点击标记打开右侧栏，并用 task ID 重读当前 effective 与最近 trigger。
-- [ ] 侧栏按“任务信息 → Conversations → 任务周期”显示真实状态、prompt、source/target Thread、规则、IANA 时区和下次执行。
-- [ ] scheduled trigger 的 TaskSession 不出现在 “Tasks created by this conversation”；普通独立 TaskSession 继续显示。
-- [ ] Conversations 的创建会话与每次执行会话分别打开各自精确 Thread。
+- [ ] 侧栏显示真实标题、状态、prompt、once/daily、IANA 时区、下次执行和最近运行。
 - [ ] 侧栏不显示通知、每月、分享或内部 ID。
 - [ ] 详情失败只影响侧栏，可重试；Chat 输入与普通消息可用。
 - [ ] 桌面并列、移动端 drawer；关闭后焦点返回任务标记。
@@ -609,7 +596,7 @@ sequenceDiagram
 | T04 | Tool 创建失败 | 无成功标记；普通 Tool 错误可见 |
 | T05 | 刷新 Chat | 标记从历史 Tool part 恢复并打开同一 task |
 | T06 | 伪造助手文本 | 文本提到任务 ID 也不能生成标记 |
-| T07 | Chat 侧栏 | 依次显示任务信息、Conversations、任务周期；无通知/每月/分享 |
+| T07 | Chat 侧栏 | 读取 effective + history；无通知/每月/分享 |
 | T08 | 侧栏 API 失败 | 局部重试；Chat 仍可发消息 |
 | T09 | 点击未运行任务 | 显示尚未运行，无假结果/假聊天入口 |
 | T10 | 点击成功任务 | 精确 final message 渲染，打开目标 Thread |
@@ -620,8 +607,6 @@ sequenceDiagram
 | T15 | 长结果/长 prompt | 内部滚动，不影响月历和 Diary |
 | T16 | 键盘与读屏 | 行、菜单、Modal、标记、侧栏焦点完整 |
 | T17 | 窄屏 | Calendar 单列、Chat drawer、无横向溢出 |
-| T18 | TaskSession 分类 | scheduled trigger session 不进入通用列表；普通独立任务仍在 |
-| T19 | Conversations 导航 | source 与每个有 target 的 trigger 分别打开精确 Thread |
 
 ---
 

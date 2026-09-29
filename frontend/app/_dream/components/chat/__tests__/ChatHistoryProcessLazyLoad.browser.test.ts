@@ -5,6 +5,7 @@
 // [Sync] 2026-09-06: prove the exact MCP App panel is a persistent sibling outside the collapsible process.
 // [Sync] 2026-09-29: auto-recover historical Tool results so persisted scheduled-task markers survive reload.
 // [Sync] 2026-09-29: verify the entire scheduled-task marker is the single detail-opening button.
+// [Sync] 2026-09-29: verify task information, source/run Conversations and task schedule stay in the scheduled detail sidebar.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -66,6 +67,12 @@ const harnessModule = `
         status: 'succeeded', task_session_id: null, target_thread_id: 'thread-result', input_message_id: null,
         target_turn_id: null, final_message_id: 'message-final', error_code: null, skipped_from_at: null,
         skipped_through_at: null, created_at: '2026-09-30T01:00:01Z', updated_at: '2026-09-30T01:00:02Z',
+      }, {
+        id: 'trigger_0', task_id: 'st_1', kind: 'scheduled', scheduled_at: '2026-09-29T01:00:00Z',
+        definition_revision: 1, title: '晨间复盘', source_thread_id: 'thread-source', time_zone: 'Asia/Shanghai',
+        status: 'failed', task_session_id: null, target_thread_id: 'thread-older-result', input_message_id: null,
+        target_turn_id: null, final_message_id: null, error_code: 'UPSTREAM_FAILED', skipped_from_at: null,
+        skipped_through_at: null, created_at: '2026-09-29T01:00:01Z', updated_at: '2026-09-29T01:00:02Z',
       }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (url.includes('/scheduled-tasks/st_1')) {
@@ -337,12 +344,26 @@ test('persisted successful create_scheduled_task result restores a marker in its
       window as unknown as { __openedScheduledTask?: { id: string } }
     ).__openedScheduledTask?.id)).toBe('st_1');
     const sidebar = page.getByRole('complementary', { name: 'Scheduled task' });
+    await expect(sidebar.getByRole('heading', { name: 'Task information' })).toBeVisible();
+    await expect(sidebar.getByRole('heading', { name: 'Conversations' })).toBeVisible();
+    await expect(sidebar.getByRole('heading', { name: 'Task schedule' })).toBeVisible();
+    await expect(sidebar.locator('h3')).toHaveText(['Task information', 'Conversations', 'Task schedule']);
     await expect(sidebar).toContainText('整理今天的笔记');
     await expect(sidebar).toContainText('Completed');
-    await sidebar.getByRole('button', { name: 'Open conversation' }).click();
+    await sidebar.getByRole('button', { name: /Creation conversation/ }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window as unknown as { __openedThread?: string }
+    ).__openedThread)).toBe('thread-source');
+    const runConversations = sidebar.getByRole('button', { name: /Run conversation/ });
+    await expect(runConversations).toHaveCount(2);
+    await runConversations.nth(0).click();
     await expect.poll(() => page.evaluate(() => (
       window as unknown as { __openedThread?: string }
     ).__openedThread)).toBe('thread-result');
+    await runConversations.nth(1).click();
+    await expect.poll(() => page.evaluate(() => (
+      window as unknown as { __openedThread?: string }
+    ).__openedThread)).toBe('thread-older-result');
   } finally {
     await server.close();
   }

@@ -1,3 +1,4 @@
+// [Sync] 2026-09-29: localize task information, source/run Conversations, and task schedule detail groups.
 // [Sync] 2026-09-27: localize task-session source navigation and created-task lists.
 // [Sync] 2026-09-29: localize per-user-message turn navigation, previews, loading, and locate feedback.
 // [Sync] 2026-09-27: localize consolidated Chat information and server-reported task states.
@@ -535,6 +536,9 @@ const resources = {
           openAria: 'Open scheduled task: {{title}}', detailTitle: 'Scheduled task',
           close: 'Close scheduled task details', loading: 'Loading task details…',
           unavailable: 'Task details are temporarily unavailable.', details: 'Details',
+          taskInfo: 'Task information', conversations: 'Conversations', taskCycle: 'Task schedule',
+          sourceConversation: 'Creation conversation', runConversation: 'Run conversation',
+          noConversations: 'No conversations are available yet.',
         },
         deck: {
           none: 'No Deck',
@@ -1566,6 +1570,9 @@ const resources = {
           openAria: '打开定时任务：{{title}}', detailTitle: '定时任务',
           close: '关闭定时任务详情', loading: '正在加载任务详情…',
           unavailable: '任务详情暂不可用。', details: '详情',
+          taskInfo: '任务信息', conversations: '会话', taskCycle: '任务周期',
+          sourceConversation: '创建任务的会话', runConversation: '任务运行会话',
+          noConversations: '暂无可打开的会话。',
         },
         deck: {
           none: '不使用 Deck',
