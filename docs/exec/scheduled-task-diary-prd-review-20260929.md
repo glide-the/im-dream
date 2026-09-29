@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-29: 复评确认 exhausted、A3 diary-only、claim/prepare 与文档导航已经收敛，设计结论升级为可直接实施。 -->
 <!-- [Sync] 2026-09-29: 首次评审 html-design-workflow 正式产物与既有实现，结论为收敛后实施。 -->
 <!-- [Sync] 2026-09-29: 独立分卡生产实现、能力目录热刷新、Admin worker 权限配置、7 条 Chrome 旅程与真实模型持久化会话回执关闭全部本轮 P1。 -->
+<!-- [Sync] 2026-09-29: 记录电脑重启后的新建一次性任务按 15:38 自动领取、真实模型完成、目标 Thread 精确回复与页面刷新持久化回执。 -->
 
 # 定时任务日记日期弹窗 PRD 独立评审（2026-09-29）
 
@@ -29,8 +30,9 @@
 
 1. 重启后，长运行 Dream 进程持有旧 Admin capability catalog，日期读取在精确 operation/schema 检查处 fail closed；Dream 现在遇到缺失时只刷新一次 capability catalog，再执行同一精确检查。刷新失败或仍不匹配继续 fail closed，不影响 Agent turn。
 2. Admin 已为生成和校验的 Dream service client 加入 `schedule:execute`，并生成/保留长度合规的 `AUTH_CHAT_SCHEDULE_AUTHORITY_SECRET`；本机现有 service client 已通过正式 provision 命令更新。
-3. 真实任务 `c487820e-2a4a-4f19-8cdf-2d4beb2e8724` 保留 14:38 的旧失败记录；修复后从正常 Calendar 执行“立即运行”，历史显示 14:56 `Completed`，打开目标会话得到精确回复 `SCHEDULE-E2E-PASS-20260929-1438`。浏览器刷新并从历史重新进入后，同一 prompt、回复和目标 Thread 仍存在，证明公开 UI、真实模型、正常数据库和重启后持久化链路闭合。
-4. provider-free Chrome 套件最终为 `7 passed`，覆盖布局、错误隔离、空态、移动顺序、revision 冲突、暂停/恢复、运行幂等、删除撤销、历史分页、非终态刷新、DST 和目标 Thread；Dream 后端定向测试 `8 passed`，Admin 配置测试 `3 passed`，Admin 调度合同测试 `6 passed`，Next production build 通过。
+3. 真实任务 `c487820e-2a4a-4f19-8cdf-2d4beb2e8724` 保留 14:38 的旧失败记录；修复后从正常 Calendar 执行“立即运行”，历史显示 14:56 `Completed`，打开目标会话得到精确回复 `SCHEDULE-E2E-PASS-20260929-1438`。浏览器刷新并从历史重新进入后，同一 prompt、回复和目标 Thread 仍存在。
+4. 电脑重启后又通过正常 Chat Tool 创建一次性任务 `6de68c25-07b1-40e2-9f0f-ae3a4bfdb23a`（`REAL-SCHEDULE-AUTO-E2E-20260929-1538`，`Asia/Shanghai` 15:38）。未执行“立即运行”；worker 到时自动领取并完成，Calendar 历史显示 `Scheduled run Completed Sep 29, 03:38 PM`，目标 Thread `5d694a87-b877-4df4-a117-e86f8c1b3f22` 精确回复 `AUTO-SCHEDULE-E2E-PASS-20260929-1538`。整页刷新后从 Chat history 重开目标 Thread、再从 Calendar 重读任务，回复和 `Completed` 状态均保持，证明公开 UI、真实模型、正常数据库、自动调度与重启恢复链路闭合。
+5. provider-free Chrome 套件最终为 `7 passed`，覆盖布局、错误隔离、空态、移动顺序、revision 冲突、暂停/恢复、运行幂等、删除撤销、历史分页、非终态刷新、DST 和目标 Thread；Dream 后端定向测试 `8 passed`，Admin 配置测试 `3 passed`，Admin 调度合同测试 `6 passed`，Next production build 通过。
 
 下文保留首次与前轮评审快照作为历史证据；其中“仍待实施”“没有真实业务验收”等表述只描述对应旧基线，不再代表当前工作树。
 
@@ -147,7 +149,7 @@
 6. **Thread 导航已关闭。** 页面关闭日期弹窗后进入 Chat，并消费精确目标 Thread ID。
 7. **DST 失败反馈已关闭。** 页面提交 IANA timezone 与本地时间，不自行猜测 UTC 偏移；Admin 返回当地时间不存在、重复时间缺少 offset 或 offset 非法时，页面保留 desired 草稿并显示对应可行动错误。候选偏移选择器只有在 Admin 提供候选 DTO 后才可能成为后续增强，不是当前实现假设。
 8. **两仓交付归位已关闭。** Admin 既有定时任务迁移 `9ed8fc0` 与 worker 配置修复 `fe2e8ac` 均在 `/Users/dmeck/project/ink-admin-memory` 的 `main`；Dream capability catalog 修复 `c8dcfd6e` 与本轮独立分卡交付均在 `/Users/dmeck/project/ink-dream-memory` 的 `develop`。
-9. **本机正常 capability 与真实业务已关闭。** 本机正常 Admin 配置已用正式 provision 命令补齐 `schedule:execute`，Dream worker authority secret 已生成并校验；真实账户任务通过公开 Calendar → run → TaskSession/Thread → Claude turn → final 链路完成，刷新后仍可从历史进入同一持久化会话。外部部署不在本轮授权范围内。
+9. **本机正常 capability 与真实业务已关闭。** 本机正常 Admin 配置已用正式 provision 命令补齐 `schedule:execute`，Dream worker authority secret 已生成并校验；真实账户任务通过公开 Chat Tool 创建 → 到时自动领取 → TaskSession/Thread → Claude turn → final → Calendar 历史链路完成，整页刷新后仍可进入同一持久化会话并读到完成状态。外部部署不在本轮授权范围内。
 
 ## 7. DTO 与 operation 对齐检查
 
@@ -167,7 +169,7 @@
 | Chat Tool 创建单次/每日任务 | 第 49–57 行 | 时序一第 67–109 行 | [`_ThreadToolTurnProvider._perform`](/Users/dmeck/project/ink-dream-memory/backend/routers/claude_agent.py:2108) | [`test_scheduled_tool_uses_current_turn_grant_and_stable_call_key`](/Users/dmeck/project/ink-dream-memory/backend/tests/test_scheduled_task_consumer.py:55) | 技术合同已覆盖 |
 | 选中日期展示独立任务卡与日记卡 | 第 84–112、124–129 行 | 时序一第 95–106 行 | [`CalendarPopup`](/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/components/CalendarPopup.tsx) 以透明 workspace 承载两个直接 sibling card | E2E 核对 DOM、computed style、卡头计数、16px 间距和空任务卡 | 独立分卡合同已覆盖 |
 | A3 首期 diary-only、月摘要后置 | 第 56、120、335、377 行 | 第 410 行 | 月份日期只来自日记数据 | E2E 第 287 行 | 对齐并锁定 |
-| 到期领取并执行 Claude turn | 验收第 397–399 行 | 时序二第 113–190 行 | [`ScheduledTaskCoordinator._poll`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:74)、[`_dispatch`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:165) | 技术探针 + 真实任务 14:56 完成并写入精确模型回复 | 本机正常 capability 与真实链路通过 |
+| 到期领取并执行 Claude turn | 验收第 397–399 行 | 时序二第 113–190 行 | [`ScheduledTaskCoordinator._poll`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:74)、[`_dispatch`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:165) | 技术探针 + 重启后真实任务 15:38 到时自动完成并写入精确模型回复 | 本机正常 capability、自动调度与真实链路通过 |
 | 查看最近状态与完整历史 | 第 131–143、180–190 行 | 时序二/三 | 卡片显示最近状态，按需展开 20 条并用 `before_created_at` 追加 | E2E 覆盖首次 20 条、追加至 21 条和 cursor 请求 | 首屏、展开与分页均已覆盖 |
 | exhausted 禁编辑、重新排期新建 | 第 140、154、208、250–255 行 | 第 253、325、334–346 行 | UI 隐藏编辑 | E2E 第 339–364 行 | 页面合同已覆盖 |
 | 打开真实目标 Thread | 第 141、184 行 | 时序三第 259–263 行 | `CalendarPopup` 请求 App 切换真实 Thread | fixture 精确 Thread ID + 真实 Calendar 打开会话并在刷新后从历史重进 | 生产持久化 Thread 已覆盖 |
@@ -192,6 +194,7 @@
 | `cd /Users/dmeck/project/ink-admin-memory && node --test scripts/setup-env.test.mjs` | 0，`3 passed` | schedule scope/authority secret 生成、保留、校验和失败关闭 |
 | `cd /Users/dmeck/project/ink-admin-memory && corepack pnpm exec vitest run app/lib/dream/chatScheduledTaskAuthority.test.ts app/lib/dream/chatScheduledTaskRegistration.test.ts app/lib/dream/chatScheduledTaskTime.test.ts` | 0，`3 files / 6 tests passed` | authority、operation 注册与时间规则合同 |
 | 真实 Calendar “立即运行”并打开会话，刷新后从历史重进 | `Completed` | 真实任务、正常数据库、真实模型、目标 Thread 持久化；回复 `SCHEDULE-E2E-PASS-20260929-1438` |
+| 重启后通过正常 Chat Tool 创建 `REAL-SCHEDULE-AUTO-E2E-20260929-1538`，等待 15:38 到时触发；Calendar 打开历史与目标会话；整页刷新后从 Chat history 和 Calendar 复核 | `Scheduled run Completed Sep 29, 03:38 PM` | 未手动触发；真实自动领取、正常数据库、真实模型、目标 Thread `5d694a87-b877-4df4-a117-e86f8c1b3f22` 与刷新持久化；回复 `AUTO-SCHEDULE-E2E-PASS-20260929-1538` |
 
 ### 前轮与历史回执（保留）
 
@@ -223,5 +226,5 @@
 - **当前最小纵向切片是否完成：** 是。独立分卡、任务局部状态、历史分页、非终态有界刷新、DST 明确失败反馈、能力目录重启恢复与真实模型会话均已关闭。
 - **技术验收是否完成：** 是。前端、后端、普通 Chat 回归、隔离跨仓旅程、最新 production build 和文档引用检查均有通过回执。
 - **Admin 主分支归位是否完成：** 是。既有迁移 `9ed8fc0` 与 worker 配置修复 `fe2e8ac` 均在 Admin `main`；本轮配置单测和调度合同测试通过。
-- **本机真实业务验收是否完成：** 是。正常账户、正常数据库、真实模型和持久化目标 Thread 已经由公开 Calendar 业务入口验证；14:38 旧失败与 14:56 修复后成功均保留可复核。外部部署不在本轮范围内。
+- **本机真实业务验收是否完成：** 是。正常账户、正常数据库、真实模型和持久化目标 Thread 已由公开 Chat Tool 与 Calendar 业务入口验证；14:38 旧失败、14:56 修复后手动执行成功，以及电脑重启后 15:38 新任务自动执行成功均保留可复核。外部部署不在本轮范围内。
 - **剩余产品项：** 同时间戳 cursor 的稳定分页和 DST 候选列表需要 Admin 协议扩展后再设计；月摘要、复杂周期、继续原 Thread 与运行中远程取消仍按 PRD 作为后续事项。
