@@ -1,0 +1,26 @@
+/* [Input] ScheduledTaskDetailSidebar effective task and trigger facts. */
+/* [Output] Responsive right-side detail surface matching the existing Chat split view. */
+/* [Pos] Chat scheduled-task detail sidebar presentation. */
+/* [Sync] 2026-09-29: add desktop sidebar and narrow-screen drawer geometry. */
+
+.scheduled-task-detail { width: min(42vw, 38rem); min-width: min(23rem, 90vw); max-width: 90vw; height: 100%; min-height: 0; display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--color-border-paper); background: var(--color-bg-app); }
+.scheduled-task-detail__header { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) 2rem; align-items: center; gap: .7rem; min-height: 4rem; padding: .65rem 1rem; border-bottom: 1px solid var(--color-border-paper); }
+.scheduled-task-detail__header > div { display: grid; min-width: 0; gap: .16rem; }
+.scheduled-task-detail__header strong, .scheduled-task-detail__header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-task-detail__header small { color: var(--color-text-secondary); }
+.scheduled-task-detail__icon { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .6rem; background: var(--color-bg-hover); }
+.scheduled-task-detail__icon svg, .scheduled-task-detail__header button svg { width: 1.1rem; height: 1.1rem; }
+.scheduled-task-detail__header button { display: grid; width: 2rem; height: 2rem; place-items: center; border: 0; border-radius: .5rem; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.scheduled-task-detail__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 1.1rem; }
+.scheduled-task-detail__body section { padding: 1rem 0; border-bottom: 1px solid var(--color-border-paper); }
+.scheduled-task-detail__body section:first-of-type { padding-top: 0; }
+.scheduled-task-detail__body h3 { margin: 0 0 .7rem; color: var(--color-text-muted); font-size: .76rem; font-weight: 600; }
+.scheduled-task-detail__body dl { display: grid; gap: .65rem; margin: 0; }
+.scheduled-task-detail__body dl div { display: grid; grid-template-columns: minmax(6rem, .38fr) minmax(0, 1fr); gap: 1rem; }
+.scheduled-task-detail__body dt { color: var(--color-text-secondary); }
+.scheduled-task-detail__body dd { margin: 0; overflow-wrap: anywhere; color: var(--color-text-primary); text-align: right; }
+.scheduled-task-detail__prompt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.scheduled-task-detail__error { display: flex; align-items: center; gap: .65rem; color: var(--color-state-danger); }
+.scheduled-task-detail footer { padding: .85rem 1rem; border-top: 1px solid var(--color-border-paper); }
+.scheduled-task-detail footer button, .scheduled-task-detail__error button { min-height: 2.4rem; padding: 0 .85rem; border: 1px solid var(--color-border-paper); border-radius: .7rem; background: var(--color-bg-paper); color: var(--color-text-primary); cursor: pointer; }
+@media (max-width: 48rem) { .scheduled-task-detail { position: absolute; inset: 0 0 0 auto; z-index: 45; width: min(92vw, 38rem); max-width: 92vw; box-shadow: -18px 0 42px var(--color-shadow-medium); } }

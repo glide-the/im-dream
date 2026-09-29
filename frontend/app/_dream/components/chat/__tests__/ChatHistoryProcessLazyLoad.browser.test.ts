@@ -1,8 +1,10 @@
 // [Input] Production ChatMessageList with one server-projected historical assistant final.
-// [Output] Local-Chrome evidence for expand-only exact-id fetch, single-flight, retry, unmount, and MCP App promotion.
+// [Output] Local-Chrome evidence for bounded exact-id recovery, single-flight, retry, scheduled-task markers, and MCP App promotion.
 // [Pos] Shared Chat/Dream lazy process-detail browser acceptance seam.
 // [Sync] 2026-09-02: created for final-first history hydration and on-demand canonical process rendering.
 // [Sync] 2026-09-06: prove the exact MCP App panel is a persistent sibling outside the collapsible process.
+// [Sync] 2026-09-29: auto-recover historical Tool results so persisted scheduled-task markers survive reload.
+// [Sync] 2026-09-29: verify the entire scheduled-task marker is the single detail-opening button.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -30,12 +32,13 @@ async function reserveEphemeralPort(): Promise<number> {
 }
 
 const harnessModule = `
-  import React from 'react';
+  import React, { useState } from 'react';
   import { createRoot } from 'react-dom/client';
   import '/app/_dream/i18n.ts';
   import '/app/_dream/styles/tokens.css';
   import '/app/_dream/styles/markdown.css';
   import ChatMessageList from '/app/_dream/components/chat/ChatMessageList.tsx';
+  import ScheduledTaskDetailSidebar from '/app/_dream/components/chat/ScheduledTaskDetailSidebar.tsx';
 
   window.__detailPayload = {
     id: 'assistant/1',
@@ -53,10 +56,28 @@ const harnessModule = `
   };
   window.__processRequests = 0;
   window.__processUrls = [];
-  window.__processMode = 'pending';
+  window.__processMode = new URLSearchParams(location.search).get('mode') || 'pending';
   window.fetch = (input) => {
+    const url = String(input);
+    if (url.includes('/scheduled-tasks/st_1/history')) {
+      return Promise.resolve(new Response(JSON.stringify({ triggers: [{
+        id: 'trigger_1', task_id: 'st_1', kind: 'scheduled', scheduled_at: '2026-09-30T01:00:00Z',
+        definition_revision: 1, title: '晨间复盘', source_thread_id: 'thread-source', time_zone: 'Asia/Shanghai',
+        status: 'succeeded', task_session_id: null, target_thread_id: 'thread-result', input_message_id: null,
+        target_turn_id: null, final_message_id: 'message-final', error_code: null, skipped_from_at: null,
+        skipped_through_at: null, created_at: '2026-09-30T01:00:01Z', updated_at: '2026-09-30T01:00:02Z',
+      }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (url.includes('/scheduled-tasks/st_1')) {
+      return Promise.resolve(new Response(JSON.stringify({ task: {
+        id: 'st_1', source_thread_id: 'thread-source', title: '晨间复盘', prompt: '整理今天的笔记',
+        rule: { kind: 'daily', local_time: '09:00', time_zone: 'Asia/Shanghai' },
+        next_run_at: '2026-10-01T01:00:00Z', status: 'active', revision: 1,
+        created_at: '2026-09-29T01:00:00Z', updated_at: '2026-09-29T01:00:00Z',
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
     window.__processRequests += 1;
-    window.__processUrls.push(String(input));
+    window.__processUrls.push(url);
     if (window.__processMode === 'fail-once') {
       window.__processMode = 'success';
       return Promise.resolve(new Response('{}', { status: 503 }));
@@ -88,16 +109,22 @@ const harnessModule = `
       historyProcessAvailable: true,
     },
   };
-  createRoot(document.querySelector('#root')).render(React.createElement('div', {
-    'data-chat-scroll-region': 'messages',
-    style: { height: '620px', overflow: 'auto' },
-  }, React.createElement(ChatMessageList, {
-    messages: [summary],
-    threadId: 'thread/1',
-    isLoading: false,
-    addToolResult: () => {},
-    historicalMessageIds: new Set(['assistant/1']),
-  })));
+  function Harness() {
+    const [selected, setSelected] = useState(null);
+    return React.createElement('div', { style: { height: '620px', display: 'flex', overflow: 'hidden' } },
+      React.createElement('div', { 'data-chat-scroll-region': 'messages', style: { flex: 1, overflow: 'auto' } },
+        React.createElement(ChatMessageList, {
+          messages: [summary], threadId: 'thread/1', isLoading: false, addToolResult: () => {},
+          historicalMessageIds: new Set(['assistant/1']),
+          onOpenScheduledTask: (task) => { window.__openedScheduledTask = task; setSelected(task); },
+        })),
+      selected ? React.createElement(ScheduledTaskDetailSidebar, {
+        taskId: selected.id, snapshot: selected, onClose: () => setSelected(null),
+        onOpenThread: (threadId) => { window.__openedThread = threadId; },
+      }) : null,
+    );
+  }
+  createRoot(document.querySelector('#root')).render(React.createElement(Harness));
 `;
 
 async function startHarness() {
@@ -112,7 +139,8 @@ async function startHarness() {
       enforce: 'pre',
       configureServer(vite) {
         vite.middlewares.use(async (request, response, next) => {
-          if ((request as { url?: string }).url !== '/chat-history-process') return next();
+          const requestUrl = (request as { url?: string }).url ?? '';
+          if (requestUrl !== '/chat-history-process' && !requestUrl.startsWith('/chat-history-process?')) return next();
           const html = await vite.transformIndexHtml('/chat-history-process', `
             <!doctype html><html><head><link rel="icon" href="data:,"></head>
             <body><div id="root"></div><script type="module" src="/chat-history-process.js"></script></body></html>
@@ -149,13 +177,13 @@ async function startHarness() {
   return { server, url: `http://127.0.0.1:${port}/chat-history-process` };
 }
 
-test('collapsed final makes no request and repeated expansion shares one detail fetch', async ({ page }) => {
+test('historical final auto-recovers once and repeated expansion shares that detail fetch', async ({ page }) => {
   const { server, url } = await startHarness();
   try {
     await page.goto(url);
     const toggle = page.locator('.chat-assistant-turn__toggle');
     await expect(page.getByText('visible final answer')).toBeVisible();
-    expect(await page.evaluate(() => (window as unknown as { __processRequests: number }).__processRequests)).toBe(0);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __processRequests: number }).__processRequests)).toBe(1);
 
     await toggle.click();
     await expect(page.getByText(/Loading process/i)).toBeVisible();
@@ -179,17 +207,13 @@ test('collapsed final makes no request and repeated expansion shares one detail 
   }
 });
 
-test('detail failure keeps final readable and retry reuses the same public endpoint', async ({ page }) => {
+test('automatic detail failure keeps final readable and explicit expansion retries the same endpoint', async ({ page }) => {
   const { server, url } = await startHarness();
   try {
-    await page.goto(url);
-    await page.evaluate(() => {
-      (window as unknown as { __processMode: string }).__processMode = 'fail-once';
-    });
+    await page.goto(`${url}?mode=fail-once`);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __processRequests: number }).__processRequests)).toBe(1);
     await page.getByRole('button', { name: /process/i }).click();
-    await expect(page.getByText(/Process could not be loaded/i)).toBeVisible();
     await expect(page.getByText('visible final answer')).toBeVisible();
-    await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.locator('[data-turn-process]')
       .getByText('loaded process evidence').last()).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __processRequests: number }).__processRequests)).toBe(2);
@@ -245,6 +269,7 @@ test('validated MCP App panel stays outside the process disclosure after collaps
           durationMs: 1200,
         },
       };
+      (window as unknown as { __resolveProcess: () => void }).__resolveProcess();
     });
 
     const toggle = page.locator('.chat-assistant-turn__toggle');
@@ -266,6 +291,58 @@ test('validated MCP App panel stays outside the process disclosure after collaps
     expect(await panel.evaluate((element) => Boolean(
       element.closest('[data-turn-outside-process]'),
     ))).toBe(true);
+  } finally {
+    await server.close();
+  }
+});
+
+test('persisted successful create_scheduled_task result restores a marker in its assistant reply', async ({ page }) => {
+  const { server, url } = await startHarness();
+  try {
+    await page.goto(url);
+    await page.evaluate(() => {
+      (window as unknown as { __detailPayload: unknown }).__detailPayload = {
+        id: 'assistant/1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'dynamic-tool', toolName: 'create_scheduled_task', toolCallId: 'schedule-1',
+            state: 'output-available', input: { title: '晨间复盘' },
+            output: {
+              ok: true,
+              result: {
+                status: 'ok',
+                scheduled_task: {
+                  id: 'st_1', title: '晨间复盘', status: 'active', revision: 1,
+                  next_run_at: '2026-09-30T01:00:00Z',
+                  rule: { kind: 'daily', local_time: '09:00', time_zone: 'Asia/Shanghai' },
+                },
+              },
+            },
+          },
+          { type: 'text', text: 'visible final answer' },
+        ],
+        metadata: { turnId: 'turn-1', turnStatus: 'completed', finalPartIndex: 1, durationMs: 1200 },
+      };
+      (window as unknown as { __resolveProcess: () => void }).__resolveProcess();
+    });
+    const marker = page.locator('.scheduled-task-marker');
+    await expect(marker).toContainText('晨间复盘');
+    await expect(marker).toContainText('Daily · 09:00');
+    await expect(page.getByText('‹ Terminal')).toHaveCount(0);
+    await expect(marker).toHaveRole('button');
+    await expect(marker).toHaveAccessibleName(/Open scheduled task/);
+    await marker.click();
+    await expect.poll(() => page.evaluate(() => (
+      window as unknown as { __openedScheduledTask?: { id: string } }
+    ).__openedScheduledTask?.id)).toBe('st_1');
+    const sidebar = page.getByRole('complementary', { name: 'Scheduled task' });
+    await expect(sidebar).toContainText('整理今天的笔记');
+    await expect(sidebar).toContainText('Completed');
+    await sidebar.getByRole('button', { name: 'Open conversation' }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window as unknown as { __openedThread?: string }
+    ).__openedThread)).toBe('thread-result');
   } finally {
     await server.close();
   }

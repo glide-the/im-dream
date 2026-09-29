@@ -1,98 +1,104 @@
-<!-- [Input] 用户标注图、Ink & Memory UI Design v2.1、现行 Calendar PRD/骨架/UI/系统设计、生产 CalendarPopup 与浏览器旅程。 -->
-<!-- [Output] CalendarPopup 悬浮纸张视觉纠错的独立评审、范围裁决、追踪矩阵与验证回执。 -->
-<!-- [Pos] 定时任务日记日期弹窗的现行设计与实施门禁；上一版分卡评审原文保存在 docs/exec/history。 -->
-<!-- [Sync] 2026-09-29: 三张悬浮纸面、宽屏独立卡栈滚动和完整 Chrome 业务回归均已通过；上一版评审完整归档。 -->
+<!-- [Input] 现行 v4 Calendar/Chat PRD、结构骨架、UI/系统设计，及本轮 Calendar、Chat、ScheduledTask API 与 Tool 投影实现和验证回执。 -->
+<!-- [Output] 定时任务 v4 的独立设计裁决、实施关闭审计、需求—设计—实现—测试追踪矩阵与剩余部署门禁。 -->
+<!-- [Pos] v4 定时任务页面交互的现行评审和实现回执；v3 悬浮纸张视觉评审原文保存在 docs/exec/history。 -->
+<!-- [Sync] 2026-09-29: v4 Calendar/Chat 纵向切片完成，独立设计结论保持“可直接实施”，并补录源码、类型、lint、build、Chrome 和后端合同回执。 -->
 
-# CalendarPopup 悬浮纸张视觉纠错独立评审（2026-09-29）
+# 定时任务 Calendar / Chat v4 设计评审与实现关闭回执（2026-09-29）
 
 ## 文档导航
 
 - [现行 PRD](../prd/claude-agent/scheduled-task-diary-page-prd.md)
 - [现行页面骨架](../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)
-- [现行 UI 设计与原型](../design/claude-agent/scheduled-task-diary-page-ui-design.md)
+- [现行 UI 设计与 HTML 原型](../design/claude-agent/scheduled-task-diary-page-ui-design.md)
 - [定时任务系统交互与执行设计](../design/claude-agent/scheduled-task-loop-interaction-design.md)
-- [上一版独立分卡评审与真实业务回执（历史）](./history/scheduled-task-diary-prd-review-v2-20260929.md)
+- [上一版悬浮纸张视觉评审（历史）](./history/scheduled-task-diary-prd-review-v3-20260929.md)
+- [更早的分卡评审与真实业务回执（历史）](./history/scheduled-task-diary-prd-review-v2-20260929.md)
 
-## 1. 评审结论
+## 1. 结论
 
-**结论：可直接实施并验证完成。**
+**设计裁决：可直接实施。实施裁决：v4 页面纵向切片已完成并通过本轮技术验收。**
 
-上一版已经把 `Scheduled tasks` 与 `Diary` 分成独立卡片，但仍保留可见的大型 Modal 纸面、重复的 `Calendar`/日期摘要，以及计划、下次执行、最近结果等嵌套事实框，因此未满足用户标注图的悬浮层级。现行设计已经完成以下收敛：
+本轮实现覆盖五个用户界面：Calendar 顶部安排入口、轻量定时任务行、最近执行结果、独立编辑 Modal、Chat 内持久任务标记与右侧详情栏。实现继续使用既有 ScheduledTask day/get/history/update 接口、`create_scheduled_task` Tool 回执、Thread messages、`ChatMarkdown`、共享 `Modal` 与 Chat 导航边界；没有新增数据库 schema、API 路由、调度器、分享、通知、monthly、repeat-end 或第二套任务状态机。
 
-1. 共享 `Modal` 只负责 portal、dialog、焦点循环、Escape、关闭后焦点恢复和尺寸边界；Calendar 作用域中的 surface 透明且没有包围边框、圆角或阴影。
-2. 月历、Scheduled tasks、Diary 是透明画布上的三张同级 Paper Cream 纸面，使用完整圆角与响应式暖棕阴影；右侧卡栈没有共享白底。
-3. 可见 `Calendar` 标题与独立日期摘要被移除。dialog 标题仍以 1px 裁切方式供 `aria-labelledby` 使用；日期进入任务、日记业务标题。
-4. 任务 facts、recent、edit/history 展开区取消卡中卡底色、圆角和阴影，以文字、留白和必要单线分组。
-5. Task、Thread、Run、Tool、revision、manual request key、状态机、任务/日记 API 和数据库 schema 均不改变。
+正常 PostgreSQL capability、真实账户/真实模型和部署环境的真实业务验收仍是发布门禁。本回执记录的是当前代码候选的 provider-free 技术闭环，不把隔离 fixture 描述成真实业务数据验收。
 
-上一版 PRD、骨架、UI 和评审已完整保存在各自 `history/` 目录；它们只说明当时基线，不再作为现行实现规范。
+## 2. 实现事实
 
-## 2. 目标符合性与范围裁决
-
-| 评审项 | 证据和判断 | 裁决 |
+| 范围 | 当前实现 | 失败处理与边界 |
 | --- | --- | --- |
-| 是否解决用户指出的“线框大弹窗” | 现行 PRD §3、骨架 §2/§4 和 UI §5/§10 均定义透明 dialog 画布；生产 CSS 移除 outer surface | 符合 |
-| 是否形成分开的悬浮卡 | 月历、任务、日记三个生产 surface 共用 Paper Cream、圆角和双层阴影；右栏父级透明 | 符合 |
-| 是否删除无关信息层 | JSX 删除独立日期摘要；可见标题隐藏；计数改为普通次级文字；任务事实框扁平化 | 符合 |
-| 是否保留业务交互 | 只调整现有组件 JSX、i18n、CSS 和浏览器断言；没有改 API、DTO、状态或持久化 | 符合 |
-| 是否复用现有模块 | 继续使用共享 `Modal`、`CalendarPopup`、`ScheduledTaskCard`、原 API 与 Chat 导航 | 符合 |
-| 是否引入未来假设 | 原型中误写的每周计划已改回每日；没有新建入口、筛选器、工作流或新状态 | 符合 |
-| 是否增加无价值动效 | 现行设计明确不新增纸面入场、错峰、持续浮动或整体 hover 动画 | 符合 |
-| 是否覆盖响应式和阴影裁切 | 1024px 以下单列；宽/中/手机分别匹配阴影安全区；宽屏右栈滚动不移动月历；短视口日期可达 | 符合，Chrome 回归通过 |
-| 是否存在数据库 capability 影响 | 本轮无 schema、migration、runtime DDL 或 capability 变化 | 无影响 |
+| Calendar 安排入口 | `CalendarPopup` 将非空自然语言交给 `App`；`ChatView` 打开 fresh Chat 并把文本放入可编辑、未发送的输入框 | 空白禁用；不直接创建定义，不自动发送 |
+| 轻量任务列表 | 任务主体、编辑、更多为三个独立按钮；状态图标、标题、计划/下次运行保持一行信息层级 | 单任务错误留在该行；任务读取失败不阻断日记 |
+| 任务菜单 | 复用既有 run/history/pause/resume/delete/restore 和 Thread 导航 | disabled action 不进入菜单键盘焦点；没有 share |
+| 最近结果 | `ScheduledTaskResult` 合并 day 与 history，严格按 `created_at` 选择最新 trigger | 目标 Thread 或 final ID 缺失、读取失败、精确消息不存在时显示局部“结果不可用” |
+| 结果正文 | 调用既有 full Thread message 读取，精确匹配同一 trigger 的 `final_message_id` 与 assistant role，再交给 `ChatMarkdown` | 不回退到最新 assistant，不用 source Thread 或最近浏览 Thread 替代 |
+| 编辑 | 共享 `Modal` 承载 title、prompt、once/daily、日期、时间、IANA 时区及 stable footer | 本地字段错误、revision 冲突、DST missing/repeated time 和 API 失败都保留 desired 草稿；关闭直接丢弃未保存草稿，不增加确认弹窗 |
+| Chat marker | `scheduledTaskMarkerModel.ts` 只接受完成的 `create_scheduled_task`、`ok=true`、`result.status=ok` 和合法 `scheduled_task` | malformed、失败 envelope、其他 Tool 继续走原 Tool 呈现；不解析 assistant prose |
+| 刷新后 marker | `ChatMessageList` 对 final-only history 复用 `fetchClaudeThreadMessageProcess`，按 Thread/message ID 去重、取消，并限制同轮并发读取 | 单条 process 失败保留 final；显式展开可重试；marker 不依赖展开过程 |
+| Chat 详情栏 | 详情打开后重读 current task 与 history，显示 effective 配置、prompt、latest trigger，并从该 trigger 打开目标 Thread | 详情 API 失败局部重试；marker 快照仅作加载前标题/规则后备 |
+| 侧栏互斥 | `ChatView` 持有 scheduled task 选择；打开 scheduled/File/Subagent/TaskSession 任一类型时关闭其他选择 | 切换 Thread 或从 Calendar 建 fresh Chat 时关闭旧详情；窄屏使用右侧 Drawer 几何 |
+| 滚动 | 桌面月历纸面固定；右侧任务/日记外层独立纵向滚动；结果正文与编辑内容各有自己的滚动容器 | 短视口月历自身可滚；内容不会撑动相邻月历 |
 
-## 3. 需求—设计—实现—测试追踪矩阵
+## 3. 独立评审结论
 
-| 需求 | PRD/设计 | 实现 | 本轮测试 | 状态 |
+四项 P1 文档差距已经在实施前关闭，并由当前实现兑现：
+
+1. final-only history 不再被误写成包含 Tool parts；历史 marker 经现有 message-process 接口自动恢复，实时与历史共用严格 decoder。
+2. `ChatView` 是 scheduled/File/Subagent/TaskSession 右栏选择 owner；各入口双向关闭其他栏。
+3. 编辑器没有伪造服务端不提供的 DST 偏移候选；错误保留 desired，并要求用户改成无歧义当地时刻。
+4. v3 历史回执与 v4 当前回执分开保存；现行 E2E 已重写为 v4 DOM、交互和精确 ID 合同。
+
+未发现为未来假设场景引入的通用 marker 框架、工作流引擎、通知服务或新状态。设计和实现保持最小业务切片。
+
+## 4. 需求—设计—实现—测试追踪矩阵
+
+| 需求 | 设计证据 | 实现证据 | 测试证据 | 状态 |
 | --- | --- | --- | --- | --- |
-| 透明外层 dialog | PRD §3.1；UI §5/§10 | `.calendar-popup-modal` 透明、border 0、shadow none；标题视觉隐藏 | computed style 与隐藏标题裁切断言 | 通过 |
-| 三张独立悬浮纸面 | PRD §3.2；骨架宽/窄屏；UI §3/§4 | `.calendar-popup__calendar` 与两个 `.calendar-popup__section` 共用纸色/圆角/阴影 | 要求正好三张非透明、有边界、有阴影的纸面 | 通过 |
-| 关闭按钮不覆盖内容 | 骨架 D1；UI §4/§6 | 宽屏按钮位于纸面外侧安全区；单列时内容顶部预留 68px | 关闭按钮和三张纸面矩形不相交 | 通过 |
-| 去掉重复日期摘要 | PRD §3.3；UI §10.1 | 删除 `.calendar-popup__date-summary`；日期进入两个业务 heading | 摘要不存在；中文标题为“今天的定时任务/日记” | 通过 |
-| 计数是次级文字 | PRD B2/C2；UI §6.2 | `1 项` / `1 篇`，无圆形底 | 有数据与空任务日期断言 | 通过 |
-| 任务详情扁平 | PRD §5.1；UI §6.3/§10 | task/fact/recent/展开区移除嵌套纸面 | task border/background/shadow 与 fact background 断言 | 通过 |
-| 任务错误不阻断日记 | PRD §5.5；系统设计时序一失败分支 | 任务卡局部 error/retry；日记按钮仍可操作 | 持续错误、恢复重试和日记 enabled 旅程 | 通过 |
-| 编辑、暂停、恢复和 revision | 系统设计时序三 | 既有 `ScheduledTaskCard`/API 不变 | desired 保留、CAS 重试、暂停/恢复 | 通过 |
-| 手动运行与重复控制 | 系统设计时序二/三/四 | 既有 manual request key 和状态刷新不变 | 确定失败新 key、未知响应复用原 key、终态刷新 | 通过 |
-| 历史、删除撤销和 Thread | PRD §5；系统设计时序三 | 既有 cursor、undo、Chat 导航不变 | 20+1 历史、删除/撤销、精确目标 Thread | 通过 |
-| 滚动与断点 | 骨架 §4；UI §4 | 宽屏右侧卡栈独立滚动且月历固定；短视口月历内部可达；单列 `.calendar-popup` 统一滚动；1024/1025 同步切换 | overflow、390/1024/1025、1440×480 几何与最后日期可见 | 通过 |
-| DST 失败反馈 | 系统设计配置规则 | 既有 desired 草稿和稳定错误文案不变 | 重复/缺失当地时间与恢复保存 | 通过 |
+| Calendar 安排入口进入 fresh Chat 草稿 | PRD §5.1；骨架 C4；UI §5.1 | `CalendarPopup` → `App` → `ChatView.requestedInput` | Calendar Chrome：草稿可编辑、未进入消息列表 | 通过 |
+| 轻量任务列表与独立点击边界 | PRD §5.2；骨架 C5/C6；UI §5.2 | `ScheduledTaskCard` row 主按钮、edit、more | 桌面完整旅程、移动菜单键盘、平板/短视口 | 通过 |
+| 既有菜单动作 | PRD §5.3；骨架 C7 | 复用 `updateScheduledTask` 和 history | edit conflict、pause/resume、run 重试、history、delete/restore | 通过 |
+| 最新 trigger 结果页 | PRD §5.4；骨架 C8；UI §5.4 | LIST/RESULT 互斥；day/history 按 `created_at` 合并 | 完成态结果和独立 history 分页；活动态轮询终止 | 通过 |
+| 精确 final message | PRD §5.4.3-6；系统时序 §7.3 | full message 读取后只接受 `id===final_message_id && role===assistant` | 目标 Thread 有更晚 assistant，结果仍显示指定旧 final；更晚消息不出现 | 通过 |
+| 精确打开目标 Thread | PRD §3.3、§5.4.6、§5.7.6 | 结果和详情只传 latest trigger 的 `target_thread_id` | Calendar 与 Chat browser harness 均断言目标 Thread ID | 通过 |
+| 独立编辑 Modal | PRD §5.5；骨架 C9；UI §5.5 | 共享 `Modal`、effective→desired、revision 冲突 | 独立 dialog、冲突后二次保存、DST repeated/missing、保存关闭 | 通过 |
+| 严格 Tool success marker | PRD §5.6；骨架 H2/H3；UI §5.6 | 纯 decoder + owning assistant final 后 marker | object/string success；prose/其他 Tool/失败/malformed fail closed | 通过 |
+| 刷新后持久 marker | PRD §5.6、§7.2 | final-only message 自动读取 process，去重/取消/重试 | Chrome：single-flight、失败后显式重试、不展开过程也恢复 marker | 通过 |
+| 详情侧栏重读 effective/history | PRD §5.7；骨架 H4-H8；UI §5.7 | `ScheduledTaskDetailSidebar` 复用 get/history | Chrome：prompt、completed trigger、精确 Open conversation | 通过 |
+| 右栏互斥和移动 Drawer | PRD §5.7、§10.2；骨架 §6.3/§7 | `ChatView` 单一选择 owner；响应式 CSS | TypeScript/build、源码状态转换审计；marker 详情浏览器旅程 | 通过（源码与组件浏览器证据） |
+| 不伪造协议外能力 | PRD §2.3；骨架 §12；UI §12 | 无 share/monthly/notification/repeat-end/cron 字段或控件 | 请求 fixture 与 DOM 旅程无这些能力 | 通过 |
+| 任务/日记滚动互不影响 | PRD §5、§10；UI §6 | 固定月历 + workspace 外滚动 + result/editor 内滚动 | 390/1024/1025/1440/短视口几何、滚动 owner、无横向溢出 | 通过 |
+| 普通 Chat/Tool/调度回归 | PRD §13.5；系统设计测试门禁 | 未改后端状态机、SSE、resume/cancel 或 ScheduledTask DTO | Chat process/MCP App 6 项与调度 Tool/broker/consumer 40 项 | 通过（相关范围） |
 
-## 4. 影响范围与测试边界
+## 5. 影响范围与测试资源
 
-| 项目 | 本轮范围 |
-| --- | --- |
-| 生产模块 | `frontend/app/_dream/components/CalendarPopup.tsx`、`CalendarPopup.css`、`frontend/app/_dream/i18n.ts` |
-| 既有旅程 | 查看任务、任务错误重试、日记、编辑冲突、暂停/恢复、立即运行、历史、删除撤销、Thread 导航、DST |
-| 数据库与后台 | 无代码和 schema 改动；确定性回归不连接数据库、不调用模型 |
-| 浏览器资源 | 复用本机 Chrome。55173 因现有 5173 dev 进程持有 `.next/dev/lock` 无法另启同项目实例，按 harness 规则复用正常 5173 服务 |
-| 清理 | 未停止或修改用户已有 5173/8765 服务；55173 最终无监听；Playwright 生成物由本轮恢复/清理 |
+- 项目：Dream 前端和既有 Dream 后端合同测试；Admin 与共享 PostgreSQL schema 无代码变化。
+- 前端模块：`CalendarPopup`、`App`、`ChatView`、`ChatPanel`、`ChatMessageList`、scheduled marker/detail 组件、i18n 与 browser fixtures。
+- 既有流程风险：普通 Chat history process、TaskSession/Subagent/File 侧栏、Calendar 日记读取、ScheduledTask action DTO 和 Thread 导航。
+- 数据风险：本轮 Chrome 旅程使用 production-shaped route fixture，不写真实数据库、账户、Thread、Run、日记或模型。
+- 资源：复用本机 Chrome；临时 Vite/Next 端口与进程由 runner 所有并在结束时清理；不停止用户服务。
 
-## 5. 既有真实业务闭环的适用范围
+## 6. 验证回执
 
-本轮是视觉和信息层级纠错，没有改变调度业务链。上一版评审已经记录两条正常账户、正常 PostgreSQL、真实模型的公开入口回执：修复后手动运行得到 `SCHEDULE-E2E-PASS-20260929-1438`；电脑重启后通过正常 Chat Tool 创建的一次性任务在 15:38 自动领取、完成并在持久目标 Thread 返回 `AUTO-SCHEDULE-E2E-PASS-20260929-1538`。任务、失败历史、目标 Thread 和刷新后持久化证据均保留在[历史评审](./history/scheduled-task-diary-prd-review-v2-20260929.md)。
+| 命令 | 退出码 | 关键输出 | 覆盖 |
+| --- | ---: | --- | --- |
+| `cd frontend && pnpm exec tsc --noEmit` | 0 | 无输出 | 前端类型合同 |
+| `cd frontend && pnpm run lint` | 0 | `0 errors, 17 warnings`；warnings 为仓库现有 Hook dependency 清单 | 全前端 lint |
+| 在隔离复制目录执行 `pnpm run build` | 0 | Next 16.1.6；compiled、TypeScript、3/3 static pages、traces 全通过 | 生产构建；未覆盖用户运行中的 `.next` |
+| `cd frontend && E2E_WEB_BASE=http://127.0.0.1:5173 pnpm exec playwright test e2e/scheduled-task-calendar.spec.ts --reporter=line --workers=1` | 0 | `9 passed (31.6s)`；console/page/request 诊断为空 | Calendar v4 完整旅程、精确 final、断点、焦点恢复和失败分支 |
+| `cd frontend && pnpm exec playwright test app/_dream/components/chat/__tests__/ScheduledTaskMarker.test.ts app/_dream/components/chat/__tests__/ChatHistoryProcessLazyLoad.browser.test.ts --reporter=line --workers=1` | 0 | `6 passed (2.8s)` | decoder、history process、整卡 marker、详情与目标 Thread |
+| `cd backend && PYTHONPATH=. uv run --group dev python -m pytest -q tests/test_thread_tool.py tests/test_scheduled_task_consumer.py tests/test_session_projection_broker.py` | 0 | `40 passed in 15.53s` | Tool、broker、调度 consumer 与 fail-closed 合同 |
 
-这些回执证明既有 Chat Tool → Admin → worker → TaskSession/Thread → Claude turn → final → Calendar 历史业务链。它们不替代本轮视觉回归；本轮也不为纯 UI 变化再制造真实任务或日记数据。
+浏览器 runner 预检确认 Playwright 1.62.1 与本机 Chrome 可用；最终 `.last-run.json` 为 passed，无失败 trace。所有测试只清理本轮明确创建的进程、临时端口和构建复制目录。
 
-## 6. 本轮验证回执
+## 7. 已修正的旧错误内容
 
-| 命令 | 退出码/关键输出 | 覆盖 |
-| --- | --- | --- |
-| `git diff --check` | 0；无输出 | patch 空白和冲突标记 |
-| `cd frontend && corepack pnpm exec eslint app/_dream/components/CalendarPopup.tsx app/_dream/i18n.ts e2e/scheduled-task-calendar.spec.ts` | 0 | 生产 JSX/i18n 与浏览器旅程静态规则 |
-| `cd frontend && corepack pnpm exec tsc --noEmit --incremental false` | 0 | TypeScript 合同 |
-| `cd frontend && corepack pnpm build` | 0 | Next production build |
-| `cd frontend && E2E_WEB_BASE=http://127.0.0.1:5173 corepack pnpm exec playwright test e2e/scheduled-task-calendar.spec.ts --grep 'mobile exhausted' --reporter=line --workers=1` | 0；`1 passed (3.8s)` | 390×844 底部阴影安全区聚焦复验 |
-| `cd frontend && E2E_WEB_BASE=http://127.0.0.1:5173 corepack pnpm exec playwright test e2e/scheduled-task-calendar.spec.ts --reporter=line --workers=1` | 0；`8 passed (27.7s)`；console/pageerror/unexpected request 均为 0 | 三张悬浮纸面、宽屏右栈独立滚动、1440×480 月历可达、390/1024/1025 响应式，以及完整任务业务旅程 |
+1. 旧 E2E 的 trigger `final_message_id` 与消息 ID 不一致，仍可通过，因为当时没有验证结果正文；现 fixture 使用精确匹配，并增加更晚 assistant 消息防止“取最后一条”伪通过。
+2. 历史分页 fixture 曾把历史记录时间造得比 active trigger 更新，导致卡片提前显示成功；历史时间已改为早于 active trigger，轮询终止断言现在有因果关系。
+3. 一个分页场景只有一项任务和一篇日记，却强制底层 stack 必须溢出；改为验证独立 history Modal、正确滚动 owner 与安全边距，不再把内容长度当产品合同。
+4. 后端首轮用 `uv run pytest` 时 console-script import path 导致 `tests` 包不可见；正式回执改用 `PYTHONPATH=. uv run --group dev python -m pytest`，未把 harness 调用错误算作产品失败。
+5. 现行文档中“v4 未实施/待 E2E”已改为当前实现与验证事实；v3 原文保存在 history，不覆盖历史回执。
 
-## 7. 最终裁决门禁
+## 8. 剩余门禁
 
-以下门禁均已满足：
-
-- 独立评审没有未关闭的阻塞或 P1 问题。
-- focused lint、TypeScript、production build 全部退出码 0。
-- provider-free Chrome 完整旅程全部通过，且 application console、page error 和意外请求为 0。
-- 390、1024、1025、1440 宽度均无文档或主滚动边界横向溢出；关闭按钮不覆盖纸面；三张纸的阴影样式存在且匹配各断点安全区。
-- 本轮现行 Markdown 相对链接全部存在，`git diff --check` 退出码 0。
-
-独立静态复核最终裁决为“可直接实施”；本轮无未关闭 P0/P1。
+- 正常 PostgreSQL capability 是否已部署、目标账户权限、真实 worker 到期触发、真实模型正文和 Admin 可见 Run/Thread 记录未在本轮 provider-free 测试中验证。
+- 这些属于部署/真实业务验收，不影响当前 v4 页面代码和隔离业务旅程通过；发布时仍必须按本仓库“本机真实业务测试协议”单独执行并保留正常业务记录。
+- 当前实现没有数据库 schema 变化，因此不需要 Admin Drizzle migration，也没有 Dream runtime DDL 或 SQLite fallback。

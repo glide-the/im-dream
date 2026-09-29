@@ -55,6 +55,7 @@
 // [Sync] 2026-09-27: attach created-Thread source navigation to the first user bubble; retain access while older history is unloaded.
 // [Sync] 2026-09-27: place the settled created-task list inside the latest assistant reply, before its actions.
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
+// [Sync] 2026-09-29: recover persisted create_scheduled_task Tool results and render durable task markers in the creating reply.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -79,6 +80,8 @@ import { fetchClaudeThreadMessageProcess } from './threadSessionHydration';
 import type { ChatUserMessage } from './chatUserMessageIngress';
 import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 import { isNavigableUserMessage } from './chatTurnNavigationModel';
+import ScheduledTaskMarkerList from './ScheduledTaskMarker';
+import { decodeScheduledTaskMarker, type ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -110,6 +113,7 @@ interface ChatMessageListProps {
   onNavigateThread?: (threadId: string) => void;
   createdTaskLinks?: TaskSessionLink[];
   locatedMessageId?: string | null;
+  onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -289,7 +293,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId, onOpenScheduledTask }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -383,6 +387,19 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
     }
   }, [historicalProcessDetails, threadId]);
 
+  useEffect(() => {
+    let remaining = 4;
+    for (const message of messages) {
+      if (remaining === 0) break;
+      if (!historicalMessageIds.has(message.id)) continue;
+      const projection = projectHistoricalAssistantTurn(message);
+      const key = `${threadId}:${message.id}`;
+      if (!projection?.deferredProcess || historicalProcessDetails[key]) continue;
+      remaining -= 1;
+      void loadHistoricalProcess(message);
+    }
+  }, [historicalMessageIds, historicalProcessDetails, loadHistoricalProcess, messages, threadId]);
+
   const handleCopy = async (id: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -445,6 +462,17 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
         const projection = historicalProjection?.processAvailable
           ? historicalProjection
           : null;
+        const scheduledTaskMarkers = message.parts.reduce<ScheduledTaskMarkerSnapshot[]>((tasks, candidate) => {
+          if (!isToolUIPart(candidate)) return tasks;
+          const toolPart = candidate as ToolUIPart | DynamicToolUIPart;
+          if (getToolStatus(toolPart, isLoading) === 'executing') return tasks;
+          const marker = decodeScheduledTaskMarker(
+            resolveToolName(toolPart),
+            'output' in toolPart ? toolPart.output : undefined,
+          );
+          if (marker && !tasks.some((task) => task.id === marker.id && task.revision === marker.revision)) tasks.push(marker);
+          return tasks;
+        }, []);
         const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'outside-app' | 'final') => {
               const part = message.parts?.[partIndex];
               if (!part) return null;
@@ -547,10 +575,13 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       setMessages={setMessages}
                       sendMessage={sendUserMessage}
                       workspaceSessionId={threadId}
-                      afterContent={index === createdTaskMessageIndex
-                        && partKind !== 'process'
-                        && partIndex === lastTextPartIndex
-                        ? <CreatedTaskSessionList links={createdTaskLinks ?? []} onNavigateThread={onNavigateThread} />
+                      afterContent={partKind !== 'process' && partIndex === lastTextPartIndex
+                        ? <>
+                          {index === createdTaskMessageIndex
+                            ? <CreatedTaskSessionList links={createdTaskLinks ?? []} onNavigateThread={onNavigateThread} />
+                            : null}
+                          <ScheduledTaskMarkerList tasks={scheduledTaskMarkers} onOpen={onOpenScheduledTask} />
+                        </>
                         : undefined}
                     />
                   </div>
@@ -565,6 +596,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const outputText = getToolOutputText(toolPart);
                 const title = 'title' in toolPart ? (toolPart as { title?: string }).title : undefined;
                 const toolName = resolveToolName(toolPart);
+                const scheduledTaskMarker = isCompleted ? decodeScheduledTaskMarker(
+                  toolName,
+                  'output' in toolPart ? toolPart.output : undefined,
+                ) : null;
+                if (scheduledTaskMarker) return null;
                 const displayTitle = title || toolName || getToolName(toolPart);
                 const isBuiltInWrite = isBuiltInWriteTool(toolName);
                 const normalizedToolName = toolName.toLowerCase();

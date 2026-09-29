@@ -96,6 +96,7 @@
 // [Sync] 2026-08-17: allow an active Thread to select the next-turn Agent within its bound Deck.
 // [Sync] 2026-09-02: hydrate only the newest message page and reserve full-history
 //                    transport for an explicit whole-thread export.
+// [Sync] 2026-09-29: own scheduled-task marker details as a mutually exclusive right sidebar and accept Calendar task drafts.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -115,6 +116,8 @@ import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
 import { SubagentSidebar } from './SubagentPanel';
 import TaskSessionSidebar from './TaskSessionSidebar';
+import ScheduledTaskDetailSidebar from './ScheduledTaskDetailSidebar';
+import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
@@ -173,6 +176,10 @@ interface ChatViewProps {
   requestedDeckInput?: string;
   /** Bump-only companion of requestedDeckId so repeated requests for the same Deck still re-apply. */
   requestedDeckNonce?: number;
+  /** Generic unsent draft requested by another first-party surface, such as Calendar task creation. */
+  requestedInput?: string;
+  /** Bump-only companion so the same draft can be requested again. */
+  requestedInputNonce?: number;
   onNewChat?: () => void;
   quickActions?: QuickActionStripItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
@@ -317,6 +324,8 @@ function ChatViewContent({
   requestedAgentId,
   requestedDeckInput,
   requestedDeckNonce,
+  requestedInput,
+  requestedInputNonce,
   onNewChat,
   quickActions,
   editorState,
@@ -331,6 +340,9 @@ function ChatViewContent({
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
   const [sideTaskThreadId, setSideTaskThreadId] = useState<string | null>(null);
+  const [scheduledTaskDetail, setScheduledTaskDetail] = useState<{
+    taskId: string; snapshot: ScheduledTaskMarkerSnapshot;
+  } | null>(null);
   useEffect(() => {
     const selected = new URLSearchParams(window.location.search).get('task_thread');
     if (selected) setSideTaskThreadId(selected);
@@ -616,6 +628,7 @@ function ChatViewContent({
   useEffect(() => {
     setFileSidebarOpen(false);
     setSubagentSidebarOpen(false);
+    setScheduledTaskDetail(null);
   }, [activeThreadId]);
 
   // @@@ External navigation: switch threads, or rehydrate/reconnect when the
@@ -668,6 +681,21 @@ function ChatViewContent({
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
   }, [availableDecks, requestedAgentId, requestedDeckId, requestedDeckNonce]);
+
+  useEffect(() => {
+    if (requestedInputNonce === undefined || !requestedInput?.trim()) return;
+    setActiveThreadId(null);
+    setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
+    setHasConversationStarted(false);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    setScheduledTaskDetail(null);
+  }, [requestedInput, requestedInputNonce]);
 
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component).
@@ -1192,6 +1220,7 @@ function ChatViewContent({
                 }}
                 onToggleSubagents={() => {
                   closeSideTask();
+                  setScheduledTaskDetail(null);
                   setSubagentSidebarOpen((current) => {
                     const next = !current;
                     if (next) setFileSidebarOpen(false);
@@ -1240,7 +1269,7 @@ function ChatViewContent({
                         onClick={() => {
                           setFileSidebarOpen((current) => {
                             const next = !current;
-                            if (next) setSubagentSidebarOpen(false);
+                            if (next) { setSubagentSidebarOpen(false); setScheduledTaskDetail(null); closeSideTask(); }
                             return next;
                           });
                           setMoreMenuOpen(false);
@@ -1311,6 +1340,7 @@ function ChatViewContent({
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
                   onOpenTaskThread={(taskThreadId) => {
                     setSideTaskThreadId(taskThreadId);
+                    setScheduledTaskDetail(null);
                     setFileSidebarOpen(false);
                     setSubagentSidebarOpen(false);
                     const url = new URL(window.location.href);
@@ -1320,6 +1350,12 @@ function ChatViewContent({
                   onNavigateThread={(taskThreadId) => {
                     closeSideTask();
                     handleSelectThread(taskThreadId);
+                  }}
+                  onOpenScheduledTask={(task) => {
+                    closeSideTask();
+                    setFileSidebarOpen(false);
+                    setSubagentSidebarOpen(false);
+                    setScheduledTaskDetail({ taskId: task.id, snapshot: task });
                   }}
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
@@ -1341,8 +1377,8 @@ function ChatViewContent({
                       <AIInputDock
                         deckId={selectedDeckId}
                         workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
-                        prefill={requestedDeckInput}
-                        prefillNonce={requestedDeckNonce}
+                        prefill={requestedInput ?? requestedDeckInput}
+                        prefillNonce={requestedInputNonce ?? requestedDeckNonce}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
                         }}
@@ -1792,7 +1828,7 @@ function ChatViewContent({
         {activeThreadId ? (
           <SubagentSidebar
             threadId={activeThreadId}
-            open={subagentSidebarOpen && !sideTaskThreadId}
+            open={subagentSidebarOpen && !sideTaskThreadId && !scheduledTaskDetail}
             onClose={() => setSubagentSidebarOpen(false)}
           />
         ) : null}
@@ -1806,6 +1842,16 @@ function ChatViewContent({
           closeSideTask();
           handleSelectThread(taskThreadId);
         }} /> : null}
+
+        {scheduledTaskDetail ? <ScheduledTaskDetailSidebar
+          taskId={scheduledTaskDetail.taskId}
+          snapshot={scheduledTaskDetail.snapshot}
+          onClose={() => setScheduledTaskDetail(null)}
+          onOpenThread={(threadId) => {
+            setScheduledTaskDetail(null);
+            handleSelectThread(threadId);
+          }}
+        /> : null}
 
         <ChatShareDialog
           open={shareDialogOpen}

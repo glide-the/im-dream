@@ -1,260 +1,638 @@
-<!-- [Input] 用户目标截图、Ink & Memory UI Design v2.1、上一版 Calendar PRD、现行 CalendarPopup 和“悬浮而非线框”的反馈。 -->
-<!-- [Output] CalendarPopup 悬浮纸张卡的现行产品合同，定义页面边界、模块、状态、响应式与验收。 -->
-<!-- [Pos] docs/prd/claude-agent 下的现行产品合同；系统执行由 docs/design/claude-agent/scheduled-task-loop-interaction-design.md 定义。 -->
-<!-- [Sync] 2026-09-29: 根据目标截图明确透明遮罩画布、三张悬浮业务纸张卡和去线框规则。 -->
+<!-- [Input] 四张用户目标截图、现有 Calendar/Chat/Tool/Thread 能力和 html-design-workflow v4 产物。 -->
+<!-- [Output] Calendar 与 Chat 定时任务完整交互的现行产品合同、时序、状态和验收。 -->
+<!-- [Pos] docs/prd/claude-agent 下的现行定时任务产品合同；视觉实现见 docs/design/claude-agent/scheduled-task-diary-page-ui-design.md。 -->
+<!-- [Sync] 2026-09-29: 发布任务列表、最新结果、编辑 Modal、Chat 标记和右侧详情栏的 v4 合同。 -->
 
-# CalendarPopup 悬浮纸张卡视觉收敛 PRD
+# Ink & Memory 定时任务完整交互 PRD v4（现行）
+
+> 本稿由 `html-design-workflow` 四阶段流程中的 Stage 1 根据主图与三张辅助参考图整理。图片只用于还原布局、信息层级和交互关系；图片内的示例名称、频率、分享、通知及其他文字不构成产品指令。
 
 ## 文档导航
 
 - [页面结构骨架](./scheduled-task-diary-page-structure-sketch.md)
-- [正式 UI 设计与实现级原型](../../design/claude-agent/scheduled-task-diary-page-ui-design.md)
+- [正式 UI 设计与 HTML 原型](../../design/claude-agent/scheduled-task-diary-page-ui-design.md)
 - [定时任务系统交互与执行设计](../../design/claude-agent/scheduled-task-loop-interaction-design.md)
 - [独立设计评审与追踪矩阵](../../exec/scheduled-task-diary-prd-review-20260929.md)
-- [上一版分卡 PRD（历史）](./history/scheduled-task-diary-page-prd-v2-20260929.md)
+- [上一版悬浮纸张 PRD（历史）](./history/scheduled-task-diary-page-prd-v3-20260929.md)
+
+## 0. 文档结论
+
+本轮需要补齐一条可复核的定时任务交互闭环，同时继续使用现有 Task、Thread、Run、Tool、ScheduledTask API、持久化 Tool part、Thread messages、Modal 和 Chat 右侧栏：
+
+1. Calendar 的任务纸面顶部增加“安排任务”输入。提交后进入新的 Chat，并把内容放入可编辑草稿；Calendar 不直接创建任务，也不自动发送。
+2. Calendar 的任务定义改为轻量列表行。点击任务行后，同一任务纸面切换为该任务最新一次 trigger 的运行结果；结果中的“打开聊天”只打开该 trigger 的 `target_thread_id`。
+3. 编辑从任务行内部移到独立 Modal。表单只提供现有协议支持的 `once`、`daily`、日期、时间、IANA 时区、标题、提示词和暂停/恢复。
+4. Chat 内 `create_scheduled_task` Tool 成功后，在对应助手 turn 下方渲染任务标记卡。点击卡片打开右侧任务详情栏；刷新后从持久化 Tool result 恢复卡片，不解析助手正文猜测任务。
+5. 本轮不实现参考图中的分享、每月、重复结束、通知，也不建立新的创建接口、任务模型、消息 parser 或侧栏框架。
+
+---
 
 ## 1. 背景与问题
 
-CalendarPopup 已承载月历、Scheduled tasks、Diary、任务操作、执行历史与日记操作，业务能力完整；当前问题发生在呈现层级：
+### 1.1 已有能力
 
-1. 顶层 Modal 自身绘制一张覆盖整个内容区的大纸面，月历和右侧内容又各自画边框，形成“大框套小框”。
-2. 顶部 `Calendar` 页面标题、右侧独立日期摘要、两张业务卡标题同时存在，重复说明用户正在看的对象。
-3. 任务条目把计划、时区、下次执行、最近结果等信息拆成多层带边界区域，操作区、编辑区、历史区继续嵌套，页面呈现为线框表单。
-4. 现有左侧月历虽然有纸张背景，但它仍被顶层大 Modal 包住，缺少目标截图中“纸张浮在遮罩画布上”的空间高度。
-5. Scheduled tasks 与 Diary 已按业务分开，却没有和月历形成同一套悬浮纸张层级。
+- Agent 可在普通 Chat turn 中调用 `create_scheduled_task`，由宿主注入当前用户、来源 Thread 和 Tool 调用身份。
+- 定时任务定义支持单次与每日规则，Admin 保存定义、计算下一次执行时间、管理 revision、trigger claim 和执行结果。
+- Calendar 可按所选日期读取任务与 triggers，并执行查看、历史、编辑、暂停、恢复、删除、撤销删除和立即运行。
+- 每次触发可建立独立 TaskSession / Thread / Run；trigger 可记录 `target_thread_id`、`target_turn_id`、`final_message_id` 和错误信息。
+- Chat 已持久化 Tool 过程并以 final-only history 加载最终回复；需要时可用现有 message-process 接口读取对应过程详情，并已有 Markdown、Thread hydration 和右侧栏布局。
 
-目标截图证明的核心结构是：背景应用被半透明遮罩压暗；内容画布本身透明；月历是一张独立的大纸张卡；右侧内容是自然高度的独立纸张卡；卡片以大圆角、暖纸色、柔和暖棕高度阴影和留白悬浮，不依靠连续边框划分页面。
+### 1.2 当前体验缺口
+
+- Calendar 的任务信息密度高，主要操作散在正文里，难以扫描。
+- 点击任务后缺少以“最新一次执行结果”为核心的阅读页。
+- 行内编辑改变任务纸面高度，挤压 Diary 并影响旁边月历。
+- Chat Tool 创建成功后，助手回复与真实任务定义没有可点击关联；刷新后也没有稳定标记。
+- 用户无法从创建任务的原会话直接打开任务详情。
+
+### 1.3 图像证据与取舍
+
+| 参考图 | 可采纳的布局与交互证据 | 不采纳为需求的示例内容 |
+| --- | --- | --- |
+| 定时任务列表 / 安排入口 | 顶部长圆输入；列表行左状态、中标题摘要、右编辑和更多；更多菜单承载主要操作 | 分享、示例标题、每月、推荐分组、麦克风 |
+| 最新运行结果 | 点击任务进入结果阅读视图；底部“打开聊天”；标题区保留编辑、更多与返回/关闭 | 示例财务文本、日期与金额 |
+| 编辑弹窗 | 独立居中 Modal；标题和提示词优先；规则字段分组；底部状态动作与保存 | 每月、重复结束、通知、示例模板正文 |
+| Chat 任务标记与侧栏 | Tool 成功后在助手回复下放任务卡；点击后右侧展示详情；侧栏与主区并列 | 示例 Codex 任务、十分钟间隔、通知级别、分享 |
+
+---
 
 ## 2. 目标与边界
 
-### 2.1 目标
+### 2.1 产品目标
 
-1. 打开 CalendarPopup 后，用户首先感知到浮在遮罩上的独立纸张，而不是一个由横线和边框组成的大型表单。
-2. 宽屏中，左侧月历卡与右侧 Scheduled tasks、Diary 卡形成三个同级悬浮对象；不存在包住它们的可见大 Modal 表面。
-3. 只保留帮助用户识别内容归属的分隔线：每张右侧业务卡允许一条卡头/正文分隔线，其他层级优先使用留白、文字层级和浅色状态面表达。
-4. 删除重复的 `Calendar` 页面标题和独立日期摘要。日期与业务名称合并到业务卡标题或简短元信息中，不再单独占一层容器。
-5. 保留现有定时任务和日记能力、状态、错误反馈、键盘操作、焦点管理、屏幕阅读器语义及响应式行为。
+1. 用户能从 Calendar 发起定时任务意图，并明确回到现有 Chat Tool 创建路径。
+2. 用户能在 Calendar 一次点击查看最新运行结果，并准确进入该次执行的 Thread。
+3. 用户能在独立 Modal 中编辑真实可保存字段，编辑过程不改变 Calendar 两列及右侧卡栈的高度关系。
+4. 用户在 Chat 创建任务后立即看到与真实 `scheduled_task.id` 绑定的标记，刷新后仍存在。
+5. 用户可在 Chat 右侧栏读取任务当前 effective 配置和最近执行状态。
+6. 所有新增呈现都从现有协议取数，失败时局部降级，不影响普通 Chat、月历和 Diary。
 
-### 2.2 边界
+### 2.2 本轮包含
 
-- 本轮只调整 CalendarPopup 的容器、信息层级和视觉呈现，不改变任务 API、Task/Thread/Run、revision、调度、幂等、并发或日记持久化语义。
-- 定时任务创建入口继续由现有 Chat Tool 提供；Calendar 内不新增创建按钮。
-- 不增加新的页面标题、日期栏、摘要栏、统计面板、筛选器、标签体系、装饰图标或确认弹窗。
-- 不把任务和日记重新合并成一张右侧大卡；两者仍是独立业务卡，错误和加载状态互不覆盖。
-- 不新增一套 Card/Modal 组件。实现阶段应改造现有 `Modal`、`CalendarPopup` 和 `ScheduledTaskCard` 的呈现职责。
-- 不改变现有文案含义或状态机；只允许为去除独立日期标题而组合现有本地化日期与业务标题。
+- Calendar 的安排入口、列表行、更多菜单、最新结果详情和独立编辑 Modal。
+- Chat 助手 turn 下的定时任务标记卡和右侧任务详情栏。
+- 现有任务操作在新布局中的重新归位。
+- 从持久化 Tool result 恢复 Chat 任务标记。
+- actor scoped API 读取、revision 冲突、加载/失败/空态、响应式和无障碍。
+
+### 2.3 本轮不包含
+
+- 新增调度规则、数据库字段、migration、runtime DDL 或 SQLite fallback。
+- 每周、每月、cron、重复结束、通知、分享、分类、推荐、拖拽排序。
+- Calendar 直接调用创建 API或自动发送 Chat 草稿。
+- 从助手自然语言、标题或 prompt 猜测任务 ID。
+- 新建消息协议、Markdown renderer、Thread 导航器、Modal 或通用工作流系统。
+
+---
 
 ## 3. 概念与规则
 
-### 3.1 透明遮罩画布
+### 3.1 核心对象
 
-- 遮罩继续负责压暗背景、阻止背景交互、关闭语义和焦点约束。
-- CalendarPopup 的内容承载层不绘制背景、边框或包围式阴影，视觉上是一块透明布局画布。
-- 顶层容器仍可承担最大尺寸、滚动、Escape 关闭和焦点陷阱，但这些实现能力不能表现为第四张大卡。
-- 关闭按钮保留；它作为画布右上角的独立可访问控件，不需要 `Calendar` 标题为其提供视觉容器。
+| 概念 | 程序含义 | 页面用途 |
+| --- | --- | --- |
+| ScheduledTask | 标题、prompt、规则、状态、下一次时间和 revision | 列表、编辑 Modal、Chat 详情栏 |
+| ScheduledTrigger | 某次定时或手动执行记录 | 最新结果、历史、状态、精确 Thread 关联 |
+| source Thread | 创建任务时所在的 Chat Thread | 审计来源；不能替代执行结果 Thread |
+| target Thread | 某次 trigger 实际执行所在 Thread | “打开聊天”的唯一目标 |
+| final message | 某次 trigger 的最终 assistant message | Calendar 最新结果正文 |
+| Tool part | Chat turn 中持久化的 Tool 调用与返回值 | Chat 任务标记恢复的唯一来源 |
 
-### 3.2 悬浮纸张卡
+### 3.2 配置型业务语义
 
-- 月历、Scheduled tasks、Diary 都使用 Paper Cream 纸张表面、较大圆角和同一族柔和暖棕高度阴影。
-- “悬浮”由卡片与透明画布之间的阴影、完整圆角轮廓和可见间隙共同表达。禁止用粗描边、外层框或红色标注框表达层级；目标图中的红框只用于指出范围，不属于产品 UI。
-- 阴影应有明显的纵向模糊和低透明度，足以把纸张从遮罩背景抬起，同时避免黑色硬边。实现阶段映射到现有阴影 token 或 `color-mix`，不得新增孤立品牌色。
-- 卡片不是可整体点击的按钮，因此静止、悬停时不做整体上浮动画；具体可操作控件继续有各自 hover/focus 反馈。
+| 名称 | 定义 | 规则 |
+| --- | --- | --- |
+| default | 创建时服务端补充的初始状态；当前为启用。执行时间、规则和时区没有可猜测默认值 | Agent 未提供完整 `once` / `daily` 和 IANA 时区时不创建 |
+| desired | 用户在编辑 Modal 中尚未保存的表单值 | 仅存在于前端草稿；失败时保留 |
+| effective | 最近一次由服务端接受并返回的任务定义 | 列表、详情、下次执行都显示 effective |
+| revision | 服务端定义版本，用于 compare and set | 编辑、暂停、恢复、删除提交 `expected_revision`；前端不能自增 |
 
-### 3.3 日期表达
+```mermaid
+stateDiagram-v2
+  [*] --> active: Tool 创建成功
+  active --> paused: pause(expected_revision)
+  paused --> active: resume(expected_revision)
+  active --> exhausted: 单次任务完成且无下次执行
+  active --> deleted: delete(expected_revision)
+  paused --> deleted: delete(expected_revision)
+  deleted --> active: restore(expected_revision)
+  active --> active: edit(expected_revision, desired)
+  paused --> paused: edit(expected_revision, desired)
+```
 
-- 左侧月历的选中格是日期选择的主要可视证据。
-- 右侧不再显示独立的 `Today / Diary 2 / Tasks unknown / Items needing attention` 摘要区。
-- 业务卡需要日期上下文时，将日期和业务名称合为一个标题，例如“今天的定时任务”“今天的日记”或对应本地化形式；数量作为同一卡头内的次级信息。
-- 不在两张卡之外重复日期，不让“数量未知”污染另一个业务卡的数量。
+`exhausted` 不在编辑 Modal 中重新排期；重新安排通过 Chat Tool 创建新定义。删除沿用现有可撤销语义，不新增确认弹窗。
 
-### 3.4 配置与执行语义
+### 3.3 执行状态
 
-- Scheduled task 的 `default`、用户编辑中的 `desired`、服务端返回的 `effective` 与 `revision` 保持现有独立含义。
-- 编辑成功后只以服务端返回的 effective/revision 更新卡片；冲突或校验失败时保留 desired 并显示可行动错误。
-- 本轮视觉变化不得根据部署环境、测试状态或本地常量改变上述行为。
+| trigger status | 列表摘要 | 详情正文 |
+| --- | --- | --- |
+| `claimed` | 正在准备 | 准备状态与最近更新时间 |
+| `queued` | 等待执行 | 排队状态与计划时间 |
+| `running` | 正在运行 | 运行状态；无最终正文 |
+| `succeeded` | 已完成 | 精确读取 `final_message_id` 并渲染结果 |
+| `failed` | 运行失败 | 可行动反馈、重试/历史入口 |
+| `state_unknown` | 结果待确认 | 不把空结果当成功，不盲目重跑 |
+| `skipped` | 已跳过 | 服务端提供的跳过时间范围 |
+| 无 trigger | 尚未运行 | 计划与下次执行时间 |
+
+最新 trigger 按服务端历史中的 `created_at` 倒序选择。任务定义的 `source_thread_id`、最近浏览的 Thread 或同名 Thread 都不能替代该 trigger 的 `target_thread_id`。
+
+---
 
 ## 4. 页面模块结构（自上而下、自左至右）
 
-| 编号 | 模块 | 位置与外观 | 内容 | 职责 |
+### 4.1 Calendar 任务纸面
+
+| 编号 | 模块 | 位置与形状 | 内容 | 功能 |
 | --- | --- | --- | --- | --- |
-| A0 | 遮罩层 | 覆盖应用视口的半透明暖灰遮罩，可沿用现有轻微模糊 | 无业务文案 | 隔离背景交互，突出悬浮纸张 |
-| A1 | 透明布局画布 | 遮罩中央；无背景、无边框、无包围阴影 | A2、B1、C1 和关闭按钮 | 只管理尺寸、两列布局、间距、滚动与焦点 |
-| A2 | 月历悬浮纸张卡 | 宽屏左列，接近画布高度；Paper Cream、大圆角、柔和高度阴影 | A3 月份导航、A4 星期行、A5 日期网格 | 选择需要查看的日期 |
-| A3 | 月份导航 | 月历卡顶部；左右箭头位于卡内两侧，月份居中 | 上月、月份/年份、下月 | 切换月份；不增加 Calendar 页面标题 |
-| A4 | 星期行 | 月份导航下方，以留白隔开 | 周日至周六或本地化顺序 | 提供日期网格列语义，不绘制独立框 |
-| A5 | 日期网格 | 七列网格，行列靠留白组织 | 日期、选中态、今天态、日记标记 | 选择日期；保留现有键盘与可访问名称 |
-| B0 | 右侧悬浮卡栈 | 宽屏右列；透明、无共享外框，顶部对齐月历卡 | B1 与 C1 | 按自然高度排列独立业务卡并提供间距 |
-| B1 | Scheduled tasks 悬浮纸张卡 | 右侧第一张；Paper Cream、大圆角、柔和高度阴影 | B2 卡头、B3 正文 | 展示所选日期的任务和任务局部状态 |
-| B2 | 任务卡头 | 卡片顶部，正文前仅一条必要分隔线 | 日期化业务标题、任务数、需处理数（有值时） | 说明卡片身份与摘要 |
-| B3 | 任务卡正文 | 卡内自然高度内容区 | 加载、失败/重试、空态或 B4 列表 | 承载任务全部现有能力 |
-| B4 | 任务列表与条目 | 纵向排列；优先使用留白和轻背景，不叠加厚卡框 | 标题、状态、计划、最近结果、操作、编辑、历史 | 查看和操作单个任务 |
-| C1 | Diary 悬浮纸张卡 | 右侧第二张，与 B1 有清楚透明间隙 | C2 卡头、C3 正文 | 展示所选日期的日记和日记局部状态 |
-| C2 | 日记卡头 | 卡片顶部，正文前仅一条必要分隔线 | 日期化业务标题、篇数 | 说明卡片身份与数量 |
-| C3 | 日记卡正文 | 卡内自然高度内容区 | 空态或 C4 日记列表 | 打开或删除日记 |
-| C4 | 日记条目 | 轻量圆角行；当前笔记可用绿色细边和浅底 | 时间、当前笔记标识、标题、删除 | 保留目标截图的信息顺序和现有操作 |
-| D1 | 关闭按钮 | 透明画布右上角，避开三张卡内容 | 关闭图标与可访问名称 | 关闭弹窗并恢复触发点焦点 |
+| C0 | Calendar 透明画布 | 遮罩中央；无共享白底与共享边框 | 月历、任务、Diary 三张纸面 | 管理两列、卡栈和滚动 |
+| C1 | 月历悬浮纸面 | 宽屏左列；Paper Cream、大圆角、柔和暖色阴影 | 月份、星期、日期格 | 选择日期；不被右栏撑开 |
+| C2 | Scheduled tasks 悬浮纸面 | 宽屏右列顶部；独立圆角与阴影 | C3-C8 | 承载任务交互 |
+| C3 | 任务卡头 | C2 顶部 | 所选日期标题、任务数、需处理数 | 说明范围与局部状态 |
+| C4 | 安排任务入口 | 正文顶部；横向胶囊 | 加号、单行输入、圆形发送按钮 | 带入新 Chat 草稿 |
+| C5 | 任务列表 | C4 下方；纵向轻量行 | 多个 C6 | 快速扫描 |
+| C6 | 任务行 | 左状态、中正文、右操作 | 图标、标题、摘要、编辑、更多 | 点击查看最新结果 |
+| C7 | 更多菜单 | 锚定行尾；纸色浮层 | 运行、聊天、历史、暂停/恢复、删除 | 次级与危险操作 |
+| C8 | 最新结果 | 与 C5 互斥，占 C2 正文 | 返回、状态、Markdown、打开聊天 | 阅读最新 trigger |
+| C9 | 编辑 Modal | Calendar 上方；独立大圆角表面 | 标题、prompt、规则、状态、保存 | 编辑 desired |
+| C10 | Diary 悬浮纸面 | C2 下方，有透明间隙 | Diary 卡头与条目 | 保持现有日记体验 |
 
-### 4.1 宽屏结构
+### 4.2 Chat 任务标记与详情栏
 
-```text
-┌────────────── 半透明遮罩层 A0（覆盖应用） ──────────────┐
-│                 A1 透明布局画布                         │
-│  ┌──── A2 月历悬浮纸张 ────┐   ┌─ B1 任务悬浮纸张 ─┐   │
-│  │ ‹       2026 年 9 月   › │   │ 选中日的定时任务  │   │
-│  │ 日 一 二 三 四 五 六     │   ├───────────────────┤   │
-│  │ 日期网格                 │   │ 任务状态与操作     │   │
-│  │                          │   └───────────────────┘   │
-│  │                          │                            │
-│  │                          │   ┌─ C1 日记悬浮纸张 ─┐   │
-│  │                          │   │ 选中日的日记       │   │
-│  │                          │   ├───────────────────┤   │
-│  │                          │   │ 日记条目           │   │
-│  └──────────────────────────┘   └───────────────────┘   │
-│                                     ○ 透明间隙            │
-└──────────────────────────────────────────────────────────┘
-```
+| 编号 | 模块 | 位置与形状 | 内容 | 功能 |
+| --- | --- | --- | --- | --- |
+| H1 | Chat 对话主区 | 页面左/中 | 用户消息、助手 turn、Tool parts | 保持现有对话流 |
+| H2 | 定时任务标记组 | 创建成功的助手正文后、消息操作前 | 一个或多个 H3 | 把任务锚定到原 turn |
+| H3 | 任务标记卡 | 回复同宽浅色细边卡；三列 | 时钟图标、标题/摘要、“打开” | 选择真实 task ID |
+| H4 | 任务详情侧栏 | Chat 右侧，与主区并列；复用现有侧栏壳 | H5-H8 | 读取当前 effective |
+| H5 | 侧栏头部 | 顶部；底部分隔线 | “定时任务”、标题、关闭 | 识别与关闭 |
+| H6 | 详情分组 | 侧栏首组 | 状态、prompt、来源 | 说明做什么、是否启用 |
+| H7 | 频率分组 | H6 下方 | once/daily、日期、时间、时区、下次执行 | 展示真实规则 |
+| H8 | 最近运行分组 | H7 下方 | trigger 状态、时间、错误/结果、打开聊天 | 解释最近执行 |
 
-关键约束：A1 和 B0 都不得绘制可见表面；A2、B1、C1 是唯一分类级纸面。D1 不创建标题栏。
-
-### 4.2 窄屏结构
+### 4.3 宽屏草图
 
 ```text
-A0 遮罩
-└─ A1 透明滚动画布
-   ├─ A2 月历悬浮纸张
-   ├─ B1 Scheduled tasks 悬浮纸张
-   └─ C1 Diary 悬浮纸张
+Calendar
+┌────────────── 透明遮罩 / 透明画布 ──────────────┐
+│ ┌──── 月历悬浮纸面 ────┐  ┌── 任务悬浮纸面 ───┐ │
+│ │ 月份 / 星期 / 日期格   │  │ [＋ 安排任务   ↑] │ │
+│ │                        │  │ ◉ 标题 摘要 ✎ ··· │ │
+│ │                        │  │ ◷ 标题 摘要 ✎ ··· │ │
+│ └────────────────────────┘  └───────────────────┘ │
+│                             ┌── Diary 纸面 ────┐ │
+│                             │ 日记条目          │ │
+│                             └───────────────────┘ │
+└──────────────────────────────────────────────────┘
+
+Chat
+┌──────────────── 对话主区 ────────────────┬──── 任务详情侧栏 ────┐
+│ 助手正文                                 │ 定时任务          × │
+│ ┌──────────────────────────────────────┐ │ 标题 / 状态         │
+│ │ ◷ 任务标题                 [打开]    │ │ 提示词              │
+│ │   每天 09:00 · Asia/Shanghai        │ │ 频率 / 时间 / 时区   │
+│ └──────────────────────────────────────┘ │ 下次执行 / 最近运行   │
+└─────────────────────────────────────────┴─────────────────────┘
 ```
 
-窄屏按月历、任务、日记的 DOM 顺序单列排列。每张卡保持完整圆角与阴影；画布承担纵向滚动，卡片不得被裁切成共享面板的片段。
+---
 
 ## 5. 详细功能需求
 
-### 5.1 打开、关闭与焦点
+### 5.1 Calendar：安排任务入口 C4
 
-1. 从现有入口打开时，A0 显示并阻止背景交互，焦点进入 CalendarPopup。
-2. 不渲染可见的 `Calendar` 页面标题栏。需要给对话框命名时，使用屏幕阅读器可读标题或现有 `aria-label`，不得为此恢复可见外框。
-3. D1 保持不小于现有触控目标、`aria-label`、键盘焦点环和 Escape 关闭能力。
-4. 任务编辑 dirty 时继续遵守现有关闭处理；本轮不改变确认条件。
-5. 关闭后焦点返回打开 CalendarPopup 的触发控件。
+1. C4 始终位于任务正文顶部，加载、错误、空态和列表状态下都保留。
+2. placeholder 为“安排任务”；加号仅作为入口识别图标并 `aria-hidden`，不伪造附件或菜单。
+3. 非空输入按 Enter 或点击发送：关闭 Calendar；进入新 Chat；生成可识别的创建任务草稿；保持可编辑且不自动发送；不直接调用 ScheduledTask API。
+4. 空白输入不跳转，发送按钮不可用。
+5. Calendar 不新增麦克风。后续只有在复用 Chat 已有录音能力并保持同一草稿语义时才另行设计。
+6. 创建仍由普通 Agent turn 调用 `create_scheduled_task`；校验失败在 Chat 中反馈。
 
-### 5.2 月历悬浮卡
+### 5.2 Calendar：任务列表 C5/C6
 
-1. A3 只显示月份导航，不再重复 `Calendar`。
-2. A4、A5 不绘制每个日期的常驻边框。普通日期依靠网格与留白排列；有日记日期可保留现有纸面浅底和圆点。
-3. 今天与选中日期必须有文字之外的视觉反馈；选中态使用清楚焦点色轮廓，今天态沿用暖色内圈，二者重叠时仍可区分。
-4. 点击日期后同时更新 B1 和 C1。日期请求或任务请求各自失败，只影响所属卡片。
-5. 月历卡自身不因右侧编辑/历史展开而拉伸；左右列顶部保持对齐。
+1. 每行固定为左状态图标、中标题与单行摘要、右编辑与更多。
+2. 摘要优先级：活动 trigger 状态 > 失败/待确认状态与时间 > 规则与下次时间 > 已暂停/已结束。
+3. 活动行使用浅灰或纸色混合整行底；普通行保持透明/纸色。行之间用留白或低对比分隔线，不增加卡片级阴影。
+4. 点击行主体或按 Enter/Space 进入 C8。编辑、更多及菜单项必须阻止行点击。
+5. 多任务时由右侧卡栈滚动；列表增长不改变左月历高度，也不把 Diary 挤出自身布局边界。
 
-### 5.3 Scheduled tasks 悬浮卡
+### 5.3 Calendar：更多菜单 C7
 
-1. B2 将日期与业务名合成同一标题，不另加日期摘要框；数量只属于任务卡。
-2. B3 在同一位置互斥显示加载、错误/重试、空态或任务列表。任务请求失败不能隐藏或禁用 C1。
-3. 一条任务的首要信息只有标题、定义状态和当前可采取的动作。计划、时区、下次执行、最近结果以最多两组紧凑文本行展示，不再各自包成事实框。
-4. 立即运行、暂停/恢复保留在主要动作区；编辑、历史、删除保留在现有更多菜单。
-5. 编辑或历史展开时，内容在所属任务条目内向下展开。允许用微弱表面色区分展开内容，不再增加完整的“卡中卡”外边框和重阴影。
-6. 多条任务之间优先用垂直间距；如果仅靠间距不足以识别条目，可使用一条低对比分隔线，但不得同时叠加每条任务的完整边框和阴影。
-7. queued/claimed/preparing/running、succeeded、failed、state_unknown、skipped 的现有文字状态、刷新与打开会话能力全部保留。
-8. revision 冲突、字段校验、运行结果未知和历史加载错误继续显示在所属任务附近，不新增全局错误框。
+1. **立即运行**：调用现有 run action；提交后禁用重复点击；结果不确定时复用同一 `manual_request_key`。
+2. **打开聊天**：仅当所指最新 trigger 有 `target_thread_id` 时显示。
+3. **历史**：打开该 task 的执行历史，并留在任务纸面滚动边界内。
+4. **暂停 / 恢复**：按 effective status 二选一，携带 `expected_revision`。
+5. **删除**：置于危险分隔线下；成功后沿用可撤销反馈，不新增确认弹窗。
+6. 不显示分享。现有生产协议没有分享操作。
+7. 支持 Escape、上下方向键、Home/End、Enter/Space；禁用项跳过焦点。
 
-### 5.4 Diary 悬浮卡
+### 5.4 Calendar：最新运行结果 C8
 
-1. C2 将日期与 Diary 身份合成标题，并显示篇数；不重复右侧共享日期标题。
-2. C3 无日记时显示轻量空态，卡片轮廓仍保留；有日记时按现有时间顺序显示。
-3. C4 第一行显示时间和“当前笔记”文字标识，第二行显示标题，删除入口靠右；点击非删除区域打开日记。
-4. 当前笔记同时使用文字标识、绿色细边和极浅绿色底，不能只靠颜色。
-5. 普通日记条目不使用高度阴影。它属于 C1 内部内容，依靠圆角浅底或细边表达可点击区域。
-6. Scheduled tasks 加载、失败、编辑或历史展开时，Diary 仍可打开和删除。
+1. 以该 task 的 triggers 中 `created_at` 最新记录为目标；本地不完整时调用 `getScheduledHistory`。
+2. 顶部显示返回、状态图标、标题、规则/下次执行摘要，并保留编辑与更多。
+3. 无 trigger 显示“尚未运行”；claimed/queued/running 显示状态；failed/state_unknown/skipped 显示明确反馈；succeeded 只在 `target_thread_id` 和 `final_message_id` 完整时读取结果。
+4. 读取目标 Thread 后必须精确匹配 `final_message_id`，再把 assistant text 交给现有 Chat Markdown。不得回退到最近一条 assistant message。
+5. Thread 读取失败只替换正文为局部错误和重试；任务头、返回、编辑、历史和 Diary 继续可用。
+6. “打开聊天”只在同一 trigger 有 `target_thread_id` 时出现，点击后关闭 Calendar 并打开精确 Thread。
+7. C8 自身承担长正文滚动，不撑高月历，也不让背景页面滚动。
 
-### 5.5 状态归属
+### 5.5 Calendar：独立编辑 Modal C9
 
-| 场景 | 月历卡 | Scheduled tasks 卡 | Diary 卡 |
+#### 信息顺序
+
+1. 顶部：规则类型文字（“单次”或“每天”）、任务标题、关闭。
+2. 提示词：多行可滚动文本框。
+3. 频率：`once` / `daily`。
+4. once 显示日期、时间和 IANA 时区；daily 显示时间和 IANA 时区。重复或无效当地时刻保留 desired，并要求改用无歧义时刻；当前接口不提供候选偏移，浏览器不得猜测。
+5. 底部：暂停或恢复、保存。
+
+#### 行为规则
+
+1. 以 effective 初始化 desired；用户修改后才进入 dirty。
+2. 保存提交标题、prompt、完整 rule 和 effective revision。
+3. 保存中禁用重复提交；成功后用返回 task 替换 effective，关闭 Modal 并刷新列表。
+4. revision 冲突时保留 desired，提示任务已在其他位置更新，读取并展示最新 effective，等待用户重新确认。
+5. 字段错误放在字段附近；能力/网络失败保留 Modal 和 desired 并提供重试。
+6. 暂停/恢复是独立 revision action，不伪装成保存。
+7. 短视口由 Modal 内容内部滚动，页脚可达；不改变月历或 Diary 布局。
+8. 不渲染每月、重复结束、通知或 cron。
+
+### 5.6 Chat：任务标记 H2/H3
+
+#### 识别规则
+
+1. 只处理 Tool 名称严格匹配 `create_scheduled_task` 的完成态 Tool part。
+2. 只在 output 可解析为成功回执，并包含 `scheduled_task.id`、`title`、`rule`、`status`、`revision` 时生成标记。
+3. 实时 turn 与刷新后的 message-process 详情必须调用同一个识别函数；基础 history 的 final-only 消息本身不被误写成含 Tool parts。
+4. 不解析助手正文、标题相似度、prompt 或其他 Tool 输出推断任务。
+5. 失败或无法解析时不生成成功卡，并回落到普通 Tool 呈现。
+
+#### 布局与行为
+
+1. H2 位于产生成功结果的同一助手 turn 正文之后、消息操作之前。
+2. 同一 turn 创建多个任务时，按 Tool part 顺序生成多行。
+3. H3 使用三列：时钟图标、标题与紧凑规则摘要、“打开”。
+4. 卡片摘要来自创建回执快照；点击后 H4 重新读取服务端当前 effective，避免旧快照冒充当前配置。
+5. 建议整张任务标记使用一个可访问 button，不创建可点击 `article` 内嵌另一 button 的冲突结构。
+6. 标记是历史审计入口：任务后来暂停、结束或删除，原 turn 标记仍保留；H4 展示当前状态或不可用反馈。
+
+### 5.7 Chat：任务详情侧栏 H4-H8
+
+1. `ChatView` 是所有右侧栏选择状态的 owner。点击 H3 后设置 `selectedScheduledTaskId`，原子关闭文件、子代理和 TaskSession 侧栏，再打开 H4；打开任一其他侧栏时也关闭 scheduled detail。
+2. H4 复用当前 Chat 侧栏布局、边界、关闭和响应式策略，不复制容器。
+3. 使用 `getScheduledTask(taskId)` 读取 effective，并用 `getScheduledHistory(taskId)` 读取最近 trigger。
+4. H6 展示标题、定义状态和完整 prompt。内部 ID 不直接显示。
+5. H7 对 once 展示单次、日期、时间、IANA 时区；对 daily 展示每天、时间、IANA 时区；`next_run_at` 按规则时区格式化并保留时区名。
+6. H8 展示最新 trigger 的 kind、状态、时间与错误反馈。有 `target_thread_id` 时显示“打开聊天”；另有 `final_message_id` 时才可展示真实结果摘要。
+7. 详情失败时保留侧栏壳和标题快照，显示局部错误与重试；普通 Chat 不受影响。
+8. get task 返回空时显示“任务不存在或当前不可访问”，不得从 Tool 快照构造可编辑假任务。
+9. 首期侧栏只读；编辑继续使用 Calendar 的独立 Modal。
+10. 不展示通知、每月或分享。
+
+---
+
+## 6. 数据来源与接口影响
+
+### 6.1 数据映射
+
+| 页面字段 | 数据来源 | 判断与转换 | 失败处理 |
 | --- | --- | --- | --- |
-| 初始打开 | 可交互或显示现有加载结果 | 卡头保留，正文加载 | 已有日记正常显示 |
-| 日期切换 | 更新选中格 | 加载所选日期任务 | 更新所选日期日记 |
-| 任务 API 失败 | 不变 | 卡内错误和重试，任务数显示未知 | 保持正常 |
-| 无任务 | 不变 | 卡内空态 | 保持正常 |
-| 任务操作失败 | 不变 | 对应任务附近显示可行动错误 | 保持正常 |
-| 无日记 | 不变 | 保持正常 | 卡内空态，篇数为 0 |
-| 日记删除失败 | 不变 | 保持正常 | 沿用日记局部错误反馈 |
+| Calendar 列表 | `getScheduledDay(date, timezone)` | tasks 与同 task triggers 关联 | 任务纸面局部错误；Diary 可用 |
+| 当前定义 | `getScheduledTask(taskId)` | 服务端 task 为 effective | 空值显示不存在/无权 |
+| 历史/最新执行 | `getScheduledHistory(taskId)` | 按 `created_at` 倒序 | 历史或结果局部重试 |
+| 最终结果 | actor scoped Thread messages | 用 target Thread 读取并匹配 final message | 不匹配显示尚不可用 |
+| Chat 标记 | 持久化 `create_scheduled_task` Tool output | 严格解析成功 scheduled_task | 无效时普通 Tool UI |
+| Chat 详情 | get task + history | Tool task ID 只作查询键 | 后端继续所有权校验 |
+| 编辑 | `updateScheduledTask(id, 'edit', desired + expected_revision)` | 返回值成为 effective | 冲突保留 desired |
+| 暂停/恢复/删除 | revision action | 携带 effective revision | 保留原状态并重试 |
+| 立即运行 | run + `manual_request_key` | 未知结果重试复用 key | 防止重复 trigger |
 
-## 6. 视觉与内容规则
+### 6.2 无需改变的协议
 
-### 6.1 表面与高度
+- 不新增 ScheduledTask/trigger/message 表和 API 路由。
+- 不修改 Task / Thread / Run 状态机。
+- 不增加前端本地调度或进程 timer。
+- 不修改 Thread messages 的 actor scope。
+- Tool 快照不是当前任务存储；当前状态仍以 Admin API 为准。
 
-- A1、B0：完全透明，不画 `background`、`border`、`border-radius` 或包围全部内容的 `box-shadow`。
-- A2、B1、C1：使用现有 Paper Cream token。圆角明显大于卡内条目，形成纸张轮廓。
-- 三张卡共享一组两层暖棕低透明阴影：近层提供离地边缘，远层提供柔和高度。阴影向下延伸，模糊范围大，不出现灰黑硬边；具体值在 UI 阶段映射到现有 design token。
-- 卡片之间露出遮罩画布，透明间隙必须能完整识别每张卡的四个圆角和阴影。
+### 6.3 可新增的纯前端投影
 
-### 6.2 边框与分隔线
+允许增加一个纯函数模块，仅负责：严格识别 `create_scheduled_task`、解码完成态成功 output、输出只读 marker 视图模型、为 once/daily 生成本地化摘要。实时与历史渲染必须共同使用它，不复制 Chat SSE、Tool 状态机或 history hydration。
 
-- 悬浮卡外边界可用极低对比纸边，不能成为主要层级手段。
-- B1、C1 各自只保留卡头与正文之间的一条横线。
-- A2 的月份导航、星期行和日期网格之间使用留白，不增加横线。
-- 删除独立日期摘要下方横线、共享工作区边线、任务事实框边线和纯装饰分隔线。
-- 错误提示、输入框、菜单、选中态等有交互含义的边界不计入装饰分隔线，继续遵守现有语义。
+---
 
-### 6.3 文字层级
+## 7. 正常业务流程与时序
 
-- 月份和业务卡标题沿用现有手写感标题字体，正文和状态使用现有 UI 正文字体。
-- 页面不显示 `Calendar` 大标题。月份导航、任务卡标题、日记卡标题已经提供足够上下文。
-- 数量使用次级文字，例如“2 项”“1 篇”；不要为了数量再创建圆形统计卡或独立事实框。
-- 不展示实现术语、revision 数字、claim、DTO、worker 或 capability。
+### 7.1 Calendar 安排任务，到 Chat Tool 成功并显示标记
 
-### 6.4 动效
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant C as CalendarPopup
+  participant A as App / ChatView
+  participant G as ChatPanel
+  participant T as create_scheduled_task Tool
+  participant S as Admin ScheduledTask capability
 
-- 遮罩和卡片出现可沿用现有 reduced-motion 兼容过渡。
-- 卡片整体不因鼠标经过而上浮或缩放，避免误示整卡可点击。
-- 按钮、日期格、菜单项保持现有 hover/pressed/focus 状态。
+  U->>C: 输入“每天 9 点总结昨天的笔记”
+  U->>C: Enter / 点击发送
+  C->>A: onArrangeTask(原始输入)
+  A->>A: 关闭 Calendar，创建新 Chat 草稿
+  A-->>U: 显示可编辑但未发送的草稿
+  U->>G: 检查后发送
+  G->>T: Agent 调用 title + prompt + daily rule
+  T->>S: create(source_thread, request_key, rule)
+  S-->>T: effective task + revision
+  T-->>G: 持久化成功 Tool part
+  G-->>U: 助手正文后显示任务标记卡
+```
 
-## 7. 响应式与滚动
+### 7.2 Chat 刷新后恢复标记并打开侧栏
 
-1. 宽屏使用两列：左侧月历略宽或与右侧接近，右侧卡栈自然高度排列；视觉比例以目标截图为准，不延续“右侧明显更宽”的线框面板比例。
-2. 右侧卡片不为填满画布而强制等高；宽屏由右侧卡栈独立滚动且月历固定，宽屏短视口允许月历内部滚动以保证日期可达；单列由 `.calendar-popup` 统一滚动。所有状态都不撑开 dialog 或背景页面。
-3. 中等宽度可收窄间距并允许任务元信息和动作换行，但 A2、B1、C1 仍保持独立轮廓。
-4. 窄屏变成单列；三张卡之间保留可见间隙，不能恢复为一张连续白色长面板。
-5. 展开任务编辑或历史时，滚动应发生在当前画布或既有详情滚动边界；背景页面不滚动。
-6. 任意支持宽度下不得出现横向滚动，关闭按钮不得遮挡月份导航或卡头操作。
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant H as Thread history hydration
+  participant M as ChatMessageList
+  participant X as Message process API
+  participant P as Tool result parser
+  participant D as ScheduledTask detail sidebar
+  participant S as ScheduledTask API
 
-## 8. 可访问性
+  U->>H: 刷新并重新打开来源 Thread
+  H-->>M: 返回 final-only message + process_available
+  M->>X: 按可见 message ID 有界、可取消、去重读取 process
+  X-->>M: 返回 owning assistant 的 Tool parts
+  M->>P: 实时/历史共用 decoder 解析完成态 output
+  P-->>M: taskId + 创建时快照
+  M-->>U: 在原助手 turn 下恢复任务标记
+  U->>M: 点击“打开”
+  M->>D: selectedScheduledTaskId = taskId
+  D->>S: get task + history
+  S-->>D: 当前 effective + 最近 triggers
+  D-->>U: 显示右侧详情栏
+```
 
-1. 顶层继续使用现有 modal dialog 语义、焦点陷阱、Escape 和背景 inert 行为，即使表面变透明。
-2. 可见 `Calendar` 标题移除后，dialog 必须保留可访问名称；使用视觉隐藏标题或 `aria-label`，不能产生无名 dialog。
-3. A2、B1、C1 分别具有可识别的 heading/section 关系；DOM 顺序与视觉顺序一致。
-4. 数量更新使用适当的 polite 通知；错误保留 `role="alert"`；加载状态保留 `aria-busy` 或现有等价语义。
-5. 今天、选中日期、当前日记、任务定义状态和执行状态均有文字或 ARIA 表达，不能只依靠颜色、阴影或位置。
-6. 所有现有按钮的名称、触控面积、键盘顺序和 focus-visible 反馈不得退化。
+### 7.3 到期执行、Calendar 查看结果并打开精确 Thread
 
-## 9. 技术建议
+```mermaid
+sequenceDiagram
+  participant W as 现有调度 Worker
+  participant S as Admin ScheduledTask capability
+  participant R as 现有 TaskSession / Thread / Run
+  actor U as 用户
+  participant C as CalendarPopup
+  participant H as Thread messages API
+  participant A as App / ChatView
 
-1. 继续复用 `Modal` 的遮罩、portal、focus trap 和关闭行为，只为 CalendarPopup 提供透明 surface 变体；不要复制 Modal 实现。
-2. 在现有 `CalendarPopup` 内删除可见标题/日期摘要层，把布局根设为透明 grid；保留 selectedDate 状态，直接把日期上下文投影到 B2/C2 文案和 aria label。
-3. 复用 `.calendar-popup__calendar`、`.calendar-popup__section`、`ScheduledTaskCard`、任务 API 与日记存储逻辑；本轮不拆出平行页面或新状态机。
-4. 样式使用现有 `--color-bg-paper`、`--color-shadow-soft`、文字、纸边和状态 token。需要增强悬浮高度时，用现有暖色 token 的 `color-mix` 生成两层阴影。
-5. 将任务事实区域从多框布局改为语义化文本组；DOM 仍保留标题、状态、计划、下次执行和最近结果，避免为了视觉简化删除业务信息。
-6. E2E 通过语义和 computed style 同时验证：顶层 surface 透明无外框；A2/B1/C1 为独立元素且有纸张背景、圆角和非 `none` 阴影；B1/C1 不共享可见父卡。
-7. 视觉回归应在目标截图相近宽屏和窄屏各留一张截图，检查外框数量、间隙、阴影裁切、滚动与焦点。
+  W->>S: claim / prepare trigger
+  S-->>W: trigger + authority + TaskSession
+  W->>R: 走现有生产入口执行 Agent turn
+  R-->>W: target_thread_id + final_message_id / error
+  W->>S: finish trigger
+  U->>C: 选择日期并点击任务行
+  C->>S: day/history，选择最新 trigger
+  alt succeeded 且两个 ID 完整
+    C->>H: 读取 target_thread_id 的 messages
+    H-->>C: actor scoped message list
+    C->>C: 精确匹配 final_message_id
+    C-->>U: 渲染 Markdown 最终结果
+    U->>C: 点击“打开聊天”
+    C->>A: 打开该 target_thread_id
+  else 尚未完成或关系不完整
+    C-->>U: 显示状态或局部错误，不伪造正文
+  end
+```
 
-## 10. 验收标准
+### 7.4 独立编辑与 revision 冲突
 
-- [ ] CalendarPopup 顶层内容画布透明，无可见大 Modal 背景、边框、圆角外框或包围三张卡的阴影。
-- [ ] 页面不再显示独立 `Calendar` 标题栏，也不再显示独立的日期摘要区。
-- [ ] 左侧月历、右侧 Scheduled tasks、右侧 Diary 是三个同级视觉层级的悬浮 Paper Cream 卡片。
-- [ ] 三张卡均具有完整圆角和柔和暖棕高度阴影，卡间透明间隙清楚可见，阴影不被父容器裁切。
-- [ ] B1、C1 各自至多保留一条卡头/正文分隔线；月历内部不新增分隔线。
-- [ ] 任务计划、时区、下次执行和最近结果不再分别放入多层事实框，但信息与可访问名称均未丢失。
-- [ ] 任务加载、失败/重试、空态、列表、编辑、历史、删除/撤销、暂停/恢复、立即运行和打开会话仍可用。
-- [ ] 任务 API 失败时 Diary 卡仍可查看、打开和删除；日记错误也不覆盖任务卡。
-- [ ] 选中日期、今天、当前笔记、任务状态在浅色和深色主题中均可识别，且不只依赖颜色。
-- [ ] 宽屏呈现左月历/右卡栈，窄屏按月历/任务/日记堆叠；均无横向溢出和阴影裁切。
-- [ ] dialog 仍有可访问名称、焦点陷阱、Escape 关闭和关闭后焦点恢复。
-- [ ] 现有任务、Thread、Run、revision 和日记持久化协议没有因视觉改版发生变化。
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant L as Calendar 任务列表
+  participant M as 编辑 Modal
+  participant S as ScheduledTask API
 
-## 11. 非目标与后续事项
+  U->>L: 点击铅笔
+  L->>M: effective -> desired 初始值
+  U->>M: 修改标题、prompt 或规则
+  U->>M: 保存
+  M->>S: edit(taskId, expected_revision, desired)
+  alt revision 有效
+    S-->>M: 新 effective + 新 revision
+    M->>L: 替换任务并刷新
+    M-->>U: 关闭
+  else revision 冲突
+    S-->>M: SCHEDULE_REVISION_CONFLICT
+    M->>S: get task
+    S-->>M: 最新 effective
+    M-->>U: 保留 desired，提示重新确认
+  else 字段或能力失败
+    S-->>M: 稳定错误
+    M-->>U: 保留 desired，字段附近或表单级重试
+  end
+```
 
-- 本轮不重新设计任务创建流程、调度规则、历史数据模型或执行详情页面。
-- 本轮不引入通用卡片设计系统重构；如后续多个页面需要同一纸张高度，可单独评审为 token/组件工作。
-- 本轮不加入拖拽布局、卡片折叠、窗口化多面板、任务排序或日记筛选。
-- 本轮不追求像素复制目标图中的红色标注框、裁切范围或示例日期；它们只用于说明布局关系。
-- 产品合同、页面骨架和 UI 设计已同步发布；后续视觉调整需保持三份现行文档与生产实现一致。
+---
+
+## 8. 加载、失败与恢复
+
+| 场景 | 页面行为 | 用户可执行动作 | 禁止行为 |
+| --- | --- | --- | --- |
+| Calendar day 请求中 | 保留卡头和安排入口；列表区加载 | 关闭、查看 Diary、安排草稿 | 清空整张 Calendar |
+| Calendar day 请求失败 | 任务纸面显示暂不可用和重试 | 重试、查看 Diary | 把任务数显示为 0 |
+| 无任务 | 轻量空态 | 使用安排入口 | 隐藏安排入口 |
+| 最新历史失败 | C8 保留任务头并局部报错 | 返回、重试、编辑 | 关闭整个 Calendar |
+| 最终消息缺失 | 显示“结果尚不可用” | 重试、可用时打开 target Thread | 用其他 assistant 消息替代 |
+| 立即运行结果未知 | 标记待确认并保留请求键 | 刷新状态 | 自动生成新 key 重跑 |
+| revision 冲突 | 保留 desired，刷新 effective | 重新确认后保存 | 静默覆盖 |
+| Tool 创建失败 | 不生成成功标记 | 查看 Tool 错误、继续 Chat | 从助手文本构造假任务 |
+| Chat 标记解析失败 | 普通 Tool UI 可见 | 不阻断对话 | 让 hydration 失败 |
+| 侧栏 API 失败 | 侧栏局部错误和重试 | 关闭、重试 | 阻断 Chat 输入 |
+| 任务已删除 | 原标记保留；详情显示已删除 | 关闭；可用时去 Calendar 撤销 | 删除历史标记 |
+| capability 缺失 | 调度边界 fail closed | 普通 Chat、Diary、月历可用 | runtime 建表或 fallback |
+
+错误文案围绕用户动作，例如“任务详情暂时无法读取，请重试”，不展示 revision 数字、claim、DTO、worker、schema capability 或原始堆栈。
+
+---
+
+## 9. 视觉规则
+
+### 9.1 Calendar 任务列表
+
+- 安排入口：Paper Cream / 表面色长胶囊，低对比细边与柔和阴影；左侧加号，右侧强调色圆形上箭头。
+- 任务行：高度由两行文字与触控区决定；标题使用主文字色和中等字重，摘要使用次级灰色。
+- 活动执行行：整行浅灰背景；状态图标仍有文字等价说明。
+- 更多菜单：独立纸色浮层、大圆角、柔和阴影；危险操作使用危险色并置于分隔线后。
+- 不复制参考图的红色标注框、裁切、示例 emoji 或品牌蓝；颜色映射到项目现有 token。
+
+### 9.2 结果详情
+
+- 头部紧凑，正文获得最大阅读面积。
+- Markdown 使用现有 Chat 正文排版，不新建 renderer。
+- “打开聊天”放在正文后的稳定操作区；长结果可滚动且按钮不遮挡正文。
+
+### 9.3 编辑 Modal
+
+- 独立遮罩和大圆角表面，层级高于 Calendar。
+- 表单依靠标题、留白和低对比边界分组，不做密集线框。
+- prompt 文本框是视觉主体并内部滚动。
+- 保存为主按钮，暂停/恢复为次按钮，关闭在右上。
+
+### 9.4 Chat 标记与侧栏
+
+- H3 与助手正文同宽或受同一最大宽度约束；边框和背景略明显，但不伪装成独立 Chat 消息。
+- 时钟图标置于浅底圆角方块；标题与摘要单行省略；“打开”为轻量描边按钮。
+- H4 使用现有 Chat 侧栏背景与左边界。字段以分组行呈现，标签在左、effective 值在右或下方。
+- 不显示内部 ID，也不把图片中的通知、间隔硬编码为固定字段。
+
+---
+
+## 10. 响应式与滚动
+
+### 10.1 Calendar
+
+1. 宽屏保持左月历、右任务/Diary 卡栈；右侧独立滚动，月历固定。短视口可让月历卡内部滚动。
+2. C8 与 C5 互斥；长结果在 C8 内滚动。
+3. C9 独立于 Calendar grid，打开后不改变三张纸面的尺寸。
+4. 窄屏按月历、任务、Diary 单列排列，由透明画布滚动；每张纸面保持完整圆角、阴影和间隙。
+5. 任意宽度不得横向滚动或裁切阴影。
+
+### 10.2 Chat
+
+1. 桌面：H4 与 H1 并列，沿用现有侧栏宽度约束；主区收窄后输入框、消息和任务标记仍可读。
+2. 中等宽度：侧栏可覆盖部分主区或收窄到既有最小宽度，但不能叠加多个右侧栏。
+3. 移动端：H4 变为全高 drawer/overlay；关闭后焦点返回任务标记。
+4. H4 内容独立滚动；Chat 消息和输入保持已有滚动边界。
+
+---
+
+## 11. 无障碍
+
+1. Calendar 和编辑 Modal 保留 dialog、可访问名称、焦点陷阱、Escape 和关闭后焦点恢复。
+2. 任务行使用真实 button 或等价键盘模式；编辑和更多有包含任务标题的独立名称。
+3. 状态图标 `aria-hidden`，状态通过可见摘要或 aria label 表达。
+4. 更多菜单沿用项目既有 menu 语义；禁用项跳过焦点。
+5. C8 加载使用 polite status，错误使用 alert；Markdown 保留标题、列表与链接语义。
+6. H3 的可访问名称包含“打开定时任务”和标题；多个标记名称唯一。
+7. H4 使用 aside 和明确 label；打开后焦点到标题或关闭，关闭后返回 H3。
+8. 可点击目标满足现有触控尺寸和 focus-visible。状态不能只依赖颜色。
+9. 动效遵守 `prefers-reduced-motion`。
+
+---
+
+## 12. 技术实现建议
+
+1. **Calendar**：继续改造现有 `CalendarPopup` / `ScheduledTaskCard`；安排入口通过 callback 把草稿交给 `App` / `ChatView`，不建创建 API。
+2. **最新结果**：复用 `getScheduledHistory`、actor scoped `fetchClaudeThreadMessages` 和 `ChatMarkdown`；选择器只接受同一 trigger 的两个关系 ID。
+3. **编辑**：复用共享 `Modal`。状态包含 effective、desired、dirty、saving、fieldErrors 和冲突后的 latest effective；不复制任务状态机。
+4. **Chat 标记**：在 `ChatMessageList` 的 Tool part 渲染路径增加成功投影并锚定 owning assistant turn；实时和历史共用 decoder。
+5. **侧栏**：`ChatView` 统一拥有 scheduled/File/Subagent/TaskSession 的互斥选择；复用既有右栏表面和响应式策略，内容组件只负责 ScheduledTask 读取与展示。
+6. **API**：继续使用 `scheduledTaskApi` 的 day/get/history/update；身份由同源会话和后端 actor scope 执行，浏览器不构造 user ID。
+7. **国际化**：标题、状态、错误、规则摘要和 aria label 进入现有 i18n；IANA 时区名称不翻译。
+8. **文件职责**：parser/selector 保持纯函数并有失败回落；不得复制 ToolMessagePart、SSE reducer 或 history hydration。
+9. **同步要求**：实现时同步受影响 PRD、设计、目录说明和文件头。
+
+---
+
+## 13. 验收标准
+
+### 13.1 Calendar 安排与列表
+
+- [ ] 顶部显示“安排任务”输入、加号和发送按钮。
+- [ ] 空输入不能提交；非空提交进入新的 Chat 可编辑草稿。
+- [ ] 草稿不自动发送，Calendar 不直接创建任务。
+- [ ] 任务行顺序为状态图标、标题/摘要、编辑、更多。
+- [ ] 活动运行行有整行状态背景和文字状态。
+- [ ] 更多菜单只有立即运行、打开聊天、历史、暂停/恢复、删除，不显示分享。
+
+### 13.2 最新结果与 Thread
+
+- [ ] 点击任务行后，同一任务纸面切换为最新 trigger 结果，月历和 Diary 不被撑开。
+- [ ] 无运行、运行中、成功、失败、待确认、跳过都有明确状态。
+- [ ] 成功正文只来自最新 trigger 的 target Thread 和精确 final message。
+- [ ] final message 缺失时不显示其他消息冒充结果。
+- [ ] “打开聊天”只在同一 trigger 有 target Thread 时出现并打开它。
+- [ ] 结果失败可局部重试，任务头、返回和 Diary 可用。
+
+### 13.3 编辑 Modal
+
+- [ ] 铅笔打开独立 Modal，不在任务行展开。
+- [ ] 只展示标题、prompt、once/daily、对应日期/时间/IANA 时区、暂停/恢复和保存。
+- [ ] 不出现每月、重复结束、通知或 cron。
+- [ ] 保存提交 expected revision，成功以后端返回值更新 effective。
+- [ ] revision 冲突保留 desired 并展示最新 effective。
+- [ ] 短视口内部滚动，不改变 Calendar 与背景布局。
+
+### 13.4 Chat 标记与侧栏
+
+- [ ] Tool 成功后，标记出现在对应助手 turn 正文之后。
+- [ ] 刷新后从持久化 Tool part 恢复，位置和 task ID 不变。
+- [ ] 助手只在正文提到任务不会生成标记；失败 result 不生成成功卡。
+- [ ] 同一 turn 多任务按 Tool part 顺序显示多个标记。
+- [ ] 点击标记打开右侧栏，并用 task ID 重读当前 effective 与最近 trigger。
+- [ ] 侧栏显示真实标题、状态、prompt、once/daily、IANA 时区、下次执行和最近运行。
+- [ ] 侧栏不显示通知、每月、分享或内部 ID。
+- [ ] 详情失败只影响侧栏，可重试；Chat 输入与普通消息可用。
+- [ ] 桌面并列、移动端 drawer；关闭后焦点返回任务标记。
+
+### 13.5 回归
+
+- [ ] 普通 Chat turn、Tool part、Tool 确认、历史恢复和 SSE 不因任务标记改变。
+- [ ] 现有 TaskSession 标记、Subagent Sidebar、File Sidebar 和 Thread 导航正常。
+- [ ] ScheduledTask 运行、暂停、恢复、删除/撤销、历史和 revision 语义保持一致。
+- [ ] Calendar 月历键盘、Diary 打开/删除、独立滚动和响应式无回归。
+- [ ] capability 不可用时 fail closed，普通 Chat 和 Diary 仍可用。
+
+---
+
+## 14. 测试场景建议
+
+| 编号 | 场景 | 关键断言 |
+| --- | --- | --- |
+| T01 | Calendar 输入安排任务 | 新 Chat 草稿可编辑、未发送、无直接创建请求 |
+| T02 | Tool 创建 once | 标记含单次日期/时间/时区 |
+| T03 | Tool 创建 daily | 标记含每天时间/时区 |
+| T04 | Tool 创建失败 | 无成功标记；普通 Tool 错误可见 |
+| T05 | 刷新 Chat | 标记从历史 Tool part 恢复并打开同一 task |
+| T06 | 伪造助手文本 | 文本提到任务 ID 也不能生成标记 |
+| T07 | Chat 侧栏 | 读取 effective + history；无通知/每月/分享 |
+| T08 | 侧栏 API 失败 | 局部重试；Chat 仍可发消息 |
+| T09 | 点击未运行任务 | 显示尚未运行，无假结果/假聊天入口 |
+| T10 | 点击成功任务 | 精确 final message 渲染，打开目标 Thread |
+| T11 | final ID 不匹配 | 显示尚不可用，不回退其他消息 |
+| T12 | 编辑成功 | revision 更新、Modal 关闭、列表刷新 |
+| T13 | revision 冲突 | desired 保留、effective 刷新 |
+| T14 | 立即运行重复点击 | 不产生错误重复 trigger |
+| T15 | 长结果/长 prompt | 内部滚动，不影响月历和 Diary |
+| T16 | 键盘与读屏 | 行、菜单、Modal、标记、侧栏焦点完整 |
+| T17 | 窄屏 | Calendar 单列、Chat drawer、无横向溢出 |
+
+---
+
+## 15. 非目标与后续事项
+
+### 15.1 明确非目标
+
+- 不建立“自动化中心”或通用工作流编排器。
+- 不新增分布式调度、多租户策略中心、通知服务或分享权限。
+- 不用部署环境名称切换行为，不为测试加入生产 fallback。
+- 不把 source Thread 当执行结果 Thread，不把 Tool 快照当当前 task。
+- 不为参考图中的示例字段扩展 schema。
+
+### 15.2 可独立评审的后续事项
+
+- 服务端未来正式提供 weekly/monthly/notification capability 后，再分别补 DTO、migration、状态、控件和 E2E；本稿不放不可保存的占位控件。
+- 若要求从 Chat 侧栏直接编辑，应复用同一个编辑 Modal 和 revision 流程。
+- 若多个 Tool 都需要消息级业务标记，在出现第二个真实用例后再评审通用投影接口。
+
+---
+
+## 16. 交付给后续设计阶段的约束
+
+1. 视觉稿必须同时包含 Calendar 列表、Calendar 最新结果、编辑 Modal、Chat 标记和 Chat 右侧详情栏。
+2. 示例字段必须来自现有 ScheduledTask / ScheduledTrigger；不得出现分享、每月、重复结束或通知。
+3. Calendar 仍是月历、任务、Diary 三张独立悬浮纸面；任务内容变化不得撑开月历。
+4. Chat 标记必须锚定 Tool 成功回执，右侧栏必须重读当前 effective。
+5. 最新结果与“打开聊天”绑定同一个 trigger 的 target Thread，正文匹配同一 trigger 的 final message。
+6. 交互稿须展示加载、空、运行中、成功、失败、state unknown、revision 冲突与 API 不可用。

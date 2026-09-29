@@ -1,0 +1,17 @@
+/* [Input] Persisted scheduled-task marker markup rendered below its creating assistant answer. */
+/* [Output] Quiet compact card aligned with the existing Chat task/navigation cards. */
+/* [Pos] ScheduledTaskMarker presentation in frontend/app/_dream/components/chat. */
+/* [Sync] 2026-09-29: make each responsive marker row a single clickable task-detail control. */
+
+.scheduled-task-markers { display: grid; gap: .55rem; margin-top: .85rem; }
+.scheduled-task-marker { display: grid; width: 100%; grid-template-columns: 2.45rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; min-width: 0; padding: .68rem .75rem; border: 1px solid var(--color-border-paper); border-radius: .8rem; background: var(--color-bg-surface-solid); color: var(--color-text-primary); font: inherit; text-align: left; cursor: pointer; }
+.scheduled-task-marker:hover { background: var(--color-bg-hover); }
+.scheduled-task-marker:disabled { cursor: default; opacity: .55; }
+.scheduled-task-marker__icon { display: grid; width: 2.15rem; height: 2.15rem; place-items: center; border-radius: .65rem; background: var(--color-bg-hover); color: var(--color-text-secondary); }
+.scheduled-task-marker__icon svg { width: 1.15rem; height: 1.15rem; }
+.scheduled-task-marker__copy { display: grid; min-width: 0; gap: .15rem; }
+.scheduled-task-marker__copy strong, .scheduled-task-marker__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-task-marker__copy strong { color: var(--color-text-primary); font-size: .9rem; }
+.scheduled-task-marker__copy small { color: var(--color-text-secondary); font-size: .76rem; }
+.scheduled-task-marker__action { min-height: 2.2rem; padding: .42rem .72rem; border: 1px solid var(--color-border-paper); border-radius: .65rem; background: var(--color-bg-paper); color: var(--color-text-primary); }
+@media (max-width: 36rem) { .scheduled-task-marker { grid-template-columns: 2.25rem minmax(0, 1fr); } .scheduled-task-marker__action { grid-column: 2; justify-self: start; } }

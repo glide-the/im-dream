@@ -8,6 +8,7 @@
 // [Sync] 2026-09-27: show actionable queue cards and move one queued message to an independent side Chat.
 // [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+// [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
 import { browserRequestHeaders } from '../../lib/browserSession';
 import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
@@ -110,6 +111,7 @@ import {
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
+import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import TurnNavigation from './TurnNavigation';
 import {
   fetchTurnNavigation,
@@ -230,6 +232,8 @@ interface ChatPanelProps {
   onOpenTaskThread?: (threadId: string) => void;
   /** Replaces the current canonical Chat Thread after following a persisted task relation. */
   onNavigateThread?: (threadId: string) => void;
+  /** Opens a persisted scheduled task created by a successful Tool result. */
+  onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
   voiceSystemPrompt?: string;
   /** Immutable Deck selection for this thread. */
@@ -293,6 +297,7 @@ export default function ChatPanel({
   onOpenSubagentTask,
   onOpenTaskThread,
   onNavigateThread,
+  onOpenScheduledTask,
   voiceSystemPrompt,
   deckId,
   voiceId,
@@ -1446,6 +1451,7 @@ export default function ChatPanel({
                 sourceThread={taskSessionLinks.source}
                 createdTaskLinks={taskSessionLinks.created}
                 onNavigateThread={onNavigateThread}
+                onOpenScheduledTask={onOpenScheduledTask}
                 isLoading={chatLoading}
                 error={error}
                 onReloadAfterError={handleReloadAfterError}

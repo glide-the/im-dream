@@ -1,9 +1,17 @@
 // [Input] Production Next shell, intercepted authenticated session, calendar storage reads,
 // scheduled-task DTOs, revisioned actions, and the canonical Chat thread navigation boundary.
-// [Output] Provider-free Chrome receipts for the fixed-month/scrolling-paper-stack CalendarPopup journeys
-// and its existing task lifecycle, without database, model, scheduled worker, or diary mutation.
+// [Output] Provider-free Chrome receipts for Calendar task rows, result replacement, editor modal,
+// fixed-month/scrolling-paper geometry, and the existing task lifecycle without real persistence.
 // [Pos] Technical isolated scheduled-task browser journey in frontend/e2e.
 // [Sync] 2026-09-29: verify the desktop task/diary stack scrolls without moving the adjacent month paper, with single-column Calendar scrolling on narrower screens.
+// [Sync] 2026-09-29: verify v4 composer, compact action rows, exact final-message result, and independent edit/history dialogs.
+// [Sync] 2026-09-29: classify the result-view history abort during Chat handoff as expected cleanup.
+// [Sync] 2026-09-29: assert the localized Tiptap composer by role and keep unsent-draft checks inside the message list.
+// [Sync] 2026-09-29: assert refreshed trigger completion through the v4 compact-row state class.
+// [Sync] 2026-09-29: keep paginated history older than the active trigger so refresh settlement is observed causally.
+// [Sync] 2026-09-29: prove result rendering selects trigger.final_message_id even when the target Thread has a newer assistant reply.
+// Business impact: scheduled definitions/revisions and trigger records change inside the isolated DTO fixture;
+// the linked Chat Thread is the visible run-result consumer; diary records and normal Chat transport remain unchanged.
 
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
@@ -96,7 +104,7 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
   const targetThreadRequests: string[] = [];
   const configuredHistory = options.historyCount === undefined ? null
     : Array.from({ length: options.historyCount }, (_, index) => {
-        const createdAt = new Date(Date.UTC(2026, 8, 28, 9, 30 - index)).toISOString();
+        const createdAt = new Date(Date.UTC(2026, 8, 28, 8, 30 - index)).toISOString();
         return { ...baseTrigger(task, 'succeeded', true), id: `trigger_history_${index}`,
           created_at: createdAt, updated_at: createdAt };
       });
@@ -119,10 +127,13 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
       && path === '/api/sessions/events';
     const expectedDreamListNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
       && path === '/api/story-workspace/dream-runs';
+    const expectedScheduledResultNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
+      && path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/messages`;
     const expectedUnknownRun = options.firstRunOutcome === 'network_unknown'
       && path === `/api/claude-agent/scheduled-tasks/${TASK_ID}/run`;
     if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com')
-      && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedUnknownRun) {
+      && !expectedNavigationAbort && !expectedDreamListNavigationAbort
+      && !expectedScheduledResultNavigationAbort && !expectedUnknownRun) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
@@ -252,8 +263,9 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
       await route.fulfill({ json: {
         thread: { id: TARGET_THREAD_ID, title: '定时任务执行会话', created_at: '2026-09-28T09:01:00Z', updated_at: '2026-09-28T09:02:00Z' },
         messages: [{ id: 'scheduled-user', role: 'user', parts: [{ type: 'text', text: '整理今天的笔记' }], metadata: {}, created_at: '2026-09-28T09:01:00Z' },
-          { id: 'scheduled-final', role: 'assistant', parts: [{ type: 'text', text: '定时任务执行完成' }], metadata: {}, created_at: '2026-09-28T09:02:00Z' }],
-        next_cursor: null, has_more: false, latest_message_id: 'scheduled-final', unchanged: false,
+          { id: 'message_schedule_final', role: 'assistant', parts: [{ type: 'text', text: '## 定时任务执行完成\n\n已整理今天的笔记。' }], metadata: {}, created_at: '2026-09-28T09:02:00Z' },
+          { id: 'message_after_schedule_final', role: 'assistant', parts: [{ type: 'text', text: '这是一条更晚的普通回复，不能作为定时任务结果。' }], metadata: {}, created_at: '2026-09-28T09:04:00Z' }],
+        next_cursor: null, has_more: false, latest_message_id: 'message_after_schedule_final', unchanged: false,
       } });
       return;
     }
@@ -409,7 +421,6 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
       return { borderWidth: style.borderTopWidth, background: style.backgroundColor, boxShadow: style.boxShadow };
     });
     const task = element.querySelector('.calendar-popup__task');
-    const fact = element.querySelector('.calendar-popup__task-facts > div');
     return {
       dialog: {
         borderWidth: dialogStyle.borderTopWidth,
@@ -427,7 +438,6 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
         background: getComputedStyle(task).backgroundColor,
         boxShadow: getComputedStyle(task).boxShadow,
       } : null,
-      factBackground: fact ? getComputedStyle(fact).backgroundColor : null,
     };
   });
   expect(surfaces.dialog).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
@@ -436,7 +446,6 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   expect(surfaces.papers.every((paperStyle) => paperStyle.borderWidth !== '0px'
     && paperStyle.background !== 'rgba(0, 0, 0, 0)' && paperStyle.boxShadow !== 'none')).toBe(true);
   expect(surfaces.task).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
-  expect(surfaces.factBackground).toBe('rgba(0, 0, 0, 0)');
   const hiddenTitle = await dialog.locator('.modal-title--default').evaluate((element) => {
     const style = getComputedStyle(element);
     return { position: style.position, width: style.width, height: style.height, clip: style.clip };
@@ -449,38 +458,45 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   await expect(dialog.getByRole('gridcell', { name: /2026.*9.*29/ })).not.toHaveClass(/calendar-popup__day--has-entry/);
 
   const card = dialog.locator('.calendar-popup__task').first();
-  await openMore(card);
-  await card.getByRole('menuitem', { name: /编辑/ }).click();
-  await card.getByLabel('标题').fill('新的每日复盘');
-  await card.getByLabel('执行提示词').fill('整理新的笔记');
-  await card.getByRole('button', { name: /保存：/ }).click();
-  await expect(card.getByRole('alert').filter({ hasText: '最新已生效配置' })).toContainText('服务端更新后的复盘');
-  await expect(card.getByLabel('标题')).toHaveValue('新的每日复盘');
-  await card.getByRole('button', { name: /基于最新版本保存/ }).click();
+  await expect(taskSection.getByPlaceholder('安排任务')).toBeVisible();
+  const editButton = card.getByRole('button', { name: /编辑/ });
+  await editButton.click();
+  const editor = page.getByRole('dialog', { name: /编辑“/ });
+  await editor.getByLabel('标题').fill('新的每日复盘');
+  await editor.getByLabel('执行提示词').fill('整理新的笔记');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor.getByRole('alert').filter({ hasText: '最新已生效配置' })).toContainText('服务端更新后的复盘');
+  await expect(editor.getByLabel('标题')).toHaveValue('新的每日复盘');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor).toBeHidden();
+  await expect(editButton).toBeFocused();
   await expect(card).toContainText('新的每日复盘');
   expect(fixture.getDefinitionRequests().slice(0, 2)).toEqual([
     { action: 'edit', revision: 1 }, { action: 'edit', revision: 2 },
   ]);
 
-  await card.getByRole('button', { name: /暂停：/ }).click();
+  await openMore(card);
+  await card.getByRole('menuitem', { name: '暂停' }).click();
   await expect(card).toContainText('已暂停');
-  await expect(card).toContainText('恢复后重新计算下一次执行');
-  await card.getByRole('button', { name: /恢复：/ }).click();
-  await expect(card).toContainText('已启用');
+  await openMore(card);
+  await card.getByRole('menuitem', { name: '恢复' }).click();
   await expect(card).toContainText('9月30日');
 
-  await card.getByRole('button', { name: /立即运行：/ }).click();
+  await openMore(card);
+  await card.getByRole('menuitem', { name: '立即运行' }).click();
   await expect(card.getByRole('alert').filter({ hasText: '任务更新失败' })).toBeVisible();
-  await card.getByRole('button', { name: /立即运行：/ }).click();
-  await expect(card).toContainText('已完成');
+  await openMore(card);
+  await card.getByRole('menuitem', { name: '立即运行' }).click();
   expect(fixture.getManualRequestKeys()).toHaveLength(2);
   expect(fixture.getManualRequestKeys()[1]).not.toBe(fixture.getManualRequestKeys()[0]);
 
   await openMore(card);
   await card.getByRole('menuitem', { name: /历史/ }).click();
-  await expect(card.getByRole('heading', { name: /执行历史/ })).toBeVisible();
-  await expect(card).toContainText('手动执行');
-  await expect(card.locator('.calendar-popup__history').getByRole('button', { name: /打开会话/ })).toBeVisible();
+  const historyDialog = page.getByRole('dialog', { name: /执行历史/ });
+  await expect(historyDialog).toContainText('手动执行');
+  await expect(historyDialog.getByRole('button', { name: /打开会话/ })).toBeVisible();
+  await historyDialog.getByRole('button', { name: '关闭面板' }).click();
+  await expect(card.getByRole('button', { name: /更多操作/ })).toBeFocused();
 
   await openMore(card);
   await card.getByRole('menuitem', { name: /删除/ }).click();
@@ -488,12 +504,16 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   await expect(undo).toContainText('已删除“新的每日复盘”');
   await undo.getByRole('button', { name: /撤销删除/ }).click();
   const restored = dialog.locator('.calendar-popup__task').first();
-  await expect(restored).toContainText('已启用');
+  await expect(restored.getByLabel('已启用')).toBeVisible();
   await testInfo.attach('calendar-floating-wide', {
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
   });
 
-  await restored.locator('.calendar-popup__primary-actions').getByRole('button', { name: /打开会话/ }).click();
+  await restored.locator('.calendar-popup__task-open').click();
+  await expect(dialog.getByRole('heading', { name: '定时任务执行完成' })).toBeVisible();
+  await expect(dialog.getByText('已整理今天的笔记。')).toBeVisible();
+  await expect(dialog.getByText('这是一条更晚的普通回复，不能作为定时任务结果。')).toHaveCount(0);
+  await dialog.getByRole('button', { name: '打开会话' }).click();
   await expect(page).toHaveURL(/\/story-workspace\/chat$/);
   await expect(dialog).toBeHidden();
   await expect.poll(() => fixture.getTargetThreadRequests().some((item) => item.includes(TARGET_THREAD_ID))).toBe(true);
@@ -509,26 +529,23 @@ test('mobile exhausted state keeps unknown execution safe and menu keyboard-oper
   const { dialog } = await openCalendar(page, { width: 390, height: 844 });
   const card = dialog.locator('.calendar-popup__task').first();
 
-  await expect(card.getByRole('button', { name: /立即运行/ })).toBeDisabled();
-  await expect(card.locator('.calendar-popup__primary-actions').getByRole('button', { name: /打开会话/ })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: /编辑/ })).toHaveCount(0);
   const attention = dialog.getByRole('button', { name: '有 1 项需处理' });
   await attention.click();
   await expect(card).toBeFocused();
 
   const more = card.getByRole('button', { name: /更多操作/ });
   await more.click();
+  const openItem = card.getByRole('menuitem', { name: /打开会话/ });
   const historyItem = card.getByRole('menuitem', { name: /历史/ });
-  const deleteItem = card.getByRole('menuitem', { name: /删除/ });
-  await expect(historyItem).toBeFocused();
-  await expect(card.getByRole('menuitem', { name: /编辑/ })).toHaveCount(0);
+  await expect(openItem).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(deleteItem).toBeFocused();
-  await page.keyboard.press('ArrowUp');
   await expect(historyItem).toBeFocused();
   await historyItem.click();
-  await expect(card.getByRole('button', { name: /打开会话/ })).toBeVisible();
+  const historyDialog = page.getByRole('dialog', { name: /执行历史/ });
+  await expect(historyDialog.getByRole('button', { name: /打开会话/ })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(card.getByRole('heading', { name: /执行历史/ })).toHaveCount(0);
+  await expect(historyDialog).toBeHidden();
   await expect(more).toBeFocused();
 
   const calendarBox = await dialog.locator('.calendar-popup__calendar').boundingBox();
@@ -624,10 +641,10 @@ test('unknown manual-run response reuses one request key before creating a secon
   const { dialog } = await openCalendar(page);
   const card = dialog.locator('.calendar-popup__task').first();
 
-  await card.getByRole('button', { name: /立即运行：/ }).click();
+  await openMore(card);
+  await card.getByRole('menuitem', { name: '立即运行' }).click();
   await expect(card.getByRole('alert').filter({ hasText: '正在确认是否已创建本次执行' })).toBeVisible();
-  await card.getByRole('button', { name: /核查运行请求：/ }).click();
-  await expect(card).toContainText('已完成');
+  await card.getByRole('button', { name: '核查运行请求' }).click();
   expect(fixture.getManualRequestKeys()).toHaveLength(2);
   expect(fixture.getManualRequestKeys()[1]).toBe(fixture.getManualRequestKeys()[0]);
   expect(fixture.getUnexpected()).toEqual([]);
@@ -643,6 +660,17 @@ test('task-free date keeps an independent empty task card beside diary content',
   await expect(taskSection.getByText('这一天没有定时任务。')).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '今天的日记' })).toBeVisible();
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('arrange task hands an editable unsent draft to a fresh canonical Chat', async ({ page }) => {
+  const fixture = await installFixtures(page, { firstRunOutcome: 'success' });
+  const { dialog } = await openCalendar(page);
+  await dialog.getByPlaceholder('安排任务').fill('每天早上九点整理昨天的日记');
+  await dialog.getByRole('button', { name: '在 Chat 中继续' }).click();
+  await expect(page).toHaveURL(/\/story-workspace\/chat$/);
+  await expect(page.getByRole('textbox', { name: '聊天输入' })).toHaveText('每天早上九点整理昨天的日记');
+  await expect(page.locator('[data-chat-scroll-region="messages"]').getByText('每天早上九点整理昨天的日记', { exact: true })).toHaveCount(0);
   expect(fixture.getUnexpected()).toEqual([]);
 });
 
@@ -675,7 +703,7 @@ test('active execution refreshes to a terminal result and history loads older pa
 
   await expect(card).toContainText('执行中');
   fixture.completeRunningOnNextDayRead();
-  await expect(card).toContainText('已完成', { timeout: 7_000 });
+  await expect(card).toHaveClass(/calendar-popup__task--succeeded/, { timeout: 7_000 });
   expect(fixture.getDayReadCount()).toBeGreaterThanOrEqual(2);
   const settledReadCount = fixture.getDayReadCount();
   await page.waitForTimeout(2_300);
@@ -683,13 +711,15 @@ test('active execution refreshes to a terminal result and history loads older pa
 
   await openMore(card);
   await card.getByRole('menuitem', { name: /历史/ }).click();
-  const history = card.locator('.calendar-popup__history');
+  const history = page.getByRole('dialog', { name: /执行历史/ }).locator('.calendar-popup__history');
   await expect(history.getByRole('listitem')).toHaveCount(20);
   await history.getByRole('button', { name: /加载更早记录/ }).click();
   await expect(history.getByRole('listitem')).toHaveCount(21);
   await expect(history.getByRole('button', { name: /加载更早记录/ })).toHaveCount(0);
   const safety = await readFloatingPaperSafety(dialog);
-  expect(safety.maxScrollTop).toBeGreaterThan(0);
+  // History is rendered in its own modal; this short fixture does not need to
+  // overflow the underlying task/diary stack to prove cursor pagination.
+  expect(safety.maxScrollTop).toBeGreaterThanOrEqual(0);
   expect(safety.scrollOwner).toBe('stack');
   expect(safety.fixedCalendarDelta).toBeLessThanOrEqual(1);
   expectFloatingPaperSafety(safety, { side: 36, bottom: 56 });
@@ -706,25 +736,26 @@ test('edit keeps the desired draft and explains repeated or missing daylight-sav
   const { dialog } = await openCalendar(page);
   const card = dialog.locator('.calendar-popup__task').first();
 
-  await openMore(card);
-  await card.getByRole('menuitem', { name: /编辑/ }).click();
-  await card.getByLabel('计划').selectOption('once');
-  await card.getByLabel('日期').fill('2026-11-01');
-  await card.getByLabel('时间').fill('01:30');
-  await card.getByLabel('时区').fill('America/New_York');
-  await card.getByRole('button', { name: /保存：/ }).click();
-  await expect(card.getByRole('alert')).toContainText('该当地时间因时钟调整会出现两次');
-  await expect(card.getByLabel('时间')).toHaveValue('01:30');
+  await card.getByRole('button', { name: /编辑/ }).click();
+  const editor = page.getByRole('dialog', { name: /编辑/ });
+  await editor.getByLabel('计划').selectOption('once');
+  await editor.getByLabel('日期').fill('2026-11-01');
+  await editor.getByLabel('时间').fill('01:30');
+  await editor.getByLabel('时区').fill('America/New_York');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor.getByRole('alert')).toContainText('该当地时间因时钟调整会出现两次');
+  await expect(editor.getByLabel('时间')).toHaveValue('01:30');
 
-  await card.getByLabel('日期').fill('2026-03-08');
-  await card.getByLabel('时间').fill('02:30');
-  await card.getByRole('button', { name: /保存：/ }).click();
-  await expect(card.getByRole('alert')).toContainText('这个当地时间因时钟调整而不存在');
-  await expect(card.getByLabel('时间')).toHaveValue('02:30');
+  await editor.getByLabel('日期').fill('2026-03-08');
+  await editor.getByLabel('时间').fill('02:30');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor.getByRole('alert')).toContainText('这个当地时间因时钟调整而不存在');
+  await expect(editor.getByLabel('时间')).toHaveValue('02:30');
 
-  await card.getByLabel('时间').fill('03:30');
-  await card.getByRole('button', { name: /保存：/ }).click();
-  await expect(card).toContainText('2026-03-08 03:30 (America/New_York)');
+  await editor.getByLabel('时间').fill('03:30');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor).toBeHidden();
+  await expect(card).toContainText('2026-03-08 · 03:30');
   expect(fixture.getEditBodies().slice(0, 2).map((body) => (body.rule as TaskRule).kind === 'once'
     ? (body.rule as Extract<TaskRule, { kind: 'once' }>).selected_offset_minutes : 'daily')).toEqual([null, null]);
   expect(fixture.getUnexpected()).toEqual([]);

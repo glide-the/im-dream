@@ -1,6 +1,7 @@
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
 // [Sync] 2026-09-28: open a scheduled task's persisted target Thread through the mounted ChatView navigation props.
 // [Sync] 2026-09-29: expose the shared Calendar date workspace from the existing 44px mobile Writing toolbar.
+// [Sync] 2026-09-29: hand Calendar task drafts to a fresh canonical Chat composer without auto-sending them.
 // [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
 // [Output] Render the authenticated Story Workspace shell, writing canvas, and canonical Chat surfaces.
 // [Pos] frontend app-root node in frontend/app/_dream
@@ -395,6 +396,7 @@ export default function App() {
     input?: string;
     nonce: number;
   } | undefined>(undefined);
+  const [requestedChatInput, setRequestedChatInput] = useState<{ input: string; nonce: number } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
   const [writingChatPanelOpen, setWritingChatPanelOpen] = useState(false);
@@ -1171,6 +1173,7 @@ export default function App() {
     setRequestedChatThreadId(threadId);
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
+    setRequestedChatInput(undefined);
     setActiveChatVoice(undefined);
     setWritingChatPanelOpen(false);
   }, []);
@@ -1187,6 +1190,7 @@ export default function App() {
   const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice, input?: string) => {
     setRequestedChatThreadId(undefined);
     setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, input, nonce: Date.now() });
+    setRequestedChatInput(undefined);
     setActiveChatVoice(voiceInfo);
     const query = new URLSearchParams({ deck: deckId });
     if (voiceInfo?.id) query.set('agent', voiceInfo.id);
@@ -1195,6 +1199,17 @@ export default function App() {
       '',
       `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
     );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, []);
+
+  const handleCalendarArrangeTask = useCallback((input: string) => {
+    setRequestedChatThreadId(undefined);
+    setRequestedChatDeck(undefined);
+    setRequestedChatInput({ input, nonce: Date.now() });
+    setActiveChatVoice(undefined);
+    setWritingChatPanelOpen(false);
+    setShowCalendarPopup(false);
+    window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, []);
 
@@ -1700,6 +1715,8 @@ export default function App() {
                     requestedAgentId={requestedChatDeck?.agentId}
                     requestedDeckInput={requestedChatDeck?.input}
                     requestedDeckNonce={requestedChatDeck?.nonce}
+                    requestedInput={requestedChatInput?.input}
+                    requestedInputNonce={requestedChatInput?.nonce}
                     activeVoice={activeChatVoice}
                     isMobile={isMobile}
                     landingTab={chatLandingTab}
@@ -2384,6 +2401,7 @@ export default function App() {
           onEntryDeleted={handleCalendarEntryDeleted}
           onClose={() => setShowCalendarPopup(false)}
           onOpenTaskThread={handleCalendarTaskThreadRequest}
+          onArrangeTask={handleCalendarArrangeTask}
           timezone={userTimezone}
           initialDateKey={getLocalDayKey(state?.createdAt, userTimezone) ?? getTodayKeyInTimezone(userTimezone)}
         />

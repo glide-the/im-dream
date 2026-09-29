@@ -1,959 +1,842 @@
-<!-- [Input] ../../prd/claude-agent/scheduled-task-diary-page-prd.md、页面结构骨架、用户目标截图，以及现有 CalendarPopup/Modal 生产类名。 -->
-<!-- [Output] CalendarPopup 悬浮纸张改版的实现级视觉规范、生产类名映射和完整 HTML/Tailwind/CSS 静态原型。 -->
-<!-- [Pos] docs/design/claude-agent 下的现行 UI 实现规范；定义生产视觉参数、类名迁移和可审阅原型。 -->
-<!-- [Sync] 2026-09-29: 定稿透明 Modal、独立关闭控件和月历/任务/日记三张同级悬浮纸面。 -->
+<!-- [Input] 现行 v4 PRD、结构草图、层级逻辑和四张用户参考图。 -->
+<!-- [Output] Calendar/Chat 定时任务完整交互的视觉规范、生产映射与 HTML/Tailwind/CSS 原型。 -->
+<!-- [Pos] docs/design/claude-agent 下的现行 UI 设计；业务规则以 docs/prd/claude-agent/scheduled-task-diary-page-prd.md 为准。 -->
+<!-- [Sync] 2026-09-29: 通过 html-design-workflow Stage 4 发布列表、结果、编辑 Modal、Chat 标记与详情侧栏。 -->
 
-# CalendarPopup 悬浮纸张 UI 设计稿
+# Ink & Memory 定时任务完整 UI 设计 v4（现行）
 
-## 文档导航
+> 产物类型：实施级 UI 规范 + 可独立审阅的 HTML5 原型
+> 输入：`1_prd_draft.md`、`2_structure_sketch.md`、`3_hierarchy_logic.md`、主图与三张辅助参考图
+> 设计方向：**Ultra-Sensory Minimalism / Warm Paper Editorial**
+> 图片只提供视觉与交互证据，示例文字不构成业务字段；原型只呈现现有协议支持的信息与操作。
 
-- [现行 PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)
-- [页面结构骨架](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)
-- [定时任务系统交互与执行设计](./scheduled-task-loop-interaction-design.md)
-- [上一版分卡 UI 设计（历史）](./history/scheduled-task-diary-page-ui-design-v2-20260929.md)
+---
 
-## 1. 最终视觉结论
+## 1. 设计结论
 
-本方案采用**温暖纸张感的超感官极简主义**。视觉重点是三张有明确高度的 Paper Cream 纸面直接浮在半透明遮罩上：左侧月历一张，右侧“所选日期的定时任务”和“所选日期的日记”各一张。Modal 仍保留对话框、焦点约束和滚动职责，但其 surface、header 和 content 在视觉上完全透明，不能形成包住三张纸面的第四张卡。
+本轮把定时任务从“线框内堆信息”收敛为两类有明确阅读顺序的纸面：
 
-目标图中的红色矩形仅用于指出范围，不属于产品界面。生产 UI 不增加红框、装饰性描边、共享右栏底板、独立日期摘要、可见 `Calendar` 页面标题或额外统计卡。
+1. **Calendar 任务纸面**：顶部是轻量安排入口，下面是可扫描任务行；任务主体、编辑、更多为三个独立点击目标。点击主体后，原纸面切换为最近一次运行结果，不增加第四张浮层。
+2. **Chat 任务关联**：Tool 成功后，在所属 assistant turn 下显示单一按钮式任务标记；点击后占用既有右侧栏槽，窄屏变为 Drawer。
 
-### 1.1 一眼可见的验收特征
+视觉上保留 Ink & Memory 的暖白纸张、深棕墨色和鼠尾草绿状态色。主要层级依靠纸面色差、留白和柔和阴影建立，边线只用于内容分隔和输入边界。任务列表自身不套连续的小卡片，避免出现过强线框感。
 
-1. 遮罩上只看到三张大圆角纸面，以及一个独立圆形关闭控件。
-2. 三张纸面四周都能看到透明间隙和暖棕柔和高度阴影。
-3. 月历卡没有内部横线；任务卡和日记卡各只保留一条卡头/正文分隔线。
-4. 右栏没有共享白底，任务卡和日记卡的圆角、底边与阴影分别完整可见。
-5. 业务标题直接带日期，例如“今天的定时任务”“今天的日记”；不再单列“今天”摘要。
-6. 任务配置和执行结果是连续文本组，不使用“计划框、时区框、结果框”套娃。
-7. 当前日记由绿色细边、极浅绿色底和“当前笔记”文字共同标识。
+---
 
-## 2. 美学样式表
+## 2. 图像证据转译
 
-| 维度 | 最终规范 | 设计目的 | 禁止做法 |
-| --- | --- | --- | --- |
-| 视觉方向 | Warm Paper / Ultra-Sensory Minimalism | 延续 Ink & Memory 的纸张、手写和安静书写气质 | 玻璃拟态、冷灰企业后台、强渐变 |
-| 遮罩 | 暖灰棕半透明，允许轻微背景模糊 | 压低应用背景，使纸张高度清楚 | 白色大底板或纯黑硬遮罩 |
-| Modal surface | 完全透明，无 border/radius/shadow | 只保留对话框和布局职责 | 大白框套住全部内容 |
-| 主纸面 | Paper Cream，24px 圆角，暖棕双层高度阴影 | 三张卡形成一致的实体纸张 | 粗边框、黑色硬阴影、整卡 hover 上浮 |
-| 卡头 | 手写感标题 + 本卡数量；任务/日记卡头下各一条淡分隔线 | 用文字和留白建立层级 | 独立日期摘要、卡头再套卡 |
-| 正文 | Noto Sans SC / 生产正文字体，扁平分组 | 保证高密度任务信息仍可读 | 每个字段一个事实框 |
-| 选中日期 | 暖棕外轮廓；今天可叠加琥珀内圈 | 同时识别“选中”和“今天” | 只用底色区分 |
-| 当前日记 | 绿色 2px 细边、浅绿纸底、文字 badge | 明确当前对象且具备非颜色线索 | 左侧粗色条加多重阴影 |
-| 动效 | 不新增纸面入场或悬浮动画；沿用既有控件 hover/focus 反馈 | 保持页面安静并避免无业务价值的运动 | 卡片持续漂浮、弹跳或 hover 缩放 |
-| 字体 | 标题优先生产 `Excalifont/Xiaolai`；原型以 Noto Serif SC 模拟；正文 Noto Sans SC | 保留手写标题与清晰正文的对比 | 给正文使用大面积手写字体 |
-
-## 3. 设计 Token 与精确参数
-
-所有生产颜色优先映射既有 `frontend/app/_dream/styles/tokens.css`。以下原型值用于审阅视觉关系，不授权在生产代码中新建另一套主题系统。
-
-```css
-:root {
-  /* 生产映射：--color-bg-overlay */
-  --calendar-overlay: rgba(52, 43, 34, 0.54);
-
-  /* 生产映射：--color-bg-paper */
-  --calendar-paper: #fffaf2;
-  --calendar-paper-soft: #fcf7ed;
-  --calendar-paper-selected: #f2f6ea;
-
-  /* 生产映射：--color-text-primary/body/secondary/muted */
-  --calendar-ink: #3f3429;
-  --calendar-ink-soft: #746657;
-  --calendar-ink-muted: #978775;
-
-  /* 生产映射：--color-border-paper / --color-border-focus */
-  --calendar-paper-edge: rgba(169, 142, 111, 0.28);
-  --calendar-rule: rgba(155, 126, 94, 0.32);
-  --calendar-focus: #6a523d;
-
-  /* 生产映射：--color-state-success / --color-state-warning */
-  --calendar-green: #7e9468;
-  --calendar-green-soft: rgba(126, 148, 104, 0.09);
-  --calendar-amber: #c58b4d;
-
-  /* 高度阴影由既有 shadow token 组合，不增加新业务颜色 */
-  --calendar-paper-shadow:
-    0 18px 36px rgba(91, 69, 44, 0.18),
-    0 8px 18px rgba(91, 69, 44, 0.11);
-  --calendar-control-shadow: 0 8px 22px rgba(91, 69, 44, 0.16);
-
-  --calendar-radius-paper: 24px;
-  --calendar-radius-item: 14px;
-  --calendar-gap-column: 28px;
-  --calendar-gap-stack: 22px;
-  --calendar-card-padding-x: 28px;
-  --calendar-card-padding-y: 24px;
-  --calendar-control-size: 44px;
-}
-```
-
-### 3.1 生产 token 映射规则
-
-- 纸色：`var(--color-bg-paper)`。
-- 纸边：`color-mix(in srgb, var(--color-border-paper) 42%, transparent)`，边界仅用于补足浅色背景上的轮廓，不能成为主要高度来源。
-- 卡头分隔线：`color-mix(in srgb, var(--color-border-paper) 52%, transparent)`。
-- 高度阴影：近层使用 `var(--color-shadow-soft)`，远层使用 `var(--color-shadow-medium)`；宽屏组合为 `0 8px 18px var(--color-shadow-soft), 0 18px 36px var(--color-shadow-medium)`，在明确悬浮高度的同时完整容纳于主滚动边界；深色主题继续使用现有 token 自动变换。
-- 当前日记：`var(--color-state-success)` 与 `color-mix(in srgb, var(--color-state-success) 9%, var(--color-bg-paper))`。
-- 选中日期：`var(--color-border-focus)`；今天内圈：`var(--color-state-warning)`。
-- 所有正文和控件颜色继续使用现有 text/action/state token，不硬编码业务色。
-
-## 4. 页面尺寸与布局网格
-
-### 4.1 宽屏（视口宽度 > 1024px）
-
-| 对象 | 尺寸/规则 |
-| --- | --- |
-| 遮罩 | `position: fixed; inset: 0; padding: 32px; overflow: auto` |
-| 透明 dialog | `width: min(1180px, calc(100vw - 64px)); height: min(800px, calc(100dvh - 64px))` |
-| 主布局/滚动 | 两列 `minmax(440px, 1.05fr) minmax(400px, .95fr)`；月历固定，右侧 `.calendar-popup__workspace-scroll` 在可用高度内独立纵向滚动 |
-| 月历纸面 | 占满 dialog 可用高度，内边距 30px 32px；不受右侧内容拉伸；宽屏短视口时仅月历内部滚动以保持最后一周可达 |
-| 右侧卡栈 | 完全透明，`display: grid; align-content: start; gap: 22px` |
-| 任务/日记纸面 | 自然高度，卡头横向内边距 28px，正文 24px 28px 28px |
-| 关闭按钮 | dialog 右上角外侧安全区，44×44px；不得覆盖卡头 |
-| 阴影安全区 | 右侧滚动卡栈左右至少 36px、底部至少 56px；完整容纳宽屏 `0 18px 36px` 远层阴影 |
-
-月历卡与任务卡顶部基线一致。日记卡紧随任务卡自然向下，不为了与月历等高而拉伸。任务编辑或历史展开只增加右侧卡栈的滚动内容高度，旁边的月历保持原位。
-
-### 4.2 中窄屏（视口宽度 ≤ 1024px）
-
-- 改为单列，DOM 顺序固定为月历 → 定时任务 → 日记。
-- 单列时取消右侧独立滚动，改由 `.calendar-popup` 统一滚动，避免嵌套滚动。
-- dialog 宽度 `min(720px, calc(100vw - 32px))`，三张纸面间距 22px。
-- 三张卡继续保持独立 20px 圆角与阴影。
-- 为避免主滚动边界裁切纸面高度，阴影在此断点收敛为 `0 6px 14px var(--color-shadow-soft), 0 10px 20px var(--color-shadow-medium)`；内容左右至少保留 20px，最后一张纸面通过 22px 卡间距和 10px 末尾占位形成 32px 底部安全区。
-- 关闭按钮固定在 dialog 内容安全区右上角；第一张卡顶部为其预留至少 52px，不遮挡月份导航。
-- 任务标题、状态和操作可以换行；任何字段不得触发横向滚动。
-
-### 4.3 手机（视口宽度 ≤ 640px）
-
-- 遮罩内边距 10px；dialog 宽度 `100%`。
-- 纸面圆角 18px，卡内横向内边距 16px，卡间距 14px。
-- 阴影收敛为 `0 4px 10px var(--color-shadow-soft), 0 8px 16px var(--color-shadow-medium)`；主滚动边界左右至少保留 16px，最后一张纸面通过 14px 卡间距和 10px 末尾占位形成 24px 底部安全区。
-- 月历日期格最小触控区域 42×42px；操作按钮最小高度 42px。
-- 月历标题可缩至 1.18rem，星期文字 0.72rem。
-- 最后一张日记卡之后保留 24px 透明安全区，确保阴影完整滚入视口。
-
-## 5. 组件结构与视觉职责
-
-| 模块 | 生产视觉职责 | 精确规则 |
+| 视觉证据 | 本稿采用方式 | 协议边界 |
 | --- | --- | --- |
-| A1 `.modal-backdrop` | 遮罩 | 暖灰半透明；背景不可交互；不显示纸色 |
-| A2 `.calendar-popup-modal` | 透明 dialog 壳 | `background: transparent; border: 0; border-radius: 0; box-shadow: none; padding` 只保留阴影安全区 |
-| 隐藏标题 `.modal-title--default` | dialog 可访问名称 | 视觉隐藏但可被屏幕阅读器读取；不得 `display:none` |
-| D1 `.modal-close--default` | 独立关闭控件 | 44px 圆形纸色控件，有轻阴影和焦点环；不依附可见顶栏 |
-| E1 响应式滚动边界 | 宽屏为 `.calendar-popup__workspace-scroll`，单列为 `.calendar-popup` | 宽屏右侧滚动且月历固定；单列统一滚动；两种状态都不撑开 dialog 或背景页面 |
-| B1 `.calendar-popup__calendar` | 月历悬浮纸面 | Paper Cream、24px 圆角、双层暖棕阴影；常规宽屏固定，短视口内部可滚动；无内部横线 |
-| E2 `.calendar-popup__workspace` / `__workspace-scroll` | 右侧透明卡栈 | 无 background/border/radius/shadow；只负责 gap 与内容顺序 |
-| C1 `.calendar-popup__task-section` | 定时任务悬浮纸面 | 与月历相同纸色、圆角和阴影；自然高度 |
-| D2 `.calendar-popup__diary-section` | 日记悬浮纸面 | 与前两张纸面同级；自然高度 |
-| C2/D3 `.calendar-popup__section-heading` | 日期化业务卡头 | 单行或自然换行标题 + 本卡数量；底部唯一分隔线 |
-| C5 `.calendar-popup__task` | 扁平任务信息组 | 无完整卡框、无阴影；任务之间用间距或单条低对比分隔线 |
-| D6 `.calendar-popup__diary` | 日记行 | 普通条目为轻表面；当前条目绿色细边和浅绿底；无悬浮阴影 |
+| 长圆安排入口 | 纸面顶部胶囊输入；左侧加号为装饰；右侧圆形提交 | 只把非空文字带入新的 Chat 可编辑草稿，不直接创建、不自动发送 |
+| 左状态、中标题摘要、右操作 | 任务行为三列；运行中行使用暖灰浅填充 | 不制造分类字段；第二行只投影真实状态、规则与下次时间 |
+| 锚定操作菜单 | 菜单悬浮在行尾，阴影高于纸面 | 仅承载现有 run、target Thread、history、pause/resume、delete 动作 |
+| 最近结果阅读页 | 任务纸面内 LIST/RESULT 互斥；正文独立滚动；底部动作稳定可达 | 结果只匹配 latest trigger 的 `final_message_id`；聊天只打开同一 trigger 的 `target_thread_id` |
+| 独立编辑面板 | 共用 Modal 壳；标题、prompt、规则在内部纵向滚动；页脚固定 | 只编辑 title、prompt、once/daily、日期、时间、IANA 时区与任务状态 |
+| Chat turn 内标记与右栏 | 标记紧跟 Tool 成功所在 turn；详情栏与消息区并列 | 标记只由持久化 Tool success 投影；详情栏重新读取 current effective |
 
-## 6. 关键组件视觉规范
+---
 
-### 6.1 透明 Modal 与关闭控件
+## 3. 视觉系统
 
-1. `.calendar-popup-modal` 必须覆盖共享 `.modal-surface` 的纸色、边框、圆角和阴影。
-2. `.modal-header--default` 对 CalendarPopup 只提供关闭按钮定位，不占据可见标题栏高度；其余页面不受影响。
-3. `.modal-title--default` 在 CalendarPopup 作用域内使用标准 visually-hidden 写法：1px 尺寸、负 margin、clip、`white-space: nowrap`。保留 `aria-labelledby`。
-4. 关闭按钮是单独的圆形纸面控件，允许轻阴影，但视觉面积远小于主卡，不能被理解为第四张内容卡。
-5. 按钮 hover 只改变底色和文字色，不位移；focus-visible 使用 2px focus ring + 3px offset。
+### 3.1 美学样式表
 
-### 6.2 月历纸面
+| 项目 | 设计值 | 使用说明 |
+| --- | --- | --- |
+| 页面底色 | `--canvas: #eee7dd` | 半透明遮罩后的应用背景，不承担内容边界 |
+| 主纸面 | `--paper: #fffaf2` | 月历、任务、Diary、Modal |
+| 抬升纸面 | `--paper-raised: #fffdf8` | 菜单、任务标记、详情分组 |
+| 运行态填充 | `--wash-active: #f0eee8` | 仅活动任务整行填充；不加卡片阴影 |
+| 主文字 | `--ink: #3f352c` | 标题、正文、关键值 |
+| 次文字 | `--muted: #817568` | 时间、计划摘要、字段标签 |
+| 品牌强调 | `--accent: #9a6743` | 提交、选中、焦点环 |
+| 成功状态 | `--sage: #7d9670` | 已启用、完成、当前状态 |
+| 危险状态 | `--danger: #ba4e42` | 删除和失败；同时使用文字/图标 |
+| 分隔 | `--hairline: rgba(93,73,54,.14)` | 仅一像素内容分隔 |
+| 大纸面圆角 | `28px` | Calendar 三纸面和 Modal |
+| 控件圆角 | `16px / 999px` | 表单组 / 胶囊输入 |
+| 纸面阴影 | `0 22px 54px rgba(76,55,37,.14)` | 仅独立浮层使用 |
+| 轻抬升阴影 | `0 12px 30px rgba(76,55,37,.10)` | 菜单、marker hover、侧栏组 |
+| 标题字体 | `Noto Serif SC` | 纸面标题和结果阅读标题 |
+| UI 字体 | `Noto Sans SC` | 控件、列表、状态与正文 |
 
-- 月份导航上方不显示 `Calendar`。
-- 月份标题居中、20–24px 手写/衬线字体，字重 600。
-- 上一月/下一月按钮是 44×44px 无边框按钮，hover 使用浅暖灰背景。
-- 星期行与日期网格通过 20px 上间距组织，不加横线。
-- 普通日期没有常驻边框；有内容日期可用很浅的小纸片底和柔和 2px 小阴影。
-- 选中日期为 2px 暖棕外轮廓；今天使用内缩 4px 的琥珀内圈；同一天同时具备二者时两圈都保留。
-- 有日记/内容标记继续使用底部蓝色圆点，尺寸 5px，不新增图例。
+### 3.2 排版、间距与层级
 
-### 6.3 日期化任务卡头
-
-- 标题格式：今天使用“今天的定时任务”；其他日期使用本地化的“9月30日的定时任务”等价表达。
-- 数量属于任务卡自身，使用次级文字“2 项”；有待处理项时在同一元信息组显示“1 项需处理”。
-- 加载和失败时只把数量替换为“载入中”或“数量未知”，不得影响日记卡数量。
-- 卡头最小高度 78px；标题与元信息自然换行；底部只画 1px 低对比分隔线。
-
-### 6.4 扁平任务信息组
-
-一条任务按下列顺序排版，不创建逐字段小卡：
+- 纸面主标题：24/32，`600`；Chat 侧栏标题：20/28，`600`。
+- 任务标题：16/24，`600`；摘要：13/20，`400`；正文阅读：15/26。
+- 触控目标最小 `44×44px`；图标视觉尺寸约 `18px`。
+- 主纸面 padding：宽屏 `28px`，窄屏 `20px`；纸面透明间隙 `18–24px`。
+- 任务行默认高度不小于 `72px`；长标题和摘要各单行省略。
 
 ```text
-任务标题                                      [Active] [更多]
-每天 09:00 · Asia/Shanghai
-下次：9月30日 09:00 · 最近结果：已完成 08:59
-[立即运行] [暂停] [历史]
+Z4 共享 Edit Modal surface
+Z3 Modal backdrop / Chat mobile drawer backdrop
+Z2 任务行更多菜单
+Z1 Calendar 三张悬浮纸面 / Chat marker / side panel
+Z0 被遮罩的现有应用页面
 ```
 
-- 单条任务本身背景透明，边框和阴影均为 `none`。
-- 相邻任务之间以 `padding-block: 20px` 和一条 `border-top` 区分；第一条无顶线。
-- 标题 16px/600；配置与执行行 13px，次级颜色；行间距 7px。
-- 状态 badge 可保留浅色圆角，但不能与任务条目形成同高度卡片。
-- 主操作使用现有按钮层级；更多菜单、输入框、错误提示等有交互含义的边界继续保留。
-- 编辑和历史展开区可以使用 4%–7% 的浅纸色差与 12px 圆角，只承担局部分组，不加完整外框和重阴影。
+任务行之间用留白和 `hairline` 分隔；任务行不再各自使用粗边框与大阴影。当前运行行使用整行浅填充，让状态识别来自面而不是边框。
 
-### 6.5 日期化日记卡与当前条目
+---
 
-- 卡头格式与任务卡一致：“今天的日记” + “1 篇”。
-- 日记行采用两行信息：第一行时间、当前笔记 badge 和删除；第二行标题。
-- 普通条目使用极浅纸底或 1px 低对比边界，无高度阴影。
-- 当前日记使用 2px `state-success` 边界、9% 浅绿纸底和文字 badge；不使用左侧粗条。
-- 删除按钮保持独立，hover 时才显示浅红背景；点击日记正文与删除仍是两个不同操作。
+## 4. 组件结构与生产映射
 
-## 7. 局部状态呈现
+| 设计 ID | 产品组件 | 建议生产类名 | 关键行为 |
+| --- | --- | --- | --- |
+| C3 | Scheduled Paper | `.calendar-popup__scheduled-paper` | LIST / RESULT 互斥；属于右侧外滚动栈 |
+| C4 | Arrange Task | `.calendar-popup__arrange` | 非空提交后进入新 Chat 草稿；不直接写 API |
+| C6 | Scheduled Task Row | `.calendar-popup__task-row` | 行主体查看结果；编辑和更多独立 |
+| C7 | Task Action Menu | `.calendar-popup__task-menu` | 锚定行尾；键盘跳过 disabled 项 |
+| C8 | Latest Result | `.calendar-popup__task-result` | header/footer 固定，正文独立滚动 |
+| C9 | Edit Form in shared Modal | `.scheduled-task-edit-modal` | effective 初始化 desired；保存携带 revision |
+| H2/H3 | Marker Group / Marker | `.chat-scheduled-markers` / `.chat-scheduled-marker` | 单一 button；从严格 Tool success 投影 |
+| H4 | Detail Sidebar | `.chat-scheduled-detail` | 读取 current effective 与 latest trigger；只读 |
+| HM1 | Mobile Drawer | `.chat-scheduled-detail--drawer` | 覆盖式右 Drawer；限制焦点并锁定背景滚动 |
 
-| 状态 | 任务纸面 | 日记纸面 |
+### 4.1 建议组件树
+
+```text
+CalendarPopup
+├─ CalendarPaper
+└─ RightCardStack                  // 宽屏唯一外滚动
+   ├─ ScheduledPaper
+   │  ├─ ArrangeTaskInput          // LIST 时保留
+   │  ├─ ScheduledTaskRow[]        // LIST
+   │  └─ ScheduledTaskResult       // RESULT，与 LIST 互斥
+   └─ DiaryPaper
+
+Modal                              // 覆盖 Calendar，不参与两列排版
+└─ ScheduledTaskEditForm
+
+ChatWorkspace
+├─ ConversationColumn
+│  └─ AssistantTurn
+│     ├─ ChatMarkdown
+│     ├─ ExistingToolPartUI
+│     └─ ScheduledTaskMarkerGroup  // Tool success 所属 turn
+└─ ExistingSidePanelSlot           // 互斥 union
+   └─ ScheduledTaskDetailSidebar
+```
+
+---
+
+## 5. 组件实施规格
+
+### 5.1 安排任务输入 C4
+
+- 胶囊高度 `58px`，左右 padding `14/12px`，背景使用 `paper-raised`，边界为半透明暖色线并投下轻阴影。
+- 加号只是入口识别，`aria-hidden=true`，不响应附件或菜单。
+- 输入 placeholder 为“安排任务”；空白值时提交按钮 `disabled`。
+- Enter 与圆形提交等价。提交后关闭 Calendar，打开新 Chat，把内容写入可编辑且未发送的 composer 草稿。
+- 焦点在提交后落到 Chat composer。
+
+### 5.2 任务行 C6
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ [状态]  标题……………………………………        [编辑] [更多] │
+│         真实状态 / 计划摘要…………………………………… │
+└──────────────────────────────────────────────────────┘
+```
+
+- 行主体是一个 button；编辑和更多是同级按钮，不能嵌套在主体 button 内。
+- 状态图形 `aria-hidden`；摘要必须出现可见状态文字。
+- 活动行使用 `wash-active`，普通行透明。hover 只提高背景明度，不产生明显位移。
+- 摘要优先级：活动 trigger → 失败/待确认 → effective 规则与 next run → 暂停/结束。
+- 点击行主体进入 C8；返回后焦点精确回到原任务行。
+
+### 5.3 更多菜单 C7
+
+- 宽度 `210px`，`paper-raised`，圆角 `18px`，`shadow-pop`。
+- 每项高度 `44px`；危险动作位于 `hairline` 分隔线下。
+- 可见动作由当前状态和最新 trigger 决定。没有 target Thread 时不渲染对应入口。
+- Escape 关闭并回到更多按钮；ArrowUp/ArrowDown/Home/End 只在 enabled 项中移动。
+
+### 5.4 最近运行结果 C8
+
+- 结果头保留状态、标题、规则摘要及编辑/更多，左侧返回按钮建立 LIST/RESULT 关系。
+- 正文使用 `min-height:260px; max-height:min(46vh,520px); overflow:auto`。长结果只滚动正文，不改变月历高度，也不让 Diary 离开右卡栈。
+- 成功正文由现有 Chat Markdown 渲染。必须精确匹配 trigger 的 final message 关系；匹配不到则显示结果暂不可用。
+- 底部动作条稳定可达；只有 latest trigger 存在精确 target Thread 时显示“打开聊天”。
+
+### 5.5 编辑 Modal C9
+
+- 宽度 `min(760px, calc(100vw - 32px))`；最大高度 `min(820px, calc(100vh - 40px))`。
+- `grid-template-rows:auto minmax(0,1fr) auto`；只有 body 滚动，header/footer 始终可达。
+- body 顺序：标题 → prompt → once/daily selector → 条件字段。
+- `once`：日期、时间、IANA 时区；`daily`：时间、IANA 时区。
+- effective 初始化 desired；dirty 后保存可用。字段/API/冲突错误保留 desired。
+- 暂停/恢复为独立 revision action。关闭/Escape 后焦点回原编辑按钮。
+
+### 5.6 Chat 任务标记 H3
+
+- 位于成功 Tool part 所属 assistant turn 正文之后、message actions 之前。
+- 整张 marker 是一个 button：左时钟图标，中间标题与规则快照，右侧“打开”文字和箭头只是视觉尾标。
+- Tool result 是创建时快照；点击后侧栏必须重新读取 current effective。
+- 同一 turn 多个合法成功结果按 Tool part 顺序纵向排列，间距 `8px`。
+
+### 5.7 Chat 详情栏 / Drawer H4
+
+- 桌面宽度建议 `380–430px`，边界由既有 side panel shell 提供；详情自身滚动，不改变 composer 高度。
+- 信息分组：任务定义 → 执行规则 → 最近运行。组内使用 label/value 行，不套多层边框盒。
+- 最近 trigger 有 target Thread 时显示“打开聊天”，并使用当前分组所示 trigger。
+- 窄屏复用同一内容，投影为右侧 Drawer；宽度 `min(92vw,420px)`，带 backdrop、focus trap 和 Escape 关闭。
+
+---
+
+## 6. 交互状态与微动效
+
+| 状态 | 视觉反馈 | 动效 |
 | --- | --- | --- |
-| Loading | 卡头和纸面保留，正文一行加载文案/进度语义 | 正常可用 |
-| Error | 正文显示简短原因与“重试”；错误边界只包住反馈行 | 正常可打开、删除 |
-| Empty | 纸面保留，正文显示“这一天没有定时任务” | 独立显示“这一天还没有日记” |
-| List | 扁平任务信息组按间距排列 | 日记行按间距排列 |
-| 操作失败 | 对应任务附近显示可行动错误 | 不改变日记卡 |
-| 日记删除失败 | 不改变任务卡 | 对应日记附近显示既有反馈 |
-
-状态切换不能改变三张纸面的同级关系，也不能恢复共享右栏白底。
-
-## 8. 动效约束与 reduced motion
-
-### 8.1 默认行为
-
-三张纸面打开时直接呈现，不新增入场、错峰、持续浮动或整体 hover 位移。按钮、日期格和菜单继续使用现有组件的背景色、边界色和焦点环反馈，不为本轮视觉纠错增加新的时间常量。
-
-### 8.2 减少动态效果
+| hover | 背景加深 2–3%，图标墨色增强 | `160ms ease-out` |
+| active | 按钮缩放到 `0.985` | `90ms` |
+| focus-visible | 2px accent ring + 3px paper offset | 无位移 |
+| 菜单出现 | opacity 0→1，translateY -4→0 | `160ms cubic-bezier(.2,.8,.2,1)` |
+| Modal / Drawer | backdrop 淡入；surface 轻微上移/侧移 | `220ms` |
+| 保存中 | 固定宽度文案 + 低对比进度环 | 不修改布局宽度 |
 
 ```css
+@keyframes paper-rise {
+  from { opacity: 0; transform: translateY(8px) scale(.992); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .calendar-popup *,
-  .calendar-popup *::before,
-  .calendar-popup *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
     scroll-behavior: auto !important;
   }
 }
 ```
 
-关闭、键盘导航、焦点恢复和状态反馈不依赖动画完成。
+---
 
-## 9. 完整可审阅 HTML / Tailwind / CSS 原型
+## 7. 响应式、滚动与无障碍
 
-以下为静态视觉原型。它复用生产类名表达迁移目标，并使用 Tailwind 2.2.19 做布局辅助；按钮不连接新业务逻辑，所有文案对应现有月历、任务和日记能力。
+| 视口 | Calendar | Chat |
+| --- | --- | --- |
+| 宽屏 | 左月历固定；右卡栈独立滚动，任务与 Diary 为分离纸面 | conversation 与详情栏并列；两者分别滚动 |
+| 短高宽屏 | 两列保留；月历必要时自身滚动；结果正文/右卡栈继续独立 | composer 保持固定关系，详情栏内容滚动 |
+| 窄屏 | 三纸面按月历 → 任务 → Diary 单列；透明间隙保留 | 详情变为覆盖式 Drawer |
+| 极窄屏 | 任务标题/摘要省略；动作保持 44px；Modal 单列字段 | marker 标题/摘要省略；Drawer 不横向溢出 |
+
+- Calendar 背景页不因弹窗内容滚动；任务列表随右卡栈滚动，不再增加同方向内滚动。
+- 结果正文、Modal body、prompt textarea、Chat messages、Chat details 各自只拥有指定滚动边界。
+- Drawer 打开时锁定背景 Chat 滚动；关闭后恢复 marker 焦点和消息位置。
+- 状态不得只用颜色；状态图形旁必须有摘要文字。
+- C6 主体、编辑、更多是同级交互节点；H3 是单一 button，禁止嵌套 button。
+- Modal 使用 `role=dialog`、`aria-modal=true`；结果加载用 `aria-live=polite`，失败用 `role=alert`。
+- 任务菜单使用 `role=menu/menuitem`；禁用项不进入方向键焦点序列。
+- 文本与纸面对比至少达到 WCAG AA；所有图标按钮提供明确可访问名称。
+
+---
+
+## 8. 完整 HTML5 + Tailwind 2.2.19/CSS 交互原型
+
+以下代码可保存为单个 `.html` 文件直接打开。顶部场景切换器只供设计审阅，不属于生产页面。Calendar 任务行、结果、菜单、编辑 Modal，以及 Chat marker、桌面侧栏和移动 Drawer 均可操作。
 
 ```html
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CalendarPopup floating paper review</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://lf6-cdn-tos.bytecdntp.com/cdn/expire-100-M/font-awesome/6.0.0/css/all.min.css" />
-  <link rel="stylesheet" href="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/tailwindcss/2.2.19/tailwind.min.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ink & Memory · 定时任务 UI v4</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/tailwindcss/2.2.19/tailwind.min.css">
+  <link rel="stylesheet" href="https://lf6-cdn-tos.bytecdntp.com/cdn/expire-100-M/font-awesome/6.0.0/css/all.min.css">
   <style>
     :root {
-      --color-bg-overlay: rgba(52, 43, 34, .54);
-      --color-bg-paper: #fffaf2;
-      --color-bg-surface-solid: #fffcf7;
-      --color-bg-hover: #f3ece1;
-      --color-text-primary: #3f3429;
-      --color-text-body: #524538;
-      --color-text-secondary: #746657;
-      --color-text-muted: #978775;
-      --color-text-on-action: #fffaf2;
-      --color-border-paper: #d8c7b3;
-      --color-border-focus: #6a523d;
-      --color-action-primary: #5f4a36;
-      --color-action-link: #4d78ad;
-      --color-state-success: #7e9468;
-      --color-state-warning: #c58b4d;
-      --color-state-danger: #ae5d54;
-      --color-shadow-soft: rgba(91, 69, 44, .10);
-      --color-shadow-medium: rgba(91, 69, 44, .18);
-      --paper-shadow: 0 8px 18px var(--color-shadow-soft), 0 18px 36px var(--color-shadow-medium);
-      --paper-radius: 24px;
+      --canvas: #eee7dd; --paper: #fffaf2; --paper-raised: #fffdf8;
+      --wash-active: #f0eee8; --wash-hover: #f7f2ea;
+      --ink: #3f352c; --muted: #817568; --faint: #a89b8e;
+      --accent: #9a6743; --accent-soft: #ead9c7;
+      --sage: #7d9670; --sage-soft: #edf2e8;
+      --danger: #ba4e42; --danger-soft: #f8ebe7;
+      --hairline: rgba(93,73,54,.14);
+      --shadow-paper: 0 22px 54px rgba(76,55,37,.14);
+      --shadow-pop: 0 14px 36px rgba(76,55,37,.17);
+      --radius-paper: 28px; --radius-control: 16px;
     }
-
     * { box-sizing: border-box; }
     html, body { min-height: 100%; }
     body {
-      margin: 0;
-      min-width: 320px;
-      font-family: 'Noto Sans SC', system-ui, sans-serif;
-      color: var(--color-text-body);
-      background:
-        linear-gradient(rgba(255,255,255,.2), rgba(255,255,255,.2)),
-        repeating-linear-gradient(0deg, #efe5d5 0 1px, #f8f1e6 1px 42px);
+      margin: 0; color: var(--ink);
+      background: radial-gradient(circle at 18% 12%, rgba(255,255,255,.72), transparent 32%), linear-gradient(145deg,#e6ddd1,var(--canvas));
+      font-family: "Noto Sans SC", sans-serif;
     }
-    button { font: inherit; }
-    button:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 3px; }
-    .sr-only {
-      position: absolute !important;
-      width: 1px !important;
-      height: 1px !important;
-      padding: 0 !important;
-      margin: -1px !important;
-      overflow: hidden !important;
-      clip: rect(0, 0, 0, 0) !important;
-      white-space: nowrap !important;
-      border: 0 !important;
+    button, input, textarea, select { font: inherit; }
+    button { color: inherit; }
+    .serif { font-family: "Noto Serif SC", serif; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .icon-button {
+      display:inline-grid; width:44px; height:44px; flex:0 0 44px; place-items:center;
+      border:0; border-radius:999px; background:transparent;
+      transition:background .16s ease,color .16s ease,transform .09s ease;
     }
+    .icon-button:hover { color:var(--accent); background:var(--wash-hover); }
+    .icon-button:active { transform:scale(.985); }
+    .paper {
+      border:1px solid rgba(161,128,95,.20); border-radius:var(--radius-paper);
+      background:linear-gradient(150deg,rgba(255,253,248,.98),rgba(255,248,238,.98));
+      box-shadow:var(--shadow-paper);
+    }
+    .eyebrow { color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; }
+    .review-nav {
+      position:fixed; z-index:80; top:14px; left:50%; display:flex; gap:4px; max-width:calc(100vw - 20px);
+      padding:5px; transform:translateX(-50%); overflow-x:auto; border:1px solid var(--hairline);
+      border-radius:999px; background:rgba(255,253,248,.90); box-shadow:0 10px 28px rgba(63,53,44,.12); backdrop-filter:blur(14px);
+    }
+    .review-nav button { border:0; border-radius:999px; padding:8px 14px; color:var(--muted); background:transparent; font-size:12px; white-space:nowrap; }
+    .review-nav button[aria-selected="true"] { color:var(--paper-raised); background:var(--ink); }
+    .scene { display:none; min-height:100vh; }
+    .scene.is-active { display:block; }
 
-    /* A1：暖灰遮罩。 */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 60;
-      display: grid;
-      place-items: center;
-      overflow: auto;
-      padding: 32px;
-      background: var(--color-bg-overlay);
-      backdrop-filter: blur(2px);
+    /* Calendar：透明画布 + 三张独立纸面 */
+    .calendar-shell { min-height:100vh; padding:76px 24px 24px; background:rgba(63,53,44,.36); }
+    .calendar-dialog {
+      position:relative; display:grid; grid-template-columns:minmax(420px,.9fr) minmax(500px,1.1fr);
+      gap:24px; width:min(1460px,100%); height:min(760px,calc(100vh - 100px)); max-height:calc(100vh - 100px); margin:0 auto;
     }
+    .calendar-close { position:absolute; z-index:4; top:-12px; right:-12px; border:1px solid var(--hairline); background:var(--paper-raised); box-shadow:var(--shadow-pop); }
+    .calendar-paper { min-height:0; height:100%; padding:28px; overflow:auto; }
+    .month-head { display:grid; grid-template-columns:44px 1fr 44px; align-items:center; margin-bottom:28px; }
+    .month-title { text-align:center; font-size:26px; font-weight:600; }
+    .week-grid,.date-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+    .week-grid { margin-bottom:10px; color:var(--muted); font-size:12px; text-align:center; }
+    .date-button { position:relative; aspect-ratio:1; min-height:48px; border:0; border-radius:16px; background:transparent; transition:background .16s,box-shadow .16s; }
+    .date-button:hover { background:var(--paper-raised); box-shadow:0 7px 18px rgba(76,55,37,.08); }
+    .date-button.has-note::after { position:absolute; left:50%; bottom:8px; width:5px; height:5px; content:""; transform:translateX(-50%); border-radius:999px; background:var(--accent); }
+    .date-button[aria-current="date"] { background:var(--paper-raised); box-shadow:inset 0 0 0 2px var(--accent),0 8px 18px rgba(76,55,37,.10); font-weight:700; }
+    .right-card-stack { display:grid; align-content:start; gap:22px; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 10px 28px 2px; }
+    .scheduled-paper,.diary-paper { padding:26px; }
+    .paper-header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom:22px; }
+    .paper-header h2 { margin:2px 0 4px; font-size:24px; font-weight:600; }
+    .paper-meta { margin:0; color:var(--muted); font-size:13px; }
+    .arrange {
+      display:grid; grid-template-columns:44px minmax(0,1fr) 48px; align-items:center; height:60px; margin-bottom:18px; padding:5px 7px 5px 8px;
+      border:1px solid rgba(138,105,72,.18); border-radius:999px; background:var(--paper-raised); box-shadow:0 10px 28px rgba(76,55,37,.08);
+    }
+    .arrange .leading { display:grid; place-items:center; font-size:18px; }
+    .arrange input { min-width:0; border:0; outline:0; color:var(--ink); background:transparent; }
+    .arrange input::placeholder { color:var(--faint); }
+    .round-submit { display:grid; width:46px; height:46px; place-items:center; border:0; border-radius:999px; color:white; background:var(--accent); box-shadow:0 8px 18px rgba(154,103,67,.22); }
+    .round-submit:disabled { cursor:default; opacity:.34; }
+    .task-list { display:grid; gap:2px; }
+    .task-item { position:relative; border-bottom:1px solid var(--hairline); }
+    .task-item:last-child { border-bottom:0; }
+    .task-item.is-running { margin:2px 0; border-bottom-color:transparent; border-radius:18px; background:var(--wash-active); }
+    .task-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; min-height:76px; padding:8px 8px 8px 4px; }
+    .task-main { display:grid; grid-template-columns:44px minmax(0,1fr); align-items:center; min-width:0; height:100%; border:0; border-radius:14px; text-align:left; background:transparent; }
+    .task-main:hover { background:rgba(255,255,255,.48); }
+    .task-state { display:grid; width:34px; height:34px; place-items:center; justify-self:center; border-radius:999px; color:var(--accent); background:rgba(154,103,67,.10); }
+    .task-item.is-running .task-state { color:var(--sage); background:var(--sage-soft); }
+    .task-copy { min-width:0; padding:4px 8px 4px 4px; }
+    .task-copy strong,.task-copy span { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .task-copy strong { margin-bottom:4px; font-size:16px; font-weight:600; }
+    .task-copy span { color:var(--muted); font-size:13px; }
+    .task-actions { display:flex; align-items:center; }
+    .task-menu {
+      position:absolute; z-index:20; top:62px; right:4px; display:none; width:210px; padding:8px;
+      border:1px solid var(--hairline); border-radius:18px; background:var(--paper-raised); box-shadow:var(--shadow-pop); animation:menu-in .16s ease-out;
+    }
+    .task-menu.is-open { display:block; }
+    .task-menu button { display:grid; grid-template-columns:28px 1fr; align-items:center; width:100%; min-height:44px; border:0; border-radius:11px; text-align:left; background:transparent; }
+    .task-menu button:hover { background:var(--wash-hover); }
+    .task-menu .danger { margin-top:6px; padding-top:6px; border-top:1px solid var(--hairline); color:var(--danger); }
+    .task-result { display:none; grid-template-rows:auto minmax(0,1fr) auto; }
+    .scheduled-paper.show-result .task-list-view { display:none; }
+    .scheduled-paper.show-result .task-result { display:grid; }
+    .result-header { display:grid; grid-template-columns:44px minmax(0,1fr) auto; align-items:center; gap:8px; padding-bottom:18px; border-bottom:1px solid var(--hairline); }
+    .result-heading { min-width:0; }
+    .result-heading h3 { overflow:hidden; margin:0 0 4px; white-space:nowrap; text-overflow:ellipsis; font-size:20px; font-weight:600; }
+    .result-heading p { margin:0; color:var(--muted); font-size:13px; }
+    .result-actions { display:flex; }
+    .result-scroll { min-height:280px; max-height:min(46vh,520px); overflow:auto; overscroll-behavior:contain; padding:24px 6px 26px 4px; line-height:1.8; }
+    .result-scroll .time { margin-bottom:18px; color:var(--muted); font-size:13px; }
+    .result-scroll p { margin:0 0 16px; }
+    .result-scroll ul { margin:0 0 16px; padding-left:20px; }
+    .result-footer { display:flex; justify-content:flex-end; padding-top:16px; border-top:1px solid var(--hairline); }
+    .secondary-button,.primary-button,.danger-button { min-height:44px; border-radius:999px; padding:0 18px; font-weight:600; }
+    .secondary-button { border:1px solid var(--hairline); background:var(--paper-raised); }
+    .primary-button { border:0; color:white; background:var(--accent); }
+    .danger-button { border:0; color:var(--danger); background:var(--danger-soft); }
+    .diary-entry { display:grid; grid-template-columns:74px minmax(0,1fr) auto; align-items:center; gap:10px; min-height:70px; padding:12px 4px; border-top:1px solid var(--hairline); }
+    .diary-entry time { color:var(--muted); font-size:13px; }
+    .diary-entry strong { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 
-    /* A2：透明 Modal 交互壳，不是第四张卡。 */
-    .modal-surface--default.calendar-popup-modal {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      width: min(1180px, calc(100vw - 64px));
-      height: min(800px, calc(100dvh - 64px));
-      max-height: calc(100dvh - 64px);
-      margin: 0;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-      overflow: visible;
+    /* Shared modal */
+    .modal-layer { position:fixed; z-index:90; inset:0; display:none; place-items:center; padding:20px; background:rgba(63,53,44,.38); backdrop-filter:blur(5px); }
+    .modal-layer.is-open { display:grid; }
+    .edit-modal {
+      display:grid; grid-template-rows:auto minmax(0,1fr) auto; width:min(760px,calc(100vw - 32px)); max-height:min(820px,calc(100vh - 40px)); overflow:hidden;
+      border:1px solid rgba(161,128,95,.18); border-radius:28px; background:var(--paper-raised); box-shadow:0 30px 80px rgba(49,36,25,.26); animation:paper-rise .22s cubic-bezier(.2,.8,.2,1);
     }
-    .calendar-popup-modal > .modal-header--default {
-      position: absolute;
-      top: 24px;
-      right: -22px;
-      z-index: 10;
-      margin: 0;
-    }
-    .calendar-popup-modal .modal-title--default { /* 同 .sr-only */
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    .calendar-popup-modal .modal-close--default {
-      display: grid;
-      width: 44px;
-      height: 44px;
-      place-items: center;
-      padding: 0;
-      border: 1px solid color-mix(in srgb, var(--color-border-paper) 52%, transparent);
-      border-radius: 999px;
-      background: var(--color-bg-paper);
-      box-shadow: 0 8px 22px var(--color-shadow-medium);
-      color: var(--color-text-secondary);
-      cursor: pointer;
-    }
-    .calendar-popup-modal .modal-close--default:hover {
-      background: var(--color-bg-hover);
-      color: var(--color-text-primary);
-    }
-    .calendar-popup-modal > .modal-content--default {
-      box-sizing: border-box;
-      flex: 1 1 auto;
-      min-height: 0;
-      width: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-    }
+    .modal-head,.modal-foot { padding:22px 26px; }
+    .modal-head { display:flex; align-items:flex-start; justify-content:space-between; border-bottom:1px solid var(--hairline); }
+    .modal-head h2 { margin:3px 0 0; font-size:22px; font-weight:600; }
+    .modal-body { overflow-y:auto; overscroll-behavior:contain; padding:24px 26px 30px; }
+    .field { display:grid; gap:8px; margin-bottom:22px; }
+    .field label,.field legend { color:var(--muted); font-size:13px; font-weight:600; }
+    .field input,.field textarea,.field select { width:100%; border:1px solid var(--hairline); border-radius:var(--radius-control); color:var(--ink); background:#fffefb; }
+    .field input,.field select { min-height:48px; padding:0 14px; }
+    .field textarea { min-height:190px; max-height:280px; resize:vertical; padding:14px; line-height:1.65; }
+    .frequency-select { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .frequency-select button { min-height:48px; border:1px solid var(--hairline); border-radius:15px; background:#fffefb; }
+    .frequency-select button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+    .rule-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .once-only { display:none; }
+    .edit-modal[data-frequency="once"] .once-only { display:grid; }
+    .modal-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; border-top:1px solid var(--hairline); }
+    .modal-foot-right { display:flex; gap:10px; }
 
-    /* 三张纸面的布局；外层均透明。 */
-    .calendar-popup {
-      display: grid;
-      grid-template-columns: minmax(440px, 1.05fr) minmax(400px, .95fr);
-      gap: 28px;
-      align-items: start;
-      min-width: 0;
-      min-height: 0;
-      height: 100%;
-      padding: 36px 36px 56px;
-      overflow: hidden;
-      overscroll-behavior: contain;
+    /* Chat marker / sidebar / drawer */
+    .chat-scene { min-height:100vh; padding-top:60px; background:#f5f2ec; }
+    .chat-workspace { display:grid; grid-template-columns:minmax(0,1fr); min-height:calc(100vh - 60px); }
+    .chat-scene.detail-open .chat-workspace { grid-template-columns:minmax(0,1fr) 410px; }
+    .conversation { display:grid; grid-template-rows:auto minmax(0,1fr) auto; min-width:0; border-right:1px solid var(--hairline); background:rgba(255,255,255,.76); }
+    .chat-head { display:flex; align-items:center; justify-content:space-between; min-height:68px; padding:0 26px; border-bottom:1px solid var(--hairline); }
+    .chat-head h1 { overflow:hidden; margin:0; white-space:nowrap; text-overflow:ellipsis; font-size:18px; font-weight:600; }
+    .messages { overflow-y:auto; overscroll-behavior:contain; padding:34px clamp(22px,5vw,72px) 46px; }
+    .assistant-turn { width:min(760px,100%); margin:0 auto; }
+    .assistant-turn > p { margin:0 0 16px; line-height:1.8; }
+    .tool-success { display:inline-flex; align-items:center; gap:8px; margin:8px 0 12px; color:var(--sage); font-size:13px; font-weight:600; }
+    .marker-group { display:grid; gap:8px; margin-top:8px; }
+    .scheduled-marker {
+      display:grid; grid-template-columns:46px minmax(0,1fr) auto; align-items:center; width:100%; min-height:82px; padding:12px 14px;
+      border:1px solid var(--hairline); border-radius:18px; text-align:left; background:var(--paper-raised); box-shadow:0 8px 24px rgba(76,55,37,.06);
+      transition:box-shadow .16s ease,transform .16s ease,border-color .16s ease;
     }
-    .calendar-popup__workspace,
-    .calendar-popup__workspace-scroll {
-      min-width: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .calendar-popup__workspace { height: 100%; }
-    .calendar-popup__workspace-scroll {
-      display: grid;
-      box-sizing: border-box;
-      align-content: start;
-      gap: 22px;
-      width: calc(100% + 72px);
-      height: calc(100% + 92px);
-      margin: -36px -36px -56px;
-      padding: 36px 36px 56px;
-      overflow: auto;
-      overscroll-behavior: contain;
-      scrollbar-gutter: stable;
-    }
-    .calendar-popup__date-summary { display: none; }
+    .scheduled-marker:hover { border-color:rgba(154,103,67,.30); box-shadow:var(--shadow-pop); transform:translateY(-1px); }
+    .marker-icon { display:grid; width:38px; height:38px; place-items:center; border-radius:12px; color:var(--accent); background:var(--accent-soft); }
+    .marker-copy { min-width:0; }
+    .marker-copy strong,.marker-copy span { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .marker-copy strong { margin-bottom:4px; font-size:15px; }
+    .marker-copy span { color:var(--muted); font-size:13px; }
+    .marker-tail { display:flex; align-items:center; gap:8px; color:var(--accent); font-size:13px; font-weight:600; }
+    .composer-wrap { padding:16px clamp(18px,4vw,52px) 22px; background:linear-gradient(transparent,rgba(255,255,255,.96) 24%); }
+    .composer { display:flex; align-items:flex-end; gap:12px; width:min(820px,100%); min-height:72px; margin:0 auto; padding:15px 16px; border:1px solid var(--hairline); border-radius:24px; background:white; box-shadow:0 14px 32px rgba(76,55,37,.09); }
+    .composer textarea { flex:1; min-height:38px; max-height:120px; resize:none; border:0; outline:0; background:transparent; }
+    .draft-note { display:none; width:min(820px,100%); margin:0 auto 8px; color:var(--muted); font-size:12px; }
+    .draft-note.is-visible { display:block; }
+    .detail-sidebar { display:none; grid-template-rows:auto minmax(0,1fr); min-width:0; background:var(--paper-raised); }
+    .chat-scene.detail-open .detail-sidebar { display:grid; }
+    .detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-height:86px; padding:22px 22px 18px; border-bottom:1px solid var(--hairline); }
+    .detail-head h2 { margin:3px 0 0; font-size:20px; font-weight:600; }
+    .detail-scroll { overflow-y:auto; overscroll-behavior:contain; padding:20px 22px 32px; }
+    .detail-group { padding:18px; border-radius:20px; background:#fffaf3; box-shadow:0 7px 22px rgba(76,55,37,.05); }
+    .detail-group + .detail-group { margin-top:14px; }
+    .detail-group h3 { margin:0 0 14px; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.08em; }
+    .detail-row { display:grid; grid-template-columns:92px minmax(0,1fr); gap:12px; padding:10px 0; border-top:1px solid var(--hairline); }
+    .detail-row:first-of-type { border-top:0; }
+    .detail-row dt { color:var(--muted); font-size:13px; }
+    .detail-row dd { margin:0; overflow-wrap:anywhere; text-align:right; font-size:13px; font-weight:500; }
+    .status-pill { display:inline-flex; align-items:center; gap:6px; color:var(--sage); }
+    .prompt-block { margin-top:10px; font-size:13px; line-height:1.65; }
+    .drawer-backdrop { display:none; }
 
-    .calendar-popup__calendar,
-    .calendar-popup__section {
-      min-width: 0;
-      border: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
-      border-radius: var(--paper-radius);
-      background: var(--color-bg-paper);
-      box-shadow: var(--paper-shadow);
+    @keyframes menu-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    @keyframes paper-rise { from { opacity:0; transform:translateY(8px) scale(.992); } to { opacity:1; transform:none; } }
+    @keyframes drawer-in { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:none; } }
+    @media (max-width:980px) {
+      .calendar-shell { padding:70px 14px 14px; overflow-y:auto; }
+      .calendar-dialog { display:block; height:auto; max-height:none; }
+      .calendar-paper { min-height:auto; height:auto; margin-bottom:20px; }
+      .right-card-stack { display:grid; overflow:visible; padding:0; }
+      .chat-workspace { grid-template-columns:minmax(0,1fr); }
+      .detail-sidebar { position:fixed; z-index:72; inset:60px 0 0 auto; display:none; width:min(92vw,420px); box-shadow:-20px 0 50px rgba(48,35,24,.20); animation:drawer-in .22s ease-out; }
+      .chat-scene.detail-open .detail-sidebar { display:grid; }
+      .chat-scene.detail-open .drawer-backdrop { position:fixed; z-index:71; inset:60px 0 0; display:block; border:0; background:rgba(63,53,44,.34); }
     }
-    .calendar-popup__calendar {
-      min-height: 0;
-      height: 100%;
-      padding: 30px 32px 34px;
-      overflow: auto;
-      overscroll-behavior: contain;
+    @media (max-width:620px) {
+      .calendar-paper,.scheduled-paper,.diary-paper { padding:20px; border-radius:22px; }
+      .calendar-close { top:8px; right:8px; }
+      .date-grid,.week-grid { gap:4px; }
+      .date-button { min-height:40px; border-radius:12px; }
+      .task-actions .icon-button { width:40px; flex-basis:40px; }
+      .result-header { grid-template-columns:40px minmax(0,1fr); }
+      .result-actions { grid-column:2; justify-self:end; }
+      .rule-grid { grid-template-columns:1fr; }
+      .modal-head,.modal-foot { padding:18px; }
+      .modal-body { padding:20px 18px 24px; }
+      .modal-foot-right { margin-left:auto; }
+      .messages { padding:28px 16px 34px; }
+      .marker-tail span { display:none; }
+      .chat-head { padding:0 16px; }
     }
-
-    .calendar-popup__month-heading,
-    .calendar-popup__section-heading,
-    .calendar-popup__task-heading {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-    }
-    .calendar-popup__month-heading h3,
-    .calendar-popup__section-heading h3,
-    .calendar-popup__task-heading h4,
-    .calendar-popup__diary-open strong {
-      margin: 0;
-      font-family: 'Noto Serif SC', Georgia, serif;
-      color: var(--color-text-primary);
-    }
-    .calendar-popup__month-heading h3 { font-size: 1.42rem; font-weight: 600; }
-    .calendar-popup__month-heading button,
-    .calendar-popup__icon-button {
-      display: grid;
-      width: 44px;
-      height: 44px;
-      place-items: center;
-      border: 0;
-      border-radius: 12px;
-      background: transparent;
-      color: var(--color-text-secondary);
-      cursor: pointer;
-    }
-    .calendar-popup__month-heading button:hover,
-    .calendar-popup__icon-button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-
-    .calendar-popup__weekdays,
-    .calendar-popup__grid {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .calendar-popup__weekdays {
-      margin: 30px 0 10px;
-      color: var(--color-text-muted);
-      font-size: .76rem;
-      font-weight: 700;
-      text-align: center;
-    }
-    .calendar-popup__day,
-    .calendar-popup__day-placeholder { min-width: 0; min-height: 56px; aspect-ratio: 1; }
-    .calendar-popup__day {
-      position: relative;
-      display: grid;
-      place-items: center;
-      border: 2px solid transparent;
-      border-radius: 14px;
-      background: transparent;
-      color: var(--color-text-body);
-      cursor: pointer;
-    }
-    .calendar-popup__day:hover { background: var(--color-bg-hover); }
-    .calendar-popup__day--has-entry {
-      background: var(--color-bg-surface-solid);
-      box-shadow: 0 3px 9px var(--color-shadow-soft);
-    }
-    .calendar-popup__day--selected { border-color: var(--color-border-focus); font-weight: 700; }
-    .calendar-popup__day--today::after {
-      content: '';
-      position: absolute;
-      inset: 6px;
-      border: 2px solid var(--color-state-warning);
-      border-radius: 11px;
-      pointer-events: none;
-    }
-    .calendar-popup__day i {
-      position: absolute;
-      bottom: 6px;
-      width: 5px;
-      height: 5px;
-      border-radius: 999px;
-      background: var(--color-action-link);
-    }
-
-    .calendar-popup__section-heading {
-      min-height: 78px;
-      padding: 21px 28px 18px;
-      border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 52%, transparent);
-    }
-    .calendar-popup__section-heading h3 { font-size: 1.14rem; font-weight: 600; }
-    .calendar-popup__card-header-meta { display: flex; align-items: center; gap: 9px; color: var(--color-text-secondary); }
-    .calendar-popup__card-count { font-size: .78rem; white-space: nowrap; }
-    .calendar-popup__count-alert {
-      border: 0;
-      background: transparent;
-      color: var(--color-state-danger);
-      font-size: .78rem;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .calendar-popup__card-body { padding: 5px 28px 26px; }
-
-    /* C5：任务是扁平信息组，不再是内嵌卡。 */
-    .calendar-popup__task-list { display: grid; }
-    .calendar-popup__task {
-      min-width: 0;
-      padding: 20px 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .calendar-popup__task + .calendar-popup__task {
-      border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
-    }
-    .calendar-popup__task-heading h4 { overflow-wrap: anywhere; font-size: 1rem; font-weight: 600; }
-    .calendar-popup__task-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-    .calendar-popup__status {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--color-bg-hover);
-      color: var(--color-text-secondary);
-      font-size: .71rem;
-      font-weight: 700;
-    }
-    .calendar-popup__status--succeeded { color: var(--color-state-success); }
-    .calendar-popup__task-facts,
-    .calendar-popup__recent {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 5px 8px;
-      margin: 8px 0 0;
-      padding: 0;
-      border: 0;
-      background: transparent;
-      color: var(--color-text-secondary);
-      font-size: .8rem;
-    }
-    .calendar-popup__task-facts dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
-    .calendar-popup__task-facts dd { margin: 0; }
-    .calendar-popup__task-facts > div { display: contents; }
-    .calendar-popup__task-facts > div + div::before { content: '·'; color: var(--color-text-muted); }
-    .calendar-popup__recent > span { color: var(--color-text-muted); }
-    .calendar-popup__primary-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-    .calendar-popup__button {
-      min-height: 42px;
-      padding: 8px 13px;
-      border: 1px solid color-mix(in srgb, var(--color-border-paper) 64%, transparent);
-      border-radius: 10px;
-      background: var(--color-bg-surface-solid);
-      color: var(--color-text-body);
-      cursor: pointer;
-    }
-    .calendar-popup__button--primary {
-      border-color: var(--color-action-primary);
-      background: var(--color-action-primary);
-      color: var(--color-text-on-action);
-    }
-    .calendar-popup__button--quiet { border-color: transparent; background: transparent; color: var(--color-action-link); }
-
-    /* D6：普通日记是轻量条目；当前日记使用绿色细边与浅底。 */
-    .calendar-popup__diary-list { display: grid; gap: 12px; padding-top: 18px; }
-    .calendar-popup__diary {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 14px 16px;
-      border: 1px solid color-mix(in srgb, var(--color-border-paper) 52%, transparent);
-      border-radius: 14px;
-      background: color-mix(in srgb, var(--color-bg-surface-solid) 72%, transparent);
-      box-shadow: none;
-    }
-    .calendar-popup__diary--current {
-      border: 2px solid var(--color-state-success);
-      background: color-mix(in srgb, var(--color-state-success) 9%, var(--color-bg-paper));
-    }
-    .calendar-popup__diary-open {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      grid-template-rows: auto auto;
-      flex: 1;
-      align-items: center;
-      gap: 5px 8px;
-      min-width: 0;
-      min-height: 42px;
-      padding: 0;
-      border: 0;
-      background: transparent;
-      color: var(--color-text-body);
-      text-align: left;
-      cursor: pointer;
-    }
-    .calendar-popup__diary-open > span { color: var(--color-text-secondary); font-size: .78rem; }
-    .calendar-popup__diary-open em {
-      justify-self: start;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--color-state-success);
-      color: var(--color-text-on-action);
-      font-size: .7rem;
-      font-style: normal;
-    }
-    .calendar-popup__diary-open strong {
-      grid-column: 1 / -1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: .96rem;
-      font-weight: 600;
-    }
-    .calendar-popup__diary-delete {
-      min-width: 42px;
-      min-height: 42px;
-      padding: 7px;
-      border: 0;
-      border-radius: 9px;
-      background: transparent;
-      color: var(--color-text-muted);
-      cursor: pointer;
-    }
-    .calendar-popup__diary-delete:hover { background: rgba(174,93,84,.09); color: var(--color-state-danger); }
-
-    @media (max-width: 1024px) {
-      .modal-backdrop { padding: 16px; }
-      .modal-surface--default.calendar-popup-modal {
-        width: min(720px, calc(100vw - 32px));
-        height: calc(100dvh - 32px);
-        max-height: calc(100dvh - 32px);
-        padding: 0;
-      }
-      .calendar-popup-modal > .modal-header--default { top: 12px; right: 12px; }
-      .calendar-popup-modal > .modal-content--default { padding: 0; overflow: hidden; }
-      .calendar-popup { grid-template-columns: minmax(0, 1fr); gap: 22px; height: 100%; padding: 68px 20px 0; overflow: auto; }
-      .calendar-popup__workspace-scroll::after { content: ''; display: block; height: 10px; }
-      .calendar-popup__calendar,
-      .calendar-popup__section {
-        border-radius: 20px;
-        box-shadow: 0 6px 14px var(--color-shadow-soft), 0 10px 20px var(--color-shadow-medium);
-      }
-      .calendar-popup__calendar { min-height: 0; height: auto; overflow: visible; }
-      .calendar-popup__workspace { height: auto; }
-      .calendar-popup__workspace-scroll {
-        width: auto;
-        height: auto;
-        margin: 0;
-        padding: 0;
-        gap: 22px;
-        overflow: visible;
-        scrollbar-gutter: auto;
-      }
-    }
-    @media (max-width: 640px) {
-      .modal-backdrop { padding: 10px; }
-      .modal-surface--default.calendar-popup-modal {
-        width: 100%;
-        height: calc(100dvh - 20px);
-        max-height: calc(100dvh - 20px);
-        padding: 0;
-      }
-      .calendar-popup-modal > .modal-content--default { padding: 0; overflow: hidden; }
-      .calendar-popup { gap: 14px; height: 100%; padding: 68px 16px 0; overflow: auto; }
-      .calendar-popup__workspace-scroll { gap: 14px; }
-      .calendar-popup__calendar,
-      .calendar-popup__section {
-        border-radius: 18px;
-        box-shadow: 0 4px 10px var(--color-shadow-soft), 0 8px 16px var(--color-shadow-medium);
-      }
-      .calendar-popup__calendar { padding: 16px; }
-      .calendar-popup__section-heading { padding-inline: 16px; }
-      .calendar-popup__card-body { padding-inline: 16px; }
-      .calendar-popup__day,
-      .calendar-popup__day-placeholder { min-height: 42px; }
-      .calendar-popup__month-heading h3 { font-size: 1.18rem; }
-      .calendar-popup__weekdays { font-size: .72rem; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .calendar-popup *,
-      .calendar-popup *::before,
-      .calendar-popup *::after {
-        animation-duration: .01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: .01ms !important;
-        scroll-behavior: auto !important;
-      }
+    @media (prefers-reduced-motion:reduce) {
+      *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
     }
   </style>
 </head>
 <body>
-  <div class="modal-backdrop modal-backdrop--default" role="presentation">
-    <section class="modal-surface modal-surface--default calendar-popup-modal" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">
-      <div class="modal-header modal-header--default">
-        <h2 id="calendar-dialog-title" class="modal-title modal-title--default">日历</h2>
-        <div class="modal-toolbar modal-toolbar--default">
-          <button type="button" class="modal-close modal-close--default" aria-label="关闭日历">
-            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-          </button>
-        </div>
-      </div>
+  <nav class="review-nav" aria-label="原型场景（仅设计审阅）">
+    <button type="button" data-scene="calendar" aria-selected="true">Calendar</button>
+    <button type="button" data-scene="chat" aria-selected="false">Chat 详情</button>
+  </nav>
 
-      <div class="modal-content modal-content--default">
-        <main class="calendar-popup">
-          <!-- B1：月历悬浮纸面 -->
-          <section class="calendar-popup__calendar" aria-labelledby="calendar-month-title">
-            <header class="calendar-popup__month-heading">
-              <button type="button" aria-label="上一个月"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
-              <h3 id="calendar-month-title">2026年9月</h3>
-              <button type="button" aria-label="下一个月"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
-            </header>
+  <main>
+    <section id="calendar-scene" class="scene is-active" aria-label="Calendar 定时任务原型">
+      <div class="calendar-shell">
+        <div class="calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-title">
+          <button class="icon-button calendar-close" type="button" aria-label="关闭日历"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
 
-            <div class="calendar-popup__weekdays" aria-hidden="true">
-              <span>周日</span><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span>
+          <section class="paper calendar-paper" aria-label="月历">
+            <div class="month-head">
+              <button class="icon-button" type="button" aria-label="上个月"><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>
+              <h2 class="month-title serif">2026 年 9 月</h2>
+              <button class="icon-button" type="button" aria-label="下个月"><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
             </div>
-            <div class="calendar-popup__grid" role="grid" aria-label="2026年9月">
-              <span class="calendar-popup__day-placeholder" aria-hidden="true"></span>
-              <span class="calendar-popup__day-placeholder" aria-hidden="true"></span>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月1日"><span>1</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月2日"><span>2</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月3日"><span>3</span></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月4日"><span>4</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月5日"><span>5</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月6日"><span>6</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月7日"><span>7</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--has-entry" role="gridcell" aria-label="2026年9月8日"><span>8</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day calendar-popup__day--selected calendar-popup__day--today calendar-popup__day--has-entry" role="gridcell" aria-label="今天，2026年9月9日" aria-selected="true"><span>9</span><i aria-hidden="true"></i></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月10日"><span>10</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月11日"><span>11</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月12日"><span>12</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月13日"><span>13</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月14日"><span>14</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月15日"><span>15</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月16日"><span>16</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月17日"><span>17</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月18日"><span>18</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月19日"><span>19</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月20日"><span>20</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月21日"><span>21</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月22日"><span>22</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月23日"><span>23</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月24日"><span>24</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月25日"><span>25</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月26日"><span>26</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月27日"><span>27</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月28日"><span>28</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月29日"><span>29</span></button>
-              <button class="calendar-popup__day" role="gridcell" aria-label="2026年9月30日"><span>30</span></button>
+            <div class="week-grid" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+            <div class="date-grid" role="grid" aria-label="2026 年 9 月">
+              <span></span><span></span>
+              <button class="date-button has-note" type="button">1</button><button class="date-button" type="button">2</button><button class="date-button" type="button">3</button><button class="date-button" type="button">4</button><button class="date-button has-note" type="button">5</button>
+              <button class="date-button" type="button">6</button><button class="date-button has-note" type="button">7</button><button class="date-button" type="button">8</button><button class="date-button has-note" type="button">9</button><button class="date-button" type="button">10</button><button class="date-button" type="button">11</button><button class="date-button" type="button">12</button>
+              <button class="date-button" type="button">13</button><button class="date-button" type="button">14</button><button class="date-button" type="button">15</button><button class="date-button" type="button">16</button><button class="date-button" type="button">17</button><button class="date-button" type="button">18</button><button class="date-button" type="button">19</button>
+              <button class="date-button" type="button">20</button><button class="date-button" type="button">21</button><button class="date-button" type="button">22</button><button class="date-button" type="button">23</button><button class="date-button" type="button">24</button><button class="date-button" type="button">25</button><button class="date-button" type="button">26</button>
+              <button class="date-button" type="button">27</button><button class="date-button" type="button">28</button><button class="date-button has-note" type="button" aria-current="date">29</button><button class="date-button" type="button">30</button>
             </div>
           </section>
 
-          <!-- E2：透明右侧卡栈，不能添加共享 surface。 -->
-          <div class="calendar-popup__workspace">
-            <div class="calendar-popup__workspace-scroll">
-              <!-- C1：定时任务悬浮纸面 -->
-              <section class="calendar-popup__section calendar-popup__task-section" aria-labelledby="scheduled-tasks-title">
-                <header class="calendar-popup__section-heading calendar-popup__card-header">
-                  <h3 id="scheduled-tasks-title">今天的定时任务</h3>
-                  <div class="calendar-popup__card-header-meta" aria-live="polite">
-                    <span class="calendar-popup__card-count">2 项</span>
-                    <button class="calendar-popup__count-alert" type="button">1 项需处理</button>
+          <div class="right-card-stack">
+            <section id="scheduled-paper" class="paper scheduled-paper" aria-labelledby="calendar-title">
+              <div class="task-list-view">
+                <header class="paper-header">
+                  <div><div class="eyebrow">Today</div><h2 id="calendar-title" class="serif">定时任务</h2><p class="paper-meta">2 项任务 · 1 项正在运行</p></div>
+                </header>
+                <form id="arrange-form" class="arrange">
+                  <span class="leading" aria-hidden="true"><i class="fa-solid fa-plus"></i></span>
+                  <input id="arrange-input" type="text" autocomplete="off" placeholder="安排任务" aria-label="安排任务">
+                  <button id="arrange-submit" class="round-submit" type="submit" aria-label="带入新的聊天草稿" disabled><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button>
+                </form>
+
+                <div class="task-list" aria-label="任务列表">
+                  <article class="task-item is-running">
+                    <div class="task-row">
+                      <button class="task-main" type="button" data-open-result aria-label="查看整理今日工作记录的最近运行结果">
+                        <span class="task-state" aria-hidden="true"><i class="fa-solid fa-pause"></i></span>
+                        <span class="task-copy"><strong>整理今日工作记录</strong><span>监测中 · 正在运行</span></span>
+                      </button>
+                      <div class="task-actions">
+                        <button class="icon-button" type="button" data-open-edit aria-label="编辑整理今日工作记录"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                        <button class="icon-button" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="更多任务操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
+                      </div>
+                    </div>
+                    <div class="task-menu" role="menu">
+                      <button type="button" role="menuitem"><i class="fa-solid fa-play" aria-hidden="true"></i><span>立即运行</span></button>
+                      <button type="button" role="menuitem" data-open-chat><i class="fa-regular fa-comment" aria-hidden="true"></i><span>打开聊天</span></button>
+                      <button type="button" role="menuitem"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>运行历史</span></button>
+                      <button type="button" role="menuitem"><i class="fa-solid fa-pause" aria-hidden="true"></i><span>暂停</span></button>
+                      <div class="danger"><button type="button" role="menuitem"><i class="fa-regular fa-trash-can" aria-hidden="true"></i><span>删除</span></button></div>
+                    </div>
+                  </article>
+                  <article class="task-item">
+                    <div class="task-row">
+                      <button class="task-main" type="button" data-open-result aria-label="查看每日回顾明日计划的最近运行结果">
+                        <span class="task-state" aria-hidden="true"><i class="fa-regular fa-clock"></i></span>
+                        <span class="task-copy"><strong>每日回顾明日计划</strong><span>每天 21:30 · 下次运行：今天</span></span>
+                      </button>
+                      <div class="task-actions">
+                        <button class="icon-button" type="button" data-open-edit aria-label="编辑每日回顾明日计划"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                        <button class="icon-button" type="button" aria-label="更多任务操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+
+              <section class="task-result" aria-labelledby="result-title">
+                <header class="result-header">
+                  <button class="icon-button" type="button" data-back-list aria-label="返回任务列表"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+                  <div class="result-heading"><h3 id="result-title" class="serif">整理今日工作记录</h3><p>已完成 · 今天 09:00</p></div>
+                  <div class="result-actions">
+                    <button class="icon-button" type="button" data-open-edit aria-label="编辑任务"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                    <button class="icon-button" type="button" aria-label="更多任务操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
                   </div>
                 </header>
-                <div class="calendar-popup__card-body">
-                  <div class="calendar-popup__task-list">
-                    <article class="calendar-popup__task calendar-popup__task--succeeded" tabindex="-1">
-                      <div class="calendar-popup__task-heading">
-                        <div class="calendar-popup__task-title-row">
-                          <h4>整理今天的写作回顾</h4>
-                          <span class="calendar-popup__status calendar-popup__status--succeeded">Active</span>
-                        </div>
-                        <button class="calendar-popup__icon-button" type="button" aria-label="更多操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
-                      </div>
-                      <dl class="calendar-popup__task-facts">
-                        <div><dt>计划</dt><dd>每天 21:30</dd></div>
-                        <div><dt>时区</dt><dd>Asia/Shanghai</dd></div>
-                        <div><dt>下次执行</dt><dd>今天 21:30</dd></div>
-                      </dl>
-                      <div class="calendar-popup__recent" aria-live="polite">
-                        <span>最近结果</span><strong>已完成 · 今天 09:12</strong>
-                      </div>
-                      <div class="calendar-popup__primary-actions">
-                        <button class="calendar-popup__button calendar-popup__button--primary" type="button">立即运行</button>
-                        <button class="calendar-popup__button calendar-popup__button--secondary" type="button">暂停</button>
-                        <button class="calendar-popup__button calendar-popup__button--quiet" type="button">历史</button>
-                      </div>
-                    </article>
-
-                    <article class="calendar-popup__task calendar-popup__task--failed" tabindex="-1">
-                      <div class="calendar-popup__task-heading">
-                        <div class="calendar-popup__task-title-row">
-                          <h4>生成每日灵感摘要</h4>
-                          <span class="calendar-popup__status">Paused</span>
-                        </div>
-                        <button class="calendar-popup__icon-button" type="button" aria-label="更多操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
-                      </div>
-                      <dl class="calendar-popup__task-facts">
-                        <div><dt>计划</dt><dd>每天 08:00</dd></div>
-                        <div><dt>时区</dt><dd>Asia/Shanghai</dd></div>
-                      </dl>
-                      <div class="calendar-popup__recent" aria-live="polite">
-                        <span>最近结果</span><strong>需要处理 · 会话未能启动</strong>
-                      </div>
-                      <div class="calendar-popup__primary-actions">
-                        <button class="calendar-popup__button calendar-popup__button--secondary" type="button">恢复</button>
-                        <button class="calendar-popup__button calendar-popup__button--quiet" type="button">查看历史</button>
-                      </div>
-                    </article>
-                  </div>
+                <div class="result-scroll" tabindex="0" aria-live="polite">
+                  <div class="time">9 月 29 日星期二 09:00</div>
+                  <p>今日工作记录已完成整理。以下内容来自本次运行对应的最终回复：</p>
+                  <ul><li>梳理了当前进行中的工作与阻塞项。</li><li>归纳了需要继续跟进的两项决策。</li><li>生成了可直接用于明日计划的行动清单。</li></ul>
+                  <p><strong>下一步：</strong>先处理最高优先级阻塞，再按行动清单继续执行。</p>
                 </div>
+                <footer class="result-footer"><button class="secondary-button" type="button" data-open-chat><i class="fa-regular fa-comment mr-2" aria-hidden="true"></i>打开聊天</button></footer>
               </section>
+            </section>
 
-              <!-- D2：日记悬浮纸面 -->
-              <section class="calendar-popup__section calendar-popup__diary-section" aria-labelledby="diary-title">
-                <header class="calendar-popup__section-heading calendar-popup__card-header">
-                  <h3 id="diary-title">今天的日记</h3>
-                  <span class="calendar-popup__card-count" aria-live="polite">2 篇</span>
-                </header>
-                <div class="calendar-popup__card-body">
-                  <div class="calendar-popup__diary-list">
-                    <article class="calendar-popup__diary calendar-popup__diary--current">
-                      <button type="button" class="calendar-popup__diary-open" aria-label="打开日记：Untitled">
-                        <span>12:00</span><em>当前笔记</em><strong>Untitled</strong>
-                      </button>
-                      <button type="button" class="calendar-popup__diary-delete" aria-label="删除日记：Untitled">删除</button>
-                    </article>
-                    <article class="calendar-popup__diary">
-                      <button type="button" class="calendar-popup__diary-open" aria-label="打开日记：晨间记录">
-                        <span>09:40</span><strong>晨间记录</strong>
-                      </button>
-                      <button type="button" class="calendar-popup__diary-delete" aria-label="删除日记：晨间记录">删除</button>
-                    </article>
-                  </div>
-                </div>
-              </section>
-            </div>
+            <section class="paper diary-paper" aria-labelledby="diary-title">
+              <header class="paper-header"><div><div class="eyebrow">Writing</div><h2 id="diary-title" class="serif">日记</h2><p class="paper-meta">2 篇记录</p></div></header>
+              <article class="diary-entry"><time>14:16</time><strong>今天的工作记录</strong><i class="fa-solid fa-angle-right" aria-hidden="true"></i></article>
+              <article class="diary-entry"><time>08:40</time><strong>清晨随笔</strong><i class="fa-solid fa-angle-right" aria-hidden="true"></i></article>
+            </section>
           </div>
-        </main>
+        </div>
       </div>
     </section>
+
+    <section id="chat-scene" class="scene chat-scene detail-open" aria-label="Chat 定时任务原型">
+      <div class="chat-workspace">
+        <section class="conversation" aria-label="聊天内容">
+          <header class="chat-head"><h1>整理工作记录与明日计划</h1><button class="icon-button" type="button" aria-label="更多会话操作"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button></header>
+          <div class="messages">
+            <article class="assistant-turn">
+              <p>我已经按每天 21:30 的计划创建任务。它会在计划时间通过现有任务执行链路运行，你可以从下方标记查看当前设置。</p>
+              <div class="tool-success"><i class="fa-regular fa-circle-check" aria-hidden="true"></i><span>定时任务已创建</span></div>
+              <div class="marker-group" aria-label="本次回复创建的定时任务">
+                <button class="scheduled-marker" type="button" data-open-detail aria-label="打开每日回顾明日计划的任务详情">
+                  <span class="marker-icon" aria-hidden="true"><i class="fa-regular fa-clock"></i></span>
+                  <span class="marker-copy"><strong>每日回顾明日计划</strong><span>每天 21:30 · Asia/Shanghai</span></span>
+                  <span class="marker-tail"><span>打开</span><i class="fa-solid fa-angle-right" aria-hidden="true"></i></span>
+                </button>
+              </div>
+            </article>
+          </div>
+          <div class="composer-wrap">
+            <p id="draft-note" class="draft-note">已带入新的可编辑草稿，尚未发送。</p>
+            <div class="composer"><button class="icon-button" type="button" aria-label="添加内容"><i class="fa-solid fa-plus" aria-hidden="true"></i></button><textarea id="chat-draft" placeholder="随心输入" aria-label="聊天输入"></textarea><button class="round-submit" type="button" aria-label="发送消息"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button></div>
+          </div>
+        </section>
+
+        <button class="drawer-backdrop" type="button" data-close-detail aria-label="关闭任务详情"></button>
+        <aside class="detail-sidebar" aria-labelledby="detail-title">
+          <header class="detail-head"><div><div class="eyebrow">Scheduled task</div><h2 id="detail-title" class="serif">任务详情</h2></div><button class="icon-button" type="button" data-close-detail aria-label="关闭任务详情"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+          <div class="detail-scroll">
+            <section class="detail-group" aria-labelledby="definition-heading">
+              <h3 id="definition-heading">任务定义</h3>
+              <dl><div class="detail-row"><dt>状态</dt><dd><span class="status-pill"><i class="fa-solid fa-circle text-xs" aria-hidden="true"></i>已启用</span></dd></div><div class="detail-row"><dt>标题</dt><dd>每日回顾明日计划</dd></div></dl>
+              <p class="prompt-block">整理今天的工作记录，提炼未完成事项，并生成明日优先行动清单。</p>
+            </section>
+            <section class="detail-group" aria-labelledby="frequency-heading">
+              <h3 id="frequency-heading">执行规则</h3>
+              <dl><div class="detail-row"><dt>频率</dt><dd>每天</dd></div><div class="detail-row"><dt>时间</dt><dd>21:30</dd></div><div class="detail-row"><dt>时区</dt><dd>Asia/Shanghai</dd></div><div class="detail-row"><dt>下次执行</dt><dd>今天 21:30</dd></div></dl>
+            </section>
+            <section class="detail-group" aria-labelledby="run-heading">
+              <h3 id="run-heading">最近运行</h3>
+              <dl><div class="detail-row"><dt>状态</dt><dd>已完成</dd></div><div class="detail-row"><dt>时间</dt><dd>今天 09:00</dd></div></dl>
+              <button class="secondary-button mt-4 w-full" type="button" data-open-chat>打开聊天</button>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="edit-layer" class="modal-layer" aria-hidden="true">
+    <section id="edit-modal" class="edit-modal" data-frequency="daily" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+      <header class="modal-head"><div><div class="eyebrow">每天</div><h2 id="edit-title" class="serif">编辑定时任务</h2></div><button id="edit-close" class="icon-button" type="button" aria-label="关闭编辑弹窗"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+      <div class="modal-body">
+        <div class="field"><label for="task-title">标题</label><input id="task-title" value="每日回顾明日计划"></div>
+        <div class="field"><label for="task-prompt">提示词</label><textarea id="task-prompt">整理今天的工作记录，提炼未完成事项，并生成明日优先行动清单。</textarea></div>
+        <fieldset class="field"><legend>频率</legend><div class="frequency-select"><button type="button" data-frequency="once" aria-pressed="false">单次</button><button type="button" data-frequency="daily" aria-pressed="true">每天</button></div></fieldset>
+        <div class="once-only rule-grid"><div class="field"><label for="task-date">日期</label><input id="task-date" type="date" value="2026-09-30"></div></div>
+        <div class="rule-grid"><div class="field"><label for="task-time">时间</label><input id="task-time" type="time" value="21:30"></div><div class="field"><label for="task-timezone">时区</label><select id="task-timezone"><option>Asia/Shanghai</option><option>Asia/Tokyo</option><option>Europe/London</option></select></div></div>
+        <p id="form-status" class="text-sm text-gray-500" aria-live="polite"></p>
+      </div>
+      <footer class="modal-foot"><button class="danger-button" type="button">暂停</button><div class="modal-foot-right"><button id="edit-cancel" class="secondary-button" type="button">取消</button><button id="edit-save" class="primary-button" type="button">保存</button></div></footer>
+    </section>
   </div>
+
+  <script>
+    const scenes = { calendar: document.getElementById('calendar-scene'), chat: document.getElementById('chat-scene') };
+    const scheduledPaper = document.getElementById('scheduled-paper');
+    const editLayer = document.getElementById('edit-layer');
+    const editModal = document.getElementById('edit-modal');
+    const chatDraft = document.getElementById('chat-draft');
+    let lastEditOpener = null;
+    let lastResultOpener = null;
+    let lastMarkerOpener = null;
+
+    function showScene(name) {
+      Object.entries(scenes).forEach(([key,node]) => node.classList.toggle('is-active', key === name));
+      document.querySelectorAll('[data-scene]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.scene === name)));
+    }
+    document.querySelectorAll('[data-scene]').forEach(button => button.addEventListener('click', () => showScene(button.dataset.scene)));
+
+    document.querySelectorAll('[data-open-result]').forEach(button => button.addEventListener('click', () => {
+      lastResultOpener = button;
+      scheduledPaper.classList.add('show-result');
+      scheduledPaper.querySelector('[data-back-list]').focus();
+    }));
+    document.querySelector('[data-back-list]').addEventListener('click', () => {
+      scheduledPaper.classList.remove('show-result');
+      lastResultOpener?.focus();
+    });
+
+    const menuButton = document.querySelector('[data-menu-toggle]');
+    const menu = document.querySelector('.task-menu');
+    menuButton.addEventListener('click', () => {
+      const open = !menu.classList.contains('is-open');
+      menu.classList.toggle('is-open', open);
+      menuButton.setAttribute('aria-expanded', String(open));
+      if (open) menu.querySelector('[role="menuitem"]:not(:disabled)').focus();
+    });
+    menu.addEventListener('keydown', event => {
+      const items = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+      const current = items.indexOf(document.activeElement);
+      if (event.key === 'Escape') { menu.classList.remove('is-open'); menuButton.setAttribute('aria-expanded','false'); menuButton.focus(); }
+      if (event.key === 'ArrowDown') { event.preventDefault(); items[(current + 1) % items.length].focus(); }
+      if (event.key === 'ArrowUp') { event.preventDefault(); items[(current - 1 + items.length) % items.length].focus(); }
+      if (event.key === 'Home') { event.preventDefault(); items[0].focus(); }
+      if (event.key === 'End') { event.preventDefault(); items[items.length - 1].focus(); }
+    });
+
+    document.querySelectorAll('[data-open-edit]').forEach(button => button.addEventListener('click', () => {
+      lastEditOpener = button;
+      editLayer.classList.add('is-open');
+      editLayer.setAttribute('aria-hidden','false');
+      document.getElementById('task-title').focus();
+    }));
+    function closeEdit() {
+      editLayer.classList.remove('is-open');
+      editLayer.setAttribute('aria-hidden','true');
+      lastEditOpener?.focus();
+    }
+    document.getElementById('edit-close').addEventListener('click', closeEdit);
+    document.getElementById('edit-cancel').addEventListener('click', closeEdit);
+    document.getElementById('edit-save').addEventListener('click', () => {
+      document.getElementById('form-status').textContent = '已保存当前任务设置。';
+      window.setTimeout(closeEdit, 450);
+    });
+    document.querySelectorAll('.frequency-select [data-frequency]').forEach(button => button.addEventListener('click', () => {
+      editModal.dataset.frequency = button.dataset.frequency;
+      document.querySelectorAll('.frequency-select [data-frequency]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    }));
+
+    const arrangeInput = document.getElementById('arrange-input');
+    const arrangeSubmit = document.getElementById('arrange-submit');
+    arrangeInput.addEventListener('input', () => { arrangeSubmit.disabled = !arrangeInput.value.trim(); });
+    document.getElementById('arrange-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const value = arrangeInput.value.trim();
+      if (!value) return;
+      showScene('chat');
+      chatDraft.value = '请创建定时任务：' + value;
+      document.getElementById('draft-note').classList.add('is-visible');
+      chatDraft.focus();
+    });
+
+    function openDetail(opener) {
+      lastMarkerOpener = opener;
+      scenes.chat.classList.add('detail-open');
+      scenes.chat.querySelector('[data-close-detail]').focus();
+    }
+    function closeDetail() {
+      scenes.chat.classList.remove('detail-open');
+      lastMarkerOpener?.focus();
+    }
+    document.querySelectorAll('[data-open-detail]').forEach(button => button.addEventListener('click', () => openDetail(button)));
+    document.querySelectorAll('[data-close-detail]').forEach(button => button.addEventListener('click', closeDetail));
+    document.querySelectorAll('[data-open-chat]').forEach(button => button.addEventListener('click', () => showScene('chat')));
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      if (editLayer.classList.contains('is-open')) return closeEdit();
+      if (scenes.chat.classList.contains('detail-open')) return closeDetail();
+      if (menu.classList.contains('is-open')) { menu.classList.remove('is-open'); menuButton.setAttribute('aria-expanded','false'); menuButton.focus(); }
+    });
+  </script>
 </body>
 </html>
 ```
 
-## 10. 现有生产类名迁移映射
+---
 
-本轮应修改既有类的视觉职责，不创建平行的 Calendar V2 组件。
+## 9. 状态覆盖清单
 
-| 现有生产类名 | 当前问题 | 目标职责/样式 |
-| --- | --- | --- |
-| `.modal-backdrop:has(.calendar-popup-modal)` | 仅通用遮罩 | 保留遮罩与背景隔离；为阴影提供安全内边距 |
-| `.modal-surface--default.calendar-popup-modal` | 仍绘制大纸底和大圆角 | 改为透明、无 border/radius/shadow；只控制最大尺寸和定位 |
-| `.calendar-popup-modal > .modal-header--default` | 形成可见顶栏 | 改为绝对/安全区定位层，不占标题栏高度 |
-| `.calendar-popup-modal .modal-title--default` | 可见 `Calendar` 标题重复 | 视觉隐藏，继续为 `aria-labelledby` 提供名称 |
-| `.calendar-popup-modal .modal-close--default` | 依赖顶栏定位 | 成为独立 44px 圆形关闭控件，轻阴影，键盘语义不变 |
-| `.calendar-popup-modal > .modal-content--default` | 可能裁切卡片阴影 | 固定可用高度并隐藏自身溢出，把滚动职责交给响应式业务布局 |
-| `.calendar-popup` | 两列线框容器 | 宽屏固定布局且不滚动；单列时成为统一滚动边界 |
-| `.calendar-popup__calendar` | 边框较强、阴影偏弱 | Paper Cream、24px 圆角、双层暖棕高度阴影 |
-| `.calendar-popup__workspace` | 可能仍像右侧面板 | 完全透明，无边框/背景/阴影 |
-| `.calendar-popup__date-summary` | 重复日期摘要 | 移除可见呈现；日期并入两张业务卡标题 |
-| `.calendar-popup__workspace-scroll` | 右栏内部滚动且可能裁影 | 宽屏独立滚动并保留阴影安全区，使月历固定；单列时恢复为透明普通卡栈 |
-| `.calendar-popup__section` | 独立卡但缺少悬浮高度 | 与月历相同纸色、24px 圆角和高度阴影 |
-| `.calendar-popup__section-heading` | 通用标题，日期上下文缺失 | 显示日期化标题和本卡数量；只保留底部一条淡线 |
-| `.calendar-popup__card-count` | 圆形数字徽章偏统计面板 | 改为“2 项/2 篇”次级文字；不再绘制独立圆形底 |
-| `.calendar-popup__task` | 每条任务有完整边框、底色和状态左边框 | 改为透明扁平信息组；相邻条目仅单线分隔 |
-| `.calendar-popup__task-facts > div` | 每个事实形成小框 | `display: contents` 或连续文字行；移除背景和 padding |
-| `.calendar-popup__recent` | 结果形成另一块事实框 | 并入次级文本组；保留 live region |
-| `.calendar-popup__edit-panel`, `.calendar-popup__history` | 卡中卡线框较重 | 仅浅色分组面；保留输入、错误等有意义边界，不加重阴影 |
-| `.calendar-popup__diary` | 普通条目边框可保留但不能悬浮 | 轻底/细边，无阴影 |
-| `.calendar-popup__diary--current` | 左侧粗色条偏线框 | 2px 绿色完整边界 + 极浅绿色底 + 文字 badge |
+### Calendar 列表与结果
 
-### 10.1 对应 JSX 结构调整边界
-
-- `Modal` 仍由 `CalendarPopup` 使用，不复制 portal、focus trap 或 Escape 逻辑。
-- `title={t('calendar.title')}` 继续传入；只在 CalendarPopup 的 CSS 作用域内将标题视觉隐藏。
-- `.calendar-popup__date-summary` 的可见标题移除后，任务和日记 heading 分别组合 `selectedDateLabel` 与现有业务标题。不得增加一个新的共享日期容器。
-- `.calendar-popup__task-section` 与 `.calendar-popup__diary-section` 继续是 `.calendar-popup__workspace-scroll` 的直接子级，父级保持透明。
-- `ScheduledTaskCard` 的数据、操作、状态机、菜单、编辑和历史不变；只把 facts/recent/展开区从多层线框改为排版分组。
-- 日记打开与删除仍是独立按钮，不能把整个 `<article>` 改成嵌套交互控件。
-
-## 11. 可访问性与语义验收
-
-1. dialog 保持 `role="dialog"`、`aria-modal="true"`、隐藏标题和稳定 `aria-labelledby`。
-2. 隐藏标题不能使用 `display: none` 或 `visibility: hidden`。
-3. 关闭按钮、上月、下月、更多、日记打开和删除均有本地化名称，触控目标至少 42px。
-4. DOM 顺序为月历 → 定时任务 → 日记，与宽窄屏视觉顺序一致。
-5. 今天、选中日期、有内容、当前日记、任务状态和失败状态均有文字或 ARIA 表达，不只依赖颜色。
-6. 任务卡和日记卡分别拥有 heading/section 关系；局部 live region 不播报整个 dialog。
-7. focus-visible 在浅色和深色主题均清晰；卡片阴影不能代替焦点环。
-8. Tab 循环、Escape 关闭和关闭后焦点恢复继续由现有 Modal 提供。
-
-## 12. 视觉实现验收清单
-
-### 12.1 必须成立
-
-- `.calendar-popup-modal` computed style：`background-color` 透明、`border-width: 0`、`box-shadow: none`。
-- 宽屏 `.calendar-popup` 不滚动，`.calendar-popup__workspace-scroll` 为唯一滚动边界；任务或历史增长时旁边的月历位置不变。
-- 宽屏短视口下月历纸面保持原位并允许自身内部滚动，最后一周日期必须可达。
-- 单列 `.calendar-popup` 为唯一滚动边界，右侧卡栈取消自身滚动，避免嵌套滚动。
-- `.calendar-popup__workspace` 与 `__workspace-scroll` 没有可见 surface。
-- `.calendar-popup__calendar`、`.calendar-popup__task-section`、`.calendar-popup__diary-section` 分别具有 Paper Cream 背景、完整圆角和非 `none` 暖棕阴影。
-- 宽屏可完整看到三张卡之间的透明遮罩间隙；任务卡和日记卡不共享纸色父级。
-- 可见文案不含独立 `Calendar` 标题、独立“今天”摘要或跨卡 `Tasks unknown` 汇总。
-- 任务和日记标题包含所选日期上下文。
-- 任务 facts/recent 不再呈现为多个带背景的小框。
-- 当前日记有绿色完整边界、浅绿底和“当前笔记”文字。
-- 1024px 与 640px 两个断点下无横向滚动，三张卡仍是独立纸面。
-- reduced-motion 下既有控件动画与过渡近似关闭。
-
-### 12.2 不得出现
-
-- 透明 dialog 外再新增一个可见 wrapper。
-- 右栏共享白底或任务/日记共同大卡。
-- 用阴影、边框和浅底同时重复包裹同一信息层级。
-- 新建任务入口、筛选、统计图、装饰图标、确认弹窗或任何新增业务功能。
-- 为实现视觉效果改动 Task、Thread、Run、revision、调度、错误或持久化语义。
-
-## 13. 设计自检结论
-
-| 检查项 | 结论 |
+| 状态 | 设计呈现 |
 | --- | --- |
-| 是否忠实于目标图的悬浮纸张关系 | 是。外层透明，纸张独立，使用暖棕柔和高度阴影 |
-| 是否删除了无关设计内容 | 是。不保留可见 Calendar 顶栏、独立日期摘要和共享右栏表面 |
-| 是否保留业务能力 | 是。任务查看/运行/暂停/恢复/编辑/历史/删除以及日记打开/删除均保留 |
-| 是否避免线框套娃 | 是。分类级仅三张纸面，任务内部改为扁平文本组 |
-| 是否覆盖宽窄屏和 reduced motion | 是。给出 1024px、640px 规则和 reduced-motion 样式 |
-| 是否可直接映射现有实现 | 是。原型和迁移表使用现有 Modal/CalendarPopup 类名，没有建立平行组件 |
+| tasks loading | 保留纸面头和安排入口；显示 2–3 行低对比骨架，`aria-live=polite` |
+| tasks empty | 保留安排入口；显示“暂无定时任务，可从上方开始安排” |
+| tasks API error | 局部暖红提示 + 重试；月历与 Diary 继续可用；任务数显示未知而非 0 |
+| trigger running | 活动行浅填充；左状态图形 + “正在运行”文字 |
+| result loading | C8 header/footer 保留；正文显示加载状态 |
+| succeeded | 精确 final message 交给现有 Chat Markdown |
+| failed | 失败原因 + 重试/历史；若同一 trigger 有 target Thread，保留打开聊天 |
+| state unknown | “结果待确认” + 刷新；不自动再次运行 |
+| result missing | “结果尚不可用”；不回退其他 assistant message |
+
+### 编辑 Modal
+
+| 状态 | 设计呈现 |
+| --- | --- |
+| pristine | 保存不可用；状态动作按 effective 显示 |
+| dirty | 保存可用 |
+| saving | 表单与动作禁用，保存按钮显示固定宽度进度反馈 |
+| field error | 错误靠近对应字段，desired 保留 |
+| revision conflict | Modal body 顶部显示冲突提示和 latest effective 摘要；desired 不覆盖 |
+| API error | 表单级错误与重试；Modal 不关闭 |
+
+### Chat marker 与详情
+
+| 状态 | 设计呈现 |
+| --- | --- |
+| Tool pending/running | 只显示现有 Tool UI，不生成成功 marker |
+| valid completed success | 在 owning turn 下生成 marker |
+| Tool explicit failure / malformed | 不生成成功 marker；不影响 Thread hydration |
+| detail loading | header + group skeleton |
+| detail API error | 标题快照 + 局部错误 + 重试，Chat 主区继续可用 |
+| deleted / inaccessible | 历史 marker 保留；详情说明当前不可用 |
+
+---
+
+## 10. 生产接入说明
+
+1. `CalendarPopup` 持有 LIST/RESULT、selected task、anchored menu 与 edit modal 协调；`ScheduledTaskCard` 只负责单行和动作事件。
+2. C8 使用既有 history 与 actor scoped Thread message 读取边界；正文复用 `ChatMarkdown`。
+3. C9 放入现有 `Modal`，不复制 focus trap、body lock 或 Escape 管理。
+4. Chat marker 投影函数保持无状态；实时与 hydration 共用同一函数：
+
+```ts
+type ScheduledTaskMarkerViewModel = {
+  taskId: string;
+  titleSnapshot: string;
+  ruleSnapshot: ScheduledTaskRule;
+  statusSnapshot: ScheduledTaskStatus;
+  revisionSnapshot: number;
+};
+
+function projectScheduledTaskMarker(toolPart: ExistingToolPart): ScheduledTaskMarkerViewModel | undefined {
+  // 严格匹配真实 tool name、completed lifecycle 与成功 output schema。
+  // 任一字段缺失即返回 undefined；不读取 assistant Markdown，不发网络请求。
+}
+```
+
+5. `ChatView` 作为右侧栏 owner，原子协调 `ScheduledTaskDetailSidebar`、File、Subagent 和 TaskSession；任一打开时关闭其他类型，不得叠出第二条右栏。
+6. C4 通过 App/ChatView 的草稿交接回调进入新 Chat，输入保持可编辑且未发送。
+
+---
+
+## 11. 验收清单
+
+- [ ] Calendar 仍是月历、任务、Diary 三张独立悬浮纸面；透明间隙清晰，外层没有共享线框盒。
+- [ ] 宽屏右卡栈独立滚动，任务列表和结果不会撑高或移动左侧月历。
+- [ ] 安排入口为空时不可提交；非空提交只进入新的 Chat 可编辑草稿，且不自动发送。
+- [ ] 任务行左状态、中标题摘要、右编辑/更多；三个点击边界互不嵌套。
+- [ ] 更多菜单只显示当前协议可执行动作；危险操作位于分隔线后。
+- [ ] 点击任务主体后在同一纸面展示 latest trigger；返回后焦点回原行。
+- [ ] 成功结果只渲染精确 final message；“打开聊天”只导航同一 trigger 的 target Thread。
+- [ ] 结果长正文自身滚动；结果头、底部动作和 Diary 保持可达。
+- [ ] 编辑使用共享 Modal；字段只覆盖现有 title/prompt/once/daily/date/time/timezone/status 能力。
+- [ ] Modal 的 desired 在字段错误、API 错误和 revision 冲突后仍保留。
+- [ ] Chat 成功 marker 只来自持久化 `create_scheduled_task` Tool success；刷新后可恢复。
+- [ ] marker 是单一 button；点击后右侧栏重读 current effective，不直接信任创建快照。
+- [ ] 桌面侧栏与消息列表分别滚动；窄屏变为 Drawer，并恢复焦点与背景滚动。
+- [ ] loading、empty、failed、state unknown、result missing、deleted 等状态均局部呈现。
+- [ ] 键盘可以完成打开结果、编辑、菜单导航、打开/关闭详情；所有图标按钮有可访问名称。
+- [ ] reduced motion 下禁用位移动画；任何断点没有横向页面滚动。
+
+---
+
+## 12. 实现边界
+
+- 不增加现有 DTO 未定义的调度字段、协作操作或输入媒介。
+- 不增加新的任务分类、推荐区、筛选器和管理仪表盘。
+- 不展示内部 task/thread/message ID、revision 数字、claim 或 schema capability。
+- 不复制消息 parser、SSE reducer、Thread hydration、Markdown renderer、Modal 或 side panel shell。

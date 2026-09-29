@@ -1,7 +1,8 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
-// [Output] Accessible responsive Calendar dialog with three independent floating paper surfaces for month, tasks, and diary entries.
+// [Output] Accessible responsive Calendar dialog with floating month/task/diary papers, compact task rows, result view, and edit/history modals.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
 // [Sync] 2026-09-29: move date context into task/diary headings and remove the visible outer summary surface for the floating-paper layout.
+// [Sync] 2026-09-29: add Chat handoff composer, latest-result replacement view, compact action rows, and independent task editor/history dialogs.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
@@ -15,7 +16,9 @@ import {
   type ScheduledTaskDefinitionResult, type ScheduledTaskRunResult, ScheduledTaskApiError,
 } from '../api/scheduledTaskApi';
 import Modal from './chat/Modal';
-import { IconMoreHorizontal } from './chat/Icons';
+import { IconArrowUp, IconClock, IconEdit, IconMoreHorizontal } from './chat/Icons';
+import ChatMarkdown from './chat/ChatMarkdown';
+import { fetchFullClaudeThreadMessages } from './chat/threadSessionHydration';
 import './CalendarPopup.css';
 
 interface Props {
@@ -26,6 +29,7 @@ interface Props {
   timezone: string;
   initialDateKey?: string | null;
   onOpenTaskThread?: (threadId: string) => void;
+  onArrangeTask?: (prompt: string) => void;
 }
 
 type CalendarListEntry = { id: string; timestamp: number; firstLine: string; state?: CalendarEntry['state'] };
@@ -105,29 +109,79 @@ function triggerTimestamp(trigger: ScheduledTrigger): number {
 }
 
 function recentTrigger(triggers: ScheduledTrigger[]): ScheduledTrigger | null {
-  const priority: Record<ScheduledTrigger['status'], number> = {
-    state_unknown: 0, failed: 1, running: 2, queued: 2, claimed: 2, succeeded: 3, skipped: 3,
-  };
-  return [...triggers].sort((left, right) => (
-    priority[left.status] - priority[right.status] || triggerTimestamp(right) - triggerTimestamp(left)
-  ))[0] ?? null;
+  return [...triggers].sort((left, right) => triggerTimestamp(right) - triggerTimestamp(left))[0] ?? null;
 }
 
-function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, onLayerChange,
-  onDraftDirtyChange, onCardRef, dateLocale }: {
+function ScheduledTaskResult({ task, triggers, onBack, onOpenThread, dateLocale }: {
+  task: ScheduledTask;
+  triggers: ScheduledTrigger[];
+  onBack: () => void;
+  onOpenThread?: (threadId: string) => void;
+  dateLocale: string;
+}) {
+  const { t } = useTranslation();
+  const [latest, setLatest] = useState<ScheduledTrigger | null>(() => recentTrigger(triggers));
+  const [result, setResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((response) => {
+      if (!active) return;
+      const merged = new Map(triggers.map((trigger) => [trigger.id, trigger]));
+      response.triggers.forEach((trigger) => merged.set(trigger.id, trigger));
+      setLatest(recentTrigger([...merged.values()]));
+    }).catch(() => { if (active) setLatest(recentTrigger(triggers)); });
+    return () => { active = false; };
+  }, [task.id, task.revision, triggers]);
+  useEffect(() => {
+    if (!latest?.target_thread_id || !latest.final_message_id) {
+      setResult(null); setLoading(false); setUnavailable(true); return;
+    }
+    const controller = new AbortController();
+    setLoading(true); setUnavailable(false); setResult(null);
+    fetchFullClaudeThreadMessages(latest.target_thread_id, controller.signal).then((snapshot) => {
+      const message = snapshot.messages.find((candidate) => candidate.id === latest.final_message_id
+        && candidate.role === 'assistant');
+      const text = message?.parts.flatMap((part) => part.type === 'text' && part.text ? [part.text] : []).join('\n\n').trim();
+      if (!text) throw new Error('Scheduled final message is unavailable.');
+      setResult(text);
+    }).catch(() => { if (!controller.signal.aborted) setUnavailable(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [latest?.final_message_id, latest?.target_thread_id]);
+  const latestTime = latest ? new Date(latest.scheduled_at ?? latest.created_at).toLocaleString(dateLocale, {
+    timeZone: task.rule.time_zone,
+  }) : null;
+  return <div className="calendar-popup__task-result">
+    <header>
+      <button type="button" onClick={onBack}>{t('calendar.scheduledBackToList')}</button>
+      <div><span>{t('calendar.scheduledResultTitle')}</span><strong>{task.title}</strong>
+        {latestTime ? <small>{latestTime}</small> : null}</div>
+    </header>
+    <div className="calendar-popup__task-result-scroll">
+      {loading ? <p role="status">{t('calendar.scheduledResultLoading')}</p> : null}
+      {unavailable ? <p role="alert">{t('calendar.scheduledResultUnavailable')}</p> : null}
+      {result && latest?.target_thread_id ? <ChatMarkdown text={result} workspaceSessionId={latest.target_thread_id} /> : null}
+    </div>
+    {latest?.target_thread_id && onOpenThread ? <footer><button type="button"
+      onClick={() => onOpenThread(latest.target_thread_id!)}>{t('calendar.scheduledOpenThread')}</button></footer> : null}
+  </div>;
+}
+
+function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResult,
+  onLayerChange, onDraftDirtyChange, onCardRef, dateLocale }: {
   task: ScheduledTask;
   triggers: ScheduledTrigger[];
   onAction: (task: ScheduledTask, action: ScheduledTaskAction, desired?: ScheduledTaskDesired) => Promise<ScheduledTaskActionResult>;
   onOpenThread?: (threadId: string) => void;
-  onRefresh: () => void;
+  onOpenResult: () => void;
   onLayerChange: (key: string, closer: (() => void) | null) => void;
   onDraftDirtyChange: (taskId: string, dirty: boolean) => void;
   onCardRef: (taskId: string, element: HTMLElement | null) => void;
   dateLocale: string;
 }) {
   const { t } = useTranslation();
-  const editPanelId = useId();
-  const historyPanelId = useId();
   const moreMenuId = useId();
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -152,100 +206,87 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, 
   const loadHistory = useCallback(async () => {
     setHistoryError(false); setHistoryLoadMoreError(false);
     try {
-      const result = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE);
-      setHistory(result.triggers);
-      setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
-      return result.triggers;
+      const response = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE);
+      setHistory(response.triggers); setHistoryHasMore(response.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
+      return response.triggers;
     } catch { setHistoryError(true); return null; }
   }, [task.id]);
-
   const loadOlderHistory = useCallback(async () => {
     if (!history?.length || historyLoadingMore) return;
     setHistoryLoadingMore(true); setHistoryLoadMoreError(false);
     try {
-      const oldestCreatedAt = [...history].sort((left, right) => triggerTimestamp(left) - triggerTimestamp(right))[0]?.created_at;
-      if (!oldestCreatedAt) { setHistoryHasMore(false); return; }
-      const result = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE, oldestCreatedAt);
+      const oldest = [...history].sort((left, right) => triggerTimestamp(left) - triggerTimestamp(right))[0]?.created_at;
+      if (!oldest) { setHistoryHasMore(false); return; }
+      const response = await getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE, oldest);
       setHistory((current) => {
         const merged = new Map((current ?? []).map((trigger) => [trigger.id, trigger]));
-        result.triggers.forEach((trigger) => merged.set(trigger.id, trigger));
+        response.triggers.forEach((trigger) => merged.set(trigger.id, trigger));
         return [...merged.values()];
       });
-      setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
+      setHistoryHasMore(response.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
     } catch { setHistoryLoadMoreError(true); }
     finally { setHistoryLoadingMore(false); }
   }, [history, historyLoadingMore, task.id]);
-
   useEffect(() => {
     let active = true;
-    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((result) => { if (active) {
-      setHistory(result.triggers); setHistoryHasMore(result.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
-    } })
-      .catch(() => { if (active) setHistoryError(true); });
+    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((response) => { if (active) {
+      setHistory(response.triggers); setHistoryHasMore(response.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
+    } }).catch(() => { if (active) setHistoryError(true); });
     return () => { active = false; };
   }, [task.id, task.revision]);
-
   useEffect(() => {
     onDraftDirtyChange(task.id, dirty);
     return () => onDraftDirtyChange(task.id, false);
   }, [dirty, onDraftDirtyChange, task.id]);
 
   const closeEditing = useCallback(() => {
-    if (dirty && !window.confirm(t('calendar.scheduledDiscardConfirm'))) return;
-    setDraft(null); setDefaultDraft(null); setFieldErrors({}); setConflictLatest(null);
-    requestAnimationFrame(() => moreButtonRef.current?.focus());
-  }, [dirty, t]);
+    setDraft(null); setDefaultDraft(null); setFieldErrors({}); setConflictLatest(null); setError(null);
+  }, []);
   const closeHistory = useCallback(() => {
     setHistoryOpen(false); requestAnimationFrame(() => moreButtonRef.current?.focus());
   }, []);
   const closeMore = useCallback(() => {
     setMoreOpen(false); requestAnimationFrame(() => moreButtonRef.current?.focus());
   }, []);
-
   useEffect(() => {
-    const layerKey = `scheduled-task-${task.id}`;
-    if (moreOpen) onLayerChange(layerKey, closeMore);
-    else if (editing) onLayerChange(layerKey, closeEditing);
-    else if (historyOpen) onLayerChange(layerKey, closeHistory);
-    else onLayerChange(layerKey, null);
-    return () => onLayerChange(layerKey, null);
-  }, [closeEditing, closeHistory, closeMore, editing, historyOpen, moreOpen, onLayerChange, task.id]);
-
-  useEffect(() => { if (editing) requestAnimationFrame(() => firstEditFieldRef.current?.focus()); }, [editing]);
+    const key = `scheduled-task-${task.id}`;
+    if (moreOpen) onLayerChange(key, closeMore); else onLayerChange(key, null);
+    return () => onLayerChange(key, null);
+  }, [closeMore, moreOpen, onLayerChange, task.id]);
 
   const knownTriggers = useMemo(() => {
     const merged = new Map((history ?? []).map((trigger) => [trigger.id, trigger]));
     triggers.forEach((trigger) => merged.set(trigger.id, trigger));
     return [...merged.values()];
   }, [history, triggers]);
-  const summaryTrigger = recentTrigger(knownTriggers);
+  const latest = recentTrigger(knownTriggers);
   const unresolved = knownTriggers.some((trigger) => UNRESOLVED_TRIGGER_STATES.has(trigger.status));
   const stateUnknown = knownTriggers.some((trigger) => trigger.status === 'state_unknown');
-  const actionLabel = (action: string) => t('calendar.scheduledActionAria', { action, title: task.title });
   const statusLabel = (status: string) => t(`calendar.scheduledStatus.${status}`, { defaultValue: status });
+  const actionLabel = (action: string) => t('calendar.scheduledActionAria', { action, title: task.title });
   const formatTime = (value: string) => new Date(value).toLocaleString(dateLocale, {
     timeZone: task.rule.time_zone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-  const formatTriggerTime = (trigger: ScheduledTrigger) => formatTime(trigger.scheduled_at ?? trigger.created_at);
   const planText = (definition: ScheduledTask = task) => definition.rule.kind === 'once'
-    ? `${definition.rule.local_date} ${definition.rule.local_time} (${definition.rule.time_zone})`
-    : `${t('calendar.scheduledDaily')} ${definition.rule.local_time} (${definition.rule.time_zone})`;
+    ? `${definition.rule.local_date} · ${definition.rule.local_time}`
+    : `${t('calendar.scheduledDaily')} · ${definition.rule.local_time}`;
+  const summary = latest && ACTIVE_TRIGGER_STATES.has(latest.status) ? statusLabel(latest.status)
+    : latest?.status === 'failed' || latest?.status === 'state_unknown' ? statusLabel(latest.status)
+    : task.status === 'paused' ? t('calendar.scheduledStatus.paused')
+    : task.next_run_at ? `${planText()} · ${t('calendar.scheduledNext')} ${formatTime(task.next_run_at)}`
+      : planText();
 
   const openEditing = () => {
-    const nextDraft = draftFromTask(task);
-    setDefaultDraft(nextDraft); setDraft(nextDraft); setFieldErrors({}); setConflictLatest(null);
-    setError(null); setMoreOpen(false);
+    const next = draftFromTask(task);
+    setDefaultDraft(next); setDraft(next); setFieldErrors({}); setConflictLatest(null); setError(null); setMoreOpen(false);
   };
-
-  const toggleMore = () => {
-    setMoreOpen((current) => {
-      const next = !current;
-      if (next) requestAnimationFrame(() => moreMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
-      return next;
-    });
-  };
+  const toggleMore = () => setMoreOpen((current) => {
+    const next = !current;
+    if (next) requestAnimationFrame(() => moreMenuRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus());
+    return next;
+  });
   const handleMoreKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = [...(moreMenuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+    const items = [...(moreMenuRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])') ?? [])];
     if (items.length === 0) return;
     const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
     const next = event.key === 'ArrowDown' ? (current + 1) % items.length
@@ -259,220 +300,124 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onRefresh, 
     let desired: ScheduledTaskDesired | undefined;
     if (action === 'edit') {
       if (!draft) return;
-      const validation = validateDraft(draft);
-      setFieldErrors(validation);
-      if (Object.keys(validation).length > 0) return;
+      const validation = validateDraft(draft); setFieldErrors(validation);
+      if (Object.keys(validation).length) return;
       desired = desiredFromDraft(draft);
     }
     setBusyAction(action); setError(null);
     try {
       const result = await onAction(action === 'edit' && conflictLatest ? conflictLatest : task, action, desired);
-      if ('trigger' in result) {
-        setHistory((items) => items
-          ? [result.trigger, ...items.filter((item) => item.id !== result.trigger.id)]
-          : [result.trigger]);
-      }
-      if (action === 'edit') { setDraft(null); setDefaultDraft(null); setConflictLatest(null); }
+      if ('trigger' in result) setHistory((items) => [result.trigger, ...(items ?? []).filter((item) => item.id !== result.trigger.id)]);
+      if (action === 'edit') closeEditing();
       if (action === 'run') setRunOutcomeUnknown(false);
       if (historyOpen) await loadHistory();
     } catch (cause) {
       if (cause instanceof ScheduledTaskConflictError && action === 'edit') {
         setConflictLatest(cause.latest); setError(t('calendar.scheduledConflict'));
-      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_LOCAL_TIME_MISSING') {
-        setError(t('calendar.scheduledLocalTimeMissing'));
-      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_REQUIRED') {
-        setError(t('calendar.scheduledOffsetRequired'));
-      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_INVALID') {
-        setError(t('calendar.scheduledOffsetInvalid'));
-      } else if (cause instanceof ScheduledTaskApiError
-        && ['SCHEDULE_INPUT_INVALID', 'SCHEDULE_RULE_INVALID', 'SCHEDULE_DATE_INVALID',
-          'SCHEDULE_TIME_INVALID', 'SCHEDULE_TIME_ZONE_INVALID'].includes(cause.code)) {
-        setError(t('calendar.scheduledInputInvalid'));
-      } else if (action === 'run' && !(cause instanceof ScheduledTaskApiError)) {
+      } else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_LOCAL_TIME_MISSING') setError(t('calendar.scheduledLocalTimeMissing'));
+      else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_REQUIRED') setError(t('calendar.scheduledOffsetRequired'));
+      else if (cause instanceof ScheduledTaskApiError && cause.code === 'SCHEDULE_OFFSET_INVALID') setError(t('calendar.scheduledOffsetInvalid'));
+      else if (cause instanceof ScheduledTaskApiError && ['SCHEDULE_INPUT_INVALID', 'SCHEDULE_RULE_INVALID', 'SCHEDULE_DATE_INVALID', 'SCHEDULE_TIME_INVALID', 'SCHEDULE_TIME_ZONE_INVALID'].includes(cause.code)) setError(t('calendar.scheduledInputInvalid'));
+      else if (action === 'run' && !(cause instanceof ScheduledTaskApiError)) {
         setRunOutcomeUnknown(true); setError(t('calendar.scheduledRunOutcomeUnknown'));
-      } else { setError(t('calendar.scheduledActionError')); }
+      } else setError(t('calendar.scheduledActionError'));
     } finally { setBusyAction(null); }
   };
-
-  const updateDraft = (change: Partial<EditDraft>, scheduleChanged = false) => {
-    setDraft((current) => current ? { ...current, ...change,
-      ...(scheduleChanged ? { selectedOffsetMinutes: null } : {}) } : current);
-  };
-
+  const updateDraft = (change: Partial<EditDraft>, scheduleChanged = false) => setDraft((current) => current ? {
+    ...current, ...change, ...(scheduleChanged ? { selectedOffsetMinutes: null } : {}),
+  } : current);
   const conflictFields = useMemo(() => {
     if (!draft || !conflictLatest) return [];
-    const latest = draftFromTask(conflictLatest);
-    const fields: string[] = [];
-    if (draft.title.trim() !== latest.title) fields.push(t('calendar.scheduledTitle'));
-    if (draft.prompt.trim() !== latest.prompt) fields.push(t('calendar.scheduledPrompt'));
-    if (draft.kind !== latest.kind) fields.push(t('calendar.scheduledRule'));
-    if (draft.kind === 'once' && draft.localDate !== latest.localDate) fields.push(t('calendar.scheduledDate'));
-    if (draft.localTime !== latest.localTime) fields.push(t('calendar.scheduledTime'));
-    if (draft.timeZone.trim() !== latest.timeZone) fields.push(t('calendar.scheduledTimeZone'));
+    const current = draftFromTask(conflictLatest); const fields: string[] = [];
+    if (draft.title.trim() !== current.title) fields.push(t('calendar.scheduledTitle'));
+    if (draft.prompt.trim() !== current.prompt) fields.push(t('calendar.scheduledPrompt'));
+    if (draft.kind !== current.kind) fields.push(t('calendar.scheduledRule'));
+    if (draft.kind === 'once' && draft.localDate !== current.localDate) fields.push(t('calendar.scheduledDate'));
+    if (draft.localTime !== current.localTime) fields.push(t('calendar.scheduledTime'));
+    if (draft.timeZone.trim() !== current.timeZone) fields.push(t('calendar.scheduledTimeZone'));
     return fields;
   }, [conflictLatest, draft, t]);
 
-  if (task.status === 'deleted') {
-    return <article ref={(element) => onCardRef(task.id, element)} tabIndex={-1}
-      className="calendar-popup__undo-row" aria-label={`${statusLabel(task.status)}: ${task.title}`}>
-      <div><strong>{t('calendar.scheduledDeletedTitle', { title: task.title })}</strong>
-        {unresolved ? <span aria-live="polite">{t('calendar.scheduledDeletedRunning')}</span> : null}</div>
-      <button type="button" className="calendar-popup__button calendar-popup__button--secondary"
-        disabled={busyAction !== null} aria-label={actionLabel(t('calendar.scheduledRestore'))}
-        onClick={() => void perform('restore')}>
-        {busyAction === 'restore' ? t('calendar.scheduledSaving') : t('calendar.scheduledRestore')}
-      </button>
-      {error ? <div className="calendar-popup__alert" role="alert">{error}</div> : null}
-    </article>;
-  }
+  if (task.status === 'deleted') return <article ref={(element) => onCardRef(task.id, element)} tabIndex={-1}
+    className="calendar-popup__undo-row"><div><strong>{t('calendar.scheduledDeletedTitle', { title: task.title })}</strong>
+      {unresolved ? <span>{t('calendar.scheduledDeletedRunning')}</span> : null}</div>
+    <button type="button" disabled={busyAction !== null} onClick={() => void perform('restore')}>{t('calendar.scheduledRestore')}</button></article>;
 
   const historyRows = [...(history ?? [])].sort((left, right) => triggerTimestamp(right) - triggerTimestamp(left));
-  return <article ref={(element) => onCardRef(task.id, element)} tabIndex={-1}
-    className={`calendar-popup__task calendar-popup__task--${summaryTrigger?.status ?? task.status}`}>
-    <div className="calendar-popup__task-heading">
-      <div><h4>{task.title}</h4><span className={`calendar-popup__status calendar-popup__status--${task.status}`}>
-        {statusLabel(task.status)}</span></div>
+  return <>
+    <article ref={(element) => onCardRef(task.id, element)} tabIndex={-1}
+      className={`calendar-popup__task calendar-popup__task--${latest?.status ?? task.status}`}>
+      <span className="calendar-popup__task-state" aria-label={statusLabel(task.status)}><IconClock aria-hidden="true" /></span>
+      <button type="button" className="calendar-popup__task-open" onClick={onOpenResult}>
+        <strong>{task.title}</strong><small>{summary}</small>
+      </button>
+      {task.status === 'active' || task.status === 'paused' ? <button type="button"
+        className="calendar-popup__icon-button calendar-popup__edit-button"
+        aria-label={actionLabel(t('calendar.scheduledEdit'))} onClick={openEditing}><IconEdit aria-hidden="true" /></button>
+        : <span aria-hidden="true" />}
       <div className="calendar-popup__more-wrap">
         <button ref={moreButtonRef} type="button" className="calendar-popup__icon-button"
           aria-label={actionLabel(t('calendar.scheduledMore'))} aria-haspopup="menu" aria-expanded={moreOpen}
-          aria-controls={moreMenuId} disabled={busyAction !== null} onClick={toggleMore}>
-          <IconMoreHorizontal aria-hidden="true" />
-        </button>
-        {moreOpen ? <div ref={moreMenuRef} id={moreMenuId} className="calendar-popup__more-menu" role="menu"
-          onKeyDown={handleMoreKeyDown}>
-          {(task.status === 'active' || task.status === 'paused') ?
-            <button type="button" role="menuitem"
-              aria-label={actionLabel(t('calendar.scheduledEdit'))} onClick={openEditing}>{t('calendar.scheduledEdit')}</button> : null}
-          <button type="button" role="menuitem" aria-label={actionLabel(t('calendar.scheduledHistory'))} onClick={() => {
-            setMoreOpen(false); setHistoryOpen(true); if (history === null) void loadHistory();
-          }}>{t('calendar.scheduledHistory')}</button>
-          <button type="button" role="menuitem" className="calendar-popup__danger-action"
-            aria-label={actionLabel(t('calendar.scheduledDelete'))}
-            onClick={() => { setMoreOpen(false); void perform('delete'); }}>{t('calendar.scheduledDelete')}</button>
+          aria-controls={moreMenuId} disabled={busyAction !== null} onClick={toggleMore}><IconMoreHorizontal aria-hidden="true" /></button>
+        {moreOpen ? <div ref={moreMenuRef} id={moreMenuId} className="calendar-popup__more-menu" role="menu" onKeyDown={handleMoreKeyDown}>
+          <button type="button" role="menuitem" disabled={stateUnknown || task.status === 'paused'} onClick={() => { setMoreOpen(false); void perform('run'); }}>{t('calendar.scheduledRun')}</button>
+          <button type="button" role="menuitem" disabled={!latest?.target_thread_id || !onOpenThread} onClick={() => { setMoreOpen(false); if (latest?.target_thread_id) onOpenThread?.(latest.target_thread_id); }}>{t('calendar.scheduledOpenThread')}</button>
+          <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); setHistoryOpen(true); if (history === null) void loadHistory(); }}>{t('calendar.scheduledHistory')}</button>
+          {task.status === 'active' ? <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); void perform('pause'); }}>{t('calendar.scheduledPause')}</button> : null}
+          {task.status === 'paused' ? <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); void perform('resume'); }}>{t('calendar.scheduledResume')}</button> : null}
+          <hr /><button type="button" role="menuitem" className="calendar-popup__danger-action" onClick={() => { setMoreOpen(false); void perform('delete'); }}>{t('calendar.scheduledDelete')}</button>
         </div> : null}
       </div>
-    </div>
-    <dl className="calendar-popup__task-facts">
-      <div><dt>{t('calendar.scheduledRule')}</dt><dd>{planText()}</dd></div>
-      <div><dt>{t('calendar.scheduledNext')}</dt><dd>{task.next_run_at ? formatTime(task.next_run_at)
-        : task.status === 'paused' ? t('calendar.scheduledNextPaused')
-          : task.status === 'exhausted' ? t('calendar.scheduledNextExhausted')
-            : t('calendar.scheduledNextUnavailable')}</dd></div>
-    </dl>
-    <div className="calendar-popup__recent" aria-live="polite">
-      <span>{t('calendar.scheduledRecent')}</span>
-      {summaryTrigger ? <div><strong>{statusLabel(summaryTrigger.status)}</strong><small>{formatTriggerTime(summaryTrigger)}</small>
-        {summaryTrigger.status === 'failed' ? <p>{t('calendar.scheduledFailure')}</p> : null}
-        {summaryTrigger.status === 'state_unknown' ? <p>{t('calendar.scheduledUnknown')}</p> : null}
-        {summaryTrigger.status === 'skipped' ? <p>{t('calendar.scheduledSkipped')}</p> : null}</div>
-        : <strong>{t('calendar.scheduledNeverRun')}</strong>}
-    </div>
-    <div className="calendar-popup__primary-actions">
-      {(task.status === 'active' || task.status === 'exhausted') ? <button type="button"
-        className="calendar-popup__button calendar-popup__button--primary"
-        disabled={busyAction !== null || stateUnknown}
-        aria-label={actionLabel(runOutcomeUnknown ? t('calendar.scheduledCheckRun') : t('calendar.scheduledRun'))}
-        title={stateUnknown ? t('calendar.scheduledRunBlocked') : undefined} onClick={() => void perform('run')}>
-        {busyAction === 'run' ? t('calendar.scheduledRequesting')
-          : runOutcomeUnknown ? t('calendar.scheduledCheckRun') : t('calendar.scheduledRun')}</button> : null}
-      {task.status === 'active' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary"
-        disabled={busyAction !== null} aria-label={actionLabel(t('calendar.scheduledPause'))}
-        onClick={() => void perform('pause')}>{t('calendar.scheduledPause')}</button> : null}
-      {task.status === 'paused' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary"
-        disabled={busyAction !== null} aria-label={actionLabel(t('calendar.scheduledResume'))}
-        onClick={() => void perform('resume')}>{t('calendar.scheduledResume')}</button> : null}
-      {summaryTrigger?.target_thread_id && onOpenThread && task.status !== 'exhausted' ? <button type="button"
-        className="calendar-popup__button calendar-popup__button--quiet"
-        aria-label={actionLabel(t('calendar.scheduledOpenThread'))}
-        onClick={() => onOpenThread(summaryTrigger.target_thread_id!)}>{t('calendar.scheduledOpenThread')}</button> : null}
-    </div>
-    {stateUnknown ? <p className="calendar-popup__hint" aria-live="polite">{t('calendar.scheduledRunBlocked')}</p> : null}
-    {error ? <div className="calendar-popup__alert" role="alert"><span>{error}</span></div> : null}
+      {error ? <div className="calendar-popup__alert" role="alert">{error}</div> : null}
+      {runOutcomeUnknown ? <button type="button" className="calendar-popup__refresh-link"
+        onClick={() => void perform('run')}>{t('calendar.scheduledCheckRun')}</button> : null}
+    </article>
 
-    {editing && draft ? <form id={editPanelId} className="calendar-popup__edit-panel"
-      onSubmit={(event) => { event.preventDefault(); void perform('edit'); }}>
-      <h5>{t('calendar.scheduledEditTitle', { title: task.title })}</h5>
-      <label><span>{t('calendar.scheduledTitle')}</span><input ref={firstEditFieldRef} value={draft.title}
-        aria-invalid={Boolean(fieldErrors.title)} onChange={(event) => updateDraft({ title: event.target.value })} />
-        {fieldErrors.title ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
-      <label><span>{t('calendar.scheduledPrompt')}</span><textarea value={draft.prompt} rows={4}
-        aria-invalid={Boolean(fieldErrors.prompt)} onChange={(event) => updateDraft({ prompt: event.target.value })} />
-        {fieldErrors.prompt ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
-      <label><span>{t('calendar.scheduledRule')}</span><select value={draft.kind}
-        onChange={(event) => updateDraft({ kind: event.target.value as ScheduledRule['kind'] }, true)}>
-        <option value="once">{t('calendar.scheduledOnce')}</option><option value="daily">{t('calendar.scheduledDaily')}</option>
-      </select></label>
-      {draft.kind === 'once' ? <label><span>{t('calendar.scheduledDate')}</span><input type="date" value={draft.localDate}
-        aria-invalid={Boolean(fieldErrors.localDate)} onChange={(event) => updateDraft({ localDate: event.target.value }, true)} />
-        {fieldErrors.localDate ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label> : null}
-      <label><span>{t('calendar.scheduledTime')}</span><input type="time" value={draft.localTime}
-        aria-invalid={Boolean(fieldErrors.localTime)} onChange={(event) => updateDraft({ localTime: event.target.value }, true)} />
-        {fieldErrors.localTime ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
-      <label><span>{t('calendar.scheduledTimeZone')}</span><input value={draft.timeZone}
-        aria-invalid={Boolean(fieldErrors.timeZone)} onChange={(event) => updateDraft({ timeZone: event.target.value }, true)} />
-        {fieldErrors.timeZone ? <small role="alert">{t('calendar.scheduledTimeZoneInvalid')}</small> : null}</label>
-      {draft.kind === 'once' && draft.selectedOffsetMinutes !== null ? <p className="calendar-popup__offset-note">
-        {t('calendar.scheduledSelectedOffset', { offset: draft.selectedOffsetMinutes })}</p> : null}
-      {conflictLatest ? <div className="calendar-popup__conflict" role="alert">
-        <strong>{t('calendar.scheduledLatestEffective')}</strong><p>{conflictLatest.title} · {planText(conflictLatest)}</p>
-        <p>{t('calendar.scheduledConflictFields', { fields: conflictFields.length > 0
-          ? conflictFields.join(', ') : t('calendar.scheduledConflictNoFields') })}</p>
-        <div><button type="submit" disabled={busyAction !== null}
-          aria-label={actionLabel(t('calendar.scheduledRetryLatest'))}>{t('calendar.scheduledRetryLatest')}</button>
-          <button type="button" aria-label={actionLabel(t('calendar.scheduledDiscardDraft'))}
-            onClick={() => { setDraft(null); setDefaultDraft(null); setConflictLatest(null);
-            setError(null); requestAnimationFrame(() => moreButtonRef.current?.focus()); }}>
-            {t('calendar.scheduledDiscardDraft')}</button></div>
-      </div> : null}
-      <div className="calendar-popup__edit-actions"><button type="submit"
-        className="calendar-popup__button calendar-popup__button--primary" disabled={busyAction !== null}
-        aria-label={actionLabel(t('calendar.scheduledSave'))}>
-        {busyAction === 'edit' ? t('calendar.scheduledSaving') : t('calendar.scheduledSave')}</button>
-        <button type="button" className="calendar-popup__button calendar-popup__button--quiet"
-          aria-label={actionLabel(t('calendar.scheduledCancel'))} onClick={closeEditing}>
-          {t('calendar.scheduledCancel')}</button></div>
-    </form> : null}
+    <Modal open={editing} title={t('calendar.scheduledEditTitle', { title: task.title })} closeLabel={t('calendar.scheduledCancel')}
+      onClose={closeEditing} initialFocusRef={firstEditFieldRef} surfaceClassName="calendar-popup-task-editor">
+      {draft ? <form className="calendar-popup__edit-panel" onSubmit={(event) => { event.preventDefault(); void perform('edit'); }}>
+        <p className="calendar-popup__editor-kicker">{draft.kind === 'once' ? t('calendar.scheduledOnce') : t('calendar.scheduledDaily')}</p>
+        <label><span>{t('calendar.scheduledTitle')}</span><input ref={firstEditFieldRef} value={draft.title}
+          aria-invalid={Boolean(fieldErrors.title)} onChange={(event) => updateDraft({ title: event.target.value })} />
+          {fieldErrors.title ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
+        <label><span>{t('calendar.scheduledPrompt')}</span><textarea value={draft.prompt} rows={8}
+          aria-invalid={Boolean(fieldErrors.prompt)} onChange={(event) => updateDraft({ prompt: event.target.value })} />
+          {fieldErrors.prompt ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
+        <label><span>{t('calendar.scheduledRule')}</span><select value={draft.kind}
+          onChange={(event) => updateDraft({ kind: event.target.value as ScheduledRule['kind'] }, true)}>
+          <option value="once">{t('calendar.scheduledOnce')}</option><option value="daily">{t('calendar.scheduledDaily')}</option></select></label>
+        {draft.kind === 'once' ? <label><span>{t('calendar.scheduledDate')}</span><input type="date" value={draft.localDate}
+          aria-invalid={Boolean(fieldErrors.localDate)} onChange={(event) => updateDraft({ localDate: event.target.value }, true)} /></label> : null}
+        <label><span>{t('calendar.scheduledTime')}</span><input type="time" value={draft.localTime}
+          aria-invalid={Boolean(fieldErrors.localTime)} onChange={(event) => updateDraft({ localTime: event.target.value }, true)} /></label>
+        <label><span>{t('calendar.scheduledTimeZone')}</span><input value={draft.timeZone}
+          aria-invalid={Boolean(fieldErrors.timeZone)} onChange={(event) => updateDraft({ timeZone: event.target.value }, true)} /></label>
+        {conflictLatest ? <div className="calendar-popup__conflict" role="alert"><strong>{t('calendar.scheduledLatestEffective')}</strong>
+          <p>{conflictLatest.title} · {planText(conflictLatest)}</p><p>{t('calendar.scheduledConflictFields', { fields: conflictFields.join(', ') || t('calendar.scheduledConflictNoFields') })}</p></div> : null}
+        {error ? <div className="calendar-popup__alert" role="alert">{error}</div> : null}
+        <div className="calendar-popup__edit-actions">
+          {task.status === 'active' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary" disabled={busyAction !== null} onClick={() => void perform('pause')}>{t('calendar.scheduledPause')}</button> : null}
+          {task.status === 'paused' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary" disabled={busyAction !== null} onClick={() => void perform('resume')}>{t('calendar.scheduledResume')}</button> : null}
+          <button type="submit" className="calendar-popup__button calendar-popup__button--primary" disabled={busyAction !== null}>{busyAction === 'edit' ? t('calendar.scheduledSaving') : t('calendar.scheduledSave')}</button>
+        </div>
+      </form> : null}
+    </Modal>
 
-    {historyOpen ? <section id={historyPanelId} className="calendar-popup__history" aria-labelledby={`${historyPanelId}-title`}>
-      <div className="calendar-popup__subpanel-heading"><h5 id={`${historyPanelId}-title`}>
-        {t('calendar.scheduledHistoryTitle', { title: task.title })}</h5>
-        <button type="button" className="calendar-popup__button calendar-popup__button--quiet"
-          aria-label={actionLabel(t('calendar.scheduledClosePanel'))} onClick={closeHistory}>
-          {t('calendar.scheduledClosePanel')}</button></div>
-      {historyError ? <div className="calendar-popup__alert" role="alert">{t('calendar.scheduledHistoryUnavailable')}
-        <button type="button" aria-label={actionLabel(t('calendar.scheduledRetry'))}
-          onClick={() => void loadHistory()}>{t('calendar.scheduledRetry')}</button></div>
-        : history === null ? <div className="calendar-popup__loading" aria-live="polite">{t('calendar.scheduledLoadingHistory')}</div>
-          : historyRows.length === 0 ? <p>{t('calendar.scheduledNoHistory')}</p> : <ol>{historyRows.map((trigger) => <li key={trigger.id}>
-            <div><strong>{trigger.kind === 'manual' ? t('calendar.scheduledManual') : t('calendar.scheduledPlanned')}</strong>
-              <span className={`calendar-popup__status calendar-popup__status--${trigger.status}`}>{statusLabel(trigger.status)}</span></div>
-            <time>{formatTriggerTime(trigger)}</time>
-            {trigger.status === 'failed' ? <p>{t('calendar.scheduledFailure')}</p> : null}
-            {trigger.status === 'state_unknown' ? <p>{t('calendar.scheduledUnknown')}</p> : null}
-            {trigger.status === 'skipped' ? <p>{t('calendar.scheduledSkipped')}</p> : null}
-            {trigger.target_thread_id && onOpenThread ? <button type="button"
-              className="calendar-popup__button calendar-popup__button--quiet" aria-label={actionLabel(t('calendar.scheduledOpenThread'))}
-              onClick={() => onOpenThread(trigger.target_thread_id!)}>{t('calendar.scheduledOpenThread')}</button> : null}
-          </li>)}</ol>}
-      {!historyError && history !== null && historyHasMore ? <button type="button"
-        className="calendar-popup__button calendar-popup__button--secondary calendar-popup__history-more"
-        disabled={historyLoadingMore} aria-label={actionLabel(t('calendar.scheduledLoadOlder'))}
-        onClick={() => void loadOlderHistory()}>
-        {historyLoadingMore ? t('calendar.scheduledLoadingOlder') : t('calendar.scheduledLoadOlder')}
-      </button> : null}
-      {historyLoadMoreError ? <div className="calendar-popup__alert" role="alert">
-        {t('calendar.scheduledOlderHistoryUnavailable')}
-        <button type="button" aria-label={actionLabel(t('calendar.scheduledRetry'))}
-          onClick={() => void loadOlderHistory()}>{t('calendar.scheduledRetry')}</button>
-      </div> : null}
-    </section> : null}
-    {runOutcomeUnknown ? <button type="button" className="calendar-popup__refresh-link" onClick={onRefresh}>
-      {t('calendar.scheduledRefreshDate')}</button> : null}
-  </article>;
+    <Modal open={historyOpen} title={t('calendar.scheduledHistoryTitle', { title: task.title })}
+      closeLabel={t('calendar.scheduledClosePanel')} onClose={closeHistory} surfaceClassName="calendar-popup-task-history">
+      <section className="calendar-popup__history">
+        {historyError ? <div className="calendar-popup__alert" role="alert">{t('calendar.scheduledHistoryUnavailable')}<button type="button" onClick={() => void loadHistory()}>{t('calendar.scheduledRetry')}</button></div>
+          : history === null ? <p>{t('calendar.scheduledLoadingHistory')}</p>
+            : historyRows.length === 0 ? <p>{t('calendar.scheduledNoHistory')}</p>
+              : <ol>{historyRows.map((trigger) => <li key={trigger.id}><div><strong>{trigger.kind === 'manual' ? t('calendar.scheduledManual') : t('calendar.scheduledPlanned')}</strong><span>{statusLabel(trigger.status)}</span></div><time>{new Date(trigger.scheduled_at ?? trigger.created_at).toLocaleString(dateLocale)}</time>{trigger.target_thread_id && onOpenThread ? <button type="button" onClick={() => onOpenThread(trigger.target_thread_id!)}>{t('calendar.scheduledOpenThread')}</button> : null}</li>)}</ol>}
+        {!historyError && history !== null && historyHasMore ? <button type="button" disabled={historyLoadingMore} onClick={() => void loadOlderHistory()}>{historyLoadingMore ? t('calendar.scheduledLoadingOlder') : t('calendar.scheduledLoadOlder')}</button> : null}
+        {historyLoadMoreError ? <div role="alert">{t('calendar.scheduledOlderHistoryUnavailable')}</div> : null}
+      </section>
+    </Modal>
+  </>;
 }
-
 export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, onEntryDeleted, timezone,
-  initialDateKey, onOpenTaskThread }: Props) {
+  initialDateKey, onOpenTaskThread, onArrangeTask }: Props) {
   const { isAuthenticated } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
@@ -486,6 +431,8 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const [calendarData, setCalendarData] = useState<Record<string, CalendarListEntry[]>>({});
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [scheduledTriggers, setScheduledTriggers] = useState<ScheduledTrigger[]>([]);
+  const [selectedResultTaskId, setSelectedResultTaskId] = useState<string | null>(null);
+  const [arrangePrompt, setArrangePrompt] = useState('');
   const [scheduledError, setScheduledError] = useState(false);
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [scheduledRefresh, setScheduledRefresh] = useState(0);
@@ -503,6 +450,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
 
   useEffect(() => {
     setScheduledTasks([]); setScheduledTriggers([]); setScheduledError(false); setScheduledLoading(false);
+    setSelectedResultTaskId(null);
   }, [isAuthenticated, selectedDate, timezone]);
 
   useEffect(() => {
@@ -632,10 +580,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
     return () => cancelAnimationFrame(frame);
   }, [currentMonth]);
 
-  const confirmDiscardDrafts = useCallback(() => ![...dirtyDraftsRef.current.values()].some(Boolean)
-    || window.confirm(t('calendar.scheduledDiscardConfirm')), [t]);
   const handleDateClick = (dateKey: string) => {
-    if (dateKey !== selectedDate && !confirmDiscardDrafts()) return;
     dirtyDraftsRef.current.clear(); setSelectedDate(dateKey); setCalendarFocusKey(dateKey);
   };
   const moveCalendarFocus = (dateKey: string, dayDelta: number) => {
@@ -680,9 +625,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const onDraftDirtyChange = useCallback((taskId: string, dirty: boolean) => {
     if (dirty) dirtyDraftsRef.current.set(taskId, true); else dirtyDraftsRef.current.delete(taskId);
   }, []);
-  const closeDialog = useCallback(() => {
-    if (confirmDiscardDrafts()) onClose();
-  }, [confirmDiscardDrafts, onClose]);
+  const closeDialog = useCallback(() => onClose(), [onClose]);
 
   useEffect(() => {
     const closeTopSubpanel = (event: KeyboardEvent) => {
@@ -755,6 +698,18 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
               </div>
             </header>
             <div className="calendar-popup__card-body">
+              {!selectedResultTaskId ? <form className="calendar-popup__arrange" onSubmit={(event) => {
+                event.preventDefault();
+                const prompt = arrangePrompt.trim();
+                if (!prompt || !onArrangeTask) return;
+                onArrangeTask(prompt);
+              }}>
+                <span aria-hidden="true">＋</span>
+                <input value={arrangePrompt} onChange={(event) => setArrangePrompt(event.target.value)}
+                  placeholder={t('calendar.scheduledArrangePlaceholder')} aria-label={t('calendar.scheduledArrangePlaceholder')} />
+                <button type="submit" disabled={!arrangePrompt.trim() || !onArrangeTask}
+                  aria-label={t('calendar.scheduledArrange')}><IconArrowUp aria-hidden="true" /></button>
+              </form> : null}
               {scheduledLoading ? <div className="calendar-popup__loading" aria-busy="true" aria-live="polite">
                 {t('calendar.scheduledLoading')}</div> : null}
               {scheduledError ? <div className="calendar-popup__alert" role="alert"><span>{t('calendar.scheduledUnavailable')}</span>
@@ -767,12 +722,19 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                   activeRefreshCountRef.current = 0; setActiveRefreshExhausted(false); refreshScheduled();
                 }}>{t('calendar.scheduledRefreshDate')}</button>
               </div> : null}
-              <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
+              {selectedResultTaskId ? (() => {
+                const task = scheduledTasks.find((candidate) => candidate.id === selectedResultTaskId);
+                return task ? <ScheduledTaskResult task={task}
+                  triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)}
+                  onBack={() => setSelectedResultTaskId(null)} onOpenThread={onOpenTaskThread} dateLocale={dateLocale} />
+                  : null;
+              })() : <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
                 task={task} triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)} onAction={actOnTask}
-                onOpenThread={onOpenTaskThread} onRefresh={refreshScheduled} onLayerChange={onLayerChange}
+                onOpenThread={onOpenTaskThread} onOpenResult={() => setSelectedResultTaskId(task.id)}
+                onLayerChange={onLayerChange}
                 onDraftDirtyChange={onDraftDirtyChange} onCardRef={(taskId, element) => {
                   if (element) taskCardRefs.current.set(taskId, element); else taskCardRefs.current.delete(taskId);
-                }} dateLocale={dateLocale} />)}</div>
+                }} dateLocale={dateLocale} />)}</div>}
             </div>
           </section> : null}
 

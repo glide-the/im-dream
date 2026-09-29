@@ -2,7 +2,7 @@
 <!-- [Input] docs/exec 下阶段评审、docs/prd/claude-agent 下正式页面 PRD/骨架图、现有 Chat/CalendarPopup、Admin Drizzle 和 Notion 主页面证据。 -->
 <!-- [Output] 首期单次与每日定时任务的交互、业务时序、执行、配置版本、失败反馈及可验证的实施门槛。 -->
 <!-- [Pos] Claude Agent 定时任务现行设计；阶段二原文保存在 scheduled-task-loop-interaction-design-20260928-phase2-history.md。 -->
-<!-- [Sync] 2026-09-29: 日记页最小纵向切片和四条生产组件 E2E 关闭评审 P0；正常 capability 发布与真实业务验收仍独立。 -->
+<!-- [Sync] 2026-09-29: v4 列表、精确结果、编辑 Modal、Chat marker/详情侧栏已按现行 PRD 落地并取得类型、lint、build、Chrome 与后端合同回执。 -->
 <!-- [Sync] 2026-09-29: 补齐历史游标、可见页面非终态有界观察和 DST fail-closed 页面合同。 -->
 <!-- [Sync] 2026-09-29: 同步独立复评结论为“可直接实施（设计基线）”。 -->
 <!-- [Sync] 2026-09-29: 链接正式日记页 PRD/UI 设计，补充创建展示、触发执行、页面操作、并发恢复四张业务时序图及定义/触发状态图。 -->
@@ -22,7 +22,7 @@
 
 设计日期：2026-09-28。Notion「近期需求」主页面要求 Agent 建任务并在日记日期中显示任务卡片与关联会话；两个指定锚点单独读取为空。阶段二的[完整原文](./scheduled-task-loop-interaction-design-20260928-phase2-history.md)仅供历史对照，不作为本稿以外的现行实施范围。
 
-> **当前门禁：最小纵向切片技术验收通过。** Dream Tool、worker、CalendarPopup、移动入口、普通 Chat 回归和隔离 PostgreSQL 跨仓旅程已有通过回执。正常 PostgreSQL capability 发布、Admin 提交归位、真实账户/模型及部署验收仍是独立交付门禁。
+> **当前门禁：底层调度链、v4 Calendar/Chat 页面和 provider-free 完整业务旅程已有技术回执。** v4 任务列表、精确 `final_message_id` 结果、独立编辑 Modal、Chat marker/详情侧栏、类型、lint、隔离 build、Chrome 与 Tool/broker/consumer 合同均已通过。正常 PostgreSQL capability、真实账户/模型及部署验收仍是独立交付门禁，不由隔离 fixture 替代。
 
 页面产品行为以[日记日期弹窗 PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)为准，结构分区与状态展开见[页面骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md)，视觉、响应式、无障碍和可运行评审原型见[日记日期弹窗 UI 设计](./scheduled-task-diary-page-ui-design.md)。本稿负责跨 Chat Tool、Dream、Admin、PostgreSQL、ThreadFactory 和 Claude Runtime 的系统行为；四份现行文档必须保持同一 operation、状态与失败语义。
 
@@ -65,7 +65,7 @@ scheduled-task.edit 只接受 active 或 paused 定义。exhausted 是单次计�
 
 ### Calendar 页面容器合同
 
-Calendar Modal 只承担对话框、焦点和滚动职责，其 surface、header 与 content 不绘制可见背景、包围边框、圆角或整体阴影。月历、Scheduled tasks 与 Diary 是透明画布上的三张同级 Paper Cream 悬浮纸面；右侧透明卡栈只安排任务卡与日记卡的自然高度和间距。日期上下文直接进入两张业务卡标题，页面不再增加可见 `Calendar` 标题或独立日期摘要。任务卡与日记卡各自拥有标题、计数、一条卡头分隔线和正文；任务条目的计划、时区、下次执行与最近结果使用扁平文本组，不再各套一个事实框。已认证且已选日期时任务卡始终存在，loading、error、empty、list 只替换任务卡正文，任务读取或操作失败不得遮挡或禁用日记卡。窄屏顺序固定为月历 → 任务卡 → 日记卡。具体骨架与视觉标尺分别见现行 [PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)、[骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md) 与 [UI 设计](./scheduled-task-diary-page-ui-design.md)。
+Calendar Modal 只承担对话框、焦点和滚动职责，其 surface、header 与 content 不绘制可见背景、包围边框、圆角或整体阴影。月历、Scheduled tasks 与 Diary 是透明画布上的三张同级 Paper Cream 悬浮纸面；右侧透明卡栈独立滚动。v4 任务纸面顶部提供进入现有 Chat 草稿的安排入口，列表行与最近结果互斥；最近结果只按同一 trigger 的 `target_thread_id` 和 `final_message_id` 读取，编辑使用独立共享 Modal。Chat 的 marker 只来自真实 `create_scheduled_task` 成功 Tool 结果；刷新时基础 history 为 final-only，必须通过现有 message-process 接口有界、可取消、按 message ID 去重恢复 Tool 过程。`ChatView` 统一拥有 scheduled/File/Subagent/TaskSession 右栏互斥状态。具体骨架与视觉标尺分别见现行 [PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)、[骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md) 与 [UI 设计](./scheduled-task-diary-page-ui-design.md)。
 
 
 1. 已认证用户在 Chat 指定提示词和明确时间；Tool 保存成功后 Agent 复述当地时间、时区与任务入口。Tool 不获得模型传入的用户 ID、Claude session ID 或凭据。
@@ -412,8 +412,9 @@ state_unknown 是持久执行事实，不能由页面映射为 failed，也不�
 | --- | --- |
 | Admin schema、到期/手动唯一性、租约和 final 核对 | 隔离 PostgreSQL 的 Admin 集成测试与[阶段四技术回执](../../exec/scheduled-task-phase4-consumer-receipt-20260928.md)；正常数据库 capability 发布仍待部署。 |
 | Dream Tool、公开日期/历史/修改、到期和手动触发、Factory 最终消息 | 隔离 Admin HTTP 与 Dream 探针通过；实际到达下一 UTC 整分钟后产生 `kind=scheduled` 触发，模型替身共调用两次。 |
-| 日历卡片、操作与笔记兼容 | 本机 Chrome fixture 阶段通过；该阶段拦截同源 API，未与隔离 Admin HTTP 同一浏览器进程串行执行。 |
-| 普通 Chat、resume/cancel、SSE 与工具回归 | Dream 定向回归与 broker 测试通过；真实模型和正常账户验收未执行。 |
+| v3 日历卡片、操作与笔记兼容 | 本机 Chrome fixture 阶段通过；该阶段拦截同源 API，未与隔离 Admin HTTP 同一浏览器进程串行执行。 |
+| v4 Calendar 列表/结果/Edit Modal 与 Chat marker/详情栏 | 生产实现已完成；Calendar Chrome `9 passed`，Chat marker/process Chrome `6 passed`，精确 final ID 与目标 Thread 均有断言。完整命令和错误修正见[实现关闭回执](../../exec/scheduled-task-diary-prd-review-20260929.md)。 |
+| 普通 Chat、resume/cancel、SSE 与工具回归 | Chat history process/MCP App 定向回归与 Tool/broker/consumer `40 passed`；真实模型和正常账户验收未执行。 |
 
 ## 非目标与后续事项
 

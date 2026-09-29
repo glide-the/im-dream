@@ -5,6 +5,7 @@
 // [Sync] 2026-09-28: localize scheduled Chat cards, revision conflicts and date-query recovery.
 // [Sync] 2026-09-29: localize the reviewed date workspace, task state hierarchy, conflict recovery, and accessibility labels.
 // [Sync] 2026-09-29: localize date-qualified floating task/diary card headings and plain card counts.
+// [Sync] 2026-09-29: localize task composer/result/editor flows and Chat scheduled-task marker/detail surfaces.
 // [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
 // [Sync] 2026-09-28: explain uncertain dispatched inputs separately from retained unsent drafts.
 // [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
@@ -442,6 +443,11 @@ const resources = {
         scheduledOffsetInvalid: 'The saved daylight-saving choice no longer matches this date and time. Choose another time.',
         scheduledRunOutcomeUnknown: 'We are confirming whether this run was created. Checking again reuses the same request and will not create a second run.',
         scheduledTitle: 'Title', scheduledPrompt: 'Prompt', scheduledRule: 'Schedule',
+        scheduledStatusLabel: 'Status', scheduledRunAt: 'Run time',
+        scheduledArrangePlaceholder: 'Schedule a task', scheduledArrange: 'Continue in Chat',
+        scheduledBackToList: 'Back to scheduled tasks', scheduledResultTitle: 'Latest execution',
+        scheduledResultUnavailable: 'The latest result is unavailable. Open the run conversation to review it.',
+        scheduledResultLoading: 'Loading the latest result…',
         scheduledOnce: 'Once', scheduledDaily: 'Daily', scheduledDate: 'Date',
         scheduledTime: 'Time', scheduledTimeZone: 'Time zone',
         scheduledNext: 'Next run', scheduledSave: 'Save', scheduledCancel: 'Cancel',
@@ -524,6 +530,12 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        scheduledTask: {
+          createdList: 'Scheduled tasks created in this reply', open: 'Open',
+          openAria: 'Open scheduled task: {{title}}', detailTitle: 'Scheduled task',
+          close: 'Close scheduled task details', loading: 'Loading task details…',
+          unavailable: 'Task details are temporarily unavailable.', details: 'Details',
+        },
         deck: {
           none: 'No Deck',
           noneAgent: 'No Agent',
@@ -1462,6 +1474,11 @@ const resources = {
         scheduledOffsetInvalid: '已保存的夏令时选择与当前日期时间不再匹配，请选择其他时间。',
         scheduledRunOutcomeUnknown: '正在确认是否已创建本次执行。再次核查会复用同一请求，不会创建第二次执行。',
         scheduledTitle: '标题', scheduledPrompt: '执行提示词', scheduledRule: '计划',
+        scheduledStatusLabel: '状态', scheduledRunAt: '执行时间',
+        scheduledArrangePlaceholder: '安排任务', scheduledArrange: '在 Chat 中继续',
+        scheduledBackToList: '返回定时任务列表', scheduledResultTitle: '最近一次运行结果',
+        scheduledResultUnavailable: '最近一次运行结果暂不可用，可打开本次运行会话查看。',
+        scheduledResultLoading: '正在加载最近一次运行结果…',
         scheduledOnce: '单次', scheduledDaily: '每天', scheduledDate: '日期',
         scheduledTime: '时间', scheduledTimeZone: '时区',
         scheduledNext: '下次执行', scheduledSave: '保存', scheduledCancel: '取消',
@@ -1544,6 +1561,12 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        scheduledTask: {
+          createdList: '本次回复创建的定时任务', open: '打开',
+          openAria: '打开定时任务：{{title}}', detailTitle: '定时任务',
+          close: '关闭定时任务详情', loading: '正在加载任务详情…',
+          unavailable: '任务详情暂不可用。', details: '详情',
+        },
         deck: {
           none: '不使用 Deck',
           noneAgent: '不使用 Agent',
