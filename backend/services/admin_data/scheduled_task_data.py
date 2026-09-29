@@ -1,6 +1,7 @@
 # [Input] Admin scheduled Chat operation registry, exact schema capabilities and explicit user or service credentials.
 # [Output] Typed once/daily definition, date, history, trigger and authority consumers without Dream SQL.
 # [Pos] Dream scheduled Chat data port; Admin owns time calculation, revision, claims and persistence.
+# [Sync] 2026-09-29: refresh one stale process capability catalog before failing closed on a scheduled operation added by Admin.
 # [Sync] 2026-09-28: consume the reviewed Admin 0069-0072 operation contracts and fail closed on missing capabilities.
 """Strict consumers for Admin-owned scheduled Chat operations."""
 
@@ -257,6 +258,12 @@ class AdminScheduledTaskData:
             raise ValueError("Unknown scheduled Chat operation")
         self.client.capabilities_snapshot(request_id)
         required = SCHEDULED_SCHEMA_REQUIREMENTS if operation in SCHEDULED_BACKGROUND_OPERATIONS else SCHEDULED_SCHEMA_REQUIREMENTS[:3]
+        if not self.client.supports((operation,), required):
+            # A long-lived Dream process may have authenticated and frozen its
+            # catalog before Admin published the scheduled-task operations.
+            # Refresh exactly once at this read-only contract boundary; the
+            # operation itself still follows the existing no-retry policy.
+            self.client.capabilities(request_id)
         if not self.client.supports((operation,), required):
             raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
         return self.client.execute(operation, input_dto, request_id, access_token=access_token)

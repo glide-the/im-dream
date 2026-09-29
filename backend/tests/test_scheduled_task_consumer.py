@@ -1,6 +1,7 @@
 # [Input] Production scheduled-task DTO port, current-turn Tool bridge and explicit fake Admin capability snapshots.
 # [Output] Prove fail-closed capability checks and stable source/Tool-call authorization for schedule creation.
 # [Pos] Provider-free scheduled Chat consumer contract tests; no database, browser account or model call.
+# [Sync] 2026-09-29: cover one stale scheduled-capability catalog refresh before the existing fail-closed result.
 # [Sync] 2026-09-28: guard exact Admin capability, in-turn schedule creation identities and uncertain start receipts.
 from __future__ import annotations
 
@@ -24,9 +25,13 @@ from claude_agent.stream_events import NormalizedAgentEvent
 
 
 class CapabilityClient:
-    def __init__(self, *, supported: bool):
+    def __init__(self, *, supported: bool, supported_after_refresh: bool | None = None,
+                 refresh_error: bool = False):
         self.supported = supported
+        self.supported_after_refresh = supported_after_refresh
+        self.refresh_error = refresh_error
         self.executed = []
+        self.refreshes = []
 
     def capabilities_snapshot(self, request_id):
         return object()
@@ -35,6 +40,14 @@ class CapabilityClient:
         assert operations == (DAY_TASK,)
         assert len(requirements) == 3
         return self.supported
+
+    def capabilities(self, request_id):
+        self.refreshes.append(request_id)
+        if self.refresh_error:
+            raise AdminDataError("ADMIN_DATA_UNAVAILABLE", 503, request_id)
+        if self.supported_after_refresh is not None:
+            self.supported = self.supported_after_refresh
+        return object()
 
     def execute(self, operation, input_dto, request_id, *, access_token=None):
         self.executed.append((operation, input_dto, request_id, access_token))
@@ -49,6 +62,31 @@ def test_scheduled_date_requires_all_three_published_admin_capabilities():
                                                display_time_zone="Asia/Shanghai"),
             "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
         )
+    assert client.refreshes == ["734e880b-7313-4103-bf25-b77ac96df08e"]
+    assert client.executed == []
+
+
+def test_scheduled_date_refreshes_one_stale_process_catalog_before_dispatch():
+    client = CapabilityClient(supported=False, supported_after_refresh=True)
+    result = AdminScheduledTaskData(client).execute(
+        DAY_TASK, DayScheduledTaskInputDTO(local_date="2026-09-29",
+                                           display_time_zone="Asia/Shanghai"),
+        "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
+    )
+    assert result.tasks == []
+    assert client.refreshes == ["734e880b-7313-4103-bf25-b77ac96df08e"]
+    assert len(client.executed) == 1
+
+
+def test_scheduled_date_stays_fail_closed_when_catalog_refresh_fails():
+    client = CapabilityClient(supported=False, refresh_error=True)
+    with pytest.raises(AdminDataError, match="ADMIN_DATA_UNAVAILABLE"):
+        AdminScheduledTaskData(client).execute(
+            DAY_TASK, DayScheduledTaskInputDTO(local_date="2026-09-29",
+                                               display_time_zone="Asia/Shanghai"),
+            "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
+        )
+    assert client.refreshes == ["734e880b-7313-4103-bf25-b77ac96df08e"]
     assert client.executed == []
 
 
