@@ -3,7 +3,7 @@
 // [Output] Provider-free Chrome receipts for the reviewed CalendarPopup desktop/mobile journeys
 // without database, model, scheduled worker, or diary mutation.
 // [Pos] Technical isolated scheduled-task browser journey in frontend/e2e.
-// [Sync] 2026-09-29: add cursor history, bounded active-run refresh, and explicit DST rejection/recovery coverage.
+// [Sync] 2026-09-29: verify independent task/diary cards, card-local empty/error states, and mobile card order.
 
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
@@ -46,7 +46,7 @@ type FixtureOptions = {
   firstEditConflict?: boolean;
   editErrorCodes?: string[];
   historyCount?: number;
-  runningCompletesAfterDayReads?: number;
+  dayStartsUnavailable?: boolean;
 };
 
 function baseTask(status: TaskStatus = 'active'): Task {
@@ -86,6 +86,8 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
   const editErrorCodes = [...(options.editErrorCodes ?? [])];
   let firstRunPending = options.firstRunOutcome !== 'success';
   let dayReadCount = 0;
+  let dayUnavailable = options.dayStartsUnavailable ?? false;
+  let completeRunningOnNextDayRead = false;
   const unexpected: string[] = [];
   const manualRequestKeys: string[] = [];
   const definitionRequests: Array<{ action: string; revision: unknown }> = [];
@@ -157,11 +159,15 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
       const suffix = path.slice('/api/claude-agent/scheduled-tasks'.length);
       if (suffix === '/day') {
         const selectedDate = url.searchParams.get('local_date');
+        if (dayUnavailable) {
+          await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_DATA_UNAVAILABLE' } } });
+          return;
+        }
         const visible = !options.empty && (selectedDate === TASK_DATE || selectedDate === TASK_ONLY_DATE);
         if (visible) {
           dayReadCount += 1;
-          if (options.runningCompletesAfterDayReads !== undefined
-            && dayReadCount >= options.runningCompletesAfterDayReads) {
+          if (completeRunningOnNextDayRead) {
+            completeRunningOnNextDayRead = false;
             triggers = triggers.map((trigger) => trigger.status === 'running'
               ? { ...trigger, status: 'succeeded', target_thread_id: TARGET_THREAD_ID,
                   final_message_id: 'message_schedule_final', updated_at: '2026-09-28T09:03:00Z' }
@@ -292,6 +298,8 @@ async function installFixtures(page: Page, options: FixtureOptions = {}) {
     getHistoryRequests: () => historyRequests,
     getDayReadCount: () => dayReadCount,
     getTargetThreadRequests: () => targetThreadRequests,
+    allowDayReads: () => { dayUnavailable = false; },
+    completeRunningOnNextDayRead: () => { completeRunningOnNextDayRead = true; },
   };
 }
 
@@ -316,11 +324,38 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   const fixture = await installFixtures(page, { firstRunOutcome: 'server_error' });
   const { dialog } = await openCalendar(page);
 
-  await expect(dialog.getByText('日记 1', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('任务 1', { exact: true })).toBeVisible();
+  const workspace = dialog.locator('.calendar-popup__workspace');
+  const stack = workspace.locator('.calendar-popup__workspace-scroll');
+  const taskSection = stack.locator(':scope > .calendar-popup__task-section');
+  const diarySection = stack.locator(':scope > .calendar-popup__diary-section');
+  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('1');
+  await expect(diarySection.locator('.calendar-popup__card-count')).toHaveText('1');
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
   await expect(dialog.getByText('晨间复盘')).toBeVisible();
   expect(await dialog.locator('.calendar-popup__section-heading h3').allTextContents()).toEqual(['定时任务', '日记']);
+  expect(await taskSection.evaluate((element) =>
+    element.nextElementSibling?.classList.contains('calendar-popup__diary-section'))).toBe(true);
+  const cardBoxes = await Promise.all([taskSection.boundingBox(), diarySection.boundingBox()]);
+  expect(cardBoxes[0] && cardBoxes[1] && cardBoxes[1].y > cardBoxes[0].y + cardBoxes[0].height).toBeTruthy();
+  const surfaces = await workspace.evaluate((element) => {
+    const workspaceStyle = getComputedStyle(element);
+    const cards = Array.from(element.querySelectorAll('.calendar-popup__section')).map((card) => {
+      const style = getComputedStyle(card);
+      return { borderWidth: style.borderTopWidth, background: style.backgroundColor, boxShadow: style.boxShadow };
+    });
+    return {
+      workspace: {
+        borderWidth: workspaceStyle.borderTopWidth,
+        background: workspaceStyle.backgroundColor,
+        boxShadow: workspaceStyle.boxShadow,
+      },
+      cards,
+    };
+  });
+  expect(surfaces.workspace).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
+  expect(surfaces.cards).toHaveLength(2);
+  expect(surfaces.cards.every((cardStyle) => cardStyle.borderWidth !== '0px'
+    && cardStyle.background !== 'rgba(0, 0, 0, 0)')).toBe(true);
   await expect(dialog.getByRole('gridcell', { name: /2026.*9.*29/ })).not.toHaveClass(/calendar-popup__day--has-entry/);
 
   const card = dialog.locator('.calendar-popup__task').first();
@@ -404,8 +439,10 @@ test('mobile exhausted state keeps unknown execution safe and menu keyboard-oper
   await expect(more).toBeFocused();
 
   const calendarBox = await dialog.locator('.calendar-popup__calendar').boundingBox();
-  const workspaceBox = await dialog.locator('.calendar-popup__workspace').boundingBox();
-  expect(calendarBox && workspaceBox && workspaceBox.y > calendarBox.y).toBeTruthy();
+  const taskBox = await dialog.locator('.calendar-popup__task-section').boundingBox();
+  const diaryBox = await dialog.locator('.calendar-popup__diary-section').boundingBox();
+  expect(calendarBox && taskBox && diaryBox
+    && taskBox.y > calendarBox.y && diaryBox.y > taskBox.y + taskBox.height).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
   expect(fixture.getUnexpected()).toEqual([]);
 });
@@ -424,24 +461,48 @@ test('unknown manual-run response reuses one request key before creating a secon
   expect(fixture.getUnexpected()).toEqual([]);
 });
 
-test('task-free date omits the scheduled-task group while preserving diary content', async ({ page }) => {
+test('task-free date keeps an independent empty task card beside diary content', async ({ page }) => {
   const fixture = await installFixtures(page, { empty: true, firstRunOutcome: 'success' });
   const { dialog } = await openCalendar(page);
-  await expect(dialog.locator('.calendar-popup__task-section')).toHaveCount(0);
+  const taskSection = dialog.locator('.calendar-popup__task-section');
+  await expect(taskSection).toHaveCount(1);
+  await expect(taskSection.getByRole('heading', { name: '定时任务' })).toBeVisible();
+  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('0');
+  await expect(taskSection.getByText('这一天没有定时任务。')).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '日记' })).toBeVisible();
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('task read failure stays inside its card while diary remains actionable', async ({ page }) => {
+  const fixture = await installFixtures(page, {
+    dayStartsUnavailable: true,
+    firstRunOutcome: 'success',
+  });
+  const { dialog } = await openCalendar(page);
+  const taskSection = dialog.locator('.calendar-popup__task-section');
+  const diarySection = dialog.locator('.calendar-popup__diary-section');
+  await expect(taskSection.getByRole('alert')).toContainText('任务暂不可用。');
+  await expect(diarySection.getByText('普通日历笔记仍然可见')).toBeVisible();
+  await expect(diarySection.getByRole('button', { name: '打开: 普通日历笔记仍然可见' })).toBeEnabled();
+  await expect(diarySection.getByRole('button', { name: '删除: 普通日历笔记仍然可见' })).toBeEnabled();
+  fixture.allowDayReads();
+  await taskSection.getByRole('button', { name: '重试' }).click();
+  await expect(taskSection.getByText('晨间复盘')).toBeVisible();
+  await expect(diarySection.getByText('普通日历笔记仍然可见')).toBeVisible();
   expect(fixture.getUnexpected()).toEqual([]);
 });
 
 test('active execution refreshes to a terminal result and history loads older pages by cursor', async ({ page }) => {
   const fixture = await installFixtures(page, {
     initialTriggerStatus: 'running', initialTriggerHasThread: true,
-    runningCompletesAfterDayReads: 2, historyCount: 21, firstRunOutcome: 'success',
+    historyCount: 21, firstRunOutcome: 'success',
   });
   const { dialog } = await openCalendar(page);
   const card = dialog.locator('.calendar-popup__task').first();
 
   await expect(card).toContainText('执行中');
+  fixture.completeRunningOnNextDayRead();
   await expect(card).toContainText('已完成', { timeout: 7_000 });
   expect(fixture.getDayReadCount()).toBeGreaterThanOrEqual(2);
   const settledReadCount = fixture.getDayReadCount();

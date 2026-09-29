@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-29: Calendar 右栏按现行 PRD 修正为独立任务卡与日记卡，任务局部状态不影响日记。 -->
 <!-- [Input] docs/exec 下阶段评审、docs/prd/claude-agent 下正式页面 PRD/骨架图、现有 Chat/CalendarPopup、Admin Drizzle 和 Notion 主页面证据。 -->
 <!-- [Output] 首期单次与每日定时任务的交互、业务时序、执行、配置版本、失败反馈及可验证的实施门槛。 -->
 <!-- [Pos] Claude Agent 定时任务现行设计；阶段二原文保存在 scheduled-task-loop-interaction-design-20260928-phase2-history.md。 -->
@@ -61,6 +62,11 @@ Dream 独立 worker 以服务凭据领取触发，用 `sta_` 解析当前用户�
 scheduled-task.edit 只接受 active 或 paused 定义。exhausted 是单次计划已完成的终态，不允许修改标题、提示词或规则来重新排期；用户需要新时间时由 Chat Tool 创建新的定义。exhausted 的定义级操作只有立即运行、查看历史和删除。
 
 ## 用户交互流程
+
+### Calendar 页面容器合同
+
+Calendar 的右栏是透明布局与单一滚动容器，不绘制同时包住两类内容的背景、边框、圆角或阴影。Scheduled tasks 与 Diary 是同一容器下的两个同级独立 Paper Cream 卡片，各自拥有标题、计数、分隔线和正文；两卡间保留 16px Warm Canvas 间隙。已认证且已选日期时任务卡始终存在，loading、error、empty、list 只替换任务卡正文，任务读取或操作失败不得遮挡或禁用日记卡。窄屏顺序固定为月历 → 日期上下文 → 任务卡 → 日记卡。具体骨架与视觉标尺分别见现行 [PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)、[骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md) 与 [UI 设计](./scheduled-task-diary-page-ui-design.md)。
+
 
 1. 已认证用户在 Chat 指定提示词和明确时间；Tool 保存成功后 Agent 复述当地时间、时区与任务入口。Tool 不获得模型传入的用户 ID、Claude session ID 或凭据。
 2. CalendarPopup 保留笔记列表；选中日期出现受权任务卡片，只有任务没有笔记时仍显示任务。卡片包含标题、计划时间、时区、待执行或执行状态、延迟与错误说明。执行真正建立 Thread 后才显示“打开会话”；点击后由 App 到 ChatView 的明确导航参数打开既有 ChatPanel/TaskSessionSidebar，不能仅修改已挂载页面的地址栏。

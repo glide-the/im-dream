@@ -1,7 +1,7 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive date workspace with scheduled-task summary/actions before independent diary entries.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
-// [Sync] 2026-09-29: add cursor history, bounded visible-page refresh, and explicit daylight-saving validation feedback.
+// [Sync] 2026-09-29: render Scheduled tasks and Diary as independent sibling paper cards with card-local counts and states.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
@@ -738,63 +738,70 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
       </section>
 
       {selectedDate ? <section className="calendar-popup__workspace" aria-labelledby="calendar-popup-date-title">
-        <header className="calendar-popup__date-summary"><h3 id="calendar-popup-date-title">{selectedDateLabel}</h3>
-          <div className="calendar-popup__counts" aria-live="polite">
-            <span>{t('calendar.diaryCount', { count: selectedEntries.length })}</span>
-            <span>{scheduledError ? t('calendar.taskCountUnknown') : scheduledLoading
-              ? t('calendar.taskCountLoading') : t('calendar.taskCount', { count: scheduledTasks.length })}</span>
-            {scheduledError ? <span>{t('calendar.attentionCountUnknown')}</span> : scheduledLoading
-              ? <span>{t('calendar.attentionCountLoading')}</span>
-              : attentionCount > 0 && firstAttentionTaskId
-                ? <button type="button" className="calendar-popup__count-alert" onClick={() => {
-                    taskCardRefs.current.get(firstAttentionTaskId)?.focus();
-                  }}>{t('calendar.attentionCount', { count: attentionCount })}</button>
-                : <span>{t('calendar.attentionCount', { count: attentionCount })}</span>}
-          </div>
+        <header className="calendar-popup__date-summary">
+          <h3 id="calendar-popup-date-title">{selectedDateLabel}</h3>
         </header>
         <div className="calendar-popup__workspace-scroll">
-          {isAuthenticated && (scheduledLoading || scheduledError || scheduledTasks.length > 0)
-            ? <section className="calendar-popup__section calendar-popup__task-section"
+          {isAuthenticated ? <section className="calendar-popup__section calendar-popup__task-section"
             aria-labelledby="calendar-popup-task-title">
-            <div className="calendar-popup__section-heading"><h3 id="calendar-popup-task-title">{t('calendar.scheduledSectionTitle')}</h3>
-              {!scheduledError ? <span>{scheduledTasks.length}</span> : null}</div>
-            {scheduledLoading ? <div className="calendar-popup__loading" aria-busy="true" aria-live="polite">
-              {t('calendar.scheduledLoading')}</div> : null}
-            {scheduledError ? <div className="calendar-popup__alert" role="alert"><span>{t('calendar.scheduledUnavailable')}</span>
-              <button type="button" onClick={refreshScheduled}>{t('calendar.scheduledRetry')}</button></div> : null}
-            {!scheduledLoading && !scheduledError && scheduledTasks.length === 0
-              ? <p className="calendar-popup__empty">{t('calendar.scheduledEmpty')}</p> : null}
-            {activeRefreshExhausted && activeTriggerKey ? <div className="calendar-popup__hint" aria-live="polite">
-              <span>{t('calendar.scheduledAutoRefreshPaused')}</span>
-              <button type="button" className="calendar-popup__refresh-link" onClick={() => {
-                activeRefreshCountRef.current = 0; setActiveRefreshExhausted(false); refreshScheduled();
-              }}>{t('calendar.scheduledRefreshDate')}</button>
-            </div> : null}
-            <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
-              task={task} triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)} onAction={actOnTask}
-              onOpenThread={onOpenTaskThread} onRefresh={refreshScheduled} onLayerChange={onLayerChange}
-              onDraftDirtyChange={onDraftDirtyChange} onCardRef={(taskId, element) => {
-                if (element) taskCardRefs.current.set(taskId, element); else taskCardRefs.current.delete(taskId);
-              }} dateLocale={dateLocale} />)}</div>
+            <header className="calendar-popup__section-heading calendar-popup__card-header">
+              <h3 id="calendar-popup-task-title">{t('calendar.scheduledSectionTitle')}</h3>
+              <div className="calendar-popup__card-header-meta" aria-live="polite">
+                {scheduledError ? <span className="calendar-popup__card-status">{t('calendar.taskCountUnknown')}</span>
+                  : scheduledLoading ? <span className="calendar-popup__card-status">{t('calendar.taskCountLoading')}</span>
+                    : <span className="calendar-popup__card-count">{scheduledTasks.length}</span>}
+                {!scheduledLoading && !scheduledError && attentionCount > 0 && firstAttentionTaskId
+                  ? <button type="button" className="calendar-popup__count-alert" onClick={() => {
+                      taskCardRefs.current.get(firstAttentionTaskId)?.focus();
+                    }}>{t('calendar.attentionCount', { count: attentionCount })}</button>
+                  : null}
+              </div>
+            </header>
+            <div className="calendar-popup__card-body">
+              {scheduledLoading ? <div className="calendar-popup__loading" aria-busy="true" aria-live="polite">
+                {t('calendar.scheduledLoading')}</div> : null}
+              {scheduledError ? <div className="calendar-popup__alert" role="alert"><span>{t('calendar.scheduledUnavailable')}</span>
+                <button type="button" onClick={refreshScheduled}>{t('calendar.scheduledRetry')}</button></div> : null}
+              {!scheduledLoading && !scheduledError && scheduledTasks.length === 0
+                ? <p className="calendar-popup__empty">{t('calendar.scheduledEmpty')}</p> : null}
+              {activeRefreshExhausted && activeTriggerKey ? <div className="calendar-popup__hint" aria-live="polite">
+                <span>{t('calendar.scheduledAutoRefreshPaused')}</span>
+                <button type="button" className="calendar-popup__refresh-link" onClick={() => {
+                  activeRefreshCountRef.current = 0; setActiveRefreshExhausted(false); refreshScheduled();
+                }}>{t('calendar.scheduledRefreshDate')}</button>
+              </div> : null}
+              <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
+                task={task} triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)} onAction={actOnTask}
+                onOpenThread={onOpenTaskThread} onRefresh={refreshScheduled} onLayerChange={onLayerChange}
+                onDraftDirtyChange={onDraftDirtyChange} onCardRef={(taskId, element) => {
+                  if (element) taskCardRefs.current.set(taskId, element); else taskCardRefs.current.delete(taskId);
+                }} dateLocale={dateLocale} />)}</div>
+            </div>
           </section> : null}
 
           <section className="calendar-popup__section calendar-popup__diary-section" aria-labelledby="calendar-popup-diary-title">
-            <div className="calendar-popup__section-heading"><h3 id="calendar-popup-diary-title">{t('calendar.diarySectionTitle')}</h3>
-              <span>{selectedEntries.length}</span></div>
-            {selectedEntries.length === 0 ? <p className="calendar-popup__empty">{t('calendar.noEntriesForDate')}</p>
-              : <div className="calendar-popup__diary-list">{selectedEntries.map((entry) => {
-                const isCurrentEntry = currentEntryId === entry.id;
-                const time = new Date(entry.timestamp).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' });
-                return <article key={entry.id} className={`calendar-popup__diary${isCurrentEntry ? ' calendar-popup__diary--current' : ''}`}>
-                  <button type="button" className="calendar-popup__diary-open"
-                    aria-label={`${t('calendar.openButton')}: ${entry.firstLine}`} onClick={() => void handleOpenEntry(entry)}>
-                    <span>{time}</span>{isCurrentEntry ? <em>{t('calendar.currentEntryLabel')}</em> : null}<strong>{entry.firstLine}</strong>
-                  </button>
-                  <button type="button" className="calendar-popup__diary-delete"
-                    aria-label={`${t('calendar.deleteButton')}: ${entry.firstLine}`}
-                    onClick={() => void handleDeleteEntry(selectedDate, entry.id)}>{t('calendar.deleteButton')}</button>
-                </article>;
-              })}</div>}
+            <header className="calendar-popup__section-heading calendar-popup__card-header">
+              <h3 id="calendar-popup-diary-title">{t('calendar.diarySectionTitle')}</h3>
+              <span className="calendar-popup__card-count" aria-live="polite">{selectedEntries.length}</span>
+            </header>
+            <div className="calendar-popup__card-body">
+              {selectedEntries.length === 0 ? <p className="calendar-popup__empty">{t('calendar.noEntriesForDate')}</p>
+                : <div className="calendar-popup__diary-list">{selectedEntries.map((entry) => {
+                  const isCurrentEntry = currentEntryId === entry.id;
+                  const time = new Date(entry.timestamp).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' });
+                  return <article key={entry.id}
+                    className={['calendar-popup__diary', isCurrentEntry ? 'calendar-popup__diary--current' : ''].filter(Boolean).join(' ')}>
+                    <button type="button" className="calendar-popup__diary-open"
+                      aria-label={t('calendar.openButton') + ': ' + entry.firstLine} onClick={() => void handleOpenEntry(entry)}>
+                      <span>{time}</span>{isCurrentEntry ? <em>{t('calendar.currentEntryLabel')}</em> : null}
+                      <strong>{entry.firstLine}</strong>
+                    </button>
+                    <button type="button" className="calendar-popup__diary-delete"
+                      aria-label={t('calendar.deleteButton') + ': ' + entry.firstLine}
+                      onClick={() => void handleDeleteEntry(selectedDate, entry.id)}>{t('calendar.deleteButton')}</button>
+                  </article>;
+                })}</div>}
+            </div>
           </section>
         </div>
       </section> : null}

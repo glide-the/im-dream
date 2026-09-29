@@ -1,12 +1,38 @@
 <!-- [Input] 2026-09-29 现行日记日期弹窗 PRD/UI/系统设计、Agent.md 前置门禁，以及定时任务前后端与浏览器测试源码。 -->
-<!-- [Output] 代码先于 PRD 情况下的独立设计评审、P0/P1 本地关闭结果、剩余发布门禁和“需求—PRD—系统设计—当前实现—测试”追踪矩阵。 -->
+<!-- [Output] 代码先于 PRD 情况下的独立设计评审、独立分卡实现闭环、真实业务回执和“需求—PRD—系统设计—当前实现—测试”追踪矩阵。 -->
 <!-- [Pos] 定时任务日记日期弹窗的独立实施门禁；不替代 PRD、UI 设计、系统设计或阶段四技术回执。 -->
 <!-- [Sync] 2026-09-29: 生产页面、移动入口和四条浏览器旅程关闭首次评审 P0；保留首次评审快照，正常 capability 发布与真实业务验收仍独立。 -->
 <!-- [Sync] 2026-09-29: close history pagination, bounded active-state refresh and explicit DST failure feedback; record Admin main integration and six browser journeys while retaining the initial review snapshot. -->
 <!-- [Sync] 2026-09-29: 复评确认 exhausted、A3 diary-only、claim/prepare 与文档导航已经收敛，设计结论升级为可直接实施。 -->
 <!-- [Sync] 2026-09-29: 首次评审 html-design-workflow 正式产物与既有实现，结论为收敛后实施。 -->
+<!-- [Sync] 2026-09-29: 独立分卡生产实现、能力目录热刷新、Admin worker 权限配置、7 条 Chrome 旅程与真实模型持久化会话回执关闭全部本轮 P1。 -->
 
 # 定时任务日记日期弹窗 PRD 独立评审（2026-09-29）
+
+## 本轮独立分卡复评
+
+**结论：可直接实施，且本轮实现与验证已经关闭全部分卡 P1。**
+
+现行 PRD、骨架、UI 设计和系统设计定义的页面合同已经落入生产 `CalendarPopup`：右栏是透明布局与滚动容器；`Scheduled tasks` 与 `Diary` 是同一父级下的独立同级 Paper Cream 卡，各自拥有 header、count/status、divider 和 body；任务 loading/error/empty/list 只替换任务卡正文，Diary 保持可读可操作；窄屏顺序固定为月历、日期上下文、任务卡、日记卡。改版复用现有 API、DTO、`ScheduledTaskCard` 和 Chat 导航，没有增加并行任务模型、状态机或 schema。
+
+| 需求 | 现行设计 | 当前生产实现 | 当前验证 | 裁决 |
+| --- | --- | --- | --- | --- |
+| 右栏透明、无共享表面 | PRD §3.1；骨架 §2.1；UI §3/§8 | [`CalendarPopup.css`](../../frontend/app/_dream/components/CalendarPopup.css) 移除 workspace border/background/radius/shadow，滚动容器只负责网格间距 | Chrome E2E 读取父容器 computed style 并核对两张卡均有独立 border/background | **通过** |
+| 任务/日记同级独立卡 | 骨架 §6；UI §3.1 DOM 冻结 | [`CalendarPopup.tsx`](../../frontend/app/_dream/components/CalendarPopup.tsx) 中两张 section 为直接 sibling，各自闭合 | 桌面断言 DOM sibling、纵向边界和 16px 间距；真实 Chrome 视觉复核与参考 PDF 一致 | **通过** |
+| 各自 header/count/divider/body | PRD B3/B4、C2/C3；UI §8 | 任务数/未知/加载状态归任务卡头，日记数归日记卡头；divider 和 body 均归各自卡 | E2E 分别定位两卡 count、heading 和 body | **通过** |
+| 任务四态局部化 | PRD §4.2/§4.4；骨架 §4.1；UI §5 | 无任务时任务卡仍渲染；loading/error/empty/list 仅替换 task body | empty 与持续 503 两条旅程通过；重试前 Diary 打开/删除按钮保持 enabled | **通过** |
+| 移动顺序 | PRD §6；骨架 §3；UI §6 | DOM 与 CSS 保持 calendar → context → task → diary | 390×844 比较四区坐标且断言无横向溢出 | **通过** |
+| Task/Thread/Run/revision/幂等语义 | PRD §2.2；系统设计时序二/三/四 | 保留 TaskSession、目标 Thread/turn/final、`expected_revision`、`manual_request_key` 与 claim/prepare/start/finish/reconcile | 编辑冲突、未知响应 key 复用、非终态刷新、历史分页和精确 Thread 导航通过 | **通过** |
+| 是否过度设计 | PRD §2.2；UI §10.2；系统设计非目标 | 仅修改既有组件/CSS/E2E、Dream capability catalog 读取与 Admin 配置生成 | 没有新增接口、表、调度器、运行环境分支或第二套任务系统 | **通过** |
+
+### `Tasks temporarily unavailable` 根因与关闭证据
+
+1. 重启后，长运行 Dream 进程持有旧 Admin capability catalog，日期读取在精确 operation/schema 检查处 fail closed；Dream 现在遇到缺失时只刷新一次 capability catalog，再执行同一精确检查。刷新失败或仍不匹配继续 fail closed，不影响 Agent turn。
+2. Admin 已为生成和校验的 Dream service client 加入 `schedule:execute`，并生成/保留长度合规的 `AUTH_CHAT_SCHEDULE_AUTHORITY_SECRET`；本机现有 service client 已通过正式 provision 命令更新。
+3. 真实任务 `c487820e-2a4a-4f19-8cdf-2d4beb2e8724` 保留 14:38 的旧失败记录；修复后从正常 Calendar 执行“立即运行”，历史显示 14:56 `Completed`，打开目标会话得到精确回复 `SCHEDULE-E2E-PASS-20260929-1438`。浏览器刷新并从历史重新进入后，同一 prompt、回复和目标 Thread 仍存在，证明公开 UI、真实模型、正常数据库和重启后持久化链路闭合。
+4. provider-free Chrome 套件最终为 `7 passed`，覆盖布局、错误隔离、空态、移动顺序、revision 冲突、暂停/恢复、运行幂等、删除撤销、历史分页、非终态刷新、DST 和目标 Thread；Dream 后端定向测试 `8 passed`，Admin 配置测试 `3 passed`，Admin 调度合同测试 `6 passed`，Next production build 通过。
+
+下文保留首次与前轮评审快照作为历史证据；其中“仍待实施”“没有真实业务验收”等表述只描述对应旧基线，不再代表当前工作树。
 
 ## 1. 结论
 
@@ -120,8 +146,8 @@
 5. **展示时区已关闭。** 初始化、今天标记、任务读取和历史格式化共用 IANA timezone。
 6. **Thread 导航已关闭。** 页面关闭日期弹窗后进入 Chat，并消费精确目标 Thread ID。
 7. **DST 失败反馈已关闭。** 页面提交 IANA timezone 与本地时间，不自行猜测 UTC 偏移；Admin 返回当地时间不存在、重复时间缺少 offset 或 offset 非法时，页面保留 desired 草稿并显示对应可行动错误。候选偏移选择器只有在 Admin 提供候选 DTO 后才可能成为后续增强，不是当前实现假设。
-8. **两仓交付归位已关闭。** 定时任务提交 `9ed8fc0` 已 fast-forward 进入 `/Users/dmeck/project/ink-admin-memory` 的 `main`；Dream 既有纵向切片和本轮 P1 关闭改动均已提交至 `/Users/dmeck/project/ink-dream-memory` 的 `develop`。
-9. **正常 capability 与真实业务仍是独立发布门禁。** 隔离 PostgreSQL 跨仓旅程已通过；本轮没有读取或修改正常业务数据库，也没有调用真实账户或真实模型，因此不把技术验证描述为部署或真实业务验收。
+8. **两仓交付归位已关闭。** Admin 既有定时任务迁移 `9ed8fc0` 与 worker 配置修复 `fe2e8ac` 均在 `/Users/dmeck/project/ink-admin-memory` 的 `main`；Dream capability catalog 修复 `c8dcfd6e` 与本轮独立分卡交付均在 `/Users/dmeck/project/ink-dream-memory` 的 `develop`。
+9. **本机正常 capability 与真实业务已关闭。** 本机正常 Admin 配置已用正式 provision 命令补齐 `schedule:execute`，Dream worker authority secret 已生成并校验；真实账户任务通过公开 Calendar → run → TaskSession/Thread → Claude turn → final 链路完成，刷新后仍可从历史进入同一持久化会话。外部部署不在本轮授权范围内。
 
 ## 7. DTO 与 operation 对齐检查
 
@@ -139,20 +165,35 @@
 | 需求 | PRD | 系统设计 | 当前实现 | 当前测试 | 评审状态 |
 | --- | --- | --- | --- | --- | --- |
 | Chat Tool 创建单次/每日任务 | 第 49–57 行 | 时序一第 67–109 行 | [`_ThreadToolTurnProvider._perform`](/Users/dmeck/project/ink-dream-memory/backend/routers/claude_agent.py:2108) | [`test_scheduled_tool_uses_current_turn_grant_and_stable_call_key`](/Users/dmeck/project/ink-dream-memory/backend/tests/test_scheduled_task_consumer.py:55) | 技术合同已覆盖 |
-| 选中日期展示任务与日记 | 第 84–112、124–129 行 | 时序一第 95–106 行 | [`CalendarPopup`](/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/components/CalendarPopup.tsx:665) | E2E 第 278–287、390–397 行 | 已覆盖顺序、分组、计数和无任务日期 |
+| 选中日期展示独立任务卡与日记卡 | 第 84–112、124–129 行 | 时序一第 95–106 行 | [`CalendarPopup`](/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/components/CalendarPopup.tsx) 以透明 workspace 承载两个直接 sibling card | E2E 核对 DOM、computed style、卡头计数、16px 间距和空任务卡 | 独立分卡合同已覆盖 |
 | A3 首期 diary-only、月摘要后置 | 第 56、120、335、377 行 | 第 410 行 | 月份日期只来自日记数据 | E2E 第 287 行 | 对齐并锁定 |
-| 到期领取并执行 Claude turn | 验收第 397–399 行 | 时序二第 113–190 行 | [`ScheduledTaskCoordinator._poll`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:74)、[`_dispatch`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:165) | [`probe_scheduled_task_http`](/Users/dmeck/project/ink-dream-memory/backend/tests/probe_scheduled_task_http.py:207) | 隔离技术覆盖；正常 capability 待发布 |
+| 到期领取并执行 Claude turn | 验收第 397–399 行 | 时序二第 113–190 行 | [`ScheduledTaskCoordinator._poll`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:74)、[`_dispatch`](/Users/dmeck/project/ink-dream-memory/backend/claude_agent/scheduled_task_coordinator.py:165) | 技术探针 + 真实任务 14:56 完成并写入精确模型回复 | 本机正常 capability 与真实链路通过 |
 | 查看最近状态与完整历史 | 第 131–143、180–190 行 | 时序二/三 | 卡片显示最近状态，按需展开 20 条并用 `before_created_at` 追加 | E2E 覆盖首次 20 条、追加至 21 条和 cursor 请求 | 首屏、展开与分页均已覆盖 |
 | exhausted 禁编辑、重新排期新建 | 第 140、154、208、250–255 行 | 第 253、325、334–346 行 | UI 隐藏编辑 | E2E 第 339–364 行 | 页面合同已覆盖 |
-| 打开真实目标 Thread | 第 141、184 行 | 时序三第 259–263 行 | `CalendarPopup` 请求 App 切换真实 Thread | E2E 第 331–334 行 | 精确 Thread ID 已覆盖 |
+| 打开真实目标 Thread | 第 141、184 行 | 时序三第 259–263 行 | `CalendarPopup` 请求 App 切换真实 Thread | fixture 精确 Thread ID + 真实 Calendar 打开会话并在刷新后从历史重进 | 生产持久化 Thread 已覆盖 |
 | 编辑 desired 并采用 effective/revision | 第 145–154、248–255 行 | 时序三第 212–256 行 | 编辑草稿、CAS 冲突和 latest effective 差异 | E2E 第 289–301 行 | 已覆盖 |
 | 暂停、恢复、立即运行、删除、撤销 | 第 156–178 行 | 时序三第 216–247 行 | 主操作与更多菜单复用真实 API | E2E 第 303–329 行 | 已覆盖 |
 | 失败与 `state_unknown` | 第 211–236 行 | 时序二第 147–180、时序四第 289–316 行 | UI 禁止未知状态盲重跑；网络结果不明保留 manual key | E2E 第 310–315、339–387 行；后端 renew/reconcile 测试 | 已覆盖关键分支 |
-| 重启、并发、重复触发 | 第 397–399 行 | 时序四第 266–317 行 | worker claim/start/finish/reconcile | 隔离跨仓旅程验证 dedupe、due-once、restart；86 条后端测试通过 | 技术验收通过；正常 capability 待发布 |
-| 普通日记不受任务错误影响 | 第 192–198、223–236 行 | 时序一失败分支 | 任务读取和日记读取分离 | E2E 第 282–286、390–397 行 | 已覆盖 |
+| 重启、并发、重复触发 | 第 397–399 行 | 时序四第 266–317 行 | worker claim/start/finish/reconcile；Dream 缺 capability 时刷新一次 catalog | 隔离跨仓 dedupe/due-once/restart + 本机重启后真实运行 + capability fail-closed 单测 | 技术与本机真实验收通过 |
+| 普通日记不受任务错误影响 | 第 192–198、223–236 行 | 时序一失败分支 | 任务错误仅替换独立任务卡 body | 持续 503 时 Diary 文本、打开和删除按钮可用；解除故障后任务卡局部重试恢复 | 已覆盖 |
 | 响应式和可访问性 | 第 272–305 行 | UI 设计第 670–712 行 | Modal、移动入口、单列布局、grid/menu 键盘和焦点恢复 | E2E 第 339–373 行 | 已覆盖首期关键合同 |
 
 ## 9. 实施与验证回执
+
+### 本轮最终回执
+
+| 命令或业务操作 | 退出码/结果 | 覆盖 |
+| --- | ---: | --- |
+| `cd frontend && corepack pnpm exec eslint app/_dream/components/CalendarPopup.tsx e2e/scheduled-task-calendar.spec.ts` | 0 | 生产组件与新 E2E lint |
+| `cd frontend && corepack pnpm exec tsc --noEmit` | 0 | 前端类型检查 |
+| `cd frontend && E2E_WEB_BASE=http://127.0.0.1:5173 corepack pnpm exec playwright test e2e/scheduled-task-calendar.spec.ts --reporter=line --workers=1` | 0，`7 passed (25.1s)` | 独立卡、桌面/移动、空态/错误、编辑、暂停/恢复、运行、历史、删除撤销、Thread、刷新与 DST |
+| `cd frontend && corepack pnpm build` | 0 | Next.js production build、TypeScript、静态与动态路由生成 |
+| `PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_scheduled_task_consumer.py` | 0，`8 passed` | capability catalog 刷新成功、仍缺失与刷新失败时 fail closed；Tool 调度消费回归 |
+| `cd /Users/dmeck/project/ink-admin-memory && node --test scripts/setup-env.test.mjs` | 0，`3 passed` | schedule scope/authority secret 生成、保留、校验和失败关闭 |
+| `cd /Users/dmeck/project/ink-admin-memory && corepack pnpm exec vitest run app/lib/dream/chatScheduledTaskAuthority.test.ts app/lib/dream/chatScheduledTaskRegistration.test.ts app/lib/dream/chatScheduledTaskTime.test.ts` | 0，`3 files / 6 tests passed` | authority、operation 注册与时间规则合同 |
+| 真实 Calendar “立即运行”并打开会话，刷新后从历史重进 | `Completed` | 真实任务、正常数据库、真实模型、目标 Thread 持久化；回复 `SCHEDULE-E2E-PASS-20260929-1438` |
+
+### 前轮与历史回执（保留）
 
 | 命令 | 退出码 | 关键结果 |
 | --- | ---: | --- |
@@ -170,7 +211,7 @@
 | 隔离 Admin migration + `pnpm exec vitest run app/lib/dream/chatScheduledTaskPostgres.integration.test.ts` | 0 | `73/73` migration，`4 tests passed`；命名库 `ink_scheduled_chat_test_20260929_goal` 已清理 |
 | `python3 /private/tmp/check_scheduled_markdown_links.py docs/prd/claude-agent/scheduled-task-diary-page-prd.md docs/prd/claude-agent/scheduled-task-diary-page-structure-sketch.md docs/design/claude-agent/scheduled-task-diary-page-ui-design.md docs/design/claude-agent/scheduled-task-loop-interaction-design.md docs/exec/scheduled-task-diary-prd-review-20260929.md` | 0 | `checked 5 markdown files: all local links exist` |
 
-正常数据库发布与真实业务验收按第 6 节保留为独立门禁。
+本机正常 capability 与真实业务验收已按第 6 节关闭；外部部署仍需在目标环境重复配置校验与公开入口验收。
 
 ## 10. 最终裁决
 
@@ -179,8 +220,8 @@
 - **三项首次评审问题是否关闭：** 是。`exhausted`、A3 diary-only/月摘要后置、claim/prepare DTO 均已统一。
 - **是否与 DTO/operation 对齐：** 是。定义、触发、revision、manual key、claim/prepare/start/finish/reconcile 均可逐项映射。
 - **是否过度设计：** 否。月摘要和更复杂周期已后置，首期复用现有 Task/Thread/Run/Tool/事件与持久化路径。
-- **当前最小纵向切片是否完成：** 是。首次评审 P0 以及历史分页、非终态有界刷新、DST 明确失败反馈均由生产页面和相称测试关闭。
+- **当前最小纵向切片是否完成：** 是。独立分卡、任务局部状态、历史分页、非终态有界刷新、DST 明确失败反馈、能力目录重启恢复与真实模型会话均已关闭。
 - **技术验收是否完成：** 是。前端、后端、普通 Chat 回归、隔离跨仓旅程、最新 production build 和文档引用检查均有通过回执。
-- **Admin 主分支归位是否完成：** 是。`9ed8fc0` 已 fast-forward 进入 Admin `main`，并在主目录重跑类型、单元、集成、lint 与 build。
-- **发布与真实业务验收是否完成：** 否。正常 PostgreSQL capability、真实账户/模型和部署均未被本回执证明；这是发布边界，不是本地实现缺口。
+- **Admin 主分支归位是否完成：** 是。既有迁移 `9ed8fc0` 与 worker 配置修复 `fe2e8ac` 均在 Admin `main`；本轮配置单测和调度合同测试通过。
+- **本机真实业务验收是否完成：** 是。正常账户、正常数据库、真实模型和持久化目标 Thread 已经由公开 Calendar 业务入口验证；14:38 旧失败与 14:56 修复后成功均保留可复核。外部部署不在本轮范围内。
 - **剩余产品项：** 同时间戳 cursor 的稳定分页和 DST 候选列表需要 Admin 协议扩展后再设计；月摘要、复杂周期、继续原 Thread 与运行中远程取消仍按 PRD 作为后续事项。
