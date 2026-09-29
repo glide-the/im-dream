@@ -1,7 +1,7 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
-// [Output] Accessible responsive date workspace with scheduled-task summary/actions before independent diary entries.
+// [Output] Accessible responsive Calendar dialog with three independent floating paper surfaces for month, tasks, and diary entries.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
-// [Sync] 2026-09-29: render Scheduled tasks and Diary as independent sibling paper cards with card-local counts and states.
+// [Sync] 2026-09-29: move date context into task/diary headings and remove the visible outer summary surface for the floating-paper layout.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
@@ -737,19 +737,16 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
         </div>
       </section>
 
-      {selectedDate ? <section className="calendar-popup__workspace" aria-labelledby="calendar-popup-date-title">
-        <header className="calendar-popup__date-summary">
-          <h3 id="calendar-popup-date-title">{selectedDateLabel}</h3>
-        </header>
+      {selectedDate ? <div className="calendar-popup__workspace">
         <div className="calendar-popup__workspace-scroll">
           {isAuthenticated ? <section className="calendar-popup__section calendar-popup__task-section"
             aria-labelledby="calendar-popup-task-title">
             <header className="calendar-popup__section-heading calendar-popup__card-header">
-              <h3 id="calendar-popup-task-title">{t('calendar.scheduledSectionTitle')}</h3>
+              <h3 id="calendar-popup-task-title">{t('calendar.scheduledSectionTitleForDate', { date: selectedDateLabel })}</h3>
               <div className="calendar-popup__card-header-meta" aria-live="polite">
                 {scheduledError ? <span className="calendar-popup__card-status">{t('calendar.taskCountUnknown')}</span>
                   : scheduledLoading ? <span className="calendar-popup__card-status">{t('calendar.taskCountLoading')}</span>
-                    : <span className="calendar-popup__card-count">{scheduledTasks.length}</span>}
+                    : <span className="calendar-popup__card-count">{t('calendar.scheduledCount', { count: scheduledTasks.length })}</span>}
                 {!scheduledLoading && !scheduledError && attentionCount > 0 && firstAttentionTaskId
                   ? <button type="button" className="calendar-popup__count-alert" onClick={() => {
                       taskCardRefs.current.get(firstAttentionTaskId)?.focus();
@@ -781,8 +778,8 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
 
           <section className="calendar-popup__section calendar-popup__diary-section" aria-labelledby="calendar-popup-diary-title">
             <header className="calendar-popup__section-heading calendar-popup__card-header">
-              <h3 id="calendar-popup-diary-title">{t('calendar.diarySectionTitle')}</h3>
-              <span className="calendar-popup__card-count" aria-live="polite">{selectedEntries.length}</span>
+              <h3 id="calendar-popup-diary-title">{t('calendar.diarySectionTitleForDate', { date: selectedDateLabel })}</h3>
+              <span className="calendar-popup__card-count" aria-live="polite">{t('calendar.entriesLabel', { count: selectedEntries.length })}</span>
             </header>
             <div className="calendar-popup__card-body">
               {selectedEntries.length === 0 ? <p className="calendar-popup__empty">{t('calendar.noEntriesForDate')}</p>
@@ -804,7 +801,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
             </div>
           </section>
         </div>
-      </section> : null}
+      </div> : null}
     </div>
   </Modal>;
 }

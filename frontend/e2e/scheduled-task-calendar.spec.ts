@@ -1,9 +1,9 @@
 // [Input] Production Next shell, intercepted authenticated session, calendar storage reads,
 // scheduled-task DTOs, revisioned actions, and the canonical Chat thread navigation boundary.
-// [Output] Provider-free Chrome receipts for the reviewed CalendarPopup desktop/mobile journeys
-// without database, model, scheduled worker, or diary mutation.
+// [Output] Provider-free Chrome receipts for the fixed-month/scrolling-paper-stack CalendarPopup journeys
+// and its existing task lifecycle, without database, model, scheduled worker, or diary mutation.
 // [Pos] Technical isolated scheduled-task browser journey in frontend/e2e.
-// [Sync] 2026-09-29: verify independent task/diary cards, card-local empty/error states, and mobile card order.
+// [Sync] 2026-09-29: verify the desktop task/diary stack scrolls without moving the adjacent month paper, with single-column Calendar scrolling on narrower screens.
 
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
@@ -320,7 +320,60 @@ async function openMore(card: Locator) {
   await card.getByRole('button', { name: /更多操作/ }).click();
 }
 
-test('desktop journey follows the reviewed task-before-diary lifecycle', async ({ page }) => {
+async function readFloatingPaperSafety(dialog: Locator) {
+  return dialog.evaluate((element) => {
+    const layout = element.querySelector('.calendar-popup');
+    const stack = element.querySelector('.calendar-popup__workspace-scroll');
+    if (!(layout instanceof HTMLElement) || !(stack instanceof HTMLElement)) {
+      throw new Error('calendar floating-paper scroll regions are incomplete');
+    }
+    const usesLayoutScroll = getComputedStyle(layout).overflowY === 'auto';
+    const content = usesLayoutScroll ? layout : stack;
+    const papers = Array.from(usesLayoutScroll
+      ? element.querySelectorAll('.calendar-popup__calendar, .calendar-popup__section')
+      : stack.querySelectorAll(':scope > .calendar-popup__section'));
+    if (papers.length !== (usesLayoutScroll ? 3 : 2)
+      || papers.some((paper) => !(paper instanceof HTMLElement))) {
+      throw new Error('calendar floating-paper geometry is incomplete');
+    }
+    const calendar = element.querySelector('.calendar-popup__calendar');
+    const calendarTopBefore = calendar?.getBoundingClientRect().top ?? null;
+    const previousScrollTop = content.scrollTop;
+    content.scrollTop = content.scrollHeight;
+    const contentRect = content.getBoundingClientRect();
+    const paperRects = papers.map((paper) => paper.getBoundingClientRect());
+    const style = getComputedStyle(content);
+    const result = {
+      paddingLeft: Number.parseFloat(style.paddingLeft),
+      paddingRight: Number.parseFloat(style.paddingRight),
+      paddingBottom: Number.parseFloat(style.paddingBottom),
+      leftGap: Math.min(...paperRects.map((rect) => rect.left - contentRect.left)),
+      rightGap: Math.min(...paperRects.map((rect) => contentRect.right - rect.right)),
+      bottomGap: contentRect.bottom - Math.max(...paperRects.map((rect) => rect.bottom)),
+      maxScrollTop: content.scrollHeight - content.clientHeight,
+      reachedScrollBottom: Math.abs(content.scrollTop - (content.scrollHeight - content.clientHeight)) <= 1,
+      scrollOwner: usesLayoutScroll ? 'layout' : 'stack',
+      fixedCalendarDelta: usesLayoutScroll || calendarTopBefore === null || !calendar
+        ? null : Math.abs(calendar.getBoundingClientRect().top - calendarTopBefore),
+    };
+    content.scrollTop = previousScrollTop;
+    return result;
+  });
+}
+
+function expectFloatingPaperSafety(
+  safety: Awaited<ReturnType<typeof readFloatingPaperSafety>>,
+  expected: { side: number; bottom: number },
+) {
+  expect(safety.paddingLeft).toBe(expected.side);
+  expect(safety.paddingRight).toBe(expected.side);
+  expect(safety.leftGap).toBeGreaterThanOrEqual(expected.side - 1);
+  expect(safety.rightGap).toBeGreaterThanOrEqual(expected.side - 1);
+  expect(safety.bottomGap).toBeGreaterThanOrEqual(expected.bottom - 1);
+  expect(safety.reachedScrollBottom).toBe(true);
+}
+
+test('desktop journey follows the reviewed task-before-diary lifecycle', async ({ page }, testInfo) => {
   const fixture = await installFixtures(page, { firstRunOutcome: 'server_error' });
   const { dialog } = await openCalendar(page);
 
@@ -328,34 +381,71 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   const stack = workspace.locator('.calendar-popup__workspace-scroll');
   const taskSection = stack.locator(':scope > .calendar-popup__task-section');
   const diarySection = stack.locator(':scope > .calendar-popup__diary-section');
-  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('1');
-  await expect(diarySection.locator('.calendar-popup__card-count')).toHaveText('1');
+  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('1 项');
+  await expect(diarySection.locator('.calendar-popup__card-count')).toHaveText('1 篇');
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
   await expect(dialog.getByText('晨间复盘')).toBeVisible();
-  expect(await dialog.locator('.calendar-popup__section-heading h3').allTextContents()).toEqual(['定时任务', '日记']);
+  expect(await dialog.locator('.calendar-popup__section-heading h3').allTextContents()).toEqual(['今天的定时任务', '今天的日记']);
+  await expect(dialog.locator('.calendar-popup__date-summary')).toHaveCount(0);
   expect(await taskSection.evaluate((element) =>
     element.nextElementSibling?.classList.contains('calendar-popup__diary-section'))).toBe(true);
   const cardBoxes = await Promise.all([taskSection.boundingBox(), diarySection.boundingBox()]);
   expect(cardBoxes[0] && cardBoxes[1] && cardBoxes[1].y > cardBoxes[0].y + cardBoxes[0].height).toBeTruthy();
-  const surfaces = await workspace.evaluate((element) => {
-    const workspaceStyle = getComputedStyle(element);
-    const cards = Array.from(element.querySelectorAll('.calendar-popup__section')).map((card) => {
-      const style = getComputedStyle(card);
+  const closeBox = await dialog.getByRole('button', { name: '关闭' }).boundingBox();
+  const paperBoxes = await Promise.all([
+    dialog.locator('.calendar-popup__calendar').boundingBox(), taskSection.boundingBox(), diarySection.boundingBox(),
+  ]);
+  expect(closeBox && paperBoxes.every((paper) => paper && (
+    closeBox.x + closeBox.width <= paper.x || paper.x + paper.width <= closeBox.x
+    || closeBox.y + closeBox.height <= paper.y || paper.y + paper.height <= closeBox.y
+  ))).toBeTruthy();
+  const surfaces = await dialog.evaluate((element) => {
+    const dialogStyle = getComputedStyle(element);
+    const workspaceElement = element.querySelector('.calendar-popup__workspace');
+    if (!(workspaceElement instanceof HTMLElement)) throw new Error('calendar workspace is missing');
+    const workspaceStyle = getComputedStyle(workspaceElement);
+    const papers = Array.from(element.querySelectorAll('.calendar-popup__calendar, .calendar-popup__section')).map((paper) => {
+      const style = getComputedStyle(paper);
       return { borderWidth: style.borderTopWidth, background: style.backgroundColor, boxShadow: style.boxShadow };
     });
+    const task = element.querySelector('.calendar-popup__task');
+    const fact = element.querySelector('.calendar-popup__task-facts > div');
     return {
+      dialog: {
+        borderWidth: dialogStyle.borderTopWidth,
+        background: dialogStyle.backgroundColor,
+        boxShadow: dialogStyle.boxShadow,
+      },
       workspace: {
         borderWidth: workspaceStyle.borderTopWidth,
         background: workspaceStyle.backgroundColor,
         boxShadow: workspaceStyle.boxShadow,
       },
-      cards,
+      papers,
+      task: task ? {
+        borderWidth: getComputedStyle(task).borderTopWidth,
+        background: getComputedStyle(task).backgroundColor,
+        boxShadow: getComputedStyle(task).boxShadow,
+      } : null,
+      factBackground: fact ? getComputedStyle(fact).backgroundColor : null,
     };
   });
+  expect(surfaces.dialog).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
   expect(surfaces.workspace).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
-  expect(surfaces.cards).toHaveLength(2);
-  expect(surfaces.cards.every((cardStyle) => cardStyle.borderWidth !== '0px'
-    && cardStyle.background !== 'rgba(0, 0, 0, 0)')).toBe(true);
+  expect(surfaces.papers).toHaveLength(3);
+  expect(surfaces.papers.every((paperStyle) => paperStyle.borderWidth !== '0px'
+    && paperStyle.background !== 'rgba(0, 0, 0, 0)' && paperStyle.boxShadow !== 'none')).toBe(true);
+  expect(surfaces.task).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
+  expect(surfaces.factBackground).toBe('rgba(0, 0, 0, 0)');
+  const hiddenTitle = await dialog.locator('.modal-title--default').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { position: style.position, width: style.width, height: style.height, clip: style.clip };
+  });
+  expect(hiddenTitle).toEqual({ position: 'absolute', width: '1px', height: '1px', clip: 'rect(0px, 0px, 0px, 0px)' });
+  const desktopSafety = await readFloatingPaperSafety(dialog);
+  expect(desktopSafety.scrollOwner).toBe('stack');
+  expect(desktopSafety.fixedCalendarDelta).toBeLessThanOrEqual(1);
+  expectFloatingPaperSafety(desktopSafety, { side: 36, bottom: 56 });
   await expect(dialog.getByRole('gridcell', { name: /2026.*9.*29/ })).not.toHaveClass(/calendar-popup__day--has-entry/);
 
   const card = dialog.locator('.calendar-popup__task').first();
@@ -399,6 +489,9 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   await undo.getByRole('button', { name: /撤销删除/ }).click();
   const restored = dialog.locator('.calendar-popup__task').first();
   await expect(restored).toContainText('已启用');
+  await testInfo.attach('calendar-floating-wide', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
 
   await restored.locator('.calendar-popup__primary-actions').getByRole('button', { name: /打开会话/ }).click();
   await expect(page).toHaveURL(/\/story-workspace\/chat$/);
@@ -408,7 +501,7 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
 });
 
-test('mobile exhausted state keeps unknown execution safe and menu keyboard-operable', async ({ page }) => {
+test('mobile exhausted state keeps unknown execution safe and menu keyboard-operable', async ({ page }, testInfo) => {
   const fixture = await installFixtures(page, {
     taskStatus: 'exhausted', initialTriggerStatus: 'state_unknown', initialTriggerHasThread: true,
     firstRunOutcome: 'success',
@@ -442,7 +535,86 @@ test('mobile exhausted state keeps unknown execution safe and menu keyboard-oper
   const taskBox = await dialog.locator('.calendar-popup__task-section').boundingBox();
   const diaryBox = await dialog.locator('.calendar-popup__diary-section').boundingBox();
   expect(calendarBox && taskBox && diaryBox
-    && taskBox.y > calendarBox.y && diaryBox.y > taskBox.y + taskBox.height).toBeTruthy();
+    && taskBox.y > calendarBox.y + calendarBox.height
+    && diaryBox.y > taskBox.y + taskBox.height).toBeTruthy();
+  const mobileSafety = await readFloatingPaperSafety(dialog);
+  expect(mobileSafety.scrollOwner).toBe('layout');
+  expectFloatingPaperSafety(mobileSafety, { side: 16, bottom: 24 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
+  await testInfo.attach('calendar-floating-mobile', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('tablet breakpoint keeps one scroll owner and switches cleanly to two columns', async ({ page }, testInfo) => {
+  const fixture = await installFixtures(page, { firstRunOutcome: 'success' });
+  const { dialog } = await openCalendar(page, { width: 1024, height: 768 });
+  const calendar = dialog.locator('.calendar-popup__calendar');
+  const taskSection = dialog.locator('.calendar-popup__task-section');
+  const diarySection = dialog.locator('.calendar-popup__diary-section');
+
+  const singleColumnBoxes = await Promise.all([calendar.boundingBox(), taskSection.boundingBox(), diarySection.boundingBox()]);
+  expect(singleColumnBoxes[0] && singleColumnBoxes[1] && singleColumnBoxes[2]
+    && singleColumnBoxes[1].y > singleColumnBoxes[0].y + singleColumnBoxes[0].height
+    && singleColumnBoxes[2].y > singleColumnBoxes[1].y + singleColumnBoxes[1].height).toBeTruthy();
+  const closeBox = await dialog.getByRole('button', { name: '关闭' }).boundingBox();
+  expect(closeBox && singleColumnBoxes.every((paper) => paper && (
+    closeBox.x + closeBox.width <= paper.x || paper.x + paper.width <= closeBox.x
+    || closeBox.y + closeBox.height <= paper.y || paper.y + paper.height <= closeBox.y
+  ))).toBeTruthy();
+  const scrollOwners = await dialog.evaluate((element) => {
+    const content = element.querySelector(':scope > .modal-content--default');
+    const layout = element.querySelector('.calendar-popup');
+    const stack = element.querySelector('.calendar-popup__workspace-scroll');
+    if (!(content instanceof HTMLElement) || !(layout instanceof HTMLElement) || !(stack instanceof HTMLElement)) {
+      throw new Error('calendar scroll structure is incomplete');
+    }
+    return {
+      content: getComputedStyle(content).overflowY,
+      layout: getComputedStyle(layout).overflowY,
+      stack: getComputedStyle(stack).overflowY,
+    };
+  });
+  expect(scrollOwners).toEqual({ content: 'hidden', layout: 'auto', stack: 'visible' });
+  const tabletSafety = await readFloatingPaperSafety(dialog);
+  expect(tabletSafety.scrollOwner).toBe('layout');
+  expectFloatingPaperSafety(tabletSafety, { side: 20, bottom: 32 });
+
+  await page.setViewportSize({ width: 1025, height: 768 });
+  const twoColumnBoxes = await Promise.all([calendar.boundingBox(), taskSection.boundingBox()]);
+  expect(twoColumnBoxes[0] && twoColumnBoxes[1]
+    && twoColumnBoxes[1].x > twoColumnBoxes[0].x + twoColumnBoxes[0].width
+    && Math.abs(twoColumnBoxes[1].y - twoColumnBoxes[0].y) <= 1).toBeTruthy();
+  const desktopScrollOwners = await dialog.evaluate((element) => ({
+    layout: getComputedStyle(element.querySelector('.calendar-popup') as HTMLElement).overflowY,
+    stack: getComputedStyle(element.querySelector('.calendar-popup__workspace-scroll') as HTMLElement).overflowY,
+  }));
+  expect(desktopScrollOwners).toEqual({ layout: 'hidden', stack: 'auto' });
+  const contentFits = await dialog.locator('.calendar-popup').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth + 1);
+  expect(contentFits).toBeTruthy();
+  await testInfo.attach('calendar-floating-tablet-boundary', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
+
+  await page.setViewportSize({ width: 1440, height: 480 });
+  const shortViewportDialogBox = await dialog.boundingBox();
+  const shortViewportCalendarTop = (await calendar.boundingBox())?.y;
+  const monthScroll = await calendar.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    return {
+      overflowY: getComputedStyle(element).overflowY,
+      maxScrollTop: element.scrollHeight - element.clientHeight,
+      reachedBottom: Math.abs(element.scrollTop - (element.scrollHeight - element.clientHeight)) <= 1,
+    };
+  });
+  expect(monthScroll.overflowY).toBe('auto');
+  expect(monthScroll.maxScrollTop).toBeGreaterThan(0);
+  expect(monthScroll.reachedBottom).toBe(true);
+  await expect(calendar.getByRole('gridcell', { name: /2026.*9.*30/ })).toBeVisible();
+  expect((await calendar.boundingBox())?.y).toBeCloseTo(shortViewportCalendarTop ?? 0, 0);
+  expect(shortViewportDialogBox && shortViewportDialogBox.height <= 416 + 1).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
   expect(fixture.getUnexpected()).toEqual([]);
 });
@@ -466,10 +638,10 @@ test('task-free date keeps an independent empty task card beside diary content',
   const { dialog } = await openCalendar(page);
   const taskSection = dialog.locator('.calendar-popup__task-section');
   await expect(taskSection).toHaveCount(1);
-  await expect(taskSection.getByRole('heading', { name: '定时任务' })).toBeVisible();
-  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('0');
+  await expect(taskSection.getByRole('heading', { name: '今天的定时任务' })).toBeVisible();
+  await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('0 项');
   await expect(taskSection.getByText('这一天没有定时任务。')).toBeVisible();
-  await expect(dialog.getByRole('heading', { name: '日记' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: '今天的日记' })).toBeVisible();
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
   expect(fixture.getUnexpected()).toEqual([]);
 });
@@ -516,6 +688,11 @@ test('active execution refreshes to a terminal result and history loads older pa
   await history.getByRole('button', { name: /加载更早记录/ }).click();
   await expect(history.getByRole('listitem')).toHaveCount(21);
   await expect(history.getByRole('button', { name: /加载更早记录/ })).toHaveCount(0);
+  const safety = await readFloatingPaperSafety(dialog);
+  expect(safety.maxScrollTop).toBeGreaterThan(0);
+  expect(safety.scrollOwner).toBe('stack');
+  expect(safety.fixedCalendarDelta).toBeLessThanOrEqual(1);
+  expectFloatingPaperSafety(safety, { side: 36, bottom: 56 });
   expect(fixture.getHistoryRequests().some((search) => search.includes('before_created_at='))).toBe(true);
   expect(fixture.getUnexpected()).toEqual([]);
 });

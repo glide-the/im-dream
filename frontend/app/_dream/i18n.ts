@@ -4,6 +4,7 @@
 // [Sync] 2026-09-28: localize completed task status and durable result notification states.
 // [Sync] 2026-09-28: localize scheduled Chat cards, revision conflicts and date-query recovery.
 // [Sync] 2026-09-29: localize the reviewed date workspace, task state hierarchy, conflict recovery, and accessibility labels.
+// [Sync] 2026-09-29: localize date-qualified floating task/diary card headings and plain card counts.
 // [Sync] 2026-09-27: clarify queue-unavailable feedback and label read-only status refresh.
 // [Sync] 2026-09-28: explain uncertain dispatched inputs separately from retained unsent drafts.
 // [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
@@ -414,10 +415,13 @@ const resources = {
         loadError: 'Unable to open this entry.',
         deleteError: 'Failed to delete entry',
         diarySectionTitle: 'Diary',
+        diarySectionTitleForDate: 'Diary · {{date}}',
         diaryCount_one: 'Diary {{count}}',
         diaryCount_other: 'Diary {{count}}',
         taskCount_one: 'Task {{count}}',
         taskCount_other: 'Tasks {{count}}',
+        scheduledCount_one: '{{count}} task',
+        scheduledCount_other: '{{count}} tasks',
         taskCountLoading: 'Tasks …',
         taskCountUnknown: 'Tasks unknown',
         attentionCount_one: '{{count}} item needs attention',
@@ -425,6 +429,7 @@ const resources = {
         attentionCountLoading: 'Checking items needing attention…',
         attentionCountUnknown: 'Items needing attention unknown',
         scheduledSectionTitle: 'Scheduled tasks',
+        scheduledSectionTitleForDate: 'Scheduled tasks · {{date}}',
         scheduledEmpty: 'No scheduled tasks for this date.',
         scheduledLoading: 'Loading tasks…',
         scheduledUnavailable: 'Tasks are temporarily unavailable.',
@@ -1430,10 +1435,13 @@ const resources = {
         loadError: '无法打开这篇记录。',
         deleteError: '删除失败',
         diarySectionTitle: '日记',
+        diarySectionTitleForDate: '{{date}}的日记',
         diaryCount_one: '日记 {{count}}',
         diaryCount_other: '日记 {{count}}',
         taskCount_one: '任务 {{count}}',
         taskCount_other: '任务 {{count}}',
+        scheduledCount_one: '{{count}} 项',
+        scheduledCount_other: '{{count}} 项',
         taskCountLoading: '任务 …',
         taskCountUnknown: '任务数未知',
         attentionCount_one: '有 {{count}} 项需处理',
@@ -1441,6 +1449,7 @@ const resources = {
         attentionCountLoading: '正在检查需处理项…',
         attentionCountUnknown: '需处理数未知',
         scheduledSectionTitle: '定时任务',
+        scheduledSectionTitleForDate: '{{date}}的定时任务',
         scheduledEmpty: '这一天没有定时任务。',
         scheduledLoading: '正在加载任务…',
         scheduledUnavailable: '任务暂不可用。',

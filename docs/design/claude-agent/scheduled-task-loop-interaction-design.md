@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-09-29: Calendar 右栏按现行 PRD 修正为独立任务卡与日记卡，任务局部状态不影响日记。 -->
+<!-- [Sync] 2026-09-29: Calendar 使用透明对话画布与月历/任务/日记三张独立悬浮纸面；日期并入业务卡标题，任务局部状态不影响日记。 -->
 <!-- [Input] docs/exec 下阶段评审、docs/prd/claude-agent 下正式页面 PRD/骨架图、现有 Chat/CalendarPopup、Admin Drizzle 和 Notion 主页面证据。 -->
 <!-- [Output] 首期单次与每日定时任务的交互、业务时序、执行、配置版本、失败反馈及可验证的实施门槛。 -->
 <!-- [Pos] Claude Agent 定时任务现行设计；阶段二原文保存在 scheduled-task-loop-interaction-design-20260928-phase2-history.md。 -->
@@ -65,7 +65,7 @@ scheduled-task.edit 只接受 active 或 paused 定义。exhausted 是单次计�
 
 ### Calendar 页面容器合同
 
-Calendar 的右栏是透明布局与单一滚动容器，不绘制同时包住两类内容的背景、边框、圆角或阴影。Scheduled tasks 与 Diary 是同一容器下的两个同级独立 Paper Cream 卡片，各自拥有标题、计数、分隔线和正文；两卡间保留 16px Warm Canvas 间隙。已认证且已选日期时任务卡始终存在，loading、error、empty、list 只替换任务卡正文，任务读取或操作失败不得遮挡或禁用日记卡。窄屏顺序固定为月历 → 日期上下文 → 任务卡 → 日记卡。具体骨架与视觉标尺分别见现行 [PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)、[骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md) 与 [UI 设计](./scheduled-task-diary-page-ui-design.md)。
+Calendar Modal 只承担对话框、焦点和滚动职责，其 surface、header 与 content 不绘制可见背景、包围边框、圆角或整体阴影。月历、Scheduled tasks 与 Diary 是透明画布上的三张同级 Paper Cream 悬浮纸面；右侧透明卡栈只安排任务卡与日记卡的自然高度和间距。日期上下文直接进入两张业务卡标题，页面不再增加可见 `Calendar` 标题或独立日期摘要。任务卡与日记卡各自拥有标题、计数、一条卡头分隔线和正文；任务条目的计划、时区、下次执行与最近结果使用扁平文本组，不再各套一个事实框。已认证且已选日期时任务卡始终存在，loading、error、empty、list 只替换任务卡正文，任务读取或操作失败不得遮挡或禁用日记卡。窄屏顺序固定为月历 → 任务卡 → 日记卡。具体骨架与视觉标尺分别见现行 [PRD](../../prd/claude-agent/scheduled-task-diary-page-prd.md)、[骨架图](../../prd/claude-agent/scheduled-task-diary-page-structure-sketch.md) 与 [UI 设计](./scheduled-task-diary-page-ui-design.md)。
 
 
 1. 已认证用户在 Chat 指定提示词和明确时间；Tool 保存成功后 Agent 复述当地时间、时区与任务入口。Tool 不获得模型传入的用户 ID、Claude session ID 或凭据。
@@ -106,7 +106,7 @@ sequenceDiagram
         Admin->>DB: 按当前用户读取定义与当日触发
         DB-->>Admin: effective 定义和持久触发记录
         Admin-->>Diary: tasks + triggers
-        Diary-->>U: 按“日期摘要 → 定时任务 → 日记”展示
+        Diary-->>U: 在透明画布上按“月历 → 日期化任务卡 → 日期化日记卡”展示
     else rule 字段、当地时间或时区无效
         Admin-->>Host: 422 + 稳定字段错误；不写定义
         Host-->>Agent: 创建失败
