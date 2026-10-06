@@ -1,3 +1,4 @@
+// [Sync] 2026-10-07: login/import cleanup uses the explicit key list and retains browser language/theme.
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
 // [Sync] 2026-09-28: open a scheduled task's persisted target Thread through the mounted ChatView navigation props.
 // [Sync] 2026-09-29: expose the shared Calendar date workspace from the existing 44px mobile Writing toolbar.
@@ -78,7 +79,7 @@ import { useAuth } from './contexts/AuthContext';
 import LoginForm from './components/Auth/LoginForm';
 import RegisterForm from './components/Auth/RegisterForm';
 import DeviceVerificationPage from './components/Auth/DeviceVerificationPage';
-import { STORAGE_KEYS } from './constants/storageKeys';
+import { LOCAL_IMPORT_CLEANUP_KEYS, STORAGE_KEYS } from './constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from './utils/timezone';
 import { useSessionLifecycle } from './hooks/useSessionLifecycle';
 import { useWritingSuggestions } from './hooks/useWritingSuggestions';
@@ -683,10 +684,10 @@ export default function App() {
         const { getPreferences } = await import('./api/voiceApi');
         const preferences = await getPreferences();
 
-        // If user has already completed first login, clear localStorage
+        // Clear completed local account/import data while retaining browser display preferences.
         if (preferences?.first_login_completed) {
           // Clear completed local import data and any retired credential.
-          Object.values(STORAGE_KEYS).forEach(key => {
+          LOCAL_IMPORT_CLEANUP_KEYS.forEach(key => {
             localStorage.removeItem(key);
           });
           return;
@@ -1070,7 +1071,7 @@ export default function App() {
       await markFirstLoginCompleted();
 
       // Clear completed local import data and any retired credential.
-      Object.values(STORAGE_KEYS).forEach(key => {
+      LOCAL_IMPORT_CLEANUP_KEYS.forEach(key => {
         localStorage.removeItem(key);
       });
 
@@ -1107,7 +1108,7 @@ export default function App() {
       await markFirstLoginCompleted();
 
       // Clear completed local import data and any retired credential.
-      Object.values(STORAGE_KEYS).forEach(key => {
+      LOCAL_IMPORT_CLEANUP_KEYS.forEach(key => {
         localStorage.removeItem(key);
       });
 
