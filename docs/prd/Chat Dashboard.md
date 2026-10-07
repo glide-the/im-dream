@@ -1,3 +1,8 @@
+<!-- [Input] Existing Chat landing, WorkspaceTabBar and the priority activity PRD. -->
+<!-- [Output] Chat dashboard layout and an auxiliary activity entry reference without changing the primary landing content switch. -->
+<!-- [Pos] Existing Chat dashboard contract; activity product rules and skeletons belong to docs/prd/chat/priority-activity.md. -->
+<!-- [Sync] 2026-10-07: add the auxiliary activity bell contract while retaining existing landing/connector behavior. -->
+
 # Chat Dashboard PRD
 
 > 对话工作台首页的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
@@ -11,6 +16,8 @@
 > **[Sync] 2026-07-08**: 根据 Chat 入口比例反馈收紧实现边界：`MainContentArea` 与输入框 / `WorkspaceTabBar` 同宽居中；历史窗体移除外层冗余边框；Chat 连接器已连接态改为状态信息面板，展示授权 / 同步 / 已链接资源摘要，只有小型「管理」入口可跳转 Settings。
 > **[Sync] 2026-07-08**: Chat 连接器面板的已链接资源必须来自后端 persisted `connector.sources`；Settings 保存资源后刷新页面仍可恢复，且 Notion People 系统数据源不会出现在资源范围或 Chat 摘要中。
 > **[Sync] 2026-07-09**: Chat `ConnectorLandingPanel` 继续减少卡片感：根内容区无外框，`ConnectorStatusPanel` 使用虚线边界但无卡片底色 / 阴影，空态、状态 chip 和已链接资源行使用轻表面承载，只在明确操作控件上保留弱边界。
+
+> **[Sync] 2026-10-07**: 新建旁增加活动铃铛，按[Chat 活动视图 PRD](./chat/priority-activity.md)和[正式交互设计](../design/claude-agent/priority-activity-sidebar.md)作为当前消息或 landing 之外的辅助入口，右侧汇集优先级与历史。`WorkspaceTabBar` 仍负责原首屏主内容切换，不因辅助面板替换。当前活动方案待独立评审与实施。
 
 ## 1. 文档范围
 

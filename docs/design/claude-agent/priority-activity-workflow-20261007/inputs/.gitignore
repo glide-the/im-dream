@@ -1,0 +1,6 @@
+# [Input] User screenshots containing conversation excerpts.
+# [Output] Exact local-only reference exclusions.
+# [Pos] Activity design input Git boundary.
+# [Sync] 2026-10-07: preserve screenshots locally without committing conversation text.
+/target_image.png
+/priority_filter.png

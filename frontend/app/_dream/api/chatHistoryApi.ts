@@ -5,6 +5,7 @@ import { browserRequestHeaders } from '../lib/browserSession';
 // [Pos] Chat history transport owner in frontend/app/_dream/api.
 // [Sync] 2026-08-17: centralize Chat history transport and expose actor-scoped Deck filtering.
 // [Sync] 2026-09-01: allow product-owned Thread titles without attaching a Deck or Voice.
+// [Sync] 2026-10-07: accept optional read cancellation for the Chat activity sidebar without changing list semantics.
 
 
 import { API_BASE } from '../lib/apiBase';
@@ -66,6 +67,7 @@ export async function createChatThread(
 
 export async function listChatThreads(
   params: ChatThreadSearchParams = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<ChatHistoryThread[]> {
   const search = new URLSearchParams();
   const query = params.query?.trim() ?? '';
@@ -81,6 +83,7 @@ export async function listChatThreads(
   const suffix = search.size > 0 ? `?${search.toString()}` : '';
   const response = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, {
     headers: authHeaders(),
+    signal: options.signal,
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { detail?: string } | null;
