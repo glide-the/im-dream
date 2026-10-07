@@ -98,6 +98,7 @@
 // [Sync] 2026-09-02: hydrate only the newest message page and reserve full-history
 //                    transport for an explicit whole-thread export.
 // [Sync] 2026-09-29: own scheduled-task marker details as a mutually exclusive right sidebar and accept Calendar task drafts.
+// [Sync] 2026-10-07: reuse the history sidebar for the priority activity bell, independent read recovery and original navigation/delete behavior.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -118,6 +119,10 @@ import PlanButton from './PlanPanel';
 import { SubagentSidebar } from './SubagentPanel';
 import TaskSessionSidebar from './TaskSessionSidebar';
 import ScheduledTaskDetailSidebar from './ScheduledTaskDetailSidebar';
+import ActivitySidebar from './ActivitySidebar';
+import { useActivitySidebarData } from './useActivitySidebarData';
+import { buildActivityRows, DEFAULT_ACTIVITY_FILTERS, type ActivityFilters, type ActivityRow } from './activitySidebarModel';
+import { useMobile } from '../../utils/mobileDetect';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
@@ -125,7 +130,7 @@ import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip'
 import ChatShareDialog from './ChatShareDialog';
 import { renderThreadImage, downloadThreadImage, releaseThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
 import { getChatExportSnapshot } from '../../lib/chat-export-registry';
-import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconSparkles, IconX } from './Icons';
+import { IconBell, IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconSparkles, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
@@ -271,10 +276,10 @@ function parseThreadDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function dayDiffFromToday(value: string): number | null {
+function dayDiffFromToday(value: string, localDayKey?: string): number | null {
   const date = parseThreadDate(value);
   if (!date) return null;
-  const today = new Date();
+  const today = localDayKey ? new Date(`${localDayKey}T00:00:00`) : new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   return Math.floor((todayStart - dateStart) / 86400000);
@@ -291,8 +296,8 @@ function formatThreadDateLabel(value: string, t: TFunction, language?: string): 
   return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
 }
 
-function getThreadDateGroup(value: string, t: TFunction): string {
-  const diff = dayDiffFromToday(value);
+function getThreadDateGroup(value: string, t: TFunction, localDayKey?: string): string {
+  const diff = dayDiffFromToday(value, localDayKey);
   if (diff === 0) return t('chat.dateGroup.today');
   if (diff === 1) return t('chat.dateGroup.yesterday');
   if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.last7Days');
@@ -300,12 +305,8 @@ function getThreadDateGroup(value: string, t: TFunction): string {
   return t('chat.dateGroup.earlier');
 }
 
-async function fetchThreads(params: Parameters<typeof listChatThreads>[0] = {}): Promise<ChatThread[]> {
-  try {
-    return await listChatThreads(params);
-  } catch {
-    return [];
-  }
+async function fetchThreads(params: Parameters<typeof listChatThreads>[0] = {}, options: { signal?: AbortSignal } = {}): Promise<ChatThread[]> {
+  return listChatThreads(params, options);
 }
 
 async function deleteThread(threadId: string): Promise<boolean> {
@@ -337,12 +338,13 @@ function ChatViewContent({
   onLandingTabChange,
 }: ChatViewContentProps) {
   const { t, i18n } = useTranslation();
+  const isMobile = useMobile();
   const { workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
   const [sideTaskThreadId, setSideTaskThreadId] = useState<string | null>(null);
   const [scheduledTaskDetail, setScheduledTaskDetail] = useState<{
-    taskId: string; snapshot: ScheduledTaskMarkerSnapshot;
+    taskId: string; snapshot: ScheduledTaskMarkerSnapshot | null;
   } | null>(null);
   useEffect(() => {
     const selected = new URLSearchParams(window.location.search).get('task_thread');
@@ -370,6 +372,19 @@ function ChatViewContent({
   const freshQueuedThreadIdRef = useRef<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
+  const activity = useActivitySidebarData(threadSidebarOpen);
+  const { removeChat: removeActivityChat } = activity;
+  const [activityFilters, setActivityFilters] = useState<ActivityFilters>(() => ({ ...DEFAULT_ACTIVITY_FILTERS }));
+  const activityBellRef = useRef<HTMLButtonElement>(null);
+  const [threadHistoryError, setThreadHistoryError] = useState(false);
+  const [threadHistoryMoreError, setThreadHistoryMoreError] = useState(false);
+  const threadHistoryOffsetRef = useRef(0);
+  const threadHistoryConsumedIdsRef = useRef(new Set<string>());
+  const deletedThreadIdsRef = useRef(new Set<string>());
+  const threadHistoryControllerRef = useRef<AbortController | null>(null);
+  const threadHistoryActivityOwnedRef = useRef(false);
+  const activityOpenRef = useRef(threadSidebarOpen);
+  activityOpenRef.current = threadSidebarOpen;
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
   const [isLoadingMoreThreads, setIsLoadingMoreThreads] = useState(false);
   const [hasMoreThreads, setHasMoreThreads] = useState(false);
@@ -409,6 +424,8 @@ function ChatViewContent({
   const threadLoadMoreInFlightRef = useRef(false);
   const threadSearchRequestSeqRef = useRef(0);
   const threadSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const threadSearchDialogRef = useRef<HTMLElement | null>(null);
+  const [threadSearchError, setThreadSearchError] = useState(false);
   const [isSearchingThreads, setIsSearchingThreads] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
@@ -426,9 +443,30 @@ function ChatViewContent({
     [dreamRuns.data?.runs],
   );
   const openDreamRun = useCallback((href: string) => {
+    setThreadSidebarOpen(false);
     window.history.pushState({ inkDreamView: 'story-workspace' }, '', href);
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, []);
+  const closeActivity = useCallback(() => {
+    setThreadSidebarOpen(false);
+    window.requestAnimationFrame(() => activityBellRef.current?.focus());
+  }, []);
+  const toggleActivity = useCallback(() => {
+    if (threadSidebarOpen) { closeActivity(); return; }
+    setFileSidebarOpen(false);
+    setSubagentSidebarOpen(false);
+    setScheduledTaskDetail(null);
+    closeSideTask();
+    setMoreMenuOpen(false);
+    setThreadSidebarOpen(true);
+  }, [closeActivity, closeSideTask, threadSidebarOpen]);
+  const openActivityTask = useCallback((row: ActivityRow) => {
+    setThreadSidebarOpen(false);
+    setFileSidebarOpen(false);
+    setSubagentSidebarOpen(false);
+    closeSideTask();
+    setScheduledTaskDetail({ taskId: row.id, snapshot: row.snapshot ?? null });
+  }, [closeSideTask]);
   const selectedDeck = useMemo(
     () => availableDecks.find((deck) => deck.id === selectedDeckId),
     [availableDecks, selectedDeckId],
@@ -500,17 +538,28 @@ function ChatViewContent({
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
+    threadHistoryControllerRef.current?.abort();
+    const controller = new AbortController();
+    threadHistoryControllerRef.current = controller;
+    threadHistoryActivityOwnedRef.current = activityOpenRef.current;
     const requestSeq = threadFetchRequestSeqRef.current + 1;
     threadFetchRequestSeqRef.current = requestSeq;
     threadLoadMoreInFlightRef.current = false;
     setIsLoadingThreads(true);
     setIsLoadingMoreThreads(false);
-    setHasMoreThreads(false);
+    setThreadHistoryError(false);
+    setThreadHistoryMoreError(false);
     try {
-      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset: 0 });
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset: 0 }, { signal: controller.signal });
       if (requestSeq !== threadFetchRequestSeqRef.current) return;
-      setThreads(list.slice(0, THREAD_HISTORY_PAGE_SIZE));
+      const consumed = list.slice(0, THREAD_HISTORY_PAGE_SIZE);
+      const retained = consumed.filter((thread) => !deletedThreadIdsRef.current.has(thread.id));
+      threadHistoryConsumedIdsRef.current = new Set(retained.map((thread) => thread.id));
+      setThreads(retained);
+      threadHistoryOffsetRef.current = retained.length;
       setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } catch {
+      if (requestSeq === threadFetchRequestSeqRef.current) setThreadHistoryError(true);
     } finally {
       if (requestSeq === threadFetchRequestSeqRef.current) {
         setIsLoadingThreads(false);
@@ -522,50 +571,59 @@ function ChatViewContent({
     if (isLoadingThreads || isLoadingMoreThreads || threadLoadMoreInFlightRef.current || !hasMoreThreads) return;
 
     const requestSeq = threadFetchRequestSeqRef.current;
-    const offset = threads.length;
+    const offset = threadHistoryOffsetRef.current;
+    const controller = new AbortController();
+    threadHistoryControllerRef.current = controller;
+    threadHistoryActivityOwnedRef.current = activityOpenRef.current;
     threadLoadMoreInFlightRef.current = true;
     setIsLoadingMoreThreads(true);
+    setThreadHistoryMoreError(false);
     try {
-      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset });
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset }, { signal: controller.signal });
       if (requestSeq !== threadFetchRequestSeqRef.current) return;
-      const existingIds = new Set(threads.map((thread) => thread.id));
-      const nextPage = list
-        .slice(0, THREAD_HISTORY_PAGE_SIZE)
-        .filter((thread) => !existingIds.has(thread.id));
-      if (nextPage.length === 0) {
-        setHasMoreThreads(false);
-        return;
-      }
+      const consumed = list.slice(0, THREAD_HISTORY_PAGE_SIZE).filter((thread) => !deletedThreadIdsRef.current.has(thread.id));
+      threadHistoryOffsetRef.current += consumed.length;
+      for (const thread of consumed) threadHistoryConsumedIdsRef.current.add(thread.id);
       setThreads((prev) => {
         const latestExistingIds = new Set(prev.map((thread) => thread.id));
         const latestNextPage = list
           .slice(0, THREAD_HISTORY_PAGE_SIZE)
-          .filter((thread) => !latestExistingIds.has(thread.id));
+          .filter((thread) => !latestExistingIds.has(thread.id) && !deletedThreadIdsRef.current.has(thread.id));
         return latestNextPage.length > 0 ? [...prev, ...latestNextPage] : prev;
       });
       setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } catch {
+      if (requestSeq === threadFetchRequestSeqRef.current) setThreadHistoryMoreError(true);
     } finally {
       if (requestSeq === threadFetchRequestSeqRef.current) {
         threadLoadMoreInFlightRef.current = false;
         setIsLoadingMoreThreads(false);
       }
     }
-  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, threads]);
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads]);
 
   const handleThreadListScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    if (isLoadingThreads || isLoadingMoreThreads || !hasMoreThreads) return;
+    if (isLoadingThreads || isLoadingMoreThreads || !hasMoreThreads || threadHistoryMoreError) return;
 
     const target = event.currentTarget;
     const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
     if (remaining <= 48) {
       void loadMoreThreads();
     }
-  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, loadMoreThreads]);
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, loadMoreThreads, threadHistoryMoreError]);
 
   useEffect(() => {
-    if (!threadSidebarOpen) return;
+    if (!threadSidebarOpen || !activity.active) return;
     void reloadThreads();
-  }, [threadSidebarOpen, reloadThreads]);
+    return () => {
+      if (!threadHistoryActivityOwnedRef.current) return;
+      threadFetchRequestSeqRef.current += 1;
+      threadHistoryControllerRef.current?.abort();
+      threadLoadMoreInFlightRef.current = false;
+      setIsLoadingThreads(false);
+      setIsLoadingMoreThreads(false);
+    };
+  }, [threadSidebarOpen, activity.active, reloadThreads]);
 
   useEffect(() => {
     if (activeThreadId || landingTab !== 'history') return;
@@ -578,13 +636,20 @@ function ChatViewContent({
       setIsSearchingThreads(false);
       return;
     }
-
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusTimeout = window.setTimeout(() => {
       threadSearchInputRef.current?.focus();
     }, 0);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
         setThreadSearchOpen(false);
+      } else if (event.key === 'Tab' && threadSearchDialogRef.current) {
+        const items = [...threadSearchDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),input,a[href],[tabindex]:not([tabindex="-1"])')].filter((node) => node.getClientRects().length > 0);
+        const first = items[0]; const last = items.at(-1);
+        if (event.shiftKey && (document.activeElement === first || !threadSearchDialogRef.current.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || !threadSearchDialogRef.current.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -592,6 +657,7 @@ function ChatViewContent({
     return () => {
       window.clearTimeout(focusTimeout);
       window.removeEventListener('keydown', handleKeyDown);
+      window.requestAnimationFrame(() => { if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus(); });
     };
   }, [threadSearchOpen]);
 
@@ -607,14 +673,20 @@ function ChatViewContent({
     }
 
     setIsSearchingThreads(true);
+    setThreadSearchError(false);
     const requestSeq = threadSearchRequestSeqRef.current + 1;
     threadSearchRequestSeqRef.current = requestSeq;
     const timeout = window.setTimeout(() => {
       void (async () => {
-        const list = await fetchThreads({ query: trimmedQuery, searchScope: 'all', retrievalMode: 'fuzzy' });
-        if (requestSeq !== threadSearchRequestSeqRef.current) return;
-        setThreadSearchResults(list);
-        setIsSearchingThreads(false);
+        try {
+          const list = await fetchThreads({ query: trimmedQuery, searchScope: 'all', retrievalMode: 'fuzzy' });
+          if (requestSeq !== threadSearchRequestSeqRef.current) return;
+          setThreadSearchResults(list);
+        } catch {
+          if (requestSeq === threadSearchRequestSeqRef.current) setThreadSearchError(true);
+        } finally {
+          if (requestSeq === threadSearchRequestSeqRef.current) setIsSearchingThreads(false);
+        }
       })();
     }, THREAD_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timeout);
@@ -637,6 +709,7 @@ function ChatViewContent({
   useEffect(() => {
     if (!requestedThreadId) return;
     if (requestedThreadId === activeThreadId && requestedThreadNonce === undefined) return;
+    setThreadSidebarOpen(false);
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
@@ -1079,6 +1152,10 @@ function ChatViewContent({
     const ok = await deleteThread(threadId);
     setDeletingThreadId(null);
     if (!ok) return;
+    deletedThreadIdsRef.current.add(threadId);
+    if (threadHistoryConsumedIdsRef.current.delete(threadId)) {
+      threadHistoryOffsetRef.current = Math.max(0, threadHistoryOffsetRef.current - 1);
+    }
     // If deleting the active thread, clear the workspace
     if (threadId === activeThreadId) {
       setActiveThreadId(null);
@@ -1093,7 +1170,9 @@ function ChatViewContent({
       setQueuedToolChoice('auto');
     }
     setThreads((prev) => prev.filter((t) => t.id !== threadId));
-  }, [deletingThreadId, activeThreadId]);
+    removeActivityChat(threadId);
+    setThreadSearchResults((previous) => previous.filter((thread) => thread.id !== threadId));
+  }, [deletingThreadId, activeThreadId, removeActivityChat]);
 
   const defaultLandingQuickActions = useMemo(() => buildDefaultLandingQuickActions(t), [t]);
   const landingQuickActions = quickActions && quickActions.length > 0 ? quickActions : defaultLandingQuickActions;
@@ -1105,7 +1184,7 @@ function ChatViewContent({
     const byLabel = new Map<string, ChatThread[]>();
 
     threads.forEach((thread) => {
-      const label = getThreadDateGroup(thread.updated_at, t);
+      const label = getThreadDateGroup(thread.updated_at, t, activity.day);
       if (!byLabel.has(label)) {
         byLabel.set(label, []);
         groups.push({ label, threads: byLabel.get(label) ?? [] });
@@ -1114,7 +1193,16 @@ function ChatViewContent({
     });
 
     return groups;
-  }, [threads, t]);
+  }, [threads, t, activity.day]);
+
+  const priorityRows = useMemo(() => buildActivityRows({
+    now: activity.now, chats: activity.chat.data, dreams: activity.dream.data, scheduled: activity.scheduled.data,
+    stale: { chat: Boolean(activity.chat.error), scheduled: Boolean(activity.scheduled.error), dream: Boolean(activity.dream.error) }, filters: activityFilters,
+  }), [activity.now, activity.chat.data, activity.chat.error, activity.dream.data, activity.dream.error, activity.scheduled.data, activity.scheduled.error, activityFilters]);
+  const activityHistoryGroups = useMemo(() => {
+    const priorityIds = new Set(priorityRows.filter((row) => row.source === 'chat').map((row) => row.id));
+    return defaultThreadGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !priorityIds.has(thread.id)) })).filter((group) => group.threads.length > 0);
+  }, [defaultThreadGroups, priorityRows]);
 
   const selectedVoiceEntry = availableDecks
     .flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
@@ -1211,6 +1299,12 @@ function ChatViewContent({
               <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
               <span>{isCreatingThread ? t('chat.history.creating') : t('chat.history.newShort')}</span>
             </button>
+            <button ref={activityBellRef} type="button" onClick={toggleActivity}
+              aria-label={t('chat.activity.entry')} title={t('chat.activity.entry')}
+              aria-expanded={threadSidebarOpen} aria-controls="chat-activity-sidebar"
+              style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: threadSidebarOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+              <IconBell style={{ width: '1.1rem', height: '1.1rem' }} />
+            </button>
             {activeThreadId ? (
               <PlanButton
                 threadId={activeThreadId}
@@ -1224,7 +1318,7 @@ function ChatViewContent({
                   setScheduledTaskDetail(null);
                   setSubagentSidebarOpen((current) => {
                     const next = !current;
-                    if (next) setFileSidebarOpen(false);
+                    if (next) { setFileSidebarOpen(false); setThreadSidebarOpen(false); }
                     return next;
                   });
                 }}
@@ -1252,11 +1346,7 @@ function ChatViewContent({
                     <button
                       type="button"
                       onClick={() => {
-                        if (activeThreadId) {
-                          setThreadSidebarOpen((v) => !v);
-                        } else {
-                          onLandingTabChange('history');
-                        }
+                        toggleActivity();
                         setMoreMenuOpen(false);
                       }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
@@ -1270,7 +1360,7 @@ function ChatViewContent({
                         onClick={() => {
                           setFileSidebarOpen((current) => {
                             const next = !current;
-                            if (next) { setSubagentSidebarOpen(false); setScheduledTaskDetail(null); closeSideTask(); }
+                            if (next) { setThreadSidebarOpen(false); setSubagentSidebarOpen(false); setScheduledTaskDetail(null); closeSideTask(); }
                             return next;
                           });
                           setMoreMenuOpen(false);
@@ -1340,6 +1430,7 @@ function ChatViewContent({
                   ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
                   onOpenTaskThread={(taskThreadId) => {
+                    setThreadSidebarOpen(false);
                     setSideTaskThreadId(taskThreadId);
                     setScheduledTaskDetail(null);
                     setFileSidebarOpen(false);
@@ -1353,6 +1444,7 @@ function ChatViewContent({
                     handleSelectThread(taskThreadId);
                   }}
                   onOpenScheduledTask={(task) => {
+                    setThreadSidebarOpen(false);
                     closeSideTask();
                     setFileSidebarOpen(false);
                     setSubagentSidebarOpen(false);
@@ -1496,7 +1588,8 @@ function ChatViewContent({
                             {isLoadingThreads && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
                             ) : null}
-                            {!isLoadingThreads && visibleThreads.length === 0 ? (
+                            {threadHistoryError ? <div role="status" style={{ padding: '0.7rem 0.45rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>{t('chat.activity.historyFailed')} <button type="button" onClick={() => void reloadThreads()}>{t('chat.activity.retry')}</button></div> : null}
+                            {!isLoadingThreads && !threadHistoryError && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>{t('chat.history.empty')}</div>
                             ) : null}
                             {defaultThreadGroups.map((group) => (
@@ -1551,7 +1644,8 @@ function ChatViewContent({
                             {isLoadingMoreThreads ? (
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={2} /></div>
                             ) : null}
-                            {!hasMoreThreads && visibleThreads.length > 0 ? (
+                            {threadHistoryMoreError ? <div role="status" style={{ padding: '0.7rem 0.45rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>{t('chat.activity.historyFailed')} <button type="button" onClick={() => void loadMoreThreads()}>{t('chat.activity.retry')}</button></div> : null}
+                            {!threadHistoryError && !threadHistoryMoreError && !isLoadingThreads && !hasMoreThreads && visibleThreads.length > 0 ? (
                               <div style={{ padding: '0.55rem 0.45rem 0.2rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
                             ) : null}
                           </div>
@@ -1622,95 +1716,42 @@ function ChatViewContent({
           </div>
         </main>
 
-        {/* 历史对话右侧面板 */}
-        <aside style={{ width: threadSidebarOpen ? '16rem' : 0, minWidth: threadSidebarOpen ? '16rem' : 0, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderLeft: threadSidebarOpen ? '1px solid var(--color-border-paper)' : 'none', background: 'var(--color-bg-paper)', transition: 'width 0.22s ease, min-width 0.22s ease' }}>
-          {threadSidebarOpen ? (
-            <>
-              <div style={{ padding: '0.75rem 0.85rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border-paper)' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setThreadSearchQuery('');
-                      setThreadSearchResults([]);
-                      setThreadSearchOpen(true);
-                      void reloadThreads();
-                    }}
-                    style={{ background: threadSearchOpen ? 'var(--color-bg-app)' : 'none', border: 'none', cursor: 'pointer', color: threadSearchOpen ? 'var(--color-text-primary)' : 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }}
-                    title={t('chat.search.ariaLabel')}
-                    aria-label={t('chat.search.ariaLabel')}
-                  >
-                    <IconSearch style={{ width: '0.86rem', height: '0.86rem' }} />
-                  </button>
-                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title={t('chat.history.close')}>
-                    <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
-                  </button>
-                </div>
-              </div>
-              <div onScroll={handleThreadListScroll} style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
-                {isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
-                ) : null}
-                {!isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{t('chat.history.empty')}</div>
-                ) : null}
-                {visibleThreads.map((thread) => {
-                  const isActive = thread.id === activeThreadId;
-                  const isHovered = thread.id === hoveredThreadId;
-                  const isDeleting = thread.id === deletingThreadId;
-                  const matchExcerpt = thread.match?.excerpt?.trim();
-                  return (
-                    <div
-                      key={thread.id}
-                      style={{ position: 'relative', marginBottom: '0.1rem' }}
-                      onMouseEnter={() => setHoveredThreadId(thread.id)}
-                      onMouseLeave={() => setHoveredThreadId(null)}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSelectThread(thread.id)}
-                        style={{ width: '100%', minHeight: matchExcerpt ? '3.05rem' : '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
-                        title={thread.title ?? t('chat.history.fallbackTitle')}
-                      >
-                        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.12rem', overflow: 'hidden' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
-                          {matchExcerpt ? (
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
-                          ) : null}
-                        </span>
-                        {isActive && !isHovered ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
-                      </button>
-                      {(isHovered || isDeleting) ? (
-                        <button
-                          type="button"
-                          onClick={(e) => void handleDeleteThread(e, thread.id)}
-                          disabled={isDeleting}
-                          title={t('chat.history.deleteThread')}
-                          style={{ position: 'absolute', right: '0.3rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.35rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
-                          onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
-                        >
-                          <IconX style={{ width: '0.75rem', height: '0.75rem' }} />
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {isLoadingMoreThreads ? (
-                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={2} /></div>
-                ) : null}
-                {!hasMoreThreads && visibleThreads.length > 0 ? (
-                  <div style={{ padding: '0.45rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-        </aside>
+        {/* 同一右侧面板：优先级活动与日期历史 */}
+        {threadSidebarOpen ? <ActivitySidebar
+          isMobile={isMobile}
+          searchOpen={threadSearchOpen}
+          rows={priorityRows}
+          filters={activityFilters}
+          onFiltersChange={setActivityFilters}
+          sources={{ chat: activity.chat, scheduled: activity.scheduled, dream: activity.dream }}
+          groups={activityHistoryGroups}
+          activeThreadId={activeThreadId}
+          deletingThreadId={deletingThreadId}
+          historyLoading={isLoadingThreads}
+          historyLoadingMore={isLoadingMoreThreads}
+          historyError={threadHistoryError}
+          historyMoreError={threadHistoryMoreError}
+          hasMoreHistory={hasMoreThreads}
+          onHistoryRetry={() => void reloadThreads()}
+          onHistoryMore={() => void loadMoreThreads()}
+          onScroll={handleThreadListScroll}
+          onRetry={activity.retry}
+          onRefresh={() => { activity.refresh(); void reloadThreads(); }}
+          onSearch={() => {
+            setThreadSearchQuery(''); setThreadSearchResults([]); setThreadSearchError(false);
+            setThreadSearchOpen(true); void reloadThreads();
+          }}
+          onClose={closeActivity}
+          onSelectThread={handleSelectThread}
+          onDeleteThread={(event, id) => void handleDeleteThread(event, id)}
+          onDream={openDreamRun}
+          onTask={openActivityTask}
+        /> : null}
 
         {threadSearchOpen ? (
           <div
             role="presentation"
+            data-chat-history-search
             onClick={(event) => {
               if (event.target === event.currentTarget) {
                 setThreadSearchOpen(false);
@@ -1719,6 +1760,7 @@ function ChatViewContent({
             style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'grid', placeItems: 'center', padding: 'clamp(1rem, 5vw, 4rem)', background: 'color-mix(in srgb, var(--color-bg-app) 64%, transparent)' }}
           >
             <section
+              ref={threadSearchDialogRef}
               role="dialog"
               aria-modal="true"
               aria-label={t('chat.search.ariaLabel')}
@@ -1751,7 +1793,8 @@ function ChatViewContent({
                     {isSearchingThreads ? (
                       <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.searching')}</div>
                     ) : null}
-                    {!isSearchingThreads && threadSearchResults.length === 0 ? (
+                    {threadSearchError ? <div role="status" style={{ padding: '0.8rem 1rem', color: 'var(--color-state-error)', fontSize: '0.86rem' }}>{t('chat.activity.historyFailed')}</div> : null}
+                    {!isSearchingThreads && !threadSearchError && threadSearchResults.length === 0 ? (
                       <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.noResults')}</div>
                     ) : null}
                     {threadSearchResults.map((thread) => {
@@ -1827,6 +1870,10 @@ function ChatViewContent({
         ) : null}
 
         {sideTaskThreadId ? <TaskSessionSidebar threadId={sideTaskThreadId} onClose={closeSideTask} onOpenTaskThread={(taskThreadId) => {
+          setThreadSidebarOpen(false);
+          setFileSidebarOpen(false);
+          setSubagentSidebarOpen(false);
+          setScheduledTaskDetail(null);
           setSideTaskThreadId(taskThreadId);
           const url = new URL(window.location.href);
           url.searchParams.set('task_thread', taskThreadId);

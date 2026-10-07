@@ -1,0 +1,10 @@
+Optimized Prompt:
+你是 Ink & Memory 产品交互设计及前端工程负责人。基于两张用户参考图及当前生产代码，完成活动视图需求的现状判断、现行 PRD、交互设计、正常/异常/恢复业务时序图、状态图、独立设计评审、最小范围代码实现和技术验证。图一提供铃铛入口和优先级/按日期历史的布局；图二提供显示筛选的参考。用户要求：在 Chat 的“新建”旁加入活动视图通知图标，点击在右侧栏显示对话历史，新增“优先级”部分，汇集定时任务、最近五分钟 Chat 对话和最近五分钟 Dream 工作台；以正在运行的工作和任务优先显示为目标。五分钟是本次用户明确要求的时间规则，需集中定义并明确时间字段、边界与自动更新。活动打开、刷新、筛选和行导航不自动触发任务执行、取消、删除、归档、标记已读或数据库写入。保留原用户主动删除对话的独立按钮和 handleDeleteThread，近期 Chat 可复用同一回调，不增加删除机制或确认。截图中无本次授权/接口支持的功能不得照搬。先搜索和复用当前 ChatView、历史列表、FileSidebar 布局、Dream 重入列表和 scheduledTaskApi；使用现有主题、国际化和组件体系，不引入新的样式框架或外部图标/字体依赖。
+阅读 Agent.md、AGENTS.md、受影响 .folder.md 和仓库规则。当前有大量用户/其他 Agent 的未提交改动，禁止覆盖、回退、格式化无关代码，必须小范围补丁。PRD 归属 docs/prd/chat/ 并直接包含桌面和窄屏骨架；正式设计稿直接包含 Mermaid 正常时序、异常恢复时序和状态图，使用当前代码接口/模块名称，未实现的建议必须标明。文档必须先于功能实现；完成独立评审后才编写功能代码。html-design-workflow 四阶段顺序产物保存在当前 workflow 的 workspace/ 中。保留所有既有设计稿原文。
+现有入口：frontend/app/_dream/components/chat/ChatView.tsx 的新建、对话历史列表、threadSidebarOpen，以及 frontend/app/_dream/components/dashboard/FileSidebar.tsx 的右侧布局；PlanButton/TaskActivityContent 服务于当前 Thread 任务进度，不应更改其职责。
+接口事实：listChatThreads 支持 limit/offset 并返回 updated_at；useStoryWorkspaceDreamRuns 返回服务器 lastActivityAt 与 canonical href；getScheduledDay(localDate, displayTimeZone) 返回 tasks/triggers。不存在用户授权的跨服务 schema/控制通道新增范围。明确现有数据限制，不用猜测字段、浏览器时间或轮询次数伪造运行状态。共享 PostgreSQL schema 由 Admin Drizzle 所有，不进行数据库/Runtime/发送协议改造。
+验收应覆盖铃铛开关、右侧栏互斥、优先级分类筛选、时间边界/运行排序/去重、日期历史/分页复用、Chat/Dream/定时任务原有导航、分区加载失败和重试、窄屏滚动与键盘行为；验证范围为无外部模型的技术合同和浏览器界面，不冒充真实业务验收。使用本机安装的 Chrome，不重复下载浏览器。只清理本轮创建的资源，保留已有服务。同步受影响目录文档、文件头及必要 README 双语说明，记录实际命令、退出码、关键结果和未覆盖范围。
+默认自主推进；仅实质歧义影响目标时再问一个必要问题。每次新规划先按 Expert Prompt Architect 模板优化当前任务；优化提示词和计划保存作为执行依据，不反复朗读。
+
+Optional Enhancers:
+可在后续单独指定最近活动时间窗口、默认筛选选项或是否扩展到全局 Dream 工作台入口；本次按以上边界完成，不增加这些额外功能。
