@@ -1,3 +1,4 @@
+// [Sync] 2026-10-07: remove the redundant history title/subtitle block below the existing tab/search toolbar.
 // [Sync] 2026-09-27: navigate between source and created task-session Threads from Chat content.
 // [Sync] 2026-09-27: open selected queue messages in an independent right-side task Thread.
 // [Sync] 2026-09-27: group task sessions, subagents, plans and todos in the existing Plan/Todo activity popover.
@@ -1491,14 +1492,6 @@ function ChatViewContent({
                     <section style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       {landingTab === 'history' ? (
                         <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                          <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-                            <div>
-                              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</div>
-                              <div style={{ marginTop: '0.22rem', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
-                                {t('chat.history.subtitle')}
-                              </div>
-                            </div>
-                          </div>
                           <div onScroll={handleThreadListScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
                             {isLoadingThreads && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>

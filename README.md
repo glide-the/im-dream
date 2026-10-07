@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-07: Settings language/theme survive login and local-data import cleanup. -->
 <!-- [Input] Current Dream/Admin architecture, AutoDL direct-host release, and local development contracts. -->
 <!-- [Output] User-first startup, usage, local setup, verification, and recovery entry guide. -->
 <!-- [Pos] Canonical English repository README; README.zh.md is the faithful Chinese mirror. -->
@@ -47,6 +48,7 @@ If a WebUI entry is unavailable after an instance restart, use the [AutoDL recov
 
 ## Use Dream
 
+- **Interface language** changes immediately under Settings → General. The current browser saves language and theme across sign-out, sign-in and page reloads; local-data migration cleanup preserves these selections. See the [Settings design](docs/design/story-workspace/settings.md).
 - **Chat** keeps Thread history and streams Agent output. Resume, cancel and retry keep the same production path.
 - **Chat turn navigation** shows compact animated markers for sent user messages in the current Thread. Hover or focus a marker to preview that exchange, then select it to locate the original message, including messages in older history pages. Narrow layouts use an expandable message list. See the [turn navigation PRD](docs/prd/chat/turn-navigation.md).
 - **Chat while an Agent runs** accepts further text into a durable per-Thread queue. Queue cards above the composer can guide, edit, cancel, or move one pending message into an independent side Chat. A card leaves the composer when the server starts dispatching its message; later turn failures appear in the conversation, while uncertain outcomes prompt a separate status check. An acknowledged Adjust direction interruption ends the old reply as cancelled; the selected message receives its own turn, and a genuine SDK failure still appears as an error. Agents use `create_thread`, `list_threads`, `read_thread`, and `send_message_to_thread` for independent Dream Threads; stop remains a page/API action. Each created Thread shows a return link above its first user message. The source Chat's Task activity panel groups created tasks, subagents, plans, and todos. The Admin schema capabilities must be applied before these operations are available. Running-owner controls currently require the same Dream process. See the [Task activity PRD](docs/prd/chat/task-activity.md).

@@ -1,3 +1,7 @@
+<!-- [Input] Story Workspace routes and ChatView's existing landing tab, search and grouped history list. -->
+<!-- [Output] Product scope, navigation and visible content hierarchy. -->
+<!-- [Pos] Current Story Workspace navigation and page-composition design. -->
+<!-- [Sync] 2026-10-07: Chat history landing uses the existing tab label without a duplicate title/description block. -->
 # Product scope and navigation
 
 ## Product goal
@@ -59,6 +63,14 @@ Navigation never starts or resumes a model turn. GET requests hydrate current
 state only. A new turn requires an explicit user/business command.
 
 ## Layout
+
+On the Chat landing page, the history tab already identifies the selected
+content. `ChatViewContent` renders the grouped thread list immediately below
+the tab/search toolbar, without another history title or explanatory subtitle.
+The existing loading skeleton, empty message, group labels, thread controls
+and list-owned vertical scrolling remain in that content region. The same
+hierarchy applies on desktop and narrow screens; opening a thread and history
+search retain their existing interactions and error feedback.
 
 Desktop uses three cooperative regions:
 

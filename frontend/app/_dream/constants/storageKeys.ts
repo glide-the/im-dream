@@ -1,3 +1,7 @@
+// [Input] Existing browser storage keys and App's login/local-import cleanup boundaries.
+// [Output] Central storage registry and explicit cleanup list that preserves browser display preferences.
+// [Pos] Frontend storage-key and local-data cleanup policy owner.
+// [Sync] 2026-10-07: exclude language/theme from completed-login, migration and skip cleanup.
 /**
  * Storage keys constants
  *
@@ -39,6 +43,26 @@ export const STORAGE_KEYS = {
   // Theme
   THEME: 'ink-theme'
 } as const;
+
+// Existing account/import data and retired credentials cleared by App after completed login/import.
+// Browser display preferences are deliberately absent; new keys require an explicit cleanup decision.
+export const LOCAL_IMPORT_CLEANUP_KEYS = [
+  STORAGE_KEYS.AUTH_TOKEN,
+  STORAGE_KEYS.MIGRATION_COMPLETED,
+  STORAGE_KEYS.EDITOR_STATE,
+  STORAGE_KEYS.SELECTED_STATE,
+  STORAGE_KEYS.VOICE_CONFIGS,
+  STORAGE_KEYS.META_PROMPT,
+  STORAGE_KEYS.STATE_CONFIG,
+  STORAGE_KEYS.CALENDAR_ENTRIES,
+  STORAGE_KEYS.DAILY_PICTURES,
+  STORAGE_KEYS.SELECTED_FRIEND,
+  STORAGE_KEYS.RECENT_FRIENDS,
+  STORAGE_KEYS.RESOURCE_CONNECTORS,
+  STORAGE_KEYS.ANALYSIS_REPORTS,
+  STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE,
+  STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK,
+] as const;
 
 // Type for autocomplete
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
