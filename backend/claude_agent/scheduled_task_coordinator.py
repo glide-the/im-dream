@@ -1,7 +1,7 @@
-# [Input] Admin-owned claims and sta_ authority, source-limited idg_ grants, and the canonical Chat route/Factory.
-# [Output] One lease-fenced scheduled turn per trigger with durable start, verified finish and crash reconciliation.
+# [Input] Admin v3 dispatch claims with Thread/model snapshots, source-limited grants and the canonical Chat Factory.
+# [Output] One lease-fenced unattended source-resume or new-Thread turn with tool policy and crash reconciliation.
 # [Pos] Independent scheduled Chat composition root; no database schema, browser bearer or alternate model runtime.
-# [Sync] 2026-09-28: dispatch once/daily triggers through the shared Chat application service and exact Admin operations.
+# [Sync] 2026-10-07: dispatch v3 source/new Thread modes with immutable model selection through the public Chat path.
 """Consume Admin scheduled triggers without adding a second Chat execution path."""
 
 from __future__ import annotations
@@ -15,32 +15,54 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from services.story_workspace.dream_lifecycle_observer import NormalizedAgentTurnClassifier
 from services.admin_data.chat_data import AdminChatData
+from services.admin_data.chat_models import MessageDetailInputDTO
 from services.admin_data.client import AdminDataClient
 from services.admin_data.delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO
 from services.admin_data.gateway_runtime import AdminGatewayRuntime
+from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.scheduled_task_data import (
-    AdminScheduledTaskData, CLAIM_TRIGGER, PREPARE_TRIGGER, RENEW_TRIGGER,
-    START_TRIGGER, FINISH_TRIGGER, RECONCILE_TRIGGER, RESOLVE_AUTHORITY,
+    AdminScheduledTaskData, CLAIM_TRIGGER_V3, PREPARE_TRIGGER_V3, RENEW_TRIGGER_V3,
+    START_TRIGGER_V3, FINISH_TRIGGER_V3, RECONCILE_TRIGGER_V3, RESOLVE_AUTHORITY_V3,
     ClaimScheduledTriggerInputDTO, TriggerClaimInputDTO, StartScheduledTriggerInputDTO,
     FinishScheduledTriggerInputDTO, ReconcileScheduledTriggerInputDTO,
-    ResolveScheduledAuthorityInputDTO, ScheduledTriggerDTO,
+    ResolveScheduledAuthorityInputDTO, ScheduledTriggerV3DTO,
 )
+from libs.claude_agent_kit.types import ToolApprovalPolicy, ToolApprovalViolation
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.workflow_data import AdminWorkflowData
 from services.admin_data.errors import AdminDataError
 
 logger = logging.getLogger(__name__)
 
+SCHEDULED_TOOL_APPROVAL_POLICY = ToolApprovalPolicy(
+    overrides=(
+        ("mcp__editor__write_segment", "auto"),
+        ("mcp__editor__insert_widget", "auto"),
+        ("mcp__editor__delete_segment", "manual"),
+        ("mcp__editor__reply_to_comment", "manual"),
+        ("mcp__editor__switch_editor", "manual"),
+        ("AskUserQuestion", "manual"),
+        ("mcp__user__ask_user", "manual"),
+    ),
+    deny_unresolved=True,
+    ignore_full_access=True,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ScheduledDispatchContext:
-    trigger: ScheduledTriggerDTO
+    trigger: ScheduledTriggerV3DTO
     claim_id: str
     canonical_user_id: str
     turn_id: str
     turn_persistence: AdminTurnPersistence
     gateway_runtime: AdminGatewayRuntime
+    editor_runtime: AdminEditorRuntime | None
+    editor_state: dict | None
+    resume_existing_thread: bool
+    tool_approval_policy: ToolApprovalPolicy
+    tool_approval_violation: ToolApprovalViolation
 
 
 class ScheduledTaskCoordinator:
@@ -76,10 +98,13 @@ class ScheduledTaskCoordinator:
             try:
                 request_id = self._pending_claim_request_id or str(uuid4())
                 self._pending_claim_request_id = request_id
-                claimed = await self._execute(CLAIM_TRIGGER, ClaimScheduledTriggerInputDTO(), request_id)
+                claimed = await self._execute(CLAIM_TRIGGER_V3, ClaimScheduledTriggerInputDTO(), request_id)
                 self._pending_claim_request_id = None
                 self._last_error = None
-                if claimed.trigger is not None and claimed.claim_id is not None:
+                if claimed.action == "reconcile" and claimed.trigger_id is not None:
+                    await self._reconcile(claimed.trigger_id)
+                    continue
+                if claimed.action == "dispatch" and claimed.trigger is not None and claimed.claim_id is not None:
                     work = asyncio.create_task(self._dispatch(claimed.trigger, claimed.claim_id),
                                                name=f"scheduled-chat-{claimed.trigger.id}")
                     self._in_flight.add(work)
@@ -102,7 +127,7 @@ class ScheduledTaskCoordinator:
 
     async def _reconcile(self, trigger_id: str) -> None:
         try:
-            await self._execute(RECONCILE_TRIGGER, ReconcileScheduledTriggerInputDTO(trigger_id=trigger_id), str(uuid4()))
+            await self._execute(RECONCILE_TRIGGER_V3, ReconcileScheduledTriggerInputDTO(trigger_id=trigger_id), str(uuid4()))
         except Exception:
             logger.exception("Scheduled Chat reconciliation failed for trigger=%s", trigger_id)
 
@@ -117,7 +142,7 @@ class ScheduledTaskCoordinator:
             except asyncio.TimeoutError:
                 pass
             try:
-                result = await self._execute(RENEW_TRIGGER,
+                result = await self._execute(RENEW_TRIGGER_V3,
                     TriggerClaimInputDTO(trigger_id=trigger_id, claim_id=claim_id), str(uuid4()))
             except AdminDataError as exc:
                 logger.warning("Scheduled Chat lease renewal failed: trigger=%s code=%s", trigger_id, exc.code)
@@ -136,12 +161,12 @@ class ScheduledTaskCoordinator:
         )
         request_id = str(uuid4())
         try:
-            await self._execute(FINISH_TRIGGER, input_dto, request_id)
+            await self._execute(FINISH_TRIGGER_V3, input_dto, request_id)
         except AdminDataError as exc:
             if exc.outcome_unknown:
                 # Receipt-bearing Admin writes are idempotent under their original ID.
                 try:
-                    await self._execute(FINISH_TRIGGER, input_dto, request_id)
+                    await self._execute(FINISH_TRIGGER_V3, input_dto, request_id)
                     return
                 except AdminDataError:
                     pass
@@ -154,15 +179,15 @@ class ScheduledTaskCoordinator:
         )
         request_id = str(uuid4())
         try:
-            return await self._execute(START_TRIGGER, input_dto, request_id)
+            return await self._execute(START_TRIGGER_V3, input_dto, request_id)
         except AdminDataError as exc:
             if not exc.outcome_unknown:
                 raise
             # A lost HTTP response may follow a committed start. Replay only
             # the original receipt; never issue a new turn binding.
-            return await self._execute(START_TRIGGER, input_dto, request_id)
+            return await self._execute(START_TRIGGER_V3, input_dto, request_id)
 
-    async def _dispatch(self, trigger: ScheduledTriggerDTO, claim_id: str) -> None:
+    async def _dispatch(self, trigger: ScheduledTriggerV3DTO, claim_id: str) -> None:
         claim_input = TriggerClaimInputDTO(trigger_id=trigger.id, claim_id=claim_id)
         dispatch: ScheduledDispatchContext | None = None
         started = False
@@ -171,18 +196,23 @@ class ScheduledTaskCoordinator:
         owner_completion: asyncio.Future | None = None
         renewal_done = asyncio.Event()
         renewal_task: asyncio.Task | None = None
+        editor_runtime: AdminEditorRuntime | None = None
+        turn_persistence: AdminTurnPersistence | None = None
+        gateway_runtime: AdminGatewayRuntime | None = None
         try:
-            prepared = await self._execute(PREPARE_TRIGGER, claim_input, str(uuid4()))
+            prepared = await self._execute(PREPARE_TRIGGER_V3, claim_input, str(uuid4()))
             if not prepared.prepared:
                 return
-            if prepared.task_session is None or prepared.authority_token is None or prepared.authority_expires_at is None:
+            if (prepared.authority_token is None or prepared.authority_expires_at is None
+                or prepared.target_thread_id is None or prepared.input_message_id is None
+                or prepared.resume_existing_thread is None):
                 raise AdminDataError("SCHEDULE_PREPARE_INVALID", 503)
             authority = await asyncio.to_thread(
-                self._data.execute, RESOLVE_AUTHORITY, ResolveScheduledAuthorityInputDTO(),
+                self._data.execute, RESOLVE_AUTHORITY_V3, ResolveScheduledAuthorityInputDTO(),
                 str(uuid4()), access_token=prepared.authority_token,
             )
             if (authority.trigger_id != trigger.id or authority.claim_id != claim_id
-                or authority.target_thread_id != prepared.task_session.thread_id):
+                or authority.target_thread_id != prepared.target_thread_id):
                 raise AdminDataError("SCHEDULE_AUTHORITY_MISMATCH", 403)
             creator = AdminDelegationCreator(self._owner.client)
             persistence_grant = await asyncio.to_thread(
@@ -202,7 +232,7 @@ class ScheduledTaskCoordinator:
                 AdminWorkflowData(self._owner.client).resolve, authority.target_thread_id, str(uuid4()),
                 access_token=persistence_grant.token, canonical_user_id=authority.canonical_user_id,
             )
-            persistence = AdminTurnPersistence(
+            turn_persistence = AdminTurnPersistence(
                 workflow, persistence_grant, self._owner.client,
                 runtime_client_factory=lambda: AdminRuntimeClient(self._owner.runtime_http_config),
                 session_broker_settings=self._owner.session_broker_settings,
@@ -210,10 +240,43 @@ class ScheduledTaskCoordinator:
             gateway_runtime = AdminGatewayRuntime(
                 gateway_grant, AdminRuntimeClient(self._owner.runtime_http_config),
             )
+            scheduled_message = await asyncio.to_thread(
+                AdminChatData(self._owner.client).process_detail,
+                MessageDetailInputDTO(thread_id=authority.target_thread_id,
+                                      message_id=prepared.input_message_id),
+                str(uuid4()), access_token=persistence_grant.token,
+            )
+            if scheduled_message.message is None or scheduled_message.message.role != "user":
+                raise AdminDataError("SCHEDULE_INPUT_UNAVAILABLE", 409)
+            editor_state = None
+            if authority.target_editor_session_id is not None:
+                editor_runtime = AdminEditorRuntime(
+                    workflow,
+                    actor_id=authority.canonical_user_id,
+                    access_token=prepared.authority_token,
+                    delegation_creator=creator,
+                    runtime_http_config=self._owner.runtime_http_config,
+                    initial_session_id=authority.target_editor_session_id,
+                    initial_request_id=str(uuid4()),
+                    runtime_client_factory=lambda: AdminRuntimeClient(self._owner.runtime_http_config),
+                )
+                await asyncio.to_thread(editor_runtime.start)
+                loaded = await asyncio.to_thread(
+                    editor_runtime.load,
+                    EditorLoadInputDTO(session_id=authority.target_editor_session_id),
+                    str(uuid4()),
+                )
+                if loaded.editor_state is None:
+                    raise AdminDataError("SCHEDULE_EDITOR_TARGET_UNAVAILABLE", 409)
+                editor_state = loaded.editor_state.model_dump(mode="python", exclude_unset=True)
             turn_id = str(uuid4())
+            tool_violation = ToolApprovalViolation()
             dispatch = ScheduledDispatchContext(prepared.trigger, claim_id,
                                                 authority.canonical_user_id, turn_id,
-                                                persistence, gateway_runtime)
+                                                turn_persistence, gateway_runtime,
+                                                editor_runtime, editor_state,
+                                                prepared.resume_existing_thread,
+                                                SCHEDULED_TOOL_APPROVAL_POLICY, tool_violation)
             issued_at = int(datetime.fromisoformat(authority.issued_at.replace("Z", "+00:00")).timestamp())
             expires_at = int(datetime.fromisoformat(authority.expires_at.replace("Z", "+00:00")).timestamp())
             actor = AdminRequestActor(authority.subject, authority.canonical_user_id,
@@ -224,8 +287,10 @@ class ScheduledTaskCoordinator:
             response = await _claude_agent_stream_impl(
                 ClaudeAgentRequestBody(
                     thread_id=authority.target_thread_id,
-                    message={"id": prepared.task_session.initial_message_id, "role": "user",
-                             "parts": [{"type": "text", "text": prepared.task_session.initial_message}]},
+                    resume=prepared.resume_existing_thread,
+                    model=prepared.model_alias,
+                    message={"id": prepared.input_message_id, "role": "user",
+                             "parts": scheduled_message.message.parts},
                 ), user, AdminChatData(self._owner.client), self._owner,
                 scheduled_dispatch=dispatch,
             )
@@ -252,7 +317,10 @@ class ScheduledTaskCoordinator:
             if isinstance(owner_completion, asyncio.Future):
                 await asyncio.shield(owner_completion)
             final_id = str(uuid5(NAMESPACE_URL, f"scheduled-final:{authority.target_thread_id}:{turn_id}"))
-            if renewal_task.done() and not renewal_task.result():
+            violation_code = tool_violation.code()
+            if violation_code is not None:
+                await self._finish(trigger.id, claim_id, "failed", None, violation_code)
+            elif renewal_task.done() and not renewal_task.result():
                 await self._finish(trigger.id, claim_id, "state_unknown", None, "SCHEDULE_RENEW_FAILED")
             elif classifier.result().completed:
                 await self._finish(trigger.id, claim_id, "succeeded", final_id, None)
@@ -284,5 +352,18 @@ class ScheduledTaskCoordinator:
             if renewal_task is not None:
                 await asyncio.gather(renewal_task, return_exceptions=True)
             if dispatch is not None:
+                if dispatch.editor_runtime is not None:
+                    await asyncio.to_thread(dispatch.editor_runtime.close)
                 await asyncio.to_thread(dispatch.gateway_runtime.close)
                 await asyncio.to_thread(dispatch.turn_persistence.close)
+            elif editor_runtime is not None:
+                await asyncio.to_thread(editor_runtime.close)
+                if gateway_runtime is not None:
+                    await asyncio.to_thread(gateway_runtime.close)
+                if turn_persistence is not None:
+                    await asyncio.to_thread(turn_persistence.close)
+            else:
+                if gateway_runtime is not None:
+                    await asyncio.to_thread(gateway_runtime.close)
+                if turn_persistence is not None:
+                    await asyncio.to_thread(turn_persistence.close)

@@ -1,7 +1,7 @@
 // [Input] Raw Tool names and output envelopes from live or persisted Chat messages.
 // [Output] Regression coverage for strict successful scheduled-task marker decoding.
 // [Pos] Provider-free scheduled-task Chat marker contract test.
-// [Sync] 2026-09-29: cover the production top-level Tool receipt in structured/string form and reject the former synthetic nested fixture.
+// [Sync] 2026-10-07: cover interval, hourly and weekly receipts in the v3 production Tool output.
 
 import { expect, test } from '@playwright/test';
 import { decodeScheduledTaskMarker } from '../scheduledTaskMarkerModel';
@@ -24,6 +24,27 @@ test('decodes only the exact successful create_scheduled_task envelope', () => {
   });
   expect(decodeScheduledTaskMarker('create_scheduled_task', JSON.stringify(success))?.id).toBe('st_1');
   expect(decodeScheduledTaskMarker('mcp__user__create_scheduled_task', success)?.id).toBe('st_1');
+  expect(decodeScheduledTaskMarker('create_scheduled_task', {
+    ...success,
+    scheduled_task: {
+      ...success.scheduled_task,
+      rule: { kind: 'interval', interval_minutes: 10, time_zone: 'Asia/Shanghai' },
+    },
+  })?.rule).toEqual({ kind: 'interval', interval_minutes: 10, time_zone: 'Asia/Shanghai' });
+  expect(decodeScheduledTaskMarker('create_scheduled_task', {
+    ...success,
+    scheduled_task: {
+      ...success.scheduled_task,
+      rule: { kind: 'hourly', interval_hours: 2, minute: 15, time_zone: 'Asia/Shanghai' },
+    },
+  })?.rule).toEqual({ kind: 'hourly', interval_hours: 2, minute: 15, time_zone: 'Asia/Shanghai' });
+  expect(decodeScheduledTaskMarker('create_scheduled_task', {
+    ...success,
+    scheduled_task: {
+      ...success.scheduled_task,
+      rule: { kind: 'weekly', weekdays: ['MO', 'FR'], local_time: '09:00', time_zone: 'Asia/Shanghai' },
+    },
+  })?.rule).toEqual({ kind: 'weekly', weekdays: ['MO', 'FR'], local_time: '09:00', time_zone: 'Asia/Shanghai' });
 });
 
 test('fails closed for prose, another tool, failed envelopes, and malformed rules', () => {
@@ -36,5 +57,13 @@ test('fails closed for prose, another tool, failed envelopes, and malformed rule
   })).toBeNull();
   expect(decodeScheduledTaskMarker('create_scheduled_task', {
     ...success, scheduled_task: { ...success.scheduled_task, rule: { kind: 'monthly' } },
+  })).toBeNull();
+  expect(decodeScheduledTaskMarker('create_scheduled_task', {
+    ...success, scheduled_task: { ...success.scheduled_task,
+      rule: { kind: 'interval', interval_minutes: 0, time_zone: 'Asia/Shanghai' } },
+  })).toBeNull();
+  expect(decodeScheduledTaskMarker('create_scheduled_task', {
+    ...success, scheduled_task: { ...success.scheduled_task,
+      rule: { kind: 'weekly', weekdays: [], local_time: '09:00', time_zone: 'Asia/Shanghai' } },
   })).toBeNull();
 });

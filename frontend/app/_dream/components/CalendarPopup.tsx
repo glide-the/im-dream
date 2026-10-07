@@ -1,6 +1,6 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive Calendar with a month paper, exclusive task/diary/Notion panels, retained local state and viewport-contained tooltips/modals.
-// [Sync] 2026-10-07: CSS owns one naturally sized floating workspace and in-flow menu presentation; all component state/API/focus owners remain unchanged.
+// [Sync] 2026-10-07: edit Codex-style repeat presets through a secondary schedule dialog, plus source/new Chat mode and captured execution model.
 // [Sync] 2026-10-06: borderless right-paper presentation is owned by CalendarPopup.css; component business and scroll/focus owners remain unchanged.
 // [Sync] 2026-10-05: add mutually exclusive accessible tabs; preserve local owners and pause hidden queries/polling.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
@@ -18,6 +18,7 @@ import {
   type ScheduledTask, type ScheduledTrigger, type ScheduledRule, type ScheduledTaskAction,
   type ScheduledTaskDefinitionResult, type ScheduledTaskRunResult, ScheduledTaskApiError,
 } from '../api/scheduledTaskApi';
+import { fetchGatewayModels, type GatewayModel } from '../api/gatewayModelsApi';
 import Modal from './chat/Modal';
 import CalendarNotionPanel from './CalendarNotionPanel';
 import NotionMark from './NotionMark';
@@ -39,19 +40,27 @@ interface Props {
 }
 
 type CalendarListEntry = { id: string; timestamp: number; firstLine: string; state?: CalendarEntry['state'] };
-type ScheduledTaskDesired = { title: string; prompt: string; rule: ScheduledRule };
+type ScheduledTaskDesired = Pick<ScheduledTask, 'title' | 'prompt' | 'rule' | 'run_thread_mode'> & { model_alias: string };
 type ScheduledTaskActionResult = ScheduledTaskDefinitionResult | ScheduledTaskRunResult;
+type Weekday = Extract<ScheduledRule, { kind: 'weekly' }>['weekdays'][number];
+type RepeatPreset = 'hourly' | 'daily' | 'workdays' | 'weekly' | 'custom';
 type EditDraft = {
-  title: string; prompt: string; kind: ScheduledRule['kind']; localDate: string;
-  localTime: string; timeZone: string; selectedOffsetMinutes: number | null;
+  title: string; prompt: string; repeatPreset: RepeatPreset; kind: ScheduledRule['kind']; localDate: string;
+  localTime: string; intervalMinutes: string; intervalHours: string; minute: string;
+  weekdays: Weekday[]; timeZone: string; selectedOffsetMinutes: number | null;
+  runThreadMode: ScheduledTask['run_thread_mode']; modelAlias: string;
 };
-type EditField = 'title' | 'prompt' | 'localDate' | 'localTime' | 'timeZone';
+type EditField = 'title' | 'prompt' | 'localDate' | 'localTime' | 'intervalMinutes'
+  | 'intervalHours' | 'minute' | 'weekdays' | 'timeZone' | 'modelAlias';
 
 const UNRESOLVED_TRIGGER_STATES = new Set<ScheduledTrigger['status']>(['claimed', 'queued', 'running', 'state_unknown']);
 const ACTIVE_TRIGGER_STATES = new Set<ScheduledTrigger['status']>(['claimed', 'queued', 'running']);
 const SCHEDULED_HISTORY_PAGE_SIZE = 20;
 const SCHEDULED_ACTIVE_REFRESH_INTERVAL_MS = 2_000;
 const SCHEDULED_ACTIVE_REFRESH_MAXIMUM = 15;
+const SCHEDULE_FIELDS = new Set<EditField>([
+  'localDate', 'localTime', 'intervalMinutes', 'intervalHours', 'minute', 'weekdays', 'timeZone',
+]);
 
 class ScheduledTaskConflictError extends Error {
   constructor(readonly latest: ScheduledTask) { super('SCHEDULE_REVISION_CONFLICT'); }
@@ -66,15 +75,38 @@ function parseDateKey(dateKey: string): Date {
   return new Date(year, month - 1, day);
 }
 
+const WORKDAYS: Weekday[] = ['MO', 'TU', 'WE', 'TH', 'FR'];
+const WEEKDAYS: Weekday[] = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+
+function sameWeekdays(left: Weekday[], right: Weekday[]): boolean {
+  return left.length === right.length && left.every((day, index) => day === right[index]);
+}
+
+function repeatPresetFromRule(rule: ScheduledRule): RepeatPreset {
+  if (rule.kind === 'hourly' && rule.interval_hours === 1 && rule.minute === 0) return 'hourly';
+  if (rule.kind === 'daily') return 'daily';
+  if (rule.kind === 'weekly' && sameWeekdays(rule.weekdays, WORKDAYS)) return 'workdays';
+  if (rule.kind === 'weekly' && rule.weekdays.length === 1) return 'weekly';
+  return 'custom';
+}
+
 function draftFromTask(task: ScheduledTask): EditDraft {
   return {
     title: task.title,
     prompt: task.prompt,
+    repeatPreset: repeatPresetFromRule(task.rule),
     kind: task.rule.kind,
     localDate: task.rule.kind === 'once' ? task.rule.local_date : '',
-    localTime: task.rule.local_time,
+    localTime: task.rule.kind === 'once' || task.rule.kind === 'daily' || task.rule.kind === 'weekly'
+      ? task.rule.local_time : '09:00',
+    intervalMinutes: task.rule.kind === 'interval' ? String(task.rule.interval_minutes) : '10',
+    intervalHours: task.rule.kind === 'hourly' ? String(task.rule.interval_hours) : '1',
+    minute: task.rule.kind === 'hourly' ? String(task.rule.minute) : '0',
+    weekdays: task.rule.kind === 'weekly' ? task.rule.weekdays : ['MO'],
     timeZone: task.rule.time_zone,
     selectedOffsetMinutes: task.rule.kind === 'once' ? task.rule.selected_offset_minutes : null,
+    runThreadMode: task.run_thread_mode,
+    modelAlias: task.model_alias ?? '',
   };
 }
 
@@ -82,14 +114,22 @@ function desiredFromDraft(draft: EditDraft): ScheduledTaskDesired {
   const rule: ScheduledRule = draft.kind === 'once'
     ? { kind: 'once', local_date: draft.localDate, local_time: draft.localTime, time_zone: draft.timeZone,
         selected_offset_minutes: draft.selectedOffsetMinutes }
-    : { kind: 'daily', local_time: draft.localTime, time_zone: draft.timeZone };
-  return { title: draft.title.trim(), prompt: draft.prompt.trim(), rule };
+    : draft.kind === 'daily' ? { kind: 'daily', local_time: draft.localTime, time_zone: draft.timeZone }
+      : draft.kind === 'interval' ? { kind: 'interval', interval_minutes: Number(draft.intervalMinutes), time_zone: draft.timeZone }
+        : draft.kind === 'hourly' ? { kind: 'hourly', interval_hours: Number(draft.intervalHours), minute: Number(draft.minute), time_zone: draft.timeZone }
+          : { kind: 'weekly', weekdays: draft.weekdays, local_time: draft.localTime, time_zone: draft.timeZone };
+  return { title: draft.title.trim(), prompt: draft.prompt.trim(), rule,
+    run_thread_mode: draft.runThreadMode, model_alias: draft.modelAlias };
 }
 
 function draftsEqual(left: EditDraft | null, right: EditDraft | null): boolean {
   return left !== null && right !== null && left.title === right.title && left.prompt === right.prompt
-    && left.kind === right.kind && left.localDate === right.localDate && left.localTime === right.localTime
-    && left.timeZone === right.timeZone && left.selectedOffsetMinutes === right.selectedOffsetMinutes;
+    && left.repeatPreset === right.repeatPreset && left.kind === right.kind
+    && left.localDate === right.localDate && left.localTime === right.localTime
+    && left.intervalMinutes === right.intervalMinutes && left.intervalHours === right.intervalHours
+    && left.minute === right.minute && sameWeekdays(left.weekdays, right.weekdays)
+    && left.timeZone === right.timeZone && left.selectedOffsetMinutes === right.selectedOffsetMinutes
+    && left.runThreadMode === right.runThreadMode && left.modelAlias === right.modelAlias;
 }
 
 function isValidDateKey(value: string): boolean {
@@ -104,7 +144,16 @@ function validateDraft(draft: EditDraft): Partial<Record<EditField, string>> {
   if (!draft.title.trim()) errors.title = 'required';
   if (!draft.prompt.trim()) errors.prompt = 'required';
   if (draft.kind === 'once' && !isValidDateKey(draft.localDate)) errors.localDate = 'required';
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.localTime)) errors.localTime = 'required';
+  if (['once', 'daily', 'weekly'].includes(draft.kind) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.localTime)) errors.localTime = 'required';
+  if (draft.kind === 'interval' && (!/^\d+$/.test(draft.intervalMinutes)
+    || !Number.isSafeInteger(Number(draft.intervalMinutes)) || Number(draft.intervalMinutes) < 1)) errors.intervalMinutes = 'required';
+  if (draft.kind === 'hourly' && (!/^\d+$/.test(draft.intervalHours)
+    || !Number.isSafeInteger(Number(draft.intervalHours)) || Number(draft.intervalHours) < 1
+    || Number(draft.intervalHours) > 35_791_394)) errors.intervalHours = 'required';
+  if (draft.kind === 'hourly' && (!/^\d+$/.test(draft.minute)
+    || Number(draft.minute) < 0 || Number(draft.minute) > 59)) errors.minute = 'required';
+  if (draft.kind === 'weekly' && draft.weekdays.length === 0) errors.weekdays = 'required';
+  if (!draft.modelAlias.trim()) errors.modelAlias = 'required';
   try { new Intl.DateTimeFormat('en', { timeZone: draft.timeZone.trim() }).format(new Date()); }
   catch { errors.timeZone = 'invalid'; }
   return errors;
@@ -222,6 +271,12 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyLoadMoreError, setHistoryLoadMoreError] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [models, setModels] = useState<GatewayModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState(false);
+  const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false);
+  const [scheduleEditorSnapshot, setScheduleEditorSnapshot] = useState<EditDraft | null>(null);
   const editing = draft !== null;
   const dirty = editing && !draftsEqual(draft, defaultDraft);
 
@@ -271,6 +326,8 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
 
   const closeEditing = useCallback(() => {
     setDraft(null); setDefaultDraft(null); setFieldErrors({}); setConflictLatest(null); setError(null);
+    setAdvancedOpen(false); setModels([]); setModelsLoading(false); setModelsError(false);
+    setScheduleEditorOpen(false); setScheduleEditorSnapshot(null);
   }, []);
   const closeHistory = useCallback(() => {
     setHistoryOpen(false); requestAnimationFrame(() => moreButtonRef.current?.focus());
@@ -299,7 +356,13 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
   });
   const planText = (definition: ScheduledTask = task) => definition.rule.kind === 'once'
     ? `${definition.rule.local_date} · ${definition.rule.local_time}`
-    : `${t('calendar.scheduledDaily')} · ${definition.rule.local_time}`;
+    : definition.rule.kind === 'daily'
+      ? `${t('calendar.scheduledDaily')} · ${definition.rule.local_time}`
+      : definition.rule.kind === 'interval'
+        ? t('calendar.scheduledIntervalSummary', { count: definition.rule.interval_minutes })
+        : definition.rule.kind === 'hourly'
+          ? t('calendar.scheduledHourlySummary', { count: definition.rule.interval_hours, minute: definition.rule.minute })
+          : t('calendar.scheduledWeeklySummary', { days: definition.rule.weekdays.map((day) => t(`calendar.scheduledWeekday.${day}`)).join('、'), time: definition.rule.local_time });
   const summary = latest && ACTIVE_TRIGGER_STATES.has(latest.status) ? statusLabel(latest.status)
     : latest?.status === 'failed' || latest?.status === 'state_unknown' ? statusLabel(latest.status)
     : task.status === 'paused' ? t('calendar.scheduledStatus.paused')
@@ -309,6 +372,18 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
   const openEditing = () => {
     const next = draftFromTask(task);
     setDefaultDraft(next); setDraft(next); setFieldErrors({}); setConflictLatest(null); setError(null); setMoreOpen(false);
+    setAdvancedOpen(false); setModelsLoading(true); setModelsError(false);
+    fetchGatewayModels().then((catalog) => {
+      if (!mountedRef.current) return;
+      const callable = catalog.models.filter((model) => model.callable);
+      setModels(callable);
+      setDraft((current) => current ? {
+        ...current,
+        modelAlias: callable.some((model) => model.modelAlias === current.modelAlias)
+          ? current.modelAlias : (catalog.defaultModelAlias ?? ''),
+      } : current);
+    }).catch(() => { if (mountedRef.current) { setModelsError(true); setAdvancedOpen(true); } })
+      .finally(() => { if (mountedRef.current) setModelsLoading(false); });
   };
   const toggleMore = () => setMoreOpen((current) => {
     const next = !current;
@@ -331,6 +406,10 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
     if (action === 'edit') {
       if (!draft) return;
       const validation = validateDraft(draft); setFieldErrors(validation);
+      if (validation.modelAlias) setAdvancedOpen(true);
+      if (Object.keys(validation).some((field) => SCHEDULE_FIELDS.has(field as EditField))) {
+        setScheduleEditorSnapshot(draft); setScheduleEditorOpen(true);
+      }
       if (Object.keys(validation).length) return;
       desired = desiredFromDraft(draft);
     }
@@ -356,6 +435,47 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
   const updateDraft = (change: Partial<EditDraft>, scheduleChanged = false) => setDraft((current) => current ? {
     ...current, ...change, ...(scheduleChanged ? { selectedOffsetMinutes: null } : {}),
   } : current);
+  const applyRepeatPreset = (preset: RepeatPreset) => setDraft((current) => {
+    if (!current) return current;
+    if (preset === 'custom') return { ...current, repeatPreset: preset };
+    if (preset === 'hourly') return { ...current, repeatPreset: preset, kind: 'hourly', intervalHours: '1', minute: '0' };
+    if (preset === 'daily') return { ...current, repeatPreset: preset, kind: 'daily' };
+    if (preset === 'workdays') return { ...current, repeatPreset: preset, kind: 'weekly', weekdays: [...WORKDAYS] };
+    return { ...current, repeatPreset: preset, kind: 'weekly', weekdays: [current.weekdays[0] ?? 'MO'] };
+  });
+  const toggleWeekday = (day: Weekday) => setDraft((current) => current ? {
+    ...current,
+    weekdays: current.repeatPreset === 'weekly' ? [day] : current.weekdays.includes(day)
+      ? current.weekdays.filter((candidate) => candidate !== day)
+      : WEEKDAYS.filter((candidate) => candidate === day || current.weekdays.includes(candidate)),
+  } : current);
+  const openScheduleEditor = () => {
+    if (!draft) return;
+    setScheduleEditorSnapshot({ ...draft, weekdays: [...draft.weekdays] });
+    setScheduleEditorOpen(true);
+  };
+  const cancelScheduleEditor = () => {
+    if (scheduleEditorSnapshot) setDraft(scheduleEditorSnapshot);
+    setScheduleEditorOpen(false); setScheduleEditorSnapshot(null);
+  };
+  const applyScheduleEditor = () => {
+    if (!draft) return;
+    const validation = validateDraft(draft);
+    const scheduleErrors = Object.fromEntries(Object.entries(validation)
+      .filter(([field]) => SCHEDULE_FIELDS.has(field as EditField))) as Partial<Record<EditField, string>>;
+    setFieldErrors((current) => ({ ...current, ...scheduleErrors }));
+    if (Object.keys(scheduleErrors).length > 0) return;
+    setScheduleEditorOpen(false); setScheduleEditorSnapshot(null);
+  };
+  const scheduleSummary = draft ? (draft.repeatPreset === 'hourly'
+    ? t('calendar.scheduledRepeatPreset.hourly')
+    : draft.repeatPreset === 'daily' ? `${t('calendar.scheduledRepeatPreset.daily')} · ${draft.localTime}`
+      : draft.repeatPreset === 'workdays' ? `${t('calendar.scheduledRepeatPreset.workdays')} · ${draft.localTime}`
+        : draft.repeatPreset === 'weekly' ? `${draft.weekdays.map((day) => t(`calendar.scheduledWeekday.${day}`)).join('、')} · ${draft.localTime}`
+          : draft.kind === 'once' ? `${draft.localDate} · ${draft.localTime}`
+            : draft.kind === 'interval' ? t('calendar.scheduledIntervalSummary', { count: Number(draft.intervalMinutes) || 0 })
+              : draft.kind === 'hourly' ? t('calendar.scheduledHourlySummary', { count: Number(draft.intervalHours) || 0, minute: Number(draft.minute) || 0 })
+                : `${draft.weekdays.map((day) => t(`calendar.scheduledWeekday.${day}`)).join('、')} · ${draft.localTime}`) : '';
   const conflictFields = useMemo(() => {
     if (!draft || !conflictLatest) return [];
     const current = draftFromTask(conflictLatest); const fields: string[] = [];
@@ -363,8 +483,13 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
     if (draft.prompt.trim() !== current.prompt) fields.push(t('calendar.scheduledPrompt'));
     if (draft.kind !== current.kind) fields.push(t('calendar.scheduledRule'));
     if (draft.kind === 'once' && draft.localDate !== current.localDate) fields.push(t('calendar.scheduledDate'));
-    if (draft.localTime !== current.localTime) fields.push(t('calendar.scheduledTime'));
+    if (['once', 'daily', 'weekly'].includes(draft.kind) && draft.localTime !== current.localTime) fields.push(t('calendar.scheduledTime'));
+    if (draft.kind === 'interval' && draft.intervalMinutes !== current.intervalMinutes) fields.push(t('calendar.scheduledIntervalMinutes'));
+    if (draft.kind === 'hourly' && (draft.intervalHours !== current.intervalHours || draft.minute !== current.minute)) fields.push(t('calendar.scheduledHourly'));
+    if (draft.kind === 'weekly' && !sameWeekdays(draft.weekdays, current.weekdays)) fields.push(t('calendar.scheduledWeekdays'));
     if (draft.timeZone.trim() !== current.timeZone) fields.push(t('calendar.scheduledTimeZone'));
+    if (draft.runThreadMode !== current.runThreadMode) fields.push(t('calendar.scheduledNewChatEveryRun'));
+    if (draft.modelAlias !== current.modelAlias) fields.push(t('calendar.scheduledModel'));
     return fields;
   }, [conflictLatest, draft, t]);
 
@@ -406,31 +531,89 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
     <Modal open={active && editing} title={t('calendar.scheduledEditTitle', { title: task.title })} closeLabel={t('calendar.scheduledCancel')}
       onClose={closeEditing} initialFocusRef={firstEditFieldRef} surfaceClassName="calendar-popup-task-editor">
       {draft ? <form className="calendar-popup__edit-panel" onSubmit={(event) => { event.preventDefault(); void perform('edit'); }}>
-        <p className="calendar-popup__editor-kicker">{draft.kind === 'once' ? t('calendar.scheduledOnce') : t('calendar.scheduledDaily')}</p>
+        <p className="calendar-popup__editor-kicker">{t(`calendar.scheduledRepeatPreset.${draft.repeatPreset}`)}</p>
         <label><span>{t('calendar.scheduledTitle')}</span><input ref={firstEditFieldRef} value={draft.title}
           aria-invalid={Boolean(fieldErrors.title)} onChange={(event) => updateDraft({ title: event.target.value })} />
           {fieldErrors.title ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
         <label><span>{t('calendar.scheduledPrompt')}</span><textarea value={draft.prompt} rows={8}
           aria-invalid={Boolean(fieldErrors.prompt)} onChange={(event) => updateDraft({ prompt: event.target.value })} />
           {fieldErrors.prompt ? <small role="alert">{t('calendar.scheduledFieldRequired')}</small> : null}</label>
-        <label><span>{t('calendar.scheduledRule')}</span><select value={draft.kind}
-          onChange={(event) => updateDraft({ kind: event.target.value as ScheduledRule['kind'] }, true)}>
-          <option value="once">{t('calendar.scheduledOnce')}</option><option value="daily">{t('calendar.scheduledDaily')}</option></select></label>
-        {draft.kind === 'once' ? <label><span>{t('calendar.scheduledDate')}</span><input type="date" value={draft.localDate}
-          aria-invalid={Boolean(fieldErrors.localDate)} onChange={(event) => updateDraft({ localDate: event.target.value }, true)} /></label> : null}
-        <label><span>{t('calendar.scheduledTime')}</span><input type="time" value={draft.localTime}
-          aria-invalid={Boolean(fieldErrors.localTime)} onChange={(event) => updateDraft({ localTime: event.target.value }, true)} /></label>
-        <label><span>{t('calendar.scheduledTimeZone')}</span><input value={draft.timeZone}
-          aria-invalid={Boolean(fieldErrors.timeZone)} onChange={(event) => updateDraft({ timeZone: event.target.value }, true)} /></label>
+        <label className="calendar-popup__setting-row"><span>{t('calendar.scheduledRepeat')}</span><select value={draft.repeatPreset}
+          onChange={(event) => applyRepeatPreset(event.target.value as RepeatPreset)}>
+          <option value="hourly">{t('calendar.scheduledRepeatPreset.hourly')}</option>
+          <option value="daily">{t('calendar.scheduledRepeatPreset.daily')}</option>
+          <option value="workdays">{t('calendar.scheduledRepeatPreset.workdays')}</option>
+          <option value="weekly">{t('calendar.scheduledRepeatPreset.weekly')}</option>
+          <option value="custom">{t('calendar.scheduledRepeatPreset.custom')}</option>
+        </select></label>
+        <button type="button" className="calendar-popup__schedule-row" onClick={openScheduleEditor}>
+          <span>{t('calendar.scheduledAdvancedSchedule')}</span><span><small>{scheduleSummary}</small>{t('calendar.scheduledEditRule')}</span>
+        </button>
+        <button type="button" className="calendar-popup__advanced-toggle" aria-expanded={advancedOpen}
+          onClick={() => setAdvancedOpen((current) => !current)}>{t('calendar.scheduledAdvanced')} <span aria-hidden="true">{advancedOpen ? '⌃' : '⌄'}</span></button>
+        {advancedOpen ? <section className="calendar-popup__advanced-panel" aria-label={t('calendar.scheduledAdvanced')}>
+          <label className="calendar-popup__switch-row"><span><strong>{t('calendar.scheduledNewChatEveryRun')}</strong>
+            <small>{t('calendar.scheduledNewChatEveryRunHint')}</small></span><input type="checkbox"
+              checked={draft.runThreadMode === 'new_thread_each_run'}
+              onChange={(event) => updateDraft({ runThreadMode: event.target.checked ? 'new_thread_each_run' : 'source_thread' })} /></label>
+          <label className="calendar-popup__setting-row"><span>{t('calendar.scheduledModel')}</span><select
+            value={draft.modelAlias} disabled={modelsLoading || modelsError} aria-invalid={Boolean(fieldErrors.modelAlias)}
+            onChange={(event) => updateDraft({ modelAlias: event.target.value })}>
+            <option value="">{modelsLoading ? t('calendar.scheduledModelsLoading') : t('calendar.scheduledChooseModel')}</option>
+            {models.map((model) => <option key={model.modelAlias} value={model.modelAlias}>{model.displayName}</option>)}
+          </select>{fieldErrors.modelAlias ? <small role="alert">{t('calendar.scheduledChooseModel')}</small> : null}</label>
+          {modelsError ? <div className="calendar-popup__alert" role="alert">{t('calendar.scheduledModelsUnavailable')}</div> : null}
+        </section> : null}
         {conflictLatest ? <div className="calendar-popup__conflict" role="alert"><strong>{t('calendar.scheduledLatestEffective')}</strong>
           <p>{conflictLatest.title} · {planText(conflictLatest)}</p><p>{t('calendar.scheduledConflictFields', { fields: conflictFields.join(', ') || t('calendar.scheduledConflictNoFields') })}</p></div> : null}
         {error ? <div className="calendar-popup__alert" role="alert">{error}</div> : null}
         <div className="calendar-popup__edit-actions">
           {task.status === 'active' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary" disabled={busyAction !== null} onClick={() => void perform('pause')}>{t('calendar.scheduledPause')}</button> : null}
           {task.status === 'paused' ? <button type="button" className="calendar-popup__button calendar-popup__button--secondary" disabled={busyAction !== null} onClick={() => void perform('resume')}>{t('calendar.scheduledResume')}</button> : null}
-          <button type="submit" className="calendar-popup__button calendar-popup__button--primary" disabled={busyAction !== null}>{busyAction === 'edit' ? t('calendar.scheduledSaving') : t('calendar.scheduledSave')}</button>
+          <button type="submit" className="calendar-popup__button calendar-popup__button--primary"
+            disabled={busyAction !== null || modelsLoading || modelsError}>{busyAction === 'edit' ? t('calendar.scheduledSaving') : t('calendar.scheduledSave')}</button>
         </div>
       </form> : null}
+    </Modal>
+
+    <Modal open={active && editing && scheduleEditorOpen} title={t('calendar.scheduledAdvancedSchedule')}
+      closeLabel={t('calendar.scheduledCancel')} onClose={cancelScheduleEditor} surfaceClassName="calendar-popup-schedule-editor">
+      {draft ? <div className="calendar-popup__schedule-editor">
+        {draft.repeatPreset === 'custom' ? <label><span>{t('calendar.scheduledCustomRule')}</span><select value={draft.kind}
+          onChange={(event) => updateDraft({ kind: event.target.value as ScheduledRule['kind'] }, true)}>
+          <option value="once">{t('calendar.scheduledOnce')}</option>
+          <option value="interval">{t('calendar.scheduledIntervalMinutesOption')}</option>
+          <option value="hourly">{t('calendar.scheduledIntervalHoursOption')}</option>
+          <option value="weekly">{t('calendar.scheduledSelectedWeekdays')}</option>
+        </select></label> : null}
+        {draft.kind === 'once' ? <label><span>{t('calendar.scheduledDate')}</span><input type="date" value={draft.localDate}
+          aria-invalid={Boolean(fieldErrors.localDate)} onChange={(event) => updateDraft({ localDate: event.target.value }, true)} /></label> : null}
+        {draft.kind === 'interval' ? <label><span>{t('calendar.scheduledIntervalMinutes')}</span><input type="number" min="1" step="1"
+          inputMode="numeric" value={draft.intervalMinutes} aria-invalid={Boolean(fieldErrors.intervalMinutes)}
+          onChange={(event) => updateDraft({ intervalMinutes: event.target.value }, true)} /></label> : null}
+        {draft.kind === 'hourly' && draft.repeatPreset === 'custom' ? <div className="calendar-popup__inline-fields">
+          <label><span>{t('calendar.scheduledIntervalHours')}</span><input type="number" min="1" max="35791394" step="1"
+            inputMode="numeric" value={draft.intervalHours} aria-invalid={Boolean(fieldErrors.intervalHours)}
+            onChange={(event) => updateDraft({ intervalHours: event.target.value }, true)} /></label>
+          <label><span>{t('calendar.scheduledMinute')}</span><input type="number" min="0" max="59" step="1"
+            inputMode="numeric" value={draft.minute} aria-invalid={Boolean(fieldErrors.minute)}
+            onChange={(event) => updateDraft({ minute: event.target.value }, true)} /></label>
+        </div> : null}
+        {draft.kind === 'weekly' && draft.repeatPreset !== 'workdays' ? <fieldset className="calendar-popup__weekdays" aria-invalid={Boolean(fieldErrors.weekdays)}>
+          <legend>{t('calendar.scheduledWeekdays')}</legend>
+          <div>{WEEKDAYS.map((day) => <label key={day}><input type="checkbox" checked={draft.weekdays.includes(day)}
+            onChange={() => toggleWeekday(day)} /><span>{t(`calendar.scheduledWeekday.${day}`)}</span></label>)}</div>
+          {fieldErrors.weekdays ? <small role="alert">{t('calendar.scheduledChooseWeekday')}</small> : null}
+        </fieldset> : null}
+        {['once', 'daily', 'weekly'].includes(draft.kind) ? <label><span>{t('calendar.scheduledTime')}</span><input type="time" value={draft.localTime}
+          aria-invalid={Boolean(fieldErrors.localTime)} onChange={(event) => updateDraft({ localTime: event.target.value }, true)} /></label> : null}
+        <label><span>{t('calendar.scheduledTimeZone')}</span><input value={draft.timeZone}
+          aria-invalid={Boolean(fieldErrors.timeZone)} onChange={(event) => updateDraft({ timeZone: event.target.value }, true)} /></label>
+        <div className="calendar-popup__schedule-actions">
+          <button type="button" className="calendar-popup__button calendar-popup__button--secondary" onClick={cancelScheduleEditor}>{t('calendar.scheduledCancel')}</button>
+          <button type="button" className="calendar-popup__button calendar-popup__button--primary" onClick={applyScheduleEditor}>{t('calendar.scheduledApplyRule')}</button>
+        </div>
+      </div> : null}
     </Modal>
 
     <Modal open={active && historyOpen} title={t('calendar.scheduledHistoryTitle', { title: task.title })}

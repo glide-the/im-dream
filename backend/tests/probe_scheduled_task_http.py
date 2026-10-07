@@ -99,7 +99,7 @@ async def main() -> None:
             chat=chat, owner=owner, source_thread_id=source_thread_id,
             source_message_id=f"scheduled-probe-{uuid4()}",
             turn_persistence=SimpleNamespace(current_grant=lambda **_: source_grant),
-            timeout_seconds=10,
+            timeout_seconds=10, model_alias="dream-balanced",
         )
         broker = SessionProjectionBroker(
             SimpleNamespace(), settings=SessionProjectionBrokerSettings(

@@ -2,6 +2,7 @@
 # [Output] A Linux Docker build with embedded SDK/Runtime/plugin-management gates.
 # [Pos] Required backend CI for both integration and release pull requests.
 # [Sync] 2026-09-15: run backend qualification for develop PRs and explicit release reruns without the retired schema-creating smoke harness.
+# [Sync] 2026-10-07: use configurable upstream Debian archives through existing Docker build args after slow CI mirror downloads.
 name: Check Backend (CI)
 
 on:
@@ -22,9 +23,14 @@ jobs:
 
       # We build, but we DO NOT push. This verifies the build succeeds.
       - name: Build Docker Image (Dry Run)
+        env:
+          DEBIAN_MIRROR: ${{ vars.CI_DEBIAN_MIRROR || 'https://deb.debian.org/debian' }}
+          DEBIAN_SECURITY_MIRROR: ${{ vars.CI_DEBIAN_SECURITY_MIRROR || 'https://deb.debian.org/debian-security' }}
         run: |
           docker buildx build \
             --platform linux/amd64 \
+            --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
+            --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
             -t ink-backend:ci \
             --load \
             backend

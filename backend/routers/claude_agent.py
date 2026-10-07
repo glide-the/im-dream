@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# [Sync] 2026-09-28: add wait_threads as an in-turn tool wait and retire automatic task-result injection/read cards.
+# [Sync] 2026-10-07: expose owner-scoped scheduled records for creation and execution Thread activity.
+# [Sync] 2026-10-07: expose tool_choice as the closed auto/manual/none request enum while scheduled runs inject server-owned per-tool policy.
 # [Sync] 2026-09-29: project an owner-checked, compact user-turn navigation index for long Chat histories.
 # [Sync] 2026-09-28: expose authenticated scheduled Chat date/history/revision actions through exact Admin DTOs.
 # [Sync] 2026-09-28: replace model task-session commands with authorized create/list/read/send Thread Tools.
@@ -155,11 +156,12 @@ from services.story_workspace.dream_auto_repair_service import (
 
 from services.admin_data.chat_data import AdminChatData
 from services.admin_data.scheduled_task_data import (
-    AdminScheduledTaskData, CREATE_TASK, DAY_TASK, GET_TASK, HISTORY_TASK, EDIT_TASK,
-    PAUSE_TASK, RESUME_TASK, DELETE_TASK, RESTORE_TASK, RUN_TASK,
+    AdminScheduledTaskData, CREATE_TASK_V3, DAY_TASK_V3, GET_TASK_V3, HISTORY_TASK_V3, EDIT_TASK_V3, THREAD_TASKS_V3,
+    PAUSE_TASK_V3, RESUME_TASK_V3, DELETE_TASK_V3, RESTORE_TASK_V3, RUN_TASK_V3,
     DayScheduledTaskInputDTO, ScheduledTaskIdInputDTO, HistoryScheduledTaskInputDTO,
-    EditScheduledTaskInputDTO, ScheduledTaskRevisionInputDTO, RunScheduledTaskInputDTO,
-    CreateScheduledTaskInputDTO, OnceRuleDTO, DailyRuleDTO,
+    EditScheduledTaskV3InputDTO, ScheduledTaskRevisionInputDTO, RunScheduledTaskInputDTO,
+    CreateScheduledTaskV3InputDTO, OnceRuleDTO, DailyRuleDTO, IntervalRuleDTO, HourlyRuleDTO, WeeklyRuleDTO,
+    ScheduledTaskThreadInputDTO,
 )
 from services.admin_data import chat_models as chat_dto
 from services.admin_data.errors import AdminDataError
@@ -920,7 +922,10 @@ class ClaudeAgentRequestBody(BaseModel):
     message: Any = None
     reconnect: bool = False
     resume: bool = False
-    tool_choice: str = Field(default="auto", validation_alias=AliasChoices("tool_choice", "toolChoice"))
+    tool_choice: Literal["auto", "manual", "none"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("tool_choice", "toolChoice"),
+    )
     chatModel: Optional[dict] = None
     model: Optional[str] = None
     max_turns: int = 100
@@ -1093,7 +1098,8 @@ async def _claude_agent_stream_impl(
             },
         )
 
-    if scheduled_dispatch is not None and (body.reconnect or body.resume):
+    if scheduled_dispatch is not None and (body.reconnect
+        or body.resume is not scheduled_dispatch.resume_existing_thread):
         raise HTTPException(status_code=400, detail={"error_code": "SCHEDULE_TURN_INVALID"})
     if scheduled_dispatch is not None and (
         scheduled_dispatch.trigger.target_thread_id != thread_id
@@ -1121,7 +1127,7 @@ async def _claude_agent_stream_impl(
         return streaming_sse_response(generate_reconnect())
 
     accepting_input = getattr(claude_agent_thread_factory, "accepting_input", None)
-    if callable(accepting_input) and accepting_input(thread_id):
+    if scheduled_dispatch is None and callable(accepting_input) and accepting_input(thread_id):
         raise HTTPException(
             status_code=409,
             detail={"error_code": "CHAT_INPUT_USE_QUEUE"},
@@ -1258,6 +1264,11 @@ async def _claude_agent_stream_impl(
                     "message": "The Editor Session identifier must be non-empty text.",
                 },
             )
+    if scheduled_dispatch is not None:
+        editor_session_id = (
+            scheduled_dispatch.editor_state.get("id")
+            if scheduled_dispatch.editor_state is not None else None
+        )
     platform_model = await _resolve_platform_model_selection(
         user_id,
         body.model,
@@ -1425,12 +1436,14 @@ async def _claude_agent_stream_impl(
         loop=asyncio.get_running_loop(), current_user=current_user, chat=chat,
         owner=owner, source_thread_id=thread_id, source_message_id=message_id,
         turn_persistence=turn_persistence,
+        target_editor_session_id=editor_session_id,
+        model_alias=platform_model_alias,
         timeout_seconds=owner.session_broker_settings.timeout_seconds,
     ))
 
     editor_request_id = str(uuid4())
     try:
-        editor_runtime = (None if scheduled_dispatch is not None else await run_in_threadpool(
+        editor_runtime = (scheduled_dispatch.editor_runtime if scheduled_dispatch is not None else await run_in_threadpool(
             owner.editor_runtime, actor, workflow_resolution, editor_request_id,
             initial_session_id=editor_session_id))
     except AdminDataError as exc:
@@ -1470,7 +1483,9 @@ async def _claude_agent_stream_impl(
         user_id=str(user_id),
         thread_id=thread_id,
         resume=body.resume,
-        tool_choice=body.tool_choice,
+        tool_choice=("auto" if scheduled_dispatch is not None else body.tool_choice),
+        tool_approval_policy=(scheduled_dispatch.tool_approval_policy if scheduled_dispatch is not None else None),
+        tool_approval_violation=(scheduled_dispatch.tool_approval_violation if scheduled_dispatch is not None else None),
         model=platform_model_alias,
         model_runtime_env=model_runtime_env,
         admin_workflow_resolution=workflow_resolution,
@@ -1483,7 +1498,7 @@ async def _claude_agent_stream_impl(
         message_id=message_id,
         message_parts=message_parts,
         attachments=attachment_payloads or None,
-        editor_state=body.editor_state,
+        editor_state=(scheduled_dispatch.editor_state if scheduled_dispatch is not None else body.editor_state),
         system_prompt=(
             deck_context.system_prompt
             if deck_context is not None
@@ -1527,6 +1542,18 @@ async def _scheduled_user_operation(current_user: dict, owner: AdminRequestAuth,
     return result.model_dump(mode="json")
 
 
+@router.get("/api/claude-agent/threads/{thread_id}/scheduled-tasks")
+async def claude_agent_scheduled_thread(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    return await _scheduled_user_operation(
+        current_user, owner, THREAD_TASKS_V3,
+        ScheduledTaskThreadInputDTO(thread_id=thread_id),
+    )
+
+
 @router.get("/api/claude-agent/scheduled-tasks/day")
 async def claude_agent_scheduled_day(
     local_date: str, display_time_zone: str,
@@ -1534,7 +1561,7 @@ async def claude_agent_scheduled_day(
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     return await _scheduled_user_operation(
-        current_user, owner, DAY_TASK,
+        current_user, owner, DAY_TASK_V3,
         DayScheduledTaskInputDTO(local_date=local_date, display_time_zone=display_time_zone),
     )
 
@@ -1544,7 +1571,7 @@ async def claude_agent_scheduled_get(
     task_id: str, current_user: dict = Depends(get_current_user),
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
-    return await _scheduled_user_operation(current_user, owner, GET_TASK, ScheduledTaskIdInputDTO(task_id=task_id))
+    return await _scheduled_user_operation(current_user, owner, GET_TASK_V3, ScheduledTaskIdInputDTO(task_id=task_id))
 
 
 @router.get("/api/claude-agent/scheduled-tasks/{task_id}/history")
@@ -1554,7 +1581,7 @@ async def claude_agent_scheduled_history(
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     return await _scheduled_user_operation(
-        current_user, owner, HISTORY_TASK,
+        current_user, owner, HISTORY_TASK_V3,
         HistoryScheduledTaskInputDTO(task_id=task_id, limit=limit, before_created_at=before_created_at),
     )
 
@@ -1566,12 +1593,12 @@ async def claude_agent_scheduled_action(
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     operation, input_type = {
-        "edit": (EDIT_TASK, EditScheduledTaskInputDTO),
-        "pause": (PAUSE_TASK, ScheduledTaskRevisionInputDTO),
-        "resume": (RESUME_TASK, ScheduledTaskRevisionInputDTO),
-        "delete": (DELETE_TASK, ScheduledTaskRevisionInputDTO),
-        "restore": (RESTORE_TASK, ScheduledTaskRevisionInputDTO),
-        "run": (RUN_TASK, RunScheduledTaskInputDTO),
+        "edit": (EDIT_TASK_V3, EditScheduledTaskV3InputDTO),
+        "pause": (PAUSE_TASK_V3, ScheduledTaskRevisionInputDTO),
+        "resume": (RESUME_TASK_V3, ScheduledTaskRevisionInputDTO),
+        "delete": (DELETE_TASK_V3, ScheduledTaskRevisionInputDTO),
+        "restore": (RESTORE_TASK_V3, ScheduledTaskRevisionInputDTO),
+        "run": (RUN_TASK_V3, RunScheduledTaskInputDTO),
     }[action]
     try:
         input_dto = input_type.model_validate({"task_id": task_id, **body})
@@ -2166,7 +2193,8 @@ class _ThreadToolTurnProvider:
     def __init__(self, *, loop: asyncio.AbstractEventLoop, current_user: dict,
                  chat: AdminChatData, owner: AdminRequestAuth,
                  source_thread_id: str, source_message_id: str,
-                 timeout_seconds: float, turn_persistence=None) -> None:
+                 timeout_seconds: float, model_alias: str, turn_persistence=None,
+                 target_editor_session_id: str | None = None) -> None:
         self._loop = loop
         self._current_user = current_user
         self._chat = chat
@@ -2174,6 +2202,8 @@ class _ThreadToolTurnProvider:
         self._source_thread_id = source_thread_id
         self._source_message_id = source_message_id
         self._turn_persistence = turn_persistence
+        self._target_editor_session_id = target_editor_session_id
+        self._model_alias = model_alias
         self._timeout_seconds = timeout_seconds
 
     def refresh_authorization(self, current_user: dict) -> None:
@@ -2228,7 +2258,11 @@ class _ThreadToolTurnProvider:
                 raise AdminDataError("SCHEDULE_AUTHORIZATION_UNAVAILABLE", 503, request.request_id)
             rule_data = request.schedule_rule or {}
             try:
-                rule = (OnceRuleDTO if rule_data.get("kind") == "once" else DailyRuleDTO).model_validate(rule_data)
+                rule_type = (OnceRuleDTO if rule_data.get("kind") == "once" else
+                             IntervalRuleDTO if rule_data.get("kind") == "interval" else
+                             HourlyRuleDTO if rule_data.get("kind") == "hourly" else
+                             WeeklyRuleDTO if rule_data.get("kind") == "weekly" else DailyRuleDTO)
+                rule = rule_type.model_validate(rule_data)
             except ValueError:
                 raise HTTPException(status_code=422, detail={"error_code": "SCHEDULE_RULE_INVALID"}) from None
             request_key = str(uuid5(NAMESPACE_URL,
@@ -2238,10 +2272,12 @@ class _ThreadToolTurnProvider:
             ).token
             result = await run_in_threadpool(
                 AdminScheduledTaskData(self._owner.client).execute,
-                CREATE_TASK,
-                CreateScheduledTaskInputDTO(
+                CREATE_TASK_V3,
+                CreateScheduledTaskV3InputDTO(
                     source_thread_id=source, create_request_key=request_key,
                     title=str(request.title).strip(), prompt=str(request.prompt).strip(), rule=rule,
+                    target_editor_session_id=self._target_editor_session_id,
+                    run_thread_mode="source_thread", model_alias=self._model_alias,
                 ),
                 request_key,
                 access_token=token,
@@ -2251,7 +2287,8 @@ class _ThreadToolTurnProvider:
                 status="ok", scheduled_task={
                     "id": task.id, "title": task.title, "rule": task.rule.model_dump(mode="json"),
                     "next_run_at": task.next_run_at, "status": task.status,
-                    "revision": task.revision,
+                    "revision": task.revision, "run_thread_mode": task.run_thread_mode,
+                    "model_alias": task.model_alias,
                 },
             )
 

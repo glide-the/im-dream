@@ -2,7 +2,7 @@
 # [Output] Verify create/list/read/send/wait and scheduled creation tools, strict inputs, and safe broker failures.
 # [Pos] Provider-free Thread Tool contract test; no real model or business data.
 # [Sync] 2026-09-28: add Codex-style wait_threads targets, cursor and timeout validation.
-# [Sync] 2026-09-28: verify explicit once/daily schedule fields and reject model-authored identities.
+# [Sync] 2026-10-07: verify explicit once/daily/interval/hourly/weekly fields and reject model-authored identities.
 # [Sync] 2026-09-28: replace model task_session_* names with Thread-oriented tools.
 from __future__ import annotations
 
@@ -142,12 +142,23 @@ def test_scheduled_creation_requires_explicit_rule_and_stays_on_host_broker():
         assert json.loads(handle_thread_tool("create_scheduled_task", valid, "call-1"))["ok"]
         assert broker.calls[-1]["operation"] == "schedule.create"
         assert broker.calls[-1]["schedule_rule"] == valid["rule"]
+        for rule in (
+            {"kind": "hourly", "interval_hours": 2, "minute": 15, "time_zone": "Asia/Shanghai"},
+            {"kind": "weekly", "weekdays": ["MO", "FR"], "local_time": "09:00", "time_zone": "Asia/Shanghai"},
+        ):
+            candidate = {**valid, "rule": rule}
+            assert json.loads(handle_thread_tool("create_scheduled_task", candidate, "call-v3"))["ok"]
+            assert broker.calls[-1]["schedule_rule"] == rule
         for invalid in (
             {**valid, "user_id": "42"},
             {**valid, "rule": {"kind": "daily", "local_time": "09:00"}},
             {**valid, "rule": {**valid["rule"], "credential": "forged"}},
             {**valid, "rule": {"kind": "once", "local_date": "2026-09-29",
                                "local_time": "09:00", "time_zone": "Asia/Shanghai"}},
+            {**valid, "rule": {"kind": "hourly", "interval_hours": 0, "minute": 0,
+                               "time_zone": "Asia/Shanghai"}},
+            {**valid, "rule": {"kind": "weekly", "weekdays": [], "local_time": "09:00",
+                               "time_zone": "Asia/Shanghai"}},
         ):
             assert json.loads(handle_thread_tool("create_scheduled_task", invalid, "call-1")) == {
                 "ok": False, "error_code": "THREAD_TOOL_INPUT_INVALID",

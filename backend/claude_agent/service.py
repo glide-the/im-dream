@@ -1,3 +1,5 @@
+# [Sync] 2026-10-07: persist a minimal visible completion for successful scheduled turns that end after tools without model final text.
+# [Sync] 2026-10-07: carry server-owned per-tool approval policy and unattended violation evidence into the shared Agent runner.
 # [Sync] 2026-09-28: accept an Admin-bound scheduled turn ID and pre-persisted input; derive its final message ID from that same turn for verified settlement.
 # [Sync] 2026-09-28: let server result turns suppress a stale browser Editor snapshot without erasing the Thread cache.
 # [Sync] 2026-09-27: carry a server-owned task-result claim through pre-persisted source input and final assistant metadata.
@@ -351,6 +353,8 @@ from libs.claude_agent_kit.types import (
     AgentStreamingCallbacks,
     DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
     DreamAutoRepairExecutionScope,
+    ToolApprovalPolicy,
+    ToolApprovalViolation,
     ToolEventPayload,
 )
 from services.claude_plugin.workspace_packer import (
@@ -1448,6 +1452,10 @@ class ClaudeAgentRunRequest:
     reconnect: bool = False
     resume: bool = False
     tool_choice: str = "auto"
+    # Server-only execution policy; unlike tool_choice, this decides whether a
+    # selected exact tool executes automatically or requires a human.
+    tool_approval_policy: ToolApprovalPolicy | None = field(default=None, repr=False)
+    tool_approval_violation: ToolApprovalViolation | None = field(default=None, repr=False)
     model: Optional[str] = None
     # Server-owned model Runtime projection. Public request DTOs never expose
     # this field; the authenticated Gateway catalog populates it.
@@ -2276,6 +2284,8 @@ class ClaudeAgentService:
             notion_credential_home=notion_credential_home,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
+            tool_approval_policy=request.tool_approval_policy,
+            tool_approval_violation=request.tool_approval_violation,
             im_full_access_enabled=im_full_access_enabled,
             sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
@@ -3083,6 +3093,18 @@ class ClaudeAgentService:
 
             asst_metadata: dict = {}
             final_part_index = _completed_turn_final_part_index(asst_parts)
+            if (
+                execution.request.scheduled_turn_id is not None
+                and final_part_index is None
+                and _scheduled_turn_ended_after_process(asst_parts)
+            ):
+                # Scheduled models may correctly stop immediately after an
+                # allowed tool call.  The shared result contract still needs
+                # one visible final text part for durable settlement/history.
+                asst_parts.append(
+                    {"type": "text", "text": _SCHEDULED_COMPLETION_TEXT}
+                )
+                final_part_index = _completed_turn_final_part_index(asst_parts)
             asst_metadata["turnId"] = execution.state.current_turn_id
             source_metadata = execution.request.message_metadata
             if (
@@ -3820,6 +3842,30 @@ def _completed_turn_final_part_index(parts: list) -> int | None:
         return None
     text = part.get("text")
     return index if isinstance(text, str) and bool(text.strip()) else None
+
+
+_SCHEDULED_COMPLETION_TEXT = "任务已执行完成。"
+
+
+def _scheduled_turn_ended_after_process(parts: list) -> bool:
+    """Return true when a completed scheduled turn has no final text suffix."""
+
+    if not parts:
+        return True
+    last_process_index = -1
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            return False
+        part_type = part.get("type")
+        if part_type not in {"text", "reasoning", "tool-invocation"}:
+            return False
+        if part_type in {"reasoning", "tool-invocation"}:
+            last_process_index = index
+    return not any(
+        isinstance(part.get("text"), str) and bool(part["text"].strip())
+        for part in parts[last_process_index + 1 :]
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
 
 
 # ---------------------------------------------------------------------------

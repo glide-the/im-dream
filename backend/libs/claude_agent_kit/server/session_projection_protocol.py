@@ -2,6 +2,7 @@
 # [Output] Strict broker DTOs plus synchronous Session/current-Run/Thread child clients without Admin or database dependency.
 # [Pos] Neutral turn projection protocol shared by the host broker and stdio children.
 # [Sync] 2026-09-28: add Codex-style wait_threads wire types and a per-call long-poll read timeout.
+# [Sync] 2026-10-07: carry closed interval scheduling input over the existing host broker without exposing actor or Editor selectors.
 # [Sync] 2026-09-28: carry a strictly shaped scheduled-task creation request and receipt over the existing host broker.
 # [Sync] 2026-09-28: replace model task-session commands with create/list/read/send Thread wire types.
 # [Sync] 2026-09-15: define the bounded private Session broker protocol.
@@ -206,13 +207,21 @@ class ThreadToolCommandRequestDTO(_StrictDTO):
         if self.operation == "schedule.create":
             rule = self.schedule_rule or {}
             required = ({"kind", "local_date", "local_time", "time_zone", "selected_offset_minutes"}
-                        if rule.get("kind") == "once" else {"kind", "local_time", "time_zone"})
+                        if rule.get("kind") == "once" else
+                        {"kind", "interval_minutes", "time_zone"} if rule.get("kind") == "interval" else
+                        {"kind", "local_time", "time_zone"})
             rule_valid = (
-                rule.get("kind") in ("once", "daily")
+                rule.get("kind") in ("once", "daily", "interval")
                 and set(rule) == required
                 and isinstance(rule.get("time_zone"), str) and bool(rule["time_zone"].strip())
-                and isinstance(rule.get("local_time"), str)
-                and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", rule["local_time"]) is not None
+                and (rule.get("kind") == "interval" or (
+                    isinstance(rule.get("local_time"), str)
+                    and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", rule["local_time"]) is not None
+                ))
+                and (rule.get("kind") != "interval" or (
+                    type(rule.get("interval_minutes")) is int
+                    and 1 <= rule["interval_minutes"] <= 2_147_483_647
+                ))
                 and (rule.get("kind") != "once" or (
                     isinstance(rule.get("local_date"), str)
                     and re.fullmatch(r"\d{4}-\d{2}-\d{2}", rule["local_date"]) is not None

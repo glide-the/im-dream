@@ -3,7 +3,8 @@
 #          factory is initialised, request/response models are correct, and
 #          authentication is enforced.
 # [Pos] test node in backend/tests
-# [Sync] 2026-09-27: keep the route-level persistence fake aligned with task-session provider binding and authorization refresh.
+# [Sync] 2026-10-07: verify the public tool_choice field rejects values outside auto/manual/none.
+# [Sync] 2026-10-07: require the public tool_choice field to accept only auto/manual/none.
 # [Sync] 2026-09-28: verify task-result claims stop before Factory close and settlements drain afterward.
 # [Sync] 2026-09-17: fail attachment metadata persistence closed before Runtime start.
 # [Sync] 2026-09-16: assert Admin HTTP owner ordering after removing Dream PostgreSQL lifecycle.
@@ -762,6 +763,12 @@ class TestClaudeAgentRequestModel(unittest.TestCase):
     def test_default_tool_choice_auto(self):
         m = self.Model(message="hello")
         self.assertEqual(m.tool_choice, "auto")
+
+    def test_tool_choice_is_a_closed_enum(self):
+        for value in ("auto", "manual", "none"):
+            self.assertEqual(self.Model(message="hello", toolChoice=value).tool_choice, value)
+        with self.assertRaises(ValueError):
+            self.Model(message="hello", toolChoice="always")
 
     def test_default_max_turns_100(self):
         m = self.Model(message="hello")

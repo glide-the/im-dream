@@ -1,7 +1,8 @@
 /* [Input] TaskActivityContent task relations and existing Dream Plan/Todo popover tokens. */
-/* [Output] Separate task-session and subagent cards with keyboard-visible actions. */
+/* [Output] Separate scheduled-task, task-session and subagent cards with keyboard-visible actions. */
 /* [Pos] Content styles inside PlanButton; this file owns no popover geometry or trigger. */
 /* [Sync] 2026-09-28: keep independent task sessions and subagents separate from Environment info. */
+/* [Sync] 2026-10-07: reuse compact scheduled marker rows inside the activity card with wrapping metadata. */
 
 .task-activity__content {
   display: flex;
@@ -75,6 +76,33 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.task-activity__scheduled .scheduled-task-markers { margin-top: 0; }
+.task-activity__scheduled .scheduled-task-marker {
+  grid-template-columns: 1.1rem minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  padding: 0.45rem 0.35rem;
+  border: 0;
+  border-radius: 0.55rem;
+}
+.task-activity__scheduled .scheduled-task-marker__icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  background: transparent;
+}
+.task-activity__scheduled .scheduled-task-marker__copy small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.task-activity__scheduled .scheduled-task-marker__action {
+  grid-column: auto;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
 }
 
 .task-activity__task {

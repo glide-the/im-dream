@@ -1,8 +1,10 @@
 # [Input] None — top-level package re-export.
 # [Output] Expose ClaudeAgentRunner, create_agent_runner, SimpleClaudeAgentSDKClient,
 #          AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolChoiceMode,
+#          ToolApprovalMode, ToolApprovalPolicy, ToolApprovalViolation,
 #          ToolEventPayload, IClaudeAgentSDKClient, AttachmentPayload, RuntimeContext,
 #          get_or_create_workspace, create_user_mcp_server, create_necklace_mcp_server
+# [Sync] 2026-10-07: export the closed per-tool auto/manual policy and unattended violation marker.
 #          to application layers.
 # [Pos] package root in libs/claude_agent_kit
 # [Sync] 2026-05-09: re-export necklace live-context MCP server factory.
@@ -66,6 +68,9 @@ from .types import (
     AgentStreamingCallbacks,
     IClaudeAgentSDKClient,
     ToolChoiceMode,
+    ToolApprovalMode,
+    ToolApprovalPolicy,
+    ToolApprovalViolation,
     ToolEventPayload,
 )
 
@@ -82,6 +87,9 @@ __all__ = [
     # Callbacks & events
     "AgentStreamingCallbacks",
     "ToolChoiceMode",
+    "ToolApprovalMode",
+    "ToolApprovalPolicy",
+    "ToolApprovalViolation",
     "ToolEventPayload",
     # Message building
     "AttachmentPayload",

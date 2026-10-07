@@ -1,3 +1,5 @@
+<!-- [同步] 2026-10-07：对齐当前周期、运行选项及 v3 capability，保留真实业务验收未闭合的回执。 -->
+<!-- [同步] 2026-10-07：记录创建与执行会话的定时任务活动及精确只读操作。 -->
 <!-- [同步] 2026-10-07：记录 Chat 活动铃铛及现有读取范围内的优先级与历史显示。 -->
 <!-- [同步] 2026-10-07：记录 Notion 精确归属能力、接受版本缓存恢复及尚未闭合的正常服务发布门禁。 -->
 <!-- [同步] 2026-10-07：日历仅可见时检查连接器快照版本；简约元数据保留一次数量/标题链接及必要恢复反馈。 -->
@@ -62,9 +64,10 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 - **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
 - **Chat 活动**由新建旁的铃铛打开同一个右侧栏。优先级显示今日定时任务及最近五分钟的 Chat／Dream 活动，支持显示筛选和独立重试；日期历史、搜索及用户主动删除对话沿用原行为。详见[活动视图 PRD](docs/prd/chat/priority-activity.md)。
 - **Chat 轮次导航** 为当前 Thread 中每条已发送的用户消息显示紧凑的动态刻度。悬浮或聚焦可预览该次交互，选中后定位原消息，包括较早的历史分页；窄屏改用可展开的消息列表。详见[轮次导航 PRD](docs/prd/chat/turn-navigation.md)。
+- **定时任务活动**显示在创建对话及每个关联执行会话的“任务与进度”中，尚未首次运行的任务也能查看。记录与创建消息打开同一个详情侧栏，定义状态和本次执行状态分别显示。当前读取依赖 Admin 精确的 `scheduled-task.v3.thread` operation 和 v3 schema capability；冻结的 v2 合同继续保留；读取失败保留当前会话记录并提供重新加载。详见[对话活动 PRD](docs/prd/scheduled-tasks/conversation-activity.md)。
 - **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
-- **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，规则为带 IANA 时区的单次当地日期时间或每日当地钟点。日历显示定义、执行历史及关联 Chat，支持编辑、暂停、恢复、立即运行、软删除和撤销删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 后台消费端复用现有 Chat Runtime。目标数据库发布 Admin Drizzle 0069–0072 的 schema capability 和精确操作合同后才能运行。技术性空闲轮询间隔由 `INK_SCHEDULED_TASK_POLL_SECONDS` 配置，默认 `2` 秒。详见[定时任务设计](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)。
+- **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，支持 IANA 时区及一次、每天、间隔、每小时和每周规则。日历预设包含每小时、每天、工作日、每周、自定义；高级选项选择执行模型，以及继续创建会话或每次开启新聊天。日历和 Chat 共用任务详情、最近结果、历史、编辑、暂停、恢复、立即运行与软删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 复用现有 Chat Runtime 和服务器所有的工具审批策略。执行依赖 Admin Drizzle 0077 发布的 v3 capability 与精确操作合同。详见[现行 PRD](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md)、[设计稿](docs/design/scheduled-tasks/codex-repeat-and-run-options.md)和[0077 后真实业务回执](docs/design/scheduled-tasks/codex-repeat-and-run-options-real-e2e.md)；权限修复加载后仍需复验正常服务中的成功定时模型执行。
 - **日历栏目**采用互斥的定时任务、日记、Notion 页签；同日切栏保留草稿、结果和滚动位置。右侧保留随可见内容自然增高的一层圆角浮空纸片；内部使用留白，未选页签透明，普通内容行无装饰边框或静态卡片阴影。Notion 从当前选择范围的连接器索引读取：历史日期展示当日创建；今天先显示快照中的创建/最近编辑文档，再仅校验快照记录为今天更新项的元数据。新页面及未记录变化依赖连接器同步。日历仅可见时检查本地连接器版本并读取变化的快照；完整上下文和成功读取版本未变时不重读文档或远程校验。列表保留一次数量、非空组、单一标题链接及必要恢复反馈。查看/刷新不 Search、保存选择、同步、读取正文或扩大 Agent 权限。设置页区分服务器已确认保存的资源范围与索引更新失败；Retry-After 仅暂停手动操作，不自动同步。详见[日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)。技术验证及正常服务复核限制见[日历同步回执](docs/exec/notion-calendar-sync-refresh-20261007.md)。
 
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。

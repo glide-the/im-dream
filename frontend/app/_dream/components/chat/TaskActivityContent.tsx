@@ -1,7 +1,8 @@
-// [Input] Current business Thread, owner-filtered task links/status, and the existing subagent store.
-// [Output] Separate task-session and subagent cards for the Plan/Todo activity popover.
+// [Input] Current business Thread, owner-filtered scheduled/task-session relations, and the existing subagent store.
+// [Output] Separate scheduled-task, task-session and subagent cards for the Plan/Todo activity popover.
 // [Pos] Current-Thread activity content; PlanButton owns the trigger and popover shell.
 // [Sync] 2026-09-28: separate independent task sessions and subagents from unchanged Environment info.
+// [Sync] 2026-10-07: render scheduled creation/source relations through the shared task-detail marker row.
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -9,6 +10,9 @@ import { useTranslation } from 'react-i18next';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentButton } from './SubagentPanel';
 import { IconChevronDown, IconChevronRight } from './Icons';
+import ScheduledTaskMarkerList from './ScheduledTaskMarker';
+import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
+import type { ScheduledTaskThreadSnapshot } from '../../api/scheduledTaskApi';
 import {
   fetchTaskSessionDetail,
   fetchTaskSessionLinks,
@@ -24,6 +28,11 @@ interface TaskActivityContentProps {
   onToggleSubagents: () => void;
   onNavigateThread: (threadId: string) => void;
   onRequestClose: () => void;
+  scheduledTasks?: ScheduledTaskThreadSnapshot | null;
+  scheduledLoading?: boolean;
+  scheduledFailed?: boolean;
+  onRefreshScheduledTasks?: () => void;
+  onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
 }
 
 function TaskStatusIcon({ status }: { status: TaskSessionStatus }) {
@@ -65,6 +74,11 @@ export default function TaskActivityContent({
   onToggleSubagents,
   onNavigateThread,
   onRequestClose,
+  scheduledTasks,
+  scheduledLoading = false,
+  scheduledFailed = false,
+  onRefreshScheduledTasks,
+  onOpenScheduledTask,
 }: TaskActivityContentProps) {
   const { t } = useTranslation();
   const [links, setLinks] = useState<TaskSessionLink[] | null>(null);
@@ -72,8 +86,18 @@ export default function TaskActivityContent({
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [tasksExpanded, setTasksExpanded] = useState(true);
+  const [scheduledExpanded, setScheduledExpanded] = useState(true);
   const requestRef = useRef(0);
   const subagents = useThreadSubagents(threadId);
+  const source = scheduledTasks?.source;
+  const scheduled = [...new Map([
+    ...(source ? [source.task] : []),
+    ...(scheduledTasks?.created ?? []),
+  ].map((task) => [task.id, task])).values()];
+  const markers: ScheduledTaskMarkerSnapshot[] = scheduled.map((task) => ({
+    id: task.id, title: task.title, rule: task.rule, nextRunAt: task.next_run_at,
+    status: task.status, revision: task.revision,
+  }));
 
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
@@ -115,6 +139,31 @@ export default function TaskActivityContent({
 
   return (
     <div className="task-activity__content" aria-label={t('chat.taskActivity.sectionsAria')}>
+      {scheduled.length > 0 || scheduledLoading || scheduledFailed ? <div className="task-activity__section task-activity__scheduled">
+        <button type="button" className="task-activity__section-heading task-activity__section-toggle"
+          aria-expanded={scheduledExpanded} onClick={() => setScheduledExpanded((value) => !value)}>
+          <span>{t('chat.taskActivity.scheduledTasks')}</span>
+          <span className="task-activity__section-summary">
+            {scheduled.length > 0 ? <span>{scheduled.length}</span> : null}
+            <IconChevronDown className={scheduledExpanded ? 'task-activity__chevron task-activity__chevron--open' : 'task-activity__chevron'} />
+          </span>
+        </button>
+        {scheduledExpanded ? <>
+          <ScheduledTaskMarkerList tasks={markers} ariaLabel={t('chat.taskActivity.scheduledTasks')}
+            onOpen={onOpenScheduledTask ? (task) => { onRequestClose(); onOpenScheduledTask(task); } : undefined}
+            renderDetail={(task) => <>
+              <small>{t('calendar.scheduledStatusLabel')}：{t(`calendar.scheduledStatus.${task.status}`)}</small>
+              {source?.task.id === task.id ? <small>{t('chat.taskActivity.scheduledExecution', {
+                status: t(`calendar.scheduledStatus.${source.trigger.status}`),
+              })}</small> : null}
+            </>} />
+          {scheduledLoading ? <p className="task-activity__note" role="status">{t('chat.taskActivity.scheduledLoading')}</p> : null}
+          {scheduledFailed ? <div className="task-activity__failure" role="status">
+            <span>{t('chat.taskActivity.scheduledUnavailable')}</span>
+            <button type="button" onClick={onRefreshScheduledTasks}>{t('chat.taskActivity.retry')}</button>
+          </div> : null}
+        </> : null}
+      </div> : null}
       <div className="task-activity__section">
         <button
           type="button"

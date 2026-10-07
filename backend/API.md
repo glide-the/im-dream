@@ -1,9 +1,11 @@
+<!-- [Sync] 2026-10-07: document owner-scoped scheduled Thread activity reads and fail-closed operation requirements. -->
 <!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
 <!-- [Sync] 2026-09-29: document owner-scoped Chat turn-navigation excerpts and no-store response. -->
 <!-- [Sync] 2026-09-15: document Registry101 aggregate import, calendar recovery and first-login completion. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
+<!-- [Sync] 2026-10-07: document tool availability, tool_choice and server-owned scheduled auto/manual execution policy. -->
 <!-- [Sync] 2026-09-15: record four original Voice mutation results and safe unknown write IDs. -->
 <!-- [Sync] 2026-09-15: preserve nine social responses, closed business errors and unknown write IDs. -->
 <!-- [Sync] 2026-09-15: document source-bound Admin refs and safe public validation. -->
@@ -605,6 +607,22 @@ Delete a session.
 
 ## Claude Agent Chat Threads
 
+### GET `/api/claude-agent/threads/{thread_id}/scheduled-tasks`
+
+Read the authenticated user's scheduled task activity for an owned Thread. The
+exact Admin `scheduled-task.v2.thread` read operation returns
+`{created: ScheduledTaskV2[], source: {task: ScheduledTaskV2, trigger: ScheduledTrigger} | null}`.
+`created` includes definitions whose `source_thread_id` matches the Thread,
+including inactive definitions and tasks with no runs. `source` matches the
+trigger's `target_thread_id` to this execution Thread. Admin validates active
+subject, `dream:read`, Thread ownership and both definition/trigger owners.
+Definition state and this execution's state remain separate.
+
+This endpoint performs no writes, date filtering or scheduling. Missing exact
+operation or existing v2/link/turn capabilities returns `503` with
+`ADMIN_CAPABILITY_UNAVAILABLE`; Browser activity retains the current Thread's
+previous records and exposes Reload. Missing/unowned Threads return `404`.
+
 ### POST `/api/claude-agent`
 
 Start or resume the current user's Claude Agent turn through the existing
@@ -629,6 +647,33 @@ fields are additive; clients that only read `errorText` remain compatible.
 data: {"type":"error","data":{"errorText":"[CLAUDE_AGENT_CAPACITY_EXHAUSTED] ...","errorCode":"CLAUDE_AGENT_CAPACITY_EXHAUSTED","retryable":true,"retryAfterSeconds":60}}
 data: {"type":"finish","data":{"finishReason":"error"}}
 ```
+
+#### Tool availability and execution policy
+
+`tool_choice` is a closed request enum:
+
+| Value | Meaning |
+| --- | --- |
+| `auto` | The model may choose an exposed tool. Existing safe-read rules may execute without a prompt; writes and interactive tools still use the normal approval path. |
+| `manual` | Every tool call except the server virtual-index read path enters the user confirmation flow. |
+| `none` | No tools are exposed for the turn. |
+
+The effective `tools` collection is server-owned. It is assembled from the
+Runtime built-ins, `allowed_tools`, registered internal MCP servers and the
+actor's enabled managed MCP servers. The public body cannot add a tool, an MCP
+server or a per-tool approval override. `tool_choice="auto"` only permits model
+selection; it does not grant execution permission.
+
+Scheduled turns always use `tool_choice="auto"` plus a server-owned exact-name
+`auto | manual` approval map. For a task bound to its captured Editor Session,
+`mcp__editor__write_segment` and `mcp__editor__insert_widget` are `auto`;
+`mcp__editor__delete_segment`, `mcp__editor__reply_to_comment`,
+`mcp__editor__switch_editor`, `AskUserQuestion` and user-question tools are
+`manual`. An unattended scheduled turn cannot wait for confirmation, so a
+manual or otherwise unresolved execution request is denied and the trigger
+finishes with `SCHEDULE_TOOL_APPROVAL_REQUIRED`; a Runtime network approval
+finishes with `SCHEDULE_NETWORK_APPROVAL_REQUIRED`. Ordinary Chat turns keep
+their current confirmation behavior.
 
 Retryable resource codes:
 

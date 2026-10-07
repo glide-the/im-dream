@@ -315,7 +315,8 @@ def test_thread_tool_host_reuses_owned_running_thread_for_send_and_read(boundary
     async def run():
         provider = routes._ThreadToolTurnProvider(loop=asyncio.get_running_loop(),
             current_user={"user_id": "42", "_admin_actor": Actor()}, chat=chat, owner=None,
-            source_thread_id="owned-thread", source_message_id="source-message", timeout_seconds=2)
+            source_thread_id="owned-thread", source_message_id="source-message", timeout_seconds=2,
+            model_alias="dream-balanced")
         provider.refresh_authorization({"user_id": "42", "_admin_actor": Actor("fresh-user-token")})
         first = await provider._perform(command("thread.send", prompt="continue"))
         replay = await provider._perform(command("thread.send", prompt="continue"))
@@ -373,7 +374,7 @@ def test_thread_tool_host_creates_related_thread_and_lists_owned_threads(boundar
             loop=asyncio.get_running_loop(),
             current_user={"user_id": "42", "_admin_actor": Actor()},
             chat=chat, owner=None, source_thread_id="owned-thread",
-            source_message_id="source-message", timeout_seconds=2,
+            source_message_id="source-message", timeout_seconds=2, model_alias="dream-balanced",
         )
         created = await provider._perform(
             command("thread.create", prompt="Inspect", title="Review")
@@ -489,7 +490,7 @@ def test_wait_threads_returns_completion_suppresses_replayed_final_and_wakes_on_
             owner=None,
             source_thread_id="source-thread",
             source_message_id="source-message",
-            timeout_seconds=2,
+            timeout_seconds=2, model_alias="dream-balanced",
         )
         completed = await provider._perform(command())
         assert completed.wait_reason == "completed"

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: scheduled tool-only completions persist a visible final receipt for durable result settlement.
 # [Sync] 2026-09-28: server result turns can ignore, but do not erase, the cached browser Editor snapshot.
 # [Sync] 2026-09-26: bound Thread resume missing/false/contract-mismatch cases fail closed.
 # [Sync] 2026-09-28: distinguish acknowledged guide interruption from an unrelated SDK failure.
@@ -2342,6 +2343,82 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
             "story-workspace-dream-auto-repair",
         )
 
+    def test_scheduled_tool_only_turn_persists_completion_receipt(self):
+        async def scenario():
+            import database
+
+            service = ClaudeAgentService()
+            turn_ctx = _TurnContext(
+                queue=asyncio.Queue(),
+                confirmation_store=ToolConfirmationStore(),
+            )
+            turn_ctx.collected_parts.extend([
+                {
+                    "type": "tool-input-available",
+                    "toolCallId": "tool-write",
+                    "toolName": "mcp__editor__write_segment",
+                    "input": {"cellId": "cell-1", "text": "append"},
+                },
+                {
+                    "type": "tool-output-available",
+                    "toolCallId": "tool-write",
+                    "toolName": "mcp__editor__write_segment",
+                    "output": {"ok": True},
+                    "isError": False,
+                },
+            ])
+            turn_id = "scheduled-turn-1"
+            state = AgentRunState(session_id="thread-scheduled-tool-only")
+            state.current_turn_id = turn_id
+            execution = service_module._TurnExecution(
+                request=ClaudeAgentRunRequest(
+                    user_id="7",
+                    thread_id="thread-scheduled-tool-only",
+                    message_id="scheduled-input",
+                    message_parts=[{"type": "text", "text": "只写笔记"}],
+                    message_metadata={"kind": "scheduled-chat"},
+                    model="claude-test",
+                    scheduled_turn_id=turn_id,
+                    admin_turn_persistence=_LegacyTurnPersistence(),
+                ),
+                state=state,
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+            )
+            result = AgentRunResult(
+                full_text="",
+                session_id="claude-session",
+                success=True,
+                usage={"input_tokens": 3, "output_tokens": 1},
+            )
+            with (
+                unittest.mock.patch.object(database, "save_chat_message") as save,
+                unittest.mock.patch.object(
+                    database,
+                    "update_chat_thread_claude_session",
+                ),
+            ):
+                await service._persist_assistant_turn(execution, result)
+            return save.call_args
+
+        call = _run(scenario())
+        self.assertEqual(call.kwargs["parts"][-1], {
+            "type": "text",
+            "text": service_module._SCHEDULED_COMPLETION_TEXT,
+        })
+        self.assertEqual(
+            call.kwargs["history_final_text"],
+            service_module._SCHEDULED_COMPLETION_TEXT,
+        )
+        self.assertTrue(call.kwargs["history_process_available"])
+        self.assertEqual(call.kwargs["history_projection_version"], 1)
+        self.assertEqual(call.kwargs["metadata"]["turnStatus"], "completed")
+        self.assertEqual(
+            call.kwargs["metadata"]["finalPartIndex"],
+            len(call.kwargs["parts"]) - 1,
+        )
+
     def test_claimed_confirmation_uses_admin_owner_without_postgres(self):
         async def scenario():
             import database
@@ -2452,8 +2529,6 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             *, guide_acknowledged: bool, sdk_error: bool = False,
             guide_turn_matches: bool = True,
         ):
-            from claude_agent_sdk.types import ResultMessage
-
             service = ClaudeAgentService(dream_artifact_turn_hook=unittest.mock.Mock())
             queue: asyncio.Queue[str | None] = asyncio.Queue()
             turn_ctx = _TurnContext(
@@ -2470,16 +2545,20 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
                 thread_id=state.session_id,
                 message_parts=[{"type": "text", "text": "first"}],
             )
-            terminal = ResultMessage(
+            # Build with the exact class captured by service.py.  Other test
+            # modules may replace the SDK stub module during collection, so a
+            # fresh import here can otherwise fail production's isinstance.
+            terminal = service_module.ResultMessage(
                 subtype="error_during_execution",
-                duration_ms=1,
-                duration_api_ms=0,
-                is_error=True,
-                num_turns=1,
                 session_id="sdk-session",
             )
-            if not hasattr(terminal, "is_error"):
-                terminal.is_error = True
+            # The shared SDK stub intentionally exposes only fields consumed
+            # by production code.  Attach optional real-SDK result fields
+            # after construction so this regression remains import-order safe.
+            terminal.duration_ms = 1
+            terminal.duration_api_ms = 0
+            terminal.is_error = True
+            terminal.num_turns = 1
 
             class _InterruptedRunner:
                 async def run_streaming(self, opts, callbacks):

@@ -1,9 +1,11 @@
 // [Input] useThreadPlan store（planMode / exists / content / truncated / updatedAt）、
 //         useThreadTodos store（source / exists / todos / truncated / updatedAt）与
 //         hydrateThreadPlan / hydrateThreadTodos 全量拉取。
-// [Output] ChatView 顶部右侧的任务活动按钮与 Todo-style 卡片组：独立任务会话、子智能体、
+//         scheduledTaskApi 的当前 Thread 定时任务投影与 ChatView settled-turn refresh key。
+// [Output] ChatView 顶部右侧的任务活动按钮与 Todo-style 卡片组：定时任务、独立任务会话、子智能体、
 //          计划和待办各占一张卡片，点击外部 / Esc 收起，threadId 切换时收起并重置未读指示。
 // [Pos] Current-Thread activity button+popover component in frontend/app/_dream/components/chat.
+// [Sync] 2026-10-07: include scheduled-only activity, cancellable Thread reads, retries and settled-turn refresh.
 // [Sync] 2026-09-28: keep PluginReceiptBadge Environment info unchanged and host task sessions/subagents here.
 // [Sync] 2026-07-20: 初版 — 依据 docs/design/claude-agent/claude-plan.md §5.6 实现；
 //                    复用 CollapsibleSection 与 AssistMessagePart 的 ReactMarkdown 渲染链。
@@ -34,7 +36,7 @@
 //                    key falls back to the index when todo.id is absent.
 // [Sync] 2026-08-22: bind plan Markdown workspace:// references to the panel Thread.
 
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { IconChevronDown, IconChevronUp, IconList, IconPlanTasks } from './Icons';
@@ -45,12 +47,16 @@ import { getDateLocale } from '../../i18n';
 import TaskActivityContent from './TaskActivityContent';
 import { fetchTaskSessionLinks } from './taskSessionLinks';
 import { hydrateThreadSubagents, useThreadSubagents } from '../../hooks/useThreadSubagents';
+import { getThreadScheduledTasks, type ScheduledTaskThreadSnapshot } from '../../api/scheduledTaskApi';
+import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 
 interface PlanButtonProps {
   threadId: string;
   subagentSidebarOpen: boolean;
   onToggleSubagents: () => void;
   onNavigateThread: (threadId: string) => void;
+  onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
+  scheduledRefreshKey?: number;
 }
 
 const PLAN_MODE_BADGE: Record<Exclude<ThreadPlanMode, 'none'>, { labelKey: string; color: string }> = {
@@ -308,13 +314,39 @@ function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
   );
 }
 
-export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSubagents, onNavigateThread }: PlanButtonProps) {
+export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSubagents, onNavigateThread,
+  onOpenScheduledTask, scheduledRefreshKey = 0 }: PlanButtonProps) {
   const { t, i18n } = useTranslation();
   const panelId = useId();
   const plan = useThreadPlan(threadId);
   const todos = useThreadTodos(threadId);
   const subagents = useThreadSubagents(threadId);
   const [hasTaskSessions, setHasTaskSessions] = useState(false);
+  const [scheduledActivity, setScheduledActivity] = useState<{
+    threadId: string; snapshot: ScheduledTaskThreadSnapshot | null; loading: boolean; failed: boolean;
+  }>({ threadId, snapshot: null, loading: true, failed: false });
+  const scheduledRequestRef = useRef<{ generation: number; controller: AbortController | null }>({ generation: 0, controller: null });
+  const refreshScheduledActivity = useCallback(async () => {
+    scheduledRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const generation = ++scheduledRequestRef.current.generation;
+    scheduledRequestRef.current.controller = controller;
+    setScheduledActivity((current) => ({ threadId,
+      snapshot: current.threadId === threadId ? current.snapshot : null, loading: true, failed: false }));
+    try {
+      const snapshot = await getThreadScheduledTasks(threadId, { signal: controller.signal });
+      if (generation === scheduledRequestRef.current.generation && !controller.signal.aborted) {
+        setScheduledActivity({ threadId, snapshot, loading: false, failed: false });
+      }
+    } catch {
+      if (generation === scheduledRequestRef.current.generation && !controller.signal.aborted) {
+        setScheduledActivity((current) => ({ ...current, loading: false, failed: true }));
+      }
+    }
+  }, [threadId]);
+  const scheduledSnapshot = scheduledActivity.threadId === threadId ? scheduledActivity.snapshot : null;
+  const scheduledFailed = scheduledActivity.threadId === threadId && scheduledActivity.failed;
+  const scheduledLoading = scheduledActivity.threadId !== threadId || scheduledActivity.loading;
   const [open, setOpen] = useState(false);
   // 按钮 hover 态：驱动「计划与待办」悬浮 tooltip（弹层打开时不显示）。
   const [hovered, setHovered] = useState(false);
@@ -327,6 +359,20 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
     setOpen(false);
     setSeenUpdatedAt({ plan: null, todos: null });
   }, [threadId]);
+
+  useEffect(() => {
+    const scheduledRequest = scheduledRequestRef.current;
+    void refreshScheduledActivity();
+    const refreshVisible = () => { if (document.visibilityState === 'visible') void refreshScheduledActivity(); };
+    const timer = window.setInterval(refreshVisible, ACTIVITY_REFRESH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
+      scheduledRequest.controller?.abort();
+      scheduledRequest.generation += 1;
+    };
+  }, [refreshScheduledActivity, scheduledRefreshKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -377,7 +423,8 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
 
   const hasPlan = plan.exists || plan.planMode !== 'none';
   const hasTodos = todos.exists;
-  const visible = hasTaskSessions || subagents.exists || hasPlan || hasTodos;
+  const hasScheduledTasks = Boolean(scheduledSnapshot?.source || scheduledSnapshot?.created.length);
+  const visible = hasTaskSessions || subagents.exists || hasPlan || hasTodos || hasScheduledTasks || scheduledFailed;
   if (!visible) return null;
 
   const hasUnseenUpdate =
@@ -386,14 +433,11 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
       (!!todos.updatedAt && todos.updatedAt !== seenUpdatedAt.todos));
 
   const handleToggle = () => {
-    setOpen((value) => {
-      const next = !value;
-      if (next) {
-        // 打开即视为已读两区当前版本。
-        setSeenUpdatedAt({ plan: plan.updatedAt, todos: todos.updatedAt });
-      }
-      return next;
-    });
+    if (!open) {
+      setSeenUpdatedAt({ plan: plan.updatedAt, todos: todos.updatedAt });
+      void refreshScheduledActivity();
+    }
+    setOpen(!open);
   };
 
   const updatedLabel = plan.updatedAt ? formatRelativeTime(plan.updatedAt, t, i18n.language) : '';
@@ -485,12 +529,18 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
           }}
         >
           <TaskActivityContent
+            key={threadId}
             active={open}
             threadId={threadId}
             subagentSidebarOpen={subagentSidebarOpen}
             onRequestClose={() => setOpen(false)}
             onToggleSubagents={onToggleSubagents}
             onNavigateThread={onNavigateThread}
+            scheduledTasks={scheduledSnapshot}
+            scheduledLoading={scheduledLoading}
+            scheduledFailed={scheduledFailed}
+            onRefreshScheduledTasks={() => void refreshScheduledActivity()}
+            onOpenScheduledTask={onOpenScheduledTask}
           />
           {hasPlan ? <div className="task-activity__plan-card" style={POPOVER_CARD_STYLE}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>

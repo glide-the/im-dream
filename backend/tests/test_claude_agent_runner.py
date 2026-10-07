@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: verify exact scheduled auto/manual overrides, strict unresolved denial and unattended network failure markers.
 # [Sync] 2026-09-28: verify Auto/full-access Thread orchestration without duplicate confirmation; manual mode still confirms.
 # [Sync] 2026-09-28: verify create/list/read/send/wait Thread registration and legacy task_session_* permission removal.
 # [Sync] 2026-09-15: verify isolated user stdio clears to broker/policy values before package imports.
@@ -290,6 +291,8 @@ from libs.claude_agent_kit.types import (  # noqa: E402
     AgentRunResult,
     DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
     DreamAutoRepairExecutionScope,
+    ToolApprovalPolicy,
+    ToolApprovalViolation,
     ToolEventPayload,
 )
 
@@ -1348,6 +1351,8 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         dream_auto_repair_scope: Optional[DreamAutoRepairExecutionScope] = None,
         notion_credential_home: Optional[str] = None,
         editor_state: Optional[dict[str, Any]] = None,
+        tool_approval_policy: Optional[ToolApprovalPolicy] = None,
+        tool_approval_violation: Optional[ToolApprovalViolation] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -1366,6 +1371,8 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 claude_tmp_workspace=cwd,
                 notion_credential_home=notion_credential_home,
                 editor_state=editor_state,
+                tool_approval_policy=tool_approval_policy,
+                tool_approval_violation=tool_approval_violation,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1376,6 +1383,65 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         options = self._mock_client.last_options
         matcher = options.hooks["PreToolUse"][0]
         return matcher.hooks[0]
+
+    async def test_server_tool_policy_auto_allows_exact_editor_write(self):
+        marker = ToolApprovalViolation()
+        policy = ToolApprovalPolicy(
+            overrides=(("mcp__editor__write_segment", "auto"),),
+            deny_unresolved=True,
+            ignore_full_access=True,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                allowed_tools=[],
+                editor_state={"id": "note-1", "cells": []},
+                tool_approval_policy=policy,
+                tool_approval_violation=marker,
+            )
+            result = await hook({"tool_name": "mcp__editor__write_segment",
+                "tool_input": {"editor_session_id": "note-1", "cellId": "cell-1", "text": "x", "reason": "update"}},
+                "scheduled-auto", _SDK_HOOK_CONTEXT())
+        self.assertEqual(_hook_specific(result, {}).get("permissionDecision"), "allow")
+        self.assertIsNone(marker.code())
+
+    async def test_server_tool_policy_manual_denies_without_confirmation_and_marks_run(self):
+        marker = ToolApprovalViolation()
+        policy = ToolApprovalPolicy(
+            overrides=(("mcp__editor__delete_segment", "manual"),),
+            deny_unresolved=True,
+            ignore_full_access=True,
+        )
+        callback = AsyncMock(return_value={"approved": True})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                allowed_tools=[],
+                editor_state={"id": "note-1", "cells": []},
+                im_full_access_enabled=True,
+                on_tool_confirmation_request=callback,
+                tool_approval_policy=policy,
+                tool_approval_violation=marker,
+            )
+            result = await hook({"tool_name": "mcp__editor__delete_segment",
+                "tool_input": {"editor_session_id": "note-1", "cellId": "cell-1", "reason": "delete"}},
+                "scheduled-manual", _SDK_HOOK_CONTEXT())
+        self.assertEqual(_hook_specific(result, {}).get("permissionDecision"), "deny")
+        self.assertEqual(marker.code(), "SCHEDULE_TOOL_APPROVAL_REQUIRED")
+        callback.assert_not_awaited()
+
+    async def test_server_tool_policy_denies_unresolved_execution_even_with_full_access(self):
+        marker = ToolApprovalViolation()
+        policy = ToolApprovalPolicy(overrides=(), deny_unresolved=True, ignore_full_access=True)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir, allowed_tools=["Bash"], im_full_access_enabled=True,
+                tool_approval_policy=policy, tool_approval_violation=marker,
+            )
+            result = await hook({"tool_name": "Bash", "tool_input": {"command": "git status"}},
+                "scheduled-unresolved", _SDK_HOOK_CONTEXT())
+        self.assertEqual(_hook_specific(result, {}).get("permissionDecision"), "deny")
+        self.assertEqual(marker.code(), "SCHEDULE_TOOL_APPROVAL_REQUIRED")
 
     @staticmethod
     def _create_notion_bound_dream_workspace(root: str) -> tuple[Path, Path]:
@@ -3826,7 +3892,7 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
         tool_names = {tool.name for tool in result.root.tools}
 
         self.assertEqual(tool_names, {
-            "get_sessions_range", "create_thread", "list_threads",
+            "get_sessions_range", "create_scheduled_task", "create_thread", "list_threads",
             "read_thread", "send_message_to_thread", "wait_threads",
         })
         self.assertEqual(tool_names, set(USER_MCP_TOOL_NAMES))
@@ -4596,6 +4662,8 @@ class TestCanUseToolPermissionChannel(_RunnerBase):
         cwd: str,
         sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
+        tool_approval_policy: Optional[ToolApprovalPolicy] = None,
+        tool_approval_violation: Optional[ToolApprovalViolation] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -4607,6 +4675,8 @@ class TestCanUseToolPermissionChannel(_RunnerBase):
                 cwd=cwd,
                 tool_choice="auto",
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+                tool_approval_policy=tool_approval_policy,
+                tool_approval_violation=tool_approval_violation,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -4655,6 +4725,25 @@ class TestCanUseToolPermissionChannel(_RunnerBase):
                 "matchedAllowedDomain": None,
             },
         )
+
+    async def test_scheduled_sandbox_network_ask_denies_without_confirmation(self):
+        callback = AsyncMock(return_value={"approved": True})
+        marker = ToolApprovalViolation()
+        policy = ToolApprovalPolicy(overrides=(), deny_unresolved=True, ignore_full_access=True)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=callback,
+                tool_approval_policy=policy,
+                tool_approval_violation=marker,
+            )
+            result = await can_use_tool(
+                "SandboxNetworkAccess", {"host": "cdn.example.com"},
+                agent_runner_module.ToolPermissionContext(),
+            )
+        self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
+        self.assertEqual(marker.code(), "SCHEDULE_NETWORK_APPROVAL_REQUIRED")
+        callback.assert_not_awaited()
 
     async def test_sandbox_network_ask_rejection_denies_with_host_in_message(self):
         async def confirm(payload: dict):

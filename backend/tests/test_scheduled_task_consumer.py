@@ -1,8 +1,8 @@
 # [Input] Production scheduled-task DTO port, current-turn Tool bridge and explicit fake Admin capability snapshots.
 # [Output] Prove fail-closed capability checks and stable source/Tool-call authorization for schedule creation.
 # [Pos] Provider-free scheduled Chat consumer contract tests; no database, browser account or model call.
-# [Sync] 2026-09-29: cover one stale scheduled-capability catalog refresh before the existing fail-closed result.
-# [Sync] 2026-09-28: guard exact Admin capability, in-turn schedule creation identities and uncertain start receipts.
+# [Sync] 2026-10-07: prove a scheduled manual-tool request fails even when the stream later emits a successful final event.
+# [Sync] 2026-10-07: guard the v3 source/new Thread contract, captured model alias and uncertain start receipts.
 from __future__ import annotations
 
 import asyncio
@@ -15,9 +15,9 @@ from libs.claude_agent_kit.server.session_projection_protocol import ThreadToolC
 from routers.claude_agent import _ThreadToolTurnProvider
 from services.admin_data.errors import AdminDataError
 from services.admin_data.scheduled_task_data import (
-    AdminScheduledTaskData, CREATE_TASK, CreateScheduledTaskInputDTO,
-    DailyRuleDTO, DAY_TASK, DayScheduledTaskInputDTO,
-    PREPARE_TRIGGER, RENEW_TRIGGER, START_TRIGGER, FINISH_TRIGGER,
+    AdminScheduledTaskData, CREATE_TASK_V3, CreateScheduledTaskV3InputDTO,
+    DailyRuleDTO, DAY_TASK_V3, DayScheduledTaskInputDTO,
+    PREPARE_TRIGGER_V3, RENEW_TRIGGER_V3, START_TRIGGER_V3, FINISH_TRIGGER_V3,
 )
 from claude_agent.scheduled_task_coordinator import ScheduledTaskCoordinator
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
@@ -37,7 +37,7 @@ class CapabilityClient:
         return object()
 
     def supports(self, operations, requirements):
-        assert operations == (DAY_TASK,)
+        assert operations == (DAY_TASK_V3,)
         assert len(requirements) == 3
         return self.supported
 
@@ -58,7 +58,7 @@ def test_scheduled_date_requires_all_three_published_admin_capabilities():
     client = CapabilityClient(supported=False)
     with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
         AdminScheduledTaskData(client).execute(
-            DAY_TASK, DayScheduledTaskInputDTO(local_date="2026-09-29",
+            DAY_TASK_V3, DayScheduledTaskInputDTO(local_date="2026-09-29",
                                                display_time_zone="Asia/Shanghai"),
             "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
         )
@@ -69,7 +69,7 @@ def test_scheduled_date_requires_all_three_published_admin_capabilities():
 def test_scheduled_date_refreshes_one_stale_process_catalog_before_dispatch():
     client = CapabilityClient(supported=False, supported_after_refresh=True)
     result = AdminScheduledTaskData(client).execute(
-        DAY_TASK, DayScheduledTaskInputDTO(local_date="2026-09-29",
+        DAY_TASK_V3, DayScheduledTaskInputDTO(local_date="2026-09-29",
                                            display_time_zone="Asia/Shanghai"),
         "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
     )
@@ -82,7 +82,7 @@ def test_scheduled_date_stays_fail_closed_when_catalog_refresh_fails():
     client = CapabilityClient(supported=False, refresh_error=True)
     with pytest.raises(AdminDataError, match="ADMIN_DATA_UNAVAILABLE"):
         AdminScheduledTaskData(client).execute(
-            DAY_TASK, DayScheduledTaskInputDTO(local_date="2026-09-29",
+            DAY_TASK_V3, DayScheduledTaskInputDTO(local_date="2026-09-29",
                                                display_time_zone="Asia/Shanghai"),
             "734e880b-7313-4103-bf25-b77ac96df08e", access_token="user-grant",
         )
@@ -99,13 +99,17 @@ def test_scheduled_tool_uses_current_turn_grant_and_stable_call_key():
             return SimpleNamespace(token="idg_current_turn")
 
     def create(_self, operation, input_dto, request_id, *, access_token):
-        assert operation is CREATE_TASK
-        assert isinstance(input_dto, CreateScheduledTaskInputDTO)
+        assert operation is CREATE_TASK_V3
+        assert isinstance(input_dto, CreateScheduledTaskV3InputDTO)
         assert isinstance(input_dto.rule, DailyRuleDTO)
+        assert input_dto.target_editor_session_id is None
+        assert input_dto.run_thread_mode == "source_thread"
+        assert input_dto.model_alias == "dream-balanced"
         calls.append((input_dto, request_id, access_token))
         return SimpleNamespace(task=SimpleNamespace(
             id="734e880b-7313-4103-bf25-b77ac96df08e", title=input_dto.title,
             rule=input_dto.rule, next_run_at="2026-09-29T01:00:00Z", status="active", revision=1,
+            run_thread_mode=input_dto.run_thread_mode, model_alias=input_dto.model_alias,
         ))
 
     async def run():
@@ -113,7 +117,7 @@ def test_scheduled_tool_uses_current_turn_grant_and_stable_call_key():
             loop=asyncio.get_running_loop(), current_user={"user_id": "42"},
             chat=None, owner=SimpleNamespace(client=object()),
             source_thread_id="source-thread", source_message_id="source-message",
-            timeout_seconds=2, turn_persistence=Persistence(),
+            timeout_seconds=2, model_alias="dream-balanced", turn_persistence=Persistence(),
         )
         command = ThreadToolCommandRequestDTO(
             capability="c" * 43, request_id="734e880b-7313-4103-bf25-b77ac96df08e",
@@ -144,7 +148,16 @@ def test_schedule_broker_rejects_model_authored_actor_fields():
         )
 
 
-def test_worker_binds_admin_turn_before_canonical_chat_stream(monkeypatch):
+@pytest.mark.parametrize(
+    ("approval_violation", "expected_status", "expected_error"),
+    [
+        (None, "succeeded", None),
+        ("SCHEDULE_TOOL_APPROVAL_REQUIRED", "failed", "SCHEDULE_TOOL_APPROVAL_REQUIRED"),
+    ],
+)
+def test_worker_binds_admin_turn_before_canonical_chat_stream(
+    monkeypatch, approval_violation, expected_status, expected_error,
+):
     from claude_agent import scheduled_task_coordinator as worker_module
     from routers import claude_agent as routes
 
@@ -157,26 +170,28 @@ def test_worker_binds_admin_turn_before_canonical_chat_stream(monkeypatch):
     owner = SimpleNamespace(client=object(), runtime_http_config=object(),
                             session_broker_settings=object())
     coordinator = ScheduledTaskCoordinator(owner, poll_interval_seconds=2)
-    task_session = SimpleNamespace(thread_id="target-thread", initial_message_id="target-input",
-                                   initial_message="Summarize my notes")
-    prepared = SimpleNamespace(prepared=True, task_session=task_session, trigger=trigger,
-                               authority_token="sta_authority", authority_expires_at="2099-01-01T00:00:00Z")
+    prepared = SimpleNamespace(prepared=True, task_session=None, trigger=trigger,
+                               authority_token="sta_authority", authority_expires_at="2099-01-01T00:00:00Z",
+                               target_editor_session_id=None, target_thread_id="target-thread",
+                               input_message_id="target-input", resume_existing_thread=True,
+                               model_alias="dream-balanced")
     authority = SimpleNamespace(trigger_id=trigger.id, claim_id=claim_id,
                                 target_thread_id="target-thread", canonical_user_id="42",
                                 subject="user-subject", client_id="scheduled-client",
-                                scopes=["dream:read", "dream:write"],
+                                    scopes=["dream:read", "dream:write"],
+                                    target_editor_session_id=None,
                                 issued_at="2026-09-28T00:00:00Z",
                                 expires_at="2099-01-01T00:00:00Z")
 
     async def execute(operation, input_dto, request_id):
-        if operation is PREPARE_TRIGGER:
+        if operation is PREPARE_TRIGGER_V3:
             steps.append("prepare")
             return prepared
-        if operation is START_TRIGGER:
+        if operation is START_TRIGGER_V3:
             steps.append("start")
             return SimpleNamespace(trigger=SimpleNamespace(target_turn_id=input_dto.target_turn_id))
-        if operation is FINISH_TRIGGER:
-            steps.append(("finish", input_dto.status, input_dto.final_message_id))
+        if operation is FINISH_TRIGGER_V3:
+            steps.append(("finish", input_dto.status, input_dto.final_message_id, input_dto.error_code))
             return SimpleNamespace(trigger=trigger)
         raise AssertionError(operation)
 
@@ -189,9 +204,16 @@ def test_worker_binds_admin_turn_before_canonical_chat_stream(monkeypatch):
     monkeypatch.setattr(worker_module, "AdminTurnPersistence", lambda *args, **kwargs: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(worker_module, "AdminRuntimeClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(worker_module, "AdminGatewayRuntime", lambda *args, **kwargs: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(worker_module, "AdminChatData", lambda client: SimpleNamespace(
+        process_detail=lambda *args, **kwargs: SimpleNamespace(message=SimpleNamespace(
+            role="user", parts=[{"type": "text", "text": "Summarize my notes"}],
+        )),
+    ))
 
     async def chat_stream(body, user, chat, owner, *, scheduled_dispatch):
         steps.append("preflight")
+        if approval_violation is not None:
+            scheduled_dispatch.tool_approval_violation.record(approval_violation)
         completion = asyncio.get_running_loop().create_future()
         completion.set_result(None)
 
@@ -206,8 +228,9 @@ def test_worker_binds_admin_turn_before_canonical_chat_stream(monkeypatch):
     monkeypatch.setattr(routes, "_claude_agent_stream_impl", chat_stream)
     asyncio.run(coordinator._dispatch(trigger, claim_id))
     assert steps[-1][0] == "finish"
-    assert steps[-1][1] == "succeeded"
-    assert steps[-1][2] is not None
+    assert steps[-1][1] == expected_status
+    assert (steps[-1][2] is not None) is (expected_status == "succeeded")
+    assert steps[-1][3] == expected_error
 
 
 def test_worker_replays_only_original_uncertain_start_receipt():
@@ -215,7 +238,7 @@ def test_worker_replays_only_original_uncertain_start_receipt():
     seen = []
 
     async def execute(operation, input_dto, request_id):
-        assert operation is START_TRIGGER
+        assert operation is START_TRIGGER_V3
         seen.append((input_dto.target_turn_id, request_id))
         if len(seen) == 1:
             raise AdminDataError("ADMIN_OUTCOME_UNKNOWN", 503, request_id, outcome_unknown=True)
@@ -240,7 +263,7 @@ def test_worker_renew_failure_is_reported_and_requires_reconciliation(monkeypatc
         raise asyncio.TimeoutError
 
     async def execute(operation, input_dto, request_id):
-        assert operation is RENEW_TRIGGER
+        assert operation is RENEW_TRIGGER_V3
         raise AdminDataError("SCHEDULE_LEASE_EXPIRED", 409, request_id)
 
     monkeypatch.setattr(worker_module.asyncio, "wait_for", expired_wait)

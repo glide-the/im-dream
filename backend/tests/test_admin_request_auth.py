@@ -1,6 +1,7 @@
 # [Input] Actual typed profile/request-auth owner and the production FastAPI dependency.
 # [Output] Provider-free claim/identity/profile/scope and public-boundary regression checks.
 # [Pos] Technical authentication contracts; no real users, PostgreSQL or model calls.
+# [Sync] 2026-10-07: prove the production request owner registers every additive scheduled Chat v2 operation.
 # [Sync] 2026-09-14: exercise strict profile wire schemas and explicit request actor propagation.
 # [Sync] 2026-09-15: recover profile operations after a separate domain invalidates the capability catalog.
 from __future__ import annotations
@@ -17,6 +18,7 @@ from routers.deps import get_current_user
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError, OAuthPrincipalClaims
 from services.admin_data.profile_data import CURRENT_PROFILE, ProfileInputDTO, UserProfileDTO
 from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.scheduled_task_data import SCHEDULED_TASK_V2_OPERATIONS
 
 
 @pytest.fixture
@@ -107,6 +109,17 @@ def test_request_auth_recovers_after_a_separate_domain_refresh_failure(config):
     assert auth_owner.current_profile(actor, "profile-2").id == "42"
     assert auth_owner.client.capabilities_ready
     assert sum(item.url.path.endswith("/capabilities") for item in calls) == 3
+
+
+def test_production_request_owner_registers_scheduled_task_v2_operations(config):
+    auth_owner = AdminRequestAuth(config, verifier=Verifier())
+    try:
+        assert all(
+            auth_owner.client._operations.get(operation.capability.name) is operation
+            for operation in SCHEDULED_TASK_V2_OPERATIONS
+        )
+    finally:
+        auth_owner.close()
 
 
 @pytest.mark.parametrize("field,value", [("id", 42), ("id", "9223372036854775808"), ("email", "invalid-email"), ("email", ".member@example.com"), ("created_at", "2026-02-29T00:00:00Z"), ("created_at", "2026-09-14T00:00:00"), ("auth_providers", ["password"]), ("password_hash", "synthetic")])
