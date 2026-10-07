@@ -12,6 +12,7 @@
 //                    assistant message bubbles reuse the same copy affordance.
 // [Sync] 2026-08-04: add IconSubagents for thread subagent task summaries/details.
 // [Sync] 2026-08-23: add shared maximize/minus controls for the unified Markdown media preview.
+// [Sync] 2026-10-07: add the Chat activity bell within the existing SVG icon family.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -42,6 +43,7 @@ export const IconSparkles = createIcon('0 0 24 24', <>
   <path d="M4 14l.8 2.3L7 17l-2.2.7L4 20l-.8-2.3L1 17l2.2-.7L4 14z" />
 </>);
 export const IconSearch = createIcon('0 0 24 24', <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>);
+export const IconBell = createIcon('0 0 24 24', <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>);
 export const IconUsers = createIcon('0 0 24 24', <><path d="M16 11c1.7 0 3-1.6 3-3.5S17.7 4 16 4s-3 1.6-3 3.5S14.3 11 16 11z" /><path d="M8 12c2.2 0 4-1.8 4-4S10.2 4 8 4 4 5.8 4 8s1.8 4 4 4z" /><path d="M2 20c0-2.2 2.5-4 5.5-4h1" /><path d="M13 16h1.5c3 0 5.5 1.8 5.5 4" /></>);
 export const IconSubagents = createIcon('0 0 24 24', <>
   <rect x="5" y="7" width="14" height="11" rx="4" />
