@@ -1,6 +1,7 @@
 // [Input] Open state, title/content, close callback, optional caller-owned initial focus/surface class, presentation variant, media toolbar actions, and controlled zoom state.
 // [Output] Portal-backed accessible modal with backdrop/Escape close, focus containment/restoration, and one shared media-preview skeleton whose controls resize only marked media content.
 // [Pos] shared modal component node in frontend/app/_dream/components/chat
+// [Sync] 2026-10-05: exclude hidden/inert descendants from focus containment when Calendar keeps inactive panels mounted.
 // [Sync] 2026-08-22: add dialog semantics, keyboard/focus lifecycle, and an image-preview size while preserving the default connector modal.
 // [Sync] 2026-08-23: replace the image-only surface with the shared Mermaid/Workspace immersive viewer: top-right actions and bottom zoom controls.
 // [Sync] 2026-08-23: add non-passive wheel zoom over the media stage, sharing the existing 50%–200% controlled state and blocking background scroll.
@@ -109,7 +110,8 @@ export default function Modal({
       }
       if (event.key !== 'Tab' || !dialogRef.current) return;
 
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+        .filter((element) => !element.closest('[hidden], [inert]') && element.getClientRects().length > 0);
       if (focusable.length === 0) {
         event.preventDefault();
         dialogRef.current.focus();

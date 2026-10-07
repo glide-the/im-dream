@@ -1,4 +1,12 @@
+<!-- [同步] 2026-10-07：记录 Notion 精确归属能力、接受版本缓存恢复及尚未闭合的正常服务发布门禁。 -->
+<!-- [同步] 2026-10-07：日历仅可见时检查连接器快照版本；简约元数据保留一次数量/标题链接及必要恢复反馈。 -->
 <!-- [同步] 2026-10-07：设置中的语言和主题在登录及本地数据导入清理后保留。 -->
+<!-- [同步] 2026-10-07：日历右侧保留自然高度的唯一圆角浮空纸片，内部简约留白。 -->
+<!-- [Sync] 2026-10-06: document snapshot-first selected-date reads and today-updated metadata verification. -->
+<!-- [Sync] 2026-10-06: clarify selected database page rows and explicit synchronization of legacy indexes. -->
+<!-- [同步] 2026-10-05：记录日历互斥栏目、Search 今日元数据及必需的服务器 API 日期配置。 -->
+<!-- [同步] 2026-10-06：记录日历右侧平坦浅纸、留白与普通内容无装饰边框的呈现。 -->
+<!-- [同步] 2026-10-06：记录实际 CLI API 日期合同、缺配置 503 及补配置重启的恢复步骤。 -->
 <!-- [输入] 当前 Dream/Admin 架构、AutoDL 直宿主发布与本机开发合同。 -->
 <!-- [输出] 用户优先的启动、使用、本机配置、验证与恢复入口。 -->
 <!-- [定位] 仓库中文 README；README.md 是同结构的英文正文。 -->
@@ -54,6 +62,8 @@ AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebU
 - **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
 - **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
 - **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，规则为带 IANA 时区的单次当地日期时间或每日当地钟点。日历显示定义、执行历史及关联 Chat，支持编辑、暂停、恢复、立即运行、软删除和撤销删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 后台消费端复用现有 Chat Runtime。目标数据库发布 Admin Drizzle 0069–0072 的 schema capability 和精确操作合同后才能运行。技术性空闲轮询间隔由 `INK_SCHEDULED_TASK_POLL_SECONDS` 配置，默认 `2` 秒。详见[定时任务设计](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)。
+- **日历栏目**采用互斥的定时任务、日记、Notion 页签；同日切栏保留草稿、结果和滚动位置。右侧保留随可见内容自然增高的一层圆角浮空纸片；内部使用留白，未选页签透明，普通内容行无装饰边框或静态卡片阴影。Notion 从当前选择范围的连接器索引读取：历史日期展示当日创建；今天先显示快照中的创建/最近编辑文档，再仅校验快照记录为今天更新项的元数据。新页面及未记录变化依赖连接器同步。日历仅可见时检查本地连接器版本并读取变化的快照；完整上下文和成功读取版本未变时不重读文档或远程校验。列表保留一次数量、非空组、单一标题链接及必要恢复反馈。查看/刷新不 Search、保存选择、同步、读取正文或扩大 Agent 权限。设置页区分服务器已确认保存的资源范围与索引更新失败；Retry-After 仅暂停手动操作，不自动同步。详见[日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)。技术验证及正常服务复核限制见[日历同步回执](docs/exec/notion-calendar-sync-refresh-20261007.md)。
+
 - **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
 - **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”组合 YuE2 统筹、编曲师、作词师，并使用本机 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
 - **文件** 保存在 Thread 工作区，继续执行路径规范化、所有权检查和共享文件系统边界。
@@ -127,6 +137,12 @@ corepack pnpm install --frozen-lockfile
 Runtime 必须输出 `2.1.241 (Claude Code)`。`uv` 管理 Python SDK，npm 管理原生 Runtime 与 Notion CLI，pnpm 管理 Web workspace；`uv sync` 不会安装 Runtime。
 
 从示例创建 `backend/.env` 与 `frontend/.env.local`。配置明确的 Admin origin/issuer、Dream resource 以及已注册的 service/BFF identity。Dream env 不得包含 `DATABASE_URL` 或 Provider secret。
+
+选中独立页面同步和快照今天更新项的远程元数据读取要求在 `backend/.env` 配置服务器所有的 `INK_NOTION_TODAY_API_VERSION=2026-03-11`，模板已显式设置。loopback 请求头捕获确认固定的 `ntn@0.15.1` 默认请求和显式 `--notion-version` 均发送该日期，见[503 修复回执](docs/exec/notion-today-503-repair-20261006.md)。已有 env 文件须补此键并重启所拥有的 Dream 后端，因为配置在启动时读取。程序没有兜底日期：缺失或非法配置返回 HTTP 503 和 `detail.error_code=NOTION_API_VERSION_UNCONFIGURED`，此时连接列表和快照读取仍可成功。`INK_NOTION_ALLOWED_URL_HOSTS` 配置精确的 HTTPS 目的地主机，默认值见 `backend/.env.example`。这些配置用于远程元数据校验；真实账户的上游兼容性与[隔离技术回执](docs/exec/calendar-right-panel-tabs-implementation-20261005.md)分开验收。
+
+选择 Notion 数据库后，已同步的数据库页面行进入日历候选索引，无需逐行手动选择。重启 Dream 不会重建持久化索引。旧索引缺上游创建/编辑时间时，进入 Notion 设置 → 管理已挂载来源 → 立即同步，然后刷新日历；该操作沿用现有仅同步元数据的入口。
+
+新的 Notion 手动同步、首次选择同步和策略同步消费端要求精确的 `dream.notion-sync-ownership.v1` capability，以及固定的 request/claim/renew/finish 四操作。Admin 负责执行领取、续租与原子接受快照；Dream 随后缓存接受版本。日历、facade 读取和新 Thread 投影在缓存缺失时通过现有 Admin 读取恢复，并校验完整接受身份及仅含元数据的结构。Chat turn 不通过此索引路径触发 Notion 同步或正文下载。缺执行能力时新同步写入关闭，既有读取仍兼容。当前正常 Admin 目录尚缺这些操作和 capability；正常库迁移、旧 writer 排空与 claim 启用仍是发布前置。不使用 runtime DDL 或按时间强制接管。详见[集成回执](docs/exec/notion-sync-ownership-dream-integration-20261007.md)及[正式连接器设计](docs/design/notion-session/connector-interaction.md)。
 
 分别启动拥有的服务：
 

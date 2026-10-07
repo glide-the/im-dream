@@ -1,3 +1,4 @@
+# [Sync] 2026-10-06: preserve upstream times in lightweight indexes and refresh selected page metadata without bodies.
 # [Input] Notion connector state and snapshot resource helpers.
 # [Output] Build lightweight canonical indexes and materialize them into workspace files.
 # [Pos] sync node in backend/notion
@@ -67,9 +68,11 @@ def _build_index_entry(page_summary: Mapping[str, Any]) -> dict[str, Any]:
     page_id = str(page_summary.get("page_id") or "").strip()
     return {
         "page_id": page_id,
-        "title": _resource_title(page_summary) or page_id,
+        "title": str(page_summary.get("title") or "").strip(),
         "url": page_summary.get("url") or "",
         "last_edited": page_summary.get("last_edited") or "",
+        "created_time": page_summary.get("created_time"),
+        "last_edited_time": page_summary.get("last_edited_time"),
     }
 
 
@@ -118,30 +121,32 @@ def filter_snapshot_for_connector(
 ) -> dict[str, Any]:
     """Intersect an LKG snapshot with the actor's current selected scope."""
 
+    from .today import page_identity
+
     resources = [
         dict(item)
         for item in connector.get("sources") or []
         if isinstance(item, Mapping)
     ]
     selected_database_ids = {
-        str(item.get("external_id") or "").strip()
+        page_identity(item.get("external_id"))
         for item in resources
         if item.get("resource_type") == "notion_database"
     }
     selected_page_ids = {
-        str(item.get("external_id") or "").strip()
+        page_identity(item.get("external_id"))
         for item in resources
         if item.get("resource_type") == "notion_page"
     }
     database_pages = {
         str(database_id): [dict(page) for page in pages if isinstance(page, Mapping)]
         for database_id, pages in _mapping(snapshot.get("database_pages")).items()
-        if str(database_id) in selected_database_ids and isinstance(pages, list)
+        if page_identity(database_id) in selected_database_ids and isinstance(pages, list)
     }
     allowed_page_ids = set(selected_page_ids)
     for pages in database_pages.values():
         allowed_page_ids.update(
-            str(page.get("page_id") or "").strip() for page in pages
+            page_identity(page.get("page_id")) for page in pages
         )
     payload = dict(snapshot)
     payload["connector"] = public_connector_projection(connector, resources)
@@ -149,13 +154,13 @@ def filter_snapshot_for_connector(
         dict(item)
         for item in snapshot.get("index") or []
         if isinstance(item, Mapping)
-        and str(item.get("page_id") or "").strip() in allowed_page_ids
+        and page_identity(item.get("page_id")) in allowed_page_ids
     ]
     payload["databases"] = [
         dict(item)
         for item in snapshot.get("databases") or []
         if isinstance(item, Mapping)
-        and str(item.get("database_id") or "").strip() in selected_database_ids
+        and page_identity(item.get("database_id")) in selected_database_ids
     ]
     payload["database_pages"] = database_pages
     payload["pages"] = {}
@@ -230,15 +235,15 @@ async def build_canonical_snapshot(
         page_id = str(page_resource.get("external_id") or "").strip()
         if not page_id:
             continue
-        page_summary = normalize_page_item(
-            {
-                "id": page_id,
-                "title": page_resource.get("title"),
-                "url": _mapping(page_resource.get("metadata")).get("url") or "",
-                "last_edited": _mapping(page_resource.get("metadata")).get("last_edited") or "",
-                "parent": _mapping(page_resource.get("metadata")).get("parent") or {},
-            }
-        )
+        # Sync owns remote metadata refresh; the Calendar never triggers it.
+        if page_id in index_entries:
+            continue
+        raw_page = await operations.get_page_metadata(page_id)
+        if raw_page.get("object") != "page" or str(raw_page.get("id") or "").replace("-", "").lower() != page_id.replace("-", "").lower():
+            raise NotionOperationError("Notion page metadata identity changed. Please retry.")
+        if raw_page.get("archived") or raw_page.get("in_trash"):
+            continue
+        page_summary = normalize_page_item(raw_page)
         entry = _build_index_entry(page_summary)
         index_entries.setdefault(page_id, entry)
         if entry.get("last_edited"):

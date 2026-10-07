@@ -1,0 +1,1 @@
+日历右侧互斥页签区域的简约留白、无边框呈现修正。依据 Ink & Memory UI Design v2.pdf 第5页§5.4。用户要求该区域无边框：不追加PDF一般页面级虚线边界。保留浅纸背景、业务行为、当前选择、滚动、焦点、鼠标/键盘 tooltip；复用现有 Tokens。范围是 CalendarPopup 右侧 tasks/diary/Notion 外层、页签、页内条目和层级留白，不改变左月历或原编辑/历史 Modal。

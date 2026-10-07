@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: bind thread projections to full accepted UUID identity and metadata-only DTO fixtures.
 # [Input] Isolated actor agentdata/workspace roots and synthetic canonical Notion snapshots.
 # [Output] Verify atomic lightweight-index publication, actor isolation, thread projection, rotation, and revocation.
 # [Pos] Notion agentdata snapshot provider contract test in backend/tests
@@ -34,12 +35,14 @@ def _snapshot(connector_id: str, version: str, text: str) -> dict:
             "fetched_at": "2026-08-28T12:00:00Z",
             "state": "snapshot_ready",
         },
-        "connector": {"id": connector_id, "platform": "notion"},
-        "index": [{"page_id": "page-1", "title": text}],
-        "databases": [{"database_id": "database-1", "title": "Database"}],
-        "database_pages": {
-            "database-1": [{"page_id": "page-1", "title": "Page"}]
-        },
+        "connector": {"id": connector_id, "name": "Fixture", "platform": "notion", "auth_status": "authenticated",
+            "last_synced_at": None, "selected_databases": ["database-1"], "selected_pages": []},
+        "index": [{"page_id": "page-1", "title": text, "url": "https://www.notion.so/page-1",
+            "last_edited": "", "created_time": None, "last_edited_time": None}],
+        "databases": [{"database_id": "database-1", "title": "Database", "page_count": 1,
+            "properties_schema": {}, "last_edited": "", "url": ""}],
+        "database_pages": {"database-1": [{"page_id": "page-1", "title": "Page",
+            "url": "https://www.notion.so/page-1", "last_edited": "", "created_time": None, "last_edited_time": None}]},
         "pages": {},
         "identity": {
             "workspace_id": connector_id,
@@ -49,6 +52,11 @@ def _snapshot(connector_id: str, version: str, text: str) -> dict:
             "sync_cursor": f"cursor-{version}",
         },
     }
+
+
+def _accepted_context(version):
+    return {"current_snapshot_version": version, "current_source_revision": f"revision-{version}",
+        "current_sync_cursor": f"cursor-{version}", "last_synced_at": "2026-08-28T12:00:00Z"}
 
 
 class TestNotionSnapshotStore(unittest.TestCase):
@@ -75,26 +83,26 @@ class TestNotionSnapshotStore(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_actor_snapshots_are_distinct_and_connector_bound(self) -> None:
-        self.store.publish_current(7, "connector-a", _snapshot("connector-a", "v1", "actor-a"))
-        self.store.publish_current(8, "connector-a", _snapshot("connector-a", "v2", "actor-b"))
+        self.store.publish_current(7, "00000000-0000-4000-8000-000000000001", _snapshot("00000000-0000-4000-8000-000000000001", "v1", "actor-a"))
+        self.store.publish_current(8, "00000000-0000-4000-8000-000000000001", _snapshot("00000000-0000-4000-8000-000000000001", "v2", "actor-b"))
 
         self.assertEqual(
-            self.store.load_current(7, "connector-a")["index"][0]["title"],
+            self.store.load_current(7, "00000000-0000-4000-8000-000000000001")["index"][0]["title"],
             "actor-a",
         )
         self.assertEqual(
-            self.store.load_current(8, "connector-a")["index"][0]["title"],
+            self.store.load_current(8, "00000000-0000-4000-8000-000000000001")["index"][0]["title"],
             "actor-b",
         )
         with self.assertRaises(NotionSnapshotNotReadyError):
             self.store.publish_current(
                 7,
-                "connector-b",
-                _snapshot("connector-a", "v3", "wrong connector"),
+                "00000000-0000-4000-8000-000000000002",
+                _snapshot("00000000-0000-4000-8000-000000000001", "v3", "wrong connector"),
             )
 
     def test_new_snapshot_rejects_embedded_page_body(self) -> None:
-        snapshot = _snapshot("connector-a", "v1", "Page")
+        snapshot = _snapshot("00000000-0000-4000-8000-000000000001", "v1", "Page")
         snapshot["pages"] = {
             "page-1": {"page_id": "page-1", "markdown": "must stay remote"}
         }
@@ -102,11 +110,11 @@ class TestNotionSnapshotStore(unittest.TestCase):
             NotionSnapshotNotReadyError,
             "lightweight page index",
         ):
-            self.store.publish_current(7, "connector-a", snapshot)
+            self.store.publish_current(7, "00000000-0000-4000-8000-000000000001", snapshot)
 
     def test_thread_projection_uses_lkg_and_refreshes_only_on_next_turn(self) -> None:
         connector = {
-            "id": "connector-a",
+            "id": "00000000-0000-4000-8000-000000000001",
             "platform": "notion",
             "sources": [
                 {
@@ -115,7 +123,8 @@ class TestNotionSnapshotStore(unittest.TestCase):
                 }
             ],
         }
-        self.store.publish_current(7, "connector-a", _snapshot("connector-a", "v1", "first"))
+        self.store.publish_current(7, "00000000-0000-4000-8000-000000000001", _snapshot("00000000-0000-4000-8000-000000000001", "v1", "first"))
+        connector.update(_accepted_context("v1"))
         first = self.store.project_thread(7, connector, self.thread_a)
         index_path = self.thread_a / ".notion" / "index.json"
         self.assertTrue(first.available)
@@ -123,8 +132,9 @@ class TestNotionSnapshotStore(unittest.TestCase):
         self.assertEqual(json.loads(index_path.read_text())["pages"][0]["title"], "first")
         self.assertFalse((self.thread_a / ".notion" / "pages" / "page-1.json").exists())
 
-        self.store.publish_current(7, "connector-a", _snapshot("connector-a", "v2", "second"))
+        self.store.publish_current(7, "00000000-0000-4000-8000-000000000001", _snapshot("00000000-0000-4000-8000-000000000001", "v2", "second"))
         self.assertEqual(json.loads(index_path.read_text())["pages"][0]["title"], "first")
+        connector.update(_accepted_context("v2"))
         second = self.store.project_thread(7, connector, self.thread_a)
         self.assertEqual(second.snapshot_version, "v2")
         self.assertEqual(json.loads(index_path.read_text())["pages"][0]["title"], "second")
@@ -133,11 +143,11 @@ class TestNotionSnapshotStore(unittest.TestCase):
     def test_projection_removes_deselected_pages_and_private_config(self) -> None:
         self.store.publish_current(
             7,
-            "connector-a",
-            _snapshot("connector-a", "v1", "private page"),
+            "00000000-0000-4000-8000-000000000001",
+            _snapshot("00000000-0000-4000-8000-000000000001", "v1", "private page"),
         )
         connector = {
-            "id": "connector-a",
+            "id": "00000000-0000-4000-8000-000000000001",
             "platform": "notion",
             "auth_status": "authenticated",
             "user_id": 7,
@@ -145,6 +155,7 @@ class TestNotionSnapshotStore(unittest.TestCase):
             "sources": [],
         }
 
+        connector.update(_accepted_context("v1"))
         projection = self.store.project_thread(7, connector, self.thread_a)
 
         self.assertFalse(projection.available)
@@ -160,7 +171,7 @@ class TestNotionSnapshotStore(unittest.TestCase):
     def test_missing_snapshot_projects_truthful_empty_state(self) -> None:
         projection = self.store.project_thread(
             7,
-            {"id": "connector-a", "platform": "notion"},
+            {"id": "00000000-0000-4000-8000-000000000001", "platform": "notion"},
             self.thread_a,
         )
         self.assertFalse(projection.available)
@@ -170,9 +181,9 @@ class TestNotionSnapshotStore(unittest.TestCase):
         )
 
     def test_clear_user_removes_snapshot_source_and_thread_credentials(self) -> None:
-        self.store.publish_current(7, "connector-a", _snapshot("connector-a", "v1", "secret"))
+        self.store.publish_current(7, "00000000-0000-4000-8000-000000000001", _snapshot("00000000-0000-4000-8000-000000000001", "v1", "secret"))
         self.credentials.clear_user(7)
-        self.assertIsNone(self.store.load_current(7, "connector-a"))
+        self.assertIsNone(self.store.load_current(7, "00000000-0000-4000-8000-000000000001"))
 
 
 if __name__ == "__main__":

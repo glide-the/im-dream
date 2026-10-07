@@ -1,3 +1,4 @@
+// [Sync] 2026-10-07: supply the real public session DTO to the authenticated Settings fixture; original full overview/child journey remains.
 // [Input] Running Vite frontend plus production-shaped intercepted Notion connector, capability, Skill, and safe-file DTOs.
 // [Output] Verify placeholders, strict seven-section overview, deferred discovery, four child views, safe links, responsive layout, and dialog-free disconnect.
 // [Pos] Provider-free Notion Settings browser journey; it never calls Notion, a real backend, or business data.
@@ -87,6 +88,10 @@ test('Notion Settings exposes the seven-section overview and focused child views
       body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/notionConnectorSettingsHarness.tsx"></script></body></html>',
     });
   });
+  await page.route('**/auth/session', (route) => route.fulfill({ json: {
+    user: { id: '20260929', email: 'notion-settings@example.test', display_name: 'Notion Settings QA',
+      avatar_url: null, role: 'user', created_at: '2026-09-01T00:00:00Z' }, csrf_token: 's'.repeat(43),
+  } }));
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;

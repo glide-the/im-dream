@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: register frozen Notion ownership operations without changing other domains or delegated authority.
 # [Sync] 2026-09-27: register exact task-result operations for optional capability-gated completion handoff.
 # [Sync] 2026-09-28: register Admin-owned scheduled Chat definitions and trigger operations without changing ordinary Chat readiness.
 # [Sync] 2026-09-27: compose one service-only task-result worker for source Thread continuations.
@@ -89,7 +90,7 @@ from .deck_chat_context_data import DECK_CHAT_CONTEXT_OPERATIONS
 from .deck_workspace_plugins_data import DECK_WORKSPACE_PLUGIN_OPERATIONS
 from .workflow_managed_mcp_scope_data import WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS
 from .managed_mcp_data import MANAGED_MCP_OPERATIONS
-from .notion_connector_data import NOTION_CONNECTOR_OPERATIONS
+from .notion_connector_data import NOTION_CONNECTOR_OPERATIONS, NOTION_SYNC_RUN_OPERATIONS
 from .workflow_runtime_activation_data import WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS
 from .story_workspace_output_data import STORY_WORKSPACE_OUTPUT_OPERATIONS
 from .story_workspace_artifact_data import STORY_WORKSPACE_ARTIFACT_OPERATIONS
@@ -164,6 +165,7 @@ class AdminRequestAuth:
                 *WORKFLOW_MANAGED_MCP_SCOPE_OPERATIONS,
                 *MANAGED_MCP_OPERATIONS,
                 *NOTION_CONNECTOR_OPERATIONS,
+                *NOTION_SYNC_RUN_OPERATIONS,
                 *WORKFLOW_RUNTIME_ACTIVATION_OPERATIONS,
                 *STORY_WORKSPACE_OUTPUT_OPERATIONS,
                 *STORY_WORKSPACE_ARTIFACT_OPERATIONS,

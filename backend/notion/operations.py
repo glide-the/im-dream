@@ -1,6 +1,8 @@
+# [Sync] 2026-10-06: preserve raw page times and add explicit-version metadata-only reads.
 # [Input] Server-owned Notion credential home and read-only ntn API endpoints.
 # [Output] Provide searchable resource discovery plus lightweight index and on-demand page read helpers.
 # [Pos] operations node in backend/notion
+# [Sync] 2026-10-05: preserve Search completion metadata and allow a server-owned explicit API date for Calendar reads.
 # [Sync] 2026-07-04: initial Notion CLI read-only operation layer for discovery,
 #                    page retrieval, and database query support.
 # [Sync] 2026-07-05: normalize database search filter value to `data_source` to match
@@ -60,6 +62,7 @@ class SearchResult:
     results: list[dict[str, Any]]
     has_more: bool
     next_cursor: str | None
+    request_status: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ def _mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _extract_title(item: Mapping[str, Any]) -> str:
+def _extract_title(item: Mapping[str, Any], *, fallback: str | None = None) -> str:
     title = item.get("title")
     if isinstance(title, str) and title.strip():
         return title.strip()
@@ -128,7 +131,7 @@ def _extract_title(item: Mapping[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
 
-    return str(item.get("id") or item.get("database_id") or item.get("page_id") or "Untitled")
+    return fallback if fallback is not None else str(item.get("id") or item.get("database_id") or item.get("page_id") or "Untitled")
 
 
 def _extract_id(item: Mapping[str, Any], kind: str) -> str:
@@ -207,8 +210,10 @@ def normalize_page_item(item: Mapping[str, Any]) -> dict[str, Any]:
     parent = raw.get("parent") if isinstance(raw.get("parent"), Mapping) else {}
     return {
         "page_id": _extract_id(raw, "page"),
-        "title": _extract_title(raw),
+        "title": _extract_title(raw, fallback=""),
         "url": raw.get("url") or "",
+        "created_time": raw.get("created_time"),
+        "last_edited_time": raw.get("last_edited_time"),
         "last_edited": _extract_last_edited(raw),
         "parent": dict(parent) if isinstance(parent, Mapping) else {},
     }
@@ -217,8 +222,9 @@ def normalize_page_item(item: Mapping[str, Any]) -> dict[str, Any]:
 class NotionOperationClient:
     """Read-only Notion CLI client."""
 
-    def __init__(self, notion_home: str | Path) -> None:
+    def __init__(self, notion_home: str | Path, *, api_version: str | None = None) -> None:
         self._notion_home = Path(notion_home)
+        self._api_version = api_version
 
     async def search(self, search_filter: SearchFilter) -> SearchResult:
         payload: dict[str, Any] = {
@@ -238,10 +244,15 @@ class NotionOperationClient:
         if search_filter.start_cursor:
             payload["start_cursor"] = search_filter.start_cursor
         response = await self._run_endpoint("v1/search", payload)
+        if self._api_version is not None and (not isinstance(response.get("results"), list)
+                or type(response.get("has_more")) is not bool):
+            from .today import NotionTodayError
+            raise NotionTodayError("NOTION_RESPONSE_INVALID")
         return SearchResult(
             results=list(response.get("results") or []),
             has_more=bool(response.get("has_more")),
             next_cursor=response.get("next_cursor"),
+            request_status=response.get("request_status"),
         )
 
     async def discover_databases(
@@ -323,6 +334,14 @@ class NotionOperationClient:
             next_cursor=response.get("next_cursor"),
         )
 
+    async def get_page_metadata(self, page_id: str) -> dict[str, Any]:
+        """Read only page metadata with the server-owned API contract, never body/blocks."""
+        from .today import api_version, page_identity, NotionTodayError
+        if not page_identity(page_id):
+            raise NotionTodayError("NOTION_RESOURCE_UNAVAILABLE", 404)
+        client = self if self._api_version is not None else NotionOperationClient(self._notion_home, api_version=api_version())
+        return await client._run_endpoint(f"v1/pages/{page_id}")
+
     async def get_page(self, page_id: str) -> OperationResult:
         page = await self._run_endpoint(f"v1/pages/{page_id}")
         markdown = await self._run_endpoint(f"v1/pages/{page_id}/markdown")
@@ -356,6 +375,8 @@ class NotionOperationClient:
     ) -> dict[str, Any]:
         env = build_notion_env(self._notion_home)
         args = [resolve_ntn_executable(), "api", endpoint]
+        if self._api_version is not None:
+            args.extend(["--notion-version", self._api_version])
         if payload is not None:
             args.extend(["--data", json.dumps(payload, ensure_ascii=False)])
 
@@ -376,10 +397,19 @@ class NotionOperationClient:
             with contextlib.suppress(Exception):
                 await proc.wait()
             raise NotionOperationError("Notion did not respond in time. Please retry.") from exc
+        except asyncio.CancelledError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            raise
 
         stdout_text = stdout.decode("utf-8", "replace").strip()
         stderr_text = stderr.decode("utf-8", "replace").strip()
         if proc.returncode != 0:
+            if self._api_version is not None:
+                from .today import remote_error
+                raise remote_error(stdout_text, stderr_text)
             combined = f"{stdout_text}\n{stderr_text}".lower()
             if any(token in combined for token in ("unauthorized", "invalid token", "expired", "status 401", "http 401")):
                 raise NotionAuthRequiredError(

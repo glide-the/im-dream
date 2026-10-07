@@ -1,9 +1,13 @@
+<!-- [Sync] 2026-10-06: current Calendar supplement uses selected snapshots and historical creation; preserve preceding task/Chat/history text. -->
 <!-- [Input] 现行定时任务 PRD、四张用户参考图和 html-design-workflow Stage 2 结构产物。 -->
 <!-- [Output] Calendar/Chat 定时任务列表、结果、编辑和详情侧栏的宽窄屏骨架及滚动/焦点边界。 -->
 <!-- [Pos] docs/prd/claude-agent 下的现行页面结构图；正式视觉规范见 docs/design/claude-agent/scheduled-task-diary-page-ui-design.md。 -->
 <!-- [Sync] 2026-09-29: v5 将 scheduled run Conversations 收入详情栏，并从通用 TaskSession 列表排除。 -->
 
+<!-- [Sync] 2026-10-04: index the Calendar right-panel tab proposal and preserve the complete preceding text beside this file. -->
 # Ink & Memory 定时任务完整交互页面结构草图 v5（现行）
+
+> 2026-10-04 现行补充：[日历右侧页签设计](../calendar/calendar-right-panel-tabs-prd.md)。Calendar 页签结构以新稿为准；本文 Chat 与任务内部结构继续适用。现行日历已采用互斥页签；2026-10-06 Notion 改用当前选择范围的连接器快照，历史展示当日创建、今天更新项单独校验。严格全集不属于用户最新范围，技术验证状态见现行日历回执。改动前的完整原文保存在[历史快照](./scheduled-task-diary-page-structure-sketch-v5-20261004-history.md)。
 
 > 输入：`files/workspace/1_prd_draft.md`、`files/inputs/target_image.png`、`files/inputs/topic.txt` 与 topic 中三张辅助参考图
 > 输出用途：为 Stage 3 层级与状态映射、Stage 4 UI 规格提供结构底稿

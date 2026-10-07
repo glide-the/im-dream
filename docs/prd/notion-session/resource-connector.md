@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-10-07: frozen ownership and saved-scope recovery pass isolated technical journeys; normal capability publication and service cutover remain blocked. -->
+<!-- [Sync] 2026-10-06: Calendar consumes selected canonical index; only snapshot-today updates receive metadata verification. -->
+<!-- [Sync] 2026-10-05: synchronize accepted Calendar Search-scope read boundary without selected-body/sync changes. -->
 <!-- [Input] Current Notion connector implementation/tests, Settings/Chat interaction, repository product rules, and the reviewed proposed detail-page redesign. -->
 <!-- [Output] Evidence-based runtime/data requirements plus implemented UI information architecture, remaining capability gaps, migration, observability, and acceptance criteria. -->
 <!-- [Pos] Current Notion Resource Connector product source of truth in docs/prd/notion-session. -->
@@ -7,9 +10,15 @@
 <!-- [Sync] 2026-08-30: add the ntn installation prerequisite and actor/thread-bound Agent CLI environment as the single notion-cli execution path. -->
 <!-- [Sync] 2026-08-30: align the Notion CLI/no-subtitle overview, management-only resource/source rows, and shared dynamic Skill catalog across Settings and workspace. -->
 
+<!-- [Sync] 2026-10-04: index the Calendar right-panel tab proposal and preserve the complete preceding text beside this file. -->
+<!-- [Sync] 2026-10-05: link the Calendar supplement in its calendar business module. -->
 # Notion 资源连接器整体 PRD
 
-- Runtime/data status: Reviewed and implemented
+> 2026-10-06 现行补充：[日历日期文档](../calendar/calendar-right-panel-tabs-prd.md)使用连接器当前索引与当前选择的交集；历史读取当日创建，今天先显示快照，再仅校验快照当天更新项的元数据。日历不执行 Search、同步、选择或正文读取。现有同步需保留上游 created_time/last_edited_time，并对选中独立页面读取元数据更新轻量索引；pages 始终为空。新文档及未记录变化依赖原连接器同步。原完整正文保存在[resource-connector 历史](./resource-connector-pre-snapshot-20261006-history.md)。
+
+- Runtime/data status: 既有连接/索引/Runtime已实现；本次归属合同、接受版本读取与保存恢复源码及隔离技术旅程通过，正常capability发布、旧writer drain与服务切换尚未完成
+- 实际命令及边界：[后端实施回执](../../exec/notion-sync-ownership-dream-integration-20261007.md#13-本仓后端实际复测与范围)、[前端完整旅程回执](../../exec/notion-calendar-sync-refresh-20261007.md#145-r2-完整旅程最终实际回执)
+- 本次前文全文：[归属接入前完整历史](./resource-connector-pre-ownership-20261007-history.md)；正式业务图与恢复规则：[连接器交互稿](../../design/notion-session/connector-interaction.md#6-同步归属与接受快照增量2026-10-07)
 - Detail UI redesign status: Implemented and verified
 - Scope: Settings、Chat、服务器连接生命周期、轻量索引、Agent 按需读取和当前详情页信息架构
 - Technical source: [`../../design/notion-session/runtime-credential-and-skill-design.md`](../../design/notion-session/runtime-credential-and-skill-design.md)
@@ -41,8 +50,8 @@
 
 - Notion 写入、评论、附件下载、全文镜像或离线正文仓库；
 - 多个 Notion 账号同时生效、连接共享或跨用户授权；
-- webhook、增量变更流、跨副本租约或新消息队列；
-- 新增数据库表、字段、migration 或运行时 DDL；
+- webhook、增量变更流、跨平台通用协调框架或新消息队列；
+- Dream 新增数据库表、字段、migration 或运行时 DDL；必要共享归属合同由 Admin Drizzle 管理，必须按精确 capability 发布后才能使用；
 - 在产品页面展示内部目录、凭证文件、Runtime hook、CLI 命令或环境变量；
 - 替代现有普通 turn、resume、cancel、EventBus 或 SSE 协议。
 - 在本轮接入 Hosted Notion MCP OAuth/inventory 执行、Notion 写入，或实现 Skill 启停/编辑。
@@ -75,12 +84,12 @@
 - 可选择的资源类型为数据库和独立页面。
 - 保存时以完整选择集合替换旧集合，不做隐式并集。
 - 空集合是有效配置，含义是“保持连接，但禁止 Notion 资源进入新对话”。系统立即清除当前索引身份。
-- 用户只能读取当前选择集合中的独立页面，以及当前选择数据库索引出的页面。
+- Agent 正文读取与 Thread 索引只允许当前选择集合中的独立页面，以及当前选择数据库索引出的页面。Calendar 只消费当前选择范围的同步索引，今天更新项可只读校验元数据；它不扩大 Agent 读取范围。
 - 从选择中移除的资源在下一次 thread 投影时立即不可读，即使最近一次新索引构建失败。
 
 ### 5.4 轻量索引
 
-轻量索引只保存定位页面所需的 ID、标题、链接和更新时间等紧凑元数据，不保存页面正文。成功索引是 last-known-good（LKG）；后台失败时可以保留它，但每次使用必须与当前选择范围求交。
+轻量索引只保存定位页面所需的 ID、标题、链接和更新时间等紧凑元数据，不保存页面正文。成功索引是 last-known-good（LKG）；后台失败时可以保留它，但每次使用必须与当前选择范围求交。Admin 返回的当前完整 identity 与最近成功时间决定可读取版本，本地文件只作可恢复缓存，不按文件修改时间推断最新版本。快照必须是严格元数据结构，pages 为空且未知正文/私有配置字段被拒绝；旧索引缺少上游时间字段时保持未知，不补成现在。
 
 ### 5.5 按需正文
 
@@ -126,6 +135,36 @@ flowchart LR
 ```
 
 产品层只关心上述关系。持久化表、目录和 Runtime 交付方式在架构文档中定义。
+
+### 6.1 页面骨架与滚动
+
+桌面，Settings内容区域独立纵向滚动：
+
+```text
+Settings侧栏 │ Notion CLI详情（返回 / 连接状态）
+            │ 权限（自动索引策略，最近成功/下次计划）
+            │ Skills → Skill/相关文件子页
+            │ 读取操作 / 写入操作（真实能力摘要）
+            │ 资源范围 → 发现、选择草稿 → 保存
+            │              保存反馈；一次当前范围回读
+            │ 已挂载来源 → 来源列表 / 立即同步
+            │ 信息
+Calendar弹窗 │ 左月历 │ 互斥Notion栏（读取接受索引，打开Notion）
+独立Modal   │ 沿用原所有者与焦点，不随同步新增确认
+```
+
+窄屏，同一Settings内容滚动；子页替换正文，返回恢复原焦点/滚动：
+
+```text
+[返回] Notion CLI
+[连接/授权状态]
+[权限 / Skills / 读取 / 写入]
+[资源范围 → 选择草稿 → 保存]
+[已挂载来源 → 立即同步]
+[信息]
+失败消息紧邻操作；Retry-After仅使既有按钮暂不可用
+Calendar：沿用现行窄屏月历和互斥栏目滚动骨架
+```
 
 ## 7. 状态定义
 
@@ -179,9 +218,9 @@ stateDiagram-v2
     部分可用 --> 未连接: 断开
 ```
 
-- 保存非空资源范围后立即启动首次轻量索引。
+- 保存非空资源范围先确认完整集合已提交，再请求首次轻量索引；两步结果分别反馈，失败不回滚已提交范围。
 - 保存空范围后保持“已连接”，同步变为“未同步”，已选来源为 0。
-- 同步成功更新 LKG、最近成功时间和精确资源状态。
+- 同步成功以 Admin 单次原子 finish 接受结果更新 LKG、最近成功时间和精确资源状态；文件缓存生成在接受之后。
 - 同步失败不推进成功 identity；有 LKG 时显示“部分可用”，无 LKG 时显示“同步失败”。
 - 策略关闭只停止定时触发，不删除 LKG，也不禁用立即同步。
 
@@ -198,11 +237,11 @@ stateDiagram-v2
 
 ## 10. 资源发现与选择
 
-1. 授权成功后，服务器分页读取全部可访问数据库和页面，并过滤系统资源。
+1. 授权成功后，服务器遍历 Search 返回的数据库和页面分页，并过滤系统资源。这是连接器权限内的资源发现，不能保证完整枚举；索引可能延迟，扫描过程中结果也可能变化。
 2. 页面提供搜索、类型区分、分页和当前选择标记。
 3. 用户保存后，服务器原子替换当前选择集合。
 4. 非空选择立即构建轻量索引；空选择立即撤销当前索引。
-5. 成功后刷新已挂载来源、同步时间和 Chat 摘要。
+5. 首次同步成功后刷新已挂载来源、同步时间和 Chat 摘要；范围已确认保存但同步失败按§12.1反馈。
 
 资源发现 DTO 不携带不可解释的上游原始响应；只传递选择和展示需要的紧凑元数据。
 
@@ -223,6 +262,16 @@ stateDiagram-v2
 - 用户希望在下一轮自动同步前使用最新索引。
 
 立即同步不下载正文，不改变自动同步策略，也不需要确认弹窗。
+
+### 12.1 同步归属、恢复与发布边界（2026-10-07）
+
+- 手动“立即同步”、非空范围首次同步与既有后台worker复用同一构建流程。手动请求遇到有效任务返回“连接器已有同步任务，请稍后重试”；后台遇到busy/not_due跳过，不计成功或扫描失败。
+- 任务归属、有效期、续租、终止及旧writer拒绝由Admin服务器所有。Dream不按产品等待时间、进程PID或stored syncing年龄认定任务已失效。后台按当前有效策略请求claim；租约/heartbeat/budget来自Admin execution_policy，浏览器无配置入口。
+- 临时失败/取消保留同授权与当前范围允许的最近索引；来源、授权、actor或凭证变化使旧run不能提交。续租拒绝、未知响应、预算耗尽或终态在途时停止本轮扫描，不再补写失败覆盖新run。取消等待原请求结束后仍须检查实际续租预算，超时不发终态。
+- 只在resources.replace确认提交后，首次同步错误的detail包含严格布尔selection_saved=true。Settings显示“资源范围已保存，索引更新未完成”，一次公开GET回读同一actor/connector当前范围。回读失败保留已保存结论、草稿与最近读取索引，另提示暂时无法重读。
+- marker缺失、false或字符串true均显示“保存状态未确认，请返回查看当前范围后重试”，保留草稿，不称服务器未变化。manual sync永不宣称范围已保存。
+- 合法Retry-After仅冷却现有保存/同步按钮；到期解禁但不自动请求、同步或重试。用户显式重试仍由服务器裁决。回读、返回结果与timer绑定actor、connector和generation，取消旧GET并拒绝A→B→A迟到结果。
+- 本次消费冻结的dream.notion-sync-ownership.v1 v1及四精确operation。当前正常公开能力读取证明新cap/四operation尚未发布，claims开放及旧writer drain未知；新写缺cap fail closed，原只读合同和允许的LKG继续可用。源码/隔离技术测试不能声明永久自动恢复已生效。legacy owner unresolved须Admin显式恢复证明，Dream不清状态。
 
 ## 13. Chat 启动与能力挂载
 
@@ -403,11 +452,22 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 21. 返回恢复焦点/滚动，revision 变化不继续把旧策略、inventory 或文件显示为最新。
 22. Skill/文件/能力目录局部失败不阻断 connector 管理或普通 Chat。
 
+### 21.1 归属接入增量验收矩阵
+
+| 完整旅程 | 必需结论 | 当前证据边界 |
+| --- | --- | --- |
+| 保存范围→request→renew→分页索引→finish→读取 | 数据库包含page，单次接受后缓存；无select/sync/body读者写入 | Dream真实DTO/公开入口DI技术测试待Luna |
+| 手动busy/首次sync失败/replace未知→返回查看范围→显式重试 | 布尔marker准确、原safe status/code/header、一次GET，草稿及错误可恢复 | 后端router和Settings完整旅程待Luna |
+| 健康长同步/取消×续租/未知receipt | 串行heartbeat、取消等待仍核预算、无重复claim/终态、LKG保留 | Dream消费者技术测试；Admin实际DB9/13回执由依赖任务所有 |
+| 重启/缓存损坏/旧writer/身份变化→日历/新thread | 只读接受版本；严格元数据结构；普通read仍updatedAt保守409并恢复 | 新旧Notion旅程待Luna；不能用同version忽略上下文 |
+| 精确cap缺失/claims关闭/legacy unresolved | 旧读兼容，新写关闭，无DDL、年龄接管或运行时fallback | 正常目录只读证据说明发布仍阻塞 |
+| 原连接/授权/日历/正文权限与任务日记 | 原业务保留；无Agent正文扩大、turn协议变化 | 完整现有回归待Luna，前端已通过范围另记 |
+
 ## 22. 本次明确不实现
 
 - 数据库级“每 actor 仅一条 Notion connector”唯一约束及历史重复记录清理；
 - 多账号切换、团队共享、细粒度成员权限；
-- webhook、增量 cursor、跨副本协调和失败通知中心；
+- webhook、增量 cursor、通用跨平台协调和失败通知中心；
 - 全文搜索、附件、写回、批量正文缓存；
 - Hosted Notion MCP OAuth、动态 inventory 执行、Notion 写入授权/确认/审计/幂等；
 - 内置 Skill 启停、安装、卸载、编辑、版本切换和用户覆盖；

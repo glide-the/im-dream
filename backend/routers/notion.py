@@ -1,6 +1,9 @@
+# [Sync] 2026-10-07: map safe domain-only busy Retry-After and selection_saved feedback while retaining original statuses and errors.
+# [Sync] 2026-10-06: expose selected-date snapshot reads and version-bound metadata verification through one public handler.
 # [Input] Notion facade, current Admin OAuth actor, discovery, and snapshot materialization.
 # [Output] Register /api/connectors* endpoints, read-only Notion capability/Skill projections, and own the strategy-driven snapshot worker lifecycle.
 # [Pos] notion route node in backend/routers
+# [Sync] 2026-10-05: add actor/preference-bound read-only today metadata with distinct safe upstream errors.
 # [Sync] 2026-07-04: initial Notion connector routes for create/auth/discover/
 #                    select/sync/resource listing and connector CRUD.
 # [Sync] 2026-08-28: remove browser credential-path/config authority and map
@@ -12,6 +15,8 @@
 
 """Notion resource connector HTTP routes."""
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Iterable, Optional
@@ -47,6 +52,9 @@ from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
 from .deps import get_admin_request_auth, get_current_user
+from .deps import invoke_admin_operation
+from notion.today import NotionTodayError
+from services.admin_data.preferences_data import AdminPreferencesData, PreferencesGetInputDTO
 
 @asynccontextmanager
 async def _notion_store_lifespan(app: Any) -> AsyncIterator[None]:
@@ -141,6 +149,25 @@ def _coerce_resource_list(items: Iterable[Any], kind: str) -> list[dict[str, Any
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    from notion.errors import NotionSyncBusyError, NotionSelectionSyncError
+    if isinstance(exc, NotionSelectionSyncError):
+        original = _http_error(exc.cause)
+        if isinstance(original.detail, dict):
+            detail = {**original.detail, "selection_saved": True}
+        else:
+            text = str(original.detail)
+            is_code = text.isupper() and all(character.isupper() or character == "_" for character in text)
+            detail = {"error_code": text if is_code else "NOTION_SYNC_FAILED", "selection_saved": True}
+            if not is_code:
+                detail["message"] = text
+        return HTTPException(original.status_code, detail=detail, headers=original.headers)
+    if isinstance(exc, NotionSyncBusyError):
+        retry = exc.retry_after
+        headers = {"Retry-After": str(retry)} if type(retry) is int and 0 <= retry <= 9_007_199_254_740_991 else None
+        return HTTPException(409, detail={"error_code": "NOTION_SYNC_BUSY"}, headers=headers)
+    if isinstance(exc, NotionTodayError):
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        return HTTPException(exc.status, detail={"error_code": exc.code, **exc.context}, headers=headers)
     if isinstance(exc, AdminDataError):
         return HTTPException(status_code=exc.status_code, detail=exc.code)
     if isinstance(exc, NotionCapabilityNotFoundError):
@@ -380,6 +407,44 @@ async def list_pages(
         return {"connectorId": connector_id, "pages": pages}
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
+
+
+@router.get("/api/connectors/{connector_id}/notion/documents")
+@router.get("/api/connectors/{connector_id}/notion/today", include_in_schema=False)
+async def today_pages(
+    connector_id: str,
+    date_key: str,
+    validate_remote: bool = False,
+    snapshot_version: str | None = None,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    facade = _connector_facade(current_user, owner, connector_id)
+    try:
+        # Ownership is checked before reading preferences or touching credentials.
+        facade.get_connector(connector_id)
+        preferences = await invoke_admin_operation(current_user, AdminPreferencesData(owner.client).get, PreferencesGetInputDTO())
+        result = await facade.today_pages(date_key, preferences.get("timezone"),
+                                          validate_remote=validate_remote, snapshot_version=snapshot_version)
+        latest = await invoke_admin_operation(current_user, AdminPreferencesData(owner.client).get, PreferencesGetInputDTO())
+        if latest.get("timezone") != preferences.get("timezone"):
+            from notion.today import day_context
+            raise NotionTodayError("NOTION_DATE_CONTEXT_CHANGED", 409,
+                                  context=day_context(latest.get("timezone"), date_key, datetime.now(timezone.utc)))
+        return result
+    except HTTPException:
+        raise
+    except NotionTodayError as exc:
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        raise HTTPException(exc.status, detail={"error_code": exc.code, **exc.context}, headers=headers) from None
+    except (NotionAuthRequiredError, NotionCredentialError):
+        raise HTTPException(401, detail={"error_code": "NOTION_AUTH_EXPIRED"}) from None
+    except NotionPermissionError:
+        raise HTTPException(403, detail={"error_code": "NOTION_PERMISSION_DENIED"}) from None
+    except NotionConnectorNotFoundError:
+        raise HTTPException(404, detail={"error_code": "NOTION_CONNECTOR_UNAVAILABLE"}) from None
+    except Exception as exc:
+        raise _http_error(exc) from None
 
 
 @router.get("/api/connectors/{connector_id}/resources")

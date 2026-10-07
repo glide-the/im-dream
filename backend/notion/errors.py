@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: add domain-only busy retry and confirmed-selection first-sync failure types.
 # [Input] Shared Notion connector backend modules.
 # [Output] Provide typed connector/auth/operation/snapshot exceptions.
 # [Pos] error node in backend/notion
@@ -52,6 +53,22 @@ class NotionSnapshotError(NotionConnectorError):
 
 class NotionSnapshotNotReadyError(NotionSnapshotError):
     """A current canonical snapshot is not yet available."""
+
+
+class NotionSyncBusyError(NotionConnectorError):
+    """A server-owned active lease prevents another manual sync."""
+
+    def __init__(self, retry_after: int | None = None):
+        super().__init__("Connector sync has not completed. Retry later.")
+        self.retry_after = retry_after
+
+
+class NotionSelectionSyncError(NotionConnectorError):
+    """Scope persisted successfully, but its subsequent sync did not complete."""
+
+    def __init__(self, cause: Exception):
+        super().__init__("Resource selection was saved; index sync did not complete.")
+        self.cause = cause
 
 
 class NotionConnectorNotFoundError(NotionConnectorError):

@@ -1,0 +1,2 @@
+用户2026-10-07要求Notion文字简约；正常服务昨天syncing成功版本未推进，公开同步502。仅可见版本发现/恢复提示建议；跨进程接管仍阻塞。视觉复用既有PDF第5页target_image与浮空外壳，不新绘原型。
+复核事实：首次公开manual502，随后background本地05:48成功，正常Calendar今日文档已可见；标题保留一次total；updatedAt强上下文/observed-loaded独立与失败周期恢复是门禁。

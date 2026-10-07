@@ -1,3 +1,4 @@
+# [Sync] 2026-10-06: synchronization stores exact upstream times and refreshes standalone metadata without bodies.
 # [Input] Consume notion_snapshot.py contract helpers.
 # [Output] Unit tests for lightweight Notion index build, virtual path resolution, and proposal staleness.
 # [Pos] test node in backend/tests
@@ -137,6 +138,7 @@ class NotionSnapshotBuildTest(unittest.IsolatedAsyncioTestCase):
                                 "properties": {
                                     "Name": {"title": [{"plain_text": "Roadmap"}]},
                                 },
+                                "created_time": "2026-08-01T10:00:00Z",
                                 "last_edited_time": "2026-08-28T10:00:00Z",
                             }
                         ],
@@ -179,12 +181,16 @@ class NotionSnapshotBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.queries[1].start_cursor, "page-2-cursor")
         self.assertEqual(snapshot["databases"][0]["page_count"], 2)
         self.assertEqual(snapshot["index"][0]["page_id"], "page-1")
+        self.assertEqual(snapshot["index"][0]["created_time"], "2026-08-01T10:00:00Z")
+        self.assertEqual(snapshot["index"][0]["last_edited_time"], "2026-08-28T10:00:00Z")
         self.assertEqual(snapshot["index"][1]["page_id"], "page-2")
         self.assertEqual(snapshot["pages"], {})
         self.assertEqual(snapshot["metadata"]["state"], "snapshot_ready")
 
-    async def test_selected_standalone_page_uses_saved_metadata_only(self):
+    async def test_selected_standalone_page_refreshes_only_metadata_and_keeps_raw_times(self):
         class NoRemoteOperations:
+            async def get_page_metadata(self, page_id):
+                return {"id": page_id, "object": "page", "title": "Fresh title", "url": "https://www.notion.so/page-standalone", "created_time": "2026-08-01T10:00:00Z", "last_edited_time": "2026-08-28T10:00:00Z"}
             async def query_database(self, query):
                 raise AssertionError(query)
 
@@ -210,9 +216,11 @@ class NotionSnapshotBuildTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(snapshot["index"], [{
             "page_id": "page-direct",
-            "title": "Direct Page",
-            "url": "https://www.notion.so/page-direct",
-            "last_edited": "2026-08-28T12:00:00Z",
+            "title": "Fresh title",
+            "url": "https://www.notion.so/page-standalone",
+            "last_edited": "2026-08-28T10:00:00Z",
+            "created_time": "2026-08-01T10:00:00Z",
+            "last_edited_time": "2026-08-28T10:00:00Z",
         }])
         self.assertEqual(snapshot["pages"], {})
 

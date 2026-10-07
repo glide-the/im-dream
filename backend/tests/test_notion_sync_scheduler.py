@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: assert latest due/busy decisions are delegated to Admin and no false scheduled success.
 # [Input] Synthetic connector policies/candidates and injected Notion facade outcomes.
 # [Output] Verify default/desired/effective policy semantics and due-only background synchronization.
 # [Pos] Notion scheduled synchronization contract test in backend/tests
@@ -42,7 +43,7 @@ class TestNotionSyncPolicy(unittest.TestCase):
 
 
 class TestNotionSnapshotSyncWorker(unittest.IsolatedAsyncioTestCase):
-    async def test_sweep_runs_only_due_enabled_connectors(self) -> None:
+    async def test_sweep_delegates_latest_due_and_busy_decisions_to_admin(self) -> None:
         old = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         disabled = update_sync_policy(None, enabled=False, interval_minutes=60)
         calls: list[tuple[int, str]] = []
@@ -54,6 +55,7 @@ class TestNotionSnapshotSyncWorker(unittest.IsolatedAsyncioTestCase):
 
             async def sync(self, connector_id: str):
                 calls.append((self.actor, connector_id))
+                return {"synced": connector_id == "due"}
 
         candidates = [
             {
@@ -84,8 +86,8 @@ class TestNotionSnapshotSyncWorker(unittest.IsolatedAsyncioTestCase):
             interval_seconds=999,
         )
         result = await worker.sync_due_once()
-        self.assertEqual(calls, [(7, "due")])
-        self.assertEqual((result.candidates, result.attempted, result.succeeded, result.failed), (3, 1, 1, 0))
+        self.assertEqual(calls, [(7, "due"), (8, "disabled")])
+        self.assertEqual((result.candidates, result.attempted, result.succeeded, result.failed), (3, 2, 1, 0))
 
     async def test_one_connector_failure_does_not_abort_later_candidates(self) -> None:
         calls: list[str] = []
@@ -98,6 +100,7 @@ class TestNotionSnapshotSyncWorker(unittest.IsolatedAsyncioTestCase):
                 calls.append(connector_id)
                 if connector_id == "first":
                     raise RuntimeError("synthetic secret must not be logged")
+                return {"synced": True}
 
         candidates = [
             {"id": name, "user_id": index, "config": {}, "sources": [{}]}

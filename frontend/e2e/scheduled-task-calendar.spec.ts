@@ -1,389 +1,14 @@
-// [Input] Production Next shell, intercepted authenticated session, calendar storage reads,
-// scheduled-task DTOs, revisioned actions, and the canonical Chat thread navigation boundary.
-// [Output] Provider-free Chrome receipts for Calendar task rows, result replacement, editor modal,
-// fixed-month/scrolling-paper geometry, and the existing task lifecycle without real persistence.
-// [Pos] Technical isolated scheduled-task browser journey in frontend/e2e.
-// [Sync] 2026-09-29: verify the desktop task/diary stack scrolls without moving the adjacent month paper, with single-column Calendar scrolling on narrower screens.
-// [Sync] 2026-09-29: verify v4 composer, compact action rows, exact final-message result, and independent edit/history dialogs.
-// [Sync] 2026-09-29: classify the result-view history abort during Chat handoff as expected cleanup.
-// [Sync] 2026-09-29: assert the localized Tiptap composer by role and keep unsent-draft checks inside the message list.
-// [Sync] 2026-09-29: assert refreshed trigger completion through the v4 compact-row state class.
-// [Sync] 2026-09-29: keep paginated history older than the active trigger so refresh settlement is observed causally.
-// [Sync] 2026-09-29: prove result rendering selects trigger.final_message_id even when the target Thread has a newer assistant reply.
-// Business impact: scheduled definitions/revisions and trigger records change inside the isolated DTO fixture;
-// the linked Chat Thread is the visible run-result consumer; diary records and normal Chat transport remain unchanged.
-
-import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-
-const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:55173';
-const TASK_ID = 'st_browser_qa_20260929';
-const TASK_DATE = '2026-09-28';
-const TASK_ONLY_DATE = '2026-09-29';
-const TARGET_THREAD_ID = 'thread_target_schedule_qa';
-const CSRF = 's'.repeat(43);
-
+// [Sync] 2026-10-07: check the true floating workspace exterior, original inner controls and last-row in-flow menu operations.
+// [Sync] 2026-10-07: make the canonical Chat Thread handoff phase explicit before checking its scoped navigation cancellation.
+// [Input] Production Calendar and shared API-boundary fixture.
+// [Output] Complete provider-free task lifecycle regression with mutually exclusive tabs.
+// [Pos] Calendar technical browser journey in frontend/e2e.
+// [Sync] 2026-10-05: preserve task journeys while checking one visible paper, original diary access and scroll ownership.
+// [Sync] 2026-10-06: distinguish the unchanged month border/shadow from the borderless active right paper and RESULT spacing.
+import { expect, test } from '@playwright/test';
+import { installFixtures, openCalendar, openMore, readFloatingPaperSafety, expectFloatingPaperSafety, TARGET_THREAD_ID, TASK_ID } from './fixtures/calendarHarness';
 test.use({ channel: 'chrome' });
 test.describe.configure({ mode: 'serial' });
-
-type TaskStatus = 'active' | 'paused' | 'exhausted' | 'deleted';
-type TriggerStatus = 'claimed' | 'queued' | 'running' | 'succeeded' | 'failed' | 'state_unknown' | 'skipped';
-type TaskRule =
-  | { kind: 'once'; local_date: string; local_time: string; time_zone: string; selected_offset_minutes: number | null }
-  | { kind: 'daily'; local_time: string; time_zone: string };
-type Task = {
-  id: string; source_thread_id: string; title: string; prompt: string; rule: TaskRule;
-  next_run_at: string | null; status: TaskStatus; revision: number;
-  created_at: string; updated_at: string;
-};
-type Trigger = {
-  id: string; task_id: string; kind: 'manual' | 'scheduled'; scheduled_at: string | null;
-  definition_revision: number; title: string; source_thread_id: string;
-  time_zone: string; status: TriggerStatus; task_session_id: string | null;
-  target_thread_id: string | null; input_message_id: string | null;
-  target_turn_id: string | null; final_message_id: string | null; error_code: string | null;
-  skipped_from_at: string | null; skipped_through_at: string | null;
-  created_at: string; updated_at: string;
-};
-
-type FixtureOptions = {
-  empty?: boolean;
-  taskStatus?: TaskStatus;
-  initialTriggerStatus?: TriggerStatus;
-  initialTriggerHasThread?: boolean;
-  firstRunOutcome?: 'server_error' | 'network_unknown' | 'success';
-  firstEditConflict?: boolean;
-  editErrorCodes?: string[];
-  historyCount?: number;
-  dayStartsUnavailable?: boolean;
-};
-
-function baseTask(status: TaskStatus = 'active'): Task {
-  return {
-    id: TASK_ID,
-    source_thread_id: 'thread_schedule_source',
-    title: '晨间复盘',
-    prompt: '整理今天的笔记',
-    rule: { kind: 'daily', local_time: '09:00', time_zone: 'UTC' },
-    next_run_at: status === 'active' ? '2026-09-29T09:00:00Z' : null,
-    status,
-    revision: 1,
-    created_at: '2026-09-27T08:00:00Z',
-    updated_at: '2026-09-27T08:00:00Z',
-  };
-}
-
-function baseTrigger(task: Task, status: TriggerStatus, hasThread = status === 'succeeded'): Trigger {
-  return {
-    id: `trigger_${status}`, task_id: task.id, kind: 'manual', scheduled_at: null,
-    definition_revision: task.revision, title: task.title, source_thread_id: task.source_thread_id,
-    time_zone: task.rule.time_zone, status, task_session_id: 'session_schedule_qa',
-    target_thread_id: hasThread ? TARGET_THREAD_ID : null,
-    input_message_id: null, target_turn_id: null,
-    final_message_id: status === 'succeeded' ? 'message_schedule_final' : null,
-    error_code: status === 'failed' ? 'SCHEDULE_EXECUTION_FAILED' : null,
-    skipped_from_at: null, skipped_through_at: null,
-    created_at: '2026-09-28T09:01:00Z', updated_at: '2026-09-28T09:01:00Z',
-  };
-}
-
-async function installFixtures(page: Page, options: FixtureOptions = {}) {
-  let task = baseTask(options.taskStatus);
-  let triggers: Trigger[] = options.initialTriggerStatus
-    ? [baseTrigger(task, options.initialTriggerStatus, options.initialTriggerHasThread)] : [];
-  let firstEditConflict = options.firstEditConflict ?? true;
-  const editErrorCodes = [...(options.editErrorCodes ?? [])];
-  let firstRunPending = options.firstRunOutcome !== 'success';
-  let dayReadCount = 0;
-  let dayUnavailable = options.dayStartsUnavailable ?? false;
-  let completeRunningOnNextDayRead = false;
-  const unexpected: string[] = [];
-  const manualRequestKeys: string[] = [];
-  const definitionRequests: Array<{ action: string; revision: unknown }> = [];
-  const editBodies: Array<Record<string, unknown>> = [];
-  const historyRequests: string[] = [];
-  const targetThreadRequests: string[] = [];
-  const configuredHistory = options.historyCount === undefined ? null
-    : Array.from({ length: options.historyCount }, (_, index) => {
-        const createdAt = new Date(Date.UTC(2026, 8, 28, 8, 30 - index)).toISOString();
-        return { ...baseTrigger(task, 'succeeded', true), id: `trigger_history_${index}`,
-          created_at: createdAt, updated_at: createdAt };
-      });
-
-  page.on('console', (message) => {
-    const expectedResponse = message.text().includes('409 (Conflict)') || message.text().includes('503 (Service Unavailable)')
-      || (Boolean(options.editErrorCodes?.length) && message.text().includes('400 (Bad Request)'));
-    const expectedUnknownRun = options.firstRunOutcome === 'network_unknown'
-      && message.text() === 'Failed to load resource: net::ERR_CONNECTION_RESET';
-    if (message.type() === 'error' && !message.text().includes('react-grab.com')
-      && !expectedResponse && !expectedUnknownRun) {
-      unexpected.push(`console: ${message.text()}`);
-    }
-  });
-  page.on('pageerror', (error) => unexpected.push(`pageerror: ${error.message}`));
-  page.on('requestfailed', (request) => {
-    const url = request.url();
-    const path = new URL(url).pathname;
-    const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
-      && path === '/api/sessions/events';
-    const expectedDreamListNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
-      && path === '/api/story-workspace/dream-runs';
-    const expectedScheduledResultNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
-      && path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/messages`;
-    const expectedUnknownRun = options.firstRunOutcome === 'network_unknown'
-      && path === `/api/claude-agent/scheduled-tasks/${TASK_ID}/run`;
-    if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com')
-      && !expectedNavigationAbort && !expectedDreamListNavigationAbort
-      && !expectedScheduledResultNavigationAbort && !expectedUnknownRun) {
-      unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
-    }
-  });
-
-  await page.route('**/auth/session', async (route) => {
-    await route.fulfill({ json: {
-      user: { id: '20260929', email: 'scheduled-calendar@example.test', display_name: 'Schedule QA', avatar_url: null, role: 'user', created_at: '2026-09-01T00:00:00Z' },
-      csrf_token: CSRF,
-    } });
-  });
-  await page.route('**/api/**', async (route: Route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const path = url.pathname;
-    if (path.includes(TARGET_THREAD_ID)) targetThreadRequests.push(`${request.method()} ${path}`);
-
-    if (path === '/api/sessions' && request.method() === 'GET') {
-      await route.fulfill({ json: { sessions: [{ id: 'note_existing_qa', created_at: `${TASK_DATE}T07:30:00Z`, updated_at: `${TASK_DATE}T07:30:00Z`, date_key: TASK_DATE, first_line: '普通日历笔记仍然可见' }] } });
-      return;
-    }
-    if (path === '/api/sessions' && request.method() === 'POST') {
-      await route.fulfill({ status: 200, json: {} });
-      return;
-    }
-    if (path === '/api/preferences') {
-      await route.fulfill({ json: { first_login_completed: true, timezone: 'UTC' } });
-      return;
-    }
-    if (path === '/api/sessions/events') {
-      await route.fulfill({ contentType: 'text/event-stream', body: ': connected\n\n' });
-      return;
-    }
-    if (path.startsWith('/api/claude-agent/scheduled-tasks')) {
-      const suffix = path.slice('/api/claude-agent/scheduled-tasks'.length);
-      if (suffix === '/day') {
-        const selectedDate = url.searchParams.get('local_date');
-        if (dayUnavailable) {
-          await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_DATA_UNAVAILABLE' } } });
-          return;
-        }
-        const visible = !options.empty && (selectedDate === TASK_DATE || selectedDate === TASK_ONLY_DATE);
-        if (visible) {
-          dayReadCount += 1;
-          if (completeRunningOnNextDayRead) {
-            completeRunningOnNextDayRead = false;
-            triggers = triggers.map((trigger) => trigger.status === 'running'
-              ? { ...trigger, status: 'succeeded', target_thread_id: TARGET_THREAD_ID,
-                  final_message_id: 'message_schedule_final', updated_at: '2026-09-28T09:03:00Z' }
-              : trigger);
-          }
-        }
-        await route.fulfill({ json: { tasks: visible ? [task] : [], triggers: visible ? triggers : [] } });
-        return;
-      }
-      if (suffix === `/${TASK_ID}`) {
-        await route.fulfill({ json: { task } });
-        return;
-      }
-      if (suffix === `/${TASK_ID}/history`) {
-        historyRequests.push(url.search);
-        const before = url.searchParams.get('before_created_at');
-        const limit = Number(url.searchParams.get('limit') ?? 50);
-        const source = configuredHistory ?? triggers;
-        const page = source.filter((trigger) => !before || trigger.created_at < before).slice(0, limit);
-        await route.fulfill({ json: { triggers: page } });
-        return;
-      }
-      const action = suffix.split('/').at(-1);
-      if (request.method() === 'POST' && action) {
-        const body = request.postDataJSON() as Record<string, unknown>;
-        if (action === 'edit') {
-          definitionRequests.push({ action, revision: body.expected_revision });
-          editBodies.push(body);
-          const editErrorCode = editErrorCodes.shift();
-          if (editErrorCode) {
-            await route.fulfill({ status: 400, json: { detail: { error_code: editErrorCode } } });
-            return;
-          }
-          if (firstEditConflict) {
-            firstEditConflict = false;
-            task = { ...task, title: '服务端更新后的复盘', revision: task.revision + 1, updated_at: '2026-09-28T09:02:00Z' };
-            await route.fulfill({ status: 409, json: { detail: { error_code: 'SCHEDULE_REVISION_CONFLICT' } } });
-            return;
-          }
-          if (body.expected_revision !== task.revision) {
-            await route.fulfill({ status: 409, json: { detail: { error_code: 'SCHEDULE_REVISION_CONFLICT' } } });
-            return;
-          }
-          task = { ...task, title: String(body.title), prompt: String(body.prompt), rule: body.rule as TaskRule,
-            revision: task.revision + 1, updated_at: '2026-09-28T09:03:00Z' };
-          await route.fulfill({ json: { task } });
-          return;
-        }
-        if (['pause', 'resume', 'delete', 'restore'].includes(action)) {
-          definitionRequests.push({ action, revision: body.expected_revision });
-          if (body.expected_revision !== task.revision) {
-            await route.fulfill({ status: 409, json: { detail: { error_code: 'SCHEDULE_REVISION_CONFLICT' } } });
-            return;
-          }
-          const status: TaskStatus = action === 'pause' ? 'paused'
-            : action === 'resume' || action === 'restore' ? 'active' : 'deleted';
-          task = { ...task, status, next_run_at: status === 'active' ? '2026-09-30T09:00:00Z' : null,
-            revision: task.revision + 1, updated_at: '2026-09-28T09:04:00Z' };
-          await route.fulfill({ json: { task } });
-          return;
-        }
-        if (action === 'run') {
-          manualRequestKeys.push(String(body.manual_request_key));
-          if (firstRunPending) {
-            firstRunPending = false;
-            if (options.firstRunOutcome === 'network_unknown') {
-              await route.abort('connectionreset');
-            } else {
-              await route.fulfill({ status: 503, json: { detail: { error_code: 'SCHEDULE_RUN_FAILED' } } });
-            }
-            return;
-          }
-          const trigger = baseTrigger(task, 'succeeded', true);
-          triggers = [trigger, ...triggers.filter((item) => item.id !== trigger.id)];
-          await route.fulfill({ json: { trigger } });
-          return;
-        }
-      }
-    }
-
-    if (path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/messages`) {
-      await route.fulfill({ json: {
-        thread: { id: TARGET_THREAD_ID, title: '定时任务执行会话', created_at: '2026-09-28T09:01:00Z', updated_at: '2026-09-28T09:02:00Z' },
-        messages: [{ id: 'scheduled-user', role: 'user', parts: [{ type: 'text', text: '整理今天的笔记' }], metadata: {}, created_at: '2026-09-28T09:01:00Z' },
-          { id: 'message_schedule_final', role: 'assistant', parts: [{ type: 'text', text: '## 定时任务执行完成\n\n已整理今天的笔记。' }], metadata: {}, created_at: '2026-09-28T09:02:00Z' },
-          { id: 'message_after_schedule_final', role: 'assistant', parts: [{ type: 'text', text: '这是一条更晚的普通回复，不能作为定时任务结果。' }], metadata: {}, created_at: '2026-09-28T09:04:00Z' }],
-        next_cursor: null, has_more: false, latest_message_id: 'message_after_schedule_final', unchanged: false,
-      } });
-      return;
-    }
-    if (path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/status`) {
-      await route.fulfill({ json: { running: false, lifecycle: 'idle', turn_count: 1,
-        pending_tool_call_ids: [], tool_confirmation_observation: 'known' } });
-      return;
-    }
-    if (path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/inputs`) {
-      await route.fulfill({ json: { entries: [], local_owner: true } });
-      return;
-    }
-    if (path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/task-links`) {
-      await route.fulfill({ json: { source: null, created: [] } });
-      return;
-    }
-    if (path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/stream`) {
-      await route.fulfill({ contentType: 'text/event-stream', body: ': connected\n\n' });
-      return;
-    }
-
-    // Boot calls unrelated to this isolated UI contract are production-shaped empty reads.
-    // No request writes a backend, database, model, worker, or diary.
-    if (request.method() === 'GET') {
-      await route.fulfill({ json: path === '/api/decks' ? { decks: [] }
-        : path === '/api/default-voices' ? {} : path === '/api/claude-agent/threads' ? { threads: [] } : {} });
-      return;
-    }
-    unexpected.push(`unexpected API ${request.method()} ${path}`);
-    await route.fulfill({ status: 501, json: { error: { code: 'UNEXPECTED_E2E_API' } } });
-  });
-
-  await page.addInitScript(() => {
-    localStorage.setItem('migration_completed', 'true');
-    localStorage.setItem('ink-language', 'zh');
-  });
-  return {
-    getUnexpected: () => unexpected,
-    getManualRequestKeys: () => manualRequestKeys,
-    getDefinitionRequests: () => definitionRequests,
-    getEditBodies: () => editBodies,
-    getHistoryRequests: () => historyRequests,
-    getDayReadCount: () => dayReadCount,
-    getTargetThreadRequests: () => targetThreadRequests,
-    allowDayReads: () => { dayUnavailable = false; },
-    completeRunningOnNextDayRead: () => { completeRunningOnNextDayRead = true; },
-  };
-}
-
-async function openCalendar(page: Page, viewport = { width: 1440, height: 900 }) {
-  await page.clock.setFixedTime(new Date('2026-09-28T12:00:00Z'));
-  await page.setViewportSize(viewport);
-  await page.goto(`${WEB_BASE}/story-workspace/writing`);
-  const calendarButton = page.getByRole('button', { name: 'Calendar' });
-  await expect(calendarButton).toBeVisible();
-  await calendarButton.focus();
-  await calendarButton.press('Enter');
-  const dialog = page.getByRole('dialog', { name: '日历' });
-  await expect(dialog).toBeVisible();
-  return { calendarButton, dialog };
-}
-
-async function openMore(card: Locator) {
-  await card.getByRole('button', { name: /更多操作/ }).click();
-}
-
-async function readFloatingPaperSafety(dialog: Locator) {
-  return dialog.evaluate((element) => {
-    const layout = element.querySelector('.calendar-popup');
-    const stack = element.querySelector('.calendar-popup__workspace-scroll');
-    if (!(layout instanceof HTMLElement) || !(stack instanceof HTMLElement)) {
-      throw new Error('calendar floating-paper scroll regions are incomplete');
-    }
-    const usesLayoutScroll = getComputedStyle(layout).overflowY === 'auto';
-    const content = usesLayoutScroll ? layout : stack;
-    const papers = Array.from(usesLayoutScroll
-      ? element.querySelectorAll('.calendar-popup__calendar, .calendar-popup__section')
-      : stack.querySelectorAll(':scope > .calendar-popup__section'));
-    if (papers.length !== (usesLayoutScroll ? 3 : 2)
-      || papers.some((paper) => !(paper instanceof HTMLElement))) {
-      throw new Error('calendar floating-paper geometry is incomplete');
-    }
-    const calendar = element.querySelector('.calendar-popup__calendar');
-    const calendarTopBefore = calendar?.getBoundingClientRect().top ?? null;
-    const previousScrollTop = content.scrollTop;
-    content.scrollTop = content.scrollHeight;
-    const contentRect = content.getBoundingClientRect();
-    const paperRects = papers.map((paper) => paper.getBoundingClientRect());
-    const style = getComputedStyle(content);
-    const result = {
-      paddingLeft: Number.parseFloat(style.paddingLeft),
-      paddingRight: Number.parseFloat(style.paddingRight),
-      paddingBottom: Number.parseFloat(style.paddingBottom),
-      leftGap: Math.min(...paperRects.map((rect) => rect.left - contentRect.left)),
-      rightGap: Math.min(...paperRects.map((rect) => contentRect.right - rect.right)),
-      bottomGap: contentRect.bottom - Math.max(...paperRects.map((rect) => rect.bottom)),
-      maxScrollTop: content.scrollHeight - content.clientHeight,
-      reachedScrollBottom: Math.abs(content.scrollTop - (content.scrollHeight - content.clientHeight)) <= 1,
-      scrollOwner: usesLayoutScroll ? 'layout' : 'stack',
-      fixedCalendarDelta: usesLayoutScroll || calendarTopBefore === null || !calendar
-        ? null : Math.abs(calendar.getBoundingClientRect().top - calendarTopBefore),
-    };
-    content.scrollTop = previousScrollTop;
-    return result;
-  });
-}
-
-function expectFloatingPaperSafety(
-  safety: Awaited<ReturnType<typeof readFloatingPaperSafety>>,
-  expected: { side: number; bottom: number },
-) {
-  expect(safety.paddingLeft).toBe(expected.side);
-  expect(safety.paddingRight).toBe(expected.side);
-  expect(safety.leftGap).toBeGreaterThanOrEqual(expected.side - 1);
-  expect(safety.rightGap).toBeGreaterThanOrEqual(expected.side - 1);
-  expect(safety.bottomGap).toBeGreaterThanOrEqual(expected.bottom - 1);
-  expect(safety.reachedScrollBottom).toBe(true);
-}
 
 test('desktop journey follows the reviewed task-before-diary lifecycle', async ({ page }, testInfo) => {
   const fixture = await installFixtures(page, { firstRunOutcome: 'server_error' });
@@ -394,18 +19,17 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   const taskSection = stack.locator(':scope > .calendar-popup__task-section');
   const diarySection = stack.locator(':scope > .calendar-popup__diary-section');
   await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('1 项');
+  await expect(diarySection).toBeHidden();
+  await expect(dialog.getByRole('tabpanel')).toHaveCount(1);
+  await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await expect(diarySection.locator('.calendar-popup__card-count')).toHaveText('1 篇');
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
+  await dialog.getByRole('tab', { name: '定时任务', exact: true }).click();
   await expect(dialog.getByText('晨间复盘')).toBeVisible();
-  expect(await dialog.locator('.calendar-popup__section-heading h3').allTextContents()).toEqual(['今天的定时任务', '今天的日记']);
   await expect(dialog.locator('.calendar-popup__date-summary')).toHaveCount(0);
-  expect(await taskSection.evaluate((element) =>
-    element.nextElementSibling?.classList.contains('calendar-popup__diary-section'))).toBe(true);
-  const cardBoxes = await Promise.all([taskSection.boundingBox(), diarySection.boundingBox()]);
-  expect(cardBoxes[0] && cardBoxes[1] && cardBoxes[1].y > cardBoxes[0].y + cardBoxes[0].height).toBeTruthy();
   const closeBox = await dialog.getByRole('button', { name: '关闭' }).boundingBox();
   const paperBoxes = await Promise.all([
-    dialog.locator('.calendar-popup__calendar').boundingBox(), taskSection.boundingBox(), diarySection.boundingBox(),
+    dialog.locator('.calendar-popup__calendar').boundingBox(), workspace.boundingBox(),
   ]);
   expect(closeBox && paperBoxes.every((paper) => paper && (
     closeBox.x + closeBox.width <= paper.x || paper.x + paper.width <= closeBox.x
@@ -416,9 +40,10 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
     const workspaceElement = element.querySelector('.calendar-popup__workspace');
     if (!(workspaceElement instanceof HTMLElement)) throw new Error('calendar workspace is missing');
     const workspaceStyle = getComputedStyle(workspaceElement);
-    const papers = Array.from(element.querySelectorAll('.calendar-popup__calendar, .calendar-popup__section')).map((paper) => {
+    const papers = Array.from(element.querySelectorAll('.calendar-popup__calendar, .calendar-popup__section:not([hidden])')).map((paper) => {
       const style = getComputedStyle(paper);
-      return { borderWidth: style.borderTopWidth, background: style.backgroundColor, boxShadow: style.boxShadow };
+      return { month: paper.classList.contains('calendar-popup__calendar'), borderWidth: style.borderTopWidth,
+        background: style.backgroundColor, boxShadow: style.boxShadow, radius: style.borderRadius, corners: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius] };
     });
     const task = element.querySelector('.calendar-popup__task');
     return {
@@ -441,10 +66,14 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
     };
   });
   expect(surfaces.dialog).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
-  expect(surfaces.workspace).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
-  expect(surfaces.papers).toHaveLength(3);
-  expect(surfaces.papers.every((paperStyle) => paperStyle.borderWidth !== '0px'
-    && paperStyle.background !== 'rgba(0, 0, 0, 0)' && paperStyle.boxShadow !== 'none')).toBe(true);
+  expect(surfaces.workspace.borderWidth).toBe('0px');
+  expect(surfaces.workspace.background).not.toBe('rgba(0, 0, 0, 0)'); expect(surfaces.workspace.boxShadow).not.toBe('none');
+  expect(surfaces.papers).toHaveLength(2);
+  const monthSurface = surfaces.papers.find((paperStyle) => paperStyle.month)!;
+  expect(monthSurface.borderWidth).not.toBe('0px'); expect(monthSurface.boxShadow).not.toBe('none');
+  const rightSurface = surfaces.papers.find((paperStyle) => !paperStyle.month)!;
+  expect(rightSurface).toMatchObject({ borderWidth: '0px', boxShadow: 'none', corners: ['0px', '0px', '24px', '24px'] });
+  expect(rightSurface.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(surfaces.task).toEqual({ borderWidth: '0px', background: 'rgba(0, 0, 0, 0)', boxShadow: 'none' });
   const hiddenTitle = await dialog.locator('.modal-title--default').evaluate((element) => {
     const style = getComputedStyle(element);
@@ -512,11 +141,24 @@ test('desktop journey follows the reviewed task-before-diary lifecycle', async (
   await restored.locator('.calendar-popup__task-open').click();
   await expect(dialog.getByRole('heading', { name: '定时任务执行完成' })).toBeVisible();
   await expect(dialog.getByText('已整理今天的笔记。')).toBeVisible();
+  await expect(dialog.locator('.calendar-popup__task-result > header')).toHaveCSS('border-bottom-width', '0px');
+  await expect(dialog.locator('.calendar-popup__task-result > footer')).toHaveCSS('border-top-width', '0px');
   await expect(dialog.getByText('这是一条更晚的普通回复，不能作为定时任务结果。')).toHaveCount(0);
+  fixture.beginThreadHandoff();
   await dialog.getByRole('button', { name: '打开会话' }).click();
   await expect(page).toHaveURL(/\/story-workspace\/chat$/);
   await expect(dialog).toBeHidden();
   await expect.poll(() => fixture.getTargetThreadRequests().some((item) => item.includes(TARGET_THREAD_ID))).toBe(true);
+  const handoffAborts = fixture.getThreadHandoffAborts();
+  await testInfo.attach('calendar-thread-handoff-abort-evidence', {
+    body: Buffer.from(JSON.stringify({ count: handoffAborts.length, handoffAborts }, null, 2)),
+    contentType: 'application/json',
+  });
+  for (const abort of handoffAborts) {
+    expect(abort).toMatchObject({ method: 'GET', path: '/api/claude-agent/threads', query: '?limit=21',
+      error: 'net::ERR_ABORTED', pagePath: '/story-workspace/chat', refererPath: '/story-workspace/chat' });
+  }
+  fixture.endThreadHandoff();
   expect(fixture.getUnexpected()).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
 });
@@ -550,13 +192,11 @@ test('mobile exhausted state keeps unknown execution safe and menu keyboard-oper
 
   const calendarBox = await dialog.locator('.calendar-popup__calendar').boundingBox();
   const taskBox = await dialog.locator('.calendar-popup__task-section').boundingBox();
-  const diaryBox = await dialog.locator('.calendar-popup__diary-section').boundingBox();
-  expect(calendarBox && taskBox && diaryBox
-    && taskBox.y > calendarBox.y + calendarBox.height
-    && diaryBox.y > taskBox.y + taskBox.height).toBeTruthy();
+  expect(calendarBox && taskBox && taskBox.y > calendarBox.y + calendarBox.height).toBeTruthy();
+  await expect(dialog.getByRole('tabpanel')).toHaveCount(1);
   const mobileSafety = await readFloatingPaperSafety(dialog);
   expect(mobileSafety.scrollOwner).toBe('layout');
-  expectFloatingPaperSafety(mobileSafety, { side: 16, bottom: 24 });
+  expectFloatingPaperSafety(mobileSafety, { side: 16, bottom: 28 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
   await testInfo.attach('calendar-floating-mobile', {
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
@@ -569,12 +209,9 @@ test('tablet breakpoint keeps one scroll owner and switches cleanly to two colum
   const { dialog } = await openCalendar(page, { width: 1024, height: 768 });
   const calendar = dialog.locator('.calendar-popup__calendar');
   const taskSection = dialog.locator('.calendar-popup__task-section');
-  const diarySection = dialog.locator('.calendar-popup__diary-section');
-
-  const singleColumnBoxes = await Promise.all([calendar.boundingBox(), taskSection.boundingBox(), diarySection.boundingBox()]);
-  expect(singleColumnBoxes[0] && singleColumnBoxes[1] && singleColumnBoxes[2]
-    && singleColumnBoxes[1].y > singleColumnBoxes[0].y + singleColumnBoxes[0].height
-    && singleColumnBoxes[2].y > singleColumnBoxes[1].y + singleColumnBoxes[1].height).toBeTruthy();
+  const singleColumnBoxes = await Promise.all([calendar.boundingBox(), taskSection.boundingBox()]);
+  expect(singleColumnBoxes[0] && singleColumnBoxes[1]
+    && singleColumnBoxes[1].y > singleColumnBoxes[0].y + singleColumnBoxes[0].height).toBeTruthy();
   const closeBox = await dialog.getByRole('button', { name: '关闭' }).boundingBox();
   expect(closeBox && singleColumnBoxes.every((paper) => paper && (
     closeBox.x + closeBox.width <= paper.x || paper.x + paper.width <= closeBox.x
@@ -596,16 +233,16 @@ test('tablet breakpoint keeps one scroll owner and switches cleanly to two colum
   expect(scrollOwners).toEqual({ content: 'hidden', layout: 'auto', stack: 'visible' });
   const tabletSafety = await readFloatingPaperSafety(dialog);
   expect(tabletSafety.scrollOwner).toBe('layout');
-  expectFloatingPaperSafety(tabletSafety, { side: 20, bottom: 32 });
+  expectFloatingPaperSafety(tabletSafety, { side: 20, bottom: 36 });
 
   await page.setViewportSize({ width: 1025, height: 768 });
   const twoColumnBoxes = await Promise.all([calendar.boundingBox(), taskSection.boundingBox()]);
   expect(twoColumnBoxes[0] && twoColumnBoxes[1]
     && twoColumnBoxes[1].x > twoColumnBoxes[0].x + twoColumnBoxes[0].width
-    && Math.abs(twoColumnBoxes[1].y - twoColumnBoxes[0].y) <= 1).toBeTruthy();
+    && twoColumnBoxes[1].y > twoColumnBoxes[0].y).toBeTruthy();
   const desktopScrollOwners = await dialog.evaluate((element) => ({
     layout: getComputedStyle(element.querySelector('.calendar-popup') as HTMLElement).overflowY,
-    stack: getComputedStyle(element.querySelector('.calendar-popup__workspace-scroll') as HTMLElement).overflowY,
+    stack: getComputedStyle(element.querySelector('.calendar-popup__task-section') as HTMLElement).overflowY,
   }));
   expect(desktopScrollOwners).toEqual({ layout: 'hidden', stack: 'auto' });
   const contentFits = await dialog.locator('.calendar-popup').evaluate((element) =>
@@ -658,6 +295,7 @@ test('task-free date keeps an independent empty task card beside diary content',
   await expect(taskSection.getByRole('heading', { name: '今天的定时任务' })).toBeVisible();
   await expect(taskSection.locator('.calendar-popup__card-count')).toHaveText('0 项');
   await expect(taskSection.getByText('这一天没有定时任务。')).toBeVisible();
+  await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await expect(dialog.getByRole('heading', { name: '今天的日记' })).toBeVisible();
   await expect(dialog.getByText('普通日历笔记仍然可见')).toBeVisible();
   expect(fixture.getUnexpected()).toEqual([]);
@@ -683,12 +321,15 @@ test('task read failure stays inside its card while diary remains actionable', a
   const taskSection = dialog.locator('.calendar-popup__task-section');
   const diarySection = dialog.locator('.calendar-popup__diary-section');
   await expect(taskSection.getByRole('alert')).toContainText('任务暂不可用。');
+  await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await expect(diarySection.getByText('普通日历笔记仍然可见')).toBeVisible();
   await expect(diarySection.getByRole('button', { name: '打开: 普通日历笔记仍然可见' })).toBeEnabled();
   await expect(diarySection.getByRole('button', { name: '删除: 普通日历笔记仍然可见' })).toBeEnabled();
+  await dialog.getByRole('tab', { name: '定时任务', exact: true }).click();
   fixture.allowDayReads();
   await taskSection.getByRole('button', { name: '重试' }).click();
   await expect(taskSection.getByText('晨间复盘')).toBeVisible();
+  await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await expect(diarySection.getByText('普通日历笔记仍然可见')).toBeVisible();
   expect(fixture.getUnexpected()).toEqual([]);
 });
@@ -760,3 +401,70 @@ test('edit keeps the desired draft and explains repeated or missing daylight-sav
     ? (body.rule as Extract<TaskRule, { kind: 'once' }>).selected_offset_minutes : 'daily')).toEqual([null, null]);
   expect(fixture.getUnexpected()).toEqual([]);
 });
+
+
+for (const width of [1440, 390]) {
+  test(`floating task menu remains reachable on short and last long rows at ${width}px`, async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const fixture = await installFixtures(page, { firstRunOutcome: 'success', firstEditConflict: false, initialTriggerStatus: 'succeeded' });
+    const publicActions: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (request.method() === 'POST' && url.pathname.startsWith('/api/claude-agent/scheduled-tasks/')) publicActions.push(`${request.method()} ${url.pathname}`);
+    });
+    const { dialog } = await openCalendar(page, { width, height: 844 });
+    const workspace = dialog.locator('.calendar-popup__workspace');
+    const heights: unknown[] = [];
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
+      for (const count of [1, 20]) {
+        fixture.setTaskCount(count);
+        await dialog.getByRole('gridcell', { name: count === 1 ? /2026.*9.*28/ : /2026.*9.*29/ }).click();
+        const rows = dialog.locator('.calendar-popup__task'); await expect(rows).toHaveCount(count);
+        const card = rows.last(); const more = card.getByRole('button', { name: /更多操作/ });
+        await card.locator('.calendar-popup__task-open').focus(); await page.keyboard.press('Tab');
+        await expect(card.getByRole('button', { name: /编辑/ })).toBeFocused();
+        await page.keyboard.press('Tab'); await expect(more).toBeFocused();
+        const hitBefore = await more.boundingBox(); expect(hitBefore!.width).toBeGreaterThanOrEqual(42); expect(hitBefore!.height).toBeGreaterThanOrEqual(42);
+        const closedHeight = (await workspace.boundingBox())!.height;
+        await openMore(card); const menu = card.getByRole('menu'); await expect(menu).toHaveCSS('position', 'static');
+        await expect(menu.getByRole('menuitem', { name: '立即运行', exact: true })).toBeFocused();
+        expect(await menu.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+        expect(await card.evaluate((element) => {
+          const menu = element.querySelector('[role=menu]'); return Boolean(menu && element.querySelector('.calendar-popup__more-wrap')?.contains(menu));
+        })).toBe(true);
+        const openHeight = (await workspace.boundingBox())!.height;
+        if (count === 1) expect(openHeight).toBeGreaterThan(closedHeight);
+        const hitOpen = await more.boundingBox(); expect(hitOpen!.width).toBeCloseTo(hitBefore!.width, 0); expect(hitOpen!.height).toBeCloseTo(hitBefore!.height, 0);
+        await menu.getByRole('menuitem', { name: '立即运行', exact: true }).press('End');
+        const remove = menu.getByRole('menuitem', { name: '删除', exact: true }); await expect(remove).toBeFocused();
+        const removeBox = await remove.boundingBox();
+        expect(removeBox && removeBox.x >= 0 && removeBox.x + removeBox.width <= width
+          && removeBox.y >= 0 && removeBox.y + removeBox.height <= 844).toBeTruthy();
+        await testInfo.attach(`calendar-tasks-${theme}-${width}-${count}-menu-open`, { body: await page.screenshot(), contentType: 'image/png' });
+        await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0); await expect(more).toBeFocused();
+        await expect.poll(async () => (await workspace.boundingBox())!.height).toBeCloseTo(closedHeight, 0);
+        await openMore(card); await card.getByRole('menuitem', { name: /历史/ }).click();
+        const history = page.getByRole('dialog', { name: /执行历史/ }); await expect(history).toBeVisible();
+        await page.keyboard.press('Escape'); await expect(history).toBeHidden(); await expect(more).toBeFocused();
+        await card.getByRole('button', { name: /编辑/ }).click(); const editor = page.getByRole('dialog', { name: /编辑“/ });
+        await expect(editor.getByLabel('标题')).toBeFocused(); await page.keyboard.press('Escape');
+        await expect(editor).toBeHidden(); await expect(card.getByRole('button', { name: /编辑/ })).toBeFocused();
+        // The last actual menu item invokes the existing public mutation DTO, then the existing undo entry restores it.
+        await openMore(card); await card.getByRole('menuitem', { name: '删除', exact: true }).click();
+        await expect(dialog.locator('.calendar-popup__undo-row')).toHaveCount(1);
+        expect(publicActions).toContain(`POST /api/claude-agent/scheduled-tasks/${TASK_ID}/delete`);
+        await dialog.getByRole('button', { name: /撤销删除/ }).click(); await expect(rows).toHaveCount(count);
+        expect(publicActions).toContain(`POST /api/claude-agent/scheduled-tasks/${TASK_ID}/restore`);
+        heights.push({ theme, count, closedHeight, openHeight, finalHeight: (await workspace.boundingBox())!.height });
+        const safety = await readFloatingPaperSafety(dialog);
+        expectFloatingPaperSafety(safety, width > 1024 ? { side: 36, bottom: 56 } : { side: 16, bottom: 28 });
+      }
+    }
+    expect(fixture.getUnexpected()).toEqual([]);
+    await testInfo.attach(`calendar-tasks-${width}-menu-height-evidence`, {
+      body: Buffer.from(JSON.stringify({ heights, publicActions }, null, 2)), contentType: 'application/json',
+    });
+  });
+}
