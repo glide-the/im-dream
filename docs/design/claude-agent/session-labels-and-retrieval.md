@@ -1,7 +1,11 @@
+<!-- [Input] Admin Session DTOs, turn-bound grants, strict broker projections and server-owned response configuration. -->
+<!-- [Output] Diary labels/retrieval rules, production data flow, bounded transport and recovery contracts. -->
+<!-- [Pos] Current diary retrieval interaction design; earlier database examples remain explicitly historical. -->
+<!-- [Sync] 2026-10-06: document startup/new-turn response-budget adoption and actual normal/failure/state flows. -->
 # 笔记标签（labels）与跨 Session 协作检索设计方案
 
 Status: Implemented
-Updated: 2026-09-15
+Updated: 2026-10-06
 Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sessions_range` MCP 工具；公开Chat两条读取均消费Admin `session.list`
 
 ---
@@ -9,14 +13,15 @@ Scope: `user_sessions.labels` 属性 + 近期prompt投影 + `mcp__user__get_sess
 ## 目录
 
 1. [背景与目标](#1-背景与目标)
-2. [数据库变更](#2-数据库变更)
-3. [API 变更：POST /api/sessions](#3-api-变更post-apisessions)
+2. [历史数据库变更（2026-05-31）](#2-历史数据库变更2026-05-31)
+3. [历史API变更：POST /api/sessions](#3-历史api变更post-apisessions)
 4. [近期 Session 上下文格式变更](#4-近期-session-上下文格式变更)
-5. [`mcp__user__get_sessions_range` MCP 工具](#5-mcpuserget_sessions_range-mcp-工具)
-6. [env var 注入路径](#6-env-var-注入路径)
+5. [`mcp__user__get_sessions_range` MCP 工具](#5-mcp__user__get_sessions_range-mcp-工具)
+6. [私有broker与子进程环境路径](#6-私有broker与子进程环境路径)
 7. [数据流：Agent 跨 Session 检索](#7-数据流agent-跨-session-检索)
 8. [实现文件索引](#8-实现文件索引)
 9. [2026-06-16 检索器增强设计稿](#9-2026-06-16-检索器增强设计稿)
+10. [服务器响应容量与失败恢复](#10-服务器响应容量与失败恢复)
 
 ---
 
@@ -527,3 +532,126 @@ Agent 在判断用户提到历史内容时，优先按以下流程调用：
 - 不改变旧版 `get_sessions_range(start_date, end_date)` 调用。
 
 这个方案能解决 labels-only 漏掉正文语义线索的问题，同时把未来向量检索的扩展点留在工具 schema 中，不把当前实现推进到尚未有存储方案支撑的复杂架构。
+
+## 10. 服务器响应容量与失败恢复
+
+### 10.1 背景、边界与执行规则
+
+`query` 非空时，`handle_get_sessions_range` 先通过 Admin `session.list(include_text=true)` 取得日期范围内全部正文，完成严格 DTO 校验后才在子进程执行字符匹配、排序与结果 `limit`。`limit=10` 或 `15` 不会限制传输阶段的日记数量。只有元数据读取成功而正文读取失败，也可能是正文响应超过字节上限；`ADMIN_RESPONSE_INVALID` 还包括响应字段、格式或请求编号不符，不能仅凭这个错误码判定原因。
+
+`AdminDataConfig.max_response_bytes` 是服务器配置的传输保护值，来自 `INK_ADMIN_DREAM_MAX_RESPONSE_BYTES`。`RuntimeHttpConfig.from_server_config` 保留相同数值，`AdminRequestAuth` 再以它创建 `SessionProjectionBrokerSettings.max_bytes`，子进程只收到这一服务器生成的配置。浏览器、检索参数与用户环境均不拥有该配置。
+
+| 配置位置 | 当前值与生效条件 |
+| --- | --- |
+| 代码缺省值 | `1_048_576` 字节；未显式配置时采用，未在本次修复中修改。 |
+| 后端安装模板 | `16_777_216` 字节（16 MiB）；明确配置，仍是有限的传输上限，不是日记数量或正文产品配额。 |
+| 已有 `backend/.env` | 需要显式设置合理容量；修复回执记录本机数值及实际读取状态，不以模板变更推定旧进程已采用。 |
+| 生效范围 | 服务启动时读取；已有 turn 的 broker 不被替换。后端重新加载配置后，新 turn 取得新上限。 |
+
+保留原日期范围、完整正文候选、排序、标签、Unicode、`limit`、向量预留接口、身份认证、权限校验、capability 和请求编号匹配。禁止通过提前截断正文或候选来消除超限；禁止增加 Dream 数据库读取或隐式无限响应。仍超过当前上限时按原错误返回，不提供部分成功结果。
+
+### 10.2 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Agent as Agent
+    participant Tool as sessions_tool.handle_get_sessions_range
+    participant Client as SessionProjectionBrokerClient
+    participant Broker as SessionProjectionBroker
+    participant Owner as AdminTurnPersistence
+    participant Admin as Admin session.list
+    User->>Agent: 请求查找指定日期范围中的历史日记
+    Agent->>Tool: start_date、end_date、query、limit
+    Tool->>Client: list_sessions(include_text=true)
+    Client->>Broker: capability、request_id、日期范围、include_text
+    Broker->>Broker: 校验请求结构和 capability
+    Broker->>Owner: list_sessions(input_dto, request_id)
+    Owner->>Owner: 获取当前 grant，检查 session.list 与 schema capability
+    Owner->>Admin: session.list 日期范围及 include_text=true
+    Admin-->>Owner: request_id 和完整 Session 预览、正文
+    Owner->>Owner: 检查响应字节数、DTO 和 request_id
+    Owner-->>Broker: SessionListResultDTO
+    Broker->>Broker: 校验 projection 及编码后的响应字节数
+    Broker-->>Client: 成功 projection
+    Client-->>Tool: SessionProjectionResultDTO
+    Tool->>Tool: 全部候选匹配、排序，最后应用 limit
+    Tool-->>Agent: ok=true、sessions、match、excerpt
+    Agent-->>User: 展示相关日记检索结果
+```
+
+### 10.3 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Agent as Agent
+    participant Tool as sessions_tool.handle_get_sessions_range
+    participant Broker as SessionProjectionBroker
+    participant Owner as AdminTurnPersistence
+    participant HTTP as request_admin_dto
+    participant Operator as 后端进程所有者
+    participant Config as AdminDataConfig
+    User->>Agent: 请求查找历史日记
+    Agent->>Tool: start_date、end_date、query、limit
+    Tool->>Broker: 日期范围和 include_text=true
+    Broker->>Owner: 读取 Session projection
+    Owner->>HTTP: 调用 Admin session.list
+    alt Admin 响应超过配置的字节上限
+        HTTP-->>Owner: ADMIN_RESPONSE_INVALID，503
+        Owner-->>Broker: AdminDataError
+        Broker-->>Tool: 原稳定错误码
+    else Admin DTO 或 request_id 不符
+        HTTP-->>Owner: ADMIN_RESPONSE_INVALID，503
+        Owner-->>Broker: AdminDataError
+        Broker-->>Tool: 原稳定错误码
+    else broker 编码响应超过上限
+        Owner-->>Broker: 已通过 Admin DTO 校验的结果
+        Broker-->>Tool: SESSION_BROKER_RESPONSE_TOO_LARGE，503
+    end
+    Tool-->>Agent: ok=false，session_projection_unavailable 及 service_error_code
+    Agent-->>User: 检索失败反馈
+    Operator->>Operator: 核对元数据与正文读取、响应容量及 DTO 边界
+    alt 确认为容量配置不足
+        Operator->>Config: 明确设置有限的响应字节容量
+        Operator->>Operator: 在已授权的进程操作范围内重新加载后端配置
+        Config-->>Owner: 新进程、新 turn 使用新配置
+        User->>Agent: 在新 turn 重试相同检索
+        Agent->>Tool: 相同检索参数
+        Tool->>Broker: 通过原公开工具重新读取
+        Broker-->>Tool: 成功 projection 或原错误
+        Tool-->>Agent: 完整匹配结果或原稳定错误
+        Agent-->>User: 检索结果或失败反馈
+    else 仍有结构、请求编号或其他错误
+        Operator->>Operator: 修复实际接口原因，保留严格校验
+        Tool-->>Agent: 继续返回原稳定错误
+        Agent-->>User: 检索失败反馈
+    end
+```
+
+### 10.4 检索状态转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> Validating: 收到工具参数
+    Validating --> Reading: 日期和检索模式合法
+    Validating --> Failed: 参数不合法或向量检索未实现
+    Reading --> Matching: Admin 和 broker 响应通过全部校验
+    Reading --> Failed: 超限、DTO错误、授权或服务失败
+    Matching --> Succeeded: 全部候选排序后应用 limit
+    Succeeded --> [*]
+    Failed --> [*]: 返回稳定错误，不提供部分结果
+    Failed --> Validating: 原因修复后，用户在新 turn 再次调用
+```
+
+### 10.5 验收与影响范围
+
+| 要求 | 实现与验证 |
+| --- | --- |
+| 正文超过原 1 MiB，但低于显式配置容量时能检索 | `test_sessions_tool.py` 实际 Admin HTTP DTO → production 配置的 broker → 原工具链路；相同合成正文在原容量失败，在模板容量成功。 |
+| 结果 limit 不造成候选遗漏 | 唯一正文命中位于第 560 条；`limit=1` 仍返回该条，响应不包含完整正文。 |
+| 配置在 Admin HTTP 与私有 broker 一致 | `AdminDataConfig.from_env` → `AdminRequestAuth.runtime_http_config` / `session_broker_settings`，回归直接核对数值并执行两层传输。 |
+| 扩容不放松校验 | 相同大正文携带额外字段或不同 request_id 时仍返回原失败；既有超限、capability、超时与关闭测试继续执行。 |
+| 本机正常服务是否恢复 | 由[修复回执](../../exec/agent-diary-retrieval-capacity-repair-20261006.md)单独记录；合成正文技术验证不能替代正常账户、真实模型验收。 |
+
+本次是既有检索行为的服务器配置修复。没有新页面、弹窗、业务入口、数据库 schema 或模型调用；不新增 PRD，不以文档检查代替功能验证。历史数据库与既有设计正文保留。

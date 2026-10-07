@@ -2,6 +2,7 @@
 # [Output] Compatibility evidence for date, fuzzy, labels, limits, Unicode, vector/auto and explicit broker failure.
 # [Pos] Provider-free user MCP tool tests; production DB helpers must never participate.
 # [Sync] 2026-09-15: replace actor/DB fixtures with the private Session projection client boundary.
+# [Sync] 2026-10-06: regress >1 MiB full-text reads through Admin DTO HTTP, the configured broker and fuzzy retrieval.
 from __future__ import annotations
 
 import json
@@ -10,6 +11,9 @@ from pathlib import Path
 import sys
 import unittest
 import unittest.mock
+
+import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -23,6 +27,10 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     SessionProjectionResultDTO,
 )
 from libs.claude_agent_kit.server.sessions_tool import handle_get_sessions_range
+from services.admin_data import AdminDataClient, AdminDataConfig
+from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.session_data import LIST_SESSIONS, AdminSessionData
+from services.admin_data.session_projection_broker import SessionProjectionBroker
 
 
 def _projection(rows: list[dict]) -> SessionProjectionResultDTO:
@@ -211,6 +219,126 @@ class TestGetSessionsRangeTool(unittest.TestCase):
         )
         legacy_range.assert_not_called()
         legacy_all.assert_not_called()
+
+
+def _template_response_budget() -> int:
+    values = dict(
+        line.split("=", 1)
+        for line in (ROOT / ".env.example").read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    return int(values["INK_ADMIN_DREAM_MAX_RESPONSE_BYTES"])
+
+
+def _large_session_tool_call(monkeypatch, budget: int, *, corrupt: str | None = None):
+    config = AdminDataConfig.from_env({
+        "INK_ADMIN_DREAM_BASE_URL": "https://admin.example",
+        "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth",
+        "INK_DREAM_API_RESOURCE": "https://dream.example/api",
+        "INK_ADMIN_DREAM_SERVICE_CLIENT_ID": "fixture-service",
+        "INK_ADMIN_DREAM_SERVICE_SECRET": "fixture-secret-" + "x" * 32,
+        "INK_ADMIN_DREAM_MAX_RESPONSE_BYTES": str(budget),
+    })
+    rows = [
+        {
+            "id": f"session-{index}", "name": None, "labels": [],
+            "created_at": "2026-01-01T00:00:00+08:00",
+            "updated_at": "2026-01-01T00:00:00.123456+08:00",
+            "first_line": "preview", "text": "x" * 2500,
+        }
+        for index in range(560)
+    ]
+    # The only matching text is in the final row: truncating before retrieval
+    # would lose it even though the requested result limit is one.
+    rows[-1]["text"] += " needle"
+    requests = []
+    response_bytes = []
+
+    def handler(request):
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            data = {
+                "version": "1", "auth": {
+                    "issuer": config.issuer, "jwks_uri": config.jwks_uri,
+                    "resource": config.resource, "algorithm": "ES256",
+                    "clients": {"browser": "fixture-browser", "device": "fixture-device"},
+                    "scopes": ["dream:read"], "delegations": [],
+                },
+                "schema_capabilities": [],
+                "operations": [LIST_SESSIONS.capability.model_dump()],
+            }
+        else:
+            assert request.url.path.endswith("/operations/session.list")
+            assert request.headers["authorization"] == "Bearer fixture-turn-grant"
+            assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture-service-token"
+            assert "cookie" not in request.headers
+            body = json.loads(request.content)
+            assert body == {
+                "request_id": request_id,
+                "input": {"start_date": "2020-01-01", "end_date": "2026-10-06", "include_text": True},
+            }
+            requests.append(body)
+            data = {"sessions": rows}
+            if corrupt == "extra-field":
+                data["unexpected"] = "synthetic-private-data"
+            elif corrupt == "request-id":
+                request_id = "different-request"
+        response = httpx.Response(200, json={"request_id": request_id, "data": data})
+        if not request.url.path.endswith("/capabilities"):
+            response_bytes.append(len(response.content))
+        return response
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        client = AdminDataClient(config, client=http, operations=(LIST_SESSIONS,),
+            service_token_provider=lambda: "fixture-service-token")
+        client.capabilities("fixture-catalog")
+        owner = AdminRequestAuth(config, client=client, verifier=unittest.mock.Mock())
+        assert owner.runtime_http_config.max_response_bytes == budget
+        assert owner.session_broker_settings.max_bytes == budget
+        sessions = AdminSessionData(client)
+
+        class Provider:
+            def list_sessions(self, input_dto, request_id):
+                return sessions.list(input_dto, request_id, access_token="fixture-turn-grant")
+
+        broker = SessionProjectionBroker(Provider(), settings=owner.session_broker_settings)
+        broker.start()
+        try:
+            monkeypatch.setattr(os, "environ", broker.child_env())
+            result = json.loads(handle_get_sessions_range({
+                "start_date": "2020-01-01", "end_date": "2026-10-06",
+                "query": "needle", "limit": 1,
+            }))
+        finally:
+            broker.close()
+    assert len(requests) == 1
+    assert 1_048_576 < response_bytes[0] < _template_response_budget()
+    return result
+
+
+@pytest.mark.parametrize("budget, expected_ok", [(1_048_576, False), (_template_response_budget(), True)])
+def test_full_text_range_uses_configured_http_and_broker_capacity(monkeypatch, budget, expected_ok):
+    result = _large_session_tool_call(monkeypatch, budget)
+    assert result["ok"] is expected_ok
+    if expected_ok:
+        assert [item["sessionId"] for item in result["sessions"]] == ["session-559"]
+        assert result["sessions"][0]["match"]["fields"] == ["text"]
+        assert "text" not in result["sessions"][0]
+    else:
+        assert result == {
+            "ok": False, "error": "session_projection_unavailable",
+            "service_error_code": "ADMIN_RESPONSE_INVALID",
+        }
+
+
+@pytest.mark.parametrize("corrupt", ["extra-field", "request-id"])
+def test_larger_diary_capacity_preserves_strict_reply_checks(monkeypatch, corrupt):
+    result = _large_session_tool_call(monkeypatch, _template_response_budget(), corrupt=corrupt)
+    assert result == {
+        "ok": False, "error": "session_projection_unavailable",
+        "service_error_code": "ADMIN_RESPONSE_INVALID",
+    }
+    assert "synthetic-private-data" not in json.dumps(result)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 <!-- [同步] 2026-10-07：日历仅可见时检查连接器快照版本；简约元数据保留一次数量/标题链接及必要恢复反馈。 -->
 <!-- [同步] 2026-10-07：设置中的语言和主题在登录及本地数据导入清理后保留。 -->
 <!-- [同步] 2026-10-07：日历右侧保留自然高度的唯一圆角浮空纸片，内部简约留白。 -->
+<!-- [Sync] 2026-10-06: document the bounded full-text Session response budget and existing-env recovery. -->
 <!-- [Sync] 2026-10-06: document snapshot-first selected-date reads and today-updated metadata verification. -->
 <!-- [Sync] 2026-10-06: clarify selected database page rows and explicit synchronization of legacy indexes. -->
 <!-- [同步] 2026-10-05：记录日历互斥栏目、Search 今日元数据及必需的服务器 API 日期配置。 -->
@@ -194,6 +195,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 
 - **WebUI 返回 404 或无法打开：** 先确认 AutoDL 实例已运行，再按[恢复手册](docs/deploy/autodl-recovery.md)检查；不要新增隧道或硬编码当前公网主机名。
 - **Unable to check your session：** 验证两个 WebUI 映射，先检查 Admin，并确认 issuer、Dream origin/resource 与 callback 都来自当前实例。
+- **日记检索返回 `session_projection_unavailable` / `ADMIN_RESPONSE_INVALID`：** 元数据读取成功而正文读取失败时，应先核对服务器响应容量，不能仅凭错误码判断字段不匹配。后端模板显式设置 `INK_ADMIN_DREAM_MAX_RESPONSE_BYTES=16777216`（16 MiB）；未配置这个可选项时，代码仍采用 1 MiB。Admin HTTP 与私有 Session broker 共用这一字节上限。全文读取发生在 fuzzy 排序和 `limit` 之前，因此较小的结果数量限制不会减少输入正文。已有后端配置需要明确设置容量，并由进程所有者重启后端；后续 turn 才会取得新的 broker 上限。严格响应结构及请求编号校验保持生效。见[日记检索修复回执](docs/exec/agent-diary-retrieval-capacity-repair-20261006.md)。
 - **`ADMIN_SERVICE_AUTH_UNAVAILABLE` 或 `ADMIN_TIMEOUT`：** 先验证 Admin 与 PostgreSQL，再重启 Dream；Dream 不得回退数据库连接。
 - **Runtime 未通过 production qualification：** 核对 `command -v ink-claude-code-dream`、package-root `cli.js`、相邻 manifest、Runtime `0.1.10`、compatibility `2.1.241` 与必需 capability。
 - **`uv sync` 删除 pytest：** 使用上面的临时 `uv run --with pytest...` 命令，或单独评审开发依赖。

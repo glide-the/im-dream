@@ -3,6 +3,7 @@
 <!-- [Sync] 2026-10-07: Calendar observes connector snapshot versions only while visible; compact metadata keeps a single count/link and necessary recovery. -->
 <!-- [Sync] 2026-10-07: Settings language/theme survive login and local-data import cleanup. -->
 <!-- [Sync] 2026-10-07: Calendar retains one naturally sized rounded floating workspace with minimal inner content. -->
+<!-- [Sync] 2026-10-06: document the bounded full-text Session response budget and existing-env recovery. -->
 <!-- [Sync] 2026-10-06: document snapshot-first selected-date reads and today-updated metadata verification. -->
 <!-- [Sync] 2026-10-06: clarify selected database page rows and explicit synchronization of legacy indexes. -->
 <!-- [Sync] 2026-10-06: describe the Calendar right workspace's flat paper, whitespace and borderless ordinary content. -->
@@ -194,6 +195,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 
 - **WebUI returns 404 or does not open:** confirm the AutoDL instance is running, then follow the [recovery runbook](docs/deploy/autodl-recovery.md). Do not add a tunnel or hard-code the current public hostname.
 - **Unable to check your session:** verify both WebUI mappings, Admin first, and confirm the projected issuer, Dream origin/resource and callback all came from the current instance.
+- **Diary retrieval returns `session_projection_unavailable` / `ADMIN_RESPONSE_INVALID`:** if metadata reads succeed while full-text reads fail, check the server response budget before assuming a DTO mismatch. The backend template sets `INK_ADMIN_DREAM_MAX_RESPONSE_BYTES=16777216` (16 MiB); the code fallback remains 1 MiB when this optional setting is omitted. Admin HTTP and the private Session broker share this bound. Full text is read before fuzzy ranking and `limit`, so a small result limit does not reduce the incoming payload. Existing backend env files need an explicit budget and a restart of the owned backend process; new turns then receive the new broker bound. Strict response/request-ID checks remain enforced. See the [retrieval repair receipt](docs/exec/agent-diary-retrieval-capacity-repair-20261006.md).
 - **`ADMIN_SERVICE_AUTH_UNAVAILABLE` or `ADMIN_TIMEOUT`:** verify Admin and its PostgreSQL before restarting Dream. Dream must not fall back to a database connection.
 - **Runtime is not production-qualified:** verify `command -v ink-claude-code-dream`, the package-root `cli.js`, adjacent manifest, Runtime `0.1.10`, compatibility `2.1.241`, and required capabilities.
 - **`uv sync` removed pytest:** use the ephemeral `uv run --with pytest...` command above or add a reviewed development dependency.
