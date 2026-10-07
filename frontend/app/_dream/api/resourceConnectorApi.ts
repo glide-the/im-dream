@@ -1,3 +1,5 @@
+// [Sync] 2026-10-07: retain the public nullable snapshot identity; malformed versions fail closed and missing versions remain unconfirmed.
+// [Sync] 2026-10-05: share cancellable Cookie transport and preserve safe structured codes/Retry-After for Calendar reads.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Connector REST endpoints, same-origin session and in-memory CSRF, and Notion resource selection payloads.
@@ -104,6 +106,7 @@ export interface ResourceConnector {
   createdAt: string;
   updatedAt: string;
   lastSyncedAt?: string;
+  currentSnapshotVersion?: string | null;
   auth: ConnectorAuthSession;
   sources: ConnectorSource[];
   syncPolicy?: ConnectorSyncPolicy;
@@ -262,7 +265,8 @@ function requirePositiveSafeInteger(value: unknown, field: string): number {
 export class ResourceConnectorApiError extends Error {
   readonly status: number;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, readonly code = '',
+    readonly context: Record<string, unknown> = {}, readonly retryAfter: number | null = null) {
     super(message);
     this.name = 'ResourceConnectorApiError';
     this.status = status;
@@ -507,6 +511,13 @@ function normalizeConnectorAuth(raw: unknown): ConnectorAuthSession {
 
 function normalizeConnector(raw: unknown): ResourceConnector {
   const record = asRecord(raw);
+  const hasSnakeVersion = Object.prototype.hasOwnProperty.call(record, 'current_snapshot_version');
+  const hasVersion = hasSnakeVersion || Object.prototype.hasOwnProperty.call(record, 'currentSnapshotVersion');
+  const currentSnapshotVersion = hasSnakeVersion ? record.current_snapshot_version : record.currentSnapshotVersion;
+  if (hasVersion && currentSnapshotVersion !== null
+    && (typeof currentSnapshotVersion !== 'string' || !currentSnapshotVersion.trim())) {
+    throw new ResourceConnectorApiError(502, 'Notion snapshot identity is invalid. Please retry.', 'ADMIN_RESPONSE_INVALID');
+  }
   const now = nowIso();
   const sources = Array.isArray(record.sources)
     ? record.sources.map(normalizeConnectorSource)
@@ -541,6 +552,7 @@ function normalizeConnector(raw: unknown): ResourceConnector {
     createdAt: asString(record.created_at) ?? asString(record.createdAt) ?? '',
     updatedAt: asString(record.updated_at) ?? asString(record.updatedAt) ?? now,
     lastSyncedAt,
+    currentSnapshotVersion: currentSnapshotVersion as string | null | undefined,
     auth,
     sources,
     syncPolicy,
@@ -717,7 +729,7 @@ function normalizeNotionSkillFileContent(raw: unknown): NotionSkillFileContent {
   };
 }
 
-async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
 
@@ -736,15 +748,20 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     let detail = '';
+    let context: Record<string, unknown> = {};
     try {
       const payload = await response.json() as { detail?: unknown };
       detail = typeof payload.detail === 'string' ? payload.detail.trim() : '';
+      context = asRecord(payload.detail);
     } catch {
       detail = '';
     }
     throw new ResourceConnectorApiError(
       response.status,
       detail || `Notion request failed (${response.status}). Please retry.`,
+      typeof context.error_code === 'string' ? context.error_code : /^(?:ADMIN_[A-Z_]+|INVALID_ACCESS_TOKEN)$/.test(detail) ? detail : '', context,
+      response.headers.has('Retry-After') && /^\d+$/.test(response.headers.get('Retry-After')!)
+        ? Number(response.headers.get('Retry-After')) : null,
     );
   }
 
@@ -755,8 +772,8 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function listConnectors(): Promise<ResourceConnector[]> {
-  const response = await fetchJson<unknown>('/api/connectors');
+export async function listConnectors(signal?: AbortSignal): Promise<ResourceConnector[]> {
+  const response = await fetchJson<unknown>('/api/connectors', { signal });
   return normalizeConnectorListResponse(response);
 }
 

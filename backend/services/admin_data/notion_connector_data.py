@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: pin frozen ownership-v1 four strict execution DTOs separately from the old21 read contracts and bind accepted receipts.
 # [Input] Admin Registry148-168 descriptors and actor-free Notion connector domain values.
 # [Output] Strict Pydantic DTOs, exact operation capabilities and bounded unknown-write recovery.
 # [Pos] Dream wire boundary; Admin owns Drizzle ORM, permissions, row locks and transactions.
@@ -6,10 +7,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from threading import RLock
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, field_validator, model_serializer
+from pydantic import Field, JsonValue, field_validator, model_serializer, model_validator
 
 from .chat_models import ChatStrictDTO, validate_timestamp_text
 from .client import AdminDataClient, DomainOperation
@@ -294,6 +296,168 @@ class NotionSyncSnapshotSaveInputDTO(ChatStrictDTO):
     synced_resources: Annotated[list[NotionSyncedResourceDTO], Field(max_length=20_000)]
 
 
+# Frozen Admin revision30 artifact: notionLightSnapshotDto / notionSyncRunDto.
+SafeRevision = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
+PositiveRevision = Annotated[int, Field(ge=1, le=9_007_199_254_740_991)]
+
+
+class NotionLightPageDTO(ChatStrictDTO):
+    page_id: EntityId
+    title: str
+    url: str
+    last_edited: str
+    created_time: str | None
+    last_edited_time: str | None
+
+    @field_validator("last_edited", "created_time", "last_edited_time")
+    @classmethod
+    def time_value(cls, value):
+        return value if value is None or value == "" else validate_timestamp_text(value)
+
+
+class NotionLightDatabaseDTO(ChatStrictDTO):
+    database_id: EntityId
+    title: str
+    page_count: SafeRevision
+    properties_schema: JsonObject
+    last_edited: str
+    url: str
+
+    @field_validator("last_edited")
+    @classmethod
+    def time_value(cls, value):
+        return value if value == "" else validate_timestamp_text(value)
+
+
+class NotionLightConnectorDTO(ChatStrictDTO):
+    id: ConnectorId
+    name: str
+    platform: Literal["notion"]
+    auth_status: Literal["authenticated"]
+    last_synced_at: str | None
+    selected_databases: Annotated[list[EntityId], Field(max_length=10_000)]
+    selected_pages: Annotated[list[EntityId], Field(max_length=10_000)]
+
+    _time = field_validator("last_synced_at")(validate_timestamp_text)
+
+
+class NotionLightIdentityDTO(ChatStrictDTO):
+    snapshot_version: EntityId
+    source_revision: EntityId
+    sync_cursor: EntityId
+    workspace_id: EntityId
+    resource_connector_id: ConnectorId
+
+
+class NotionLightSnapshotDTO(ChatStrictDTO):
+    metadata: NotionSnapshotMetadataDTO
+    connector: NotionLightConnectorDTO
+    index: list[NotionLightPageDTO]
+    databases: list[NotionLightDatabaseDTO]
+    database_pages: dict[EntityId, list[NotionLightPageDTO]]
+    pages: JsonObject
+    identity: NotionLightIdentityDTO
+
+    @model_validator(mode="after")
+    def validate_index(self):
+        if self.pages or self.connector.id != self.metadata.resource_connector_id:
+            raise ValueError("Snapshot must contain metadata only for its connector")
+        if any(getattr(self.metadata, key) != value for key, value in self.identity.model_dump().items()):
+            raise ValueError("Snapshot identity copies differ")
+        databases = set(self.connector.selected_databases)
+        page_key = lambda value: value.replace("-", "").lower()
+        selected = {page_key(value) for value in self.connector.selected_pages}
+        summaries = {db.database_id for db in self.databases}
+        if (len(databases) != len(self.connector.selected_databases)
+            or len(selected) != len(self.connector.selected_pages)
+            or len(summaries) != len(self.databases) or summaries != databases
+            or set(self.database_pages) != databases
+            or any(len(self.database_pages[db.database_id]) != db.page_count for db in self.databases)):
+            raise ValueError("Database coverage differs from selected sources")
+        database_pages = {page_key(page.page_id) for pages in self.database_pages.values() for page in pages}
+        indexed = {page_key(page.page_id) for page in self.index}
+        if len(indexed) != len(self.index) or not indexed <= selected | database_pages or not database_pages <= indexed:
+            raise ValueError("Index must cover selected database pages without duplicates")
+        return self
+
+
+class NotionSyncExecutionPolicyDTO(ChatStrictDTO):
+    lease_seconds: PositiveRevision
+    heartbeat_seconds: PositiveRevision
+    renewal_budget_seconds: PositiveRevision
+
+    @model_validator(mode="after")
+    def validate_budget(self):
+        if self.heartbeat_seconds + self.renewal_budget_seconds >= self.lease_seconds:
+            raise ValueError("Heartbeat and renewal budget must fit inside lease")
+        return self
+
+
+class NotionSyncRunDTO(ChatStrictDTO):
+    run_id: ConnectorId
+    fence_epoch: SafeRevision
+    service_client_id: Annotated[str, Field(min_length=1)]
+    worker_id: ConnectorId
+    owner_user_id: CanonicalUserId
+    selection_revision: SafeRevision
+    authorization_revision: SafeRevision
+    policy_revision: SafeRevision
+    started_at: str
+    heartbeat_at: str
+    lease_expires_at: str
+    status: Literal["running", "succeeded", "failed", "cancelled", "invalidated"]
+    error_code: Literal["NOTION_SYNC_FAILED", "NOTION_SYNC_CANCELLED", "NOTION_SYNC_CONTEXT_CHANGED", "NOTION_UPSTREAM_UNAVAILABLE"] | None
+
+    _timestamps = field_validator("started_at", "heartbeat_at", "lease_expires_at")(validate_timestamp_text)
+
+
+class NotionSyncRunClaimInputDTO(ChatStrictDTO):
+    connector_id: ConnectorId
+    worker_id: ConnectorId
+
+
+class NotionSyncRunRequestInputDTO(NotionSyncRunClaimInputDTO):
+    authority: NotionAuthorityDTO | None
+
+
+class NotionSyncRunKeyDTO(NotionSyncRunClaimInputDTO):
+    run_id: ConnectorId
+    fence_epoch: PositiveRevision
+
+
+class NotionSyncSucceededDTO(ChatStrictDTO):
+    status: Literal["succeeded"]
+    workspace_id: EntityId
+    snapshot: NotionLightSnapshotDTO
+    synced_resources: Annotated[list[NotionSyncedResourceDTO], Field(max_length=20_000)]
+
+
+class NotionSyncFailedDTO(ChatStrictDTO):
+    status: Literal["failed"]
+    error_code: Literal["NOTION_SYNC_FAILED", "NOTION_UPSTREAM_UNAVAILABLE"]
+
+
+class NotionSyncCancelledDTO(ChatStrictDTO):
+    status: Literal["cancelled"]
+    error_code: Literal["NOTION_SYNC_CANCELLED"]
+
+
+class NotionSyncRunFinishInputDTO(NotionSyncRunKeyDTO):
+    outcome: Annotated[NotionSyncSucceededDTO | NotionSyncFailedDTO | NotionSyncCancelledDTO, Field(discriminator="status")]
+
+
+class NotionSyncRunOutputDTO(ChatStrictDTO):
+    status: Literal["claimed", "busy", "not_due", "renewed", "succeeded", "failed", "cancelled"]
+    connector: NotionConnectorDTO
+    run: NotionSyncRunDTO | None
+    server_now: str
+    retry_at: str | None
+    execution_policy: NotionSyncExecutionPolicyDTO
+    snapshot: NotionLightSnapshotDTO | None
+
+    _timestamps = field_validator("server_now", "retry_at")(validate_timestamp_text)
+
+
 def _operation(
     name: str,
     kind: Literal["read", "write"],
@@ -359,6 +523,14 @@ NOTION_CONNECTOR_SCHEMA_REQUIREMENTS = (
     SchemaCapabilityDTO(capability="dream.schema.unified.v1", version=1, contract_sha256="8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"),
 )
 
+REQUEST_NOTION_SYNC_RUN = _operation("notion.sync-run.request", "write", "d020bdae89d51eef867e1337d6006081f6ba6b7a7560c4a4442b5e1461398fa3", NotionSyncRunRequestInputDTO, NotionSyncRunOutputDTO)
+CLAIM_NOTION_SYNC_RUN = _operation("notion.sync-run.claim", "write", "a2e95601c0dcb2c0c010931bbe7ab2afb4e4f6000847fe0fb92ddb819ce432cc", NotionSyncRunClaimInputDTO, NotionSyncRunOutputDTO, background=True)
+RENEW_NOTION_SYNC_RUN = _operation("notion.sync-run.renew", "write", "f15c16e243d7640fb02401cf21d1fc8584628ef307da3f8814c9a6d445bb1719", NotionSyncRunKeyDTO, NotionSyncRunOutputDTO, background=True)
+FINISH_NOTION_SYNC_RUN = _operation("notion.sync-run.finish", "write", "885e17ff0feeb4372e735d988608e9380dd72249892f69753b00165045742877", NotionSyncRunFinishInputDTO, NotionSyncRunOutputDTO, background=True)
+NOTION_SYNC_RUN_OPERATIONS = (REQUEST_NOTION_SYNC_RUN, CLAIM_NOTION_SYNC_RUN, RENEW_NOTION_SYNC_RUN, FINISH_NOTION_SYNC_RUN)
+NOTION_SYNC_RUN_SCHEMA_REQUIREMENTS = (*NOTION_CONNECTOR_SCHEMA_REQUIREMENTS,
+    SchemaCapabilityDTO(capability="dream.notion-sync-ownership.v1", version=1, contract_sha256="a54b947c69ea0f129d22fd440c3a9f5694026ac0977adef2d5b09a97d7a9e993"))
+
 
 class AdminNotionConnectorData:
     """Execute Registry148-168 with no retry and exact receipt recovery."""
@@ -367,16 +539,16 @@ class AdminNotionConnectorData:
         self._client = client
         self._catalog_lock = RLock()
 
-    def ensure_capabilities(self, request_id: str) -> None:
+    def ensure_capabilities(self, request_id: str, *, execution: bool = False) -> None:
+        operations = NOTION_SYNC_RUN_OPERATIONS if execution else NOTION_CONNECTOR_OPERATIONS
+        requirements = NOTION_SYNC_RUN_SCHEMA_REQUIREMENTS if execution else NOTION_CONNECTOR_SCHEMA_REQUIREMENTS
         with self._catalog_lock:
             if not self._client.supports(
-                NOTION_CONNECTOR_OPERATIONS,
-                NOTION_CONNECTOR_SCHEMA_REQUIREMENTS,
+                operations, requirements,
             ):
                 self._client.capabilities(request_id)
             if not self._client.supports(
-                NOTION_CONNECTOR_OPERATIONS,
-                NOTION_CONNECTOR_SCHEMA_REQUIREMENTS,
+                operations, requirements,
             ):
                 raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
 
@@ -389,14 +561,15 @@ class AdminNotionConnectorData:
         access_token: str | None,
         background_connector_id: str | None = None,
     ):
-        self.ensure_capabilities(request_id)
+        self.ensure_capabilities(request_id, execution=operation in NOTION_SYNC_RUN_OPERATIONS)
         try:
-            return self._client.execute(
+            result = self._client.execute(
                 operation,
                 input_dto,
                 request_id,
                 access_token=access_token,
             )
+            return self._checked_result(operation, input_dto, result, request_id)
         except AdminDataError as error:
             if not error.outcome_unknown or operation.capability.kind != "write":
                 raise
@@ -423,7 +596,48 @@ class AdminNotionConnectorData:
             raise AdminDataError(
                 "ADMIN_WRITE_RESULT_UNKNOWN", 503, request_id, True
             )
-        return receipt.result
+        return self._checked_result(operation, input_dto, receipt.result, request_id)
+
+    def _checked_result(self, operation, input_dto, result, request_id):
+        if operation not in NOTION_SYNC_RUN_OPERATIONS:
+            return result
+        valid_status = ("claimed", "busy", "not_due") if operation in (REQUEST_NOTION_SYNC_RUN, CLAIM_NOTION_SYNC_RUN) else (
+            ("renewed",) if operation is RENEW_NOTION_SYNC_RUN else (input_dto.outcome.status,))
+        run = result.run
+        invalid = result.connector.id != input_dto.connector_id or result.status not in valid_status
+        if result.status in ("busy", "not_due"):
+            invalid = invalid or run is not None or result.snapshot is not None
+        else:
+            invalid = invalid or run is None
+            if run is not None:
+                invalid = invalid or (run.worker_id != input_dto.worker_id
+                    or run.fence_epoch < 1
+                    or run.owner_user_id != result.connector.user_id
+                    or run.service_client_id != self._client._config.service_client_id
+                    or run.status != ("running" if result.status in ("claimed", "renewed") else result.status))
+                if hasattr(input_dto, "run_id"):
+                    invalid = invalid or run.run_id != input_dto.run_id or run.fence_epoch != input_dto.fence_epoch
+        if result.status == "succeeded":
+            invalid = invalid or result.snapshot is None
+            if result.snapshot is not None:
+                metadata = result.snapshot.metadata
+                invalid = invalid or (metadata.resource_connector_id != result.connector.id
+                    or metadata.workspace_id != result.connector.id
+                    or metadata.snapshot_version != result.connector.current_snapshot_version
+                    or metadata.source_revision != result.connector.current_source_revision
+                    or metadata.sync_cursor != result.connector.current_sync_cursor
+                    or result.connector.last_synced_at is None
+                    or datetime.fromisoformat(metadata.fetched_at.replace("Z", "+00:00"))
+                        != datetime.fromisoformat(result.connector.last_synced_at.replace("Z", "+00:00"))
+                    or result.snapshot != input_dto.outcome.snapshot
+                    or metadata.workspace_id != input_dto.outcome.workspace_id)
+        elif result.snapshot is not None:
+            invalid = True
+        if operation is FINISH_NOTION_SYNC_RUN and run is not None:
+            invalid = invalid or run.error_code != getattr(input_dto.outcome, "error_code", None)
+        if invalid:
+            raise invalid_response(request_id, write=True)
+        return result
 
 
 __all__ = [

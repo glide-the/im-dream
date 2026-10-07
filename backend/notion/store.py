@@ -1,5 +1,6 @@
+# [Sync] 2026-10-07: adapt request/claim/renew/finish with server process UUID and service-only renew/finish; no legacy sync fallback.
 # [Input] Strict Admin Notion DTO client, one OAuth/delegated actor or scheduled-sync service authority.
-# [Output] Historical Notion Store API backed only by Registry148-168 business operations.
+# [Output] Store compatibility API with Registry148-168 reads and frozen owned-execution operations.
 # [Pos] Sole connector persistence adapter; contains no SQL, ORM, pool, DDL or database fallback.
 # [Sync] 2026-09-16: replace Dream PostgreSQL repository/UOW with Admin DTO operations.
 """Admin-backed Notion connector persistence compatibility layer."""
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, is_dataclass
+import os
 from threading import RLock
 from typing import Any, Optional
 from uuid import uuid4
@@ -36,10 +38,25 @@ from services.admin_data.notion_connector_data import (
     NotionSyncConnectorPatchInputDTO, NotionSyncResourcesInputDTO,
     NotionSyncSnapshotSaveInputDTO, NotionSyncedResourceDTO,
     NotionThreadAttachInputDTO, NotionThreadResolveInputDTO,
+    REQUEST_NOTION_SYNC_RUN, CLAIM_NOTION_SYNC_RUN, RENEW_NOTION_SYNC_RUN,
+    FINISH_NOTION_SYNC_RUN, NotionSyncRunClaimInputDTO, NotionSyncRunRequestInputDTO,
+    NotionSyncRunKeyDTO, NotionSyncRunFinishInputDTO, NotionSyncRunDTO,
 )
 
 from .errors import NotionSnapshotNotReadyError
 from .sync_policy import SYNC_POLICY_CONFIG_KEY, resolve_sync_policy
+
+_worker_identity: tuple[int, str] | None = None
+_worker_identity_lock = RLock()
+
+
+def _process_worker_id() -> str:
+    """Server-only UUID; a prefork child must not inherit its parent's worker."""
+    global _worker_identity
+    with _worker_identity_lock:
+        if _worker_identity is None or _worker_identity[0] != os.getpid():
+            _worker_identity = (os.getpid(), str(uuid4()))
+        return _worker_identity[1]
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -92,6 +109,11 @@ class NotionConnectorStore:
         self._expected_user_id = None if expected_user_id is None else str(expected_user_id)
         self._background = background
 
+    @property
+    def background(self) -> bool:
+        """Authority selected by server composition, never by a browser payload."""
+        return self._background
+
     def _request_id(self) -> str:
         return str(uuid4())
 
@@ -130,6 +152,46 @@ class NotionConnectorStore:
             access_token=self._access_token,
             background_connector_id=connector_id if self._background else None,
         )
+
+    def begin_sync_run(self, connector_id: str, user_id: int):
+        if not self._background:
+            self._assert_user(user_id)
+        operation = CLAIM_NOTION_SYNC_RUN if self._background else REQUEST_NOTION_SYNC_RUN
+        fields = {"connector_id": connector_id, "worker_id": _process_worker_id()}
+        input_dto = (NotionSyncRunClaimInputDTO(**fields) if self._background else
+            NotionSyncRunRequestInputDTO(**fields, authority=self._authority))
+        result = self._data.execute(operation, input_dto, self._request_id(),
+            access_token=None if self._background else self._access_token,
+            background_connector_id=connector_id if self._background else None)
+        self._project_connector(result.connector, requested_user_id=user_id)
+        if result.run is not None and result.run.owner_user_id != str(user_id):
+            raise AdminDataError("ADMIN_RESPONSE_INVALID", 503)
+        return result
+
+    @staticmethod
+    def _run_key(connector_id: str, run: NotionSyncRunDTO) -> dict:
+        return {"connector_id": connector_id, "worker_id": _process_worker_id(),
+            "run_id": run.run_id, "fence_epoch": run.fence_epoch}
+
+    def renew_sync_run(self, connector_id: str, run: NotionSyncRunDTO):
+        result = self._data.execute(RENEW_NOTION_SYNC_RUN,
+            NotionSyncRunKeyDTO(**self._run_key(connector_id, run)), self._request_id(),
+            access_token=None, background_connector_id=connector_id)
+        return self._checked_run_context(result, run)
+
+    def finish_sync_run(self, connector_id: str, run: NotionSyncRunDTO, outcome: dict):
+        result = self._data.execute(FINISH_NOTION_SYNC_RUN,
+            NotionSyncRunFinishInputDTO(**self._run_key(connector_id, run), outcome=outcome),
+            self._request_id(), access_token=None, background_connector_id=connector_id)
+        return self._checked_run_context(result, run)
+
+    @staticmethod
+    def _checked_run_context(result, original):
+        fields = ("run_id", "fence_epoch", "service_client_id", "worker_id", "owner_user_id",
+            "selection_revision", "authorization_revision", "policy_revision", "started_at")
+        if result.run is None or any(getattr(result.run, key) != getattr(original, key) for key in fields):
+            raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, outcome_unknown=True)
+        return result
 
     def create_connector(self, user_id: int, name: str, platform: str = "notion", config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         self._assert_user(user_id)

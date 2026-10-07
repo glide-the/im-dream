@@ -1,4 +1,7 @@
 // [Sync] 2026-10-07: add matching English/Chinese Chat activity source, display and recovery labels.
+// [Sync] 2026-10-07: compact Notion title count, single safe-link content and actionable connector sync recovery copy in both languages.
+// [Sync] 2026-10-06: selected-date snapshot and separate today-verification feedback in both locales.
+// [Sync] 2026-10-05: localize Calendar tabs, Search-scope metadata states and recovery in English and Chinese.
 // [Sync] 2026-09-29: localize task information, source/run Conversations, and task schedule detail groups.
 // [Sync] 2026-09-27: localize task-session source navigation and created-task lists.
 // [Sync] 2026-09-29: localize per-user-message turn navigation, previews, loading, and locate feedback.
@@ -400,6 +403,9 @@ const resources = {
       },
       calendar: {
         title: 'Calendar',
+        tabsLabel: "Calendar sections",
+        notion: {"title": "Notion documents", "settings": "Manage connector", "refresh": "Refresh", "login": "Sign in to connect Notion and view documents.", "unconnected": "Connect Notion to view documents.", "pending": "The Notion connection is not complete.", "expired": "Notion authorization expired. Reconnect in settings.", "ambiguous": "Choose the current Notion connection in settings.", "loading": "Loading documents…", "refreshing": "Refreshing documents…", "count": "{{count}} documents", "knownCount": "{{count}} known documents", "syncIncomplete": "Connector sync has not completed.", "syncError": "Connector sync failed.", "syncDisabled": "Automatic sync is off.", "observed": "Last synced: {{time}}", "coverage": "Documents come from the selected connector snapshot. New pages and unrecorded changes require connector sync.", "partial": "Some documents are unavailable. Refresh to try again.", "noCandidates": "The connector index contains no documents. Select resources and sync in settings.", "noToday": "No documents created or edited today were found.", "failed": "Unable to read Notion documents. Try again.", "adminPermission": "You no longer have access to this connection. Check connection settings.", "permission": "This connection cannot read these documents. Check Notion sharing permissions.", "resourceUnavailable": "This document is unavailable or its access changed.", "rateLimited": "Notion has received too many requests. Please retry later.", "upstream": "Notion is temporarily unavailable. Please retry later.", "timezone": "Unable to read date settings. Please retry.", "settingsUnavailable": "Unable to read connection or date settings. Please retry.", "contextChanged": "The connection changed. Refresh to read the current documents.", "stale": "Refresh failed. The last read documents are still shown.", "created": "Created on this date", "edited": "Edited today", "createdMark": "Created", "editedMark": "Edited", "open": "Open in Notion", "openAria": "Open {{title}} in Notion in a new tab", "urlUnavailable": "Unable to open this document. Refresh and retry.", "untitled": "Untitled document", "verifying": "Verifying documents updated today…", "noDate": "No documents created on this date were found.", "needsSync": "The snapshot is missing or lacks upstream timestamps. Sync the connector in settings."},
+
         subtitle: 'Select a day to revisit your entries',
         empty: 'No entries yet. Start writing to fill this calendar.',
         untitled: 'Untitled',
@@ -1443,6 +1449,9 @@ const resources = {
       },
       calendar: {
         title: '日历',
+        tabsLabel: "日历栏目",
+        notion: {"title": "Notion 文档", "settings": "管理连接器", "refresh": "刷新", "login": "登录后可连接 Notion 并查看文档。", "unconnected": "连接 Notion 后可查看文档。", "pending": "Notion 连接尚未完成。", "expired": "Notion 授权已失效，请重新连接。", "ambiguous": "请在设置中确认当前 Notion 连接。", "loading": "正在读取文档…", "refreshing": "正在刷新文档…", "count": "{{count}} 篇", "knownCount": "已知 {{count}} 篇", "syncIncomplete": "连接器同步尚未完成。", "syncError": "连接器同步失败。", "syncDisabled": "自动同步已关闭。", "observed": "最近同步：{{time}}", "coverage": "列表来自当前连接器的已选资源快照；新文档和未记录的变化需连接器同步。", "partial": "部分文档未能读取，请稍后刷新。", "noCandidates": "当前连接器索引没有文档，可前往设置选择资源并同步。", "noToday": "今天暂未发现新建或编辑的文档。", "failed": "暂时无法读取 Notion 文档，请重试。", "adminPermission": "当前账户已无权访问此连接，请检查连接设置。", "permission": "当前连接没有权限读取这些文档，请检查 Notion 分享权限。", "resourceUnavailable": "此文档当前不可用，可能已移除或访问权限已变化。", "rateLimited": "Notion 请求较多，请稍后重试。", "upstream": "Notion 暂时无法响应，请稍后重试。", "timezone": "无法读取日期设置，请重试。", "settingsUnavailable": "暂时无法读取连接或日期设置，请重试。", "contextChanged": "连接已变化，请刷新读取当前文档。", "stale": "刷新失败，仍显示上次读取的文档。", "created": "当日创建", "edited": "今天编辑", "createdMark": "创建", "editedMark": "编辑", "open": "在 Notion 中打开", "openAria": "在新标签中打开 Notion 文档：{{title}}", "urlUnavailable": "暂时无法打开，可刷新重试。", "untitled": "未命名文档", "verifying": "正在校验今天更新的文档…", "noDate": "该日没有创建的文档。", "needsSync": "快照尚未同步或缺少上游时间，请前往连接器同步以更新索引。"},
+
         subtitle: '选择任意一天重新回到当时的文字',
         empty: '这里还没有记录，动笔就会留下足迹。',
         untitled: '未命名',

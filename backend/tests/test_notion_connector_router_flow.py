@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: exercise public selection/manual flow through strict new execution DTOs and accepted-version caches.
 # [Input] Notion connector router and facade wiring for the business flow.
 # [Output] Exercise create → auth → resources → sync through the real router,
 #          Admin DTO client, provider-free Admin boundary, and mocked CLI.
@@ -215,59 +216,24 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
                 "page_ids": selected_page_ids,
             }
         )
-        return {
-            "metadata": {
-                "workspace_id": workspace_id,
-                "resource_connector_id": str(connector["id"]),
-                "snapshot_version": self._snapshot_version,
-                "source_revision": self._source_revision,
-                "sync_cursor": self._sync_cursor,
-                "fetched_at": "2026-07-04T13:30:00Z",
-                "state": "snapshot_ready",
-            },
-            "connector": {
-                "id": connector["id"],
-                "platform": "notion",
-                "auth_status": "authenticated",
-                "selected_databases": selected_database_ids,
-                "selected_pages": selected_page_ids,
-            },
-            "index": [
-                {
-                    "page_id": "page-team",
-                    "title": "Team Notes",
-                    "url": "https://www.notion.so/page-team",
-                    "last_edited": "2026-07-04T13:30:00Z",
-                }
-            ],
-            "databases": [
-                {
-                    "database_id": "db-team",
-                    "title": "Team Knowledge",
-                    "page_count": 2,
-                    "properties_schema": {"Name": {"type": "title"}},
-                    "last_edited": "2026-07-04T13:30:00Z",
-                    "url": "https://www.notion.so/db-team",
-                }
-            ],
-            "database_pages": {
-                "db-team": [
-                    {
-                        "page_id": "page-team",
-                        "title": "Team Notes",
-                        "last_edited": "2026-07-04T13:30:00Z",
-                    }
-                ]
-            },
-            "pages": {},
-            "identity": {
-                "workspace_id": workspace_id,
-                "resource_connector_id": str(connector["id"]),
-                "snapshot_version": self._snapshot_version,
-                "source_revision": self._source_revision,
-                "sync_cursor": self._sync_cursor,
-            },
-        }
+        def page(page_id):
+            return {"page_id": page_id, "title": "Team Notes", "url": f"https://www.notion.so/{page_id}",
+                "last_edited": "2026-07-04T13:30:00Z", "created_time": "2026-07-04T12:00:00Z",
+                "last_edited_time": "2026-07-04T13:30:00Z"}
+        db_pages = {key: [page("page-team")] for key in selected_database_ids}
+        index = {row["page_id"]: row for rows in db_pages.values() for row in rows}
+        index.update({key: page(key) for key in selected_page_ids})
+        identity = {"workspace_id": workspace_id, "resource_connector_id": str(connector["id"]),
+            "snapshot_version": self._snapshot_version, "source_revision": self._source_revision,
+            "sync_cursor": self._sync_cursor}
+        return {"metadata": {**identity, "fetched_at": "2026-07-04T13:30:00Z", "state": "snapshot_ready"},
+            "connector": {"id": connector["id"], "name": connector["name"], "platform": "notion",
+                "auth_status": "authenticated", "last_synced_at": connector.get("last_synced_at"),
+                "selected_databases": selected_database_ids, "selected_pages": selected_page_ids},
+            "index": list(index.values()), "databases": [{"database_id": key, "title": "Team Knowledge",
+                "page_count": 1, "properties_schema": {"Name": {"type": "title"}},
+                "last_edited": "2026-07-04T13:30:00Z", "url": f"https://www.notion.so/{key}"}
+                for key in selected_database_ids], "database_pages": db_pages, "pages": {}, "identity": identity}
 
     def test_connector_router_happy_path(self):
         create_response = self.client.post(
@@ -337,13 +303,10 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(select_payload["pageCount"], 1)
         self.assertEqual(select_payload["snapshotIdentity"]["workspace_id"], connector_id)
         self.assertEqual(select_payload["snapshotIdentity"]["snapshot_version"], self._snapshot_version)
-        actor_snapshot = (
-            NotionCredentialStore().user_paths(7).snapshot_root
-            / connector_id
-            / "current.json"
-        )
-        self.assertTrue(actor_snapshot.is_file())
-        self.assertNotIn(self._workspace_id, str(actor_snapshot))
+        actor_snapshot_root = NotionCredentialStore().user_paths(7).snapshot_root / connector_id
+        self.assertEqual(len(list(actor_snapshot_root.glob("snapshot-*.json"))), 1)
+        self.assertFalse((actor_snapshot_root / "current.json").exists())
+        self.assertNotIn(self._workspace_id, str(actor_snapshot_root))
 
         selected_resources_response = self.client.get(
             f"/api/connectors/{connector_id}/resources",

@@ -1,4 +1,5 @@
 // [Sync] 2026-10-07: login/import cleanup uses the explicit key list and retains browser language/theme.
+// [Sync] 2026-10-05: Calendar delegates Notion recovery to the canonical Settings Resources route without changing Chat handoff.
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
 // [Sync] 2026-09-28: open a scheduled task's persisted target Thread through the mounted ChatView navigation props.
 // [Sync] 2026-09-29: expose the shared Calendar date workspace from the existing 44px mobile Writing toolbar.
@@ -2403,6 +2404,10 @@ export default function App() {
           onClose={() => setShowCalendarPopup(false)}
           onOpenTaskThread={handleCalendarTaskThreadRequest}
           onArrangeTask={handleCalendarArrangeTask}
+          onOpenSettings={() => {
+            window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS['settings-resources']);
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          }}
           timezone={userTimezone}
           initialDateKey={getLocalDayKey(state?.createdAt, userTimezone) ?? getTodayKeyInTimezone(userTimezone)}
         />

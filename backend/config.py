@@ -1,6 +1,6 @@
 # [Input] Environment-backed runtime policy values and repository prompt files.
 # [Output] Central configuration for voice archetypes, screenplay Deck defaults,
-#          and the default Claude plugin selected for newly created Decks.
+#          default Claude plugins, and Calendar Notion API-date/URL-host policy.
 # [Pos] backend configuration source of truth
 # [Sync] 2026-08-14: define the screenplay-creation Deck template, retire legacy
 #                    system Deck defaults, and select drama-forge v1.0.1 for new Decks.
@@ -10,6 +10,13 @@
 """Voice archetypes and product-default configuration."""
 
 import os
+
+# [Sync] 2026-10-06: remote metadata calls require an operator-selected API date;
+# URL origins are server policy, never browser/connector configuration.
+NOTION_TODAY_API_VERSION = os.environ.get("INK_NOTION_TODAY_API_VERSION", "").strip()
+NOTION_ALLOWED_URL_HOSTS = frozenset(host.strip().lower() for host in os.environ.get(
+    "INK_NOTION_ALLOWED_URL_HOSTS", "www.notion.so,notion.so,www.notion.site,notion.site,app.notion.com"
+).split(",") if host.strip())
 import math
 
 

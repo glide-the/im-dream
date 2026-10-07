@@ -1,9 +1,12 @@
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
-// [Output] Accessible responsive Calendar dialog with floating month/task/diary papers, compact task rows, result view, and edit/history modals.
+// [Output] Accessible responsive Calendar with a month paper, exclusive task/diary/Notion panels, retained local state and viewport-contained tooltips/modals.
+// [Sync] 2026-10-07: CSS owns one naturally sized floating workspace and in-flow menu presentation; all component state/API/focus owners remain unchanged.
+// [Sync] 2026-10-06: borderless right-paper presentation is owned by CalendarPopup.css; component business and scroll/focus owners remain unchanged.
+// [Sync] 2026-10-05: add mutually exclusive accessible tabs; preserve local owners and pause hidden queries/polling.
 // [Pos] Calendar/date-workspace dialog in frontend/app/_dream/components; Admin remains schedule and trigger owner.
 // [Sync] 2026-09-29: move date context into task/diary headings and remove the visible outer summary surface for the floating-paper layout.
 // [Sync] 2026-09-29: add Chat handoff composer, latest-result replacement view, compact action rows, and independent task editor/history dialogs.
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
 import { getCalendarData, getDateKey, getTodayKey, deleteEntry, type CalendarEntry } from '../utils/calendarStorage';
@@ -16,7 +19,9 @@ import {
   type ScheduledTaskDefinitionResult, type ScheduledTaskRunResult, ScheduledTaskApiError,
 } from '../api/scheduledTaskApi';
 import Modal from './chat/Modal';
-import { IconArrowUp, IconClock, IconEdit, IconMoreHorizontal } from './chat/Icons';
+import CalendarNotionPanel from './CalendarNotionPanel';
+import NotionMark from './NotionMark';
+import { IconArrowUp, IconClock, IconEdit, IconFile, IconMoreHorizontal } from './chat/Icons';
 import ChatMarkdown from './chat/ChatMarkdown';
 import { fetchFullClaudeThreadMessages } from './chat/threadSessionHydration';
 import './CalendarPopup.css';
@@ -30,6 +35,7 @@ interface Props {
   initialDateKey?: string | null;
   onOpenTaskThread?: (threadId: string) => void;
   onArrangeTask?: (prompt: string) => void;
+  onOpenSettings?: () => void;
 }
 
 type CalendarListEntry = { id: string; timestamp: number; firstLine: string; state?: CalendarEntry['state'] };
@@ -112,7 +118,8 @@ function recentTrigger(triggers: ScheduledTrigger[]): ScheduledTrigger | null {
   return [...triggers].sort((left, right) => triggerTimestamp(right) - triggerTimestamp(left))[0] ?? null;
 }
 
-function ScheduledTaskResult({ task, triggers, onBack, onOpenThread, dateLocale }: {
+function ScheduledTaskResult({ task, triggers, onBack, onOpenThread, dateLocale, active }: {
+  active: boolean;
   task: ScheduledTask;
   triggers: ScheduledTrigger[];
   onBack: () => void;
@@ -124,32 +131,46 @@ function ScheduledTaskResult({ task, triggers, onBack, onOpenThread, dateLocale 
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
+  const historyRequestRef = useRef('');
+  const resultRequestRef = useRef('');
+  const resultControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const historyKey = JSON.stringify([task.id, task.revision, triggers.map((item) => [item.id, item.status, item.updated_at])]);
   useEffect(() => {
-    let active = true;
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; historyRequestRef.current = ''; resultRequestRef.current = ''; resultControllerRef.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    if (!active || historyRequestRef.current === historyKey) return;
+    historyRequestRef.current = historyKey;
     getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((response) => {
-      if (!active) return;
+      if (!mountedRef.current || historyRequestRef.current !== historyKey) return;
       const merged = new Map(triggers.map((trigger) => [trigger.id, trigger]));
       response.triggers.forEach((trigger) => merged.set(trigger.id, trigger));
       setLatest(recentTrigger([...merged.values()]));
-    }).catch(() => { if (active) setLatest(recentTrigger(triggers)); });
-    return () => { active = false; };
-  }, [task.id, task.revision, triggers]);
+    }).catch(() => { if (mountedRef.current && historyRequestRef.current === historyKey) setLatest(recentTrigger(triggers)); });
+  }, [active, historyKey, task.id, triggers]);
   useEffect(() => {
+    if (!active) return;
     if (!latest?.target_thread_id || !latest.final_message_id) {
       setResult(null); setLoading(false); setUnavailable(true); return;
     }
-    const controller = new AbortController();
+    const requestKey = JSON.stringify([latest.target_thread_id, latest.final_message_id]);
+    if (resultRequestRef.current === requestKey) return;
+    resultRequestRef.current = requestKey;
+    resultControllerRef.current?.abort();
+    const controller = new AbortController(); resultControllerRef.current = controller;
     setLoading(true); setUnavailable(false); setResult(null);
     fetchFullClaudeThreadMessages(latest.target_thread_id, controller.signal).then((snapshot) => {
+      if (controller.signal.aborted || !mountedRef.current) return;
       const message = snapshot.messages.find((candidate) => candidate.id === latest.final_message_id
         && candidate.role === 'assistant');
       const text = message?.parts.flatMap((part) => part.type === 'text' && part.text ? [part.text] : []).join('\n\n').trim();
       if (!text) throw new Error('Scheduled final message is unavailable.');
       setResult(text);
-    }).catch(() => { if (!controller.signal.aborted) setUnavailable(true); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [latest?.final_message_id, latest?.target_thread_id]);
+    }).catch(() => { if (!controller.signal.aborted && mountedRef.current) setUnavailable(true); })
+      .finally(() => { if (!controller.signal.aborted && mountedRef.current) setLoading(false); });
+  }, [active, latest?.final_message_id, latest?.target_thread_id]);
   const latestTime = latest ? new Date(latest.scheduled_at ?? latest.created_at).toLocaleString(dateLocale, {
     timeZone: task.rule.time_zone,
   }) : null;
@@ -170,7 +191,8 @@ function ScheduledTaskResult({ task, triggers, onBack, onOpenThread, dateLocale 
 }
 
 function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResult,
-  onLayerChange, onDraftDirtyChange, onCardRef, dateLocale }: {
+  onLayerChange, onDraftDirtyChange, onCardRef, dateLocale, active }: {
+  active: boolean;
   task: ScheduledTask;
   triggers: ScheduledTrigger[];
   onAction: (task: ScheduledTask, action: ScheduledTaskAction, desired?: ScheduledTaskDesired) => Promise<ScheduledTaskActionResult>;
@@ -227,13 +249,21 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
     } catch { setHistoryLoadMoreError(true); }
     finally { setHistoryLoadingMore(false); }
   }, [history, historyLoadingMore, task.id]);
+  const historyRequestRef = useRef('');
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((response) => { if (active) {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; historyRequestRef.current = ''; };
+  }, []);
+  useEffect(() => {
+    if (!active) { setMoreOpen(false); return; }
+    const requestKey = `${task.id}:${task.revision}`;
+    if (historyRequestRef.current === requestKey) return;
+    historyRequestRef.current = requestKey;
+    getScheduledHistory(task.id, SCHEDULED_HISTORY_PAGE_SIZE).then((response) => { if (mountedRef.current && historyRequestRef.current === requestKey) {
       setHistory(response.triggers); setHistoryHasMore(response.triggers.length === SCHEDULED_HISTORY_PAGE_SIZE);
-    } }).catch(() => { if (active) setHistoryError(true); });
-    return () => { active = false; };
-  }, [task.id, task.revision]);
+    } }).catch(() => { if (mountedRef.current && historyRequestRef.current === requestKey) setHistoryError(true); });
+  }, [active, task.id, task.revision]);
   useEffect(() => {
     onDraftDirtyChange(task.id, dirty);
     return () => onDraftDirtyChange(task.id, false);
@@ -373,7 +403,7 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
         onClick={() => void perform('run')}>{t('calendar.scheduledCheckRun')}</button> : null}
     </article>
 
-    <Modal open={editing} title={t('calendar.scheduledEditTitle', { title: task.title })} closeLabel={t('calendar.scheduledCancel')}
+    <Modal open={active && editing} title={t('calendar.scheduledEditTitle', { title: task.title })} closeLabel={t('calendar.scheduledCancel')}
       onClose={closeEditing} initialFocusRef={firstEditFieldRef} surfaceClassName="calendar-popup-task-editor">
       {draft ? <form className="calendar-popup__edit-panel" onSubmit={(event) => { event.preventDefault(); void perform('edit'); }}>
         <p className="calendar-popup__editor-kicker">{draft.kind === 'once' ? t('calendar.scheduledOnce') : t('calendar.scheduledDaily')}</p>
@@ -403,7 +433,7 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
       </form> : null}
     </Modal>
 
-    <Modal open={historyOpen} title={t('calendar.scheduledHistoryTitle', { title: task.title })}
+    <Modal open={active && historyOpen} title={t('calendar.scheduledHistoryTitle', { title: task.title })}
       closeLabel={t('calendar.scheduledClosePanel')} onClose={closeHistory} surfaceClassName="calendar-popup-task-history">
       <section className="calendar-popup__history">
         {historyError ? <div className="calendar-popup__alert" role="alert">{t('calendar.scheduledHistoryUnavailable')}<button type="button" onClick={() => void loadHistory()}>{t('calendar.scheduledRetry')}</button></div>
@@ -417,8 +447,8 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
   </>;
 }
 export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, onEntryDeleted, timezone,
-  initialDateKey, onOpenTaskThread, onArrangeTask }: Props) {
-  const { isAuthenticated } = useAuth();
+  initialDateKey, onOpenTaskThread, onArrangeTask, onOpenSettings }: Props) {
+  const { isAuthenticated, user } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
   const initialSelectedDate = initialDateKey ?? getTodayKeyInTimeZone(timezone);
@@ -433,6 +463,61 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const [scheduledTriggers, setScheduledTriggers] = useState<ScheduledTrigger[]>([]);
   const [selectedResultTaskId, setSelectedResultTaskId] = useState<string | null>(null);
   const [arrangePrompt, setArrangePrompt] = useState('');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'diary' | 'notion'>(() => isAuthenticated ? 'tasks' : 'diary');
+  const [focusedTab, setFocusedTab] = useState<'tasks' | 'diary' | 'notion'>(() => isAuthenticated ? 'tasks' : 'diary');
+  const [tooltipTab, setTooltipTab] = useState<string | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
+  const tabsId = useId();
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const tabFocusRef = useRef<string | null>(null);
+  const panelRefs = useRef(new Map<string, HTMLElement>());
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const mobileScrollRef = useRef(new Map<string, number>());
+  const visibleTabs: Array<'tasks' | 'diary' | 'notion'> = isAuthenticated ? ['tasks', 'diary', 'notion'] : ['diary', 'notion'];
+  useLayoutEffect(() => {
+    if (!tooltipTab || tooltipTab === activeTab) return;
+    const position = () => {
+      const anchor = tabRefs.current.get(tooltipTab)?.getBoundingClientRect();
+      const tip = tooltipRef.current?.getBoundingClientRect();
+      if (!anchor || !tip) return;
+      const gap = parseFloat(getComputedStyle(document.documentElement).fontSize) / 2;
+      const left = Math.max(gap, Math.min(anchor.left + (anchor.width - tip.width) / 2, window.innerWidth - tip.width - gap));
+      const below = anchor.bottom + gap;
+      const top = Math.max(gap, Math.min(below + tip.height > window.innerHeight - gap ? anchor.top - tip.height - gap : below,
+        window.innerHeight - tip.height - gap));
+      setTooltipPosition({ left, top });
+    };
+    position(); window.addEventListener('resize', position); window.addEventListener('scroll', position, true);
+    return () => { window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
+  }, [activeTab, tooltipTab]);
+  const tasksActive = activeTab === 'tasks' && isAuthenticated;
+  const requestContext = JSON.stringify([isAuthenticated, user?.id, selectedDate, timezone]);
+  const requestContextRef = useRef(requestContext);
+  requestContextRef.current = requestContext;
+  const scheduledRequestRef = useRef('');
+  const scheduledGenerationRef = useRef(0);
+  const scheduledMountedRef = useRef(true);
+  useEffect(() => {
+    scheduledMountedRef.current = true;
+    return () => { scheduledMountedRef.current = false; scheduledRequestRef.current = ''; };
+  }, []);
+  useEffect(() => {
+    if (isAuthenticated) return;
+    const restoreFocus = activeTab === 'tasks' || tabFocusRef.current === 'tasks';
+    if (activeTab === 'tasks') setActiveTab('diary');
+    if (focusedTab === 'tasks') setFocusedTab('diary');
+    if (restoreFocus) requestAnimationFrame(() => tabRefs.current.get('diary')?.focus());
+  }, [activeTab, focusedTab, isAuthenticated]);
+  const activateTab = (tab: 'tasks' | 'diary' | 'notion') => {
+    if (tab === activeTab) return;
+    const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+    if (dialogs.length > 1) return;
+    if (layoutRef.current) mobileScrollRef.current.set(activeTab, layoutRef.current.scrollTop);
+    setActiveTab(tab); setFocusedTab(tab); setTooltipTab(null);
+    requestAnimationFrame(() => { if (layoutRef.current) layoutRef.current.scrollTop = mobileScrollRef.current.get(tab) ?? 0; });
+  };
+
   const [scheduledError, setScheduledError] = useState(false);
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [scheduledRefresh, setScheduledRefresh] = useState(0);
@@ -449,25 +534,32 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   const activeRefreshCountRef = useRef(0);
 
   useEffect(() => {
+    scheduledRequestRef.current = ''; scheduledGenerationRef.current += 1;
     setScheduledTasks([]); setScheduledTriggers([]); setScheduledError(false); setScheduledLoading(false);
     setSelectedResultTaskId(null);
-  }, [isAuthenticated, selectedDate, timezone]);
+    panelRefs.current.forEach((panel) => { panel.scrollTop = 0; });
+    mobileScrollRef.current.clear();
+  }, [isAuthenticated, user?.id, selectedDate, timezone]);
 
   useEffect(() => {
-    if (!isAuthenticated || !selectedDate) return;
-    let active = true;
+    if (!isAuthenticated || !selectedDate || !tasksActive) return;
+    const requestKey = `${requestContext}:${scheduledRefresh}`;
+    if (scheduledRequestRef.current === requestKey) return;
+    scheduledRequestRef.current = requestKey;
+    const generation = ++scheduledGenerationRef.current;
+    const accepts = () => scheduledMountedRef.current && scheduledGenerationRef.current === generation && requestContextRef.current === requestContext
+      && scheduledRequestRef.current === requestKey;
     setScheduledError(false); setScheduledLoading(true);
     getScheduledDay(selectedDate, timezone).then(async (result) => {
       const known = new Set(result.tasks.map((task) => task.id));
       const historicalIds = [...new Set(result.triggers.map((trigger) => trigger.task_id))].filter((id) => !known.has(id));
       const historical = await Promise.all(historicalIds.map((id) => getScheduledTask(id).catch(() => null)));
-      if (!active) return;
+      if (!accepts()) return;
       setScheduledTasks([...result.tasks, ...historical.flatMap((item) => item?.task ? [item.task] : [])]);
       setScheduledTriggers(result.triggers);
-    }).catch(() => { if (active) setScheduledError(true); })
-      .finally(() => { if (active) setScheduledLoading(false); });
-    return () => { active = false; };
-  }, [isAuthenticated, selectedDate, timezone, scheduledRefresh]);
+    }).catch(() => { if (accepts()) setScheduledError(true); })
+      .finally(() => { if (accepts()) setScheduledLoading(false); });
+  }, [isAuthenticated, selectedDate, timezone, scheduledRefresh, tasksActive, requestContext]);
 
   const refreshScheduled = useCallback(() => setScheduledRefresh((value) => value + 1), []);
   const activeTriggerKey = scheduledTriggers.filter((trigger) => ACTIVE_TRIGGER_STATES.has(trigger.status))
@@ -485,7 +577,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   }, [activeTriggerKey, selectedDate, timezone]);
 
   useEffect(() => {
-    if (!isAuthenticated || !selectedDate || !documentVisible || scheduledLoading || !activeTriggerKey
+    if (!tasksActive || !isAuthenticated || !selectedDate || !documentVisible || scheduledLoading || !activeTriggerKey
       || activeRefreshCountRef.current >= SCHEDULED_ACTIVE_REFRESH_MAXIMUM) return;
     const timer = window.setTimeout(() => {
       activeRefreshCountRef.current += 1;
@@ -493,7 +585,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
       refreshScheduled();
     }, SCHEDULED_ACTIVE_REFRESH_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [activeTriggerKey, documentVisible, isAuthenticated, refreshScheduled, scheduledLoading, selectedDate, timezone]);
+  }, [activeTriggerKey, documentVisible, isAuthenticated, refreshScheduled, scheduledLoading, selectedDate, timezone, tasksActive]);
   const actOnTask = useCallback(async (task: ScheduledTask, action: ScheduledTaskAction,
     desired?: ScheduledTaskDesired): Promise<ScheduledTaskActionResult> => {
     const manualRequestKey = action === 'run' ? (manualRequestKeys.current.get(task.id) ?? crypto.randomUUID()) : null;
@@ -652,7 +744,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
 
   return <Modal open title={t('calendar.title')} closeLabel={t('calendar.close')} onClose={closeDialog}
     initialFocusRef={monthPrevRef} surfaceClassName="calendar-popup-modal">
-    <div className="calendar-popup">
+    <div className="calendar-popup" ref={layoutRef}>
       <section className="calendar-popup__calendar" aria-label={t('calendar.monthCalendarLabel')}>
         <header className="calendar-popup__month-heading">
           <button ref={monthPrevRef} type="button" aria-label={t('calendar.prev')}
@@ -681,9 +773,39 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
       </section>
 
       {selectedDate ? <div className="calendar-popup__workspace">
+        <div className="calendar-popup__tabs" role="tablist" aria-label={t('calendar.tabsLabel')}>
+          {visibleTabs.map((tab) => {
+            const label = tab === 'tasks' ? t('calendar.scheduledSectionTitle') : tab === 'diary' ? t('calendar.diarySectionTitle') : 'Notion';
+            return <div className="calendar-popup__tab-wrap" key={tab}>
+              <button type="button" role="tab" id={`${tabsId}-${tab}-tab`} aria-controls={`${tabsId}-${tab}-panel`}
+                aria-label={label} aria-selected={activeTab === tab} tabIndex={focusedTab === tab ? 0 : -1}
+                ref={(element) => { if (element) tabRefs.current.set(tab, element); else tabRefs.current.delete(tab); }}
+                onFocus={() => { tabFocusRef.current = tab; setFocusedTab(tab); setTooltipTab(tab); }}
+                onBlur={() => { tabFocusRef.current = null; setTooltipTab(null); }}
+                onMouseEnter={() => setTooltipTab(tabFocusRef.current && tabFocusRef.current !== activeTab ? tabFocusRef.current : tab)}
+                onMouseLeave={() => setTooltipTab(tabFocusRef.current)}
+                onClick={() => activateTab(tab)} onKeyDown={(event) => {
+                  const index = visibleTabs.indexOf(tab);
+                  const next = event.key === 'ArrowRight' ? (index + 1) % visibleTabs.length
+                    : event.key === 'ArrowLeft' ? (index - 1 + visibleTabs.length) % visibleTabs.length
+                      : event.key === 'Home' ? 0 : event.key === 'End' ? visibleTabs.length - 1 : null;
+                  if (next !== null) { event.preventDefault(); tabRefs.current.get(visibleTabs[next])?.focus(); }
+                  else if (event.key === 'Escape' && tooltipTab !== null && activeTab !== tab) {
+                    event.preventDefault(); event.stopPropagation(); setTooltipTab(null);
+                  }
+                }} aria-describedby={tooltipTab === tab && activeTab !== tab ? `${tabsId}-${tab}-tooltip` : undefined}>
+                {tab === 'tasks' ? <IconClock aria-hidden="true" /> : tab === 'diary' ? <IconFile aria-hidden="true" /> : <NotionMark className="calendar-popup__notion-mark" />}
+                {activeTab === tab ? <span>{label}</span> : null}
+              </button>
+              {tooltipTab === tab && activeTab !== tab ? <span ref={tooltipRef} role="tooltip" id={`${tabsId}-${tab}-tooltip`}
+                style={tooltipPosition}>{label}</span> : null}
+            </div>;
+          })}
+        </div>
         <div className="calendar-popup__workspace-scroll">
           {isAuthenticated ? <section className="calendar-popup__section calendar-popup__task-section"
-            aria-labelledby="calendar-popup-task-title">
+            role="tabpanel" id={`${tabsId}-tasks-panel`} aria-labelledby={`${tabsId}-tasks-tab`}
+            hidden={!tasksActive} inert={!tasksActive} ref={(element) => { if (element) panelRefs.current.set('tasks', element); }}>
             <header className="calendar-popup__section-heading calendar-popup__card-header">
               <h3 id="calendar-popup-task-title">{t('calendar.scheduledSectionTitleForDate', { date: selectedDateLabel })}</h3>
               <div className="calendar-popup__card-header-meta" aria-live="polite">
@@ -724,11 +846,11 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
               </div> : null}
               {selectedResultTaskId ? (() => {
                 const task = scheduledTasks.find((candidate) => candidate.id === selectedResultTaskId);
-                return task ? <ScheduledTaskResult task={task}
+                return task ? <ScheduledTaskResult active={tasksActive} task={task}
                   triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)}
                   onBack={() => setSelectedResultTaskId(null)} onOpenThread={onOpenTaskThread} dateLocale={dateLocale} />
                   : null;
-              })() : <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard key={task.id}
+              })() : <div className="calendar-popup__task-list">{scheduledTasks.map((task) => <ScheduledTaskCard active={tasksActive} key={task.id}
                 task={task} triggers={scheduledTriggers.filter((trigger) => trigger.task_id === task.id)} onAction={actOnTask}
                 onOpenThread={onOpenTaskThread} onOpenResult={() => setSelectedResultTaskId(task.id)}
                 onLayerChange={onLayerChange}
@@ -738,7 +860,9 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
             </div>
           </section> : null}
 
-          <section className="calendar-popup__section calendar-popup__diary-section" aria-labelledby="calendar-popup-diary-title">
+          <section className="calendar-popup__section calendar-popup__diary-section" role="tabpanel"
+            id={`${tabsId}-diary-panel`} aria-labelledby={`${tabsId}-diary-tab`} hidden={activeTab !== 'diary'} inert={activeTab !== 'diary'}
+            ref={(element) => { if (element) panelRefs.current.set('diary', element); }}>
             <header className="calendar-popup__section-heading calendar-popup__card-header">
               <h3 id="calendar-popup-diary-title">{t('calendar.diarySectionTitleForDate', { date: selectedDateLabel })}</h3>
               <span className="calendar-popup__card-count" aria-live="polite">{t('calendar.entriesLabel', { count: selectedEntries.length })}</span>
@@ -761,6 +885,13 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                   </article>;
                 })}</div>}
             </div>
+          </section>
+          <section className="calendar-popup__section calendar-popup__notion-section" role="tabpanel"
+            id={`${tabsId}-notion-panel`} aria-labelledby={`${tabsId}-notion-tab`} hidden={activeTab !== 'notion'} inert={activeTab !== 'notion'}
+            ref={(element) => { if (element) panelRefs.current.set('notion', element); }}>
+            <CalendarNotionPanel active={activeTab === 'notion'} dateKey={selectedDate} timeZone={timezone}
+              onToday={(date) => { handleDateClick(date); const parsed = parseDateKey(date); setCurrentMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1)); }}
+              onSettings={() => { onClose(); onOpenSettings?.(); }} />
           </section>
         </div>
       </div> : null}

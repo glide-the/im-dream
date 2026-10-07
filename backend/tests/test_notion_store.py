@@ -2,6 +2,7 @@
 # [Output] Verify identity binding, resource/snapshot roundtrip, background authority, and source closure.
 # [Pos] Notion Admin DTO adapter contract tests.
 # [Sync] 2026-09-17: verify background store calls carry service OAuth without a user token.
+# [Sync] 2026-10-07: assert the explicitly injected Notion fixture service token separately from the actor bearer.
 from __future__ import annotations
 
 import sys
@@ -147,7 +148,10 @@ class TestNotionStore(unittest.TestCase):
         ]
         self.assertTrue(background_calls)
         self.assertTrue(
-            all(call[2] == "Bearer fixture.service.access.token" for call in background_calls)
+            all(call[2] == f"Bearer {self.state.service_token}" for call in background_calls)
+        )
+        self.assertTrue(
+            all(call[2] != f"Bearer {self.actor.access_token}" for call in background_calls)
         )
         with self.assertRaises(AdminDataError):
             self.background_store.create_connector(7, "Forbidden")

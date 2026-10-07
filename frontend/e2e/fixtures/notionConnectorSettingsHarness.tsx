@@ -1,3 +1,4 @@
+// [Sync] 2026-10-07: the existing isolated Settings host uses the real AuthProvider/public session for actor-owned resource recovery.
 // [Input] Production Notion Settings components and provider-free intercepted connector DTOs.
 // [Output] Minimal browser harness for Settings summary, redesigned detail/child navigation, and disconnect interaction.
 // [Pos] Notion connector technical browser fixture in frontend/e2e/fixtures.
@@ -5,6 +6,7 @@
 
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AuthProvider } from '../../app/_dream/contexts/AuthContext';
 import ConnectorNotionDetailPage from '../../app/_dream/components/dashboard/ConnectorNotionDetailPage';
 import ConnectorSettingsSection from '../../app/_dream/components/dashboard/ConnectorSettingsSection';
 
@@ -27,4 +29,4 @@ const harnessWindow = window as typeof window & {
 const root = harnessWindow.__notionConnectorHarnessRoot
   ?? createRoot(document.getElementById('root')!);
 harnessWindow.__notionConnectorHarnessRoot = root;
-root.render(<Harness />);
+root.render(<AuthProvider><Harness /></AuthProvider>);

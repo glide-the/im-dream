@@ -1,3 +1,6 @@
+// [Sync] 2026-10-07: use the browser numeric timeout handle under the shared Node/DOM type declarations; cooldown behavior is unchanged.
+// [Sync] 2026-10-07: distinguish confirmed saved scope from failed first sync, guard Settings resource requests by actor/connector generation, and honor server Retry-After without automatic writes.
+// [Sync] 2026-10-05: reuse the shared NotionMark while retaining Settings-owned auth, selection and sync.
 // [Input] Server-owned Notion connector/capability/Skill DTOs, Settings back callback, and existing resource/auth/sync mutations.
 // [Output] One seven-section Notion overview plus Skill/file/resource/source child views on the Settings-owned scroll surface.
 // [Pos] Canonical Settings Notion connector detail and child-view composition node in frontend/app/_dream/components/dashboard.
@@ -14,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, typ
 import { FaExternalLinkAlt, FaPuzzlePiece } from 'react-icons/fa';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import NotionMark from '../NotionMark';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   createConnector,
   deleteConnector,
@@ -77,6 +82,19 @@ interface DetailStatus {
 
 const DEFAULT_NOTION_CONNECTOR_NAME = 'Notion Resource Connector';
 const RESOURCE_PAGE_SIZE = 10;
+// Browser setTimeout uses a signed 32-bit delay; this is a timer bound, not a sync policy.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+interface ResourceRequestOwner {
+  key: string;
+  generation: number;
+  abort: AbortController;
+}
+
+function resourceFailureMessage(error: unknown, fallback: string): string {
+  return error instanceof ResourceConnectorApiError && error.code === 'NOTION_SYNC_BUSY'
+    ? '连接器已有同步任务，请稍后重试。' : getErrorMessage(error, fallback);
+}
 const NOTION_WEBSITE = 'https://developers.notion.com/cli/get-started/overview';
 const NOTION_PRIVACY = 'https://privacycenter.notion.so/policies';
 const NOTION_TERMS = 'https://notion.notion.site/Terms-and-Privacy-28ffdd083dc3473e9c2da6ec011b58ac';
@@ -243,9 +261,6 @@ function IndexSection({ sectionId, title, children }: { sectionId: string; title
   );
 }
 
-function NotionMark() {
-  return <span aria-hidden="true" className="notion-detail__mark"><span>N</span></span>;
-}
 
 const MARKDOWN_COMPONENTS: Components = {
   a({ children, href }) {
@@ -343,6 +358,10 @@ function SourceRow({ source }: { source: ConnectorSource }) {
 }
 
 export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: ConnectorNotionDetailPageProps) {
+  const { user, isAuthenticated } = useAuth();
+  const actorKey = JSON.stringify([isAuthenticated, user?.id ?? null]);
+  const actorKeyRef = useRef(actorKey);
+  actorKeyRef.current = actorKey;
   const [view, setView] = useState<DetailView>('overview');
   const [connector, setConnector] = useState<ResourceConnector | null>(null);
   const [catalog, setCatalog] = useState<NotionCapabilityCatalog | null>(null);
@@ -360,6 +379,11 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceError, setResourceError] = useState<string | null>(null);
+  const [resourceCooldown, setResourceCooldown] = useState<{ owner: ResourceRequestOwner; deadline: number } | null>(null);
+  const resourceRequestRef = useRef<ResourceRequestOwner | null>(null);
+  const resourceGenerationRef = useRef(0);
+  const resourceDiscoveryAbortRef = useRef<AbortController | null>(null);
+  const connectorLoadGenerationRef = useRef(0);
   const [databaseOptions, setDatabaseOptions] = useState<NotionResourceOption[]>([]);
   const [pageOptions, setPageOptions] = useState<NotionResourceOption[]>([]);
   const [selectedDatabaseIds, setSelectedDatabaseIds] = useState<string[]>([]);
@@ -384,7 +408,11 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   const connectorAuthStatus = connector?.auth.status ?? 'idle';
   const cliInstallation = catalog?.cliInstallation ?? null;
   const cliMissing = cliInstallation?.status === 'missing';
-  const canEditResources = connectorAuthStatus === 'authenticated';
+  const canEditResources = isAuthenticated && connectorAuthStatus === 'authenticated';
+  const resourceOwnerKey = JSON.stringify([actorKey, connectorId]);
+  const resourceOwnerKeyRef = useRef(resourceOwnerKey);
+  resourceOwnerKeyRef.current = resourceOwnerKey;
+  const resourceCoolingDown = resourceCooldown !== null && resourceCooldown.owner.key === resourceOwnerKey;
   const syncPolicy = connector?.syncPolicy;
   const detailStatus = getDetailStatus(connector, loading);
   const sourceStats = useMemo(() => {
@@ -419,34 +447,92 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   }, [filteredResourceOptions, resourcePage]);
   const selectedResourceCount = selectedDatabaseIds.length + selectedPageIds.length;
 
-  const reloadCatalog = useCallback(async () => {
+  const isResourceRequestCurrent = useCallback((owner: ResourceRequestOwner) => (
+    resourceRequestRef.current === owner && resourceGenerationRef.current === owner.generation
+    && resourceOwnerKeyRef.current === owner.key && !owner.abort.signal.aborted
+  ), []);
+
+  const beginResourceRequest = useCallback(() => {
+    resourceRequestRef.current?.abort.abort();
+    const owner = { key: resourceOwnerKey, generation: ++resourceGenerationRef.current, abort: new AbortController() };
+    resourceRequestRef.current = owner;
+    return owner;
+  }, [resourceOwnerKey]);
+
+  useEffect(() => {
+    resourceRequestRef.current?.abort.abort();
+    resourceRequestRef.current = null;
+    resourceDiscoveryAbortRef.current?.abort();
+    resourceGenerationRef.current += 1;
+    setResourceCooldown(null);
+    setResourceError(null);
+    setResourceSaving(false);
+    setSyncLoading(false);
+    return () => {
+      resourceRequestRef.current?.abort.abort();
+      resourceRequestRef.current = null;
+      resourceDiscoveryAbortRef.current?.abort();
+      resourceGenerationRef.current += 1;
+    };
+  }, [resourceOwnerKey]);
+
+  useEffect(() => {
+    if (!resourceCooldown) return;
+    const { owner, deadline } = resourceCooldown;
+    let timer: number | undefined;
+    const release = () => {
+      if (!isResourceRequestCurrent(owner)) return;
+      const remaining = deadline - Date.now();
+      if (remaining > 0) timer = window.setTimeout(release, Math.min(remaining, MAX_TIMER_DELAY_MS));
+      else setResourceCooldown(null); // Expiry only unlocks existing actions; no request or retry.
+    };
+    release();
+    return () => { if (timer !== undefined) window.clearTimeout(timer); };
+  }, [isResourceRequestCurrent, resourceCooldown]);
+
+  const applyResourceRetryAfter = useCallback((error: unknown, owner: ResourceRequestOwner) => {
+    if (!isResourceRequestCurrent(owner) || !(error instanceof ResourceConnectorApiError)) return;
+    const seconds = error.retryAfter;
+    if (seconds === null || !Number.isSafeInteger(seconds) || seconds <= 0) return;
+    const deadline = Date.now() + seconds * 1000;
+    if (Number.isSafeInteger(deadline)) setResourceCooldown({ owner, deadline });
+  }, [isResourceRequestCurrent]);
+
+  const reloadCatalog = useCallback(async (shouldCommit: () => boolean = () => true) => {
+    if (!shouldCommit()) return;
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      setCatalog(await getNotionCapabilityCatalog());
+      const next = await getNotionCapabilityCatalog();
+      if (shouldCommit()) setCatalog(next);
     } catch (error) {
-      setCatalogError(getErrorMessage(error, 'Notion 能力信息暂时无法读取'));
+      if (shouldCommit()) setCatalogError(getErrorMessage(error, 'Notion 能力信息暂时无法读取'));
     } finally {
-      setCatalogLoading(false);
-    }
-  }, []);
-
-  const loadConnector = useCallback(async () => {
-    setLoading(true);
-    setPageError(null);
-    try {
-      setConnector(resolveSingleNotionConnector(await listConnectors()));
-    } catch (error) {
-      setPageError(getErrorMessage(error, 'Notion 连接状态读取失败'));
-    } finally {
-      setLoading(false);
+      if (shouldCommit()) setCatalogLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadConnector();
-    void reloadCatalog();
-  }, [loadConnector, reloadCatalog]);
+    const abort = new AbortController();
+    const generation = ++connectorLoadGenerationRef.current;
+    setConnector(null);
+    setSelectedDatabaseIds([]);
+    setSelectedPageIds([]);
+    setDatabaseOptions([]);
+    setPageOptions([]);
+    setResourceLoading(false);
+    setLoading(isAuthenticated);
+    setPageError(null);
+    const current = () => !abort.signal.aborted && generation === connectorLoadGenerationRef.current
+      && actorKeyRef.current === actorKey;
+    if (isAuthenticated) void listConnectors(abort.signal).then((next) => {
+      if (current()) setConnector(resolveSingleNotionConnector(next));
+    }).catch((error: unknown) => {
+      if (current()) setPageError(getErrorMessage(error, 'Notion 连接状态读取失败'));
+    }).finally(() => { if (current()) setLoading(false); });
+    void reloadCatalog(current);
+    return () => abort.abort();
+  }, [actorKey, isAuthenticated, reloadCatalog]);
 
   useEffect(() => {
     if (!syncPolicy) return;
@@ -632,24 +718,32 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
       setPageOptions([]);
       return;
     }
+    resourceDiscoveryAbortRef.current?.abort();
+    const abort = new AbortController();
+    resourceDiscoveryAbortRef.current = abort;
+    const generation = resourceGenerationRef.current;
+    const current = () => !abort.signal.aborted && resourceDiscoveryAbortRef.current === abort
+      && resourceOwnerKeyRef.current === resourceOwnerKey && resourceGenerationRef.current === generation;
     setResourceLoading(true);
     try {
       const [databases, pages] = await Promise.all([
         listConnectorDatabases(connectorId),
         listConnectorPages(connectorId),
       ]);
+      if (!current()) return;
       setDatabaseOptions(databases);
       setPageOptions(pages);
       setSelectedDatabaseIds(selection.databaseIds.length > 0 ? selection.databaseIds : databases.filter((option) => option.selected).map((option) => option.id));
       setSelectedPageIds(selection.pageIds.length > 0 ? selection.pageIds : pages.filter((option) => option.selected).map((option) => option.id));
     } catch (error) {
+      if (!current()) return;
       setResourceError(getErrorMessage(error, '资源列表加载失败；服务器当前范围没有改变，请重试'));
       setDatabaseOptions([]);
       setPageOptions([]);
     } finally {
-      setResourceLoading(false);
+      if (current()) setResourceLoading(false);
     }
-  }, [canEditResources, connector?.sources, connectorId]);
+  }, [canEditResources, connector?.sources, connectorId, resourceOwnerKey]);
 
   const handleOpenResources = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     enterView('resources', event);
@@ -657,41 +751,62 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   }, [enterView, loadResourceOptions]);
 
   const handleSaveResources = useCallback(async () => {
-    if (!connectorId || !canEditResources || resourceSaving) return;
+    if (!connectorId || !canEditResources || resourceSaving || syncLoading || resourceCoolingDown) return;
+    const owner = beginResourceRequest();
+    const current = () => isResourceRequestCurrent(owner);
     setResourceSaving(true);
     setResourceError(null);
     try {
       const next = await selectConnectorResources(connectorId, {
-        databaseIds: selectedDatabaseIds,
-        pageIds: selectedPageIds,
-        databaseOptions,
-        pageOptions,
+        databaseIds: selectedDatabaseIds, pageIds: selectedPageIds, databaseOptions, pageOptions,
       });
+      if (!current()) return;
       if (next) setConnector(next);
       notifyResourceConnectorsChanged({ connectorId, reason: 'resources-selected' });
-      await reloadCatalog();
+      await reloadCatalog(current);
     } catch (error) {
-      setResourceError(getErrorMessage(error, '资源范围未保存；你的本页选择仍保留，服务器范围没有改变'));
+      if (!current()) return;
+      applyResourceRetryAfter(error, owner);
+      if (error instanceof ResourceConnectorApiError && error.context.selection_saved === true) {
+        const feedback = `资源范围已保存，索引更新未完成。${resourceFailureMessage(error, '请稍后重试索引更新。')}`;
+        setResourceError(feedback);
+        notifyResourceConnectorsChanged({ connectorId, reason: 'resources-selected' });
+        try {
+          const saved = resolveSingleNotionConnector(await listConnectors(owner.abort.signal));
+          if (!current()) return;
+          if (saved?.id === connectorId) setConnector(saved);
+          else setResourceError(`${feedback}暂时无法重新读取当前范围；本页选择仍保留。`);
+        } catch {
+          if (current()) setResourceError(`${feedback}暂时无法重新读取当前范围；本页选择仍保留。`);
+        }
+      } else {
+        setResourceError(`保存状态未确认；你的本页选择仍保留，请返回查看当前范围后重试。${error instanceof ResourceConnectorApiError && error.code === 'NOTION_SYNC_BUSY' ? resourceFailureMessage(error, '') : ''}`);
+      }
     } finally {
-      setResourceSaving(false);
+      if (current()) setResourceSaving(false);
     }
-  }, [canEditResources, connectorId, databaseOptions, pageOptions, reloadCatalog, resourceSaving, selectedDatabaseIds, selectedPageIds]);
+  }, [applyResourceRetryAfter, beginResourceRequest, canEditResources, connectorId, databaseOptions, isResourceRequestCurrent, pageOptions, reloadCatalog, resourceCoolingDown, resourceSaving, selectedDatabaseIds, selectedPageIds, syncLoading]);
 
   const handleSyncSources = useCallback(async () => {
-    if (!connectorId || !canEditResources || syncLoading) return;
+    if (!connectorId || !canEditResources || syncLoading || resourceSaving || resourceCoolingDown) return;
+    const owner = beginResourceRequest();
+    const current = () => isResourceRequestCurrent(owner);
     setSyncLoading(true);
     setResourceError(null);
     try {
       const next = await refreshConnectorSources(connectorId);
+      if (!current()) return;
       if (next) setConnector(next);
       notifyResourceConnectorsChanged({ connectorId, reason: 'sources-refreshed' });
-      await reloadCatalog();
+      await reloadCatalog(current);
     } catch (error) {
-      setResourceError(getErrorMessage(error, '索引更新失败；最近一次成功索引仍保留，请稍后重试'));
+      if (!current()) return;
+      applyResourceRetryAfter(error, owner);
+      setResourceError(resourceFailureMessage(error, '索引更新失败；最近一次成功索引仍保留，请稍后重试'));
     } finally {
-      setSyncLoading(false);
+      if (current()) setSyncLoading(false);
     }
-  }, [canEditResources, connectorId, reloadCatalog, syncLoading]);
+  }, [applyResourceRetryAfter, beginResourceRequest, canEditResources, connectorId, isResourceRequestCurrent, reloadCatalog, resourceCoolingDown, resourceSaving, syncLoading]);
 
   const authActionLabel = connectorAuthStatus === 'authenticated' ? '重新连接 Notion' : connectorAuthStatus === 'authenticating' ? '认证进行中' : '连接 Notion';
 
@@ -789,7 +904,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
             </div>
             <div className="notion-detail__sticky-action">
               <span>服务器当前范围 {sourceStats.total} 个</span>
-              <button className="notion-detail__button notion-detail__button--primary" disabled={resourceSaving || resourceLoading} onClick={() => void handleSaveResources()} type="button">
+              <button className="notion-detail__button notion-detail__button--primary" disabled={resourceSaving || resourceLoading || syncLoading || resourceCoolingDown} onClick={() => void handleSaveResources()} type="button">
                 {resourceSaving ? <IconLoader className="notion-detail__spinner" /> : <IconCheck />}{resourceSaving ? '保存并同步中' : '保存并首次同步'}
               </button>
             </div>
@@ -805,11 +920,11 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
         <ChildHeader backLabel="Notion" description="查看当前已挂载来源的轻量索引状态；立即同步不会批量下载正文。" headingRef={childHeadingRef} onBack={returnToOverview} title="已挂载来源" />
         <div className="notion-detail__source-summary">
           <div><strong>{sourceStats.total} 个来源</strong><span>最近成功 {formatDateTime(connector?.lastSyncedAt)}</span></div>
-          <button className="notion-detail__button" disabled={!canEditResources || syncLoading || sourceStats.total === 0} onClick={() => void handleSyncSources()} type="button">
+          <button className="notion-detail__button" disabled={!canEditResources || syncLoading || resourceSaving || resourceCoolingDown || sourceStats.total === 0} onClick={() => void handleSyncSources()} type="button">
             {syncLoading ? <IconLoader className="notion-detail__spinner" /> : <IconArrowUp />}{syncLoading ? '同步中' : syncPolicy?.status === 'error' ? '立即重试' : '立即同步'}
           </button>
         </div>
-        {resourceError ? <Notice tone="danger" title="索引没有更新">{resourceError}</Notice> : null}
+        {resourceError ? <Notice tone="danger" title="资源操作未完成">{resourceError}</Notice> : null}
         {sourceStats.total === 0 ? <Notice title="还没有挂载来源">前往“资源范围”选择数据库或页面并保存。</Notice> : (
           <div className="notion-detail__source-list">{connector?.sources.map((source) => <SourceRow key={`${source.type}-${source.id}`} source={source} />)}</div>
         )}

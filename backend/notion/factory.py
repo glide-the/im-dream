@@ -1,6 +1,9 @@
+# [Sync] 2026-10-07: share owned sync flow, enforce renewal completion budgets after cancellation, read strict accepted versions, and separate saved-selection errors.
+# [Sync] 2026-10-06: Calendar reads selected canonical snapshots and binds today-only verification to version/credential context.
 # [Input] Notion connector auth, operation, Admin DTO store, and sync helpers.
 # [Output] Provide a compact facade for routes and Claude Agent workspace attach.
 # [Pos] factory node in backend/notion
+# [Sync] 2026-10-05: actor-owned Calendar metadata reads recheck authorization/credential context before returning without persistence.
 # [Sync] 2026-07-04: initial Notion connector facade for auth, discovery, selection,
 #                    snapshot sync, and workspace materialization.
 # [Sync] 2026-07-05: add backend auth-session lifecycle tracking to avoid poll-induced
@@ -19,11 +22,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 from uuid import uuid4
+
+from services.admin_data.errors import AdminDataError
 
 from . import auth, operations, store, sync
 from .credentials import NotionCredentialProjection, NotionCredentialStore
@@ -35,11 +43,12 @@ from .errors import (
     NotionOperationError,
     NotionPermissionError,
     NotionSnapshotNotReadyError,
+    NotionSyncBusyError,
+    NotionSelectionSyncError,
 )
 from .snapshot_store import NotionSnapshotStore
 from .sync_policy import (
     SYNC_POLICY_CONFIG_KEY,
-    transition_sync_policy,
     update_sync_policy as build_updated_sync_policy,
 )
 
@@ -51,7 +60,7 @@ _NO_PENDING_TOKENS = (
     "authorization session already consumed",
 )
 _SESSION_VALID_STATUSES = {"running", "pending", "authenticated", "consumed", "expired", "failed"}
-_SYNC_LOCKS: dict[tuple[int, str], asyncio.Lock] = {}
+logger = logging.getLogger(__name__)
 _REQUEST_PROTECTED_CONFIG_KEYS = frozenset(
     {
         "notion_home",
@@ -120,20 +129,6 @@ def _safe_request_config(config: Optional[Mapping[str, Any]]) -> dict[str, Any]:
         for key, value in _mapping(config).items()
         if str(key) not in _REQUEST_PROTECTED_CONFIG_KEYS
     }
-
-
-def _sync_error_code(exc: Exception) -> str:
-    if isinstance(exc, (NotionAuthRequiredError, NotionCredentialError)):
-        return "AUTH_REQUIRED"
-    if isinstance(exc, NotionPermissionError):
-        return "PERMISSION_DENIED"
-    if isinstance(exc, NotionCLIUnavailableError):
-        return "CONNECTOR_UNAVAILABLE"
-    if isinstance(exc, NotionOperationError):
-        return "REMOTE_OPERATION_FAILED"
-    if isinstance(exc, NotionSnapshotNotReadyError):
-        return "SNAPSHOT_NOT_READY"
-    return "SYNC_FAILED"
 
 
 def _build_auth_session() -> dict[str, Any]:
@@ -590,6 +585,55 @@ class NotionConnectorFacade:
             record["selected"] = record.get("page_id") in selected_ids
         return records
 
+    async def today_pages(self, date_key: str, time_zone: str, *, now: datetime | None = None,
+                          validate_remote: bool = False, snapshot_version: str | None = None) -> dict:
+        from .today import NotionTodayError, api_version, day_context, read_documents, snapshot_records, timestamp
+        from .sync import filter_snapshot_for_connector
+
+        connector = self._resolve_connector()
+        if connector.get("auth_status") != "authenticated":
+            code = "NOTION_AUTH_PENDING" if connector.get("auth_status") in {"pending", "running"} else "NOTION_AUTH_EXPIRED"
+            raise NotionTodayError(code, 409 if code == "NOTION_AUTH_PENDING" else 401)
+        context = day_context(time_zone, date_key, now or datetime.now(timezone.utc))
+        before = self._credential_identity()
+        home = self.credential_store.effective_home(self.user_id)
+        assert self.snapshot_store is not None
+        source = await asyncio.to_thread(self._accepted_snapshot, connector)
+        version = _mapping(_mapping(source).get("metadata")).get("snapshot_version")
+        if validate_remote and snapshot_version != version:
+            raise NotionTodayError("NOTION_SNAPSHOT_CHANGED", 409)
+        selected = filter_snapshot_for_connector(source, connector) if source is not None else None
+        records, _ = snapshot_records(selected)
+        start, end = timestamp(context["intervalStart"]), timestamp(context["intervalEnd"])
+        needs_remote = validate_remote and date_key == context["todayKey"] and any(
+            (edited := timestamp(raw.get("last_edited_time"))) is not None and start <= edited < end
+            for raw in records.values())
+        client = operations.NotionOperationClient(home, api_version=api_version()) if needs_remote else None
+        result = await read_documents(client, str(connector["id"]), context, selected)
+        current = self._resolve_connector()
+        after = self._credential_identity()
+        def scope(value):
+            return sorted((str(item.get("resource_type")), str(item.get("external_id")))
+                          for item in value.get("sources") or [])
+        if (current.get("auth_status") != "authenticated"
+                or current.get("updated_at") != connector.get("updated_at") or scope(current) != scope(connector)
+                or before != after):
+            raise NotionTodayError("NOTION_CONTEXT_CHANGED", 409)
+        latest = await asyncio.to_thread(self._accepted_snapshot, current)
+        if _mapping(_mapping(latest).get("metadata")).get("snapshot_version") != version:
+            raise NotionTodayError("NOTION_SNAPSHOT_CHANGED", 409)
+        final_connector = self._resolve_connector()
+        final_credential = self._credential_identity()
+        if (self._read_context(final_connector) != self._read_context(connector)
+                or before != final_credential):
+            raise NotionTodayError("NOTION_CONTEXT_CHANGED", 409)
+        if self._accepted_identity(final_connector) != self._accepted_identity(connector):
+            raise NotionTodayError("NOTION_SNAPSHOT_CHANGED", 409)
+        after_context = day_context(time_zone, date_key, now or datetime.now(timezone.utc))
+        if after_context["todayKey"] != context["todayKey"]:
+            raise NotionTodayError("NOTION_DATE_CONTEXT_CHANGED", 409, context=after_context)
+        return result
+
     def list_selected_resources(self, connector_id: Optional[str] = None) -> list[dict[str, Any]]:
         connector = self._resolve_connector(connector_id)
         return self.connector_store.list_connector_resources(str(connector["id"]), self.user_id)
@@ -624,22 +668,7 @@ class NotionConnectorFacade:
             connector_key = str(connector["id"])
             assert self.snapshot_store is not None
             self.snapshot_store.clear_connector(self.user_id, connector_key)
-            config = _mapping(_mapping(selection.get("connector")).get("config"))
-            cleared_policy = transition_sync_policy(
-                config.get(SYNC_POLICY_CONFIG_KEY),
-                "cleared",
-            )
-            cleared_connector = self.connector_store.update_connector(
-                connector_key,
-                self.user_id,
-                {
-                    "current_snapshot_version": None,
-                    "current_source_revision": None,
-                    "current_sync_cursor": None,
-                    "last_synced_at": None,
-                    "config": {SYNC_POLICY_CONFIG_KEY: cleared_policy},
-                },
-            )
+            cleared_connector = selection["connector"]
             return {
                 "connector": cleared_connector,
                 "snapshot": None,
@@ -648,109 +677,177 @@ class NotionConnectorFacade:
                 "pageCount": 0,
                 "synced": False,
             }
-        return await self.sync(connector_id=str(connector["id"]), workspace_id=workspace_id)
+        try:
+            return await self.sync(connector_id=str(connector["id"]), workspace_id=workspace_id)
+        except Exception as exc:
+            raise NotionSelectionSyncError(exc) from exc
 
-    async def sync(
-        self,
-        connector_id: Optional[str] = None,
-        workspace_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        del workspace_id  # Canonical snapshots are actor/connector scoped, never thread scoped.
-        connector = self._resolve_connector(connector_id)
+    def _credential_identity(self):
+        from .credentials import NOTION_AUTH_FILENAME, _read_private_file
+        path = self.credential_store.effective_home(self.user_id) / NOTION_AUTH_FILENAME
+        payload = _read_private_file(path, max_bytes=self.credential_store.settings.max_credential_file_bytes)
+        if payload is None:
+            raise NotionCredentialError("Notion authorization is required.")
+        info = path.stat()
+        # effective_home hardens permissions on every read; chmod changes ctime even
+        # when authorization bytes are identical. Bind content plus replacement/mtime
+        # identity, without exporting either credentials or their digest.
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, hashlib.sha256(payload).digest())
+
+    @staticmethod
+    def _read_context(connector):
+        return (connector.get("id"), connector.get("user_id"), connector.get("platform"),
+            connector.get("auth_status"), connector.get("updated_at"),
+            tuple(sorted((item.get("resource_type"), item.get("external_id")) for item in connector.get("sources") or [])))
+
+    @staticmethod
+    def _accepted_identity(connector):
+        return tuple(connector.get(key) for key in ("current_snapshot_version",
+            "current_source_revision", "current_sync_cursor", "last_synced_at"))
+
+    def _accepted_snapshot(self, connector):
+        if connector.get("auth_status") != "authenticated":
+            raise NotionAuthRequiredError("Notion authorization is required.")
+        assert self.snapshot_store is not None
+        if not connector.get("current_snapshot_version"):
+            return None
+        cached = self.snapshot_store.load_accepted(self.user_id, connector)
+        if cached is not None:
+            return cached
+        snapshot = self.connector_store.get_current_snapshot(str(connector["id"]), str(connector["id"]), self.user_id)
+        if snapshot is None:
+            raise NotionSnapshotNotReadyError("Accepted Notion snapshot is unavailable.")
+        return self.snapshot_store.cache_accepted(self.user_id, connector, snapshot)
+
+    async def sync(self, connector_id: Optional[str] = None, workspace_id: Optional[str] = None) -> dict[str, Any]:
+        del workspace_id
+        connector = await asyncio.to_thread(self._resolve_connector, connector_id)
         connector_key = str(connector["id"])
-        lock = _SYNC_LOCKS.setdefault((self.user_id, connector_key), asyncio.Lock())
-        async with lock:
-            connector = self._resolve_connector(connector_key)
-            config = _mapping(connector.get("config"))
-            started_policy = transition_sync_policy(
-                config.get(SYNC_POLICY_CONFIG_KEY),
-                "started",
-                last_synced_at=connector.get("last_synced_at"),
-            )
-            self.connector_store.update_connector(
-                connector_key,
-                self.user_id,
-                {"config": {SYNC_POLICY_CONFIG_KEY: started_policy}},
-            )
+        claim_request = asyncio.create_task(asyncio.to_thread(
+            self.connector_store.begin_sync_run, connector_key, self.user_id))
+        try:
+            claimed = await asyncio.shield(claim_request)
+        except asyncio.CancelledError:
+            # A dispatched claim may still commit; await its finite transport and leave
+            # any resulting lease to Admin instead of issuing an unconfirmed finish.
+            await asyncio.gather(claim_request, return_exceptions=True)
+            raise
+        if claimed.status == "busy":
+            if self.connector_store.background:
+                return {"connector": self.connector_store._project_connector(claimed.connector), "synced": False}
+            delay = None
+            if claimed.retry_at is not None:
+                delay = math.ceil(max(0, (datetime.fromisoformat(claimed.retry_at.replace("Z", "+00:00"))
+                    - datetime.fromisoformat(claimed.server_now.replace("Z", "+00:00"))).total_seconds()))
+                if delay > 9_007_199_254_740_991:
+                    delay = None
+            raise NotionSyncBusyError(delay)
+        if claimed.status == "not_due":
+            return {"connector": self.connector_store._project_connector(claimed.connector), "synced": False}
+        state = {"run": claimed.run, "policy": claimed.execution_policy, "lost": False}
+        pending_admin: list[asyncio.Task] = []
+        renewal_attempts: list[dict] = []
+        stopped = asyncio.Event()
+        builder = heartbeat = None
+        terminal_started = False
+
+        async def finish(outcome):
+            request = asyncio.create_task(asyncio.to_thread(
+                self.connector_store.finish_sync_run, connector_key, state["run"], outcome))
+            pending_admin.append(request)
+            # Keep the finite transport/receipt request owned when its waiter is cancelled.
+            return await asyncio.shield(request)
+
+        async def renew():
+            loop = asyncio.get_running_loop()
+            attempt = {"deadline": loop.time() + state["policy"].renewal_budget_seconds, "completed_at": None}
+            renewal_attempts.append(attempt)
+            async def dispatch():
+                try:
+                    return await asyncio.to_thread(self.connector_store.renew_sync_run, connector_key, state["run"])
+                finally:
+                    attempt["completed_at"] = loop.time()
+            request = asyncio.create_task(dispatch())
+            pending_admin.append(request)
+            done, _ = await asyncio.wait({request}, timeout=state["policy"].renewal_budget_seconds)
+            if not done or attempt["completed_at"] >= attempt["deadline"]:
+                state["lost"] = True
+                raise AdminDataError("NOTION_SYNC_RENEWAL_TIMEOUT", 503, outcome_unknown=True)
             try:
-                if str(connector.get("auth_status") or "") != "authenticated":
-                    raise NotionSnapshotNotReadyError("Connector is not authenticated yet.")
-
-                selected_resources = self.connector_store.list_connector_resources(connector_key, self.user_id)
-                if not selected_resources:
-                    raise NotionSnapshotNotReadyError("No selected Notion resources available.")
-
-                notion_home = self.credential_store.effective_home(self.user_id)
-                ops = operations.NotionOperationClient(notion_home)
-                snapshot = await sync.build_canonical_snapshot(
-                    connector=connector,
-                    selected_resources=selected_resources,
-                    workspace_id=connector_key,
-                    operations=ops,
-                )
-                assert self.snapshot_store is not None
-                self.snapshot_store.publish_current(
-                    self.user_id,
-                    connector_key,
-                    snapshot,
-                )
-                saved_snapshot = self.connector_store.save_snapshot(
-                    connector_key,
-                    self.user_id,
-                    connector_key,
-                    snapshot,
-                    synced_resources=selected_resources,
-                )
-                succeeded_policy = transition_sync_policy(
-                    started_policy,
-                    "succeeded",
-                    last_synced_at=_mapping(saved_snapshot.get("metadata")).get("fetched_at"),
-                )
-                current_connector = self.connector_store.update_connector(
-                    connector_key,
-                    self.user_id,
-                    {"config": {SYNC_POLICY_CONFIG_KEY: succeeded_policy}},
-                )
-            except asyncio.CancelledError:
-                cancelled_policy = transition_sync_policy(
-                    started_policy,
-                    "failed",
-                    last_synced_at=connector.get("last_synced_at"),
-                    error_code="SYNC_CANCELLED",
-                )
-                try:
-                    self.connector_store.update_connector(
-                        connector_key,
-                        self.user_id,
-                        {"config": {SYNC_POLICY_CONFIG_KEY: cancelled_policy}},
-                    )
-                except Exception:
-                    pass
+                response = request.result()
+            except Exception:
+                state["lost"] = True
                 raise
-            except Exception as exc:
-                failed_policy = transition_sync_policy(
-                    started_policy,
-                    "failed",
-                    last_synced_at=connector.get("last_synced_at"),
-                    error_code=_sync_error_code(exc),
-                )
+            state["run"], state["policy"] = response.run, response.execution_policy
+
+        async def heartbeat_loop():
+            while True:
                 try:
-                    self.connector_store.update_connector(
-                        connector_key,
-                        self.user_id,
-                        {"config": {SYNC_POLICY_CONFIG_KEY: failed_policy}},
-                    )
+                    await asyncio.wait_for(stopped.wait(), timeout=state["policy"].heartbeat_seconds)
+                    return
+                except TimeoutError:
+                    await renew()
+
+        async def stop_owned_work():
+            stopped.set()
+            if builder is not None and not builder.done():
+                builder.cancel()
+            if heartbeat is not None and not heartbeat.done():
+                heartbeat.cancel()
+            await asyncio.gather(*(task for task in (builder, heartbeat) if task is not None), return_exceptions=True)
+            # Cancelling an async waiter does not cancel a dispatched synchronous HTTP write.
+            results = await asyncio.gather(*pending_admin, return_exceptions=True)
+            if (any(isinstance(result, BaseException) for result in results)
+                or any(attempt["completed_at"] is None or attempt["completed_at"] >= attempt["deadline"]
+                    for attempt in renewal_attempts)):
+                state["lost"] = True
+
+        try:
+            await renew()  # A recovered old claim receipt is not proof of a current lease.
+            connector = self.connector_store._project_connector(claimed.connector, requested_user_id=self.user_id)
+            sources = connector["sources"]
+            before = self._credential_identity()
+            ops = operations.NotionOperationClient(self.credential_store.effective_home(self.user_id))
+            builder = asyncio.create_task(sync.build_canonical_snapshot(connector=connector,
+                selected_resources=sources, workspace_id=connector_key, operations=ops))
+            heartbeat = asyncio.create_task(heartbeat_loop())
+            done, _ = await asyncio.wait({builder, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
+            if heartbeat in done:
+                state["lost"] = True
+                heartbeat.result()
+                raise AdminDataError("NOTION_SYNC_RUN_INVALID", 409)
+            snapshot = builder.result()
+            stopped.set()
+            await heartbeat
+            if self._credential_identity() != before:
+                state["lost"] = True
+                raise NotionCredentialError("Notion authorization changed during synchronization.")
+            terminal_started = True
+            accepted = await finish({
+                "status": "succeeded", "workspace_id": connector_key, "snapshot": snapshot,
+                "synced_resources": [{"resource_type": item["resource_type"], "external_id": item["external_id"]} for item in sources]})
+        except BaseException as exc:
+            await stop_owned_work()
+            if not terminal_started and not state["lost"]:
+                terminal_started = True
+                outcome = ({"status": "cancelled", "error_code": "NOTION_SYNC_CANCELLED"} if isinstance(exc, asyncio.CancelledError)
+                    else {"status": "failed", "error_code": "NOTION_UPSTREAM_UNAVAILABLE" if isinstance(exc, NotionOperationError) else "NOTION_SYNC_FAILED"})
+                try:
+                    await finish(outcome)
                 except Exception:
-                    pass
-                raise
-            return {
-                "connector": current_connector,
-                "snapshot": saved_snapshot,
-                "snapshotIdentity": saved_snapshot.get("identity") if isinstance(saved_snapshot, dict) else None,
-                "databaseCount": len(saved_snapshot.get("databases") or []),
-                "pageCount": len(saved_snapshot.get("index") or []),
-                "synced": True,
-            }
+                    logger.warning("Notion terminal outcome could not be confirmed safely")
+            raise
+        current_connector = self.connector_store._project_connector(accepted.connector, requested_user_id=self.user_id)
+        saved_snapshot = accepted.snapshot.model_dump(mode="json")
+        assert self.snapshot_store is not None
+        try:
+            self.snapshot_store.cache_accepted(self.user_id, current_connector, saved_snapshot)
+        except (OSError, NotionSnapshotNotReadyError, NotionCredentialError):
+            # The Admin success is durable; cache failures must not rewrite it to failed.
+            logger.warning("Accepted Notion snapshot cache will require read recovery")
+        return {"connector": current_connector, "snapshot": saved_snapshot,
+            "snapshotIdentity": saved_snapshot["identity"], "databaseCount": len(saved_snapshot["databases"]),
+            "pageCount": len(saved_snapshot["index"]), "synced": True}
 
     def get_current_snapshot(
         self,
@@ -760,7 +857,14 @@ class NotionConnectorFacade:
         connector = self._resolve_connector(connector_id)
         del workspace_id
         assert self.snapshot_store is not None
-        return self.snapshot_store.load_current(self.user_id, str(connector["id"]))
+        before = self._credential_identity()
+        snapshot = self._accepted_snapshot(connector)
+        current = self._resolve_connector(str(connector["id"]))
+        if (self._read_context(current) != self._read_context(connector)
+            or self._accepted_identity(current) != self._accepted_identity(connector)
+            or self._credential_identity() != before):
+            raise NotionSnapshotNotReadyError("Notion snapshot context changed. Refresh and retry.")
+        return snapshot
 
     def materialize_workspace(
         self,
@@ -768,10 +872,21 @@ class NotionConnectorFacade:
         connector_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
     ) -> None:
-        connector = self._resolve_connector(connector_id)
         del workspace_id
         assert self.snapshot_store is not None
-        self.snapshot_store.project_thread(self.user_id, connector, workspace_path)
+        try:
+            connector = self._resolve_connector(connector_id)
+            before = self._credential_identity()
+            snapshot = self._accepted_snapshot(connector)
+            self.snapshot_store.project_thread(self.user_id, connector, workspace_path, snapshot=snapshot)
+            current = self._resolve_connector(str(connector["id"]))
+            if (self._read_context(current) != self._read_context(connector)
+                or self._accepted_identity(current) != self._accepted_identity(connector)
+                or self._credential_identity() != before):
+                raise NotionSnapshotNotReadyError("Notion projection context changed. Retry the turn.")
+        except Exception:
+            self.snapshot_store.clear_thread(workspace_path)
+            raise
 
     def project_runtime_credentials(
         self,

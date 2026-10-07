@@ -1,9 +1,13 @@
+<!-- [Sync] 2026-10-06: current Calendar supplement uses selected snapshots and historical creation; preserve preceding task/Chat/history text. -->
 <!-- [Input] 现行 v5 PRD、结构草图、层级逻辑和用户参考图。 -->
 <!-- [Output] Calendar/Chat 定时任务完整交互的视觉规范、生产映射与 HTML/Tailwind/CSS 原型。 -->
 <!-- [Pos] docs/design/claude-agent 下的现行 UI 设计；业务规则以 docs/prd/claude-agent/scheduled-task-diary-page-prd.md 为准。 -->
 <!-- [Sync] 2026-09-29: html-design-workflow v5 将详情栏固定为任务信息、Conversations、任务周期，并隔离通用 TaskSession 列表。 -->
 
+<!-- [Sync] 2026-10-04: index the Calendar right-panel tab proposal and preserve the complete preceding text beside this file. -->
 # Ink & Memory 定时任务完整 UI 设计 v5（现行）
+
+> 2026-10-04 现行补充：[日历右侧页签设计](./calendar-right-panel-tabs-ui-design.md)。Calendar 的右侧卡栈示意与旧 HTML 原型仅用于历史对照；任务内部与 Chat 视觉合同继续适用。现行日历已采用互斥页签；2026-10-06 Notion 改用当前选择范围的连接器快照，历史展示当日创建、今天更新项单独校验。严格全集不属于用户最新范围，技术验证状态见现行日历回执。改动前的完整原文保存在[历史快照](./scheduled-task-diary-page-ui-design-v5-20261004-history.md)。
 
 > 产物类型：实施级 UI 规范 + 可独立审阅的 HTML5 原型
 > 输入：`1_prd_draft.md`、`2_structure_sketch.md`、`3_hierarchy_logic.md`、主图与三张辅助参考图

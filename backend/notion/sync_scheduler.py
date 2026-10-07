@@ -1,5 +1,6 @@
+# [Sync] 2026-10-07: delegate latest due and active owner decisions to Admin claim; busy/not_due skip without false success/failure.
 # [Input] Authenticated connector candidates, versioned per-connector sync policy, and the existing Notion facade.
-# [Output] One process-local background loop that refreshes due actor snapshots outside Agent turns.
+# [Output] One process-local background loop that requests Admin-owned due runs outside Agent turns.
 # [Pos] Notion scheduled snapshot synchronization worker in backend/notion
 # [Sync] 2026-08-28: add strategy-driven background synchronization without a queue, new service, or schema change.
 
@@ -16,7 +17,6 @@ from typing import Any
 
 from . import store
 from .factory import NotionConnectorFacade, build_notion_facade
-from .sync_policy import SYNC_POLICY_CONFIG_KEY, sync_policy_is_due
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class NotionSyncSweepResult:
 
 
 class NotionSnapshotSyncWorker:
-    """Evaluate policies periodically; connector locks remain in the facade."""
+    """Request scheduled claims periodically; Admin owns due and active-run decisions."""
 
     def __init__(
         self,
@@ -81,12 +81,9 @@ class NotionSnapshotSyncWorker:
         succeeded = 0
         failed = 0
         for connector in candidates:
-            config = connector.get("config") if isinstance(connector.get("config"), dict) else {}
             sources = connector.get("sources") if isinstance(connector.get("sources"), list) else []
-            if not sources or not sync_policy_is_due(
-                config.get(SYNC_POLICY_CONFIG_KEY),
-                last_synced_at=connector.get("last_synced_at"),
-            ):
+            # Admin owns current due/lease decisions; persisted syncing is not a local mutex.
+            if not sources:
                 continue
             connector_id = str(connector.get("id") or "")
             user_id = connector.get("user_id")
@@ -94,7 +91,7 @@ class NotionSnapshotSyncWorker:
                 continue
             attempted += 1
             try:
-                await self._facade_factory(user_id, connector_id).sync(
+                outcome = await self._facade_factory(user_id, connector_id).sync(
                     connector_id=connector_id,
                 )
             except asyncio.CancelledError:
@@ -103,7 +100,8 @@ class NotionSnapshotSyncWorker:
                 failed += 1
                 logger.warning("Notion scheduled sync failed safely: code=connector_sync_failed")
             else:
-                succeeded += 1
+                if isinstance(outcome, dict) and outcome.get("synced") is True:
+                    succeeded += 1
         return NotionSyncSweepResult(
             candidates=len(candidates),
             attempted=attempted,

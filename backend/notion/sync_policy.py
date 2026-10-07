@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: retain product policy projection; persisted syncing no longer acts as an execution mutex.
 # [Input] Connector config JSON, last-success timestamps, and user-selected automatic-sync preferences.
 # [Output] Validated default/desired/effective policy snapshots, monotonic revisions, due decisions, and safe status transitions.
 # [Pos] Notion snapshot synchronization policy model in backend/notion
@@ -208,7 +209,8 @@ def sync_policy_is_due(
 ) -> bool:
     current_time = now or _utcnow()
     policy = resolve_sync_policy(raw, last_synced_at=last_synced_at, now=current_time)
-    if not policy["effective"]["enabled"] or policy["status"] == "syncing":
+    # Advisory projection only. Cross-process lease/current due decisions belong to Admin claim.
+    if not policy["effective"]["enabled"]:
         return False
     next_sync = _parse_time(policy.get("next_sync_at"))
     return next_sync is None or next_sync <= current_time

@@ -1,6 +1,7 @@
 <!-- [Input] Repository governance, README contract, package-manager boundaries, and the Dream SDK/Runtime compatibility model. -->
 <!-- [Output] Mandatory maintenance, release-gate, and product-design rules for humans and coding agents working in this repository. -->
 <!-- [Pos] Root operational rulebook; product-level Agent interaction behavior remains in docs/Agent.md. -->
+<!-- [Sync] 2026-10-05: store PRD under its business module; PRD directly contains skeletons and formal interaction design directly contains business/state diagrams. -->
 <!-- [Sync] 2026-09-29: require a reviewed current PRD and interaction design before user-visible feature implementation. -->
 <!-- [Sync] 2026-09-19: require a full Claude Agent send-path release gate for every related change. -->
 <!-- [Sync] 2026-08-28: define README parity, atomic Runtime versions, and authenticated model-capability ownership. -->
@@ -114,11 +115,11 @@ All `POST /api/claude-agent` authentication and pre-stream preparation failures 
 
 ## 9. 产品 PRD 与交互设计前置门禁
 
-任何新增用户可见业务流程或改变既有用户可见行为的需求，必须在编写功能代码**之前**创建或更新现行产品 PRD。PRD 及其链接的交互设计必须包含：
+任何新增用户可见业务流程或改变既有用户可见行为的需求，必须在编写功能代码**之前**创建或更新现行产品 PRD。现行 PRD 放在 `docs/prd/<业务模块>/`；PRD 负责产品规则和页面骨架，关联正式交互设计稿负责业务时序、交互与状态图。两份正文按以下分工直接交付，不能仅以技能阶段文件或外链替代图示；归属规则见 [AGENTS.md](./AGENTS.md)。
 
-1. 涉及 UI 时的页面信息架构；
-2. 完整用户流程和业务交互时序图；
-3. 状态、状态转换、失败反馈与恢复行为；
+1. PRD 正文：背景与问题、目标与边界、概念与规则、完整用户流程；涉及 UI 时直接包含页面信息架构及桌面、窄屏页面骨架图；
+2. 正式交互设计稿正文：直接包含可渲染的 Mermaid 正常业务时序图及异常与恢复时序图；
+3. 两份文档的状态、状态转换、失败反馈与恢复行为保持一致；存在状态变化时，正式设计稿直接包含 Mermaid 页面或业务状态转换图；
 4. 数据所有权、公开接口、身份认证、权限校验、幂等与并发规则；
 5. 涉及 UI 时的响应式与可访问性行为；
 6. 验收条件，以及“需求 → 设计 → 实现 → 测试”追踪矩阵。

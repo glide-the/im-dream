@@ -1,0 +1,1 @@
+2026-10-07用户修正：左右不一定等高；右侧外层仍是圆角浮空纸片，只有容器内部简约留白。复用 ../../calendar-borderless-ui-workflow-20261006/inputs/target_image.png（PDF第5页），不下载新图。现有React/CSS/Token，右侧workspace唯一拥有paper/radius/shadow，短内容自然高度，桌面长内容受原可用高度约束并沿用active section滚动；窄屏原Calendar整体滚动与sticky tabs、末尾阴影安全留白。任务/日记/Notion数据、状态、API、owner不变；短高menu布局方案需独立评审。
