@@ -2,6 +2,7 @@
 # [Output] Provider-free read/authentication, exact contract and fail-closed relation coverage.
 # [Pos] Scheduled activity HTTP and consumer contract tests; no database or model call.
 # [Sync] 2026-10-07: cover Thread read registration, empty results, missing operation and source ID mismatch.
+# [Sync] 2026-10-07: assert the current v3 HTTP contract and retain fail-closed coverage for frozen v2 reads.
 import asyncio
 from types import SimpleNamespace
 
@@ -13,8 +14,8 @@ from pydantic import ValidationError
 from routers import claude_agent as routes
 from services.admin_data.errors import AdminDataError
 from services.admin_data.scheduled_task_data import (
-    AdminScheduledTaskData, THREAD_TASKS_V2, ScheduledTaskThreadInputDTO,
-    ScheduledTaskThreadResultDTO, ScheduledTaskThreadSourceDTO,
+    AdminScheduledTaskData, THREAD_TASKS_V2, THREAD_TASKS_V3, ScheduledTaskThreadInputDTO,
+    ScheduledTaskThreadV3ResultDTO, ScheduledTaskThreadSourceDTO,
 )
 
 
@@ -29,9 +30,9 @@ def test_scheduled_thread_route_requires_production_authentication():
 def test_scheduled_thread_route_passes_exact_thread_read_dto(monkeypatch):
     async def invoke(current_user, method, input_dto):
         assert current_user == {"user_id": "42"}
-        assert method.args == (THREAD_TASKS_V2,)
+        assert method.args == (THREAD_TASKS_V3,)
         assert input_dto == ScheduledTaskThreadInputDTO(thread_id="source")
-        return ScheduledTaskThreadResultDTO(created=[], source=None)
+        return ScheduledTaskThreadV3ResultDTO(created=[], source=None)
 
     monkeypatch.setattr(routes, "invoke_admin_operation", invoke)
     result = asyncio.run(routes.claude_agent_scheduled_thread(
@@ -40,7 +41,11 @@ def test_scheduled_thread_route_passes_exact_thread_read_dto(monkeypatch):
     assert result == {"created": [], "source": None}
 
 
-def test_scheduled_thread_operation_is_read_only_and_missing_contract_stays_closed():
+@pytest.mark.parametrize("operation,expected_name", [
+    (THREAD_TASKS_V2, "scheduled-task.v2.thread"),
+    (THREAD_TASKS_V3, "scheduled-task.v3.thread"),
+])
+def test_scheduled_thread_operation_is_read_only_and_missing_contract_stays_closed(operation, expected_name):
     executed = []
     client = SimpleNamespace(
         capabilities_snapshot=lambda request_id: None,
@@ -48,12 +53,12 @@ def test_scheduled_thread_operation_is_read_only_and_missing_contract_stays_clos
         supports=lambda operations, requirements: False,
         execute=lambda *args, **kwargs: executed.append(args),
     )
-    assert THREAD_TASKS_V2.capability.name == "scheduled-task.v2.thread"
-    assert THREAD_TASKS_V2.capability.kind == "read"
-    assert THREAD_TASKS_V2.capability.user_scope == "dream:read"
-    assert THREAD_TASKS_V2.capability.background_scope is None
+    assert operation.capability.name == expected_name
+    assert operation.capability.kind == "read"
+    assert operation.capability.user_scope == "dream:read"
+    assert operation.capability.background_scope is None
     with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
-        AdminScheduledTaskData(client).execute(THREAD_TASKS_V2,
+        AdminScheduledTaskData(client).execute(operation,
             ScheduledTaskThreadInputDTO(thread_id="source"), "activity-read", access_token="fixture-token")
     assert executed == []
 
