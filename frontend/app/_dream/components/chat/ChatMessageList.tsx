@@ -1,5 +1,6 @@
 // [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components; toolInputSummary helpers.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
+// [Sync] 2026-10-07: render successful scheduled-task markers even when the creating assistant envelope has no text part.
 // [Sync] 2026-09-06: remove the decorative start-of-conversation label.
 // [Pos] chat-message-list component node in frontend/app/_dream/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
@@ -55,7 +56,7 @@
 // [Sync] 2026-09-27: attach created-Thread source navigation to the first user bubble; retain access while older history is unloaded.
 // [Sync] 2026-09-27: place the settled created-task list inside the latest assistant reply, before its actions.
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
-// [Sync] 2026-09-29: recover persisted create_scheduled_task Tool results and render durable task markers in the creating reply.
+// [Sync] 2026-10-07: render durable task markers when persisted Tool output and final prose occupy separate assistant messages.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -857,6 +858,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 )}
               />
             ) : message.parts?.map((_part, partIndex) => renderPart(partIndex, 'normal'))}
+            {message.role === 'assistant' && lastTextPartIndex < 0 && scheduledTaskMarkers.length > 0
+              ? <ScheduledTaskMarkerList tasks={scheduledTaskMarkers} onOpen={onOpenScheduledTask} />
+              : null}
           </div>
         );
       })}

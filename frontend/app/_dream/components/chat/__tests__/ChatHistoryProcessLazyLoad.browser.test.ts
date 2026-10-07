@@ -3,9 +3,10 @@
 // [Pos] Shared Chat/Dream lazy process-detail browser acceptance seam.
 // [Sync] 2026-09-02: created for final-first history hydration and on-demand canonical process rendering.
 // [Sync] 2026-09-06: prove the exact MCP App panel is a persistent sibling outside the collapsible process.
+// [Sync] 2026-10-07: prove a persisted scheduled creation process restores its marker beside the canonical final reply and opens details.
 // [Sync] 2026-09-29: auto-recover historical Tool results so persisted scheduled-task markers survive reload.
 // [Sync] 2026-09-29: use the production top-level scheduled-task Tool receipt and verify the entire marker opens details.
-// [Sync] 2026-09-29: verify task information, source/run Conversations and task schedule stay in the scheduled detail sidebar.
+// [Sync] 2026-10-07: restore a marker from the canonical process detail before opening the scheduled-task sidebar.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -303,7 +304,7 @@ test('validated MCP App panel stays outside the process disclosure after collaps
   }
 });
 
-test('persisted successful create_scheduled_task result restores a marker in its assistant reply', async ({ page }) => {
+test('persisted create_scheduled_task process restores a marker beside its canonical final reply', async ({ page }) => {
   const { server, url } = await startHarness();
   try {
     await page.goto(url);
@@ -329,6 +330,11 @@ test('persisted successful create_scheduled_task result restores a marker in its
         ],
         metadata: { turnId: 'turn-1', turnStatus: 'completed', finalPartIndex: 1, durationMs: 1200 },
       };
+    });
+    await page.waitForFunction(() => typeof (
+      window as unknown as { __resolveProcess?: () => void }
+    ).__resolveProcess === 'function');
+    await page.evaluate(() => {
       (window as unknown as { __resolveProcess: () => void }).__resolveProcess();
     });
     const marker = page.locator('.scheduled-task-marker');

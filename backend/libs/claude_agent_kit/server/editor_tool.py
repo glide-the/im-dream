@@ -3,6 +3,7 @@
 #         purpose, scope, Editor Session ownership and every state replacement.
 # [Output] Provide EDITOR_WRITE_TOOL_SPECS, allowed_editor_tool_names,
 #          handle_editor_write_tool to the editor MCP server.
+# [Sync] 2026-10-07: document which Editor mutations may execute automatically in an owner-bound scheduled turn.
 # [Pos] tool-definition node in libs/claude_agent_kit/server
 # [Sync] 2026-05-28: initial implementation — 5 read-only EditorState tools.
 # [Sync] 2026-05-29: import EDITOR_RESOURCES and get_editor_resource_data from
@@ -29,16 +30,23 @@
 #                    unavailable persistence from missing sessions/cells, and perform
 #                    at most one fresh reload before a target-not-found failure.
 # [Sync] 2026-09-15: replace direct DB access with the turn-local Admin broker while preserving one reload and mutation semantics.
+# [Sync] 2026-10-07: describe server-owned scheduled auto/manual policy separately from ordinary interactive confirmation.
 
 """EditorEngine write MCP tool handlers.
 
 Implements the four write tools described in
 ``docs/design/claude-agent/edit-point/mcp-tools.md`` §2.1:
 
-  write_segment       — replace a cell's full text (requires confirmation)
-  delete_segment      — remove a cell entirely (irreversible, requires confirmation)
-  insert_widget       — insert a new widget cell (requires confirmation)
-  reply_to_comment    — append an agent reply to a comment thread (requires confirmation)
+  write_segment       — replace a cell's full text
+  delete_segment      — remove a cell entirely (irreversible)
+  insert_widget       — insert a new widget cell
+  reply_to_comment    — append an agent reply to a comment thread
+
+Ordinary interactive turns retain the existing confirmation policy. A scheduled
+turn receives a server-owned exact-name policy: ``write_segment`` and
+``insert_widget`` execute automatically against the task's captured Editor Session;
+``delete_segment``, ``reply_to_comment`` and context switching are denied because
+they require a user decision.
 
 Session context flows through the MCP protocol itself:
 
@@ -115,7 +123,8 @@ _EDITOR_SESSION_ID_PROPERTY = {
 EDITOR_WRITE_TOOL_SPECS: dict[str, EditorToolSpec] = {
     "write_segment": EditorToolSpec(
         description=(
-            "替换指定文本片段的完整内容。此操作会修改用户的创作内容，必须经用户确认后执行。"
+            "替换指定文本片段的完整内容。普通交互会话需要用户确认；绑定当前笔记的定时任务"
+            "可按服务端审批策略自动执行。"
         ),
         input_schema={
             "type": "object",
@@ -157,7 +166,8 @@ EDITOR_WRITE_TOOL_SPECS: dict[str, EditorToolSpec] = {
     ),
     "insert_widget": EditorToolSpec(
         description=(
-            "在指定位置插入一个新的组件片段（如 chat、image 等）。必须经用户确认后执行。"
+            "在指定位置插入一个新的组件片段（如 chat、image 等）。普通交互会话需要用户确认；"
+            "绑定当前笔记的定时任务可按服务端审批策略自动执行。"
         ),
         input_schema={
             "type": "object",
@@ -216,7 +226,7 @@ EDITOR_WRITE_TOOL_SPECS: dict[str, EditorToolSpec] = {
         description=(
             "切换当前对话的工作空间上下文至指定会话。调用成功后，智能体通过 .editor/ 路径读取的"
             "内容将来自新的目标会话文档。此操作不修改任何文档内容；状态切换在服务端由 PostToolUse"
-            "钩子完成，无需前端确认。"
+            "钩子完成。普通交互会话沿用现有低敏感策略；定时任务必须拒绝上下文切换。"
         ),
         input_schema={
             "type": "object",

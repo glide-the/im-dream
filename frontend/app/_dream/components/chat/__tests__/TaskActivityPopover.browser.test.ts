@@ -1,6 +1,7 @@
 // [Input] Production TaskActivityContent, local Chrome and owner-scoped task/subagent fixtures.
 // [Output] Visual and interaction evidence for the independent Todo-style activity popover, task navigation and failures.
 // [Pos] Isolated browser acceptance for the Chat shell activity entry; Environment info remains unchanged.
+// [Sync] 2026-10-07: keep ordinary activity isolated from scheduled reads and assert the persistent dialog is hidden after closing.
 // [Sync] 2026-09-28: cover conditional visibility, separated task/subagent/plan cards, status, navigation and unchanged Deck metadata.
 
 import { expect, test } from '@playwright/test';
@@ -103,6 +104,8 @@ test('current-Thread activity popover separates tasks, subagents and plans witho
   });
   let failLinks = false;
   let firstRunning = true;
+  await page.route('**/api/claude-agent/threads/*/scheduled-tasks', (route) =>
+    route.fulfill({ json: { created: [], source: null } }));
   const task = (id: string, threadId: string, title: string) => ({ task_id: id, source_thread_id: 'source-thread', thread_id: threadId, title, launch_status: 'starting', launch_error_code: null, created_at: '2026-09-27T00:00:00Z' });
   await page.route('**/api/claude-agent/threads/source-thread/task-links', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(failLinks ? {} : { source: null, created: [task('first', 'child-one', '复核 Admin 队列与任务会话'), task('second', 'child-two', '复核 Dream 运行中消息队列')] }) });
@@ -188,11 +191,11 @@ test('current-Thread activity popover separates tasks, subagents and plans witho
     await expect(card.locator('.task-activity__task').first()).toContainText('已完成');
     await expect(card).toContainText('检查当前任务。');
     await page.keyboard.press('Escape');
-    await expect(card).toHaveCount(0);
+    await expect(card).toBeHidden();
     await activityTrigger.click();
     await card.locator('[aria-controls="thread-subagent-sidebar"]').click();
     await expect(page.locator('#sidebar-state')).toHaveText('sidebar-open');
-    await expect(card).toHaveCount(0);
+    await expect(card).toBeHidden();
     await activityTrigger.click();
     await card.locator('.task-activity__task').first().click();
     expect(await page.evaluate(() => (window as unknown as { infoNavigation: string[] }).infoNavigation)).toEqual(['child-one']);

@@ -143,7 +143,7 @@ async def main() -> None:
             chat=chat, owner=request_auth,
             source_thread_id=source_thread_id,
             source_message_id=f"dream-http-source-message-{uuid4()}",
-            timeout_seconds=10,
+            timeout_seconds=10, model_alias="dream-balanced",
         )
         broker = SessionProjectionBroker(
             SimpleNamespace(), settings=SessionProjectionBrokerSettings(

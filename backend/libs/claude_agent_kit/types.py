@@ -1,4 +1,4 @@
-# [Sync] 2026-09-26: expose SDK terminal receipt and strict queued-session resume options.
+# [Sync] 2026-10-07: add server-owned exact tool auto/manual policy and a thread-safe unattended violation marker.
 # [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
@@ -64,6 +64,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, Callable, Literal, Optional, Union
 
 from .messages.build_user_message_content import AttachmentPayload
@@ -85,6 +86,50 @@ except ImportError:  # pragma: no cover
 
 # Tool choice mode — determines how tool calls are handled
 ToolChoiceMode = Literal["auto", "none", "manual"]
+ToolApprovalMode = Literal["auto", "manual"]
+
+
+@dataclass(frozen=True)
+class ToolApprovalPolicy:
+    """Exact server-owned execution modes layered after safety guards.
+
+    ``tool_choice`` still controls whether Claude may select tools. This policy
+    controls whether a selected exact tool may execute without a human.
+    """
+
+    overrides: tuple[tuple[str, ToolApprovalMode], ...]
+    deny_unresolved: bool = False
+    ignore_full_access: bool = False
+
+    def __post_init__(self) -> None:
+        seen: set[str] = set()
+        for name, mode in self.overrides:
+            if not name or name in seen or mode not in ("auto", "manual"):
+                raise ValueError("Tool approval overrides require unique nonempty names and auto/manual modes")
+            seen.add(name)
+
+    def mode_for(self, tool_name: str) -> ToolApprovalMode | None:
+        for name, mode in self.overrides:
+            if name == tool_name:
+                return mode
+        return None
+
+
+@dataclass
+class ToolApprovalViolation:
+    """First unattended permission violation recorded across SDK hook threads."""
+
+    _code: str | None = field(default=None, init=False, repr=False)
+    _lock: Lock = field(default_factory=Lock, init=False, repr=False)
+
+    def record(self, code: str) -> None:
+        with self._lock:
+            if self._code is None:
+                self._code = code
+
+    def code(self) -> str | None:
+        with self._lock:
+            return self._code
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +326,11 @@ class AgentRunOptions:
     allowed_tools: Optional[list[str]] = None
     # Tool choice mode.
     tool_choice: ToolChoiceMode = "auto"
+    # Internal exact per-tool execution policy. Public request DTOs cannot set it.
+    tool_approval_policy: Optional[ToolApprovalPolicy] = field(default=None, repr=False)
+    # Shared marker lets an unattended coordinator fail the run even if Claude
+    # continues after one denied tool call and later emits assistant text.
+    tool_approval_violation: Optional[ToolApprovalViolation] = field(default=None, repr=False)
     # Settings-controlled full access mode. When true, the runner returns an
     # explicit PreToolUse permissionDecision:"allow" for exposed tools after
     # safe virtual-index redirects, except AskUserQuestion-style tools that

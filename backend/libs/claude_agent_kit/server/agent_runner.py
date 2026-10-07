@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: apply exact per-tool auto/manual overrides after safety guards and record unattended denials across SDK hook threads.
 # [Sync] 2026-09-28: auto-allow authorized Thread orchestration in Auto/full-access mode; manual mode still confirms.
 # [Sync] 2026-09-28: register create/list/read/send Thread Tools and remove task_session_* permissions.
 # [Sync] 2026-09-26: expose one ResultMessage receipt and forward strict queue resume to the SDK adapter.
@@ -3227,6 +3228,29 @@ class ClaudeAgentRunner:
         _editor_redirect_tmp_paths: list[str] = []
         _notion_redirect_tmp_paths: list[str] = []
 
+        def _record_tool_approval_violation(code: str) -> None:
+            marker = opts.tool_approval_violation
+            if marker is not None:
+                marker.record(code)
+
+        def _unattended_pre_tool_deny(code: str, reason: str) -> HookJSONOutput:
+            _record_tool_approval_violation(code)
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+
+        def _record_guard_deny(result: HookJSONOutput, code: str) -> None:
+            try:
+                decision = result.get("hookSpecificOutput", {}).get("permissionDecision")
+            except AttributeError:
+                decision = None
+            if decision == "deny" and opts.tool_approval_policy is not None:
+                _record_tool_approval_violation(code)
+
         async def _pre_tool_use_hook(
             hook_input: dict[str, Any],
             tool_use_id: Optional[str],
@@ -3254,6 +3278,7 @@ class ClaudeAgentRunner:
                 tmp_paths=_notion_redirect_tmp_paths,
             )
             if notion_redirect_result is not None:
+                _record_guard_deny(notion_redirect_result, "SCHEDULE_TOOL_APPROVAL_REQUIRED")
                 return notion_redirect_result
 
             # ----------------------------------------------------------
@@ -3284,6 +3309,7 @@ class ClaudeAgentRunner:
                 live_editor_state,
             )
             if editor_session_binding is not None:
+                _record_guard_deny(editor_session_binding, "SCHEDULE_TOOL_APPROVAL_REQUIRED")
                 return editor_session_binding
             redirect_result = _apply_editor_index_redirect(
                 tool_name,
@@ -3293,6 +3319,7 @@ class ClaudeAgentRunner:
                 tmp_workspace=opts.claude_tmp_workspace or cwd,
             )
             if redirect_result is not None:
+                _record_guard_deny(redirect_result, "SCHEDULE_TOOL_APPROVAL_REQUIRED")
                 return redirect_result
 
             dream_write_guard = _apply_dream_surface_write_guard(
@@ -3306,6 +3333,7 @@ class ClaudeAgentRunner:
                 ),
             )
             if dream_write_guard is not None:
+                _record_guard_deny(dream_write_guard, "SCHEDULE_TOOL_APPROVAL_REQUIRED")
                 return dream_write_guard
 
             disabled_network_permission = _apply_disabled_network_permission(
@@ -3314,6 +3342,7 @@ class ClaudeAgentRunner:
                 tool_input,
             )
             if disabled_network_permission is not None:
+                _record_guard_deny(disabled_network_permission, "SCHEDULE_NETWORK_APPROVAL_REQUIRED")
                 return disabled_network_permission
 
             workspace_boundary_permission = _apply_workspace_boundary_permission(
@@ -3323,7 +3352,21 @@ class ClaudeAgentRunner:
                 auto_allow_queries=(tool_choice == "auto"),
             )
             if workspace_boundary_permission is not None:
+                _record_guard_deny(workspace_boundary_permission, "SCHEDULE_TOOL_APPROVAL_REQUIRED")
                 return workspace_boundary_permission
+
+            approval_policy = opts.tool_approval_policy
+            if approval_policy is not None:
+                approval_mode = approval_policy.mode_for(tool_name)
+                if approval_mode == "auto":
+                    return _explicit_pre_tool_use_allow(
+                        tool_input if forced_foreground_subagent else None
+                    )
+                if approval_mode == "manual":
+                    return _unattended_pre_tool_deny(
+                        "SCHEDULE_TOOL_APPROVAL_REQUIRED",
+                        "定时任务不能等待人工确认，此工具已被拒绝",
+                    )
 
             if tool_choice == "auto":
                 dream_canonical_write_permission = (
@@ -3346,6 +3389,7 @@ class ClaudeAgentRunner:
 
             if (
                 opts.im_full_access_enabled
+                and not (approval_policy and approval_policy.ignore_full_access)
                 and tool_choice != "none"
                 and tool_name not in _ANSWER_FORM_TOOL_NAMES
             ):
@@ -3365,6 +3409,12 @@ class ClaudeAgentRunner:
                 )
                 if low_sensitivity_permission is not None:
                     return low_sensitivity_permission
+
+            if approval_policy is not None and approval_policy.deny_unresolved:
+                return _unattended_pre_tool_deny(
+                    "SCHEDULE_TOOL_APPROVAL_REQUIRED",
+                    "定时任务不能等待人工确认，此工具未配置自动执行",
+                )
 
             # In auto mode, workspace files/ built-in file tools plus explicit
             # low-sensitivity query/context-selection/Skill tools are allowed
@@ -3511,6 +3561,13 @@ class ClaudeAgentRunner:
                 dict(input_data or {}),
             )
             is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
+            if opts.tool_approval_policy is not None and opts.tool_approval_policy.deny_unresolved:
+                code = ("SCHEDULE_NETWORK_APPROVAL_REQUIRED" if is_sandbox_network_ask
+                        else "SCHEDULE_TOOL_APPROVAL_REQUIRED")
+                _record_tool_approval_violation(code)
+                return PermissionResultDeny(
+                    message="定时任务不能等待人工确认，此权限请求已被拒绝"
+                )
             host = (
                 str(input_data.get("host") or "").strip().lower() or None
                 if is_sandbox_network_ask and isinstance(input_data, dict)

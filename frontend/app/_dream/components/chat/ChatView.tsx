@@ -1,3 +1,4 @@
+// [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-07: remove the redundant history title/subtitle block below the existing tab/search toolbar.
 // [Sync] 2026-09-27: navigate between source and created task-session Threads from Chat content.
 // [Sync] 2026-09-27: open selected queue messages in an independent right-side task Thread.
@@ -346,6 +347,8 @@ function ChatViewContent({
   const [scheduledTaskDetail, setScheduledTaskDetail] = useState<{
     taskId: string; snapshot: ScheduledTaskMarkerSnapshot | null;
   } | null>(null);
+  const [scheduledActivityRevision, setScheduledActivityRevision] = useState(0);
+  const refreshScheduledActivity = useCallback(() => setScheduledActivityRevision((value) => value + 1), []);
   useEffect(() => {
     const selected = new URLSearchParams(window.location.search).get('task_thread');
     if (selected) setSideTaskThreadId(selected);
@@ -466,6 +469,13 @@ function ChatViewContent({
     setSubagentSidebarOpen(false);
     closeSideTask();
     setScheduledTaskDetail({ taskId: row.id, snapshot: row.snapshot ?? null });
+  }, [closeSideTask]);
+  const openScheduledTask = useCallback((task: ScheduledTaskMarkerSnapshot) => {
+    setThreadSidebarOpen(false);
+    closeSideTask();
+    setFileSidebarOpen(false);
+    setSubagentSidebarOpen(false);
+    setScheduledTaskDetail({ taskId: task.id, snapshot: task });
   }, [closeSideTask]);
   const selectedDeck = useMemo(
     () => availableDecks.find((deck) => deck.id === selectedDeckId),
@@ -1308,6 +1318,8 @@ function ChatViewContent({
             {activeThreadId ? (
               <PlanButton
                 threadId={activeThreadId}
+                scheduledRefreshKey={scheduledActivityRevision}
+                onOpenScheduledTask={openScheduledTask}
                 subagentSidebarOpen={subagentSidebarOpen}
                 onNavigateThread={(taskThreadId) => {
                   closeSideTask();
@@ -1443,13 +1455,8 @@ function ChatViewContent({
                     closeSideTask();
                     handleSelectThread(taskThreadId);
                   }}
-                  onOpenScheduledTask={(task) => {
-                    setThreadSidebarOpen(false);
-                    closeSideTask();
-                    setFileSidebarOpen(false);
-                    setSubagentSidebarOpen(false);
-                    setScheduledTaskDetail({ taskId: task.id, snapshot: task });
-                  }}
+                  onOpenScheduledTask={openScheduledTask}
+                  onConversationSettled={refreshScheduledActivity}
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
                   voiceId={selectedAgentId}

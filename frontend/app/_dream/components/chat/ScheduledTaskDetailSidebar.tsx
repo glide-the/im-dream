@@ -1,7 +1,7 @@
 // [Input] A scheduled-task id, optional creation snapshot, and authenticated scheduled-task APIs.
 // [Output] Read-only right detail sidebar with task information, owned conversations, schedule, retry, and exact Thread navigation.
 // [Pos] Chat-owned scheduled-task detail surface, mutually exclusive with file/subagent/task-session sidebars.
-// [Sync] 2026-09-29: separate task information, scheduled-run Conversations, and the task schedule in the Chat sidebar.
+// [Sync] 2026-10-07: display v3 repeat, source/new Chat mode and captured model without duplicating a reused source conversation.
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -37,14 +37,19 @@ export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, 
     finally { setLoading(false); }
   }, [taskId]);
   useEffect(() => { void load(); }, [load]);
-  const conversations = useMemo(() => [...triggers]
-    .filter((trigger) => Boolean(trigger.target_thread_id))
-    .sort((left, right) => timestamp(right) - timestamp(left)), [triggers]);
+  const conversations = useMemo(() => {
+    const rows = [...triggers].filter((trigger) => Boolean(trigger.target_thread_id)
+      && trigger.target_thread_id !== task?.source_thread_id).sort((left, right) => timestamp(right) - timestamp(left));
+    return [...new Map(rows.map((trigger) => [trigger.target_thread_id!, trigger])).values()];
+  }, [task?.source_thread_id, triggers]);
   const title = task?.title ?? snapshot?.title ?? t('chat.scheduledTask.detailTitle');
   const rule = task?.rule ?? snapshot?.rule;
   const ruleText = rule?.kind === 'once'
     ? `${rule.local_date} · ${rule.local_time} · ${rule.time_zone}`
-    : rule ? `${t('calendar.scheduledDaily')} · ${rule.local_time} · ${rule.time_zone}` : '—';
+    : rule?.kind === 'daily' ? `${t('calendar.scheduledDaily')} · ${rule.local_time} · ${rule.time_zone}`
+      : rule?.kind === 'interval' ? `${t('calendar.scheduledIntervalSummary', { count: rule.interval_minutes })} · ${rule.time_zone}`
+        : rule?.kind === 'hourly' ? `${t('calendar.scheduledHourlySummary', { count: rule.interval_hours, minute: rule.minute })} · ${rule.time_zone}`
+          : rule?.kind === 'weekly' ? `${t('calendar.scheduledWeeklySummary', { days: rule.weekdays.map((day) => t(`calendar.scheduledWeekday.${day}`)).join('、'), time: rule.local_time })} · ${rule.time_zone}` : '—';
   const status = task?.status ?? snapshot?.status;
   const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString(i18n.language) : '—';
   return <aside className="scheduled-task-detail" aria-label={t('chat.scheduledTask.detailTitle')}>
@@ -60,6 +65,9 @@ export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, 
       {!loading && !error ? <>
         <section><h3>{t('chat.scheduledTask.taskInfo')}</h3><dl>
           <div><dt>{t('calendar.scheduledStatusLabel')}</dt><dd>{status ? t(`calendar.scheduledStatus.${status}`, { defaultValue: status }) : '—'}</dd></div>
+          <div><dt>{t('chat.scheduledTask.runMode')}</dt><dd>{task?.run_thread_mode === 'new_thread_each_run'
+            ? t('chat.scheduledTask.newConversation') : t('chat.scheduledTask.reuseSource')}</dd></div>
+          <div><dt>{t('chat.scheduledTask.model')}</dt><dd>{task?.model_alias ?? t('chat.scheduledTask.legacyModel')}</dd></div>
         </dl>{task?.prompt ? <p className="scheduled-task-detail__prompt">{task.prompt}</p> : null}</section>
         <section><h3>{t('chat.scheduledTask.conversations')}</h3>
           <div className="scheduled-task-detail__conversations">

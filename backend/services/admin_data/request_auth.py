@@ -1,3 +1,4 @@
+# [Sync] 2026-10-07: register scheduled Chat v3 recurrence, Thread mode and model operations.
 # [Sync] 2026-10-07: register frozen Notion ownership operations without changing other domains or delegated authority.
 # [Sync] 2026-09-27: register exact task-result operations for optional capability-gated completion handoff.
 # [Sync] 2026-09-28: register Admin-owned scheduled Chat definitions and trigger operations without changing ordinary Chat readiness.
@@ -55,7 +56,7 @@ from threading import RLock
 
 from .chat_data import CHAT_OPERATIONS
 from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWorkerData
-from .scheduled_task_data import SCHEDULED_TASK_OPERATIONS
+from .scheduled_task_data import SCHEDULED_TASK_OPERATIONS, SCHEDULED_TASK_V2_OPERATIONS, SCHEDULED_TASK_V3_OPERATIONS
 from .client import AdminDataClient
 from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
@@ -152,6 +153,8 @@ class AdminRequestAuth:
                 *CHAT_OPERATIONS,
                 *TASK_RESULT_OPERATIONS,
                 *SCHEDULED_TASK_OPERATIONS,
+                *SCHEDULED_TASK_V2_OPERATIONS,
+                *SCHEDULED_TASK_V3_OPERATIONS,
                 *SESSION_OPERATIONS,
                 *DECK_VERSION_OPERATIONS,
                 *PREFERENCES_OPERATIONS,

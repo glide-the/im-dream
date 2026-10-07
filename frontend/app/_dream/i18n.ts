@@ -1,3 +1,6 @@
+// [Sync] 2026-10-07: localize Codex-style repeat presets, source/new Chat mode and execution model controls.
+// [Sync] 2026-10-07: localize conversation scheduled activity, independent execution status and retry feedback.
+// [Sync] 2026-10-07: localize interval schedule editing and cadence display in English and Chinese.
 // [Sync] 2026-10-07: add matching English/Chinese Chat activity source, display and recovery labels.
 // [Sync] 2026-10-07: compact Notion title count, single safe-link content and actionable connector sync recovery copy in both languages.
 // [Sync] 2026-10-06: selected-date snapshot and separate today-verification feedback in both locales.
@@ -456,7 +459,21 @@ const resources = {
         scheduledBackToList: 'Back to scheduled tasks', scheduledResultTitle: 'Latest execution',
         scheduledResultUnavailable: 'The latest result is unavailable. Open the run conversation to review it.',
         scheduledResultLoading: 'Loading the latest result…',
-        scheduledOnce: 'Once', scheduledDaily: 'Daily', scheduledDate: 'Date',
+        scheduledOnce: 'Once', scheduledDaily: 'Daily', scheduledInterval: 'Interval', scheduledDate: 'Date',
+        scheduledIntervalMinutes: 'Repeat every (minutes)', scheduledIntervalSummary: 'Every {{count}} minutes',
+        scheduledRepeat: 'Repeat', scheduledAdvancedSchedule: 'Advanced schedule', scheduledEditRule: 'Edit rule',
+        scheduledApplyRule: 'Apply', scheduledCustomRule: 'Custom schedule', scheduledHourly: 'Hourly',
+        scheduledIntervalMinutesOption: 'Every N minutes', scheduledIntervalHoursOption: 'Every N hours',
+        scheduledSelectedWeekdays: 'Selected weekdays', scheduledIntervalHours: 'Every (hours)', scheduledMinute: 'At minute',
+        scheduledWeekdays: 'Weekdays', scheduledChooseWeekday: 'Choose at least one weekday.',
+        scheduledHourlySummary: 'Every {{count}} hour(s) at minute {{minute}}',
+        scheduledWeeklySummary: '{{days}} · {{time}}',
+        scheduledRepeatPreset: { hourly: 'Every hour', daily: 'Every day', workdays: 'Weekdays', weekly: 'Every week', custom: 'Custom' },
+        scheduledWeekday: { MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat', SU: 'Sun' },
+        scheduledAdvanced: 'Advanced', scheduledNewChatEveryRun: 'Open a new conversation for every run',
+        scheduledNewChatEveryRunHint: 'When off, each run continues in the conversation that created this task.',
+        scheduledModel: 'Model', scheduledModelsLoading: 'Loading models…', scheduledChooseModel: 'Choose a model',
+        scheduledModelsUnavailable: 'The model catalog is temporarily unavailable. Try again before saving.',
         scheduledTime: 'Time', scheduledTimeZone: 'Time zone',
         scheduledNext: 'Next run', scheduledSave: 'Save', scheduledCancel: 'Cancel',
         scheduledEdit: 'Edit', scheduledPause: 'Pause', scheduledResume: 'Resume',
@@ -553,6 +570,8 @@ const resources = {
           close: 'Close scheduled task details', loading: 'Loading task details…',
           unavailable: 'Task details are temporarily unavailable.', details: 'Details',
           taskInfo: 'Task information', conversations: 'Conversations', taskCycle: 'Task schedule',
+          runMode: 'Conversation for each run', reuseSource: 'Continue creation conversation', newConversation: 'Open a new conversation',
+          model: 'Execution model', legacyModel: 'Legacy task has no fixed model',
           sourceConversation: 'Creation conversation', runConversation: 'Run conversation',
           noConversations: 'No conversations are available yet.',
         },
@@ -898,6 +917,8 @@ const resources = {
         },
         taskActivity: {
           activityTitle: 'Task activity', sectionsAria: 'Tasks and agents', createdTasks: 'Tasks created',
+          scheduledTasks: 'Scheduled tasks', scheduledLoading: 'Loading scheduled tasks…',
+          scheduledUnavailable: 'Scheduled tasks could not be loaded.', scheduledExecution: 'This execution: {{status}}',
           noTasks: 'No tasks created in this conversation.', loading: 'Loading tasks…',
           unavailable: 'Tasks could not be loaded.', retry: 'Reload', refresh: 'Refresh',
           status: { pending: 'Pending', failed: 'Start failed', running: 'Running', idle: 'Ended', completed: 'Completed', state_unknown: 'Status unavailable' }
@@ -1502,7 +1523,21 @@ const resources = {
         scheduledBackToList: '返回定时任务列表', scheduledResultTitle: '最近一次运行结果',
         scheduledResultUnavailable: '最近一次运行结果暂不可用，可打开本次运行会话查看。',
         scheduledResultLoading: '正在加载最近一次运行结果…',
-        scheduledOnce: '单次', scheduledDaily: '每天', scheduledDate: '日期',
+        scheduledOnce: '单次', scheduledDaily: '每天', scheduledInterval: '间隔', scheduledDate: '日期',
+        scheduledIntervalMinutes: '每隔（分钟）', scheduledIntervalSummary: '每隔 {{count}} 分钟',
+        scheduledRepeat: '重复', scheduledAdvancedSchedule: '高级日程', scheduledEditRule: '编辑规则',
+        scheduledApplyRule: '应用', scheduledCustomRule: '自定义日程', scheduledHourly: '每小时',
+        scheduledIntervalMinutesOption: '每隔 N 分钟', scheduledIntervalHoursOption: '每隔 N 小时',
+        scheduledSelectedWeekdays: '指定星期', scheduledIntervalHours: '每隔（小时）', scheduledMinute: '第几分钟运行',
+        scheduledWeekdays: '星期', scheduledChooseWeekday: '请至少选择一个星期。',
+        scheduledHourlySummary: '每隔 {{count}} 小时，于第 {{minute}} 分钟运行',
+        scheduledWeeklySummary: '{{days}} · {{time}}',
+        scheduledRepeatPreset: { hourly: '每小时', daily: '每天', workdays: '工作日', weekly: '每周', custom: '自定义' },
+        scheduledWeekday: { MO: '周一', TU: '周二', WE: '周三', TH: '周四', FR: '周五', SA: '周六', SU: '周日' },
+        scheduledAdvanced: '高级', scheduledNewChatEveryRun: '每次运行时都开启新聊天',
+        scheduledNewChatEveryRunHint: '关闭时，任务会在创建任务的原会话中继续运行。',
+        scheduledModel: '模型', scheduledModelsLoading: '正在加载模型…', scheduledChooseModel: '选择模型',
+        scheduledModelsUnavailable: '模型目录暂不可用，请重试后再保存。',
         scheduledTime: '时间', scheduledTimeZone: '时区',
         scheduledNext: '下次执行', scheduledSave: '保存', scheduledCancel: '取消',
         scheduledEdit: '编辑', scheduledPause: '暂停', scheduledResume: '恢复',
@@ -1599,6 +1634,8 @@ const resources = {
           close: '关闭定时任务详情', loading: '正在加载任务详情…',
           unavailable: '任务详情暂不可用。', details: '详情',
           taskInfo: '任务信息', conversations: '会话', taskCycle: '任务周期',
+          runMode: '每次运行的会话', reuseSource: '继续创建任务的会话', newConversation: '开启新会话',
+          model: '执行模型', legacyModel: '存量任务未固定模型',
           sourceConversation: '创建任务的会话', runConversation: '任务运行会话',
           noConversations: '暂无可打开的会话。',
         },
@@ -1941,6 +1978,8 @@ const resources = {
         },
         taskActivity: {
           activityTitle: '任务与进度', sectionsAria: '任务与子智能体', createdTasks: '已创建的任务',
+          scheduledTasks: '定时任务', scheduledLoading: '正在加载定时任务…',
+          scheduledUnavailable: '暂时无法读取定时任务。', scheduledExecution: '本次执行：{{status}}',
           noTasks: '此对话尚未创建任务。', loading: '正在加载任务…',
           unavailable: '暂时无法读取任务。', retry: '重新加载', refresh: '刷新',
           status: { pending: '待启动', failed: '启动失败', running: '运行中', idle: '已结束', completed: '已完成', state_unknown: '状态待核对' }

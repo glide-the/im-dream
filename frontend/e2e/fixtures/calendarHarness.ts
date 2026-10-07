@@ -1,4 +1,6 @@
-// [Sync] 2026-10-07: measure natural paper seam independently of sticky translation and assert unclipped month/stack geometry.
+// [Sync] 2026-10-07: classify exact Chat-list and target-Thread schedule-relation aborts during result handoff.
+// [Sync] 2026-10-07: capture the synchronous Thread-handoff phase before asynchronous request-header inspection.
+// [Sync] 2026-10-07: serve v3 repeat, Chat mode, model snapshots and the callable model catalog through production DTO routes.
 // [Sync] 2026-10-06: recognize injected Calendar documents metadata faults/cancellation on the exact public route.
 // [Sync] 2026-10-06: measure borderless geometry and actual alpha layers over an opaque ancestor; long titles remain public DTO fixture data.
 // [Sync] 2026-10-06: wait for the existing Modal initial focus before tab journeys; a test-only hook permits bounded first-frame readiness evidence.
@@ -33,11 +35,15 @@ export const CSRF = 's'.repeat(43);
 
 type TaskStatus = 'active' | 'paused' | 'exhausted' | 'deleted';
 type TriggerStatus = 'claimed' | 'queued' | 'running' | 'succeeded' | 'failed' | 'state_unknown' | 'skipped';
-type TaskRule =
+export type TaskRule =
   | { kind: 'once'; local_date: string; local_time: string; time_zone: string; selected_offset_minutes: number | null }
-  | { kind: 'daily'; local_time: string; time_zone: string };
+  | { kind: 'daily'; local_time: string; time_zone: string }
+  | { kind: 'interval'; interval_minutes: number; time_zone: string }
+  | { kind: 'hourly'; interval_hours: number; minute: number; time_zone: string }
+  | { kind: 'weekly'; weekdays: Array<'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU'>; local_time: string; time_zone: string };
 type Task = {
   id: string; source_thread_id: string; title: string; prompt: string; rule: TaskRule;
+  run_thread_mode: 'source_thread' | 'new_thread_each_run'; model_alias: string | null;
   next_run_at: string | null; status: TaskStatus; revision: number;
   created_at: string; updated_at: string;
 };
@@ -48,6 +54,7 @@ type Trigger = {
   target_thread_id: string | null; input_message_id: string | null;
   target_turn_id: string | null; final_message_id: string | null; error_code: string | null;
   skipped_from_at: string | null; skipped_through_at: string | null;
+  run_thread_mode_snapshot: 'source_thread' | 'new_thread_each_run'; model_alias_snapshot: string | null;
   created_at: string; updated_at: string;
 };
 
@@ -75,6 +82,7 @@ function baseTask(status: TaskStatus = 'active'): Task {
     title: '晨间复盘',
     prompt: '整理今天的笔记',
     rule: { kind: 'daily', local_time: '09:00', time_zone: 'UTC' },
+    run_thread_mode: 'new_thread_each_run', model_alias: 'dream-balanced',
     next_run_at: status === 'active' ? '2026-09-29T09:00:00Z' : null,
     status,
     revision: 1,
@@ -93,6 +101,7 @@ function baseTrigger(task: Task, status: TriggerStatus, hasThread = status === '
     final_message_id: status === 'succeeded' ? 'message_schedule_final' : null,
     error_code: status === 'failed' ? 'SCHEDULE_EXECUTION_FAILED' : null,
     skipped_from_at: null, skipped_through_at: null,
+    run_thread_mode_snapshot: task.run_thread_mode, model_alias_snapshot: task.model_alias,
     created_at: '2026-09-28T09:01:00Z', updated_at: '2026-09-28T09:01:00Z',
   };
 }
@@ -148,11 +157,20 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     const path = new URL(url).pathname;
     const parsedUrl = new URL(url);
     const failure = request.failure()?.errorText ?? 'failed';
+    // Capture the synchronous lifecycle phase before awaiting headers. The
+    // caller may end the handoff phase while this listener is suspended.
+    const threadHandoffStageAtFailure = threadHandoffStage;
     const requestHeaders = await request.allHeaders();
     const referer = requestHeaders.referer ?? '';
     const refererPath = referer ? new URL(referer).pathname : '';
-    const expectedThreadHandoffAbort = threadHandoffStage
+    const expectedThreadHandoffAbort = threadHandoffStageAtFailure
       && request.method() === 'GET'
+      && parsedUrl.pathname === '/api/claude-agent/threads'
+      && parsedUrl.search === '?limit=21'
+      && failure === 'net::ERR_ABORTED'
+      && new URL(page.url()).pathname === '/story-workspace/chat'
+      && refererPath === '/story-workspace/chat';
+    const expectedChatListNavigationAbort = request.method() === 'GET'
       && parsedUrl.pathname === '/api/claude-agent/threads'
       && parsedUrl.search === '?limit=21'
       && failure === 'net::ERR_ABORTED'
@@ -164,6 +182,9 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       && path === '/api/story-workspace/dream-runs';
     const expectedScheduledResultNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
       && path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/messages`;
+    const expectedScheduledRelationNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
+      && path === `/api/claude-agent/threads/${TARGET_THREAD_ID}/scheduled-tasks`
+      && new URL(page.url()).pathname === '/story-workspace/chat';
     const expectedUnknownRun = options.firstRunOutcome === 'network_unknown'
       && path === `/api/claude-agent/scheduled-tasks/${TASK_ID}/run`;
     const expectedNotionCancellation = options.notionFaults && /^\/api\/connectors\/[^/]+\/notion\/(?:documents|today)$/.test(path)
@@ -176,8 +197,9 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       return;
     }
     if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com')
-      && !expectedNavigationAbort && !expectedDreamListNavigationAbort
+      && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedChatListNavigationAbort
       && !expectedScheduledResultNavigationAbort && !expectedUnknownRun && !expectedNotionCancellation
+      && !expectedScheduledRelationNavigationAbort
       && !expectedAuthEntryCancellation) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
@@ -217,6 +239,18 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     }
     if (path === '/api/sessions/events') {
       await route.fulfill({ contentType: 'text/event-stream', body: ': connected\n\n' });
+      return;
+    }
+    if (path === '/api/gateway/models' && request.method() === 'GET') {
+      await route.fulfill({ json: { data: [{
+        modelAlias: 'dream-balanced', displayName: 'Dream Balanced', protocol: 'anthropic', capabilities: {},
+        contextWindow: 200000, maxOutputTokens: 8192, enabled: true, callable: true,
+        availability: 'included', requiredPlanCode: null, upgradeHint: null,
+      }, {
+        modelAlias: 'dream-fast', displayName: 'Dream Fast', protocol: 'anthropic', capabilities: {},
+        contextWindow: 200000, maxOutputTokens: 8192, enabled: true, callable: true,
+        availability: 'included', requiredPlanCode: null, upgradeHint: null,
+      }], defaultModelAlias: 'dream-balanced' } });
       return;
     }
     if (path.startsWith('/api/claude-agent/scheduled-tasks')) {
@@ -277,6 +311,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
             return;
           }
           task = { ...task, title: String(body.title), prompt: String(body.prompt), rule: body.rule as TaskRule,
+            run_thread_mode: body.run_thread_mode as Task['run_thread_mode'], model_alias: String(body.model_alias),
             revision: task.revision + 1, updated_at: '2026-09-28T09:03:00Z' };
           await route.fulfill({ json: { task } });
           return;

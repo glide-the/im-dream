@@ -1,4 +1,4 @@
-// [Sync] 2026-10-07: check the true floating workspace exterior, original inner controls and last-row in-flow menu operations.
+// [Sync] 2026-10-07: edit v3 repeat presets, custom cadence, Chat mode and model through the production task DTO.
 // [Sync] 2026-10-07: make the canonical Chat Thread handoff phase explicit before checking its scoped navigation cancellation.
 // [Input] Production Calendar and shared API-boundary fixture.
 // [Output] Complete provider-free task lifecycle regression with mutually exclusive tabs.
@@ -7,6 +7,7 @@
 // [Sync] 2026-10-06: distinguish the unchanged month border/shadow from the borderless active right paper and RESULT spacing.
 import { expect, test } from '@playwright/test';
 import { installFixtures, openCalendar, openMore, readFloatingPaperSafety, expectFloatingPaperSafety, TARGET_THREAD_ID, TASK_ID } from './fixtures/calendarHarness';
+import type { TaskRule } from './fixtures/calendarHarness';
 test.use({ channel: 'chrome' });
 test.describe.configure({ mode: 'serial' });
 
@@ -379,26 +380,98 @@ test('edit keeps the desired draft and explains repeated or missing daylight-sav
 
   await card.getByRole('button', { name: /编辑/ }).click();
   const editor = page.getByRole('dialog', { name: /编辑/ });
-  await editor.getByLabel('计划').selectOption('once');
-  await editor.getByLabel('日期').fill('2026-11-01');
-  await editor.getByLabel('时间').fill('01:30');
-  await editor.getByLabel('时区').fill('America/New_York');
+  await editor.getByLabel('重复').selectOption('custom');
+  await editor.getByRole('button', { name: /高级日程/ }).click();
+  let ruleEditor = page.getByRole('dialog', { name: '高级日程' });
+  await ruleEditor.getByLabel('自定义日程').selectOption('once');
+  await ruleEditor.getByLabel('日期').fill('2026-11-01');
+  await ruleEditor.getByLabel('时间').fill('01:30');
+  await ruleEditor.getByLabel('时区').fill('America/New_York');
+  await ruleEditor.getByRole('button', { name: '应用' }).click();
   await editor.getByRole('button', { name: '保存' }).click();
   await expect(editor.getByRole('alert')).toContainText('该当地时间因时钟调整会出现两次');
-  await expect(editor.getByLabel('时间')).toHaveValue('01:30');
+  await editor.getByRole('button', { name: /高级日程/ }).click();
+  ruleEditor = page.getByRole('dialog', { name: '高级日程' });
+  await expect(ruleEditor.getByLabel('时间')).toHaveValue('01:30');
 
-  await editor.getByLabel('日期').fill('2026-03-08');
-  await editor.getByLabel('时间').fill('02:30');
+  await ruleEditor.getByLabel('日期').fill('2026-03-08');
+  await ruleEditor.getByLabel('时间').fill('02:30');
+  await ruleEditor.getByRole('button', { name: '应用' }).click();
   await editor.getByRole('button', { name: '保存' }).click();
   await expect(editor.getByRole('alert')).toContainText('这个当地时间因时钟调整而不存在');
-  await expect(editor.getByLabel('时间')).toHaveValue('02:30');
+  await editor.getByRole('button', { name: /高级日程/ }).click();
+  ruleEditor = page.getByRole('dialog', { name: '高级日程' });
+  await expect(ruleEditor.getByLabel('时间')).toHaveValue('02:30');
 
-  await editor.getByLabel('时间').fill('03:30');
+  await ruleEditor.getByLabel('时间').fill('03:30');
+  await ruleEditor.getByRole('button', { name: '应用' }).click();
   await editor.getByRole('button', { name: '保存' }).click();
   await expect(editor).toBeHidden();
   await expect(card).toContainText('2026-03-08 · 03:30');
   expect(fixture.getEditBodies().slice(0, 2).map((body) => (body.rule as TaskRule).kind === 'once'
     ? (body.rule as Extract<TaskRule, { kind: 'once' }>).selected_offset_minutes : 'daily')).toEqual([null, null]);
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('edit changes a task to every ten minutes through the production DTO', async ({ page }) => {
+  const fixture = await installFixtures(page, { firstEditConflict: false, firstRunOutcome: 'success' });
+  const { dialog } = await openCalendar(page);
+  const card = dialog.locator('.calendar-popup__task').first();
+
+  await card.getByRole('button', { name: /编辑/ }).click();
+  const editor = page.getByRole('dialog', { name: /编辑/ });
+  await editor.getByLabel('重复').selectOption('custom');
+  await editor.getByRole('button', { name: /高级日程/ }).click();
+  const ruleEditor = page.getByRole('dialog', { name: '高级日程' });
+  await ruleEditor.getByLabel('自定义日程').selectOption('interval');
+  await ruleEditor.getByLabel('每隔（分钟）').fill('10');
+  await ruleEditor.getByRole('button', { name: '应用' }).click();
+  await editor.getByRole('button', { name: '保存' }).click();
+
+  await expect(editor).toBeHidden();
+  await expect(card).toContainText('每隔 10 分钟');
+  expect(fixture.getEditBodies().at(-1)?.rule).toEqual({
+    kind: 'interval', interval_minutes: 10, time_zone: 'UTC',
+  });
+  expect(fixture.getUnexpected()).toEqual([]);
+});
+
+test('repeat presets and advanced Chat/model choices submit the v3 production DTO', async ({ page }) => {
+  const fixture = await installFixtures(page, { firstEditConflict: false, firstRunOutcome: 'success' });
+  const { dialog } = await openCalendar(page);
+  const card = dialog.locator('.calendar-popup__task').first();
+
+  await card.getByRole('button', { name: /编辑/ }).click();
+  let editor = page.getByRole('dialog', { name: /编辑/ });
+  const repeat = editor.getByLabel('重复');
+  await expect(repeat.locator('option')).toHaveText(['每小时', '每天', '工作日', '每周', '自定义']);
+  await repeat.selectOption('hourly');
+  await editor.getByRole('button', { name: '高级', exact: true }).click();
+  await editor.getByLabel(/每次运行时都开启新聊天/).check();
+  await editor.getByLabel('模型').selectOption('dream-fast');
+  await editor.getByRole('button', { name: '保存' }).click();
+  await expect(editor).toBeHidden();
+  expect(fixture.getEditBodies().at(-1)).toMatchObject({
+    rule: { kind: 'hourly', interval_hours: 1, minute: 0, time_zone: 'UTC' },
+    run_thread_mode: 'new_thread_each_run', model_alias: 'dream-fast',
+  });
+
+  await card.getByRole('button', { name: /编辑/ }).click();
+  editor = page.getByRole('dialog', { name: /编辑/ });
+  await editor.getByLabel('重复').selectOption('workdays');
+  await editor.getByRole('button', { name: '保存' }).click();
+  expect(fixture.getEditBodies().at(-1)).toMatchObject({
+    rule: { kind: 'weekly', weekdays: ['MO', 'TU', 'WE', 'TH', 'FR'], local_time: '09:00', time_zone: 'UTC' },
+    run_thread_mode: 'new_thread_each_run', model_alias: 'dream-fast',
+  });
+
+  await card.getByRole('button', { name: /编辑/ }).click();
+  editor = page.getByRole('dialog', { name: /编辑/ });
+  await editor.getByLabel('重复').selectOption('weekly');
+  await editor.getByRole('button', { name: '保存' }).click();
+  expect(fixture.getEditBodies().at(-1)?.rule).toEqual({
+    kind: 'weekly', weekdays: ['MO'], local_time: '09:00', time_zone: 'UTC',
+  });
   expect(fixture.getUnexpected()).toEqual([]);
 });
 

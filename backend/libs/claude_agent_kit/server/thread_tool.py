@@ -2,7 +2,7 @@
 # [Output] Strict Thread and scheduled-task Tool calls through the private turn broker.
 # [Pos] User MCP Thread adapter; actor, source Thread and Claude session handles stay in the Dream host.
 # [Sync] 2026-09-28: expose Codex-style wait_threads so a parent turn consumes child completion as a tool result.
-# [Sync] 2026-09-28: let an authorized Chat turn create one once/daily Admin schedule with an explicit IANA time zone.
+# [Sync] 2026-10-07: add structured hourly/weekly rules; host captures source-Thread mode and current model.
 # [Sync] 2026-09-28: expose create/list/read/send Thread semantics and retire model-facing task_session_* names.
 """Dream Thread Tools backed by the current host turn owner."""
 
@@ -21,7 +21,7 @@ from .session_projection_protocol import (
 
 THREAD_TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
     "create_scheduled_task": (
-        "仅在用户明确要求定时执行时创建 Dream 任务。必须提供提示词、单次本地日期时间或每日本地钟点，以及 IANA 时区；单次重复时刻须明确偏移。",
+        "仅在用户明确要求定时执行时创建 Dream 任务。支持单次、每天、每隔 N 分钟、每隔 N 小时或指定星期；必须提供 IANA 时区。任务默认在当前会话继续执行，并使用本轮已选择的模型。",
         {
             "type": "object",
             "properties": {
@@ -39,6 +39,24 @@ THREAD_TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
                             "kind": {"const": "daily"}, "local_time": {"type": "string", "description": "每天的 HH:MM"},
                             "time_zone": {"type": "string", "description": "IANA 时区，例如 Asia/Shanghai"},
                         }, "required": ["kind", "local_time", "time_zone"], "additionalProperties": False},
+                        {"type": "object", "properties": {
+                            "kind": {"const": "interval"},
+                            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 2147483647, "description": "两次运行之间的分钟数。"},
+                            "time_zone": {"type": "string", "description": "用于界面展示的 IANA 时区，例如 Asia/Shanghai"},
+                        }, "required": ["kind", "interval_minutes", "time_zone"], "additionalProperties": False},
+                        {"type": "object", "properties": {
+                            "kind": {"const": "hourly"},
+                            "interval_hours": {"type": "integer", "minimum": 1, "maximum": 35791394, "description": "两次运行之间的小时数。"},
+                            "minute": {"type": "integer", "minimum": 0, "maximum": 59, "description": "运行时的分钟位置。"},
+                            "time_zone": {"type": "string", "description": "IANA 时区，例如 Asia/Shanghai"},
+                        }, "required": ["kind", "interval_hours", "minute", "time_zone"], "additionalProperties": False},
+                        {"type": "object", "properties": {
+                            "kind": {"const": "weekly"},
+                            "weekdays": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": True,
+                                         "items": {"enum": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]}},
+                            "local_time": {"type": "string", "description": "运行的 HH:MM"},
+                            "time_zone": {"type": "string", "description": "IANA 时区，例如 Asia/Shanghai"},
+                        }, "required": ["kind", "weekdays", "local_time", "time_zone"], "additionalProperties": False},
                     ],
                 },
             },
@@ -160,11 +178,29 @@ def _valid_arguments(name: str, values: dict[str, Any]) -> bool:
             or not isinstance(rule, dict)):
             return False
         required = ({"kind", "local_date", "local_time", "time_zone", "selected_offset_minutes"}
-                    if rule.get("kind") == "once" else {"kind", "local_time", "time_zone"})
-        if set(rule) != required or rule.get("kind") not in ("once", "daily"):
+                    if rule.get("kind") == "once" else
+                    {"kind", "interval_minutes", "time_zone"} if rule.get("kind") == "interval" else
+                    {"kind", "interval_hours", "minute", "time_zone"} if rule.get("kind") == "hourly" else
+                    {"kind", "weekdays", "local_time", "time_zone"} if rule.get("kind") == "weekly" else
+                    {"kind", "local_time", "time_zone"})
+        if set(rule) != required or rule.get("kind") not in ("once", "daily", "interval", "hourly", "weekly"):
             return False
-        if not all(isinstance(rule.get(key), str) and rule[key].strip() for key in required - {"kind", "selected_offset_minutes"}):
+        if not all(isinstance(rule.get(key), str) and rule[key].strip()
+                   for key in required - {"kind", "selected_offset_minutes", "interval_minutes",
+                                          "interval_hours", "minute", "weekdays"}):
             return False
+        if rule.get("kind") == "interval":
+            return type(rule.get("interval_minutes")) is int and 1 <= rule["interval_minutes"] <= 2_147_483_647
+        if rule.get("kind") == "hourly":
+            return (type(rule.get("interval_hours")) is int and 1 <= rule["interval_hours"] <= 35_791_394
+                    and type(rule.get("minute")) is int and 0 <= rule["minute"] <= 59)
+        if rule.get("kind") == "weekly":
+            weekdays = rule.get("weekdays")
+            allowed = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
+            return (isinstance(weekdays, list) and 1 <= len(weekdays) <= 7
+                    and all(isinstance(day, str) for day in weekdays)
+                    and len(weekdays) == len(set(weekdays))
+                    and all(day in allowed for day in weekdays))
         return rule.get("kind") != "once" or rule["selected_offset_minutes"] is None or type(rule["selected_offset_minutes"]) is int
     if name == "create_thread":
         return (
