@@ -1,7 +1,7 @@
-<!-- [Input] Current Story Workspace design, business PRDs, frontend navigation, manifests and environment templates. -->
-<!-- [Output] Illustrated product guide, user workflows and operator setup with explicit feature gates. -->
+<!-- [Input] Notion product positioning, current business designs and PRDs, frontend features, manifests and environment templates. -->
+<!-- [Output] Illustrated descriptions of module purpose and scope, plus operator setup and enablement conditions. -->
 <!-- [Pos] Canonical English README; README.zh.md mirrors its structure, commands and facts. -->
-<!-- [Sync] 2026-10-09: align the introduction and illustrations with Chat, Dream and Decks; retain current setup and acceptance boundaries. -->
+<!-- [Sync] 2026-10-09: describe concrete product modules and thinking modes; replace the generic creation journey and update illustrations. -->
 
 # Ink & Memory Dream
 
@@ -9,64 +9,77 @@
   English · <a href="README.zh.md">中文</a>
 </p>
 
-**An AI workspace for conversations, creative projects and reusable Agent teams.** Start in Chat, develop a project in Dream, and keep instructions, tools and resources together in Decks. Saved conversations, workspace files and project outputs help you return to the work and continue.
+**Ink & Memory helps users organize personal thinking modes and apply them to analysis, task execution and creative work.** Decks hold approaches to a kind of need, problem-solving paths and Agent configuration. Chat provides conversations and task entry points; Dream brings creative conversations and project outputs into one workbench. Writing, Analysis, Calendar and resource connections help users collect material, arrange work and return to existing tasks.
 
-![Product map: Chat, Dream and Decks, supported by files, Calendar and resource connections](assets/readme/product-overview.en.svg)
+The product positioning follows the [Notion project description](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37). Current module scope follows the repository's current designs. The Chinese interface calls Decks “思维模式”; the English interface retains Deck.
 
-*Product relationship diagram based on the [current navigation design](docs/design/story-workspace/product-scope-and-navigation.md). This is an explanatory illustration, not a live screenshot.*
+![Product overview: Decks organize problem-solving approaches, Chat supports conversations and tasks, and Dream holds creative outputs](assets/readme/product-overview.en.svg)
 
-## What you can do
+*Feature illustration based on the product positioning and [current navigation design](docs/design/story-workspace/product-scope-and-navigation.md).*
 
-| Area | What it helps you do | Design reference |
-| --- | --- | --- |
-| **Chat** | Choose a model and Agent, attach files, follow streamed replies and tool feedback, search history and navigate earlier turns. While an Agent runs, queue further text, adjust direction or move a pending message into an independent Chat. | [Chat dashboard](<docs/prd/Chat Dashboard.md>), [input queue](docs/prd/chat/queued-input.md), [turn navigation](docs/prd/chat/turn-navigation.md) |
-| **Dream / Story Workspace** | Start or reopen a creative production. Collaborate with an Agent beside shared characters, scenes and Episode outputs; read available outlines, scripts, storyboards and review reports. Dream and Chat share the same conversation. | [Dream re-entry](docs/design/story-workspace/dream-workspace-and-reentry.md), [Project / Episode workbench](docs/design/story-workspace/project-and-episode-workbench.md) |
-| **Decks and Agents** | Build reusable teams with instructions, Agents, tools, resources and Claude plugins. Registered users receive editable copies of the Screenplay Creation Team and Music Creation system Decks. | [Deck design index](docs/design/deck/README.md) |
-| **Tasks and activity** | Follow created tasks, subagents, plans and todos, open linked Chats and inspect task details. The activity bell brings priority items and history into a shared sidebar. | [Task activity](docs/prd/chat/task-activity.md), [priority activity](docs/prd/chat/priority-activity.md) |
-| **Calendar** | Switch between Scheduled tasks, Diary and Notion for a selected date. Edit recurrence, execution model and conversation mode; inspect results and open the corresponding Chat. | [Calendar](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled tasks](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md) |
-| **Files and resource connections** | Work with the current Thread's files, preview supported reports and images, and connect selected Notion resources or managed MCP tools through Settings. | [File storage](docs/design/file-storage/README.md), [Notion connector](docs/prd/notion-session/resource-connector.md) |
+## Product modules
 
-The primary navigation is **Chat → Dream → Decks**. **More** contains Writing, Timeline and Analysis. Settings holds language, theme, models and resource configuration. The UI uses the warm paper [color system](docs/prd/color_system/README.md) and adapts its workspace to narrow screens. Language and theme persist in the current browser across sign-in and reloads; see the [Settings design](docs/design/story-workspace/settings.md).
+### Decks: thinking modes
 
-## From an idea to a creative project
+Organize thinking approaches, problem-solving paths and execution methods for reuse in later work. Users can browse and try existing Decks or create their own, write names and descriptions, configure Agent roles and Claude plugins, and maintain drafts, content versions and enabled status. System Decks offer starting points such as screenplay and music creation, with entry points in Chat and Dream. Current functionality focuses on modes organized and configured by the user.
 
-1. **Begin in Chat.** Sign in, choose a model and Deck/Agent, describe your task and add reference files. Follow replies, tool activity and the saved conversation.
-2. **Reuse a team.** Select or edit a Deck. Music Creation includes a YuE2 coordinator, Music Arranger and Lyricist with the `yue2-skills`, `music-composition-skills` and `lyric-writing-skills` Marketplaces.
-3. **Develop the project in Dream.** Start or reopen a production. Work with its bound Agent conversation while inspecting shared assets and the selected Episode's outputs; return to Chat with the same Thread.
-4. **Review actual outputs.** Read the available outline, script, storyboard and reports. Missing outputs remain visibly unavailable. Use the business review and confirmation actions when a result is ready.
-5. **Return and continue.** Reopen the saved Chat or Dream Run. Page loading restores state; another model turn requires an explicit action. For recurring work, use Calendar after the deployment gates below are satisfied.
+### Chat conversations
 
-### The screenplay workflow
+Discuss a concrete problem with an Agent, analyze material or carry out a task. Users can choose a model and Agent, attach reference files, read replies and tool results, search history and revisit earlier turns. During execution, they can add pending messages, adjust direction or move a message to an independent Chat. Saved conversations can be reopened and continued.
+
+### Writing and diary
+
+Record ideas, write text, and save and reopen writing sessions. “Go deeper” beneath a paragraph offers suggestions on request. Suggestions appear separately from the editable text and are saved with the writing; the latest suggestion supports regeneration or retry after failure. Ordinary typing and pauses do not generate suggestions automatically. Existing diary entries can also be opened by date from Calendar.
+
+### Reflection analysis
+
+Review existing diary entries to observe resonances, personal traits and recurring patterns in the writing. Users can request an analysis, browse Echoes, Traits and Patterns, read each item's explanation and evidence, and reopen historical reports. Analysis covers diary content; evaluation and feedback statistics for creative outcomes are not implemented.
+
+### Tasks and progress
+
+Follow tasks, subagent activity, plans and todos produced during Agent work, with current progress and available results in one place. Task details link to the associated Chat and source entry point for continued work. The activity sidebar collects priority items and history. These features track work that has already been created.
+
+### Scheduled tasks and Calendar
+
+Arrange one-time or recurring tasks, choose the execution model, and continue the original Chat or create a new Chat for each run. Calendar offers hourly, daily, weekdays, weekly and custom recurrence controls, with editing, pause, resume, run-now and execution-history actions. Date browsing switches between scheduled tasks, diary entries and Notion content, with links to the associated records.
+
+### Resource connections
+
+Give Agents access to selected external material and tools. The Notion connection supports account authorization, page or database selection, resource-index synchronization and on-demand reads of authorized page content. Selected resources are also available in Chat and Calendar. Managed MCP connections provide external tools. Settings is the full management surface, while Chat provides a lightweight entry. Interactive MCP Apps are currently a technical preview; public rendering is not enabled.
+
+### File workspace
+
+Read and use reference files and Agent outputs for the current conversation in one place. Users can attach files, open supported Markdown reports, images and diagrams, preview or download files, and reuse the material in later conversation turns. Files are organized around the current conversation. File previews do not provide image generation or video production.
+
+### Dream creative workbench
+
+Bring a creative task's ongoing conversation, shared material and Episode outputs together for review and continued work. The current focus is script organization and storyboarding: project-level characters and scenes can be reused across Episodes, while each Episode holds available outlines, scripts, storyboards, prompts and review reports. Users can reopen a saved creative task, continue working with the Agent beside its outputs, or return to the same Chat conversation.
 
 <p align="center">
-  <img src="frontend/public/assets/story-workspace-guide-illustrations/01-mimo-xiaohei-workflow-triptych.png" alt="Three screenplay stages: shared character and scene assets, per-Episode creation and review, then future production tools" width="440" />
+  <img src="frontend/public/assets/story-workspace-guide-illustrations/01-mimo-xiaohei-workflow-triptych.png" alt="Screenplay workbench guide: shared characters and scenes, per-Episode scripts and storyboards, and future production" width="440" />
 </p>
 
-*Reused from the application's [creation guide](docs/design/story-workspace/project-and-episode-workbench.md#创作阶段指引). Read the three panels from top to bottom; the last panel represents future work.*
+*Reused from the application's [creation guide](docs/design/story-workspace/project-and-episode-workbench.md#创作阶段指引). The upper panel shows shared project material, the middle panel shows Episode creation and review, and the lower panel shows future rendering, voice production and editing. The current workbench covers organizing, reading and collaborating on script and storyboard outputs.*
 
-| Stage | Workflow | Availability |
-| --- | --- | --- |
-| **Shared project assets** | `/drama-init` → `/drama-plan` → `/drama-asset`: establish the project, Episode plan, characters and scenes for reuse. | Uses installed screenplay Skills and authorized Deck/tools. |
-| **Each Episode** | `/drama-script (EP01)` → `/drama-storyboard (EP01)` → `/drama-prompt (EP01)` → `/script-reviewer`: create and review that Episode's outputs. | The workbench reads outputs that actually exist; opening a page does not generate them. |
-| **Future production** | Rendering, voice production, editing and promotion. | **Not implemented in the current workbench.** The guide describes the direction only. |
+The primary navigation is **Chat, Dream and Decks**. **More** provides Writing, Timeline and Analysis. Settings manages language, theme, models and resource connections. The UI uses the warm paper [color system](docs/prd/color_system/README.md) and supports narrow screens. Language and theme persist in the current browser; see the [Settings design](docs/design/story-workspace/settings.md).
 
-### Connect your resources
+## Current scope and enablement
 
-Open **Settings → Resource Links** to manage connections. For Notion, authorize the account, select the resources the Agent may use, then synchronize their index. Chat shows the saved resource summary; Calendar reads date-related metadata from the selected index. Index synchronization and page-body reads are separate actions: the Agent fetches authorized content when needed. See the [connector design](docs/design/notion-session/connector-interaction.md).
+Automatic discovery of solution paths, automatic Skills/MCP/Plugin composition, full multi-Agent orchestration and creative-outcome feedback statistics remain future work. Dream does not yet provide a canvas, knowledge base or automatic script-to-finished-video production chain. Native Chat image generation and editing are also not delivered as current product features.
 
-Managed MCP connections provide additional tools. Compatible MCP Apps have a technical-preview Host, but the current public setting is **`productionAppsEffective=false`**. Public App rendering remains disabled; ordinary tool results remain available. See the [MCP Apps integration design](docs/design/claude-mcp/mcp-apps-integration-strategy.md).
+<details>
+<summary>Deployment and capability requirements</summary>
 
-## Feature availability
+Designs describe the intended features. Source, deployed capabilities and acceptance records determine availability in a running instance.
 
-Design describes the intended behavior. Source, deployed capabilities and acceptance evidence determine what is available.
-
-| Feature | Current boundary |
+| Feature | Current deployment requirements |
 | --- | --- |
-| Chat queue and independent tasks | Require `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` from Admin Drizzle 0064–0066. Running-owner controls currently require the same Dream process. [Task activity](docs/prd/chat/task-activity.md) explains the linked Threads and source return path. |
-| Scheduled tasks | Code supports once, daily, interval, hourly and weekly rules. Calendar offers hourly, daily, weekdays, weekly and custom presets, model selection and continuing the source Chat or creating a Chat per run. Requires Admin v3 capability from Drizzle 0077 and exact operations. The [latest recorded real-business receipt](docs/design/scheduled-tasks/codex-repeat-and-run-options-real-e2e.md) still requires successful normal-service model execution after the authority fix is loaded. |
+| Chat queue and independent tasks | Require `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` from Admin Drizzle 0064–0066. Running-owner controls currently require the same Dream process. See [task activity](docs/prd/chat/task-activity.md). |
+| Scheduled tasks | Require Admin v3 capability from Drizzle 0077 and exact operations. Code supports once, daily, interval, hourly and weekly rules. The [latest recorded real-business receipt](docs/design/scheduled-tasks/codex-repeat-and-run-options-real-e2e.md) still requires successful normal-service model execution after the authority fix is loaded. |
 | Notion synchronization update | Existing connector/index reads are implemented. The new ownership/accepted-version path passed isolated technical checks; normal capability publication, old-writer drain and service cutover remain pending in the [integration receipt](docs/exec/notion-sync-ownership-dream-integration-20261007.md). |
-| MCP Apps | Technical preview only; public App rendering is disabled. |
-| Native Chat image generation/editing; screenplay rendering, voice production, editing and promotion | Not delivered as current product features. Existing file/image previews do not establish generation capability. |
+| MCP Apps | Technical preview only; `productionAppsEffective=false`. Public App rendering is disabled; ordinary tool results remain available. See the [integration design](docs/design/claude-mcp/mcp-apps-integration-strategy.md). |
+
+</details>
 
 ## Open a running instance
 
@@ -249,9 +262,11 @@ A send-path release requires **create Thread → `POST /api/claude-agent` → au
 
 | Topic | Entry |
 | --- | --- |
-| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [Decks](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
+| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [Deck design](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
+| Writing and reflection | [Manual writing suggestions](docs/design/writing-manual-suggestions.md), [reflection analysis](docs/prd/reflection-blog.md) |
+| Conversations and creation | [Input queue](docs/prd/chat/queued-input.md), [turn navigation](docs/prd/chat/turn-navigation.md), [Dream re-entry](docs/design/story-workspace/dream-workspace-and-reentry.md), [creative workbench](docs/design/story-workspace/project-and-episode-workbench.md) |
 | Calendar and recurring tasks | [Calendar PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled-task design](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |
-| Resources and tools | [Notion connector](docs/prd/notion-session/resource-connector.md), [MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
+| Resources and tools | [Notion connector](docs/prd/notion-session/resource-connector.md), [connector interaction](docs/design/notion-session/connector-interaction.md), [MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
 | Architecture and authentication | [Architecture](docs/architecture/项目架构设计说明.md), [Admin auth/data contract](docs/architecture/admin-auth-data-interaction.md), [backend API](backend/API.md) |
 | Setup and deployment | [Platform status](deploy/README.md), [AutoDL](deploy/autodl-ssh/README.md), [AutoDL recovery](docs/deploy/autodl-recovery.md) |
 | Repository and Agent rules | [Repository maintenance](Agent.md), [Agent behavior](docs/Agent.md), [rules index](docs/rules/README.md) |
