@@ -5,7 +5,11 @@
                          system shortcuts/cards without exposing drafts. -->
 <!-- [Sync] 2026-08-17: add Work related-Chat previews and guarded deletion states. -->
 
-# Deck UI 视觉与布局规范
+# 思维模式 UI 视觉与布局规范（Deck）
+
+<!-- [Sync] 2026-10-09: point current Chinese labels to the 思维模式 PRD; retain historical visual sketches. -->
+
+当前中文产品名称为“思维模式”。维护栏标题为“思维模式信息”，名称字段为“思维模式名称”，说明字段为“说明”；版本面板使用“思维模式内容版本”“当前思维模式内容”。导航、工作台页签和所有相关可访问名称按当前语言渲染，英文继续使用 Deck。当前桌面和窄屏骨架由[PRD](../../prd/deck/thinking-modes.md)所有，业务与状态图见[正式设计](./thinking-mode-terminology.md)；下方旧图示保留原文。沿用原有布局，并检查中文变长后的窄屏显示。
 
 ## 1. 视觉结论
 

@@ -1,9 +1,11 @@
 // [Input] Deck content commits plus current runtime binding/options/history.
 // [Output] Default-collapsed content-version timeline with secondary runtime configuration.
 // [Pos] Right-side version panel inside DeckEditorModal.
+// [Sync] 2026-10-09: localize 思维模式/Deck content-version labels; retain independent runtime facts.
 // [Sync] 2026-08-16: make immutable Deck content vN the primary history.
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDeckPluginBinding } from '../../hooks/useDeckPluginBinding';
 import { useDeckPluginBindingHistory } from '../../hooks/useDeckPluginBindingHistory';
 import { useDeckPluginOptions } from '../../hooks/useDeckPluginOptions';
@@ -18,6 +20,7 @@ interface Props {
 }
 
 export default function DeckVersionPanel({ deckId, isSystem, onClose, onVersionChanged }: Props) {
+  const { t } = useTranslation();
   const binding = useDeckPluginBinding(deckId);
   const options = useDeckPluginOptions(deckId);
   const history = useDeckPluginBindingHistory(deckId);
@@ -48,7 +51,7 @@ export default function DeckVersionPanel({ deckId, isSystem, onClose, onVersionC
       <header className="deck-version-panel__header">
         <div>
           <h2>版本记录</h2>
-          <p>Deck 内容版本 · 默认折叠</p>
+          <p>{t('deck.versions.description')}</p>
         </div>
         <button aria-label="收起版本记录" className="deck-icon-button" onClick={onClose} type="button">›</button>
       </header>
@@ -64,7 +67,7 @@ export default function DeckVersionPanel({ deckId, isSystem, onClose, onVersionC
       {!content.loading && !binding.loading && !history.loading && (
         <>
           <section className="deck-version-current">
-            <span className="deck-version-current__eyebrow">当前 Deck 内容</span>
+            <span className="deck-version-current__eyebrow">{t('deck.versions.current')}</span>
             {content.state?.latest_version ? (
               <>
                 <strong>v{content.state.latest_version}</strong>
@@ -78,7 +81,7 @@ export default function DeckVersionPanel({ deckId, isSystem, onClose, onVersionC
             )}
           </section>
 
-          <section className="deck-version-timeline" aria-label="Deck 内容版本历史">
+          <section className="deck-version-timeline" aria-label={t('deck.versions.historyLabel')}>
             <h3>内容版本</h3>
             {!content.history || content.history.versions.length === 0 ? (
               <p className="deck-empty-copy">暂无已提交内容版本。</p>
