@@ -8,6 +8,7 @@
 // [Sync] 2026-08-23: verify upward/downward wheel zoom, scroll suppression, shared percentage state, and 50%–200% clamping in Chromium.
 // [Sync] 2026-08-23: compare real geometry before/after zoom to prove only image/diagram content scales while the paper sheet stays fixed.
 // [Sync] 2026-09-13: reuse installed local Chrome for the shared media/report regression suite.
+// [Sync] 2026-10-07: initialize production BrowserSession from a mocked public DTO, assert CSRF/no Browser Bearer, and keep screenshots in this invocation's testInfo output.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -24,6 +25,7 @@ import { parseWorkspaceUri } from '../workspaceUri';
 test.use({ channel: 'chrome' });
 
 const PNG_BYTES = readFileSync(fileURLToPath(new URL('../../../../../public/placeholder-memory.png', import.meta.url)));
+const CSRF_TOKEN = 'c'.repeat(43);
 
 // A real binary ZIP archive (verified with zipfile) holding export-bundle/大纲.md and
 // export-bundle/场景/开场.txt, standing in for the backend directory download contract.
@@ -95,7 +97,7 @@ test('parses the v1 protocol once and rejects ambiguous or escaping paths', () =
   }
 });
 
-test('renders three authenticated Workspace images and preserves safe fallbacks across reload', async ({ page }) => {
+test('renders three authenticated Workspace images and preserves safe fallbacks across reload', async ({ page }, testInfo) => {
   const harnessModule = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -104,8 +106,11 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     import { WorkspaceProvider } from '/app/_dream/contexts/WorkspaceContext.tsx';
     import ChatMarkdown from '/app/_dream/components/chat/ChatMarkdown.tsx';
     import { downloadThreadImage, releaseThreadImage, renderThreadImage } from '/app/_dream/components/chat/exportThreadImage.tsx';
+    import { loadBrowserSession } from '/app/_dream/lib/browserSession.ts';
     import '/app/_dream/styles/tokens.css';
     import '/app/_dream/styles/markdown.css';
+
+    await loadBrowserSession();
 
     const markdown = [
       '## 生成结果预览',
@@ -252,8 +257,8 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
 
   const diagnostics: string[] = [];
   const expectedFileFailureDiagnostics: string[] = [];
-  const fileRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined }> = [];
-  const downloadRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined }> = [];
+  const fileRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined; readonly csrf: string | undefined }> = [];
+  const downloadRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined; readonly csrf: string | undefined }> = [];
   let workspaceEnabled = true;
   let retryAttempts = 0;
   page.on('console', (message) => {
@@ -272,8 +277,11 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
 
-  await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'workspace-preview-token');
+  await page.route('**/auth/session', async (route) => {
+    await route.fulfill({ json: {
+      user: { id: '7', email: 'workspace@example.test', display_name: 'Workspace actor', avatar_url: null, role: 'user', created_at: '2026-10-07T00:00:00+00:00' },
+      csrf_token: CSRF_TOKEN,
+    } });
   });
   await page.route('**/api/system-config', async (route) => {
     await route.fulfill({ json: { data: { workspace_enabled: workspaceEnabled } } });
@@ -288,6 +296,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       path,
       sessionId: url.searchParams.get('sessionId') ?? '',
       authorization: route.request().headers().authorization,
+      csrf: route.request().headers()['x-ink-csrf'],
     });
     if (path === 'files/missing.png') {
       await route.fulfill({ status: 404, json: { detail: 'Workspace file not found' } });
@@ -314,6 +323,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       path,
       sessionId: url.searchParams.get('sessionId') ?? '',
       authorization: route.request().headers().authorization,
+      csrf: route.request().headers()['x-ink-csrf'],
     });
     if (path === 'files/export-bundle') {
       await route.fulfill({
@@ -357,7 +367,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     const mermaidDialog = page.getByRole('dialog', { name: 'Mermaid diagram preview' });
     await expect(mermaidDialog).toBeVisible();
     await expect(mermaidDialog.locator('.modal-zoom-value')).toHaveText('100%');
-    await page.screenshot({ path: 'output/playwright/mermaid-media-preview-wide.png' });
+    await page.screenshot({ path: testInfo.outputPath('mermaid-media-preview-wide.png') });
     const mermaidStage = mermaidDialog.locator('.modal-media-stage');
     const mermaidSheet = mermaidDialog.locator('.markdown-media-preview__sheet--diagram');
     const mermaidZoomTarget = mermaidDialog.locator('.markdown-media-preview__zoom-target');
@@ -444,7 +454,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     expect(wideFullsizeBox).not.toBeNull();
     expect(wideFullsizeBox?.width ?? 0).toBeGreaterThan(wideThumbnailBox?.width ?? Number.POSITIVE_INFINITY);
     await expect(wideDialog.locator('.modal-zoom-value')).toHaveText('100%');
-    await page.screenshot({ path: 'output/playwright/workspace-uri-preview-wide.png' });
+    await page.screenshot({ path: testInfo.outputPath('workspace-uri-preview-wide.png') });
     const workspaceStage = wideDialog.locator('.modal-media-stage');
     const workspaceSheet = wideDialog.locator('.markdown-media-preview__sheet');
     const workspaceSheetAt100 = await workspaceSheet.boundingBox();
@@ -456,7 +466,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     expect(workspaceSheetAt110?.height).toBeCloseTo(workspaceSheetAt100?.height ?? 0, 0);
     expect(workspaceImageAt110?.width).toBeCloseTo((wideFullsizeBox?.width ?? 0) * 1.1, 0);
     expect(workspaceImageAt110?.height).toBeCloseTo((wideFullsizeBox?.height ?? 0) * 1.1, 0);
-    await page.screenshot({ path: 'output/playwright/workspace-uri-preview-content-zoom.png' });
+    await page.screenshot({ path: testInfo.outputPath('workspace-uri-preview-content-zoom.png') });
     await workspaceStage.dispatchEvent('wheel', { deltaY: 120 });
     await expect(wideDialog.locator('.modal-zoom-value')).toHaveText('100%');
     await workspaceStage.evaluate((stage) => {
@@ -471,7 +481,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     expect(workspaceSheetAt50?.height).toBeCloseTo(workspaceSheetAt100?.height ?? 0, 0);
     expect(workspaceImageAt50?.width).toBeCloseTo((wideFullsizeBox?.width ?? 0) * 0.5, 0);
     expect(workspaceImageAt50?.height).toBeCloseTo((wideFullsizeBox?.height ?? 0) * 0.5, 0);
-    await page.screenshot({ path: 'output/playwright/workspace-uri-preview-content-zoom-50.png' });
+    await page.screenshot({ path: testInfo.outputPath('workspace-uri-preview-content-zoom-50.png') });
     await workspaceStage.evaluate((stage) => {
       for (let index = 0; index < 5; index += 1) {
         stage.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -120 }));
@@ -490,7 +500,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
 
     expect(fileRequests).toHaveLength(5);
     expect(fileRequests.every((request) => request.sessionId === 'thread-preview')).toBe(true);
-    expect(fileRequests.every((request) => request.authorization === 'Bearer workspace-preview-token')).toBe(true);
+    expect(fileRequests.every((request) => request.authorization === undefined && request.csrf === CSRF_TOKEN)).toBe(true);
     expect(fileRequests.some((request) => request.path.includes('..') || request.path.includes('%'))).toBe(false);
 
     const exportRequestsBefore = fileRequests.length;
@@ -507,7 +517,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     const exportRequests = fileRequests.slice(exportRequestsBefore);
     expect(exportRequests).toHaveLength(5);
     expect(exportRequests.every((request) => request.sessionId === 'thread-preview')).toBe(true);
-    expect(exportRequests.every((request) => request.authorization === 'Bearer workspace-preview-token')).toBe(true);
+    expect(exportRequests.every((request) => request.authorization === undefined && request.csrf === CSRF_TOKEN)).toBe(true);
     expect(exportRequests.map((request) => request.path).sort()).toEqual([
       'files/fashion_flux2.png',
       'files/fashion_qwen.webp',
@@ -516,7 +526,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       'files/中文 fashion_zimage.png',
     ].sort());
     await expect(page.getByRole('img', { name: 'Exported Workspace conversation' })).toBeVisible();
-    await page.screenshot({ path: 'output/playwright/workspace-uri-export.png' });
+    await page.screenshot({ path: testInfo.outputPath('workspace-uri-export.png') });
     const exportDownloadPromise = page.waitForEvent('download');
     await page.evaluate(async () => {
       await (window as unknown as { downloadWorkspaceImageExport: () => Promise<void> }).downloadWorkspaceImageExport();
@@ -547,7 +557,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       'files/export-bundle',
     ]);
     expect(downloadRequests.every((request) => request.sessionId === 'thread-preview')).toBe(true);
-    expect(downloadRequests.every((request) => request.authorization === 'Bearer workspace-preview-token')).toBe(true);
+    expect(downloadRequests.every((request) => request.authorization === undefined && request.csrf === CSRF_TOKEN)).toBe(true);
     // Explicit downloads go to the download endpoint; image previews keep the content endpoint.
     expect(fileRequests.some((request) => request.path.includes('report.pdf') || request.path.includes('export-bundle'))).toBe(false);
     await expect(page.locator('[data-workspace-file-state="success"]', { hasText: '导出打包' })).toBeVisible();
@@ -576,7 +586,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     expect(narrowDialogBox).not.toBeNull();
     expect(narrowDialogBox?.width).toBe(360);
     expect(narrowDialogBox?.height).toBe(740);
-    await page.screenshot({ path: 'output/playwright/workspace-uri-preview-narrow.png' });
+    await page.screenshot({ path: testInfo.outputPath('workspace-uri-preview-narrow.png') });
     await page.getByRole('button', { name: '关闭图片预览' }).click();
     await expect(narrowTrigger).toBeFocused();
 

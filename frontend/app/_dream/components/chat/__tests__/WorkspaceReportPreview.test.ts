@@ -2,6 +2,7 @@
 // [Output] Local-Chrome evidence for report previews, relative/explicit images, nested viewer focus, downloads and fail-closed reads.
 // [Pos] Workspace report preview technical regression test.
 // [Sync] 2026-09-13: reproduce download-only report/image links without calling providers or changing real user data.
+// [Sync] 2026-10-07: use the public BrowserSession DTO and in-memory CSRF; fence absent Browser OAuth Bearer without changing production file access.
 // Scope: Project/Episode/canonical stories/.dream publication/Hook/DB projections are not in scope;
 // Thread and files must remain unchanged; only the visible file consumer changes.
 
@@ -15,6 +16,7 @@ import { parseWorkspaceUri, resolveWorkspaceDocumentReference } from '../workspa
 
 test.use({ channel: 'chrome' });
 const PNG = readFileSync(fileURLToPath(new URL('../../../../../public/placeholder-memory.png', import.meta.url)));
+const CSRF_TOKEN = 'c'.repeat(43);
 const REPORT = '# 图文报告\n\n![Figure 3](fig3.png)\n\n![Figure 4](workspace://files/report/fig4.png)\n\n![Figure 5](./fig5.png)\n\n`![Literal](workspace://files/report/literal.png)`\n\n<script>throw new Error("raw HTML executed")</script>';
 
 test('relative references are document-scoped and still pass the strict Workspace parser', () => {
@@ -35,8 +37,10 @@ test('open reports with three images and preview image links instead of silently
     import { setThemeMode } from '/app/_dream/utils/theme.ts';
     import { WorkspaceProvider } from '/app/_dream/contexts/WorkspaceContext.tsx';
     import ChatMarkdown from '/app/_dream/components/chat/ChatMarkdown.tsx';
+    import { loadBrowserSession } from '/app/_dream/lib/browserSession.ts';
     import '/app/_dream/styles/tokens.css';
     import '/app/_dream/styles/markdown.css';
+    await loadBrowserSession();
     const root = createRoot(document.querySelector('#root'));
     let thread = 'thread-report-preview';
     const render = () => root.render(React.createElement(WorkspaceProvider, null,
@@ -58,16 +62,20 @@ test('open reports with three images and preview image links instead of silently
       load(id) { return id === '\0report-preview.js' ? module : null; },
     }],
   });
-  const reads: Array<{ path: string | null; thread: string | null; auth: string | undefined; endpoint: string }> = [];
+  const reads: Array<{ path: string | null; thread: string | null; auth: string | undefined; csrf: string | undefined; endpoint: string }> = [];
   const diagnostics: string[] = [];
   let reportMime = 'text/markdown';
   page.on('pageerror', error => diagnostics.push(error.message));
   page.on('console', message => { if (message.type() === 'error') diagnostics.push(message.text()); });
-  await page.addInitScript(() => { localStorage.setItem('auth_token', 'isolated-report-token'); localStorage.setItem('ink-language', 'en'); });
+  await page.addInitScript(() => { localStorage.setItem('ink-language', 'en'); });
+  await page.route('**/auth/session', route => route.fulfill({ json: {
+    user: { id: '7', email: 'report@example.test', display_name: 'Report actor', avatar_url: null, role: 'user', created_at: '2026-10-07T00:00:00+00:00' },
+    csrf_token: CSRF_TOKEN,
+  } }));
   await page.route('**/api/system-config', route => route.fulfill({ json: { data: { workspace_enabled: true } } }));
   await page.route('**/api/workspace/files/**', async route => {
     const url = new URL(route.request().url());
-    reads.push({ path: url.searchParams.get('path'), thread: url.searchParams.get('sessionId'), auth: route.request().headers().authorization, endpoint: url.pathname });
+    reads.push({ path: url.searchParams.get('path'), thread: url.searchParams.get('sessionId'), auth: route.request().headers().authorization, csrf: route.request().headers()['x-ink-csrf'], endpoint: url.pathname });
     await route.fulfill(url.searchParams.get('path')?.endsWith('.md')
       ? { contentType: reportMime, body: REPORT }
       : { contentType: 'image/png', body: PNG });
@@ -126,7 +134,7 @@ test('open reports with three images and preview image links instead of silently
     await page.evaluate(() => (window as unknown as { switchThread: () => void }).switchThread());
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
-    expect(reads.every(read => read.auth === 'Bearer isolated-report-token' && read.thread === 'thread-report-preview')).toBe(true);
+    expect(reads.every(read => read.auth === undefined && read.csrf === CSRF_TOKEN && read.thread === 'thread-report-preview')).toBe(true);
     expect(diagnostics).toEqual([]);
   } finally { await server.close(); }
 });
