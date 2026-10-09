@@ -1,4 +1,5 @@
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
+# [Sync] 2026-10-07: assert the current single bounded read-timeout recovery keeps one request ID and never reaches Mode/files; no production changes.
 # [Input] Consume backend/routers/workspace.py and workspace file manager APIs.
 # [Output] Validate workspace file/content/download contracts, including Thread ownership and safe directory ZIPs.
 # [Pos] test node in backend/tests
@@ -132,18 +133,22 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                     self.assertNotIn("private", response.text)
                     files.assert_not_called()
 
-    def test_admin_thread_timeout_does_not_retry_or_access_mode_files(self):
+    def test_admin_thread_timeout_has_one_read_recovery_before_mode_files(self):
         for endpoint in ["content", "download"]:
             with self.subTest(endpoint=endpoint):
                 before = len(self._admin_calls)
                 with (
                     unittest.mock.patch.object(self, "_thread_lookup", side_effect=httpx.ReadTimeout("private token")),
                     unittest.mock.patch.object(workspace_router, "get_existing_workspace") as files,
+                    unittest.mock.patch.object(workspace_router, "_load_system_config") as mode,
                 ):
                     response = self.client.get("/api/workspace/files/" + endpoint, params={"sessionId": "owned-thread", "path": "files/result.txt"}, headers={"Authorization": "Bearer test-token"})
                 self.assertEqual(response.status_code, 503, response.text)
                 self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_AUTH_UNAVAILABLE")
-                self.assertEqual(len(self._admin_calls), before + 1)
+                attempts = self._admin_calls[before:]
+                self.assertEqual(len(attempts), 2)
+                self.assertEqual(attempts[0], attempts[1])
+                mode.assert_not_called()
                 files.assert_not_called()
 
     def test_admin_schema_and_thread_hash_are_required_before_file_access(self):
