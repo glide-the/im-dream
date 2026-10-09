@@ -1,10 +1,12 @@
 // [Input] Deck/Voice CRUD, real runtime-version facts, plugin refs, and Chat handoff.
 // [Output] Compact IM maintenance dialog with overview, Agents, plugins, and folded version history.
 // [Pos] Deck maintenance modal in frontend/app/_dream/components.
+// [Sync] 2026-10-09: render localized 思维模式/Deck labels without changing form or version mutations.
 // [Sync] 2026-08-16: replace the legacy 1200px nested-card editor with the PDF-led 920px
 //                    segmented dialog and restore real binding-version management.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Deck, Voice } from '../api/voiceApi';
 import type { DeckAgentType } from '../api/deckPluginApi';
 import type { ActiveChatVoice } from '../lib/chat-schema';
@@ -60,6 +62,7 @@ export default function DeckEditorModal({
   onVersionChanged,
   onChatWithDeck,
 }: Props) {
+  const { t } = useTranslation();
   const voices = useMemo(() => deck.voices || [], [deck.voices]);
   const selectedVoice = useMemo(
     () => voices.find((voice) => voice.id === selectedVoiceId) || null,
@@ -151,12 +154,12 @@ export default function DeckEditorModal({
               <DeckIcon size={20} />
             </span>
             <div>
-              <h1 id="deck-editor-title">{deck.name || 'New Deck'}</h1>
+              <h1 id="deck-editor-title">{deck.name || t('deck.defaults.newName')}</h1>
               <p>
                 {contentVersions.loading ? '正在读取内容版本' : contentVersions.state?.latest_version ? `内容版本 v${contentVersions.state.latest_version}` : '内容版本未提交'}
                 {contentVersions.state?.dirty ? ` · 草稿 r${contentVersions.state.draft_revision}` : ''}
                 {deck.deck_plugin_version ? ` · 运行插件 v${deck.deck_plugin_version}` : ''}
-                {isSystem ? ' · 系统 Deck' : ''}
+                {isSystem ? ` · ${t('deck.labels.systemDeck')}` : ''}
               </p>
             </div>
           </div>
@@ -185,7 +188,7 @@ export default function DeckEditorModal({
           </div>
         </header>
 
-        <nav aria-label="Deck maintenance sections" className="deck-editor__tabs" role="tablist">
+        <nav aria-label={t('deck.details.sectionsLabel')} className="deck-editor__tabs" role="tablist">
           {SECTIONS.map((candidate) => (
             <button
               aria-controls={`deck-editor-panel-${candidate.id}`}
@@ -212,14 +215,14 @@ export default function DeckEditorModal({
             {section === 'overview' && (
               <div className="deck-editor-panel deck-editor-overview">
                 <div className="deck-editor-panel__heading">
-                  <div><h2>Deck 信息</h2><p>基础信息和对话入口类型。</p></div>
+                  <div><h2>{t('deck.details.overviewTitle')}</h2><p>{t('deck.details.overviewDescription')}</p></div>
                   <span className={`deck-editor-state${deck.enabled ? ' is-enabled' : ''}`}>
                     {deck.enabled ? '已启用' : '已停用'}
                   </span>
                 </div>
 
                 <div className="deck-field-group">
-                  <label htmlFor={`deck-name-${deck.id}`}>Deck Name</label>
+                  <label htmlFor={`deck-name-${deck.id}`}>{t('deck.details.name')}</label>
                   <input
                     defaultValue={deck.name}
                     disabled={isSystem}
@@ -235,7 +238,7 @@ export default function DeckEditorModal({
                 </div>
 
                 <div className="deck-field-group">
-                  <label htmlFor={`deck-description-${deck.id}`}>Deck Description</label>
+                  <label htmlFor={`deck-description-${deck.id}`}>{t('deck.details.description')}</label>
                   <textarea
                     defaultValue={deck.description || ''}
                     disabled={isSystem}
@@ -422,7 +425,7 @@ export default function DeckEditorModal({
       </section>
       {contentVersions.preview && (
         <DeckVersionSubmitDialog
-          deckName={deck.name || 'Deck'}
+          deckName={deck.name || t('deck.labels.typeName')}
           error={contentVersions.error}
           onCancel={contentVersions.clearPreview}
           onConfirm={async (description) => {

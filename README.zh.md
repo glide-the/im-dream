@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
 <!-- [Input] 现行 Story Workspace 设计、业务 PRD、前端导航、包清单与环境模板。 -->
 <!-- [Output] 带图产品介绍、用户流程、运维安装与明确的功能启用边界。 -->
 <!-- [Pos] 仓库中文入口；与 README.md 保持结构、命令及事实一致。 -->
@@ -9,7 +10,9 @@
   <a href="README.md">English</a> · 中文
 </p>
 
-**把对话、创作项目和可复用 Agent 团队放在一起的 AI 工作空间。** 从 Chat 开始，在 Dream 中推进创作，用 Decks 组织指令、工具和资源。保存的对话、工作区文件与项目产物帮助你回到同一份工作继续。
+**把对话、创作项目和可复用 Agent 团队放在一起的 AI 工作空间。** 从 Chat 开始，在 Dream 中推进创作，用思维模式 组织指令、工具和资源。保存的对话、工作区文件与项目产物帮助你回到同一份工作继续。
+
+Ink & Memory 用于整理个人思维模式：针对某类需求整理思考方向、解决路径与执行方式，并关联 Agent 和插件配置。Deck 是现有实现的承载形式；中文产品名称为“思维模式”，英文沿用 Deck。见[思维模式 PRD](docs/prd/deck/thinking-modes.md)。
 
 ![产品关系图：Chat、Dream 和 Decks，以及文件、日历与资源连接](assets/readme/product-overview.zh.svg)
 
@@ -21,17 +24,17 @@
 | --- | --- | --- |
 | **Chat 对话** | 选择模型和 Agent，添加附件，查看流式回复与工具反馈，搜索历史并定位较早轮次。Agent 工作时可继续排队输入、调整方向，或把待处理消息移至独立聊天。 | [Chat 首页](<docs/prd/Chat Dashboard.md>)、[输入队列](docs/prd/chat/queued-input.md)、[轮次导航](docs/prd/chat/turn-navigation.md) |
 | **Dream / 创作工作台** | 启动或重新进入创作项目，在共享人物、场景和分集产物旁与 Agent 协作；阅读已到达的大纲、剧本、分镜和审阅报告。Dream 与 Chat 共用同一段对话。 | [Dream 重入](docs/design/story-workspace/dream-workspace-and-reentry.md)、[Project / Episode 工作台](docs/design/story-workspace/project-and-episode-workbench.md) |
-| **Decks 卡组与 Agent** | 将指令、Agent、工具、资源和 Claude Plugin 组织成可复用团队。注册用户默认获得“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本。 | [Deck 设计索引](docs/design/deck/README.md) |
+| **思维模式与 Agent** | 将指令、Agent、工具、资源和 Claude Plugin 组织成可复用团队。注册用户默认获得“剧本创作团队”和“音乐创作”系统思维模式的可编辑副本。 | [Deck 设计索引](docs/design/deck/README.md) |
 | **任务与活动** | 查看已创建任务、子智能体、计划和待办，打开关联聊天及任务详情；活动铃铛在同一侧栏汇集优先级事项和历史。 | [任务与进度](docs/prd/chat/task-activity.md)、[优先级活动](docs/prd/chat/priority-activity.md) |
 | **日历** | 按选中日期切换定时任务、日记和 Notion，编辑周期、执行模型及会话模式，查看结果并打开对应聊天。 | [日历](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md) |
 | **文件与资源连接** | 使用当前 Thread 工作区的文件，预览支持的报告和图片，在设置中连接选定的 Notion 资源或受管 MCP 工具。 | [文件存储](docs/design/file-storage/README.md)、[Notion 连接器](docs/prd/notion-session/resource-connector.md) |
 
-主导航是 **Chat → Dream → Decks**。**更多**保留写作、时间线和回顾；设置管理语言、主题、模型与资源。界面沿用暖纸[色彩系统](docs/prd/color_system/README.md)，针对窄屏调整工作区布局。当前浏览器在登录及刷新后保留语言和主题，详见[设置设计](docs/design/story-workspace/settings.md)。
+主导航是 **Chat → Dream → 思维模式**。**更多**保留写作、时间线和回顾；设置管理语言、主题、模型与资源。界面沿用暖纸[色彩系统](docs/prd/color_system/README.md)，针对窄屏调整工作区布局。当前浏览器在登录及刷新后保留语言和主题，详见[设置设计](docs/design/story-workspace/settings.md)。
 
 ## 从想法到创作项目
 
-1. **在 Chat 开始。** 登录后选择模型和 Deck/Agent，描述需求并添加参考文件；通过回复、工具活动和保存的对话追踪工作。
-2. **复用团队。** 选择或编辑 Deck。“音乐创作”包含 YuE2 统筹、编曲师和作词师，使用 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
+1. **在 Chat 开始。** 登录后选择模型和思维模式/Agent，描述需求并添加参考文件；通过回复、工具活动和保存的对话追踪工作。
+2. **复用团队。** 选择或编辑思维模式。“音乐创作”包含 YuE2 统筹、编曲师和作词师，使用 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
 3. **在 Dream 推进项目。** 启动或重新打开创作项目，在绑定的 Agent 对话中协作；查看共享资产及选中分集的产物，也可回到同一个 Thread 的 Chat。
 4. **查看实际产物。** 阅读已有大纲、剧本、分镜和报告；缺失产物明确显示不可用。结果就绪后使用业务审阅及确认入口。
 5. **回来继续。** 重新打开已保存的 Chat 或 Dream Run。页面加载只恢复状态，新模型轮次需要明确操作。重复性工作可在满足下方部署门槛后使用日历。
@@ -46,7 +49,7 @@
 
 | 阶段 | 工作流程 | 可用范围 |
 | --- | --- | --- |
-| **项目共享资产** | `/drama-init` → `/drama-plan` → `/drama-asset`：建立项目、分集规划和可跨集复用的人物、场景。 | 使用已安装的剧本 Skills 及已授权的 Deck/工具。 |
+| **项目共享资产** | `/drama-init` → `/drama-plan` → `/drama-asset`：建立项目、分集规划和可跨集复用的人物、场景。 | 使用已安装的剧本 Skills 及已授权的思维模式/工具。 |
 | **逐集创作** | `/drama-script (EP01)` → `/drama-storyboard (EP01)` → `/drama-prompt (EP01)` → `/script-reviewer`：生成并审查当前分集产物。 | 工作台读取实际存在的产物，打开页面不会自动生成。 |
 | **未来制作** | 渲染、配音、后期和宣发。 | **当前工作台尚未实现。** 指引仅展示制作方向。 |
 
@@ -249,7 +252,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 
 | 主题 | 入口 |
 | --- | --- |
-| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[Decks](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
+| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[思维模式 PRD](docs/prd/deck/thinking-modes.md)、[思维模式设计](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
 | 日历与重复任务 | [日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务设计](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |
 | 资源与工具 | [Notion 连接器](docs/prd/notion-session/resource-connector.md)、[MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
 | 架构与认证 | [项目架构](docs/architecture/项目架构设计说明.md)、[Admin 认证/数据合同](docs/architecture/admin-auth-data-interaction.md)、[后端 API](backend/API.md) |

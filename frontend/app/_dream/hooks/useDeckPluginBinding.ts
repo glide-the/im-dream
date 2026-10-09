@@ -1,9 +1,11 @@
 // [Input] Deck id, exact server versions, and optimistic binding APIs.
 // [Output] Current runtime-version binding plus explicit save/conflict state.
 // [Pos] Deck version-management data hook.
+// [Sync] 2026-10-09: use localized 思维模式/Deck wording for existing unavailable failures.
 // [Sync] 2026-08-16: restore real binding-version management without Workflow UI semantics.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import i18n from '../i18n';
 import {
   DeckPluginApiError,
   getDeckPluginBinding,
@@ -20,7 +22,7 @@ export interface DeckPluginBindingConflict {
 }
 
 function loadMessage(error: unknown): string {
-  if (error instanceof DeckPluginApiError && error.status === 404) return '此 Deck 的版本信息不可用。';
+  if (error instanceof DeckPluginApiError && error.status === 404) return i18n.t('deck.messages.versionUnavailable');
   if (error instanceof Error && error.message === 'Not authenticated') return '登录状态已失效，请重新登录。';
   return '版本信息加载失败，请稍后重试。';
 }
@@ -28,7 +30,7 @@ function loadMessage(error: unknown): string {
 function saveMessage(error: unknown): string {
   if (error instanceof DeckPluginApiError) {
     if (error.status === 422 && error.errorCode) return `该版本当前不可选择（${error.errorCode}）。`;
-    if (error.status === 404) return '无法保存：Deck 不存在或无编辑权限。';
+    if (error.status === 404) return i18n.t('deck.messages.versionSaveUnavailable');
   }
   return '版本保存失败，请稍后重试。';
 }

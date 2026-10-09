@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
 <!-- [Input] Current Story Workspace design, business PRDs, frontend navigation, manifests and environment templates. -->
 <!-- [Output] Illustrated product guide, user workflows and operator setup with explicit feature gates. -->
 <!-- [Pos] Canonical English README; README.zh.md mirrors its structure, commands and facts. -->
@@ -11,6 +12,8 @@
 
 **An AI workspace for conversations, creative projects and reusable Agent teams.** Start in Chat, develop a project in Dream, and keep instructions, tools and resources together in Decks. Saved conversations, workspace files and project outputs help you return to the work and continue.
 
+Decks carry personal thinking modes: thinking directions, solution paths and execution approaches for a recurring kind of need, together with Agent and plugin configuration. The Chinese product name is 思维模式; English retains Deck. See the [thinking modes PRD](docs/prd/deck/thinking-modes.md).
+
 ![Product map: Chat, Dream and Decks, supported by files, Calendar and resource connections](assets/readme/product-overview.en.svg)
 
 *Product relationship diagram based on the [current navigation design](docs/design/story-workspace/product-scope-and-navigation.md). This is an explanatory illustration, not a live screenshot.*
@@ -21,7 +24,7 @@
 | --- | --- | --- |
 | **Chat** | Choose a model and Agent, attach files, follow streamed replies and tool feedback, search history and navigate earlier turns. While an Agent runs, queue further text, adjust direction or move a pending message into an independent Chat. | [Chat dashboard](<docs/prd/Chat Dashboard.md>), [input queue](docs/prd/chat/queued-input.md), [turn navigation](docs/prd/chat/turn-navigation.md) |
 | **Dream / Story Workspace** | Start or reopen a creative production. Collaborate with an Agent beside shared characters, scenes and Episode outputs; read available outlines, scripts, storyboards and review reports. Dream and Chat share the same conversation. | [Dream re-entry](docs/design/story-workspace/dream-workspace-and-reentry.md), [Project / Episode workbench](docs/design/story-workspace/project-and-episode-workbench.md) |
-| **Decks and Agents** | Build reusable teams with instructions, Agents, tools, resources and Claude plugins. Registered users receive editable copies of the Screenplay Creation Team and Music Creation system Decks. | [Deck design index](docs/design/deck/README.md) |
+| **Decks: thinking modes and Agents** | Build reusable teams with instructions, Agents, tools, resources and Claude plugins. Registered users receive editable copies of the Screenplay Creation Team and Music Creation system Decks. | [Deck design index](docs/design/deck/README.md) |
 | **Tasks and activity** | Follow created tasks, subagents, plans and todos, open linked Chats and inspect task details. The activity bell brings priority items and history into a shared sidebar. | [Task activity](docs/prd/chat/task-activity.md), [priority activity](docs/prd/chat/priority-activity.md) |
 | **Calendar** | Switch between Scheduled tasks, Diary and Notion for a selected date. Edit recurrence, execution model and conversation mode; inspect results and open the corresponding Chat. | [Calendar](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled tasks](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md) |
 | **Files and resource connections** | Work with the current Thread's files, preview supported reports and images, and connect selected Notion resources or managed MCP tools through Settings. | [File storage](docs/design/file-storage/README.md), [Notion connector](docs/prd/notion-session/resource-connector.md) |
@@ -249,7 +252,7 @@ A send-path release requires **create Thread → `POST /api/claude-agent` → au
 
 | Topic | Entry |
 | --- | --- |
-| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [Decks](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
+| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [thinking modes PRD](docs/prd/deck/thinking-modes.md), [Deck design](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
 | Calendar and recurring tasks | [Calendar PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled-task design](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |
 | Resources and tools | [Notion connector](docs/prd/notion-session/resource-connector.md), [MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
 | Architecture and authentication | [Architecture](docs/architecture/项目架构设计说明.md), [Admin auth/data contract](docs/architecture/admin-auth-data-interaction.md), [backend API](backend/API.md) |

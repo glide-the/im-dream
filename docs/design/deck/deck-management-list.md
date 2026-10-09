@@ -9,7 +9,11 @@
 <!-- [Sync] 2026-08-17: use a neutral ink-and-paper preview surface without Deck accent gradients. -->
 <!-- [Sync] 2026-09-19: define multi-template initialization; Music Creation adds coordinator, arranger, lyricist and three exact plugins. -->
 
-# Deck 启用入口与 Work 设置工作台
+# 思维模式启用入口与 Work 设置工作台（Deck）
+
+<!-- [Sync] 2026-10-09: clarify the Chinese product name while preserving existing routes, rules and historical sketches. -->
+
+当前中文名称统一为“思维模式”：首页标题、可用/系统分组、工作台页签、创建维护、相关对话与失败反馈均使用该名称。Deck 表示现有承载形式，代码、路由和字段保持原样。产品用于整理需求的思考方向、解决路径与执行方式；当前配置能力仍为概览、Agents 和 Claude 插件。中文页面骨架见[现行 PRD](../../prd/deck/thinking-modes.md)，正常、失败恢复与状态图见[命名交互设计](./thinking-mode-terminology.md)。下方旧骨架原文保留，不作为当前中文标签来源。
 
 ## 1. 现有代码基线
 
