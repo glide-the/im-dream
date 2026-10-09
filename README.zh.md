@@ -1,83 +1,87 @@
-<!-- [同步] 2026-10-07：对齐当前周期、运行选项及 v3 capability，保留真实业务验收未闭合的回执。 -->
-<!-- [同步] 2026-10-07：记录创建与执行会话的定时任务活动及精确只读操作。 -->
-<!-- [同步] 2026-10-07：记录 Chat 活动铃铛及现有读取范围内的优先级与历史显示。 -->
-<!-- [同步] 2026-10-07：记录 Notion 精确归属能力、接受版本缓存恢复及尚未闭合的正常服务发布门禁。 -->
-<!-- [同步] 2026-10-07：日历仅可见时检查连接器快照版本；简约元数据保留一次数量/标题链接及必要恢复反馈。 -->
-<!-- [同步] 2026-10-07：设置中的语言和主题在登录及本地数据导入清理后保留。 -->
-<!-- [同步] 2026-10-07：日历右侧保留自然高度的唯一圆角浮空纸片，内部简约留白。 -->
-<!-- [Sync] 2026-10-06: document the bounded full-text Session response budget and existing-env recovery. -->
-<!-- [Sync] 2026-10-06: document snapshot-first selected-date reads and today-updated metadata verification. -->
-<!-- [Sync] 2026-10-06: clarify selected database page rows and explicit synchronization of legacy indexes. -->
-<!-- [同步] 2026-10-05：记录日历互斥栏目、Search 今日元数据及必需的服务器 API 日期配置。 -->
-<!-- [同步] 2026-10-06：记录日历右侧平坦浅纸、留白与普通内容无装饰边框的呈现。 -->
-<!-- [同步] 2026-10-06：记录实际 CLI API 日期合同、缺配置 503 及补配置重启的恢复步骤。 -->
-<!-- [输入] 当前 Dream/Admin 架构、AutoDL 直宿主发布与本机开发合同。 -->
-<!-- [输出] 用户优先的启动、使用、本机配置、验证与恢复入口。 -->
-<!-- [定位] 仓库中文 README；README.md 是同结构的英文正文。 -->
-<!-- [同步] 2026-09-29：记录 Thread 内用户消息导航及需求稿。 -->
-<!-- [同步] 2026-09-27：说明运行中消息队列依赖目标数据库的 Admin Drizzle 0064–0066。 -->
-<!-- [同步] 2026-09-19：记录 Gateway service key 与 Claude Agent 完整发送链路发布门禁。 -->
-<!-- [同步] 2026-09-27：记录 Chat 输入队列、独立任务 Thread 工具及 Admin capability 门禁。 -->
-<!-- [同步] 2026-09-28：说明消息开始派发后及轮次失败时不再占用输入区队列控制栏。 -->
-<!-- [同步] 2026-09-29：说明“调整方向”确认中断仅取消旧回复，选中消息另行处理。 -->
-<!-- [同步] 2026-09-28：将 Chat 任务导航指向现行“任务与进度”需求稿。 -->
-<!-- [同步] 2026-09-28：独立任务改用创建、列表、读取和发送 Dream Thread 工具。 -->
-<!-- [同步] 2026-09-28：独立任务通过当前父轮次的 wait_threads Tool 回执完成等待。 -->
-<!-- [同步] 2026-09-28：索引定时任务评审设计、注明尚未实现，并修复任务与进度 PRD 链接。 -->
-<!-- [同步] 2026-09-28：记录定时 Chat 消费端、日历操作与 Admin capability 部署门槛。 -->
-<!-- [同步] 2026-09-27：记录任务导航在用户消息和助手回复中的位置。 -->
-<!-- [同步] 2026-09-18：将 AutoDL 启动与产品使用前置，恢复细节移入独立手册。 -->
+<!-- [Input] 现行 Story Workspace 设计、业务 PRD、前端导航、包清单与环境模板。 -->
+<!-- [Output] 带图产品介绍、用户流程、运维安装与明确的功能启用边界。 -->
+<!-- [Pos] 仓库中文入口；与 README.md 保持结构、命令及事实一致。 -->
+<!-- [Sync] 2026-10-09: 按 Chat、Dream 和 Decks 重写介绍与配图，保留当前安装及验收边界。 -->
 
 # Ink & Memory Dream
-
-<p align="center">
-  <img src="assets/banner.png" alt="Ink & Memory" width="700" />
-</p>
 
 <p align="center">
   <a href="README.md">English</a> · 中文
 </p>
 
-Ink & Memory Dream 是面向长期对话、故事创作、可复用 Deck/Agent、文件、Notion 与 MCP 工具的 AI 写作工作空间。本仓库负责 Dream Web 应用与 FastAPI 业务 Runtime。
+**把对话、创作项目和可复用 Agent 团队放在一起的 AI 工作空间。** 从 Chat 开始，在 Dream 中推进创作，用 Decks 组织指令、工具和资源。保存的对话、工作区文件与项目产物帮助你回到同一份工作继续。
 
-## 在 AutoDL 启动
+![产品关系图：Chat、Dream 和 Decks，以及文件、日历与资源连接](assets/readme/product-overview.zh.svg)
 
-1. 在 AutoDL 控制台打开正在运行的实例。
-2. 点击 **WebUI-6006** 打开 Dream，不需要 SSH 隧道。
-3. 从 Dream 原有登录卡进入。密码与 Google 登录由 Admin 处理，完成后返回原先请求的 Dream 页面。
-4. 打开或创建 Chat，选择 Deck/Agent，然后发送消息。
+*依据[现行导航设计](docs/design/story-workspace/product-scope-and-navigation.md)绘制的产品关系图，用来解释功能关系，不是实际运行截图。*
 
-AutoDL 实例变化后公网主机会变化。请使用控制台当前的 **WebUI-6006**，不要把公网主机名保存到源码或文档。**WebUI-6008** 是独立的 Admin 运维后台。
+## 可以做什么
 
-| 入口 | 内部监听 | 用途 | 使用者 |
-| --- | --- | --- | --- |
-| **WebUI-6006** | Next.js `127.0.0.1:6006` | Dream 页面、同源认证/BFF 与 API 路由 | Dream 用户 |
-| Dream 后端 | FastAPI `127.0.0.1:8765` | Agent Runtime、SSE、业务编排与共享文件 | 私有；由 Next.js 访问 |
-| **WebUI-6008** | Admin `127.0.0.1:6008` | 认证、数据库接口、Gateway 与管理后台 | Admin 运维人员 |
-| 嵌入式 PostgreSQL | `54329` | Admin 管理的认证与业务持久化 | 私有；Dream 没有凭据 |
+| 功能区域 | 可以完成的工作 | 设计依据 |
+| --- | --- | --- |
+| **Chat 对话** | 选择模型和 Agent，添加附件，查看流式回复与工具反馈，搜索历史并定位较早轮次。Agent 工作时可继续排队输入、调整方向，或把待处理消息移至独立聊天。 | [Chat 首页](<docs/prd/Chat Dashboard.md>)、[输入队列](docs/prd/chat/queued-input.md)、[轮次导航](docs/prd/chat/turn-navigation.md) |
+| **Dream / 创作工作台** | 启动或重新进入创作项目，在共享人物、场景和分集产物旁与 Agent 协作；阅读已到达的大纲、剧本、分镜和审阅报告。Dream 与 Chat 共用同一段对话。 | [Dream 重入](docs/design/story-workspace/dream-workspace-and-reentry.md)、[Project / Episode 工作台](docs/design/story-workspace/project-and-episode-workbench.md) |
+| **Decks 卡组与 Agent** | 将指令、Agent、工具、资源和 Claude Plugin 组织成可复用团队。注册用户默认获得“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本。 | [Deck 设计索引](docs/design/deck/README.md) |
+| **任务与活动** | 查看已创建任务、子智能体、计划和待办，打开关联聊天及任务详情；活动铃铛在同一侧栏汇集优先级事项和历史。 | [任务与进度](docs/prd/chat/task-activity.md)、[优先级活动](docs/prd/chat/priority-activity.md) |
+| **日历** | 按选中日期切换定时任务、日记和 Notion，编辑周期、执行模型及会话模式，查看结果并打开对应聊天。 | [日历](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md) |
+| **文件与资源连接** | 使用当前 Thread 工作区的文件，预览支持的报告和图片，在设置中连接选定的 Notion 资源或受管 MCP 工具。 | [文件存储](docs/design/file-storage/README.md)、[Notion 连接器](docs/prd/notion-session/resource-connector.md) |
 
-实例重启后 WebUI 不可用时，按 [AutoDL 恢复手册](docs/deploy/autodl-recovery.md)检查。手册覆盖状态、日志、重启与完整发布，不打印 secret，也不删除持久数据。最新发布证据见 [2026-09-18 发布回执](docs/exec/exec_autodl_release_20260918.md)。
+主导航是 **Chat → Dream → Decks**。**更多**保留写作、时间线和回顾；设置管理语言、主题、模型与资源。界面沿用暖纸[色彩系统](docs/prd/color_system/README.md)，针对窄屏调整工作区布局。当前浏览器在登录及刷新后保留语言和主题，详见[设置设计](docs/design/story-workspace/settings.md)。
 
-## 使用 Dream
+## 从想法到创作项目
 
-- **界面语言** 在「设置 → 通用」中选择后立即生效。当前浏览器在登出、登录及刷新后保留语言和主题，本地数据迁移清理也会保留这些选择。详见[设置设计](docs/design/story-workspace/settings.md)。
-- **Chat** 保存 Thread 历史并流式输出 Agent 回复；继续、取消和重试都走同一生产路径。
-- **Chat 活动**由新建旁的铃铛打开同一个右侧栏。优先级显示今日定时任务及最近五分钟的 Chat／Dream 活动，支持显示筛选和独立重试；日期历史、搜索及用户主动删除对话沿用原行为。详见[活动视图 PRD](docs/prd/chat/priority-activity.md)。
-- **Chat 轮次导航** 为当前 Thread 中每条已发送的用户消息显示紧凑的动态刻度。悬浮或聚焦可预览该次交互，选中后定位原消息，包括较早的历史分页；窄屏改用可展开的消息列表。详见[轮次导航 PRD](docs/prd/chat/turn-navigation.md)。
-- **定时任务活动**显示在创建对话及每个关联执行会话的“任务与进度”中，尚未首次运行的任务也能查看。记录与创建消息打开同一个详情侧栏，定义状态和本次执行状态分别显示。当前读取依赖 Admin 精确的 `scheduled-task.v3.thread` operation 和 v3 schema capability；冻结的 v2 合同继续保留；读取失败保留当前会话记录并提供重新加载。详见[对话活动 PRD](docs/prd/scheduled-tasks/conversation-activity.md)。
-- **Agent 运行中的 Chat** 可继续接收文字，按 Thread 持久化排队。输入框上方的卡片支持引导、编辑、取消或将单条待处理消息移至独立侧边聊天。服务端开始派发消息时，卡片即退出输入区；后续轮次失败在对话中显示，结果不明时由独立状态反馈提示检查。“调整方向”的中断经确认后，旧回复以取消结束，选中消息由独立轮次处理；SDK 真实失败仍显示错误。Agent 通过 `create_thread`、`list_threads`、`read_thread`、`send_message_to_thread` 操作独立 Dream Thread，停止仍由页面/API 执行；新 Thread 的首条用户消息上方显示返回来源会话的入口。来源会话的“任务与进度”面板分别显示已创建任务、子智能体、计划和待办。相关 Admin schema capability 应用后才能使用。运行 owner 控制目前要求同一 Dream 进程。界面规则见[任务与进度 PRD](docs/prd/chat/task-activity.md)。
-- **Thread 任务等待** 提供与 Codex 一致的 `wait_threads` Tool 合同。父 Agent 保持当前 SDK 轮次，等待最多八个已授权 Dream Thread；目标最终消息已保存、目标需要工具确认、等待超时或父 Thread 收到新输入时，状态作为本次 Tool 回执交回父模型，再生成普通回复。Chat 不注入技术结果消息，也不显示独立结果卡片。详见[任务完成交接设计](docs/design/claude-agent/task-session-completion-handoff.md)。
-- **定时 Chat 任务**可由 Agent 的 `create_scheduled_task` Tool 创建，支持 IANA 时区及一次、每天、间隔、每小时和每周规则。日历预设包含每小时、每天、工作日、每周、自定义；高级选项选择执行模型，以及继续创建会话或每次开启新聊天。日历和 Chat 共用任务详情、最近结果、历史、编辑、暂停、恢复、立即运行与软删除。Admin 计算计划、领取任务、校验权限并持久化；Dream 复用现有 Chat Runtime 和服务器所有的工具审批策略。执行依赖 Admin Drizzle 0077 发布的 v3 capability 与精确操作合同。详见[现行 PRD](docs/prd/scheduled-tasks/codex-repeat-and-run-options.md)、[设计稿](docs/design/scheduled-tasks/codex-repeat-and-run-options.md)和[0077 后真实业务回执](docs/design/scheduled-tasks/codex-repeat-and-run-options-real-e2e.md)；权限修复加载后仍需复验正常服务中的成功定时模型执行。
-- **日历栏目**采用互斥的定时任务、日记、Notion 页签；同日切栏保留草稿、结果和滚动位置。右侧保留随可见内容自然增高的一层圆角浮空纸片；内部使用留白，未选页签透明，普通内容行无装饰边框或静态卡片阴影。Notion 从当前选择范围的连接器索引读取：历史日期展示当日创建；今天先显示快照中的创建/最近编辑文档，再仅校验快照记录为今天更新项的元数据。新页面及未记录变化依赖连接器同步。日历仅可见时检查本地连接器版本并读取变化的快照；完整上下文和成功读取版本未变时不重读文档或远程校验。列表保留一次数量、非空组、单一标题链接及必要恢复反馈。查看/刷新不 Search、保存选择、同步、读取正文或扩大 Agent 权限。设置页区分服务器已确认保存的资源范围与索引更新失败；Retry-After 仅暂停手动操作，不自动同步。详见[日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)。技术验证及正常服务复核限制见[日历同步回执](docs/exec/notion-calendar-sync-refresh-20261007.md)。
+1. **在 Chat 开始。** 登录后选择模型和 Deck/Agent，描述需求并添加参考文件；通过回复、工具活动和保存的对话追踪工作。
+2. **复用团队。** 选择或编辑 Deck。“音乐创作”包含 YuE2 统筹、编曲师和作词师，使用 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
+3. **在 Dream 推进项目。** 启动或重新打开创作项目，在绑定的 Agent 对话中协作；查看共享资产及选中分集的产物，也可回到同一个 Thread 的 Chat。
+4. **查看实际产物。** 阅读已有大纲、剧本、分镜和报告；缺失产物明确显示不可用。结果就绪后使用业务审阅及确认入口。
+5. **回来继续。** 重新打开已保存的 Chat 或 Dream Run。页面加载只恢复状态，新模型轮次需要明确操作。重复性工作可在满足下方部署门槛后使用日历。
 
-- **Dream 与 Story Workspace** 用于发展故事、人物、场景、剧本和生成制品。
-- **Deck 与 Agent** 组织可复用的指令、工具、资源和 Claude Plugin。注册用户默认获得代码内置“剧本创作团队”和“音乐创作”系统 Deck 的可编辑副本；“音乐创作”组合 YuE2 统筹、编曲师、作词师，并使用本机 `yue2-skills`、`music-composition-skills`、`lyric-writing-skills` Marketplace。
-- **文件** 保存在 Thread 工作区，继续执行路径规范化、所有权检查和共享文件系统边界。
-- **Resource Links** 连接 Notion 与受管 MCP Server；兼容的 MCP App 可显示在普通工具结果下方。
+### 剧本创作流程
 
-![Dream 写作工作区](assets/writing-area.png)
+<p align="center">
+  <img src="frontend/public/assets/story-workspace-guide-illustrations/01-mimo-xiaohei-workflow-triptych.png" alt="剧本创作三阶段：共享人物和场景资产、每集创作与审查、未来制作工具" width="440" />
+</p>
 
-使用 MCP 连接时，打开 **Settings → Resource Links**，新增或选择 Server，完成授权，然后在 usage policy 中启用 **Use App in Chat**。App 关闭或不可用时，普通工具结果仍保留。完整流程见 [MCP Apps 设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)。
+*复用应用[创作指引](docs/design/story-workspace/project-and-episode-workbench.md#创作阶段指引)中的插图。画面从上到下对应三个阶段，最后一段表示未来方向。*
+
+| 阶段 | 工作流程 | 可用范围 |
+| --- | --- | --- |
+| **项目共享资产** | `/drama-init` → `/drama-plan` → `/drama-asset`：建立项目、分集规划和可跨集复用的人物、场景。 | 使用已安装的剧本 Skills 及已授权的 Deck/工具。 |
+| **逐集创作** | `/drama-script (EP01)` → `/drama-storyboard (EP01)` → `/drama-prompt (EP01)` → `/script-reviewer`：生成并审查当前分集产物。 | 工作台读取实际存在的产物，打开页面不会自动生成。 |
+| **未来制作** | 渲染、配音、后期和宣发。 | **当前工作台尚未实现。** 指引仅展示制作方向。 |
+
+### 连接自己的资源
+
+在 **设置 → 资源链接**管理连接。使用 Notion 时，先授权账号，再选择 Agent 可以使用的资源并同步索引。Chat 展示已保存的资源摘要，日历从所选索引读取日期元数据。索引同步与正文读取是两个动作：Agent 按需获取已授权内容。详见[连接器设计](docs/design/notion-session/connector-interaction.md)。
+
+受管 MCP 连接提供扩展工具。兼容 MCP Apps 已有技术预览 Host，但当前公开设置仍是 **`productionAppsEffective=false`**；公开 App 渲染仍关闭，普通工具结果可使用。详见[MCP Apps 接入设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md)。
+
+## 功能可用状态
+
+设计稿定义目标行为，源码、已部署 capability 和验收证据共同决定实际可用范围。
+
+| 功能 | 当前边界 |
+| --- | --- |
+| Chat 输入队列与独立任务 | 依赖 Admin Drizzle 0064–0066 发布的 `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` capability；运行 owner 控制目前要求同一 Dream 进程。[任务与进度](docs/prd/chat/task-activity.md)说明关联 Thread 和返回来源入口。 |
+| 定时任务 | 代码支持一次、每天、间隔、每小时及每周规则；日历提供每小时、每天、工作日、每周和自定义预设，可选择执行模型，以及继续来源聊天或每次新建聊天。依赖 Admin Drizzle 0077 的 v3 capability 和精确操作合同。[最近记录的真实业务回执](docs/design/scheduled-tasks/codex-repeat-and-run-options-real-e2e.md)仍需在权限修复加载后复验正常服务中的成功模型执行。 |
+| Notion 同步增量 | 既有连接器与索引读取已实现；新增归属/接受版本路径已通过隔离技术检查，正常 capability 发布、旧 writer drain 及服务切换仍待完成，见[接入回执](docs/exec/notion-sync-ownership-dream-integration-20261007.md)。 |
+| MCP Apps | 仅技术预览，公开 App 渲染关闭。 |
+| Chat 原生图片生成/编辑；剧本渲染、配音、后期及宣发 | 尚未作为当前产品功能交付；既有文件/图片预览不代表已具备生成能力。 |
+
+## 打开正在运行的实例
+
+在 AutoDL 控制台打开正在运行的实例，选择 **WebUI-6006**。从 Dream 登录卡进入；Admin 完成密码或 Google 认证后返回 Dream。登录后的默认入口为 Chat。
+
+实例变化时公网主机名会变化，请使用控制台当前的 WebUI 链接。**WebUI-6008**是独立的 Admin 运维后台。
+
+| 入口 | 内部监听 | 用途 |
+| --- | --- | --- |
+| **WebUI-6006** | Next.js `127.0.0.1:6006` | Dream 页面、同源认证/BFF 与 API 路由 |
+| Dream 后端 | FastAPI `127.0.0.1:8765` | 私有 Agent Runtime、SSE、业务编排与文件 |
+| **WebUI-6008** | Admin `127.0.0.1:6008` | 运维后台、认证、数据接口与 Gateway |
+| 嵌入式 PostgreSQL | `54329` | 私有的 Admin 持久化；Dream 不持有数据库凭据 |
+
+重启后入口不可用时，按[AutoDL 恢复手册](docs/deploy/autodl-recovery.md)处理。[2026-09-18 发布回执](docs/exec/exec_autodl_release_20260918.md)记录当次部署，不表示后续全部功能已经验收。其他平台状态由[部署矩阵](deploy/README.md)维护。
 
 ## 认证与数据边界
 
@@ -105,13 +109,14 @@ flowchart LR
 - Python `>=3.12` 与 `uv`
 - Node.js `>=22 <25`、Corepack 与 `pnpm@10.28.1`
 - Admin 与 Dream 位于相邻目录
+- 原生 Runtime 主机：macOS 或 Linux，arm64 或 x64；registry 验证器拒绝其他目标
 
 ```bash
-git clone https://github.com/glide-the/im-dream.git ink-dream-memory
-git clone https://github.com/glide-the/dream-im-platform.git ink-admin-memory
+git clone --branch develop https://github.com/glide-the/im-dream.git ink-dream-memory
+git clone --branch main https://github.com/glide-the/dream-im-platform.git ink-admin-memory
 ```
 
-准备 Admin、嵌入式 PostgreSQL、Gateway 与服务身份：
+为新安装准备 Admin、嵌入式 PostgreSQL、Gateway 与服务身份。Migration 与 provisioning 写入已配置数据库，应使用预期安装目标；可重复的 migration 测试必须使用具名、可删除的隔离数据库：
 
 ```bash
 cd ink-admin-memory
@@ -132,8 +137,23 @@ cd ../ink-dream-memory/backend
 uv sync --frozen
 npm install --global @glide-the/ink-claude-code-dream@0.1.10
 npm install --global ntn@0.15.1
+command -v ink-claude-code-dream
 ink-claude-code-dream --version
 ntn --version
+
+# Verify the SDK and manifest-qualified normal PATH Runtime.
+uv run python - <<'PY_RUNTIME'
+from libs.claude_agent_kit.server.sdk_env import (
+    require_dream_claude_sdk_distribution,
+    resolve_claude_cli_path,
+)
+sdk = require_dream_claude_sdk_distribution()
+cli = resolve_claude_cli_path()
+if cli is None:
+    raise SystemExit('Dream Runtime is missing from PATH')
+print(f'SDK: {sdk.version}')
+print(f'Qualified Runtime: {cli}')
+PY_RUNTIME
 
 cd ../frontend
 corepack enable
@@ -142,13 +162,20 @@ corepack pnpm install --frozen-lockfile
 
 Runtime 必须输出 `2.1.241 (Claude Code)`。`uv` 管理 Python SDK，npm 管理原生 Runtime 与 Notion CLI，pnpm 管理 Web workspace；`uv sync` 不会安装 Runtime。
 
-从示例创建 `backend/.env` 与 `frontend/.env.local`。配置明确的 Admin origin/issuer、Dream resource 以及已注册的 service/BFF identity。Dream env 不得包含 `DATABASE_URL` 或 Provider secret。
+根据[backend/.env.example](backend/.env.example)和[frontend/.env.example](frontend/.env.example)创建 `backend/.env` 与 `frontend/.env.local`。配置明确的 Admin origin/issuer、Dream resource 以及已注册的 service/BFF identity。Dream env 不得包含 `DATABASE_URL` 或 Provider secret。
+
+公开浏览器 origin、OAuth callback、issuer/resource 统一使用 `localhost`，与前端模板一致；私有 Python 监听可使用 `127.0.0.1`。
+
+<details>
+<summary>Notion 元数据、同步与日记响应配置</summary>
 
 选中独立页面同步和快照今天更新项的远程元数据读取要求在 `backend/.env` 配置服务器所有的 `INK_NOTION_TODAY_API_VERSION=2026-03-11`，模板已显式设置。loopback 请求头捕获确认固定的 `ntn@0.15.1` 默认请求和显式 `--notion-version` 均发送该日期，见[503 修复回执](docs/exec/notion-today-503-repair-20261006.md)。已有 env 文件须补此键并重启所拥有的 Dream 后端，因为配置在启动时读取。程序没有兜底日期：缺失或非法配置返回 HTTP 503 和 `detail.error_code=NOTION_API_VERSION_UNCONFIGURED`，此时连接列表和快照读取仍可成功。`INK_NOTION_ALLOWED_URL_HOSTS` 配置精确的 HTTPS 目的地主机，默认值见 `backend/.env.example`。这些配置用于远程元数据校验；真实账户的上游兼容性与[隔离技术回执](docs/exec/calendar-right-panel-tabs-implementation-20261005.md)分开验收。
 
 选择 Notion 数据库后，已同步的数据库页面行进入日历候选索引，无需逐行手动选择。重启 Dream 不会重建持久化索引。旧索引缺上游创建/编辑时间时，进入 Notion 设置 → 管理已挂载来源 → 立即同步，然后刷新日历；该操作沿用现有仅同步元数据的入口。
 
-新的 Notion 手动同步、首次选择同步和策略同步消费端要求精确的 `dream.notion-sync-ownership.v1` capability，以及固定的 request/claim/renew/finish 四操作。Admin 负责执行领取、续租与原子接受快照；Dream 随后缓存接受版本。日历、facade 读取和新 Thread 投影在缓存缺失时通过现有 Admin 读取恢复，并校验完整接受身份及仅含元数据的结构。Chat turn 不通过此索引路径触发 Notion 同步或正文下载。缺执行能力时新同步写入关闭，既有读取仍兼容。当前正常 Admin 目录尚缺这些操作和 capability；正常库迁移、旧 writer 排空与 claim 启用仍是发布前置。不使用 runtime DDL 或按时间强制接管。详见[集成回执](docs/exec/notion-sync-ownership-dream-integration-20261007.md)及[正式连接器设计](docs/design/notion-session/connector-interaction.md)。
+新的 Notion 手动同步、首次选择同步和策略同步消费端要求精确的 `dream.notion-sync-ownership.v1` capability，以及固定的 request/claim/renew/finish 四操作。Admin 负责执行领取、续租与原子接受快照；Dream 随后缓存接受版本。日历、facade 读取和新 Thread 投影在缓存缺失时通过现有 Admin 读取恢复，并校验完整接受身份及仅含元数据的结构。Chat turn 不通过此索引路径触发 Notion 同步或正文下载。缺执行能力时新同步写入关闭，既有读取仍兼容。2026-10-07 集成回执记录正常 Admin 目录尚缺这些操作和 capability；正常库迁移、旧 writer 排空与 claim 启用仍是发布前置。不使用 runtime DDL 或按时间强制接管。详见[集成回执](docs/exec/notion-sync-ownership-dream-integration-20261007.md)及[正式连接器设计](docs/design/notion-session/connector-interaction.md)。
+
+</details>
 
 分别启动拥有的服务：
 
@@ -162,7 +189,7 @@ cd ink-dream-memory/frontend
 INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
 
-Dream 地址为 <http://127.0.0.1:5173>，Admin 地址为 <http://127.0.0.1:3000/admin>。
+Dream 地址为 [Dream](http://localhost:5173)，Admin 地址为 [Admin](http://localhost:3000/admin)。
 
 ## 支持版本与所有权
 
@@ -181,20 +208,25 @@ Dream 地址为 <http://127.0.0.1:5173>，Admin 地址为 <http://127.0.0.1:3000
 
 ```bash
 # Backend provider-free suite
-PYTHONPATH=backend uv run --native-tls --project backend --frozen   --with pytest==9.1.1 --with pytest-asyncio   python -m pytest backend/tests -q
+PYTHONPATH=backend uv run --native-tls --project backend --frozen \
+  --with pytest==9.1.1 --with pytest-asyncio \
+  python -m pytest backend/tests -q
 
 # Frontend checks
 corepack pnpm --dir frontend exec tsc --noEmit --incremental false
 corepack pnpm --dir frontend lint
 NODE_ENV=production corepack pnpm --dir frontend build
 
-# 已发布 SDK/Runtime 身份
-python3 scripts/verify_claude_registry_release.py   --sdk-version 0.2.145   --runtime-version 0.1.10   --expected-cli-version '2.1.241 (Claude Code)'
+# Published SDK/Runtime identity
+python3 scripts/verify_claude_registry_release.py \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.10 \
+  --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
 Provider-free 检查证明确定性合同。真实 Google、模型与业务验收必须使用正常 Dream/Admin/Gateway/PostgreSQL 服务和已授权真实账号。
 
-## 故障排查
+## 故障排查与运维边界
 
 - **WebUI 返回 404 或无法打开：** 先确认 AutoDL 实例已运行，再按[恢复手册](docs/deploy/autodl-recovery.md)检查；不要新增隧道或硬编码当前公网主机名。
 - **Unable to check your session：** 验证两个 WebUI 映射，先检查 Admin，并确认 issuer、Dream origin/resource 与 callback 都来自当前实例。
@@ -205,15 +237,21 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - **Chat 提示 Token allowance 不足：** Gateway 拒绝模型 reservation 前，用户消息已保存。先在 Admin 修正订阅/模型额度，重新加载 Thread 后再决定是否发送。
 - **Chat 提示消息队列不可用：** 检查目标 Admin PostgreSQL 是否存在 `chat_input_queue`、`chat_task_session` 及 `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` schema capability。Admin Drizzle 迁移 0064–0066 提供这些能力；获准将迁移应用到目标数据库前，Dream 会保留草稿并拒绝排队。隔离数据库中的 provider-free 测试通过不代表正常业务数据库可用。
 - **Chat 返回 `GATEWAY_API_KEY_INVALID`：** Dream service key 与 Admin 当前 active canonical-subject Gateway key 不匹配。AutoDL 现在会在替换运行环境前阻断 sync 和 qualified。必须通过 Admin 所有的发布操作恢复或轮换 Key，仅重启 Dream 以重新读取私有环境，然后完整重跑真实 `create Thread -> POST /api/claude-agent -> SSE` 验收后才能发布。
-- **MCP App 没有显示：** 检查连接状态、App advertisement、usage policy 与 Admin capability；普通工具结果是预期 fallback。
+- **MCP App 没有显示：**公开 App 渲染仍关闭（`productionAppsEffective=false`）。检查连接和工具可用性；普通工具结果仍可使用。
+
+不得提交 secret、对话正文或用户工作区内容。浏览器输入、用户 env、Deck、Plugin 和工作区设置不能覆盖服务器所有的模型/资源配置。Thread 临时文件使用服务器绑定的 `{AGENT_CWD}/{thread_id}/.claude-tmp`，不得将边界扩大到 `/tmp`。
+
+`CLAUDE_CODE_CLI_PATH` 仅用于明确评审的绝对路径回滚，不能掩盖旧 PATH；Dream 不会静默选择 ambient `claude` 或 SDK 内置 CLI。应用回滚不会反向执行 Admin 数据库 migration。详见[SDK/Runtime 接入与回滚](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)。
+
+发送链路发布必须经过**创建 Thread → `POST /api/claude-agent` → 鉴权模型目录 → 接受 SSE**，规则见[Agent.md](Agent.md#8-claude-agent-send-path-release-gate)。测试只能清理自己命名的进程、端口和临时资源，浏览器检查复用兼容的已安装 Chrome。除非要求清理，保留正常业务 Run 与日志。
 
 ## 文档
 
-- [AutoDL 部署](deploy/autodl-ssh/README.md)
-- [AutoDL 恢复](docs/deploy/autodl-recovery.md)
-- [项目架构](docs/architecture/项目架构设计说明.md)
-- [认证与数据合同](docs/architecture/admin-auth-data-interaction.md)
-- [定时任务设计与实施门槛](docs/design/claude-agent/scheduled-task-loop-interaction-design.md)（[独立评审](docs/exec/scheduled-task-phase3-design-review-20260928.md)、[隔离技术回执](docs/exec/scheduled-task-phase4-consumer-receipt-20260928.md)；Admin capability 部署仍是前置条件）
-- [仓库规则](Agent.md)
-- [产品 Agent 行为](docs/Agent.md)
-- [规则索引](docs/rules/README.md)
+| 主题 | 入口 |
+| --- | --- |
+| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[Decks](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
+| 日历与重复任务 | [日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务设计](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |
+| 资源与工具 | [Notion 连接器](docs/prd/notion-session/resource-connector.md)、[MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
+| 架构与认证 | [项目架构](docs/architecture/项目架构设计说明.md)、[Admin 认证/数据合同](docs/architecture/admin-auth-data-interaction.md)、[后端 API](backend/API.md) |
+| 安装与部署 | [平台状态](deploy/README.md)、[AutoDL](deploy/autodl-ssh/README.md)、[AutoDL 恢复](docs/deploy/autodl-recovery.md) |
+| 仓库与 Agent 规则 | [仓库维护](Agent.md)、[Agent 行为](docs/Agent.md)、[规则索引](docs/rules/README.md) |
