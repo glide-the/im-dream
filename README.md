@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
 <!-- [Input] Notion product positioning, current business designs and PRDs, frontend features, manifests and environment templates. -->
 <!-- [Output] Illustrated descriptions of module purpose and scope, plus operator setup and enablement conditions. -->
 <!-- [Pos] Canonical English README; README.zh.md mirrors its structure, commands and facts. -->
@@ -262,7 +263,7 @@ A send-path release requires **create Thread → `POST /api/claude-agent` → au
 
 | Topic | Entry |
 | --- | --- |
-| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [Deck design](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
+| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [thinking modes PRD](docs/prd/deck/thinking-modes.md), [Deck design](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
 | Writing and reflection | [Manual writing suggestions](docs/design/writing-manual-suggestions.md), [reflection analysis](docs/prd/reflection-blog.md) |
 | Conversations and creation | [Input queue](docs/prd/chat/queued-input.md), [turn navigation](docs/prd/chat/turn-navigation.md), [Dream re-entry](docs/design/story-workspace/dream-workspace-and-reentry.md), [creative workbench](docs/design/story-workspace/project-and-episode-workbench.md) |
 | Calendar and recurring tasks | [Calendar PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled-task design](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |

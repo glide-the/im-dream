@@ -1,8 +1,10 @@
 // [Input] Actor-scoped Dream run and Deck metadata resolved by Story Workspace.
 // [Output] A Dream-only Deck metadata disclosure; no Chat thread or polling owner.
 // [Pos] Dream Agent rail provenance control (design_008 §5/§16).
+// [Sync] 2026-10-09: share localized 思维模式/Deck provenance labels with Chat.
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import './StoryWorkspaceDreamDeckMetadata.css';
 
 export interface StoryWorkspaceDreamDeckMetadataProps {
@@ -20,6 +22,7 @@ export function StoryWorkspaceDreamDeckMetadata({
   runtimeSnapshotId,
   runtimeLockId,
 }: StoryWorkspaceDreamDeckMetadataProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const popoverId = useId();
   const popoverTitleId = useId();
@@ -56,11 +59,11 @@ export function StoryWorkspaceDreamDeckMetadata({
         aria-controls={popoverId}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={`查看 ${deckName} Deck 元信息`}
+        aria-label={t('chat.deck.openMetadataAria', { name: deckName })}
         className="story-workspace-dream-deck-metadata__trigger"
         onClick={() => setOpen((current) => !current)}
         ref={triggerRef}
-        title="查看 Deck 元信息"
+        title={t('chat.deck.metadataTitle')}
         type="button"
       >
         <span aria-hidden="true" className="story-workspace-dream-deck-metadata__sigil">D</span>
@@ -78,9 +81,9 @@ export function StoryWorkspaceDreamDeckMetadata({
           role="dialog"
           tabIndex={-1}
         >
-          <h2 id={popoverTitleId}>Deck 元信息</h2>
+          <h2 id={popoverTitleId}>{t('chat.deck.metadataTitle')}</h2>
           <dl>
-            <div><dt>Deck</dt><dd>{deckName}</dd></div>
+            <div><dt>{t('deck.labels.typeName')}</dt><dd>{deckName}</dd></div>
             <div><dt>Dream run</dt><dd>{runId}</dd></div>
             <div><dt>阶段</dt><dd>{stageLine}</dd></div>
             <div><dt>runtime snapshot</dt><dd>{runtimeSnapshotId ?? '—'}</dd></div>

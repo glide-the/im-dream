@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
 <!-- [Input] Notion 项目定位、现行业务设计与 PRD、前端功能、包清单与环境模板。 -->
 <!-- [Output] 按功能模块说明用途与范围的带图产品介绍，以及运维安装与启用条件。 -->
 <!-- [Pos] 仓库中文入口；与 README.md 保持结构、命令及事实一致。 -->
@@ -262,7 +263,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 
 | 主题 | 入口 |
 | --- | --- |
-| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[思维模式设计](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
+| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[思维模式 PRD](docs/prd/deck/thinking-modes.md)、[思维模式设计](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
 | 写作与回顾 | [写作手动建议](docs/design/writing-manual-suggestions.md)、[回顾分析](docs/prd/reflection-blog.md) |
 | 对话与创作 | [输入队列](docs/prd/chat/queued-input.md)、[轮次导航](docs/prd/chat/turn-navigation.md)、[Dream 重入](docs/design/story-workspace/dream-workspace-and-reentry.md)、[创作工作台](docs/design/story-workspace/project-and-episode-workbench.md) |
 | 日历与重复任务 | [日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务设计](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |

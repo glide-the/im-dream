@@ -2,10 +2,12 @@
 // [Output] Deck editor selector for Claude Code plugins: only ready, digest-verified,
 //          CLI-compatible installations are selectable; saves references (never paths).
 // [Pos] Mounted inside DeckEditorModal between Deck metadata and Agent maintenance.
+// [Sync] 2026-10-09: localize the 思维模式/Deck plugin section accessible name.
 // [Sync] 2026-08-16: restore the pre-01a00576 maintenance selector without adding an orchestration editor.
 // [Sync] 2026-08-16: notify the editor after a durable plugin-ref save so the aggregate draft state refreshes.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ClaudePluginApiError,
   listClaudePluginInstallations,
@@ -22,6 +24,7 @@ interface DeckClaudePluginSelectorProps {
 }
 
 export default function DeckClaudePluginSelector({ deckId, disabled, onSaved }: DeckClaudePluginSelectorProps) {
+  const { t } = useTranslation();
   const [installations, setInstallations] = useState<ClaudePluginInstallation[]>([]);
   const [selected, setSelected] = useState<Map<string, boolean>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -92,17 +95,17 @@ export default function DeckClaudePluginSelector({ deckId, disabled, onSaved }: 
   }, [deckId, onSaved, selected]);
 
   return (
-    <section aria-label="Deck Claude 插件" className="deck-plugin-selector">
-      <div className="deck-plugin-selector__eyebrow">共享安装 · digest 固定</div>
+    <section aria-label={t('deck.details.pluginsLabel')} className="deck-plugin-selector">
+      <div className="deck-plugin-selector__eyebrow">{t('deck.details.pluginsInstalledLabel')}</div>
       <div className="deck-plugin-selector__description">
-        只可选择已真实安装、状态 ready、digest 校验通过且与当前 Claude Code 兼容的插件。
-        发起此 Deck 的对话时，插件包将复制到对话工作空间并通过 --plugin-dir 加载。
+        {t('deck.details.pluginsDescription')}
+        {t('deck.details.pluginUsageHint')}
       </div>
       {loading ? (
         <div className="deck-plugin-selector__state">加载中…</div>
       ) : readyInstallations.length === 0 ? (
         <div className="deck-plugin-selector__state">
-          暂无 ready 状态的插件。请先在 Settings → Claude 插件中安装（例如 superpowers@claude-plugins-official）。
+          {t('deck.details.pluginsEmpty')}
         </div>
       ) : (
         <div className="deck-plugin-selector__list">

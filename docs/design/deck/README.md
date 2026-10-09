@@ -13,7 +13,13 @@
 
 五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
-# Deck 管理与内容版本设计索引
+# 思维模式管理与内容版本设计索引（Deck）
+
+<!-- [Sync] 2026-10-09: adopt 思维模式 as the Chinese product name and index its current PRD/design. -->
+
+当前中文产品名称是“思维模式”，Deck 是代码与接口中的承载形式。思维模式用于整理某类需求的思考方向、解决路径与执行方式，现有 Deck 关联 Agent、插件引用和运行配置。Skills、MCP、Plugin 的组合属于产品概念，不表示已实现自动组合或多智能体协作。英文界面继续使用 Deck。
+
+当前名称、页面骨架和用语规则以[思维模式 PRD](../../prd/deck/thinking-modes.md)为准，正常流程、异常恢复和状态图见[正式交互设计](./thinking-mode-terminology.md)。下方历史图示中的 Deck 仍指同一对象，保留原文与技术标识符。
 
 ## 需求来源与优先级
 
@@ -56,6 +62,9 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 
 ## 文档导航
 
+- [思维模式产品需求与页面骨架](../../prd/deck/thinking-modes.md)
+- [思维模式命名与交互设计](./thinking-mode-terminology.md)
+- [命名处理判断、优化提示词与验证记录](./thinking-mode-terminology-review.md)
 - [PDF 逐页需求追踪](./deck-pdf-requirement-trace.md)
 - [现状、影响与设计审查](./deck-impact-review.md)
 - [Deck 启用入口与 Work 设置工作台](./deck-management-list.md)

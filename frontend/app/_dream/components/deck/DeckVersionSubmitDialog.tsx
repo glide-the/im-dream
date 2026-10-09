@@ -1,9 +1,11 @@
 // [Input] Server-computed Deck draft diff and explicit commit callback.
 // [Output] Confirm/cancel modal for creating immutable vN without hidden writes.
 // [Pos] Deck content-version submit confirmation inside DeckEditorModal.
+// [Sync] 2026-10-09: localize the 思维模式/Deck version impact without changing commit behavior.
 // [Sync] 2026-08-16: add first-version and vN+1 confirmation states.
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { DeckContentVersionPreview } from '../../api/deckVersionApi';
 
 interface Props {
@@ -16,6 +18,7 @@ interface Props {
 }
 
 export default function DeckVersionSubmitDialog({ deckName, preview, submitting, error, onCancel, onConfirm }: Props) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState('');
   return (
     <div className="deck-version-submit-backdrop" onClick={(event) => event.stopPropagation()} role="presentation">
@@ -27,7 +30,7 @@ export default function DeckVersionSubmitDialog({ deckName, preview, submitting,
           </div>
           <button aria-label="关闭提交版本弹窗" className="deck-icon-button" disabled={submitting} onClick={onCancel} type="button">×</button>
         </header>
-        <p className="deck-version-submit__lead">提交会冻结当前 Deck 表单内容；历史 Thread 不会自动升级。</p>
+        <p className="deck-version-submit__lead">{t('deck.versions.submitImpact')}</p>
         <div className="deck-version-submit__changes" aria-label="版本变更摘要">
           {preview.changes.map((change) => (
             <div key={`${change.scope}-${change.change_type}`}>

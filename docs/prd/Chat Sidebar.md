@@ -7,6 +7,9 @@
 
 > 聊天侧边栏、会话导航、文件入口和设置入口的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
 > **[Sync] 2026-06-28**: 当前 ChatView 不再使用左侧 rail/展开侧栏；历史对话由右上角「更多」菜单打开右侧 HistorySidePanel，搜索由面板标题栏按钮打开居中 HistorySearchDialog。
+<!-- [Sync] 2026-10-09: 中文 Deck 导航名称为思维模式；英文 Decks 与既有导航行为保留。 -->
+> 中文导航中的 Deck 产品名称统一为“思维模式”，概念和页面骨架见[思维模式 PRD](./deck/thinking-modes.md)。本文历史图示及英文 Decks 原文保留，代码与路由名称不变。
+
 > **[Sync] 2026-09-18**: Story Workspace 在移动端改用底部 Chat、Dream、Decks、More 导航；More 展开层承载 Writing、Timeline、Analysis、主题、设置和账户。桌面端侧边栏语义不变。
 > **[Sync] 2026-09-29**: 当前 Thread 的用户消息刻度属于 Chat 消息阅读区，详见[轮次导航 PRD](./chat/turn-navigation.md)；右侧历史面板仍负责 Thread 切换。
 

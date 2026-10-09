@@ -4,6 +4,9 @@
 //          responsive list management, pagination, resilient refresh, create-then-full-maintenance,
 //          Workflow/market removal, Deck content vN iteration, and secondary runtime versions.
 // [Pos] Chat-first and Deck-default business E2E in frontend/e2e
+// [Sync] 2026-10-09: verify Chinese 思维模式 navigation, settings, maintenance and narrow layout; English retains Deck.
+// [Sync] 2026-10-09: stage the current public Cookie/CSRF session and Admin form DTOs inside the provider-free auth fixture.
+// [Sync] 2026-10-09: record explicit lifecycle GET cancellations separately from unexpected request failures.
 // [Sync] 2026-08-17: require published-clean enabled Decks on the home, visible system
 //                    markers, and full draft/unpublished inventory only in Settings / Work.
 // [Sync] 2026-08-17: cover Work More → related Chat previews and production thread deletion.
@@ -207,9 +210,10 @@ const secondaryInstallation = {
   operation_id: 'operation-secondary',
 };
 
-test('login → Deck list → create → Agent/Prompt/plugin maintenance → Chat → reopen', async ({ page }) => {
+test('login → Deck list → create → Agent/Prompt/plugin maintenance → Chat → reopen', async ({ page }, testInfo) => {
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
+  const expectedLifecycleAborts: string[] = [];
   const expectedHttpFailureDiagnostics: string[] = [];
   const expectedHttpFailures = new Map<number, number>();
   const isKnownExternal = (url: string) => (
@@ -218,7 +222,9 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     || url.includes('fonts.gstatic.com')
   );
   page.on('console', (message) => {
-    if (message.type() === 'error' && !isKnownExternal(message.text())) {
+    const isExpectedNoSession = new URL(message.location().url || WEB_BASE).pathname === '/auth/session'
+      && message.text().includes('401 (Unauthorized)');
+    if (message.type() === 'error' && !isKnownExternal(message.text()) && !isExpectedNoSession) {
       const status = Number(message.text().match(/status of (\d+)/)?.[1]);
       const remaining = expectedHttpFailures.get(status) ?? 0;
       if (remaining > 0) {
@@ -231,17 +237,29 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
   page.on('requestfailed', (request) => {
-    const isExpectedNavigationAbort = (
+    const { pathname, search } = new URL(request.url());
+    // useEditSessionEvents and usePluginInstallations cancel on unmount;
+    // ChatView cancels an older history read before reload and on unmount.
+    // Keep this limited to current lifecycle-owned GETs; unknown requests,
+    // other failure reasons and all HTTP errors retain strict diagnostics.
+    const isExpectedLifecycleAbort = (
       request.failure()?.errorText === 'net::ERR_ABORTED'
-      && request.url().includes('/api/story-workspace/dream-runs')
+      && request.method() === 'GET'
+      && (
+        ['/auth/options', '/api/story-workspace/dream-runs', '/api/sessions/events',
+          '/api/deck-plugins/installations'].includes(pathname)
+        || (pathname === '/api/claude-agent/threads' && search === '?limit=21')
+      )
     );
-    if (!isKnownExternal(request.url()) && !isExpectedNavigationAbort) {
+    if (isExpectedLifecycleAbort) {
+      expectedLifecycleAborts.push(`${request.method()} ${pathname}${search}`);
+    } else if (!isKnownExternal(request.url())) {
       diagnostics.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
     }
   });
 
   const email = 'chat-first-deck-defaults@example.test';
-  const token = 'chat-first-deck-defaults-token';
+  let authenticated = false;
   let deckCreated = false;
   let createdDeckState: DeckFixture = { ...createdDeck, voices: [] };
   let createdAgentTypeRevision = 0;
@@ -319,19 +337,38 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     next_version: deck.next_deck_version ?? ((deck.deck_version ?? 0) + 1),
   });
 
+  await page.route('**/react-grab/**', (route) => route.fulfill({ contentType: 'application/javascript', body: '' }));
+  await page.route(`${WEB_BASE}/auth/**`, async (route) => {
+    const request = route.request();
+    const { pathname } = new URL(request.url());
+    if (pathname === '/auth/session' && request.method() === 'GET') {
+      await route.fulfill(authenticated ? { json: {
+        user: { id: '207', email, display_name: '剧本创作者', avatar_url: null,
+          role: 'user', created_at: '2026-08-14T00:00:00Z' },
+        csrf_token: 'c'.repeat(43),
+      } } : { status: 401, json: {} });
+      return;
+    }
+    if (pathname === '/auth/options' && request.method() === 'GET') {
+      await route.fulfill({ json: {
+        password_action: `${WEB_BASE}/auth/dream/password`,
+        google_action: `${WEB_BASE}/auth/dream/google`,
+      } });
+      return;
+    }
+    if (pathname === '/auth/dream/password' && request.method() === 'POST') {
+      authenticated = true;
+      await route.fulfill({ status: 303, headers: { location: `${WEB_BASE}/story-workspace/chat` }, body: '' });
+      return;
+    }
+    unexpectedApiRequests.push(`${request.method()} ${pathname}`);
+    await route.fulfill({ status: 501, json: { detail: 'Unexpected mocked auth request' } });
+  });
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const { pathname } = url;
 
-    if (pathname === '/api/login' && request.method() === 'POST') {
-      await route.fulfill({ json: { token } });
-      return;
-    }
-    if (pathname === '/api/me') {
-      await route.fulfill({ json: { id: 207, email, display_name: '剧本创作者' } });
-      return;
-    }
     if (pathname === '/api/preferences') {
       await route.fulfill({ json: { first_login_completed: true, timezone: 'Asia/Shanghai' } });
       return;
@@ -829,6 +866,30 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
       return;
     }
 
+    if (pathname === '/api/claude-mcp/capability' && request.method() === 'GET') {
+      await route.fulfill({ json: {
+        enabled: true, reason_code: null, cli_version: null, minimum_cli_version: null,
+        headless_minimum_cli_version: null, credential_identity: null,
+        management_mode: 'managed_db', schema_capability: 'dream.managed-mcp-resources.v1',
+        schema_version: 1, transports: ['streamable_http', 'sse', 'stdio'],
+      } });
+      return;
+    }
+
+    if (pathname === '/api/claude-mcp/servers' && request.method() === 'GET') {
+      await route.fulfill({ json: { servers: [] } });
+      return;
+    }
+
+    if (pathname === '/api/deck-plugins/installations' && request.method() === 'GET') {
+      await route.fulfill({ json: {
+        installations: [],
+        runtime_plugins: [],
+        permissions: { can_manage: false, can_install_local: false, can_force_purge: false },
+      } });
+      return;
+    }
+
     if (pathname === '/api/claude-plugins/installations' && request.method() === 'GET') {
       await route.fulfill({ json: { installations: [] } });
       return;
@@ -871,8 +932,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page.getByRole('tab', { name: /Use Decks|Create Decks|使用 Deck|创作 Deck/ })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Voice Decks|声线卡组|My Decks|我的卡组/ })).toHaveCount(0);
   const deckLauncher = page.locator('[data-deck-manager-launcher]');
-  await expect(deckLauncher.getByRole('heading', { name: /^Decks?$|^Deck$/ })).toBeVisible();
-  await expect(deckLauncher.getByText(/Open an available Deck|打开可用的 Deck/)).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /^Decks?$|^思维模式$/ })).toBeVisible();
+  await expect(deckLauncher.getByText(/Open an available Deck|打开可用的思维模式/)).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-enabled__strip')).toBeVisible();
   const enabledShortcutList = deckLauncher.locator('.deck-manager-enabled__strip');
   await expect(enabledShortcutList.getByRole('listitem')).toHaveCount(14);
@@ -887,15 +948,15 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   );
   expect(wideShortcutRects.every(({ height, width }) => Math.abs(height - width) <= 1 && width === 44)).toBe(true);
   expect(new Set(wideShortcutRects.map(({ top }) => Math.round(top))).size).toBe(1);
-  await expect(enabledShortcutList.getByRole('button', { name: /Open Deck settings|打开 Deck 设置/ })).toHaveCount(0);
-  await expect(deckLauncher.locator('.deck-manager-section-heading').getByRole('button', { name: /Open Deck settings|打开 Deck 设置/ })).toBeVisible();
+  await expect(enabledShortcutList.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ })).toHaveCount(0);
+  await expect(deckLauncher.locator('.deck-manager-section-heading').getByRole('button', { name: /Open Deck settings|打开思维模式设置/ })).toBeVisible();
   await expect(deckLauncher.getByText(/14\s*\/\s*14/)).toHaveCount(0);
   await expect(deckLauncher.getByRole('switch')).toHaveCount(0);
-  await expect(deckLauncher.getByRole('searchbox', { name: /Search available Decks|搜索正式可用的 Deck/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('heading', { name: /Available Decks|可用 Deck/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('heading', { name: /System Decks|系统 Deck/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /User-created available Decks|用户创建的可用 Deck/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /System built-in Decks|系统内建 Deck/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('searchbox', { name: /Search available Decks|搜索正式可用的思维模式/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /Available Decks|可用思维模式/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /System Decks|系统思维模式/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /User-created available Decks|用户创建的可用思维模式/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /System built-in Decks|系统内建思维模式/ })).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-launch-card')).toHaveCount(14);
   await expect(deckLauncher.locator('.deck-manager-launch-card--system .deck-manager-chip')).toHaveText(/System|系统/);
   const systemLaunchCard = deckLauncher.locator('.deck-manager-launch-card--system').first();
@@ -992,7 +1053,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   await page.setViewportSize({ width: 1200, height: 760 });
 
-  await deckLauncher.getByRole('button', { name: /Open Deck settings|打开 Deck 设置/ }).click();
+  await deckLauncher.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
   let settingsNavigation = page.getByRole('navigation', { name: 'Settings categories navigation' });
   await expect(settingsNavigation.getByRole('button', { name: 'Work', exact: true })).toBeVisible();
@@ -1006,10 +1067,37 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   await settingsNavigation.getByRole('button', { name: 'General', exact: true }).click();
   await page.getByRole('button', { name: '中文 (Chinese)', exact: true }).click();
+  await page.getByRole('button', { name: '返回应用', exact: true }).click();
+  await expect(navigation.getByRole('button', { name: '思维模式', exact: true })).toBeVisible();
+  await navigation.getByRole('button', { name: '思维模式', exact: true }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
+  await expect(deckLauncher.getByRole('heading', { name: '思维模式', exact: true })).toBeVisible();
+  await deckLauncher.getByRole('button', { name: '打开思维模式设置', exact: true }).click();
   settingsNavigation = page.getByRole('navigation', { name: '设置分类导航' });
   await settingsNavigation.getByRole('button', { name: '工作台', exact: true }).click();
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: '思维模式', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const chineseDeckList = page.getByRole('list', { name: '思维模式设置列表', exact: true });
+  await expect(chineseDeckList).toBeVisible();
+  await chineseDeckList.locator('[data-deck-card-id="screenplay-default-user-deck"] .deck-manager-list__identity').click();
+  const chineseEditor = page.locator('.deck-editor');
+  await expect(chineseEditor.getByRole('heading', { name: '思维模式信息', exact: true })).toBeVisible();
+  await expect(chineseEditor.getByLabel('思维模式名称', { exact: true })).toHaveValue('剧本创作团队');
+  await expect(chineseEditor.getByLabel('说明', { exact: true })).toHaveValue(screenplayDeck.description);
+  await chineseEditor.getByRole('button', { name: '版本记录', exact: true }).click();
+  await expect(chineseEditor.getByText('当前思维模式内容', { exact: true })).toBeVisible();
+  await expect(chineseEditor.getByLabel('思维模式内容版本历史', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 780 });
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+  )).toBe(true);
+  await chineseEditor.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('tab', { name: '思维模式', exact: true })).toBeVisible();
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+  )).toBe(true);
+  await page.setViewportSize({ width: 1200, height: 760 });
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/settings-work-zh-wide.png',
     fullPage: true,
@@ -1019,7 +1107,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   settingsNavigation = page.getByRole('navigation', { name: 'Settings categories navigation' });
   await settingsNavigation.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Deck' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Deck', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Resource links' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Plugins' })).toBeVisible();
   await page.getByRole('tab', { name: 'Resource links' }).click();
@@ -1030,12 +1118,13 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=plugins`);
   await expect(page.getByRole('tabpanel', { name: 'Plugins' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude 插件' })).toBeVisible();
-  await page.getByRole('tab', { name: 'Deck' }).click();
+  await page.getByRole('tab', { name: 'Deck', exact: true }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=deck`);
-  const deckSettingsList = page.getByRole('list', { name: /Deck settings|Deck 设置列表/ });
+  const deckSettingsManager = page.locator('.deck-manager-shell--settings');
+  const deckSettingsList = page.getByRole('list', { name: /Deck settings|思维模式设置列表/ });
   await expect(deckSettingsList).toBeVisible();
   await expect(deckSettingsList.locator(':scope > li')).toHaveCount(10);
-  await expect(page.getByRole('navigation', { name: /Deck list pages|Deck 列表分页/ })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })).toBeVisible();
   await expect(page.locator('.deck-manager-home--settings thead, .deck-manager-home--settings [role="columnheader"]')).toHaveCount(0);
   await expect(deckSettingsList.getByRole('switch')).toHaveCount(9);
   await expect(deckSettingsList.locator('.deck-manager-chip').filter({ hasText: /System|系统/ })).toHaveCount(1);
@@ -1057,10 +1146,12 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   await page.setViewportSize({ width: 1200, height: 760 });
 
-  await page.getByRole('button', { name: /Next|下一页/ }).click();
+  await page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })
+    .getByRole('button', { name: /^(Next|下一页)$/ }).click();
   await expect(page.getByText('管理 Deck 11', { exact: true })).toBeVisible();
   await expect(page.getByText('剧本创作团队', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: /Previous|上一页/ }).click();
+  await page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })
+    .getByRole('button', { name: /^(Previous|上一页)$/ }).click();
   await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
 
   const readsBeforeRefresh = deckListReads;
@@ -1068,12 +1159,12 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect.poll(() => deckListReads).toBeGreaterThan(readsBeforeRefresh);
   failNextDeckRead = true;
   await page.getByRole('button', { name: /Refresh|刷新/ }).click();
-  await expect(page.getByRole('alert')).toContainText('Deck refresh temporarily unavailable');
+  await expect(deckSettingsManager.getByRole('alert')).toContainText('Deck refresh temporarily unavailable');
   await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
 
-  const creatorSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的 Deck/ });
+  const creatorSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的思维模式/ });
   await creatorSearch.fill('不存在的 Deck');
-  await expect(page.getByText(/No Deck matches these filters|没有符合当前条件的 Deck/)).toBeVisible();
+  await expect(page.getByText(/No Deck matches these filters|没有符合当前条件的思维模式/)).toBeVisible();
   await page.getByRole('button', { name: /Clear filters|清除筛选/ }).click();
   await expect(creatorSearch).toHaveValue('');
   await creatorSearch.fill('管理 Deck 14');
@@ -1111,7 +1202,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(relatedDialog.locator('.deck-manager-related-list__item')).toHaveCount(2);
   await expect(relatedDialog.getByText('雨夜开场讨论', { exact: true })).toBeVisible();
   await expect(relatedDialog.getByText('第二幕人物关系', { exact: true })).toBeVisible();
-  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除 Deck/ })).toBeDisabled();
+  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeDisabled();
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/deck-related-conversations-wide.png',
     fullPage: true,
@@ -1140,7 +1231,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await relatedDialog.getByRole('button', { name: /Delete conversation 第二幕人物关系|删除对话 第二幕人物关系/ }).click();
   await expect(relatedDialog.locator('.deck-manager-related-list__item')).toHaveCount(0);
   await expect(relatedDialog.getByText(/No related conversations|没有相关对话/)).toBeVisible();
-  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除 Deck/ })).toBeEnabled();
+  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeEnabled();
   expect(relatedThreadDeletes).toEqual(['thread-screenplay-one', 'thread-screenplay-two']);
   await relatedDialog.getByRole('button', { name: /Close|关闭/ }).last().click();
   await expect(relatedDialog).toHaveCount(0);
@@ -1151,21 +1242,21 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await page.getByRole('menuitem', { name: /Related conversations|相关对话/ }).click();
   const failedRelatedDialog = page.getByRole('dialog', { name: /Related conversations|相关对话/ });
   await expect(failedRelatedDialog.getByRole('alert')).toContainText('Related conversations temporarily unavailable');
-  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除 Deck/ })).toBeDisabled();
+  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeDisabled();
   await failedRelatedDialog.getByRole('button', { name: /Retry|重试/ }).click();
   await expect(failedRelatedDialog.getByText(/No related conversations|没有相关对话/)).toBeVisible();
-  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除 Deck/ })).toBeEnabled();
+  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeEnabled();
   await failedRelatedDialog.getByRole('button', { name: /Close|关闭/ }).last().click();
 
   await screenplayCreatorRow.locator('.deck-manager-list__identity').click();
   const detailsDialog = page.locator('.deck-editor');
   await expect(detailsDialog).toBeVisible();
-  await expect(detailsDialog.getByLabel('Deck Name')).toHaveValue('剧本创作团队');
+  await expect(detailsDialog.getByLabel('Deck name')).toHaveValue('剧本创作团队');
   await expect(detailsDialog.locator('.deck-version-panel')).toHaveCount(0);
   await expect(detailsDialog.getByRole('button', { name: '版本记录' })).toHaveAttribute('aria-expanded', 'false');
   await detailsDialog.getByRole('button', { name: '版本记录' }).click();
   await expect(detailsDialog.locator('.deck-version-panel')).toBeVisible();
-  await expect(detailsDialog.getByText('当前 Deck 内容', { exact: true })).toBeVisible();
+  await expect(detailsDialog.getByText('Current Deck content', { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v2', { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v2 · 当前', { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v1.0.1', { exact: true })).toBeVisible();
@@ -1187,7 +1278,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await detailsDialog.getByRole('tab', { name: /Agents/ }).click();
   await expect(detailsDialog.getByText('Agent Prompt')).toBeVisible();
   await detailsDialog.getByRole('tab', { name: 'Claude 插件' }).click();
-  await expect(detailsDialog.getByLabel('Deck Claude 插件')).toBeVisible();
+  await expect(detailsDialog.getByLabel('Deck Claude plugins')).toBeVisible();
   await expect(detailsDialog.getByText(/Workflow|工作流/)).toHaveCount(0);
   expect(defaultReconcileCalls).toBeGreaterThanOrEqual(1);
   expect(screenplaySelectedInstallationIds).toEqual([dramaInstallation.id]);
@@ -1201,20 +1292,20 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     path: 'output/playwright/story-workspace-chat-first/deck-pdf-create-menu-wide.png',
     fullPage: true,
   });
-  await createMenu.getByRole('menuitem', { name: /Create Deck|创建 Deck/ }).click();
+  await createMenu.getByRole('menuitem', { name: /Create Deck|创建思维模式/ }).click();
   const createDialog = page.locator('.deck-editor');
   await expect(createDialog).toBeVisible();
   await expect.poll(() => createWrites.length).toBe(1);
-  await expect(createDialog.getByLabel('Deck Name')).toHaveValue(/New Deck|新建 Deck/);
+  await expect(createDialog.getByLabel('Deck name')).toHaveValue(/New Deck|新建思维模式/);
   await expect(createDialog.getByRole('button', { name: '版本记录' })).toBeVisible();
   await expect(createDialog.getByText(/内容版本未提交/)).toBeVisible();
-  await createDialog.getByLabel('Deck Name').fill('雨夜剧作团队');
-  await createDialog.getByLabel('Deck Name').press('Tab');
+  await createDialog.getByLabel('Deck name').fill('雨夜剧作团队');
+  await createDialog.getByLabel('Deck name').press('Tab');
   await expect.poll(() => deckWrites.some(
     (write) => write.name === '雨夜剧作团队',
   )).toBe(true);
-  await createDialog.getByLabel('Deck Description').fill('用于雨夜剧本创作的完整维护 Deck');
-  await createDialog.getByLabel('Deck Description').press('Tab');
+  await createDialog.getByLabel('Description', { exact: true }).fill('用于雨夜剧本创作的完整维护 Deck');
+  await createDialog.getByLabel('Description', { exact: true }).press('Tab');
   await expect.poll(() => deckWrites.some(
     (write) => write.description === '用于雨夜剧本创作的完整维护 Deck',
   )).toBe(true);
@@ -1267,7 +1358,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
 
   await createDialog.getByRole('button', { name: /提交 v1/ }).click();
   const firstCommitDialog = page.getByRole('dialog', { name: /提交 .* 为 v1/ });
-  await expect(firstCommitDialog).toContainText('历史 Thread 不会自动升级');
+  await expect(firstCommitDialog).toContainText('Existing conversations will not upgrade automatically.');
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/deck-submit-v1-preview-wide.png',
     fullPage: true,
@@ -1286,8 +1377,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(navigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
   await navigation.getByRole('button', { name: 'Decks' }).click();
   await expect(page.locator('[data-deck-manager-launcher]')).toBeVisible();
-  await expect(page.getByRole('list', { name: /Deck settings|Deck 设置列表/ })).toHaveCount(0);
-  await page.getByRole('button', { name: /Open Deck settings|打开 Deck 设置/ }).click();
+  await expect(page.getByRole('list', { name: /Deck settings|思维模式设置列表/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
   await creatorSearch.fill('雨夜剧作团队');
   const createdCreatorCard = page.locator(
@@ -1301,8 +1392,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(editDialog.getByLabel('Agent Name')).toHaveValue('雨夜连续性 Agent');
   await expect(editDialog.getByLabel('Agent Prompt')).toHaveValue('检查人物动机、场景时间和对白连续性。');
   await editDialog.getByRole('tab', { name: '概览' }).click();
-  await editDialog.getByLabel('Deck Description').fill('用于雨夜剧本创作的完整维护');
-  await editDialog.getByLabel('Deck Description').press('Tab');
+  await editDialog.getByLabel('Description', { exact: true }).fill('用于雨夜剧本创作的完整维护');
+  await editDialog.getByLabel('Description', { exact: true }).press('Tab');
   await expect.poll(() => deckWrites.some(
     (write) => write.description === '用于雨夜剧本创作的完整维护',
   )).toBe(true);
@@ -1327,22 +1418,22 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
 
   failNextDeckUpdate = true;
   await createdCreatorCard.getByRole('switch').click();
-  await expect(page.getByRole('alert')).toContainText('Deck changed concurrently');
+  await expect(deckSettingsManager.getByRole('alert')).toContainText('Deck changed concurrently');
   await expect(createdCreatorCard.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText(/Publish to Community|发布到社区|Install|安装/)).toHaveCount(0);
 
   await page.reload();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
-  await expect(page.getByRole('list', { name: /Deck settings|Deck 设置列表/ })).toBeVisible();
+  await expect(page.getByRole('list', { name: /Deck settings|思维模式设置列表/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /Use Decks|Create Decks|使用 Deck|创作 Deck/ })).toHaveCount(0);
-  const refreshedSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的 Deck/ });
+  const refreshedSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的思维模式/ });
   await refreshedSearch.fill('雨夜剧作团队');
   await page.locator(
     `[data-deck-card-kind="owned"][data-deck-card-id="${createdDeck.id}"]`,
   ).locator('.deck-manager-list__identity').click();
   const refreshedDetailsDialog = page.locator('.deck-editor');
-  await expect(refreshedDetailsDialog.getByLabel('Deck Name')).toHaveValue('雨夜剧作团队');
-  await expect(refreshedDetailsDialog.getByLabel('Deck Description')).toHaveValue('用于雨夜剧本创作的完整维护');
+  await expect(refreshedDetailsDialog.getByLabel('Deck name')).toHaveValue('雨夜剧作团队');
+  await expect(refreshedDetailsDialog.getByLabel('Description', { exact: true })).toHaveValue('用于雨夜剧本创作的完整维护');
   await refreshedDetailsDialog.getByRole('tab', { name: /Agents/ }).click();
   await expect(refreshedDetailsDialog.getByLabel('Agent Name')).toHaveValue('雨夜连续性 Agent');
   await expect(refreshedDetailsDialog.getByText(/Workflow|工作流/)).toHaveCount(0);
@@ -1374,13 +1465,16 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect.poll(() => voiceDeletes).toEqual([createdVoice.id]);
   await expect(refreshedDetailsDialog.getByText('Select an agent from the list to edit')).toBeVisible();
   expect(unexpectedApiRequests).toEqual([]);
+  await testInfo.attach('expected-lifecycle-aborts', {
+    body: JSON.stringify(expectedLifecycleAborts, null, 2), contentType: 'application/json',
+  });
   await expect.poll(() => diagnostics).toEqual([]);
   expect(expectedHttpFailureDiagnostics).toHaveLength(4);
   expect(expectedHttpFailures.get(503)).toBe(0);
   expect(expectedHttpFailures.get(409)).toBe(0);
   expect(createWrites).toEqual([expect.objectContaining({
-    name: expect.stringMatching(/New Deck|新建 Deck/),
-    description: expect.stringMatching(/Describe your deck here|请在这里描述你的 Deck/),
+    name: expect.stringMatching(/New Deck|新建思维模式/),
+    description: expect.stringMatching(/Describe your deck here|请描述这个思维模式的用途和解决问题的方式/),
     icon: 'brain',
     color: 'blue',
   })]);

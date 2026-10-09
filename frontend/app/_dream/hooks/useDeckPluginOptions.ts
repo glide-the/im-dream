@@ -1,9 +1,11 @@
 // [Input] Deck id and server-adjudicated exact runtime versions.
 // [Output] Selectable/unavailable version options with refresh state.
 // [Pos] Deck version-management options hook.
+// [Sync] 2026-10-09: use localized 思维模式/Deck wording for unavailable version options.
 // [Sync] 2026-08-16: restore exact-version options without a separate workbench.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import i18n from '../i18n';
 import {
   DeckPluginApiError,
   getDeckPluginOptions,
@@ -11,7 +13,7 @@ import {
 } from '../api/deckPluginApi';
 
 function loadMessage(error: unknown): string {
-  if (error instanceof DeckPluginApiError && error.status === 404) return '此 Deck 的可用版本不可读取。';
+  if (error instanceof DeckPluginApiError && error.status === 404) return i18n.t('deck.messages.versionOptionsUnavailable');
   if (error instanceof Error && error.message === 'Not authenticated') return '登录状态已失效，请重新登录。';
   return '可用版本加载失败，请稍后重试。';
 }

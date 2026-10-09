@@ -7,7 +7,11 @@
 <!-- [Sync] 2026-09-15: specify Admin version consumers and known failure versus unknown result recovery. -->
 <!-- [Sync] 2026-08-16: make every effective Deck form mutation part of one versioned draft. -->
 
-# Deck 创建、更新与折叠式内容版本记录
+# 思维模式创建、更新与折叠式内容版本记录（Deck）
+
+<!-- [Sync] 2026-10-09: align current Chinese create/update/version wording with 思维模式 without changing DTO or revision rules. -->
+
+思维模式是中文产品名称，Deck 是本稿技术合同中的配置对象。界面创建、名称、说明、信息、内容版本、相关插件和失败反馈统一使用[现行 PRD](../../prd/deck/thinking-modes.md)与[命名交互设计](./thinking-mode-terminology.md)中的用语。既有草稿与版本行为、接口字段、权限、并发及历史 Thread 规则保持原样；历史图示原文保留，不以改名暗示新的版本能力。
 
 ## 背景与问题
 
