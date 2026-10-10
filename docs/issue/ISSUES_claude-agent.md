@@ -1,11 +1,12 @@
 <!-- [输入] 早期 Claude Agent 设计拆解和流水线元数据。 -->
 <!-- [输出] 历史工作分解、范围和风险索引。 -->
 <!-- [范围] 不作为当前派工、审批、assignee、checkout 或实现状态合同。 -->
+<!-- [同步] 2026-10-10：当前治理只引用根 AGENTS.md，移除已删除的根 Agent.md。 -->
 <!-- [同步] 2026-09-06：明确历史适用性；当前事实以源码、目录合同和实际回执为准。 -->
 
 # Claude Agent 模块 Issue 清单（历史拆解索引）
 
-> 本文中的 IssueDispatcher、下游 Agent、状态和分发说明是生成期流水线记录，不是当前工作队列。继续开发时必须以现行源码、`AGENTS.md` / `Agent.md`、最近的 `docs/design/claude-agent/**` 合同和对应 `docs/exec/**` 实际证据为准；缺少 capability、真实业务或生产证据时保持 fail closed。
+> 本文中的 IssueDispatcher、下游 Agent、状态和分发说明是生成期流水线记录，不是当前工作队列。继续开发时必须以现行源码、根 `AGENTS.md`、最近的 `docs/design/claude-agent/**` 合同和对应 `docs/exec/**` 实际证据为准；缺少 capability、真实业务或生产证据时保持 fail closed。
 
 ## 0. 文档元信息
 

@@ -1,4 +1,10 @@
+<!-- [Input] 历史 Deck Plugin 工作流裁决与现行 Claude Code Plugins 范围。 -->
+<!-- [Output] 保留的工作流决策原文及当前用户设计导航。 -->
+<!-- [Pos] 历史工作流决策附录，不作为当前 Claude Code Plugins 用户交互规范。 -->
+<!-- [Sync] 2026-10-10: 保留历史决策正文和图示，明确不再决定当前插件页产品分类。 -->
 # Deck Plugin 后续 Stage 五项决策 Gate 增量设计附录
+
+> **历史工作流决策记录。** 后续冻结状态、审批和运行平台 Gate 保留原文，用于对应历史工作流范围，不表示本轮批准或当前插件页功能。Deck 工作流插件见[独立现行设计](../deck-plugin/deck-workflow-plugin-interaction.md)，Claude Code Plugins 见其[独立设计](../deck-plugin/claude-code-plugins-interaction.md)。本次不改动已有工作流程序、接口或测试。
 
 > **Design ID**: `DECK-DESIGN-002`
 >

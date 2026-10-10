@@ -1,6 +1,7 @@
 <!-- [Input] Current Next.js Dream UI entry points and Python Claude Agent Thread/SSE contracts. -->
 <!-- [Output] Product-level Agent interaction patterns and integration rules for Dream surfaces. -->
-<!-- [Pos] Agent usage guide; repository governance remains in the root Agent.md. -->
+<!-- [Pos] Agent usage guide; repository governance remains in the root AGENTS.md. -->
+<!-- [Sync] 2026-10-10: point repository governance to the sole standard root AGENTS.md contract. -->
 <!-- [Sync] 2026-08-31: historical comment chat now reuses the Voice Claude Agent Thread SSE contract; the stateless legacy transport is removed. -->
 <!-- [Sync] 2026-09-06: align UI ownership with frontend/app/_dream and keep Next Route Handlers outside Agent identity/business ownership. -->
 

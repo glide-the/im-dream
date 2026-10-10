@@ -1,13 +1,13 @@
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Deck Plugin management REST contracts, authenticated browser fetch, and server-owned permission/status fields.
-// [Output] Normalized Deck workflow/runtime plugin records plus lifecycle mutation and operation helpers.
-// [Pos] frontend-only Deck Plugin Admin API adapter; deliberately independent from Paperclip PluginRecord.
+// [Output] Normalized Deck workflow installations plus lifecycle mutation and operation helpers.
+// [Pos] Deck workflow administration adapter; Claude Code Plugins use their separate API.
+// [Sync] 2026-10-10: remove the unused runtime-plugin product projection; execution dependencies remain server-owned.
 
 
 import { apiUrl } from '../lib/apiBase';
 
-export type PluginCategory = 'deck-workflow' | 'claude-runtime';
 export type DeclarationStatus = 'undeclared' | 'declared' | 'disabled';
 export type MaterializationStatus = 'missing' | 'materializing' | 'materialized' | 'failed';
 export type ActivationStatus = 'inactive' | 'loadable' | 'loaded' | 'load_failed';
@@ -19,20 +19,6 @@ export type PluginOperationStatus = 'queued' | 'running' | 'ready' | 'completed'
 export interface PluginCapabilityDiffValue {
   added: string[];
   removed: string[];
-}
-
-export interface PluginRuntimeDependency {
-  claudeCodePluginId: string;
-  resolvedVersion: string;
-  versionConstraint?: string;
-  artifactDigest?: string;
-  declarationStatus: DeclarationStatus;
-  materializationStatus: MaterializationStatus;
-  activationStatus: ActivationStatus;
-  healthStatus: HealthStatus;
-  lastErrorCode?: string;
-  lastErrorSummary?: string;
-  parentDeckPluginId?: string;
 }
 
 export interface PluginTimelineEntry {
@@ -51,7 +37,6 @@ export interface PluginRunSummary {
 }
 
 export interface DeckPluginInstallation {
-  category: 'deck-workflow';
   deckPluginInstallationId: string;
   deckPluginId: string;
   displayName: string;
@@ -88,16 +73,10 @@ export interface DeckPluginInstallation {
     outputSchemaVersion?: string;
     deckRuntimeContract?: string;
   };
-  runtimePlugins: PluginRuntimeDependency[];
   history: PluginTimelineEntry[];
   recentRuns: PluginRunSummary[];
   operationLogs: PluginTimelineEntry[];
 }
-
-export type PluginAdminItem = DeckPluginInstallation | (PluginRuntimeDependency & {
-  category: 'claude-runtime';
-  displayName: string;
-});
 
 export interface PluginAdminPermissions {
   canManage: boolean;
@@ -107,7 +86,6 @@ export interface PluginAdminPermissions {
 
 export interface PluginInstallationListResult {
   installations: DeckPluginInstallation[];
-  runtimePlugins: Array<PluginRuntimeDependency & { category: 'claude-runtime'; displayName: string }>;
   permissions: PluginAdminPermissions;
 }
 
@@ -225,34 +203,6 @@ function normalizeRuns(value: unknown): PluginRunSummary[] {
   });
 }
 
-function normalizeRuntimePlugin(value: unknown, parentDeckPluginId?: string): PluginRuntimeDependency {
-  const record = asRecord(value);
-  const materialization = read(
-    record.materialization_status,
-    ['missing', 'materializing', 'materialized', 'failed'] as const,
-    'missing',
-  );
-  const activation = read(
-    record.activation_status ?? record.load_status,
-    ['inactive', 'loadable', 'loaded', 'load_failed'] as const,
-    'inactive',
-  );
-  return {
-    claudeCodePluginId: asString(record.claude_code_plugin_id) ?? asString(record.plugin_id) ?? 'unknown-runtime-plugin',
-    resolvedVersion: asString(record.resolved_version) ?? asString(record.version) ?? 'unresolved',
-    versionConstraint: asString(record.version_constraint),
-    artifactDigest: asString(record.artifact_digest),
-    declarationStatus: read(record.declaration_status, ['undeclared', 'declared', 'disabled'] as const, 'undeclared'),
-    materializationStatus: materialization,
-    activationStatus: activation,
-    healthStatus: read(record.health_status, ['healthy', 'degraded', 'failed', 'unknown'] as const,
-      materialization === 'failed' || activation === 'load_failed' ? 'failed' : 'unknown'),
-    lastErrorCode: asString(record.last_error_code),
-    lastErrorSummary: asString(record.last_error_summary),
-    parentDeckPluginId,
-  };
-}
-
 export function normalizeDeckPluginInstallation(value: unknown): DeckPluginInstallation {
   const record = asRecord(value);
   const readiness = asRecord(record.runtime_readiness);
@@ -291,7 +241,6 @@ export function normalizeDeckPluginInstallation(value: unknown): DeckPluginInsta
     'unknown',
   );
   return {
-    category: 'deck-workflow',
     deckPluginInstallationId: asString(record.deck_plugin_installation_id) ?? asString(record.id) ?? deckPluginId,
     deckPluginId,
     displayName: asString(record.display_name) ?? asString(manifest.display_name) ?? deckPluginId,
@@ -342,8 +291,6 @@ export function normalizeDeckPluginInstallation(value: unknown): DeckPluginInsta
       outputSchemaVersion: asString(manifest.output_schema_version),
       deckRuntimeContract: asString(manifest.deck_runtime_contract),
     } : undefined,
-    runtimePlugins: (Array.isArray(record.runtime_plugins) ? record.runtime_plugins : Array.isArray(manifest.runtime_plugins) ? manifest.runtime_plugins : [])
-      .map((item) => normalizeRuntimePlugin(item, deckPluginId)),
     history: normalizeTimeline(record.history ?? record.status_history, `${deckPluginId}-history`),
     recentRuns: normalizeRuns(record.recent_runs),
     operationLogs: normalizeTimeline(record.operation_logs, `${deckPluginId}-operation`),
@@ -406,15 +353,7 @@ export async function listPluginInstallations(signal?: AbortSignal): Promise<Plu
     ? payload
     : Array.isArray(record.installations) ? record.installations : Array.isArray(record.items) ? record.items : [];
   const installations = rawInstallations.map(normalizeDeckPluginInstallation);
-  const explicitRuntime = Array.isArray(record.runtime_plugins)
-    ? record.runtime_plugins.map((item) => normalizeRuntimePlugin(item))
-    : installations.flatMap((item) => item.runtimePlugins);
-  const runtimePlugins = explicitRuntime.map((item) => ({
-    ...item,
-    category: 'claude-runtime' as const,
-    displayName: item.claudeCodePluginId,
-  }));
-  return { installations, runtimePlugins, permissions: normalizePermissions(record) };
+  return { installations, permissions: normalizePermissions(record) };
 }
 
 export async function getPluginInstallationDetail(

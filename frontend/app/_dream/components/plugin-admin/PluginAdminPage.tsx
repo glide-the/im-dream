@@ -1,15 +1,14 @@
-// [Input] Plugin Admin query/mutation hooks and server-authoritative Deck/runtime plugin contracts.
-// [Output] Settings-owned plugin catalog, install review, lifecycle controls, progress, and detail drawer.
+// [Input] Deck workflow query/mutation hooks and server-owned installation contracts.
+// [Output] Workflow purpose, Dream Story Workflow scope, catalog, lifecycle controls, and detail drawer.
 // [Pos] Plugin Admin root page mounted incrementally inside the existing Settings view.
+// [Sync] 2026-10-10: delete the runtime-plugin category and explain the built-in story workflow in the actual page.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   getPluginInstallationDetail,
   type DeckPluginApiError,
   type DeckPluginInstallation,
   type InstallPluginInput,
-  type PluginAdminItem,
-  type PluginCategory,
   type PluginMutationAction,
 } from '../../api/deckPluginAdminApi';
 import { usePluginInstallationDetail } from '../../hooks/usePluginInstallationDetail';
@@ -26,22 +25,16 @@ interface PluginAdminPageProps {
 }
 
 const EMPTY_INSTALL_INPUT: InstallPluginInput = {
-  deckPluginId: 'ink.dream.story-workflow',
-  deckPluginVersion: '1.0.0',
+  deckPluginId: '',
+  deckPluginVersion: '',
   sourceType: 'controlled',
-  source: 'builtin://ink-dream-story',
+  source: '',
 };
 
 const EXACT_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
-function mutationPluginId(item: PluginAdminItem): string | undefined {
-  return item.category === 'deck-workflow' ? item.deckPluginId : item.parentDeckPluginId;
-}
-
-function pluginAdminItemKey(item: PluginAdminItem): string {
-  return item.category === 'deck-workflow'
-    ? `deck:${item.deckPluginId}:${item.deckPluginVersion}`
-    : `runtime:${item.parentDeckPluginId ?? 'global'}:${item.claudeCodePluginId}:${item.resolvedVersion}`;
+function pluginAdminItemKey(item: DeckPluginInstallation): string {
+  return `${item.deckPluginId}:${item.deckPluginVersion}`;
 }
 
 function styles(): string {
@@ -52,9 +45,14 @@ function styles(): string {
     .plugin-admin__header h2, .plugin-admin-detail h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; }
     .plugin-admin__header p, .plugin-admin-section-heading p { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.55; }
     .plugin-admin-eyebrow { display: block; margin-bottom: 6px; color: var(--color-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .plugin-admin-tabs { display: flex; gap: 8px; margin: 22px 0 16px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border-paper); overflow-x: auto; }
-    .plugin-admin-tabs button, .plugin-admin-detail__tabs button { border: 0; background: transparent; color: var(--color-text-secondary); padding: 8px 12px; border-radius: 7px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-    .plugin-admin-tabs button.is-active, .plugin-admin-detail__tabs button.is-active { background: var(--color-bg-hover); color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border-paper); }
+    .plugin-admin-workflow-summary { margin: 20px 0; padding: 18px; border: 1px solid var(--color-border-paper); border-radius: 10px; background: var(--color-bg-surface); }
+    .plugin-admin-workflow-summary h3 { margin: 0 0 8px; font-size: 16px; }
+    .plugin-admin-workflow-summary p { margin: 8px 0; font-size: 13px; line-height: 1.65; color: var(--color-text-secondary); }
+    .plugin-admin-workflow-summary dl { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+    .plugin-admin-workflow-summary dt { font-size: 12px; font-weight: 700; }
+    .plugin-admin-workflow-summary dd { margin: 6px 0 0; font-size: 13px; line-height: 1.65; color: var(--color-text-secondary); }
+    .plugin-admin-detail__tabs button { border: 0; background: transparent; color: var(--color-text-secondary); padding: 8px 12px; border-radius: 7px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .plugin-admin-detail__tabs button.is-active { background: var(--color-bg-hover); color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border-paper); }
     .plugin-admin-list { display: grid; gap: 12px; }
     .plugin-admin-list-item { padding: 18px; border: 1px solid var(--color-border-paper); border-radius: 10px; background: var(--color-bg-surface); cursor: pointer; transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
     .plugin-admin-list-item:hover, .plugin-admin-list-item:focus-visible, .plugin-admin-list-item--selected { outline: none; border-color: var(--color-text-muted); box-shadow: 0 8px 24px var(--color-shadow-light); transform: translateY(-1px); }
@@ -115,9 +113,6 @@ function styles(): string {
     .plugin-admin-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
     .plugin-admin-chip-list span { border: 1px solid var(--color-border-paper); border-radius: 999px; padding: 4px 8px; background: var(--color-bg-surface); font-size: 11px; }
     .plugin-admin-code-list { margin: 10px 0 0; padding-left: 20px; }
-    .plugin-admin-runtime-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 11px 0; border-bottom: 1px dashed var(--color-border-paper); }
-    .plugin-admin-runtime-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .plugin-admin-runtime-row > code { grid-column: 1 / -1; }
     .plugin-admin-diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
     .plugin-admin-diff-grid > div { padding: 11px; border-radius: 7px; background: var(--color-bg-surface); font-size: 12px; }
     .plugin-admin-diff-grid ul { margin: 8px 0 0; padding-left: 17px; }
@@ -137,7 +132,7 @@ function styles(): string {
     .plugin-admin-check { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
     @media (max-width: 680px) {
       .plugin-admin__header, .plugin-admin-list-item__top, .plugin-admin-list-item__footer { flex-direction: column; }
-      .plugin-admin-facts, .plugin-admin-detail-grid, .plugin-admin-diff-grid { grid-template-columns: 1fr; }
+      .plugin-admin-facts, .plugin-admin-detail-grid, .plugin-admin-diff-grid, .plugin-admin-workflow-summary dl { grid-template-columns: 1fr; }
       .plugin-admin-detail-grid__wide { grid-column: auto; }
       .plugin-admin-actions { justify-content: flex-start; }
       .plugin-admin-detail__header, .plugin-admin-detail__tabs, .plugin-admin-detail__body { padding-left: 16px; padding-right: 16px; }
@@ -148,8 +143,7 @@ function styles(): string {
 }
 
 export default function PluginAdminPage({ isMobile = false }: PluginAdminPageProps) {
-  const [category, setCategory] = useState<PluginCategory>('deck-workflow');
-  const [selectedItem, setSelectedItem] = useState<PluginAdminItem | null>(null);
+  const [selectedItem, setSelectedItem] = useState<DeckPluginInstallation | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
   const [installInput, setInstallInput] = useState<InstallPluginInput>(EMPTY_INSTALL_INPUT);
   const [installPreview, setInstallPreview] = useState<DeckPluginInstallation | null>(null);
@@ -158,9 +152,8 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
   const [capabilitiesConfirmed, setCapabilitiesConfirmed] = useState(false);
 
   const catalog = usePluginInstallations();
-  const selectedDeck = selectedItem?.category === 'deck-workflow' ? selectedItem : null;
-  const detail = usePluginInstallationDetail(selectedDeck?.deckPluginId, selectedDeck?.deckPluginVersion);
-  const readiness = usePluginRuntimeReadiness(selectedDeck?.deckPluginId);
+  const detail = usePluginInstallationDetail(selectedItem?.deckPluginId, selectedItem?.deckPluginVersion);
+  const readiness = usePluginRuntimeReadiness(selectedItem?.deckPluginId);
   const refreshCatalog = catalog.refresh;
   const refreshDetail = detail.refresh;
   const refreshReadiness = readiness.refresh;
@@ -170,10 +163,6 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
     refreshReadiness();
   }, [refreshCatalog, refreshDetail, refreshReadiness]);
   const operation = usePluginOperation(refreshAll);
-
-  const items = useMemo<PluginAdminItem[]>(() => (
-    category === 'deck-workflow' ? catalog.installations : catalog.runtimePlugins
-  ), [catalog.installations, catalog.runtimePlugins, category]);
 
   const openInstall = useCallback(() => {
     setInstallInput(EMPTY_INSTALL_INPUT);
@@ -220,16 +209,15 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
     }
   }, [capabilitiesConfirmed, installInput, installPreview, operation]);
 
-  const handleAction = useCallback(async (action: PluginMutationAction, item: PluginAdminItem) => {
-    const deckPluginId = mutationPluginId(item);
-    if (!deckPluginId || !catalog.permissions.canManage) return;
+  const handleAction = useCallback(async (action: PluginMutationAction, item: DeckPluginInstallation) => {
+    const deckPluginId = item.deckPluginId;
+    if (!catalog.permissions.canManage) return;
     if (action === 'uninstall' && !window.confirm('确认软卸载该 Deck 工作流插件？历史 run 引用与来源元数据将由服务端保留。')) return;
     if (action === 'rollback' && !window.confirm('确认回滚默认版本？当前和历史运行不会被改绑。')) return;
     if (action === 'reject-upgrade' && !window.confirm('确认拒绝本次能力扩张升级？旧 ready 版本将保持可用。')) return;
-    const deck = item.category === 'deck-workflow' ? item : null;
     const targetVersion = action === 'upgrade'
-      ? deck?.availableVersion
-      : action === 'rollback' ? deck?.rollbackVersions[0] : undefined;
+      ? item.availableVersion
+      : action === 'rollback' ? item.rollbackVersions[0] : undefined;
     try {
       await operation.mutate({ action, deckPluginId, targetVersion, purge: false });
     } catch {
@@ -247,23 +235,25 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
         <div>
           <span className="plugin-admin-eyebrow">Settings · Plugins</span>
           <h2 id="plugin-admin-title">Deck 工作流插件</h2>
-          <p>管理 Deck workflow release 与其 ClaudeAgent runtime lock。Paperclip Plugin 仅作为体验基线，不在此页面管理。</p>
+          <p>为 Dream 类型 Deck 提供创作 Skill、阶段指引和工作台内容结构。在 Deck 维护中选择工作流版本，后续新 Run 使用所选版本。</p>
         </div>
         {catalog.permissions.canManage && (
           <button type="button" className="plugin-admin-button plugin-admin-button--primary" onClick={openInstall}>
-            Install
+            安装工作流
           </button>
         )}
       </header>
 
-      <nav className="plugin-admin-tabs" role="tablist" aria-label="插件类型">
-        <button type="button" role="tab" aria-selected={category === 'deck-workflow'} className={category === 'deck-workflow' ? 'is-active' : ''} onClick={() => { setCategory('deck-workflow'); setSelectedItem(null); }}>
-          Deck 工作流插件 · {catalog.installations.length}
-        </button>
-        <button type="button" role="tab" aria-selected={category === 'claude-runtime'} className={category === 'claude-runtime' ? 'is-active' : ''} onClick={() => { setCategory('claude-runtime'); setSelectedItem(null); }}>
-          ClaudeAgent 运行时插件 · {catalog.runtimePlugins.length}
-        </button>
-      </nav>
+      <section className="plugin-admin-workflow-summary" aria-labelledby="dream-story-workflow-title">
+        <span className="plugin-admin-eyebrow">内置短剧工作流</span>
+        <h3 id="dream-story-workflow-title">Dream Story Workflow</h3>
+        <p>把短剧创作组织成项目准备与分集创作。用户在同一 Chat 中与 Dream Agent 协作，生成内容在 Dream 工作台按项目和 Episode 展示。</p>
+        <dl>
+          <div><dt>项目准备</dt><dd>建立项目和分集计划，整理各集共用的角色卡与场景卡。</dd></div>
+          <div><dt>分集创作</dt><dd>为每个 Episode 生成剧本、分镜、Prompt 和审阅结果，支持继续修订与重新生成。</dd></div>
+        </dl>
+        <p>首次创作从 /drama-init 开始，之后可按需要调用或重复创作 Skill。渲染、配音、后期和宣发尚未开放。</p>
+      </section>
 
       {operation.operation && <PluginOperationProgress operation={operation.operation} onDismiss={operation.clear} />}
       {operation.error && !operation.operation && (
@@ -275,7 +265,7 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
       )}
 
       <PluginAdminList
-        items={items}
+        items={catalog.installations}
         selectedKey={selectedKey}
         loading={catalog.loading}
         error={catalog.error}
@@ -289,10 +279,10 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
       {selectedItem && (
         <PluginAdminDetail
           item={selectedItem}
-          detail={selectedDeck && detail.detail?.deckPluginId === selectedDeck.deckPluginId ? detail.detail : null}
-          readiness={selectedDeck ? readiness.readiness : null}
-          loading={selectedDeck ? detail.loading || readiness.loading : false}
-          error={selectedDeck ? detail.error ?? readiness.error : null}
+          detail={detail.detail?.deckPluginId === selectedItem.deckPluginId && detail.detail.deckPluginVersion === selectedItem.deckPluginVersion ? detail.detail : null}
+          readiness={readiness.readiness}
+          loading={detail.loading || readiness.loading}
+          error={detail.error ?? readiness.error}
           canManage={catalog.permissions.canManage}
           busy={operation.submitting}
           onClose={() => setSelectedItem(null)}
@@ -307,14 +297,14 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
         }}>
           <form className="plugin-admin-install" onSubmit={(event) => { event.preventDefault(); void submitInstall(); }}>
             <div className="plugin-admin-section-heading">
-              <div><h3>Install Deck 工作流插件</h3><p>先加载服务端 manifest 并确认能力，再提交安装。</p></div>
+              <div><h3>安装 Deck 工作流插件</h3><p>读取工作流信息并审阅所需权限后，提交安装。</p></div>
               <button type="button" className="plugin-admin-icon-button" aria-label="关闭安装对话框" onClick={() => setInstallOpen(false)}>×</button>
             </div>
             <label className="plugin-admin-field">Deck Plugin ID
-              <input required value={installInput.deckPluginId} placeholder="ink.dream.story-workflow" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginId: event.target.value })); setInstallPreview(null); }} />
+              <input required value={installInput.deckPluginId} placeholder="工作流 ID" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginId: event.target.value })); setInstallPreview(null); }} />
             </label>
             <label className="plugin-admin-field">精确版本
-              <input required value={installInput.deckPluginVersion} placeholder="1.0.0" pattern="\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginVersion: event.target.value })); setInstallPreview(null); }} />
+              <input required value={installInput.deckPluginVersion} placeholder="精确 SemVer 版本" pattern="\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginVersion: event.target.value })); setInstallPreview(null); }} />
             </label>
             <label className="plugin-admin-field">来源类型
               <select value={installInput.sourceType} onChange={(event) => setInstallInput((value) => ({ ...value, sourceType: event.target.value as InstallPluginInput['sourceType'] }))}>
@@ -324,11 +314,11 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
               </select>
             </label>
             <label className="plugin-admin-field">来源
-              <input required value={installInput.source} placeholder="builtin://ink-dream-story" onChange={(event) => setInstallInput((value) => ({ ...value, source: event.target.value }))} />
+              <input required value={installInput.source} placeholder="来源地址" onChange={(event) => setInstallInput((value) => ({ ...value, source: event.target.value }))} />
             </label>
             <div className="plugin-admin-actions" style={{ marginTop: 14 }}>
               <button type="button" className="plugin-admin-button" disabled={previewLoading} onClick={() => { void loadInstallPreview(); }}>
-                {previewLoading ? '读取中…' : '加载 manifest 与能力'}
+                {previewLoading ? '读取中…' : '读取工作流与权限'}
               </button>
             </div>
             {previewError && <PluginErrorCard code={(previewError as DeckPluginApiError).code} summary={previewError.message} />}
@@ -343,7 +333,7 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
                 ) : <p className="plugin-admin-muted">服务端 manifest 未声明能力。</p>}
                 <label className="plugin-admin-check">
                   <input type="checkbox" checked={capabilitiesConfirmed} onChange={(event) => setCapabilitiesConfirmed(event.target.checked)} />
-                  <span>我已审阅 manifest_requested 能力。实际 effective_capabilities 仍由服务端按批准权限取交集。</span>
+                  <span>我已审阅此工作流所需的权限。</span>
                 </label>
               </div>
             )}

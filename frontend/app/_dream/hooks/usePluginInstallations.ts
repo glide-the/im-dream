@@ -1,6 +1,7 @@
 // [Input] Deck Plugin Admin list API and React lifecycle.
-// [Output] Refreshable installation/runtime catalog with server-owned permissions and safe errors.
+// [Output] Refreshable Deck workflow catalog with server-owned permissions and safe errors.
 // [Pos] Plugin Admin list query hook.
+// [Sync] 2026-10-10: remove the standalone runtime-plugin catalog state.
 
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -10,7 +11,6 @@ import {
 
 const EMPTY_RESULT: PluginInstallationListResult = {
   installations: [],
-  runtimePlugins: [],
   permissions: { canManage: false, canInstallLocal: false, canForcePurge: false },
 };
 

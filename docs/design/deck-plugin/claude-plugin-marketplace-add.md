@@ -2,8 +2,11 @@
 <!-- [Output] Current interaction contract for the global ClaudePlugin Marketplace create-menu and four-stage installation flow. -->
 <!-- [Pos] Canonical UI/interaction design for Settings / Work / Plugins Marketplace installation. -->
 <!-- [Sync] 2026-08-19: align the design with the implemented platform-global catalog, entry-ID install, and remote revision verification. -->
+<!-- [Sync] 2026-10-10: preserve the original interaction snapshot; current user interaction belongs to claude-code-plugins-interaction.md. -->
 
 # ClaudePlugin Marketplace 添加
+
+> **历史安装交互，2026-08-19 原文保留。** 当前产品规则与页面骨架见 [PRD](../../prd/deck/claude-code-plugins.md)，用户交互见 [Claude Code Plugins 现行设计](./claude-code-plugins-interaction.md)。当前用户只在思维模式中选择 Admin 已发布的插件；下方安装入口不属于现行用户需求。远程 Marketplace 的注册、审核和发布平台尚未设计，本文不能作为该平台的产品设计或本轮功能验收。
 
 ## 1. 背景与问题
 

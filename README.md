@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-10: replace root Agent.md references with the sole AGENTS.md work contract. -->
 <!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
 <!-- [Input] Notion product positioning, current business designs and PRDs, frontend features, manifests and environment templates. -->
 <!-- [Output] Illustrated descriptions of module purpose and scope, plus operator setup and enablement conditions. -->
@@ -257,7 +258,7 @@ Never commit secrets, transcripts or user workspace contents. Browser input, use
 
 `CLAUDE_CODE_CLI_PATH` is reserved for an explicit, reviewed absolute-path rollback, not a workaround for stale PATH. Dream does not silently select an ambient `claude` or SDK-bundled CLI. Application rollback does not reverse Admin database migrations. See [SDK/Runtime integration and rollback](docs/deploy/claude-sdk-runtime-packaging-and-integration.md).
 
-A send-path release requires **create Thread → `POST /api/claude-agent` → authenticated model catalog → accepted SSE** under [Agent.md](Agent.md#8-claude-agent-send-path-release-gate). Tests may clean only their own named processes, ports and temporary resources; browser checks reuse compatible installed Chrome. Preserve normal business Runs/logs unless cleanup was requested.
+Real send-path acceptance requires **create Thread → `POST /api/claude-agent` → authenticated model catalog → accepted SSE** through the normal Dream/Admin/Gateway/PostgreSQL path under [AGENTS.md](AGENTS.md#本机真实业务测试协议). Tests may clean only their own named processes, ports and temporary resources; browser checks reuse compatible installed Chrome. Preserve normal business Runs/logs unless cleanup was requested.
 
 ## Documentation
 
@@ -270,4 +271,4 @@ A send-path release requires **create Thread → `POST /api/claude-agent` → au
 | Resources and tools | [Notion connector](docs/prd/notion-session/resource-connector.md), [connector interaction](docs/design/notion-session/connector-interaction.md), [MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
 | Architecture and authentication | [Architecture](docs/architecture/项目架构设计说明.md), [Admin auth/data contract](docs/architecture/admin-auth-data-interaction.md), [backend API](backend/API.md) |
 | Setup and deployment | [Platform status](deploy/README.md), [AutoDL](deploy/autodl-ssh/README.md), [AutoDL recovery](docs/deploy/autodl-recovery.md) |
-| Repository and Agent rules | [Repository maintenance](Agent.md), [Agent behavior](docs/Agent.md), [rules index](docs/rules/README.md) |
+| Repository and Agent rules | [Root work contract](AGENTS.md), [Agent behavior](docs/Agent.md), [rules index](docs/rules/README.md) |

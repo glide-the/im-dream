@@ -1,6 +1,8 @@
 <!-- [Input] 仓库工作边界、用户产品要求与现行文档维护合同。 -->
 <!-- [Output] Agent 必须遵守的设计、实现、数据、验证与工作区规则。 -->
-<!-- [Pos] 根工作合同，与 Agent.md 的维护及设计门禁配合使用。 -->
+<!-- [Pos] 唯一根工作合同，统一维护仓库、产品设计、实现与验证规则。 -->
+<!-- [Sync] 2026-10-10: 删除非标准根 Agent.md 后，AGENTS.md 成为唯一根工作合同。 -->
+<!-- [Sync] 2026-10-10: 产品方案进入正文前必须完成 Double Diamond 的发现、定义、方案比较与交付收敛。 -->
 <!-- [Sync] 2026-10-05: 明确按业务模块存放 PRD；PRD 正文包含骨架，正式设计稿正文包含业务时序、交互及状态图。 -->
 
 # AGENTS Instructions
@@ -12,7 +14,7 @@
 - Avoid hard-coded business IDs, thresholds, hosts, paths, or policy values; resolve to env/config/policy first.
 
 ## Source Of Truth
-- Root repository maintenance and README/version-management contract: `Agent.md`
+- Root repository maintenance and Agent contract: `AGENTS.md`
 - Folder contracts: `**/.folder.md`
 - Rules index: `docs/rules/README.md`
 - Cursor rules: `.cursor/rules/*.mdc`
@@ -44,12 +46,13 @@
 
 ## 通用产品设计原则
 
-1. 产品设计稿必须以“背景与问题、目标与边界、概念与规则”为基础结构。
-2. 产品规则必须对应真实业务约束，不得把任意技术常量包装成产品限制。
-3. 页面不得展示对用户决策没有帮助的技术说明、重复确认或实现细节。
-4. 除非操作不可逆或具有明显风险，否则不得增加确认弹窗。
-5. 配置型业务必须明确 default、desired、effective、revision 和状态转换。
-6. 实现和测试必须聚焦当前业务目标，不得增加 Chromium revision、重复环境初始化、远程环境、部署状态或其他与验收无关的检查。
+1. 产品方案进入正文前必须完成 Double Diamond：发现阶段读取用户目标、历史工作、现行设计和当前实现；定义阶段收敛核心问题、任务目的与边界；发展阶段比较可行方案并排除概念偏移与过度设计；交付阶段才编写选定方案、业务图和验收。正式设计稿或评审记录保留简洁的判断依据，不把方法过程扩写成用户文章。
+2. 产品设计稿必须以“背景与问题、目标与边界、概念与规则”为基础结构。
+3. 产品规则必须对应真实业务约束，不得把任意技术常量包装成产品限制。
+4. 页面不得展示对用户决策没有帮助的技术说明、重复确认或实现细节。
+5. 除非操作不可逆或具有明显风险，否则不得增加确认弹窗。
+6. 配置型业务必须明确 default、desired、effective、revision 和状态转换。
+7. 实现和测试必须聚焦当前业务目标，不得增加 Chromium revision、重复环境初始化、远程环境、部署状态或其他与验收无关的检查。
 
 ## 产品文档归属与图示交付要求（强制）
 

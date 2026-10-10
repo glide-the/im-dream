@@ -1,26 +1,25 @@
-// [Input] Filtered normalized plugin catalog, selection state, permission, and lifecycle callback.
-// [Output] Loading/error/empty/list states for Plugin Admin.
+// [Input] Deck workflow installations, selection state, permission, and lifecycle callback.
+// [Output] Loading/error/empty/list states for the workflow catalog.
 // [Pos] Plugin Admin catalog list.
+// [Sync] 2026-10-10: remove runtime-category identities and selection callbacks.
 
-import type { PluginAdminItem, PluginMutationAction } from '../../api/deckPluginAdminApi';
+import type { DeckPluginInstallation, PluginMutationAction } from '../../api/deckPluginAdminApi';
 import PluginAdminListItem from './PluginAdminListItem';
 
 interface PluginAdminListProps {
-  items: PluginAdminItem[];
+  items: DeckPluginInstallation[];
   selectedKey?: string;
   loading: boolean;
   error?: Error | null;
   canManage: boolean;
   busy: boolean;
   onRetry: () => void;
-  onSelect: (item: PluginAdminItem) => void;
-  onAction: (action: PluginMutationAction, item: PluginAdminItem) => void;
+  onSelect: (item: DeckPluginInstallation) => void;
+  onAction: (action: PluginMutationAction, item: DeckPluginInstallation) => void;
 }
 
-function pluginAdminItemKey(item: PluginAdminItem): string {
-  return item.category === 'deck-workflow'
-    ? `deck:${item.deckPluginId}:${item.deckPluginVersion}`
-    : `runtime:${item.parentDeckPluginId ?? 'global'}:${item.claudeCodePluginId}:${item.resolvedVersion}`;
+function pluginAdminItemKey(item: DeckPluginInstallation): string {
+  return `${item.deckPluginId}:${item.deckPluginVersion}`;
 }
 
 export default function PluginAdminList({
@@ -47,10 +46,10 @@ export default function PluginAdminList({
     );
   }
   if (!items.length) {
-    return <div className="plugin-admin-empty">当前分类没有服务端返回的插件记录。</div>;
+    return <div className="plugin-admin-empty">暂无工作流安装记录。</div>;
   }
   return (
-    <div className="plugin-admin-list" aria-label="Plugin catalog">
+    <div className="plugin-admin-list" aria-label="Deck 工作流目录">
       {error && (
         <div className="plugin-admin-inline-warning" role="status">
           刷新失败，当前显示上次成功结果。<button type="button" onClick={onRetry}>重试</button>
