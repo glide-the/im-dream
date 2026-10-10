@@ -1,11 +1,11 @@
-// [Input] Selected normalized plugin, optional server detail/readiness, permission, and lifecycle callbacks.
-// [Output] Configuration/Status drawer with manifest, runtime lock, capabilities, history, runs, and recovery.
+// [Input] Selected Deck workflow installation, server detail/readiness, permissions, and lifecycle callbacks.
+// [Output] Workflow information and status drawer with capabilities, history, runs, and recovery.
 // [Pos] Plugin Admin detail surface.
+// [Sync] 2026-10-10: remove the runtime-plugin detail branch and dependency list from the product surface.
 
 import { useState } from 'react';
 import type {
   DeckPluginInstallation,
-  PluginAdminItem,
   PluginMutationAction,
 } from '../../api/deckPluginAdminApi';
 import PluginCapabilityDiff from './PluginCapabilityDiff';
@@ -13,7 +13,7 @@ import PluginErrorCard from './PluginErrorCard';
 import PluginStatusBadge from './PluginStatusBadge';
 
 interface PluginAdminDetailProps {
-  item: PluginAdminItem;
+  item: DeckPluginInstallation;
   detail?: DeckPluginInstallation | null;
   readiness?: Partial<DeckPluginInstallation> | null;
   loading?: boolean;
@@ -22,7 +22,7 @@ interface PluginAdminDetailProps {
   busy: boolean;
   onClose: () => void;
   onRetry: () => void;
-  onAction: (action: PluginMutationAction, item: PluginAdminItem) => void;
+  onAction: (action: PluginMutationAction, item: DeckPluginInstallation) => void;
 }
 
 function formatDate(value?: string): string {
@@ -50,13 +50,11 @@ export default function PluginAdminDetail({
   onAction,
 }: PluginAdminDetailProps) {
   const [tab, setTab] = useState<'configuration' | 'status'>('configuration');
-  const isDeck = item.category === 'deck-workflow';
-  const installation = isDeck ? detail ?? item : null;
+  const installation = detail ?? item;
   const declarationStatus = readiness?.declarationStatus ?? item.declarationStatus;
   const materializationStatus = readiness?.materializationStatus ?? item.materializationStatus;
   const activationStatus = readiness?.activationStatus ?? item.activationStatus;
-  const displayId = item.category === 'deck-workflow' ? item.deckPluginId : item.claudeCodePluginId;
-  const version = item.category === 'deck-workflow' ? item.deckPluginVersion : item.resolvedVersion;
+  const version = item.deckPluginVersion;
   const errorCode = readiness?.lastErrorCode ?? installation?.lastErrorCode ?? item.lastErrorCode;
   const errorSummary = readiness?.lastErrorSummary ?? installation?.lastErrorSummary ?? item.lastErrorSummary;
 
@@ -67,14 +65,14 @@ export default function PluginAdminDetail({
       <aside className="plugin-admin-detail" role="dialog" aria-modal="true" aria-labelledby="plugin-admin-detail-title">
         <header className="plugin-admin-detail__header">
           <div>
-            <span className="plugin-admin-eyebrow">{isDeck ? 'Deck 工作流插件' : 'ClaudeAgent 运行时插件'}</span>
+            <span className="plugin-admin-eyebrow">Deck 工作流插件</span>
             <h2 id="plugin-admin-detail-title">{item.displayName}</h2>
-            <code>{displayId} · {version}</code>
+            <code>{item.deckPluginId} · {version}</code>
           </div>
           <button type="button" className="plugin-admin-icon-button" aria-label="关闭插件详情" onClick={onClose}>×</button>
         </header>
 
-        <div className="plugin-admin-detail__tabs" role="tablist" aria-label="Plugin detail tabs">
+        <div className="plugin-admin-detail__tabs" role="tablist" aria-label="工作流详情栏目">
           {(['configuration', 'status'] as const).map((value) => (
             <button
               key={value}
@@ -84,7 +82,7 @@ export default function PluginAdminDetail({
               className={tab === value ? 'is-active' : ''}
               onClick={() => setTab(value)}
             >
-              {value === 'configuration' ? 'Configuration' : 'Status'}
+              {value === 'configuration' ? '工作流信息' : '状态与记录'}
             </button>
           ))}
         </div>
@@ -103,10 +101,9 @@ export default function PluginAdminDetail({
                 <h3>身份与来源</h3>
                 <dl className="plugin-admin-detail-grid">
                   <div><dt>精确版本</dt><dd>{version}</dd></div>
-                  <div><dt>来源</dt><dd>{installation?.sourceLabel ?? 'runtime lock'}</dd></div>
+                  <div><dt>来源</dt><dd>{installation.sourceLabel}</dd></div>
                   <div><dt>schema_version</dt><dd>{installation?.manifest?.schemaVersion ?? <EmptyLine />}</dd></div>
                   <div><dt>author</dt><dd>{installation?.manifest?.author ?? <EmptyLine />}</dd></div>
-                  {!isDeck && <div><dt>artifact_digest</dt><dd><code>{item.artifactDigest ?? '未返回'}</code></dd></div>}
                 </dl>
               </section>
 
@@ -135,21 +132,6 @@ export default function PluginAdminDetail({
                     ) : <EmptyLine />}
                   </section>
 
-                  <section className="plugin-admin-detail-section">
-                    <h3>ClaudeAgent 运行时依赖</h3>
-                    {installation.runtimePlugins.length ? installation.runtimePlugins.map((runtime) => (
-                      <div className="plugin-admin-runtime-row" key={`${runtime.claudeCodePluginId}:${runtime.resolvedVersion}`}>
-                        <div><strong>{runtime.claudeCodePluginId}</strong><code>{runtime.resolvedVersion}</code></div>
-                        <PluginStatusBadge
-                          compact
-                          declarationStatus={runtime.declarationStatus}
-                          materializationStatus={runtime.materializationStatus}
-                          activationStatus={runtime.activationStatus}
-                        />
-                        <code>{runtime.artifactDigest ?? runtime.versionConstraint ?? 'digest 未返回'}</code>
-                      </div>
-                    )) : <EmptyLine>当前详情未返回 Claude Code Plugin lock</EmptyLine>}
-                  </section>
                 </>
               )}
             </>
@@ -157,7 +139,7 @@ export default function PluginAdminDetail({
             <>
               <section className="plugin-admin-detail-section">
                 <div className="plugin-admin-section-heading">
-                  <div><h3>三维状态</h3><p>只展示服务端状态，不在浏览器中推导 run-ready。</p></div>
+                  <div><h3>工作流状态</h3></div>
                   <PluginStatusBadge
                     declarationStatus={declarationStatus}
                     materializationStatus={materializationStatus}
@@ -165,10 +147,10 @@ export default function PluginAdminDetail({
                   />
                 </div>
                 <dl className="plugin-admin-detail-grid">
-                  <div><dt>Declaration</dt><dd>{declarationStatus}</dd></div>
-                  <div><dt>Materialization</dt><dd>{materializationStatus}</dd></div>
-                  <div><dt>Activation</dt><dd>{activationStatus}</dd></div>
-                  <div><dt>Health</dt><dd>{readiness?.healthStatus ?? installation?.healthStatus ?? item.healthStatus}</dd></div>
+                  <div><dt>安装登记</dt><dd>{declarationStatus}</dd></div>
+                  <div><dt>文件准备</dt><dd>{materializationStatus}</dd></div>
+                  <div><dt>加载状态</dt><dd>{activationStatus}</dd></div>
+                  <div><dt>健康状态</dt><dd>{readiness?.healthStatus ?? installation.healthStatus}</dd></div>
                   {installation && <div><dt>Compatibility</dt><dd>{installation.compatibilityStatus}</dd></div>}
                   {installation && <div><dt>Last run</dt><dd>{formatDate(installation.lastRunAt)}</dd></div>}
                 </dl>
@@ -177,7 +159,6 @@ export default function PluginAdminDetail({
               {installation && (
                 <section className="plugin-admin-detail-section">
                   <h3>Effective capabilities</h3>
-                  <p className="plugin-admin-muted">权威交集由后端返回；前端不自行计算。</p>
                   {installation.effectiveCapabilities.length ? (
                     <div className="plugin-admin-chip-list">
                       {installation.effectiveCapabilities.map((capability) => <span key={capability}>{capability}</span>)}

@@ -1,11 +1,23 @@
 <!-- [Input] Current Story Workspace product modules and cross-system Dream/Deck contracts. -->
-<!-- [Output] Authoritative index for Story Workspace product and interaction design. -->
+<!-- [Output] Authoritative index for Story Workspace interaction and data design, linked to the independent Dream workspace PRD. -->
 <!-- [Pos] Story Workspace design entry point. -->
+<!-- [Sync] 2026-10-10: link the independent Dream workspace PRD and keep this directory as the formal interaction design set. -->
 <!-- [Sync] 2026-09-02: index the Episode-first synchronization plan and EP02 isolated-read sequence. -->
 
 # Story Workspace 业务设计索引
 
-本目录只保存当前有效的产品与交互设计，并按功能模块组织。执行日志、任务过程、测试清单、
+产品目的、范围、桌面/窄屏页面骨架、状态和验收以 [Dream 工作台独立 PRD](../../prd/dream-workspace/dream-workspace.md)为准。本目录负责对应的正式交互、数据边界和恢复设计。
+
+## 产品归属判断
+
+| Double Diamond 阶段 | 结论 |
+| --- | --- |
+| 发现 | Dream 首页、Run 重入、初稿、同步和 Episode 阅读已有页面与交互设计，但没有独立 PRD。 |
+| 定义 | Dream 工作台是独立业务模块；Deck 工作流只定义工作流和版本，Dream Agent 只定义共享对话能力。 |
+| 发展 | 继续放在 Deck PRD 会混淆页面所有权，放入 Dream Agent PRD 会混淆对话与内容；独立 PRD 能复用现有设计且不新增产品结构。 |
+| 交付 | `docs/prd/dream-workspace/dream-workspace.md` 负责产品规则和页面骨架，本目录继续负责正式交互与数据合同。 |
+
+本目录只保存当前有效的正式交互与数据设计，并按功能模块组织。执行日志、任务过程、测试清单、
 评审过程和变更流水不放在这里。
 
 ## 模块

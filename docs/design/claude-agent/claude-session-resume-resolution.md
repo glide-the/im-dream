@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-10: current repository governance now points only to root AGENTS.md. -->
 <!-- [Sync] 2026-09-26: bound Dream Threads now fail closed instead of creating a second Claude session. -->
 <!-- [Input] Authorized Dream thread, SDK receipts, and qualified Runtime session storage. -->
 <!-- [Output] Historical-session diagnosis, minimal recovery contract, and acceptance scope. -->
@@ -12,7 +13,7 @@
 
 ## 背景与问题
 
-基线 `98f72dbd`，含 MCP Apps `aa265d78`，工作树开始时干净。根目录 `CLAUDE.md` 缺失；治理以 `AGENTS.md`、`Agent.md` 和目录合同为准。
+基线 `98f72dbd`，含 MCP Apps `aa265d78`，工作树开始时干净。根目录 `CLAUDE.md` 缺失；当前治理以根 `AGENTS.md` 和目录合同为准。
 
 现场 Dream thread `56887baf-e44a-4816-a3aa-0cfb44f3b0a1` 与 Claude ID `ad4f0c48-2090-4027-9b86-73b5b007c78a` 不同。只读文件元数据确认后者有 7829 字节 JSONL，但位于旧 SHA-256 项目目录。这不是“home 不存在”。
 

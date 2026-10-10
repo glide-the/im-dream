@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-10: 根工作合同统一为 AGENTS.md，移除 Agent.md 引用。 -->
 <!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
 <!-- [Input] 现行 Story Workspace 设计、业务 PRD、前端导航、包清单与环境模板。 -->
 <!-- [Output] 带图产品介绍、用户流程、运维安装与明确的功能启用边界。 -->
@@ -246,7 +247,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 
 `CLAUDE_CODE_CLI_PATH` 仅用于明确评审的绝对路径回滚，不能掩盖旧 PATH；Dream 不会静默选择 ambient `claude` 或 SDK 内置 CLI。应用回滚不会反向执行 Admin 数据库 migration。详见[SDK/Runtime 接入与回滚](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)。
 
-发送链路发布必须经过**创建 Thread → `POST /api/claude-agent` → 鉴权模型目录 → 接受 SSE**，规则见[Agent.md](Agent.md#8-claude-agent-send-path-release-gate)。测试只能清理自己命名的进程、端口和临时资源，浏览器检查复用兼容的已安装 Chrome。除非要求清理，保留正常业务 Run 与日志。
+发送链路真实业务验收必须通过正常 Dream/Admin/Gateway/PostgreSQL 路径完成**创建 Thread → `POST /api/claude-agent` → 鉴权模型目录 → 接受 SSE**，规则见 [AGENTS.md](AGENTS.md#本机真实业务测试协议)。测试只能清理自己命名的进程、端口和临时资源，浏览器检查复用兼容的已安装 Chrome。除非要求清理，保留正常业务 Run 与日志。
 
 ## 文档
 
@@ -257,4 +258,4 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 | 资源与工具 | [Notion 连接器](docs/prd/notion-session/resource-connector.md)、[MCP Apps](docs/design/claude-mcp/mcp-apps-integration-strategy.md) |
 | 架构与认证 | [项目架构](docs/architecture/项目架构设计说明.md)、[Admin 认证/数据合同](docs/architecture/admin-auth-data-interaction.md)、[后端 API](backend/API.md) |
 | 安装与部署 | [平台状态](deploy/README.md)、[AutoDL](deploy/autodl-ssh/README.md)、[AutoDL 恢复](docs/deploy/autodl-recovery.md) |
-| 仓库与 Agent 规则 | [仓库维护](Agent.md)、[Agent 行为](docs/Agent.md)、[规则索引](docs/rules/README.md) |
+| 仓库与 Agent 规则 | [根工作合同](AGENTS.md)、[Agent 行为](docs/Agent.md)、[规则索引](docs/rules/README.md) |

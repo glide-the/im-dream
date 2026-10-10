@@ -2,8 +2,11 @@
 <!-- [Output] Preserved integration decisions with current install/pack/load applicability. -->
 <!-- [Pos] Deck integration design; Remote Marketplace owns the deployed installation boundary. -->
 <!-- [Sync] 2026-09-15: retain history and clarify actual installation CLI versus SDK loading. -->
+<!-- [Sync] 2026-10-10: preserve workflow history; supersede its plugin-page categories with the current Claude Code Plugins interaction scope. -->
 
 # Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计
+
+> **历史工作流集成设计，原文与图示保留。** Deck 工作流插件的现行产品规则见[独立 PRD](../prd/deck/deck-workflow-plugin.md)及[独立交互设计](deck-plugin/deck-workflow-plugin-interaction.md)；Claude Code Plugins 见其[PRD](../prd/deck/claude-code-plugins.md)及[交互设计](deck-plugin/claude-code-plugins-interaction.md)。本文后续的 Voice Decks、Paperclip、运行依赖和“两类标签”属于历史集成口径，不决定当前用户分类。现有接口、程序和运行历史不因本次范围修订而删除。
 
 > 当前插件安装以 [Remote Marketplace 合同](deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同) 为准：CLI 安装及制品校验必须完成后才能绑定 Deck、打包新 workspace 和 SDK 加载。下面历史规划的“CLI 备选”不替代当前 `PluginInstallService` 的必需管理命令，也不授权活动会话热安装。
 

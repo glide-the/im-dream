@@ -1,4 +1,6 @@
 <!-- [Sync] 2026-09-17: close Admin producer parity for empty/raw legacy Memory text. -->
+<!-- [Sync] 2026-10-10: link the independent Dream workspace PRD and keep Deck workflow ownership focused on definition and version configuration. -->
+<!-- [Sync] 2026-10-10: index current Claude Code Plugins and the Notion/code-aligned Dream Deck workflow design; retain historical integration records. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -20,6 +22,16 @@
 当前中文产品名称是“思维模式”，Deck 是代码与接口中的承载形式。思维模式用于整理某类需求的思考方向、解决路径与执行方式，现有 Deck 关联 Agent、插件引用和运行配置。Skills、MCP、Plugin 的组合属于产品概念，不表示已实现自动组合或多智能体协作。英文界面继续使用 Deck。
 
 当前名称、页面骨架和用语规则以[思维模式 PRD](../../prd/deck/thinking-modes.md)为准，正常流程、异常恢复和状态图见[正式交互设计](./thinking-mode-terminology.md)。下方历史图示中的 Deck 仍指同一对象，保留原文与技术标识符。
+
+## Claude Code Plugins 现行入口
+
+插件选择规则见 [PRD](../../prd/deck/claude-code-plugins.md)，交互、业务时序与状态图见 [现行设计](../deck-plugin/claude-code-plugins-interaction.md)，历史概念处理见 [边界审查](../deck-plugin/claude-code-plugins-boundary-review.md)。当前用户能力是在创建或编辑思维模式时，从 Admin 已发布清单中选择 Claude Code Plugins；插件安装、发布和远程 Marketplace 平台不属于本稿。
+
+`deck-integration-delta.md`、`design_002_deck-plugin-decision-gates.md` 和上级的 `deck-plugin-voice-ink-dream-integration.md` 保留原工作流合同及历史决策，不作为当前 Claude Code Plugins 用户交互规范。中文思维模式名称沿用现行 PRD，Deck 技术标识保持原样。
+
+## Deck 工作流插件现行入口
+
+Dream 类型 Deck 的工作流定义与版本配置见 [Deck 工作流 PRD](../../prd/deck/deck-workflow-plugin.md)，跨模块业务时序见 [独立交互设计](../deck-plugin/deck-workflow-plugin-interaction.md)。Dream 首页、Run 重入、同一 Chat、Project/Episode 页面、内容版本和失败反馈由 [Dream 工作台独立 PRD](../../prd/dream-workspace/dream-workspace.md)负责。版本选择是工作流配置入口，不代表完整工作流。历史 Voice、Paperclip、运行依赖和平台 Gate 不进入现行用户说明。
 
 ## 需求来源与优先级
 
