@@ -2,7 +2,10 @@
 <!-- [Output] Current Deck integration workflow with explicit default/role provenance and remaining persistence scope. -->
 <!-- [Pos] Canonical Deck integration design; historical versions remain in Git. -->
 <!-- [Sync] 2026-09-15: public Deck/binding default and role provenance follow registered Admin contracts. -->
+<!-- [Sync] 2026-10-10: clarify historical integration scope and current Claude Code Plugins user-design ownership. -->
 # Deck Integration Canonical 设计 Delta
+
+> **历史集成分析，原正文保留。** 本文后续的“唯一当前设计真相源”和“当前真相”属于历史版本声明，不覆盖现行用户交互。Deck 工作流插件见[独立设计](../deck-plugin/deck-workflow-plugin-interaction.md)，Claude Code Plugins 见[独立设计](../deck-plugin/claude-code-plugins-interaction.md)。工作流历史、现有接口和验证方法继续保留。
 
 > **Design ID**: `design_001_deck-integration-delta`
 > **关联 Issue**: `SUO-215`、`SUO-236`、`SUO-250`

@@ -2,8 +2,11 @@
 <!-- [Output] Remote Marketplace source, sync revision, catalog approval, installation lineage, API, state-machine, rollout, and verification contract. -->
 <!-- [Pos] Canonical design for persistent remote ClaudePlugin Marketplace management shared by Admin and Dream. -->
 <!-- [Sync] 2026-08-19: align the implemented Admin schema/control plane, Dream global catalog/install lineage, full-content digest guard, and Comfy verification evidence. -->
+<!-- [Sync] 2026-10-10: scope this preserved contract to install implementation and historical evidence; current user interaction is separate. -->
 
 # ClaudePlugin 远程 Marketplace 业务模型
+
+> **远程来源与安装技术合同。** 本文保留来源同步、安装、文件检查、数据持久化和 CLI 证据，供实现与审查使用，不作为用户页面说明。远程 Marketplace 的注册、提交、审核、发布和运营平台尚未设计；本文标题中的 Marketplace 不表示该发布平台已经具备产品方案。当前产品规则和交互以 [PRD](../../prd/deck/claude-code-plugins.md)及[现行交互设计](./claude-code-plugins-interaction.md)为准。
 
 <!-- [Sync] 2026-09-15: require qualified Runtime plugin management, preserve immutable Admin 0.1.0 digest receipts, and separate install, artifact and SDK load evidence. -->
 

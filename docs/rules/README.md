@@ -1,6 +1,7 @@
 <!-- [Input] Repository guardrails, source ownership, package-manager boundaries, and validation contracts. -->
 <!-- [Output] Human-readable index of the active workspace rules. -->
 <!-- [Pos] Rules reference; executable workspace rules remain in .cursor/rules/*.mdc. -->
+<!-- [Sync] 2026-10-10: root governance now points only to the standard AGENTS.md contract. -->
 <!-- [Sync] 2026-10-05: index the root business-module PRD placement and separate skeleton versus formal design business-diagram ownership. -->
 # Rules Reference
 
@@ -20,7 +21,7 @@ They are adapted for the current Ink & Memory app:
 ## Rules Index
 
 - [根 AGENTS.md](../../AGENTS.md)：PRD 放在 `docs/prd/<业务模块>/` 并在正文包含页面骨架；正式交互设计稿在正文包含业务时序、异常恢复及状态图，技能产物不能替代各自交付。
-- [根 Agent.md §9](../../Agent.md)：产品文档先行及独立评审门禁，按上述正文图示要求检查。
+- [根 AGENTS.md](../../AGENTS.md#产品文档归属与图示交付要求强制)：产品文档先行及图示交付门禁，按上述正文图示要求检查。
 
 - `docs/rules/no-hardcoding.md`: config-first policy for envs, routes, model roles, storage keys, prompt files, thresholds, and API bases.
 - `docs/rules/component-reuse.md`: reuse-first policy for React components/hooks, editor/engine modules, backend services, Claude Agent Threads, prompts, and database helpers.

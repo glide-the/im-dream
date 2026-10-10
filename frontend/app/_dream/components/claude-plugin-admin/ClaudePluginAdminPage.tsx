@@ -3,6 +3,7 @@
 //          select/confirm/install/result flow, recent operations, shared installation list, and uninstall.
 // [Pos] Settings / Work / Plugins section component (deck-integration-delta architecture).
 // [Sync] 2026-08-19: connect the global catalog and make dialog autofocus race-free for immediate keyboard use.
+// [Sync] 2026-10-10: distinguish the Claude Code Plugins list from Dream workflows using product-facing copy.
 
 import {
   useCallback,
@@ -659,11 +660,10 @@ export default function ClaudePluginAdminPage() {
       </div>
 
       <header className="claude-plugin-admin__header">
-        <h2 id="claude-plugin-admin-title">Claude 插件</h2>
+        <h2 id="claude-plugin-admin-title">Claude Code Plugins</h2>
         <p>
-          通过真实 <code>claude plugin install</code> 在服务端受管工作空间安装插件，
-          生成 digest 固定的不可变制品。Deck 只保存安装引用；发起 Deck 对话时，
-          插件包会被复制到该对话的 Agent 工作空间并通过 <code>--plugin-dir</code> 加载。
+          为 Deck 扩展 Skill、工具和 Agent 能力。在 Deck 创建或维护时选择要使用的插件。
+          下方展示共享安装清单，安装与卸载需要管理权限。
         </p>
       </header>
 
