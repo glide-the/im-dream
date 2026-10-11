@@ -1,3 +1,4 @@
+# [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Backend dependency manifests and Docker image specification.
 # [Output] Static regression proof that the immutable Dream SDK, default public
 #          Dream Runtime and explicit official rollback CLI remain atomically
@@ -17,6 +18,7 @@
 # [Sync] 2026-09-12: require Info-ZIP in the production image.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and adjacent manifest validation.
 # [Sync] 2026-09-15: require Runtime 0.1.10 and its plugin-management preflight.
+# [Sync] 2026-10-11: require the exact published Runtime 0.1.11 image-native release.
 # [Sync] 2026-09-15: require the final image resolver check to accept package-root cli.js.
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.10"
+RUNTIME_VERSION = "0.1.12"
 NOTION_CLI_VERSION = "0.15.1"
 
 

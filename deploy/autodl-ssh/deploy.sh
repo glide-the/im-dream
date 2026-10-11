@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+# [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
+# [Sync] 2026-10-11: exact Runtime default is the published 0.1.11 image-native release.
 # [Input] AutoDL SSH settings, generated Dream env, Dream source, and a qualified Linux x64 Runtime package built from authorized 2.1.88 source.
-# [Output] Versioned direct-host Next.js/FastAPI Dream release with Gateway-key validation using the published Runtime 0.1.10 and screen.
+# [Output] Versioned direct-host Next.js/FastAPI Dream release with Gateway-key validation using the published Runtime 0.1.12 and screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
 # [Sync] 2026-08-26: run Dream as root so /root-hosted workspace protocol paths remain fully traversable.
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 beside the backend-owned
@@ -65,7 +67,7 @@ AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"
 AUTODL_NODE_VERSION="${AUTODL_NODE_VERSION:-22.18.0}"
 AUTODL_PNPM_VERSION="${AUTODL_PNPM_VERSION:-10.28.1}"
 AUTODL_NOTION_CLI_VERSION="${AUTODL_NOTION_CLI_VERSION:-0.15.1}"
-AUTODL_CLAUDE_RUNTIME_VERSION="${AUTODL_CLAUDE_RUNTIME_VERSION:-0.1.10}"
+AUTODL_CLAUDE_RUNTIME_VERSION="${AUTODL_CLAUDE_RUNTIME_VERSION:-0.1.12}"
 AUTODL_CLAUDE_CLI_COMPATIBILITY_VERSION="${AUTODL_CLAUDE_CLI_COMPATIBILITY_VERSION:-2.1.241}"
 AUTODL_PYTHON="${AUTODL_PYTHON:-/root/miniconda3/bin/python}"
 AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"

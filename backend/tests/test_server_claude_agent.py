@@ -1,3 +1,4 @@
+# [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume server.py (FastAPI app) and claude_agent module.
 # [Output] Verify that claude-agent and Notion connector routes are registered,
 #          factory is initialised, request/response models are correct, and
@@ -10,6 +11,7 @@
 # [Sync] 2026-09-16: assert Admin HTTP owner ordering after removing Dream PostgreSQL lifecycle.
 # [Sync] 2026-09-13: expect the package-root Runtime 0.1.9 identity in startup diagnostics.
 # [Sync] 2026-09-15: expect the package-root Runtime 0.1.10 identity.
+# [Sync] 2026-10-11: expect the published Runtime 0.1.11 startup identity.
 # [Sync] 2026-05-22: initial — smoke tests for /api/claude-agent/* routes in server.py.
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
 #                    (removed pet/persona/sticker/necklace contract tests).
@@ -2671,7 +2673,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/cli.js",
-                "cli_runtime_release": "0.1.10",
+                "cli_runtime_release": "0.1.12",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",
