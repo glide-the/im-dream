@@ -1,7 +1,7 @@
 <!-- [Input] Runtime PR31/32, same-source qualification/publication and identified normal Dream adoption. -->
 <!-- [Output] Exact release identity, source pin and strict compact completion consumption scope. -->
 <!-- [Pos] Current Runtime0.1.12 adoption receipt; image-feature working-tree acceptance is recorded separately. -->
-<!-- [Sync] 2026-10-11: exact public release and normal adoption verified; scoped consumer tests passed. -->
+<!-- [Sync] 2026-10-12: exact public release, normal adoption, strict completion feedback and reopened real-image files verified. -->
 
 # Runtime 0.1.12 与 compact 完成反馈接入
 
@@ -27,6 +27,10 @@ Runtime 的原 `/compact` 完成消息通过 SDK 的完整 synthetic AssistantMe
 
 本轮实际技术命令与退出码：resolver14、Docker源码合同3、startup3，Runner162 passed/1既有skip/175subtests，公开image-chat2、image-tool44、image-turn10及diff check均exit0。Provider-free回归不算真实模型验收。首轮错误callback测试失败已修订为原 `on_text_done`，失败收据保留。
 
-真实图片专项在原本机账户、Thread、服务与业务数据库进行；新生成/上传编辑已成功并按 Responses 报告Token结算，其余可见操作继续验收。完整上游图片费用没有报告时保持未知，历史三条缺少缓存分项，不估算写账。普通Dream凭证不能登录独立Admin管理身份，管理页面可见验收存在具体限制。
+真实图片专项在原本机账户、Thread、服务与业务数据库进行。本轮新 native 生成、上传编辑、草图编辑和 Images 生成、编辑五项均成功并结算，capture 分别为13911、17581、14191、567、2102 Token；原 Dmeck SUPER_ADMIN Chrome 会话已逐项可见核对正常 Token 流水，native 和 Images 请求详情也已观察。冷浏览器用普通 Dream 凭证登录独立 Admin 被拒绝的记录保留，现有管理会话已解除可见验收限制，没有新建账户或改动认证。后续引用、文字、工具名讨论、普通 Bash 与实际运行后的取消及重试均已观察。不支持模型的反馈后手动选择具备能力的 AI 重试得到新蓝圆，capture29605；每个图片turn仅一条execution，没有双链重复或自动回退。
+
+最终设置恢复AI gpt-6.1-sol且刷新确认，Image codex-gpt-image-2保持。原13加本轮6共19图刷新重开，6新图逐项实际查看/下载，SHA256与首次下载相同，唯一Compacted持久化。6091个250ms样本未发现原图节点/Blob变化；初始1图未加载不扩写为19图始终已解码。恢复图首次计数harness在历史加载前读0、预期1而实际4，失败保留；未重发模型，修正观察时点和分页等待后核对成功。
+
+完整上游图片费用没有报告时保持未知，历史三条缺少缓存分项，不估算写账。发送后尚未进入运行状态时的首次停止只中断了连接，随后 Agent 仍运行；确认实际运行后的同一 turn 停止成功。前一种竞态记录为既有取消边界，未扩大本次消费修订范围。正常图片Provider执行中取消、自然坏图/访问失败/断线没有主动制造，相关故障合同只由隔离技术验证覆盖。自有Chrome关闭/诊断保存后Node driver残留，精确自有PID清理的实际unified退出1单列，不宣称浏览器runner全绿退出；最终文件关联检查退出0。
 
 本文件交付受保护工作区之外的精确Runtime pin和必要消费修订，不把当前工作区其他未提交图片、认证和资源改动打包发布。最终真实业务回执保存在本任务现行专项执行记录，独立于制品资格。
