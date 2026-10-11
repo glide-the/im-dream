@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: optional bounded strict file reads and pinned root identity for image references; ordinary callers keep existing behavior.
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
 # [Output] Provide get_workspace_root, get_or_create_thread_runtime_workspace,
 #          init_workspace, get_or_create_workspace, get_existing_workspace,
@@ -1769,6 +1770,8 @@ def read_workspace_file_content(
     *,
     reject_symlinks: bool = False,
     require_regular_file: bool = False,
+    max_bytes: int | None = None,
+    expected_root_identity: tuple[int, int] | None = None,
 ) -> WorkspaceFileContent:
     """Read a file from the workspace and return its content and metadata.
 
@@ -1783,9 +1786,11 @@ def read_workspace_file_content(
 
     if reject_symlinks:
         return _read_workspace_file_content_without_symlinks(
-            workspace_path.resolve(),
+            workspace_path if expected_root_identity is not None else workspace_path.resolve(),
             full_path.relative_to(workspace_path.resolve()).parts,
             require_regular_file=require_regular_file,
+            max_bytes=max_bytes,
+            expected_root_identity=expected_root_identity,
         )
 
     if not full_path.exists():
@@ -1819,6 +1824,8 @@ def _read_workspace_file_content_without_symlinks(
     path_parts: tuple[str, ...],
     *,
     require_regular_file: bool,
+    max_bytes: int | None = None,
+    expected_root_identity: tuple[int, int] | None = None,
 ) -> WorkspaceFileContent:
     """Read through directory descriptors so symlink swaps cannot escape root."""
 
@@ -1835,6 +1842,10 @@ def _read_workspace_file_content_without_symlinks(
     file_fd = -1
     try:
         directory_fd = os.open(workspace_root, directory_flags)
+        if expected_root_identity is not None:
+            root_stat = os.fstat(directory_fd)
+            if (root_stat.st_dev, root_stat.st_ino) != expected_root_identity:
+                raise WorkspaceFileAccessError("NOT_FOUND", "Workspace is unavailable", 404)
         for component in path_parts[:-1]:
             next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
             os.close(directory_fd)
@@ -1855,7 +1866,9 @@ def _read_workspace_file_content_without_symlinks(
             )
         with os.fdopen(file_fd, "rb", closefd=True) as file_handle:
             file_fd = -1
-            content = file_handle.read()
+            content = file_handle.read() if max_bytes is None else file_handle.read(max_bytes + 1)
+            if max_bytes is not None and len(content) > max_bytes:
+                raise WorkspaceFileAccessError("FILE_TOO_LARGE", "File exceeds read capacity", 413)
         return WorkspaceFileContent(
             content=content,
             file_name=path_parts[-1],

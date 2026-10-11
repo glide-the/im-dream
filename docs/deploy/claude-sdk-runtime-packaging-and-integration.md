@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-11: pin public Runtime 0.1.12 and separate normal adoption from incomplete real image acceptance. -->
 <!-- [输入] SDK/Runtime 仓库当前构建脚本、Trusted Publisher 工作流、Dream 依赖锁与 Runtime resolver 合同。 -->
 <!-- [输出] 自有 Python SDK 与多平台原始模块 Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
@@ -16,7 +17,7 @@ IM Dream 的 Python 后端需要两个独立制品：
 | Python SDK | `ink-claude-dream-agent-sdk` | TestPyPI → PyPI | 安装后继续 `import claude_agent_sdk` |
 | Claude Runtime | `@glide-the/ink-claude-code-dream` + 四个平台包 | npm | SDK 通过 `ClaudeAgentOptions.cli_path` 或 PATH 启动 |
 
-Python SDK 不放到 npm，Runtime 不放进 wheel。Bun 只负责编译 Runtime；Python SDK
+Python SDK 不放到 npm，Runtime 不放进 wheel。Bun用于构建并由平台包的精确npm依赖执行core JavaScript；Python SDK
 继续使用 `pyproject.toml`、wheel 和 sdist。Dream 不复制 SDK transport、Agent 状态机、
 MCP 状态机或 Runtime 实现。
 
@@ -26,16 +27,16 @@ MCP 状态机或 Runtime 实现。
 | --- | --- |
 | SDK | PyPI/lock `ink-claude-dream-agent-sdk==0.2.145` |
 | Dream 项目元数据 | backend `0.1.4`、frontend `0.0.4`；API schema `2.0.0` 不变 |
-| Runtime selector contract | 已发布 `@glide-the/ink-claude-code-dream@0.1.10`；package-root `cli.js` |
-| Runtime checked gates | 四平台资格 `34710677422` 和发布 `34711405353` 成功；五公开归档与同 SHA CI 字节一致，旧 acceptance 不复用 |
+| Runtime selector contract | 已发布 `@glide-the/ink-claude-code-dream@0.1.12`；package-root `cli.js` |
+| Runtime checked gates | 四平台资格 `38081685997` 和发布 `38082683882` 成功；五公开归档与同 SHA CI 字节一致，旧 acceptance 不复用 |
 | 历史已发布 Runtime | npm `0.1.4`；qualification `33306855166`、publish `33306940462` 仅作历史回滚证据 |
 | Dream Runtime 接口标识 | `2.1.241 (Claude Code)` |
 
-`0.1.10` 只保留 Runtime 原始 `src`，删除重复的 `restored-src`，目录、模块、
+自`0.1.11`采用、`0.1.12`延续的源码目录只保留 Runtime 原始 `src`，删除重复的 `restored-src`，目录、模块、
 1,902 文件/35 模块目录的内容和权限摘要不变，取代旧旁路快照加平行实现。
 默认构建实际编译 `src/entrypoints/cli.tsx`，headless/MCP 变换由构建层应用，不维护另一套实现。原始源码仍保留 Anthropic 版权，派生制品的 SBOM 必须如实记录
 来源，不能将 selector MIT 用于重新许可原始模块；用户已确认来源授权，Dream 不复制实现文件。
-版本和验证边界见[源码结构接入说明](runtime-0.1.10-plugin-management-and-dream-adoption.md)。
+当前版本的四平台native依赖、公开字节与正常后端接入见[0.1.12回执](runtime-0.1.12-compact-images-and-dream-adoption.md)；[0.1.10回执](runtime-0.1.10-plugin-management-and-dream-adoption.md)保留为历史。
 
 ## 2. 仓库职责
 
@@ -199,7 +200,7 @@ PyPI 版本不可覆盖。错误版本只能停止后续审批、按治理需要
 
 ### 6.1 五包布局
 
-Runtime 发布一个 selector 和四个平台 standalone 包：
+Runtime 发布一个 selector 和四个与目标os/cpu绑定的平台包：
 
 ```text
 @glide-the/ink-claude-code-dream
@@ -210,7 +211,9 @@ Runtime 发布一个 selector 和四个平台 standalone 包：
 ```
 
 selector 暴露 `ink-claude-code-dream` 和兼容 alias `claude`，两者指向同一个 launcher。
-平台包内是已编译的 standalone；Bun `1.4.0` 是构建身份，不是目标机器运行依赖。
+平台包包含core JavaScript，由npm安装的精确Bun `1.4.0` 执行，用户无需另装ambient/global Bun。
+0.1.12平台依赖同时包含对应目标的sharp `0.34.5` 和libvips package `1.2.4`；
+实际Bun加载及库文件边界由stage/prepack/archive/install smoke验证。
 
 ### 6.2 本地构建与资格验证
 
@@ -246,7 +249,7 @@ bun run verify
 
 ## 7. Runtime 发布到 npm
 
-> 下面保留 0.1.4 的历史发布步骤：0.1.10 已恢复实际 qualification/publish workflows；当前流程以新[发布接入说明](runtime-0.1.10-plugin-management-and-dream-adoption.md)为准，不复用历史产物。
+> 下面保留 0.1.4 的历史发布步骤：0.1.10 已恢复实际 qualification/publish workflows；当前流程以新[发布接入说明](runtime-0.1.12-compact-images-and-dream-adoption.md)为准，不复用历史产物。
 > 用户已确认来源授权；自动 publish 下载新 main SHA 的精确资格归档，四目标与 registry 验证不能由旧产物替代。以下旧命令/回执仅作运维背景，真实用户业务不由 provider-free 技术资格代替。
 
 先运行资格 workflow：
@@ -394,7 +397,7 @@ RUN npm install -g \
 
 selector 的 optional dependency 自动选择当前 Linux 平台包。Docker 可以另装 official
 Claude CLI 作为显式回滚，但 Dream 默认 resolver 仍选择 `ink-claude-code-dream`。
-`0.1.10` 的 npm alias 必须解析到 package-root `cli.js`，manifest 与 capability evidence
+`0.1.12` 的 npm alias 必须解析到 package-root `cli.js`，manifest 与 capability evidence
 位于相邻 release root 并绑定 selector SHA-256；npm 包若仍声称旧嵌套 `bin/` selector 会被拒绝。
 AutoDL direct-host 的 local-core 是另一种禁止公开再分发的受限制品：它继续使用精确的
 `bin/ink-claude-code-dream` 与 release-root manifest、13 项 portable capability baseline，
@@ -449,6 +452,8 @@ Dream 中切换分发来源，可以复用原业务证据，只补 registry 安�
 
 ## 10. 端到端关系
 
+下图保留为早期发布关闭时的历史关系，不表示当前0.1.12状态。
+
 ```mermaid
 flowchart LR
     US[上游 Python SDK] -->|固定 commit/tree| SR[自有 SDK 仓库]
@@ -463,6 +468,27 @@ flowchart LR
     RT --> GW[Admin Gateway]
     RT --> MCP[MCP Servers]
 ```
+
+
+当前0.1.12的实际关系：
+
+```mermaid
+flowchart LR
+    SRC[唯一原始src] -->|同源SHA源码CI| QUAL[四平台资格与actual Bun native smoke]
+    QUAL -->|同一资格归档| PUB[五包CI生产发布]
+    PUB -->|平台先于selector| NPM[公开npm 0.1.12]
+    NPM -->|逐字节和完整性核对| INSTALL[正常精确安装]
+    INSTALL -->|默认manifest resolver| DREAM[正常Dream新进程采用]
+    PYPI[精确Python SDK 0.2.145] --> DREAM
+    DREAM -->|cli_path和实际Bun| CLI[原始模块CLI]
+    CLI --> GW[Admin Gateway]
+    CLI --> MCP[MCP服务器]
+    DREAM --> LIMIT[真实图片验收受阻]
+    LIMIT --> AUTH[本机指定账户登录拒绝]
+    LIMIT --> CAP[正常image-turn capability缺失]
+```
+
+该图记录发布与采用事实，不表示真实图片生成、文件历史或结算已经验收。
 
 ## 11. 回滚
 
@@ -537,6 +563,6 @@ registry fresh install 只选择当前平台包且安装树无 `.map`。qualific
 `969f9193be8750e2573e4c4ea9c3556d48687925d9f57b8ea676669d753980dd`，授权回执 SHA-256 为
 `87f3d1c6040e5462d85e6259a5cb16509a5d26838d5299d1ba350a4ba463dbea`。
 
-这些值是 `0.2.144`/`0.1.4` 的历史示例。当前 `0.2.145`/`0.1.10` 源码配对必须从新
-workflow/registry 回执重新取得；在此之前 Docker 的精确 `0.1.10` 安装和 registry acceptance
-按设计失败。不得复制旧摘要、旧 `0.1.5` acceptance 或旧 target qualification。
+这些值是 `0.2.144`/`0.1.4` 的历史示例。当前 `0.2.145`/`0.1.12` 的摘要及资格由
+[本轮workflow/registry回执](runtime-0.1.12-compact-images-and-dream-adoption.md)记录，不能复制旧摘要、
+旧 `0.1.5` acceptance 或旧 target qualification。本轮核对Docker精确安装合同，未构建镜像。

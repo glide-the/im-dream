@@ -1,3 +1,4 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
 // [Output] Shared GFM/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
 // [Pos] chat-markdown component node in frontend/app/_dream/components/chat
@@ -52,13 +53,14 @@ interface ChatMarkdownProps {
   text: string;
   workspaceSessionId?: string;
   workspaceDocumentPath?: string;
+  onAddImageMaterial?: (file: File) => void;
 }
 
 function workspaceUrlTransform(value: string): string {
   return isWorkspaceUri(value) ? value : defaultUrlTransform(value);
 }
 
-export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath }: ChatMarkdownProps) {
+export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath, onAddImageMaterial }: ChatMarkdownProps) {
   const { activeSessionId, workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const threadId = workspaceSessionId ?? activeSessionId ?? undefined;
   const workspaceAvailability = workspaceConfigLoaded
@@ -80,11 +82,11 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
     img({ src, alt, node, ...props }) {
       void node;
       if (typeof src === 'string' && isWorkspaceUri(src)) {
-        return <WorkspaceImage uri={src} alt={alt} threadId={threadId} workspaceAvailability={workspaceAvailability} />;
+        return <WorkspaceImage uri={src} alt={alt} threadId={threadId} workspaceAvailability={workspaceAvailability} onAddImageMaterial={onAddImageMaterial} />;
       }
       return <img src={src} alt={alt} {...props} />;
     },
-  }), [threadId, workspaceAvailability, workspaceDocumentPath]);
+  }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial]);
 
   return (
     <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} urlTransform={(value) => workspaceUrlTransform(resolveWorkspaceDocumentReference(value, workspaceDocumentPath))}>

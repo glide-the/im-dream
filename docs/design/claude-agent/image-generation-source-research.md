@@ -1,11 +1,41 @@
+<!-- [Sync] 2026-10-09: 补齐实际Gateway图片丢失/拒绝及内置图像未接通，明确CLI Runtime与主模型区别，历史调查范围保持。 -->
 <!-- [Input] Notion 图像能力需求；Claude Code restored-src；Codex Round52 交付与后续语义恢复；Dream 当前源码。 -->
 <!-- [Output] Tool 图像生成假设的分层结论、架构比较、可复核行号与实施缺口。 -->
 <!-- [Pos] 聊天图像生成调研证据；产品规则属于 docs/prd/chat/image-generation.md。 -->
-<!-- [Sync] 2026-10-09: 保留2026-10-07源码事实与原评审；技术字段和程序规则现由实施说明维护，正式稿重写为业务描述。 -->
+<!-- [Sync] 2026-10-09: 新读指定Codex CLI，补齐自定义图像函数到独立Images接口、文件与通知的证据；原恢复目录调查按读取日保留。 -->
 
 <!-- [Sync] 2026-10-09: 补充双钻石重做记录指引，原技术事实及接口边界不变。 -->
 
 # 通过 Tool 生成图片：源码调研
+
+**当前补充结论（2026-10-09）：新提供的Codex CLI已定位图像执行端，实际为主Agent Responses调用自定义`image_gen.imagegen`，工具再调用独立Images生成/编辑接口。** 上传、图片选择、HTTP、保存和通知的K1–K19证据见[CLI完整执行链](codex-cli-image-generation-chain.md)。以下2026-10-07结论和架构表保留原恢复目录的调查范围；其中“执行端未定位”已由新源码补齐，不能继续概括当前CLI。
+
+## 选定方案的Gateway补充（2026-10-09）
+
+Claude Code Runtime继续发送Messages，Admin已有codex/xai路线将其转换为Responses；这条主对话路线不要求使用Claude主模型，也不要求改CLI直接发送Responses。普通OpenAI Provider仍走Chat，不能仅换Key或冒用codex adapter获得目标路线。
+
+本次选定主对话Gateway Responses + 内部图像Tool独立Images。内置`image_generation`也可由Gateway适配，但当前缺平台工具声明、图像结果消费和媒体回传；不把“不支持现有报文”说成“永远不能兼容”。主对话图片还有两个独立缺口：Anthropic→Chat会先丢图；Chat→Responses若实际收到图片会主动拒绝。Read等工具的图片结果也会被JSON文字化。图像执行入口尚未发布。
+
+G1–G8文件、符号、行号与最小修订见[现行实施说明](image-generation-implementation-notes.md)，双链路与业务状态见[正式设计](image-generation-interaction-design.md)。以下2026-10-07原结论按当时调查范围保留，其中公开Responses图像入口是当时的候选，现行方案采用独立Images入口；旧范围不覆盖当前完整方案。本轮证据与验证归[执行记录](../../exec/image-gateway-redesign-20261009.md)。
+
+### 当前架构对照
+
+下表的Codex列指指定CLI源码，未核实与当前安装App相同。C/D编号在本稿原证据索引；G编号在实施说明；K编号在CLI链路文档，各索引给出文件、符号与行号。IM列明确区分当前基础与建议能力。
+
+| 比较项 | Claude Code Runtime | Codex CLI图像执行 | IM复用与最小缺口 |
+|---|---|---|---|
+| Tool入口与执行 | CLI工具schema/MCP发现及执行（C1/C2） | 主Responses声明namespace function，Images扩展执行（K1/K8/K11） | 复用internal MCP composition；image_gen注册、绑定与执行未实现（D1/G7）。 |
+| 生成能力归属 | 通用扩展入口，未发现内置图像Provider（C1/C2） | 独立ImagesClient生成/编辑（K11/K12） | 建议内部MCP调用Admin Images；公开授权/路由/计费合同待发布（G8）。 |
+| 图片输入 | 用户image块、Read和MCP图片（C3/C4/D4） | 上传默认inline input_image；工具选择路径或历史图（K4–K10） | 附件已有；Gateway先丢图、后层拒绝实际图；需保留并转换图片（G3/G4）。 |
+| Tool输出 | MCP content转换为Messages tool_result（C2/C3） | 完整base64图片及可选saved_path；回填input_image（K14/K16） | 建议新图保存后返回JSON URI；实际图片tool_result还需多模态转换（D1/G3/G4）。 |
+| 调用关联 | toolUseId/tool_use_id（C2/C4） | call_id关联函数、通知及文件（K8/K14–K16） | 保留原toolCallId/Thread/消息；Gateway关联function call/output（D2/G2）。 |
+| 状态与最终结果 | 原权限、progress、错误及abort（C2/C4） | 开始/完成/失败通知；完整图片，未有partial图流（K14/K15） | 复用原工具事件/授权区；新名称、引用衔接待补，不增加SSE（D2/D3/D8/D9）。 |
+| 显示与文件 | 模型图片块不保证用户预览（C3） | app-server发送图片item及路径，恢复查看器可读；当前App未观察（K15–K18/X4） | 原WorkspaceImage/查看器/content/download；安全新图写入待补（D5/D6）。 |
+| 保存与重开 | 会话转录与恢复，文件另有生命周期（C5） | 尝试codex_home保存，失败仍可返回base64；模型历史含图片（K14/K17/K19） | 原parts与history hydration；建议持久Thread files+规范URI，不复制保存失败仍成功（D2/D7）。 |
+| 失败、停止、重试 | 原工具错误、abort和连接重试；不保证生成幂等（C2/C4） | Images完整HTTP及配置重试，无独立图像cancel保证（K12/K14） | 复用原停止/恢复；新图像错误处理及迟到边界待验证，不推断退款（D8/V7）。 |
+| 后续引用与编辑 | Read或图片上下文，CLI不自动有图像生成器（C3/C4） | 路径或最近图片选择，图像output进入模型历史（K9/K10/K16/K17） | 当前Thread规范URI编辑；新Tool读取/校验待补；主对话看图需G3/G4修订。 |
+
+本方案的差异集中在Gateway图片协议、独立执行与可恢复文件结果；不是替换Agent主循环。V7等验收编号定义在实施说明，尚未完成新图像验收。
 
 ## 背景与问题
 
@@ -94,3 +124,5 @@
 补充核查还确认：交付本地ConversationPage显示message.text，交付远程ConversationItem显示图片JSON details，恢复查看器接线仍未确认；Dream `_make_tool_event_cb`明确忽略tool_progress，不能据此承诺图片实时百分比。Image API也支持流式图片，官方edit reference已支持File ID；Responses完成标记不携带最终base64。这些修订细节与源码/官方引用在补充对比稿逐项列出，不宣称当前Codex实际采用哪种上游。
 
 本轮双钻石重做的业务取舍、现行稿评审及文档回执见[2026-10-09重做记录](../../exec/image-design-double-diamond-20261009.md)；本文源码/API事实仍为原读取日证据。
+
+2026-10-09 CLI证据与相关文档修订、历史保留和新回执见[本轮执行记录](../../exec/codex-cli-image-chain-20261009.md)。Claude Code通用MCP入口、IM文件/消息复用及Admin能力待发布的判断不因该Codex源码发现而变成已实现功能。

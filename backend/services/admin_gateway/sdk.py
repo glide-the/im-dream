@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Input] SDK options, an Admin-issued entity delegation and server-owned Gateway routing.
 # [Output] Force Claude Code through Admin Gateway with an entity-bound opaque bearer.
 # [Pos] Runtime credential boundary; service keys and Dream signing authority never enter the child.
@@ -46,6 +47,7 @@ def apply_gateway_sdk_env_to_options(
     delegation_token: str | None,
     *,
     gateway_idempotency_key: str | None = None,
+    gateway_image_turn_key: str | None = None,
     environment: Mapping[str, str] | None = None,
     configuration: AdminGatewayConfig | None = None,
 ) -> Any:
@@ -64,6 +66,7 @@ def apply_gateway_sdk_env_to_options(
     apply_gateway_credential_tombstones(env)
     env["ANTHROPIC_BASE_URL"] = configured.base_url
     env["ANTHROPIC_AUTH_TOKEN"] = token
+    headers = []
     if gateway_idempotency_key is not None:
         if re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}",
@@ -74,9 +77,13 @@ def apply_gateway_sdk_env_to_options(
             )
         # The Gateway derives request-level keys from the stable turn root and
         # exact body, so a multi-step tool loop remains distinct and retryable.
-        env["ANTHROPIC_CUSTOM_HEADERS"] = (
-            f"x-ink-turn-idempotency-key: {gateway_idempotency_key}"
-        )
+        headers.append(f"x-ink-turn-idempotency-key: {gateway_idempotency_key}")
+    if gateway_image_turn_key is not None:
+        if re.fullmatch(r"dream-turn-[0-9a-f]{64}", gateway_image_turn_key) is None:
+            raise AdminGatewayConfigurationError("Gateway image turn key is invalid")
+        headers.append(f"x-ink-image-turn-key: {gateway_image_turn_key}")
+    # Clear all ambient/user headers even when the server supplies none.
+    env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(headers)
     env["INK_GATEWAY_ENABLED"] = "1"
     env["INK_GATEWAY_BASE_URL"] = configured.base_url
     options.env = env

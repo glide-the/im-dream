@@ -2,6 +2,7 @@
 /* [Output] Responsive composer controls with one visible Send or Stop action at the trailing edge. */
 /* [Pos] Local responsive presentation contract for the shared Chat input dock. */
 /* [Sync] 2026-09-27: keep the conditional Send/Stop action inside the composer trailing edge. */
+/* [Sync] 2026-10-09: in-flow attachment options include independent hand-drawn sketch input. */
 /* [Sync] 2026-09-18: add wrapping mobile controls and persistent 44px send/attachment targets. */
 
 .ai-input-dock:focus-within {
@@ -19,6 +20,19 @@
 .ai-input-dock__attachment-button {
   min-height: 2.75rem;
 }
+
+.ai-input-dock__add-actions { min-width: 0; }
+.ai-input-dock__add-options {
+  display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem;
+  padding: .35rem; border: 1px solid var(--color-border-paper); border-radius: .65rem;
+  background: var(--color-bg-app);
+}
+.ai-input-dock__add-options button {
+  min-height: 2.75rem; border: none; border-radius: .4rem; padding: .4rem .65rem;
+  background: transparent; color: var(--color-text-primary); cursor: pointer;
+}
+.ai-input-dock__add-options button:hover { background: var(--color-bg-hover); }
+.ai-input-dock__add-actions button:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
 
 .ai-input-dock__action-row {
   min-width: 0;

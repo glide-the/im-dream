@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-10: preserve files/ in synced attachment URIs, matching the public preview contract.
+# [Sync] 2026-10-10: bind uploaded image blocks to their server-synced current-Thread workspace references.
 # [Sync] 2026-10-07: expose owner-scoped scheduled records for creation and execution Thread activity.
 # [Sync] 2026-10-07: expose tool_choice as the closed auto/manual/none request enum while scheduled runs inject server-owned per-tool policy.
 # [Sync] 2026-09-29: project an owner-checked, compact user-turn navigation index for long Chat histories.
@@ -76,6 +78,7 @@
 
 import asyncio
 import base64
+from urllib.parse import quote
 import binascii
 from hashlib import sha256
 from functools import partial
@@ -1375,6 +1378,7 @@ async def _claude_agent_stream_impl(
                             name=part.get("fileName") or Path(rel_path).name,
                             media_type=part.get("mimeType") or "application/octet-stream",
                             data=base64.b64encode(file_bytes).decode("ascii"),
+                            id="workspace://" + quote(str(rel_path), safe="/"),
                         )
                     )
                 except Exception as exc:

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] User-authored text message part from the chat message stream/history and an optional leading action.
 // [Output] Right-aligned user chat bubble with an anchored provenance action, GFM Markdown and copy.
 // [Pos] user-message-part component node in frontend/app/_dream/components/chat
@@ -19,9 +20,10 @@ interface UserMessagePartProps {
   workspaceSessionId?: string;
   sourceLabel?: string;
   leadingAction?: ReactNode;
+  onAddImageMaterial?: (file: File) => void;
 }
 
-export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel, leadingAction }: UserMessagePartProps) {
+export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel, leadingAction, onAddImageMaterial }: UserMessagePartProps) {
   const { copied, copy } = useCopy();
 
   return (
@@ -51,7 +53,7 @@ export default memo(function UserMessagePart({ text, workspaceSessionId, sourceL
         }}
       >
         <div className="prose prose-chat" style={{ color: 'var(--color-text-primary)', fontSize: '0.92rem', lineHeight: 1.7 }}>
-          <ChatMarkdown text={text} workspaceSessionId={workspaceSessionId} />
+          <ChatMarkdown text={text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} />
         </div>
       </div>
       <button

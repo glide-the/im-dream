@@ -1,7 +1,9 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Input] Current Admin OAuth actor and the server-only Gateway catalog client.
 # [Output] Same-origin public model DTOs with subscription-aware callability.
 # [Pos] Browser BFF; it never accepts user IDs or exposes Gateway credentials.
 # [Sync] 2026-09-16: forward the verified Admin OAuth bearer instead of signing in Dream.
+# [Sync] 2026-10-10: expose visible text models while retaining endpoint-specific callability and subscription availability.
 """Authenticated same-origin BFF for the Admin public Gateway model catalog."""
 
 from __future__ import annotations

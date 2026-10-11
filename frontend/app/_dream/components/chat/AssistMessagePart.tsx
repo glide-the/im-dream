@@ -1,3 +1,4 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Assistant text message part from the chat message stream/history and optional post-reply content.
 // [Output] Assistant Markdown, post-reply content, and message actions in one aligned column.
 // [Pos] assistant-message-part component node in frontend/app/_dream/components/chat
@@ -32,6 +33,7 @@ interface AssistMessagePartProps {
   sendMessage?: (message: ChatUserMessage) => Promise<void>;
   workspaceSessionId?: string;
   afterContent?: ReactNode;
+  onAddImageMaterial?: (file: File) => void;
 }
 
 function IconRefresh() {
@@ -66,6 +68,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
   sendMessage,
   isLoading: isStreamLoading,
   workspaceSessionId,
+  onAddImageMaterial,
   afterContent,
 }: AssistMessagePartProps) {
   const { copied, copy } = useCopy();
@@ -132,7 +135,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', opacity: isError ? 0.6 : 1, minHeight: isLast && isStreamLoading ? '2rem' : undefined }}>
       <div style={{ color: 'var(--color-text-primary)', fontSize: '0.95rem', lineHeight: 1.75 }}>
         <div className="prose prose-chat">
-          <ChatMarkdown text={part.text} workspaceSessionId={workspaceSessionId} />
+          <ChatMarkdown text={part.text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} />
         </div>
       </div>
 

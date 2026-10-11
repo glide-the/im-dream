@@ -1,9 +1,11 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-09-27: use one trailing action: Send for a draft, Stop for an empty active turn.
 // [Sync] 2026-09-26: allow a running turn to accept a new draft and restore it after queue rejection.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
-// [Input] Consume file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
-// [Output] Render the Markdown-aware chat input, slash suggestions, attachments, and message submit/stop actions.
+// [Input] Consume SketchInputDialog, file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
+// [Output] Render the Markdown-aware chat input, slash suggestions, file/sketch attachments, and message submit/stop actions.
+// [Sync] 2026-10-09: add a local sketch entry; share file upload and return completion without changing message DTOs.
 // [Pos] chat-input-dock component node in frontend/app/_dream/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
@@ -56,6 +58,7 @@ import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
+import SketchInputDialog from './SketchInputDialog';
 import './AIInputDock.css';
 import {
   filterInstalledSkillCommands,
@@ -78,6 +81,8 @@ interface AIInputDockProps {
   loadingLabel?: string;
   defaultToolChoice?: ToolChoice;
   openFileDialogSignal?: number;
+  imageMaterial?: File;
+  onImageMaterialConsumed?: () => void;
   onStop?: () => void | Promise<void>;
   stopPending?: boolean;
   mode?: AIInputDockMode;
@@ -140,6 +145,8 @@ export default function AIInputDock({
   loadingLabel,
   defaultToolChoice = 'auto',
   openFileDialogSignal,
+  imageMaterial,
+  onImageMaterialConsumed,
   onStop,
   stopPending = false,
   mode = 'simple',
@@ -156,6 +163,11 @@ export default function AIInputDock({
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
   const [query, setQuery] = useState(() => prefill ?? '');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [sketchOpen, setSketchOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const addOptionsId = useId();
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -169,6 +181,16 @@ export default function AIInputDock({
   const lastHandledOpenFileDialogSignalRef = useRef(0);
   const lastAppliedPrefillNonceRef = useRef<number | undefined>(undefined);
   const { upload, error: uploadHookError } = useFileUpload();
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    addMenuRef.current?.querySelector<HTMLButtonElement>('[data-add-option]')?.focus();
+    const dismiss = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Node && !addMenuRef.current?.contains(event.target)) setAddMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [addMenuOpen]);
 
   useEffect(() => {
     if (prefillNonce === undefined || lastAppliedPrefillNonceRef.current === prefillNonce) return;
@@ -328,8 +350,11 @@ export default function AIInputDock({
         });
 
         if (!result) {
-          setUploadedFiles((prev) => prev.filter((entry) => entry.id !== fileId));
-          return;
+          setUploadedFiles((prev) => {
+            revokeObjectPreviewUrl(prev.find(entry => entry.id === fileId)?.previewUrl);
+            return prev.filter((entry) => entry.id !== fileId);
+          });
+          return false;
         }
 
         setUploadedFiles((prev) =>
@@ -348,6 +373,7 @@ export default function AIInputDock({
               : entry,
           ),
         );
+        return true;
       } catch (error) {
         setUploadedFiles((prev) => {
           const current = prev.find((entry) => entry.id === fileId);
@@ -355,23 +381,26 @@ export default function AIInputDock({
           return prev.filter((entry) => entry.id !== fileId);
         });
         setUploadError(error instanceof Error ? error.message : t('chat.inputDock.uploadFailed'));
+        return false;
       }
     },
     [syncFileToWorkspace, upload, t],
   );
 
   const handleFiles = useCallback(
-    (files: FileList | null, uploadSource: 'click' | 'paste' | 'drag') => {
+    async (files: FileList | readonly File[] | null, uploadSource: 'click' | 'paste' | 'drag'): Promise<boolean[]> => {
       if (!files?.length) {
-        return;
+        return [];
       }
 
       const nextFiles: UploadedFile[] = [];
-      const filesToUpload: Array<{ id: string; file: File }> = [];
+      const filesToUpload: Array<{ id: string; file: File } | null> = [];
+      setUploadError(null);
 
       Array.from(files).forEach((file) => {
         if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
           setUploadError(t('chat.inputDock.fileTooLarge', { name: file.name, max: formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES) }));
+          filesToUpload.push(null);
           return;
         }
 
@@ -392,17 +421,22 @@ export default function AIInputDock({
       });
 
       if (!nextFiles.length) {
-        return;
+        return filesToUpload.map(() => false);
       }
 
-      setUploadError(null);
       setUploadedFiles((prev) => [...prev, ...nextFiles]);
-      filesToUpload.forEach(({ id, file }) => {
-        void uploadFileToStorage(id, file);
-      });
+      return Promise.all(filesToUpload.map(entry => entry ? uploadFileToStorage(entry.id, entry.file) : false));
     },
     [uploadFileToStorage, t],
   );
+
+  const consumedImageMaterial = useRef<File | null>(null);
+  useEffect(() => {
+    if (!imageMaterial || consumedImageMaterial.current === imageMaterial) return;
+    consumedImageMaterial.current = imageMaterial;
+    onImageMaterialConsumed?.();
+    void handleFiles([imageMaterial], 'click');
+  }, [imageMaterial, onImageMaterialConsumed, handleFiles]);
 
   const deleteFile = useCallback((fileId: string) => {
     setUploadedFiles((prev) => {
@@ -719,11 +753,21 @@ export default function AIInputDock({
 
       <div className="ai-input-dock__action-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
         <div className="ai-input-dock__leading-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <div ref={addMenuRef} className="ai-input-dock__add-actions" onKeyDown={event => {
+            if (event.key === 'Escape' && addMenuOpen) {
+              event.preventDefault();
+              setAddMenuOpen(false);
+              addButtonRef.current?.focus();
+            }
+          }}>
           <button
+            ref={addButtonRef}
             className="ai-input-dock__attachment-button"
             type="button"
             aria-label={t('chat.inputDock.addAttachmentAria')}
-            onClick={openAttachmentDialog}
+            aria-expanded={addMenuOpen}
+            aria-controls={addMenuOpen ? addOptionsId : undefined}
+            onClick={() => setAddMenuOpen(current => !current)}
             disabled={disabled}
             style={{
               border: '1px solid var(--color-border-paper)',
@@ -738,6 +782,21 @@ export default function AIInputDock({
           >
             {t('chat.inputDock.addAttachment')}
           </button>
+          {addMenuOpen ? (
+            <div id={addOptionsId} className="ai-input-dock__add-options" role="group" aria-label={t('chat.inputDock.addAttachmentAria')}>
+              <button type="button" data-add-option disabled={disabled} onClick={() => {
+                setAddMenuOpen(false);
+                addButtonRef.current?.focus();
+                openAttachmentDialog();
+              }}>{t('chat.inputDock.sketch.uploadFile')}</button>
+              <button type="button" data-add-option disabled={disabled} onClick={() => {
+                setAddMenuOpen(false);
+                addButtonRef.current?.focus();
+                setSketchOpen(true);
+              }}>{t('chat.inputDock.sketch.title')}</button>
+            </div>
+          ) : null}
+          </div>
 
           {contextControl}
 
@@ -880,6 +939,8 @@ export default function AIInputDock({
         )}
         </div>
       </div>
+      <SketchInputDialog open={sketchOpen} disabled={disabled} onClose={() => setSketchOpen(false)}
+        onAdd={async file => (await handleFiles([file], 'click'))[0] ?? false} />
     </div>
   );
 }

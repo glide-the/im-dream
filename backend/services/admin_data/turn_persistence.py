@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: expose Host image-provider binding through the original turn broker owner.
 # [Sync] 2026-09-28: bind the Thread Tool host provider before the current turn broker starts and refresh its request authorization at confirmation time.
 # [Sync] 2026-09-26: queue claim/list/settle reuse the bound Thread persistence grant.
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
@@ -699,6 +701,16 @@ class AdminTurnPersistence(
         """Return only the started broker tuple for the user MCP child."""
 
         return self._session_projection_broker.child_env()
+
+    def bind_image_generation_provider(self, provider) -> None:
+        self._session_projection_broker.bind_image_generation_provider(provider)
+
+    def image_turn_data(self, *, actor_id: str, thread_id: str):
+        """Bind image-only facts to this original renewable persistence owner."""
+        from .image_turn_data import AdminImageTurnData
+        self._resolution.context_for(actor_id=actor_id, thread_id=thread_id)
+        return AdminImageTurnData(self._client, lambda: self.current_grant(actor_id=actor_id, thread_id=thread_id),
+            canonical_user_id=self._resolution.canonical_user_id)
 
     def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
         """Bind one server-owned actor/turn before starting the child broker."""

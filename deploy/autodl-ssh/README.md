@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
+<!-- [Sync] 2026-10-11: source default uses published Runtime 0.1.12; no remote deployment is claimed. -->
 <!-- [Input] AutoDL direct-host scripts, current Next.js/pnpm source, and deployment safety contracts. -->
 <!-- [Output] Current release, runtime, safety, candidate-smoke, atomic-switch, and verification procedure. -->
 <!-- [Pos] AutoDL Dream operator guide for the canonical Next.js/FastAPI topology. -->

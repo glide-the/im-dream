@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: recover independent Image writes by their original operation receipt without POST retry.
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Input] Published User/Thread SystemConfig DTOs, exact schema capabilities and explicit OAuth or persistence grant.
 # [Output] Closed typed get/patch commands, raw Python JSON decoding and original PATCH receipt recovery.
 # [Pos] Sole SystemConfig data consumer; it owns no database, model catalog, filesystem or Runtime policy.
@@ -169,6 +171,10 @@ class SystemConfigPatchedDTO(StrictDTO):
         return value
 
 
+class ImageModelPatchInputDTO(StrictDTO):
+    image_model: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+
+
 GET_USER_SYSTEM_CONFIG = DomainOperation(
     OperationCapabilityDTO(name="user-system-config.get", kind="read", user_scope="dream:read", background_scope=None,
         input_schema_version=1, output_schema_version=1,
@@ -187,7 +193,13 @@ GET_THREAD_SYSTEM_CONFIG = DomainOperation(
         contract_sha256="50ca46f131005c0e9831797fc9f2590984da8c8878fec92db61656ec9eefec8b"),
     ThreadIdInputDTO, SystemConfigReadOutputDTO,
 )
-SYSTEM_CONFIG_OPERATIONS = (GET_USER_SYSTEM_CONFIG, PATCH_USER_SYSTEM_CONFIG, GET_THREAD_SYSTEM_CONFIG)
+PATCH_USER_IMAGE_MODEL = DomainOperation(
+    OperationCapabilityDTO(name="user-system-config.patch-image-model", kind="write", user_scope="dream:write", background_scope=None,
+        input_schema_version=1, output_schema_version=1,
+        contract_sha256="6ac28e46b8c7cc8d7588c14cce623e93e597392f49cfd1222b4b5e80fe89f913"),
+    ImageModelPatchInputDTO, SystemConfigPatchedDTO,
+)
+SYSTEM_CONFIG_OPERATIONS = (GET_USER_SYSTEM_CONFIG, PATCH_USER_SYSTEM_CONFIG, GET_THREAD_SYSTEM_CONFIG, PATCH_USER_IMAGE_MODEL)
 
 
 class AdminSystemConfigData:
@@ -205,9 +217,16 @@ class AdminSystemConfigData:
     def patch_user(self, input_dto: SystemConfigPatchInputDTO, request_id: str, *, access_token: str) -> SystemConfigPatchedDTO:
         return self._execute(PATCH_USER_SYSTEM_CONFIG, input_dto, request_id, access_token)
 
+    def patch_image_model(self, input_dto: ImageModelPatchInputDTO, request_id: str, *, access_token: str) -> SystemConfigPatchedDTO:
+        return self._execute(PATCH_USER_IMAGE_MODEL, input_dto, request_id, access_token)
+
     def patch_receipt(self, request_id: str, *, access_token: str):
         require_workflow_capabilities(self._client, request_id)
         return self._client.receipt(PATCH_USER_SYSTEM_CONFIG, request_id, access_token=access_token)
+
+    def image_model_patch_receipt(self, request_id: str, *, access_token: str):
+        require_workflow_capabilities(self._client, request_id)
+        return self._client.receipt(PATCH_USER_IMAGE_MODEL, request_id, access_token=access_token)
 
     def get_thread(self, input_dto: ThreadIdInputDTO, request_id: str, *, access_token: str) -> dict[str, Any]:
         result = self._execute(GET_THREAD_SYSTEM_CONFIG, input_dto, request_id, access_token)

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 from __future__ import annotations
 
 # [Sync] 2026-09-19: verify safe upstream Gateway error-code logging without body or credential disclosure.
@@ -82,6 +83,8 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
         "availability": "included",
         "requiredPlanCode": "free",
         "upgradeHint": None,
+        "images": dict(generation=False, edit=False, configured=False, entitled=False, callable=False),
+        "responsesImage": dict(generation=False, edit=False, configured=False, entitled=False, callable=False),
     }
     assert catalog.models[0].claude_code_runtime_env() == {
         "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "8192",
@@ -217,3 +220,49 @@ def test_catalog_rejects_invalid_claude_code_runtime_windows(runtime_value: Any)
             configuration=configuration(),
             transport=transport,
         ).list_models()
+
+
+@pytest.mark.parametrize("native", [None, dict(generation=False, edit=False, configured=False, entitled=True, callable=False)])
+def test_old_and_new_endpoint_shapes_keep_images_separate_from_responses(native):
+    from backend.services.admin_gateway.models import _parse_model
+    raw = dict(id="image-a", display_name="Image A", protocol="openai",
+        context_window=None, max_output_tokens=None, claude_code_auto_compact_window=None,
+        claude_code_max_context_tokens=None, capabilities=dict(chat=False, image_generation=True, image_edit=True),
+        enabled=True, callable=True, availability="included", required_plan_code=None, upgrade_hint=None,
+        image_input_token_reserve_per_image=10, image_output_token_reserve_per_image=10,
+        endpoint_availability=dict(messages=dict(callable=False, entitled=True), chat=dict(callable=False, entitled=True),
+            images=dict(generation=True, edit=True, configured=True, entitled=True, callable=True)))
+    if native is not None:
+        raw["endpoint_availability"]["responses_image"] = native
+    parsed = _parse_model(raw)
+    assert parsed.image_generation and parsed.image_edit and parsed.image_callable
+    assert not parsed.callable and not parsed.public_dict()["responsesImage"]["generation"]
+    if native is not None:
+        native["generation"] = native["configured"] = native["callable"] = True
+        with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
+            _parse_model(raw)
+
+
+@pytest.mark.parametrize("native", [None, {}, {"generation": 1}, {"generation": False, "edit": False, "configured": False, "entitled": False, "callable": False, "extra": True}])
+def test_present_native_field_requires_a_complete_closed_boolean_object(native):
+    from backend.services.admin_gateway.models import _parse_model
+    raw = dict(id="image-a", display_name="Image A", protocol="openai", context_window=None,
+        max_output_tokens=None, claude_code_auto_compact_window=None, claude_code_max_context_tokens=None,
+        capabilities=dict(image_generation=True, image_edit=True), enabled=True, callable=True,
+        availability="included", required_plan_code=None, upgrade_hint=None,
+        image_input_token_reserve_per_image=10, image_output_token_reserve_per_image=10,
+        endpoint_availability=dict(messages=dict(callable=False, entitled=False), chat=dict(callable=False, entitled=False),
+            images=dict(generation=True, edit=True, configured=True, entitled=True, callable=True), responses_image=native))
+    with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
+        _parse_model(raw)
+
+
+def test_admin_image_form_shape_without_chat_never_becomes_ai_or_its_default():
+    from backend.services.admin_gateway.models import GatewayModel
+    entry = GatewayModel(model_alias='image-a', display_name='Image A', protocol='openai',
+        capabilities={'image_generation': True, 'image_edit': True}, context_window=None, max_output_tokens=None,
+        enabled=True, callable=True, availability='included', required_plan_code=None, upgrade_hint=None,
+        image_generation=True, image_edit=True, image_callable=True, image_configured=True, image_entitled=True)
+    assert not entry.is_conversation_model
+    assert entry.public_dict()['capabilities']['chat'] is False
+    assert entry.public_dict()['callable'] is False

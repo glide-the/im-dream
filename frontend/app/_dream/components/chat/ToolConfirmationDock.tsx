@@ -1,3 +1,4 @@
+// [Sync] 2026-10-11: label explicit image approvals by the requested operation while preserving the original approval policy.
 // [Input] PendingToolConfirmation descriptor from ChatPanel; confirmToolCall from toolConfirmation;
 //         AskUserQuestionUI (unframed variant) for askuser questions; toolInputSummary helpers.
 // [Output] Floating confirmation panel rendered above AIInputDock: generic tool approvals show
@@ -28,7 +29,7 @@ import {
   confirmToolCall,
   type PendingToolConfirmation,
 } from './toolConfirmation';
-import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
+import { isShellTool, resolveToolInputSummary, summarizeToolInvocation, imageToolAction } from './toolInputSummary';
 import { IconCheck, IconLoader, IconX } from './Icons';
 import { toolConfirmationKeyboardDecision } from './chatRuntimeState';
 
@@ -123,6 +124,8 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   }, [handleApprove, handleReject, kind, status]);
 
   const networkRequest = confirmation.networkRequest ?? null;
+  const imageAction = imageToolAction(toolName, input);
+  const toolLabel = imageAction ? t(`chat.imageTool.${imageAction}`) : toolName || t('chat.toolConfirmation.unknownTool');
   const networkPolicyModeText = networkRequest?.policyMode === 'allowlist'
     ? t('chat.toolConfirmation.networkPolicyAllowlist')
     : networkRequest?.policyMode === 'open'
@@ -134,7 +137,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
       ? t('chat.toolConfirmation.networkConfirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
       : isRejectOnly
         ? t('chat.toolConfirmation.rejectOnlyTitle')
-        : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
+        : t('chat.toolConfirmation.confirmTitle', { tool: toolLabel })
         + (summaryText ? t('chat.toolConfirmation.withSummary', { summary: summaryText }) : '');
 
   return (

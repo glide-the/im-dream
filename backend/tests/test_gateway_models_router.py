@@ -1,3 +1,8 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
+# [Input] Production Gateway model BFF with an injected authenticated actor and Admin catalog.
+# [Output] Public catalog retains text and Images entries with distinct endpoint facts.
+# [Pos] Provider-free public-route contract regression; no normal database or real model.
+# [Sync] 2026-10-10: match endpoint callability separately from subscription inclusion.
 from __future__ import annotations
 
 from fastapi import FastAPI
@@ -36,17 +41,34 @@ def test_bff_returns_all_visible_models_with_callability(monkeypatch) -> None:
                 upgrade_hint=None,
             ),
             GatewayModel(
-                model_alias="image-only",
-                display_name="Image Only",
+                model_alias="locked-text",
+                display_name="Locked Text",
                 protocol="openai",
-                capabilities={"image": True},
+                capabilities={"chat": True},
                 context_window=None,
                 max_output_tokens=None,
                 enabled=True,
                 callable=False,
-                availability="upgrade_required",
+                availability="included",
                 required_plan_code="dream",
-                upgrade_hint="升级 Dream 后可用",
+                upgrade_hint=None,
+            ),
+            GatewayModel(
+                model_alias="image-only",
+                display_name="Image Only",
+                protocol="openai",
+                capabilities={"chat": False, "image_generation": True},
+                context_window=None,
+                max_output_tokens=None,
+                enabled=True,
+                callable=False,
+                availability="included",
+                required_plan_code="dream",
+                upgrade_hint=None,
+                image_callable=True,
+                image_generation=True,
+                image_configured=True,
+                image_entitled=True,
             ),
         ), "dream-balanced"),
     })()
@@ -59,7 +81,12 @@ def test_bff_returns_all_visible_models_with_callability(monkeypatch) -> None:
     with TestClient(app) as client:
         response = client.get("/api/gateway/models")
     assert response.status_code == 200
-    assert [item["modelAlias"] for item in response.json()["data"]] == ["dream-balanced", "image-only"]
+    assert [item["modelAlias"] for item in response.json()["data"]] == ["dream-balanced", "locked-text", "image-only"]
     assert response.json()["data"][1]["callable"] is False
+    assert response.json()["data"][1]["availability"] == "included"
     assert response.json()["defaultModelAlias"] == "dream-balanced"
     assert "ownedBy" not in response.text
+    image = response.json()["data"][2]
+    assert image['images'] == dict(generation=True, edit=False, configured=True, entitled=True, callable=True)
+    assert not image['responsesImage']['generation'] and not image['responsesImage']['callable']
+    assert 'image_generation' not in image['capabilities']

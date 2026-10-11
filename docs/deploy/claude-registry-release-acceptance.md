@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-11: pin public Runtime 0.1.12 and separate normal adoption from incomplete real image acceptance. -->
 <!-- [输入] 已公开的 SDK PyPI 精确版本、Runtime npm 精确版本和期望 CLI 版本文本。 -->
 <!-- [输出] 发布后 provider-free registry 验收步骤与 fail-closed 判定。 -->
 <!-- [定位] SDK/Runtime 发布后的最小验收；完整打包、发布和 Dream 集成见相邻操作手册。 -->
@@ -13,8 +14,9 @@
 ## 最近一次已完成状态（历史）
 
 本页固定记录已发布的 SDK `0.2.144` × Runtime `0.1.4` registry 回执，不是
-当前 `develop` 源码合同。当前 SDK `0.2.145` × Runtime `0.1.10` 的同字节五包
-发布与 fresh-install 证据见[新回执](runtime-0.1.10-plugin-management-and-dream-adoption.md)。
+当前源码合同。当前 SDK `0.2.145` × Runtime `0.1.12` 的同字节五包
+发布、公开完整性与安装证据见[新回执](runtime-0.1.12-compact-images-and-dream-adoption.md)。
+[0.1.10回执](runtime-0.1.10-plugin-management-and-dream-adoption.md)保留为历史。
 不能把下列摘要或旧 Runtime 0.1.5 业务回执迁移给新布局。
 
 | 制品 | 状态 | 历史已验收版本 |

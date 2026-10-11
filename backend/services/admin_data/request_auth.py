@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: request Images only when the authenticated actor already has images:create.
 # [Sync] 2026-10-07: register scheduled Chat v3 recurrence, Thread mode and model operations.
 # [Sync] 2026-10-07: register frozen Notion ownership operations without changing other domains or delegated authority.
 # [Sync] 2026-09-27: register exact task-result operations for optional capability-gated completion handoff.
@@ -83,6 +85,7 @@ from .run_data import RUN_OPERATIONS
 from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 from .workspace_data import ENSURE_DEFAULT_WORKSPACE
 from .system_config_data import SYSTEM_CONFIG_OPERATIONS
+from .image_turn_data import IMAGE_TURN_OPERATIONS
 from .reflections_config_data import REFLECTIONS_SECTION_CONFIG_OPERATIONS
 from .local_data_import import LOCAL_DATA_IMPORT_OPERATIONS
 from .picture_history_data import PICTURE_HISTORY_OPERATIONS
@@ -159,6 +162,7 @@ class AdminRequestAuth:
                 *DECK_VERSION_OPERATIONS,
                 *PREFERENCES_OPERATIONS,
                 *SYSTEM_CONFIG_OPERATIONS,
+                *IMAGE_TURN_OPERATIONS,
                 *REFLECTIONS_SECTION_CONFIG_OPERATIONS,
                 *LOCAL_DATA_IMPORT_OPERATIONS,
                 *PICTURE_HISTORY_OPERATIONS,
@@ -303,7 +307,8 @@ class AdminRequestAuth:
             thread_id=resolution.thread_id,
             run_id=context.workflow_run_id if context is not None else None,
             editor_session_id=None,
-            scopes=["messages:create", "messages:count_tokens", "models:list"],
+            scopes=["messages:create", "messages:count_tokens", "models:list"]
+            + (["images:create"] if "images:create" in actor.scopes else []),
         )
         try:
             grant = self._delegations.create(

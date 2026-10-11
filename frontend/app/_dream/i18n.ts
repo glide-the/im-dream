@@ -1,3 +1,7 @@
+// [Sync] 2026-10-11: distinguish image operation failure, completion and interrupted history in both languages.
+// [Sync] 2026-10-10: localize pre-SSE model-selection failure and manual Settings recovery.
+// [Sync] 2026-10-10: localize image tool actions through the existing chat process rows.
+// [Sync] 2026-10-09: bilingual hand-drawn sketch input and existing add-file menu copy.
 // [Sync] 2026-10-09: name Deck 思维模式 in Chinese and share localized maintenance/version/provenance copy.
 // [Sync] 2026-10-07: localize Codex-style repeat presets, source/new Chat mode and execution model controls.
 // [Sync] 2026-10-07: localize conversation scheduled activity, independent execution status and retry feedback.
@@ -851,6 +855,7 @@ const resources = {
           fallbackTitle: 'Agent requests an editor operation: ',
           accept: 'Accept'
         },
+        imageTool: { generate: 'Generate image', edit: 'Edit image', prepare: 'Check image request', running: 'In progress', completed: 'Completed', failed: 'Failed', incomplete: 'Not completed' },
         inputDock: {
           toolChoiceAuto: 'Auto',
           toolChoiceAutoTitle: 'Claude decides when to call tools',
@@ -865,7 +870,13 @@ const resources = {
           sendShortcut: 'Enter to send · Shift+Enter for a new line',
           inputAria: 'Chat input',
           addAttachmentAria: 'Add attachment',
-          addAttachment: '+ Attachment',
+          addAttachment: '+ Add',
+          sketch: {
+            title: 'Draw a sketch', uploadFile: 'Upload files', tools: 'Drawing tools',
+            pen: 'Pen', eraser: 'Eraser', undo: 'Undo', redo: 'Redo', clear: 'Clear',
+            canvas: 'Sketch canvas', return: 'Back', add: 'Add to message', adding: 'Adding…',
+            filename: 'Sketch.png', addFailed: 'Could not add the sketch. Your drawing is kept. Try again.',
+          },
           toolAccessAria: 'Tool call permission',
           toolModeAria: 'Tool call mode',
           fullAccess: 'Full access',
@@ -954,6 +965,8 @@ const resources = {
           allowanceExhaustedTitle: 'Subscription Token allowance is insufficient',
           allowanceExhaustedDescription: 'Your message was saved, but the model could not complete a reply because this subscription period does not have enough available Tokens. Adjust the subscription allowance or model configuration, then reload the conversation before deciding whether to send again.',
           genericTitle: 'The message was not processed',
+          modelSelectionFailedTitle: 'Choose an available model',
+          modelSelectionFailedDescription: 'The selected model is unavailable or has changed. Choose an available model in Settings, then reload this conversation before sending again. The Agent did not start.',
           genericDescription: 'Reload the conversation to check its latest state before deciding whether to send again.',
           reload: 'Reload conversation',
           reloading: 'Reloading…'
@@ -1069,6 +1082,7 @@ const resources = {
           previewTitle: 'Full-size preview · {{name}}',
           closePreview: 'Close image preview',
           downloadImage: 'Download image',
+          addToMessage: 'Add to current message',
           downloadFile: 'Download file',
           closeDocumentPreview: 'Close report preview',
           loading: 'Loading…',
@@ -1934,6 +1948,7 @@ const resources = {
           fallbackTitle: 'Agent 请求执行编辑器操作：',
           accept: '接受'
         },
+        imageTool: { generate: '生成图片', edit: '编辑图片', prepare: '检查图片请求', running: '进行中', completed: '已完成', failed: '失败', incomplete: '未完成' },
         inputDock: {
           toolChoiceAuto: '自动',
           toolChoiceAutoTitle: 'Claude 自主决定是否调用工具',
@@ -1948,7 +1963,13 @@ const resources = {
           sendShortcut: 'Enter 发送 · Shift+Enter 换行',
           inputAria: '聊天输入',
           addAttachmentAria: '添加附件',
-          addAttachment: '+ 附件',
+          addAttachment: '+ 添加',
+          sketch: {
+            title: '绘制草图', uploadFile: '上传文件', tools: '绘图工具',
+            pen: '画笔', eraser: '橡皮', undo: '撤销', redo: '重做', clear: '清空',
+            canvas: '草图画布', return: '返回', add: '添加到消息', adding: '正在添加…',
+            filename: '草图.png', addFailed: '草图未能添加，绘制内容已保留，请重试。',
+          },
           toolAccessAria: '工具调用权限',
           toolModeAria: '工具调用模式',
           fullAccess: '完全访问',
@@ -2035,6 +2056,8 @@ const resources = {
           allowanceExhaustedTitle: '当前订阅周期 Token 不足',
           allowanceExhaustedDescription: '你的消息已经保存，但当前订阅周期没有足够的可用 Token，模型未能完成回复。请调整订阅额度或模型配置，然后重新加载对话，再决定是否重新发送。',
           genericTitle: '消息处理未完成',
+          modelSelectionFailedTitle: '请重新选择可用模型',
+          modelSelectionFailedDescription: '当前选择的模型不可用或已变更。请在设置中选择可用模型，然后重新加载此对话再发送。本次 Agent 尚未开始处理。',
           genericDescription: '请重新加载对话以确认最新状态，再决定是否重新发送。',
           reload: '重新加载对话',
           reloading: '正在重新加载…'
@@ -2149,6 +2172,7 @@ const resources = {
           previewTitle: '大图预览 · {{name}}',
           closePreview: '关闭图片预览',
           downloadImage: '下载图片',
+          addToMessage: '添加到当前消息',
           downloadFile: '下载文件',
           closeDocumentPreview: '关闭报告预览',
           loading: '正在加载…',

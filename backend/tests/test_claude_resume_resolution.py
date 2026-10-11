@@ -1,3 +1,4 @@
+# [Sync] 2026-10-12: verify SDK interrupt/context cleanup survives repeated cancellation without replay.
 # [Input] Production session probe and SDK adapter with isolated filesystem/client fixtures.
 # [Output] Verify identity/layout/access boundaries and connect-only bounded recovery.
 # [Pos] Provider-free resume regression tests; never touches business data.
@@ -216,3 +217,93 @@ class ResumeConnectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, ["one prompt"])
             self.assertIsNotNone(error)
             self.assertEqual(probes, 0)
+
+
+class SDKCancellationOwnershipTests(unittest.IsolatedAsyncioTestCase):
+    async def exercise(self, mode):
+        events = []
+        interrupt_entered, release_interrupt = asyncio.Event(), asyncio.Event()
+        disconnect_entered, release_disconnect = asyncio.Event(), asyncio.Event()
+        receiving = asyncio.Event()
+
+        class Client:
+            def __init__(self, options):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                events.append("disconnect")
+                disconnect_entered.set()
+                if mode == "disconnect":
+                    await release_disconnect.wait()
+                events.append("closed")
+            async def query(self, prompt):
+                events.append("query")
+            async def receive_response(self):
+                yield "first"
+                if mode == "normal":
+                    return
+                receiving.set()
+                await asyncio.Event().wait()
+            async def interrupt(self):
+                events.append("interrupt")
+                interrupt_entered.set()
+                if mode == "failure":
+                    raise RuntimeError("control unavailable")
+                if mode == "interrupt":
+                    await release_interrupt.wait()
+
+        options = SimpleNamespace(resume=None, cwd="/isolated", env={}, stderr=None)
+        with (
+            patch.object(adapter, "ClaudeSDKClient", Client),
+            patch.object(adapter, "apply_project_sdk_runtime_options", side_effect=lambda value: value),
+            patch.object(adapter, "ensure_claude_code_tmpdir"),
+            patch.object(adapter, "get_options_claude_tmp_workspace", return_value="/isolated"),
+        ):
+            sdk = adapter.SimpleClaudeAgentSDKClient()
+            stream = sdk.query_stream("one prompt", options)
+            self.assertEqual(await anext(stream), "first")
+            if mode == "normal":
+                with self.assertRaises(StopAsyncIteration):
+                    await anext(stream)
+            elif mode == "close":
+                await stream.aclose()
+            else:
+                task = asyncio.create_task(anext(stream))
+                await asyncio.wait_for(receiving.wait(), 1)
+                task.cancel()
+                await asyncio.wait_for(interrupt_entered.wait(), 1)
+                if mode == "interrupt":
+                    task.cancel()
+                    await asyncio.sleep(0)
+                    self.assertFalse(task.done())
+                    release_interrupt.set()
+                if mode == "disconnect":
+                    await asyncio.wait_for(disconnect_entered.wait(), 1)
+                    task.cancel()
+                    await asyncio.sleep(0)
+                    self.assertFalse(task.done())
+                    release_disconnect.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 1)
+            self.assertIsNone(sdk._active_client)
+            self.assertIsNone(options.stderr)
+        self.assertEqual(events.count("query"), 1)
+        self.assertEqual(events.count("disconnect"), 1)
+        self.assertEqual(events[-1], "closed")
+        self.assertEqual(events.count("interrupt"), 0 if mode == "normal" else 1)
+
+    async def test_normal_completion_does_not_interrupt(self):
+        await self.exercise("normal")
+
+    async def test_explicit_iterator_close_interrupts_before_disconnect(self):
+        await self.exercise("close")
+
+    async def test_repeated_cancel_during_interrupt_preserves_cleanup(self):
+        await self.exercise("interrupt")
+
+    async def test_repeated_cancel_during_disconnect_preserves_cleanup(self):
+        await self.exercise("disconnect")
+
+    async def test_interrupt_failure_still_disconnects_and_preserves_cancel(self):
+        await self.exercise("failure")

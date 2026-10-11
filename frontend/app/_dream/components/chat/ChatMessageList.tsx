@@ -1,3 +1,6 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+// [Sync] 2026-10-10: show explicit stale/conflicting model selection recovery before Agent execution.
+// [Sync] 2026-10-10: label the internal image tool by generate/edit intent, retaining ordinary tool states.
 // [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components; toolInputSummary helpers.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
 // [Sync] 2026-10-07: render successful scheduled-task markers even when the creating assistant envelope has no text part.
@@ -70,7 +73,7 @@ import ToolMessagePart from './ToolMessagePart';
 import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 import { isEditorWriteTool, parseEditorWriteResult } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
-import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
+import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation, imageToolAction } from './toolInputSummary';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
 import { readClaudeAgentErrorCode, readClaudeAgentErrorText } from '../../lib/claude-agent-transport';
@@ -87,6 +90,7 @@ import { decodeScheduledTaskMarker, type ScheduledTaskMarkerSnapshot } from './s
 interface ChatMessageListProps {
   messages: UIMessage[];
   threadId: string;
+  onAddImageMaterial?: (file: File) => void;
   isLoading: boolean;
   error?: Error | null;
   onReloadAfterError?: () => void | Promise<void>;
@@ -294,7 +298,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId, onOpenScheduledTask }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, onAddImageMaterial, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId, onOpenScheduledTask }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -312,6 +316,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   );
   const isGatewayAllowanceExhausted = (
     errorCode === 'GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED'
+  );
+  const isGatewayModelSelectionFailure = (
+    errorCode === 'GATEWAY_MODEL_SELECTION_STALE'
+    || errorCode === 'GATEWAY_MODEL_SELECTION_CONFLICT'
   );
   const dreamAutoRepairFailureText = isDreamAutoRepairFailure
     ? readClaudeAgentErrorText(error)
@@ -552,6 +560,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       text={part.text}
                       workspaceSessionId={threadId}
                       sourceLabel={autoRepairSourceLabel}
+                      onAddImageMaterial={readonly ? undefined : onAddImageMaterial}
                       leadingAction={index === sourceMessageIndex
                         && partIndex === message.parts.findIndex((candidate) => candidate.type === 'text' && Boolean(candidate.text))
                         ? <TaskSessionSourceMarker source={sourceThread ?? null} onNavigateThread={onNavigateThread} />
@@ -576,6 +585,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       setMessages={setMessages}
                       sendMessage={sendUserMessage}
                       workspaceSessionId={threadId}
+                      onAddImageMaterial={readonly ? undefined : onAddImageMaterial}
                       afterContent={partKind !== 'process' && partIndex === lastTextPartIndex
                         ? <>
                           {index === createdTaskMessageIndex
@@ -602,7 +612,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   'output' in toolPart ? toolPart.output : undefined,
                 ) : null;
                 if (scheduledTaskMarker) return null;
-                const displayTitle = title || toolName || getToolName(toolPart);
+                const imageAction = imageToolAction(toolName, readToolInput(toolPart));
+                const displayTitle = imageAction ? t(`chat.imageTool.${imageAction}`) : title || toolName || getToolName(toolPart);
                 const isBuiltInWrite = isBuiltInWriteTool(toolName);
                 const normalizedToolName = toolName.toLowerCase();
                 const isSubagentTool = normalizedToolName === 'agent' || normalizedToolName === 'task';
@@ -699,7 +710,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   );
                 }
 
-                if (isCompleted && outputText) {
+                if (isCompleted && outputText && !imageAction) {
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
                   const exitCodeNumber = exitCode != null ? Number(exitCode) : null;
                   const terminalToolInput = readToolInput(toolPart);
@@ -882,7 +893,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   ? 'dream-artifact-sync-failed'
                   : isGatewayAllowanceExhausted
                     ? 'gateway-token-allowance-exhausted'
-                    : 'generic'
+                    : isGatewayModelSelectionFailure
+                      ? 'gateway-model-selection-failed'
+                      : 'generic'
           }
           style={{
             alignSelf: 'flex-start',
@@ -907,7 +920,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                     ? 'chat.turnError.artifactSyncFailedTitle'
                     : isGatewayAllowanceExhausted
                       ? 'chat.turnError.allowanceExhaustedTitle'
-                      : 'chat.turnError.genericTitle',
+                      : isGatewayModelSelectionFailure
+                        ? 'chat.turnError.modelSelectionFailedTitle'
+                        : 'chat.turnError.genericTitle',
             )}
           </div>
           <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
@@ -920,7 +935,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                     ? 'chat.turnError.artifactSyncFailedDescription'
                     : isGatewayAllowanceExhausted
                       ? 'chat.turnError.allowanceExhaustedDescription'
-                      : 'chat.turnError.genericDescription',
+                      : isGatewayModelSelectionFailure
+                        ? 'chat.turnError.modelSelectionFailedDescription'
+                        : 'chat.turnError.genericDescription',
             )}
           </p>
           {onReloadAfterError ? (

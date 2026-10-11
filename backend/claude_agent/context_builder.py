@@ -1,3 +1,7 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
+# [Sync] 2026-10-10: define workspace URI paths relative to files/, avoiding duplicate or omitted namespace.
+# [Sync] 2026-10-10: carry server-bound uploaded image URI beside its visual content for imagegen edits.
 # [Sync] 2026-09-09: explain host-generated directory ZIP downloads to Agent replies.
 # [Sync] 2026-09-12: describe the literal ordinary-path ZIP boundary; hidden,
 #                    escaping, symlinked, and broad glob/root inputs stay out.
@@ -202,7 +206,8 @@ Principles:
 
 When a <workspace_context> block is present and your reply references a file generated
 or stored in the current Thread Workspace, use a Markdown target in this exact form:
-`workspace://files/<path-relative-to-the-current-thread-workspace>`.
+`workspace://files/<path-relative-to-the-files-directory>`.
+The URI maps to `files/<path>` inside the current Thread workspace.
 
 Example: `![Generated image](workspace://files/generated-image.png)`.
 
@@ -224,6 +229,29 @@ caller-selected executable path.
 Use paths relative to the current Thread Workspace root. Never expose a local absolute
 path, `file://` URL, container path, or plain relative path for a Workspace file the user
 must open from Chat. Do not emit `workspace://` when no <workspace_context> is present.
+
+## Image Model and Operation Ownership
+
+The AI model owns conversation understanding and replies. The separately saved Image
+model is used only by image_gen.imagegen (CLI name mcp__image_gen__imagegen).
+Call that tool only when the user explicitly asks to execute image_gen for generation
+or editing. Discussing its name, quoting it, or asking what it does must not call it.
+Uploaded images and sketches are message material, never an image operation by themselves.
+Ordinary image generation or editing requests must use the AI model's supported built-in
+Responses capability. When select_image_operation is available, use it to record the
+current user's intended operation and current message image references before any image
+execution. After native_generate or native_edit, continue the conversation to receive
+the server result; never call imagegen. After an explicit image_gen selection, call
+imagegen with exactly the selected prompt and references. A none or unclear decision
+starts no image operation; reply or explain the missing operation/material.
+If selection or execution reports an unavailable capability, explain its recovery
+action. If the selection tool is absent, image execution is unavailable in this turn.
+Do not switch models, call image_gen, use Bash or another service as a substitute, or
+claim an image was generated. The user can select a capable AI model in Settings, or
+select an Image model and send a new explicit image_gen request. Workspace Mode and
+server image capability/permissions are required; never enable or bypass them yourself.
+Never call both image paths for one request. Keep completed image file references in
+the original conversation and use the existing image viewer and download flow.
 
 {configurable_system_prompt_block}\
 ## Planning Prompt Optimization Workflow
@@ -475,6 +503,9 @@ class ClaudeAgentContextBuilder:
                                 },
                             }
                         )
+                        reference = getattr(attachment, "id", None)
+                        if isinstance(reference, str) and reference.startswith("workspace://files/"):
+                            blocks.append({"type": "text", "text": f"Reference image for editing: {reference}"})
                     else:
                         logger.warning("Cannot process file: %s", name)
                 except Exception as exc:  # noqa: BLE001

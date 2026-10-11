@@ -1,3 +1,4 @@
+// [Sync] 2026-10-10: independent Image model selection and endpoint-specific capability/eligibility with explicit recovery.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] System config API, shared Browser session/header owner, dashboard design tokens.
@@ -39,6 +40,7 @@ import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/sys
 import { API_BASE } from '../../lib/apiBase';
 import {
   fetchGatewayModels,
+  imageModelAvailabilityMessage,
   gatewayModelsErrorMessage,
   resolveGatewayModelSelection,
   type GatewayModel,
@@ -52,6 +54,7 @@ interface EnvVar {
 
 interface SystemConfigData {
   model?: string;
+  image_model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
   sandbox_network_mode?: SandboxNetworkMode;
@@ -127,6 +130,7 @@ function readSystemConfigResponse(payload: SystemConfigResponse): SystemConfigDa
 function hasSystemConfigFields(config: SystemConfigData): boolean {
   return Boolean(
     config.model !== undefined
+    || config.image_model !== undefined
     || config.system_prompt !== undefined
     || config.workspace_enabled !== undefined
     || config.sandbox_network_mode !== undefined
@@ -134,6 +138,44 @@ function hasSystemConfigFields(config: SystemConfigData): boolean {
     || config.sandbox_fs_allowed_write_paths !== undefined
     || config.im_full_access_enabled !== undefined
     || config.env_vars !== undefined
+  );
+}
+
+function ModelChoices({ models, selected, kind, disabled, defaultAlias, onChange }: {
+  models: GatewayModel[]; selected: string; kind: 'ai' | 'image'; disabled: boolean;
+  defaultAlias?: string | null; onChange: (alias: string) => void;
+}) {
+  return (
+    <fieldset disabled={disabled} style={{ width: 'min(100%, 36rem)', margin: 0, padding: 0, border: 0 }}>
+      <legend style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}>
+        {kind === 'ai' ? '选择 AI 模型' : '选择 Image 模型'}
+      </legend>
+      <div style={{ display: 'grid', gap: '0.5rem' }}>
+        {models.map(option => {
+          const callable = kind === 'ai' ? option.callable : option.images?.callable === true;
+          const capability = kind === 'ai' ? option.responsesImage : option.images;
+          const availabilityLabel = kind === 'image' ? imageModelAvailabilityMessage(option)
+            : callable ? (defaultAlias === option.modelAlias ? '推荐' : null)
+              : option.availability === 'upgrade_required' ? `需要 ${option.requiredPlanCode ?? '更高'} 套餐`
+                : option.availability === 'allowance_exhausted' ? '额度已用完' : '暂不可用';
+          const checked = selected === option.modelAlias;
+          return (
+            <label key={option.modelAlias} style={{ display: 'flex', minHeight: '2.9rem', alignItems: 'center', gap: '0.7rem', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${checked ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`, background: checked ? 'var(--color-bg-hover)' : 'transparent', opacity: callable ? 1 : 0.6, cursor: callable ? 'pointer' : 'not-allowed' }}>
+              <input type="radio" name={kind === 'ai' ? 'platform-model' : 'image-model'} value={option.modelAlias} checked={checked} disabled={!callable || disabled} onChange={() => onChange(option.modelAlias)} />
+              <span style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <strong style={{ color: 'var(--color-text-primary)', fontSize: '0.84rem' }}>{option.displayName}</strong>
+                {(capability?.generation || capability?.edit) ? <span style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
+                  {capability.generation ? <span>{kind === 'ai' ? '图片生成' : '生成'}</span> : null}
+                  {capability.edit ? <span>{kind === 'ai' ? '图片编辑' : '编辑'}</span> : null}
+                  {kind === 'ai' && !capability.callable ? <span>图片操作暂不可用</span> : null}
+                </span> : null}
+                {availabilityLabel ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>{availabilityLabel}</span> : null}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }
 
@@ -153,6 +195,11 @@ export default function ModelConfigSection() {
   const [sandboxFsNewPath, setSandboxFsNewPath] = useState('');
   const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('');
+  const [selectedImageModel, setSelectedImageModel] = useState('');
+  const [imageModelOptions, setImageModelOptions] = useState<GatewayModel[]>([]);
+  const [imageModelStatus, setImageModelStatus] = useState<string | null>(null);
+  const [configReadError, setConfigReadError] = useState<string | null>(null);
+  const [modelSaveUnconfirmed, setModelSaveUnconfirmed] = useState(false);
   const [modelOptions, setModelOptions] = useState<GatewayModel[]>([]);
   const [defaultModelAlias, setDefaultModelAlias] = useState<string | null>(null);
   const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
@@ -168,6 +215,7 @@ export default function ModelConfigSection() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    setConfigLoading(true);
     void (async () => {
       const configRequest = fetch(`${API_BASE}/api/system-config`, {
         headers: { ...browserRequestHeaders() },
@@ -179,15 +227,24 @@ export default function ModelConfigSection() {
         if (!active) return;
         if (modelsResult.status === 'fulfilled') {
           setModelOptions(modelsResult.value.models);
+          setImageModelOptions(modelsResult.value.imageModels);
           setDefaultModelAlias(modelsResult.value.defaultModelAlias);
           setModelCatalogError(null);
         } else if (modelsResult.reason?.name !== 'AbortError') {
           setModelCatalogError(gatewayModelsErrorMessage(modelsResult.reason));
         }
-        if (configResult.status !== 'fulfilled' || !configResult.value.ok) return;
+        if (configResult.status !== 'fulfilled' || !configResult.value.ok) {
+          setConfigReadError('模型设置读取失败，请重新加载后再选择。');
+          return;
+        }
         const payload = (await configResult.value.json()) as SystemConfigResponse;
         const config = readSystemConfigResponse(payload);
         if (!active) return;
+        setConfigReadError(null);
+        setModelSaveUnconfirmed(false);
+        setModelStatus(null);
+        setImageModelStatus(null);
+        setSelectedImageModel(config.image_model ?? '');
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
         setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');
@@ -207,7 +264,7 @@ export default function ModelConfigSection() {
         setEnvVarsDirty(false);
       } catch (error) {
         if ((error as { name?: string }).name !== 'AbortError') {
-          setModelCatalogError(gatewayModelsErrorMessage(error));
+          setConfigReadError('模型设置读取失败，请重新加载后再选择。');
         }
       } finally {
         if (active) setConfigLoading(false);
@@ -242,6 +299,7 @@ export default function ModelConfigSection() {
       setModelStatus(target?.upgradeHint ?? '此模型当前不可调用，请查看所需套餐或稍后重试。');
       return;
     }
+    if (configLoading || configReadError || modelCatalogError || modelSaveUnconfirmed || saving) return;
     const previous = selectedModel;
     setSelectedModel(value);
     setModelStatus('正在保存平台模型…');
@@ -255,10 +313,12 @@ export default function ModelConfigSection() {
         });
         if (response.ok) {
           const payload = (await response.json().catch(() => null)) as SystemConfigResponse | null;
-          const savedConfig = payload ? readSystemConfigResponse(payload) : { model: value };
-          setSelectedModel(savedConfig.model ?? value);
-          setModelStatus('模型已保存，将用于新对话。');
-          return;
+          const savedConfig = payload ? readSystemConfigResponse(payload) : null;
+          if (savedConfig?.model === value) {
+            setSelectedModel(savedConfig.model);
+            setModelStatus('模型已保存，将用于新对话。');
+            return;
+          }
         }
         setSelectedModel(previous);
         if (response.status === 403) {
@@ -267,16 +327,54 @@ export default function ModelConfigSection() {
           setModelStatus('模型状态已变化，请重新选择。');
           setModelLoadNonce((nonce) => nonce + 1);
         } else {
-          setModelStatus('模型保存失败，请重试。');
+          setModelStatus('模型保存结果未确认，请重新加载设置核对。');
+          setModelSaveUnconfirmed(true);
         }
       } catch {
         setSelectedModel(previous);
-        setModelStatus('网络连接失败，请稍后重试。');
+        setModelStatus('网络连接失败，模型保存结果未确认，请重新加载设置核对。');
+        setModelSaveUnconfirmed(true);
       } finally {
         setSaving(false);
       }
     })();
-  }, [modelOptions, selectedModel]);
+  }, [modelOptions, selectedModel, configLoading, configReadError, modelCatalogError, modelSaveUnconfirmed, saving]);
+
+  const handleImageModelChange = useCallback((value: string) => {
+    const target = imageModelOptions.find(option => option.modelAlias === value);
+    if (!target?.images?.callable || saving || configLoading || configReadError || modelCatalogError || modelSaveUnconfirmed) return;
+    const previous = selectedImageModel;
+    setSelectedImageModel(value);
+    setImageModelStatus('正在保存 Image 模型…');
+    setSaving(true);
+    void (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
+          body: JSON.stringify({ image_model: value }),
+        });
+        const payload = response.ok ? await response.json().catch(() => null) as SystemConfigResponse | null : null;
+        const savedConfig = payload ? readSystemConfigResponse(payload) : null;
+        if (response.ok && savedConfig?.image_model === value) {
+          setSelectedImageModel(value);
+          setImageModelStatus('Image 模型已保存，仅用于后续 image_gen 工具调用。');
+          return;
+        }
+        setSelectedImageModel(previous);
+        setImageModelStatus(response.status === 403 ? 'Image 模型当前不可调用，请重新加载后选择其他模型。'
+          : response.status === 409 ? 'Image 模型状态已变化，请重新加载后选择。'
+            : 'Image 模型保存结果未确认，请重新加载设置核对。');
+        if (response.status === 403 || response.status === 409) setModelLoadNonce(nonce => nonce + 1);
+        else setModelSaveUnconfirmed(true);
+      } catch {
+        setSelectedImageModel(previous);
+        setImageModelStatus('网络连接失败，Image 模型保存结果未确认，请重新加载设置核对。');
+        setModelSaveUnconfirmed(true);
+      } finally {
+        setSaving(false);
+      }
+    })();
+  }, [imageModelOptions, selectedImageModel, saving, configLoading, configReadError, modelCatalogError, modelSaveUnconfirmed]);
 
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
@@ -510,6 +608,12 @@ export default function ModelConfigSection() {
         <p style={{ margin: '-0.35rem 0 0.85rem', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
           选择新对话使用的模型。
         </p>
+        {configReadError ? <div role="alert">
+          <p>{configReadError}</p>
+          <button type="button" onClick={() => setModelLoadNonce(value => value + 1)}>重新加载设置</button>
+        </div> : null}
+        {modelSaveUnconfirmed && !configReadError ? <button type="button" disabled={saving}
+          onClick={() => setModelLoadNonce(value => value + 1)}>重新加载设置</button> : null}
         {modelCatalogError ? (
           <div role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
             <p>
@@ -535,32 +639,27 @@ export default function ModelConfigSection() {
                 当前没有可调用模型。<a href="/story-workspace/subscription#subscription-plans">查看 Token 额度与订阅状态</a>
               </p>
             ) : null}
-            <fieldset disabled={saving} style={{ width: 'min(100%, 36rem)', margin: 0, padding: 0, border: 0 }}>
-              <legend style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}>选择 AI 模型</legend>
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                {modelOptions.map((option) => {
-                  const availabilityLabel = option.callable
-                    ? defaultModelAlias === option.modelAlias ? '推荐' : null
-                    : option.availability === 'upgrade_required'
-                      ? `需要 ${option.requiredPlanCode ?? '更高'} 套餐`
-                      : option.availability === 'allowance_exhausted'
-                        ? '额度已用完'
-                        : '暂不可用';
-                  const selected = selectedModel === option.modelAlias;
-                  return (
-                    <label key={option.modelAlias} style={{ display: 'flex', minHeight: '2.9rem', alignItems: 'center', gap: '0.7rem', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${selected ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`, background: selected ? 'var(--color-bg-hover)' : 'transparent', opacity: option.callable ? 1 : 0.6, cursor: option.callable ? 'pointer' : 'not-allowed' }}>
-                      <input type="radio" name="platform-model" value={option.modelAlias} checked={selected} disabled={!option.callable || saving} onChange={() => handleModelChange(option.modelAlias)} />
-                      <strong style={{ minWidth: 0, flex: '1 1 auto', color: 'var(--color-text-primary)', fontSize: '0.84rem' }}>{option.displayName}</strong>
-                      {availabilityLabel ? <span style={{ flex: '0 0 auto', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>{availabilityLabel}</span> : null}
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
+            <ModelChoices models={modelOptions} selected={selectedModel} kind="ai"
+              disabled={saving || configLoading || !!configReadError || !!modelCatalogError || modelSaveUnconfirmed}
+              defaultAlias={defaultModelAlias} onChange={handleModelChange} />
             {modelStatus ? <p aria-live="polite" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelStatus}</p> : null}
           </>
         )}
       </div>
+
+      <section aria-label="Image 模型">
+        <p style={{ margin: '0 0 0.65rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Image 模型</p>
+        <p style={{ margin: '0 0 0.85rem', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+          仅用于明确要求 image_gen 工具的图片生成和编辑。
+        </p>
+        {!selectedImageModel && !configReadError && !configLoading ? <p>未选择 Image 模型。请选择后再使用 image_gen。</p> : null}
+        {selectedImageModel && !imageModelOptions.some(option => option.modelAlias === selectedImageModel) && !modelCatalogError && !configLoading ?
+          <p role="alert">已保存的 Image 模型 {selectedImageModel} 已停用或不再提供图片能力。请选择新的可调用模型。</p> : null}
+        {!imageModelOptions.length && !modelCatalogError && !configLoading ? <p role="status">平台尚未发布可展示的 Image 模型。</p> : null}
+        <ModelChoices models={imageModelOptions} selected={selectedImageModel} kind="image"
+          disabled={saving || configLoading || !!configReadError || !!modelCatalogError || modelSaveUnconfirmed} onChange={handleImageModelChange} />
+        {imageModelStatus ? <p aria-live="polite">{imageModelStatus}</p> : null}
+      </section>
 
       {/* System Prompt */}
       <div>

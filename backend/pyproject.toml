@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: Pillow validates actual generated/reference image decoding.
 # [Input] Dream backend project metadata and exact Python dependency contract.
 # [Output] Backend package identity and uv dependency resolution input.
 # [Pos] Canonical backend project manifest; exported requirements and uv.lock must agree.
@@ -24,6 +25,7 @@ dependencies = [
   "PyJWT>=2,<3",
   "pydantic>=2.5,<3",
   "requests>=2.31,<3",
+  "pillow>=11,<13",
   "beautifulsoup4>=4.12,<5",
   "rich>=13,<15",
   "tqdm>=4.65,<5",

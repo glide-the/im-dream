@@ -1,3 +1,5 @@
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+// [Sync] 2026-10-11: fit the add-material text action without changing image upload or send behavior.
 // [Input] Parsed workspace:// URI, current Chat Thread identity, Workspace Mode state, runtime API base, and bearer auth token.
 // [Output] Thread-bound image/report previews and explicit binary downloads with abortable authenticated reads and stable fail-closed states.
 // [Pos] workspace file Markdown reference component in frontend/app/_dream/components/chat
@@ -29,7 +31,7 @@ type WorkspaceAvailability = 'loading' | 'enabled' | 'disabled';
 
 type ImageState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'success'; readonly objectUrl: string; readonly uri: string; readonly threadId: string }
+  | { readonly kind: 'success'; readonly objectUrl: string; readonly blob: Blob; readonly uri: string; readonly threadId: string }
   | { readonly kind: 'error'; readonly failure: WorkspaceFileRequestFailure };
 
 interface PreviewIdentity {
@@ -46,6 +48,7 @@ interface WorkspaceReferenceProps {
 interface WorkspaceImageProps extends WorkspaceReferenceProps {
   readonly alt?: string;
   readonly linkLabel?: ReactNode;
+  readonly onAddImageMaterial?: (file: File) => void;
 }
 
 interface WorkspaceLinkProps extends WorkspaceReferenceProps {
@@ -237,6 +240,7 @@ export function WorkspaceImage({
   workspaceAvailability,
   alt = '',
   linkLabel,
+  onAddImageMaterial,
 }: WorkspaceImageProps) {
   const { t } = useTranslation();
   const parsed = useMemo(() => parseWorkspaceUri(uri), [uri]);
@@ -263,7 +267,7 @@ export function WorkspaceImage({
         const blob = await fetchWorkspaceImageBlob(parsed, threadId, abort.signal);
         if (abort.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
-        setState({ kind: 'success', objectUrl, uri, threadId });
+        setState({ kind: 'success', objectUrl, blob, uri, threadId });
       } catch (reason) {
         if (abort.signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError')) return;
         setState({
@@ -347,6 +351,10 @@ export function WorkspaceImage({
         <span className="markdown-media-block" data-markdown-media-kind="workspace-image">
           <span className="markdown-media-block__toolbar">
             <span className="markdown-media-block__label">{previewName}</span>
+            {onAddImageMaterial ? <button type="button" className="markdown-media-block__action workspace-image-reference__add-material"
+              onClick={() => onAddImageMaterial(new File([state.blob], parsed.ok ? parsed.fileName : 'image.png', { type: state.blob.type }))}>
+              {t('chat.workspaceFile.addToMessage')}
+            </button> : null}
             <button
               type="button"
               className="markdown-media-block__action"
