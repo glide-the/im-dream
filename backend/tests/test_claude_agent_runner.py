@@ -1,3 +1,4 @@
+# [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
 # [Sync] 2026-10-07: verify exact scheduled auto/manual overrides, strict unresolved denial and unattended network failure markers.
 # [Sync] 2026-09-28: verify Auto/full-access Thread orchestration without duplicate confirmation; manual mode still confirms.
 # [Sync] 2026-09-28: verify create/list/read/send/wait Thread registration and legacy task_session_* permission removal.
@@ -808,6 +809,50 @@ class TestClaudeAgentRunnerStreamEvent(_RunnerBase):
     Original Pawkeyland agent_runner.py uses include_partial_messages=True by
     default, so text_delta StreamEvents are the primary text dispatch path.
     """
+
+    async def test_original_compact_completion_without_stream_reaches_text_callbacks(self):
+        for text in ("Compacted", "Compacted (show summary)\nHook completion\nTip"):
+            with self.subTest(text=text):
+                synthetic = AssistantMessage([_text_block(text)])
+                synthetic.model = "<synthetic>"
+                self.set_query([synthetic])
+                received: list[str] = []
+                completed: list[str] = []
+                result = await self.make_runner().run_streaming(
+                    opts=AgentRunOptions(thread_id="compact-feedback", user_message="/compact", tool_choice="none"),
+                    callbacks=AgentStreamingCallbacks(
+                        on_text_delta=received.append,
+                        on_text_done=completed.append,
+                    ),
+                )
+                self.assertTrue(result.success)
+                self.assertEqual(received, [text])
+                self.assertEqual(completed, [text])
+
+    async def test_compact_wording_does_not_repeat_network_snapshots(self):
+        snapshot = AssistantMessage([_text_block("Compacted")])
+        snapshot.model = "ordinary-model"
+        self.set_query([_text_delta_event("Compacted"), snapshot])
+        received: list[str] = []
+        result = await self.make_runner().run_streaming(
+            opts=AgentRunOptions(thread_id="compact-network", user_message="reply", tool_choice="none"),
+            callbacks=AgentStreamingCallbacks(on_text_delta=received.append),
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(received, ["Compacted"])
+
+    async def test_other_synthetic_text_does_not_bypass_partial_mode(self):
+        for text in ("CompactedSomething", "Compaction canceled.", "Other local output"):
+            with self.subTest(text=text):
+                snapshot = AssistantMessage([_text_block(text)])
+                snapshot.model = "<synthetic>"
+                self.set_query([snapshot])
+                received: list[str] = []
+                await self.make_runner().run_streaming(
+                    opts=AgentRunOptions(thread_id="compact-other", user_message="/other", tool_choice="none"),
+                    callbacks=AgentStreamingCallbacks(on_text_delta=received.append),
+                )
+                self.assertEqual(received, [])
 
     async def test_stream_event_text_delta_is_dispatched(self):
         """Runner dispatches on_text_delta from StreamEvent content_block_delta.

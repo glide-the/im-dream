@@ -1,3 +1,4 @@
+# [Sync] 2026-10-11: project only original synthetic compact completion through the existing text path in partial mode.
 # [Sync] 2026-10-07: apply exact per-tool auto/manual overrides after safety guards and record unattended denials across SDK hook threads.
 # [Sync] 2026-09-28: auto-allow authorized Thread orchestration in Auto/full-access mode; manual mode still confirms.
 # [Sync] 2026-09-28: register create/list/read/send Thread Tools and remove task_session_* permissions.
@@ -2966,6 +2967,14 @@ def _block_type(block: Any) -> Optional[str]:
     return None
 
 
+def _is_compact_completion(message: AssistantMessage, text: Any) -> bool:
+    """Recognize the original CLI's full local-command completion, without a stream."""
+    if getattr(message, "model", None) != "<synthetic>" or not isinstance(text, str):
+        return False
+    normalized = text.strip()
+    return normalized == "Compacted" or normalized.startswith("Compacted ")
+
+
 def _assistant_message_error_detail(message: AssistantMessage) -> str:
     """Extract the provider's human-readable detail from a terminal error."""
 
@@ -4307,11 +4316,11 @@ class ClaudeAgentRunner:
                     block_type = _block_type(block)
 
                     if block_type == "text":
-                        # When include_partial_messages is on, text was already
-                        # delivered via stream_event text_deltas — skip to avoid
-                        # duplicating output.
-                        if not include_partial_messages:
-                            text = _block_value(block, "text", "")
+                        # Network text snapshots follow their existing deltas.
+                        # The original CLI's local compact completion has no
+                        # stream_event and must use this existing text path.
+                        text = _block_value(block, "text", "")
+                        if not include_partial_messages or _is_compact_completion(message, text):
                             if isinstance(text, str):
                                 on_text_accumulate(text)
                                 await _call(callbacks.on_text_delta, text)
@@ -4343,7 +4352,7 @@ class ClaudeAgentRunner:
                                 )
 
             elif isinstance(content, str):
-                if not include_partial_messages:
+                if not include_partial_messages or _is_compact_completion(message, content):
                     on_text_accumulate(content)
                     await _call(callbacks.on_text_delta, content)
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume backend/.env, HTTP requests, Admin auth/data clients, and runtime config.
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
@@ -41,6 +42,7 @@
 # [Sync] 2026-09-15: compose the Registry99 frozen Reflections operations into the sole Admin request owner.
 # [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
 # [Sync] 2026-09-15: startup identity now expects Runtime 0.1.10.
+# [Sync] 2026-10-11: startup identity consumes the exact Runtime 0.1.11 pin.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    Admin API sink, and publisher lifecycle.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox

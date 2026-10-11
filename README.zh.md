@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: 根工作合同统一为 AGENTS.md，移除 Agent.md 引用。 -->
 <!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
 <!-- [Input] Notion 项目定位、现行业务设计与 PRD、前端功能、包清单与环境模板。 -->
@@ -150,7 +151,7 @@ pnpm local:stable
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
-npm install --global @glide-the/ink-claude-code-dream@0.1.10
+npm install --global @glide-the/ink-claude-code-dream@0.1.12
 npm install --global ntn@0.15.1
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -213,7 +214,7 @@ Dream 地址为 [Dream](http://localhost:5173)，Admin 地址为 [Admin](http://
 | Dream metadata | backend `0.1.4`、frontend `0.0.4`、API schema `2.0.0` |
 | Next.js / React | `16.1.6` / `19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.10` |
+| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.12` |
 | Runtime compatibility | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | 认证、PostgreSQL、Drizzle、Gateway、计费 | Admin 仓库 |
@@ -235,7 +236,7 @@ NODE_ENV=production corepack pnpm --dir frontend build
 # Published SDK/Runtime identity
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.145 \
-  --runtime-version 0.1.10 \
+  --runtime-version 0.1.12 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -247,7 +248,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - **Unable to check your session：** 验证两个 WebUI 映射，先检查 Admin，并确认 issuer、Dream origin/resource 与 callback 都来自当前实例。
 - **日记检索返回 `session_projection_unavailable` / `ADMIN_RESPONSE_INVALID`：** 元数据读取成功而正文读取失败时，应先核对服务器响应容量，不能仅凭错误码判断字段不匹配。后端模板显式设置 `INK_ADMIN_DREAM_MAX_RESPONSE_BYTES=16777216`（16 MiB）；未配置这个可选项时，代码仍采用 1 MiB。Admin HTTP 与私有 Session broker 共用这一字节上限。全文读取发生在 fuzzy 排序和 `limit` 之前，因此较小的结果数量限制不会减少输入正文。已有后端配置需要明确设置容量，并由进程所有者重启后端；后续 turn 才会取得新的 broker 上限。严格响应结构及请求编号校验保持生效。见[日记检索修复回执](docs/exec/agent-diary-retrieval-capacity-repair-20261006.md)。
 - **`ADMIN_SERVICE_AUTH_UNAVAILABLE` 或 `ADMIN_TIMEOUT`：** 先验证 Admin 与 PostgreSQL，再重启 Dream；Dream 不得回退数据库连接。
-- **Runtime 未通过 production qualification：** 核对 `command -v ink-claude-code-dream`、package-root `cli.js`、相邻 manifest、Runtime `0.1.10`、compatibility `2.1.241` 与必需 capability。
+- **Runtime 未通过 production qualification：** 核对 `command -v ink-claude-code-dream`、package-root `cli.js`、相邻 manifest、Runtime `0.1.12`、compatibility `2.1.241` 与必需 capability。
 - **`uv sync` 删除 pytest：** 使用上面的临时 `uv run --with pytest...` 命令，或单独评审开发依赖。
 - **Chat 提示 Token allowance 不足：** Gateway 拒绝模型 reservation 前，用户消息已保存。先在 Admin 修正订阅/模型额度，重新加载 Thread 后再决定是否发送。
 - **Chat 提示消息队列不可用：** 检查目标 Admin PostgreSQL 是否存在 `chat_input_queue`、`chat_task_session` 及 `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` schema capability。Admin Drizzle 迁移 0064–0066 提供这些能力；获准将迁移应用到目标数据库前，Dream 会保留草稿并拒绝排队。隔离数据库中的 provider-free 测试通过不代表正常业务数据库可用。

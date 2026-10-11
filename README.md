@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: replace root Agent.md references with the sole AGENTS.md work contract. -->
 <!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
 <!-- [Input] Notion product positioning, current business designs and PRDs, frontend features, manifests and environment templates. -->
@@ -150,7 +151,7 @@ Install Dream and the exact native Runtime:
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
-npm install --global @glide-the/ink-claude-code-dream@0.1.10
+npm install --global @glide-the/ink-claude-code-dream@0.1.12
 npm install --global ntn@0.15.1
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -213,7 +214,7 @@ Open Dream at [Dream](http://localhost:5173) and Admin at [Admin](http://localho
 | Dream metadata | backend `0.1.4`, frontend `0.0.4`, API schema `2.0.0` |
 | Next.js / React | `16.1.6` / `19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.10` |
+| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.12` |
 | Runtime compatibility | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | Auth, PostgreSQL, Drizzle, Gateway, billing | Admin repository |
@@ -235,7 +236,7 @@ NODE_ENV=production corepack pnpm --dir frontend build
 # Published SDK/Runtime identity
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.145 \
-  --runtime-version 0.1.10 \
+  --runtime-version 0.1.12 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -247,7 +248,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 - **Unable to check your session:** verify both WebUI mappings, Admin first, and confirm the projected issuer, Dream origin/resource and callback all came from the current instance.
 - **Diary retrieval returns `session_projection_unavailable` / `ADMIN_RESPONSE_INVALID`:** if metadata reads succeed while full-text reads fail, check the server response budget before assuming a DTO mismatch. The backend template sets `INK_ADMIN_DREAM_MAX_RESPONSE_BYTES=16777216` (16 MiB); the code fallback remains 1 MiB when this optional setting is omitted. Admin HTTP and the private Session broker share this bound. Full text is read before fuzzy ranking and `limit`, so a small result limit does not reduce the incoming payload. Existing backend env files need an explicit budget and a restart of the owned backend process; new turns then receive the new broker bound. Strict response/request-ID checks remain enforced. See the [retrieval repair receipt](docs/exec/agent-diary-retrieval-capacity-repair-20261006.md).
 - **`ADMIN_SERVICE_AUTH_UNAVAILABLE` or `ADMIN_TIMEOUT`:** verify Admin and its PostgreSQL before restarting Dream. Dream must not fall back to a database connection.
-- **Runtime is not production-qualified:** verify `command -v ink-claude-code-dream`, the package-root `cli.js`, adjacent manifest, Runtime `0.1.10`, compatibility `2.1.241`, and required capabilities.
+- **Runtime is not production-qualified:** verify `command -v ink-claude-code-dream`, the package-root `cli.js`, adjacent manifest, Runtime `0.1.12`, compatibility `2.1.241`, and required capabilities.
 - **`uv sync` removed pytest:** use the ephemeral `uv run --with pytest...` command above or add a reviewed development dependency.
 - **Chat reports insufficient Token allowance:** the user message is saved before Gateway rejects the model reservation. Fix the subscription/model allowance in Admin, reload the Thread, then decide whether to send again.
 - **Chat says the message queue is unavailable:** check the target Admin PostgreSQL for `chat_input_queue`, `chat_task_session`, and `dream.chat-input-queue.v1` / `dream.chat-task-session.v2` schema capabilities. Admin Drizzle migrations 0064–0066 supply them; until the approved Admin migration is applied, Dream retains the draft and refuses queued input. Provider-free tests against an isolated database do not qualify the normal business database.
