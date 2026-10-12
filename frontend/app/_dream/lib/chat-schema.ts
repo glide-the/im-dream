@@ -1,3 +1,5 @@
+// [Sync] 2026-10-12: type closed server-owned contextUsage alongside compaction state.
+// [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Input] Consume AI SDK message and usage types for chat request/metadata contracts.
 // [Output] Define frontend chat transport request body, attachment, model, tool, and metadata types.
 // [Pos] chat-schema type node in frontend/app/_dream/lib
@@ -9,6 +11,7 @@
 //                    used by the shared historical assistant turn projector.
 // [Sync] 2026-09-02: type read-only final projection flags used to defer process hydration.
 import type { LanguageModelUsage, UIMessage } from 'ai';
+import type { ContextCompactionSnapshot, ContextUsageSnapshot } from './context-compaction';
 
 export type ChatAttachment = {
   type: 'file' | 'source-url';
@@ -75,6 +78,9 @@ export type ChatMetadata = {
   turnProjectionInvalid?: boolean;
   historyProjectionVersion?: 1;
   historyProcessAvailable?: boolean;
+  contextCompactions?: ContextCompactionSnapshot[];
+  contextUsage?: ContextUsageSnapshot;
+  compactCompletionText?: string;
   projectCleanup?: {
     trustedProjectSlug: string;
     staleProjectSlugs: string[];

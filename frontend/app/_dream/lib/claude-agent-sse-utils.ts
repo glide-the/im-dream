@@ -1,7 +1,9 @@
+// [Sync] 2026-10-12: replay context-use snapshots and explicit invalidation through the original reducer.
 /**
  * [Input]  Pawkeyland-aligned Claude Agent SSE event shapes.
  * [Output] parse/coalesce helpers, applyBackendEventToMessages, consumeClaudeAgentSseStream.
  * [Pos]    shared SSE helpers in frontend/app/_dream/lib
+ * [Sync]   2026-10-12: retain validated compaction snapshots through the original reconnect reducer.
  * [Sync]   2026-06-09: extracted from claude-agent-transport for thread SSE reconnect.
  * [Sync]   2026-06-09: add consumeClaudeAgentSseStream with incremental frame buffering.
  * [Sync]   2026-06-12: emit AI SDK 6 dynamic-tool and reasoning parts during reconnect replay.
@@ -26,6 +28,7 @@
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
+import { projectContextCompactionMetadata } from './context-compaction';
 
 export type BackendEvent = {
   type: string;
@@ -358,6 +361,7 @@ export function applyBackendEventToMessages(
             ? target.metadata as Record<string, unknown>
             : {}),
           ...(turnId ? { turnId } : {}),
+          ...projectContextCompactionMetadata(event),
         },
       };
       return base;

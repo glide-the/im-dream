@@ -1,3 +1,5 @@
+// [Sync] 2026-10-12: localize builtin compact usage and unavailable feedback.
+// [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-11: distinguish image operation failure, completion and interrupted history in both languages.
 // [Sync] 2026-10-10: localize pre-SSE model-selection failure and manual Settings recovery.
 // [Sync] 2026-10-10: localize image tool actions through the existing chat process rows.
@@ -678,6 +680,14 @@ const resources = {
           deleteThread: 'Delete conversation',
           close: 'Close'
         },
+        contextCompaction: {
+          running: 'Compacting context',
+          completed: 'Context compacted',
+          automaticCompleted: 'Context automatically compacted',
+          cancelled: 'Context compaction cancelled',
+          failed: 'Context compaction did not complete',
+          unconfirmed: 'Context compaction completion not confirmed'
+        },
         historyTurn: {
           loading: 'Loading conversation…',
           duration: 'Took {{duration}}',
@@ -857,6 +867,10 @@ const resources = {
         },
         imageTool: { generate: 'Generate image', edit: 'Edit image', prepare: 'Check image request', running: 'In progress', completed: 'Completed', failed: 'Failed', incomplete: 'Not completed' },
         inputDock: {
+          commandMenu: 'Chat commands',
+          compactDescription: 'Compact this conversation’s context',
+          contextUnavailable: 'Usage unavailable',
+          contextUsed: '{{percent}}% used',
           toolChoiceAuto: 'Auto',
           toolChoiceAutoTitle: 'Claude decides when to call tools',
           toolChoiceManual: 'Confirm each step',
@@ -1771,6 +1785,14 @@ const resources = {
           deleteThread: '删除对话',
           close: '关闭'
         },
+        contextCompaction: {
+          running: '正在压缩上下文',
+          completed: '上下文已压缩',
+          automaticCompleted: '上下文已自动压缩',
+          cancelled: '上下文压缩已取消',
+          failed: '上下文压缩未完成',
+          unconfirmed: '未确认上下文压缩完成'
+        },
         historyTurn: {
           loading: '正在加载对话…',
           duration: '用时 {{duration}}',
@@ -1950,6 +1972,10 @@ const resources = {
         },
         imageTool: { generate: '生成图片', edit: '编辑图片', prepare: '检查图片请求', running: '进行中', completed: '已完成', failed: '失败', incomplete: '未完成' },
         inputDock: {
+          commandMenu: '聊天指令',
+          compactDescription: '压缩此聊天的上下文',
+          contextUnavailable: '使用情况暂不可用',
+          contextUsed: '已使用 {{percent}}%',
           toolChoiceAuto: '自动',
           toolChoiceAutoTitle: 'Claude 自主决定是否调用工具',
           toolChoiceManual: '逐步确认',

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
 // [Sync] 2026-10-12: retain submission-owned Stop through lazy admission and panel remount; unknown cannot unlock retry.
 // [Sync] 2026-10-11: keep the thread-scoped material callback stable so chat refreshes preserve image loading and previews.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -113,6 +114,7 @@ import {
   toAttachment,
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
+import { latestContextUsage } from '../../lib/context-compaction';
 import ChatMessageList from './ChatMessageList';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import TurnNavigation from './TurnNavigation';
@@ -179,11 +181,13 @@ const CHAT_BOTTOM_PROXIMITY_PX = 120;
 const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
 interface SystemConfigData {
+  model?: string;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
 }
 
 interface SystemConfigResponse {
+  model?: string;
   data?: SystemConfigData;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
@@ -265,7 +269,7 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
     return payload.data;
   }
   if (
-    payload.system_prompt ||
+    payload.model || payload.system_prompt ||
     payload.im_full_access_enabled !== undefined
   ) {
     return payload;
@@ -1594,6 +1598,7 @@ export default function ChatPanel({
           />
         ) : null}
         <AIInputDock
+            contextUsage={latestContextUsage(messages, systemConfig?.model, chatLoading)}
             deckId={deckId}
             threadId={threadId}
             workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}

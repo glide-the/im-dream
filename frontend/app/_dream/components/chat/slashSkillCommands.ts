@@ -1,8 +1,9 @@
 // [Input] Backend common Skill catalog plus Deck Claude-plugin refs, receipts, and inventories.
-// [Output] Resolve safe, de-duplicated common and Deck slash Skill suggestions for Chat.
+// [Output] Resolve safe common/Deck Skill suggestions and the built-in compact command for Chat.
 // [Pos] Pure Chat composer discovery helper; it does not execute commands or inspect workflow state.
 // [Sync] 2026-08-13: added installed-Skill slash suggestions without a workflow state machine.
 // [Sync] 2026-09-04: merge backend-owned common Skills ahead of optional Deck plugin Skills.
+// [Sync] 2026-10-12: include built-in compact independently of installed Skills and Workspace Mode.
 // [Sync] 2026-09-11: strip the Markdown serializer's trailing newline artifacts before
 //                    slash-draft matching so a standalone "/" typed into the Tiptap
 //                    composer opens the menu; the trailing space inserted after a
@@ -28,6 +29,11 @@ export interface AvailableSkillCommand {
   readonly command: string;
   readonly name: string;
   readonly sourceLabel: string;
+}
+
+export function withBuiltinCompact(commands: readonly AvailableSkillCommand[]): readonly AvailableSkillCommand[] {
+  return [...commands.filter((item) => item.command !== '/compact'),
+    { command: '/compact', name: 'compact', sourceLabel: 'builtin' }];
 }
 
 const COMMON_SKILL_SOURCE_LABEL = 'Ink & Memory';

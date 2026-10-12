@@ -1,3 +1,5 @@
+# [Sync] 2026-10-12: keep SystemMessage distinct from StreamEvent to mirror the public SDK DTO hierarchy.
+# [Sync] 2026-10-12: expose the public TextBlock DTO used by synthetic compaction completion.
 # [Input] None — module-level side-effecting stub setup.
 # [Output] Inject claude_agent_sdk stub into sys.modules so libs/claude_agent_kit
 #          can be imported in environments where claude-agent-sdk is not installed.
@@ -63,6 +65,11 @@ class _AssistantMessage:
         self.content = content or []
 
 
+class TextBlock:
+    def __init__(self, text=""):
+        self.text = text
+
+
 class _ResultMessage:
     def __init__(self, subtype="success", session_id=None, usage=None, **kwargs):
         self.subtype = subtype
@@ -76,6 +83,11 @@ class _UserMessage:
 
 
 class _StreamEvent(_KwargsBase):
+    pass
+
+
+class _SystemMessage(_KwargsBase):
+    # Public SDK SystemMessage and StreamEvent are separate DTO classes.
     pass
 
 
@@ -120,7 +132,8 @@ _stub_module("claude_agent_sdk.types",
     PermissionResultDeny=_PermissionResultDeny,
     ResultMessage=_ResultMessage,
     StreamEvent=_StreamEvent,
-    SystemMessage=_KwargsBase,
+    SystemMessage=_SystemMessage,
+    TextBlock=TextBlock,
     ToolPermissionContext=_ToolPermissionContext,
     UserMessage=_UserMessage,
 )

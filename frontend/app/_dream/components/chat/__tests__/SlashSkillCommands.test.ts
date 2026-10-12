@@ -1,3 +1,4 @@
+// [Sync] 2026-10-12: verify builtin compact is independent of Skill catalog and removes name collisions.
 // [Input] Backend common commands plus installed Claude-plugin inventories, Deck refs, and receipts.
 // [Output] Contract coverage for safe merged slash Skill discovery and text-only matching.
 // [Pos] Chat composer Skill suggestion unit contract.
@@ -13,7 +14,14 @@ import {
   mergeSkillCommands,
   resolveCommonSkillCommands,
   resolveInstalledSkillCommands,
+  withBuiltinCompact,
 } from '../slashSkillCommands';
+
+test('builtin compact needs no catalog or workspace and replaces a Skill name collision', () => {
+  expect(withBuiltinCompact([])).toEqual([{ command: '/compact', name: 'compact', sourceLabel: 'builtin' }]);
+  expect(withBuiltinCompact([{ command: '/compact', name: 'compact', sourceLabel: 'plugin' }])).toEqual(withBuiltinCompact([]));
+  expect(filterInstalledSkillCommands('/compact', withBuiltinCompact([]))).toHaveLength(1);
+});
 
 const SKILLS = [
   'drama-init', 'drama-plan', 'drama-script', 'drama-asset', 'drama-storyboard',

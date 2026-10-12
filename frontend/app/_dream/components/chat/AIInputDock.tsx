@@ -27,6 +27,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
 // [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 // [Sync] 2026-09-04: include backend-owned common Skills in slash suggestions without requiring a Deck.
+// [Sync] 2026-10-12: show the built-in compact command with the latest actual context-use snapshot.
 // [Sync] 2026-09-18: keep the mobile send action visible and make Enter send while Shift+Enter inserts a line break.
 import {
   useCallback,
@@ -46,6 +47,7 @@ import type { TFunction } from 'i18next';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import type { ToolChoice } from '../../lib/chat-schema';
+import { contextUsagePercentage, type ContextUsageSnapshot } from '../../lib/context-compaction';
 import { IconArrowUp, IconFile, IconLoader, IconStop, IconX } from './Icons';
 import {
   runWithFileDialogTaskLock,
@@ -63,6 +65,7 @@ import './AIInputDock.css';
 import {
   filterInstalledSkillCommands,
   loadAvailableSkillCommands,
+  withBuiltinCompact,
   type AvailableSkillCommand,
 } from './slashSkillCommands';
 
@@ -96,6 +99,7 @@ interface AIInputDockProps {
   threadId?: string;
   /** Whether this Chat can materialize and execute workspace-backed Skills. */
   workspaceEnabled?: boolean;
+  contextUsage?: ContextUsageSnapshot;
   /** External draft text to apply only when prefillNonce changes. */
   prefill?: string;
   /** Request identity that prevents rerenders from overwriting user edits. */
@@ -156,6 +160,7 @@ export default function AIInputDock({
   deckId,
   threadId,
   workspaceEnabled = true,
+  contextUsage,
   prefill,
   prefillNonce,
 }: AIInputDockProps) {
@@ -216,9 +221,10 @@ export default function AIInputDock({
   const matchingSkillCommands = useMemo(
     () => !isInputFocused || dismissedSlashDraft === query
       ? []
-      : filterInstalledSkillCommands(query, installedSkillCommands),
+      : filterInstalledSkillCommands(query, withBuiltinCompact(installedSkillCommands)),
     [dismissedSlashDraft, installedSkillCommands, isInputFocused, query],
   );
+  const contextPercent = contextUsagePercentage(contextUsage);
 
   useEffect(() => {
     setActiveSkillIndex(0);
@@ -703,7 +709,7 @@ export default function AIInputDock({
 
       {matchingSkillCommands.length > 0 ? (
         <div
-          aria-label="已安装的 Skill 指令"
+          aria-label={t('chat.inputDock.commandMenu')}
           id={skillListboxId}
           role="listbox"
           style={{
@@ -729,7 +735,7 @@ export default function AIInputDock({
               type="button"
               style={{
                 display: 'flex',
-                alignItems: 'baseline',
+                alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: '1rem',
                 width: '100%',
@@ -744,8 +750,20 @@ export default function AIInputDock({
                 textAlign: 'left',
               }}
             >
-              <strong>{command.command}</strong>
-              <small style={{ color: 'var(--color-text-muted)' }}>{command.sourceLabel}</small>
+              {command.command === '/compact' ? (
+                <>
+                  <span className="ai-input-dock__context-ring" aria-hidden="true"
+                    style={contextPercent === undefined ? undefined : {
+                      background: `conic-gradient(var(--color-text-primary) ${contextPercent}%, var(--color-border-paper) 0)`,
+                    }} />
+                  <span className="ai-input-dock__compact-description">
+                    <strong>/compact</strong>
+                    <small>{t('chat.inputDock.compactDescription')}（{contextPercent === undefined
+                      ? t('chat.inputDock.contextUnavailable')
+                      : t('chat.inputDock.contextUsed', { percent: contextPercent })}）</small>
+                  </span>
+                </>
+              ) : <><strong>{command.command}</strong><small style={{ color: 'var(--color-text-muted)' }}>{command.sourceLabel}</small></>}
             </button>
           ))}
         </div>

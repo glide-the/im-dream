@@ -1,3 +1,5 @@
+// [Sync] 2026-10-12: carry actual context-use snapshots through original assistant metadata assembly.
+// [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-12: observe each POST admission from production SSE, not response headers, for submission-owned Stop.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-10-10: preserve known pre-SSE model-selection HTTP 409 codes without changing other HTTP/SSE behavior.
@@ -77,6 +79,7 @@ import {
 } from 'ai';
 import { applyPlanEvent } from '../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoItem } from '../hooks/useThreadTodos';
+import { projectContextCompactionMetadata } from './context-compaction';
 import {
   publishStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
@@ -513,12 +516,15 @@ function convertEvent(
     // Session metadata & lifecycle
     // -----------------------------------------------------------------------
     case 'message-metadata': {
+      const compactionMetadata = projectContextCompactionMetadata(event);
+      if (compactionMetadata.contextCompactions?.length || compactionMetadata.contextUsage) ensureStarted();
       chunks.push({
         type: 'message-metadata',
         messageMetadata: {
           sessionId: event.sessionId,
           turnIndex: event.turnIndex,
           turnId: event.turnId,
+          ...compactionMetadata,
         },
       });
       break;

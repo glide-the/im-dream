@@ -1,3 +1,4 @@
+// [Sync] 2026-10-12: builtin compact survives catalog failure while existing keyboard selection stays intact.
 // [Input] Real Chromium input against the production AIInputDock module with mocked Skill catalog and system-config APIs.
 // [Output] Regression coverage for the user-visible slash shortcut menu: draft trigger, listbox rendering, keyboard selection, dismissal, and silent catalog-failure degrade.
 // [Pos] AIInputDock slash menu regression contract in frontend/app/_dream/components/chat/__tests__.
@@ -163,7 +164,7 @@ test('suggests installed Skills for a standalone slash draft and inserts the sel
     await editor.click();
 
     await editor.fill('/');
-    const listbox = page.getByRole('listbox', { name: '已安装的 Skill 指令' });
+    const listbox = page.getByRole('listbox', { name: 'Chat commands' });
     await expect(listbox).toBeVisible();
     await expect(listbox.getByRole('option', { name: '/plot-twist' })).toBeVisible();
     await expect(listbox.getByRole('option', { name: '/scene-beat' })).toBeVisible();
@@ -248,7 +249,7 @@ test('dismisses the slash menu with Escape and restores it when the draft change
     await editor.click();
 
     await editor.fill('/');
-    const listbox = page.getByRole('listbox', { name: '已安装的 Skill 指令' });
+    const listbox = page.getByRole('listbox', { name: 'Chat commands' });
     await expect(listbox).toBeVisible();
 
     await editor.press('Escape');
@@ -263,7 +264,7 @@ test('dismisses the slash menu with Escape and restores it when the draft change
   }
 });
 
-test('keeps the composer usable without a menu when the Skill catalog fails', async ({ page }) => {
+test('keeps builtin compact usable when the Skill catalog fails', async ({ page }) => {
   const server = await startHarness(page, { catalogStatus: 503, sentLogKey: 'slashMenuFailureSentMessages' });
   try {
     const editor = page.locator('#chat-input');
@@ -271,7 +272,7 @@ test('keeps the composer usable without a menu when the Skill catalog fails', as
     await editor.click();
 
     await editor.fill('/');
-    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(page.getByRole('listbox').getByRole('option', { name: '/compact' })).toContainText('Usage unavailable');
     await expect(editor).toContainText('/');
     await expect(page.getByTestId('sent-count')).toHaveText('0');
   } finally {

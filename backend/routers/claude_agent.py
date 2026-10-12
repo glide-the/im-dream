@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-12: project closed contextUsage snapshots through owner-checked history DTOs.
+# [Sync] 2026-10-12: expose closed compaction display metadata in the original owned history DTO.
 # [Sync] 2026-10-10: preserve files/ in synced attachment URIs, matching the public preview contract.
 # [Sync] 2026-10-10: bind uploaded image blocks to their server-synced current-Thread workspace references.
 # [Sync] 2026-10-07: expose owner-scoped scheduled records for creation and execution Thread activity.
@@ -109,6 +111,7 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     ThreadToolWaitUpdateDTO,
 )
 from claude_agent import ClaudeAgentRunRequest
+from claude_agent.context_compaction import public_context_compaction_metadata
 from claude_agent.service import (
     _build_mcp_apps_tool_result_projection,
     _validated_mcp_apps_projection_for_tool_part,
@@ -313,6 +316,9 @@ class PublicChatThreadDto(BaseModel):
 
 
 class PublicChatMetadataDto(BaseModel):
+    contextUsage: dict[str, Any] | None = None
+    contextCompactions: list[dict[str, Any]] | None = None
+    compactCompletionText: str | None = None
     kind: str | None = None
     visibility: str | None = None
     dispatch_status: PublicDispatchStatus | None = None
@@ -340,7 +346,7 @@ class PublicChatMetadataDto(BaseModel):
         cls,
         metadata: dict[str, Any],
     ) -> tuple["PublicChatMetadataDto", bool]:
-        values: dict[str, Any] = {}
+        values: dict[str, Any] = public_context_compaction_metadata(metadata)
         malformed_discriminator = False
 
         kind = metadata.get("kind")
