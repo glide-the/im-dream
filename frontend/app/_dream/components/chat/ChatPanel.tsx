@@ -1,3 +1,6 @@
+// [Sync] 2026-10-12: retain submission-owned Stop through lazy admission and panel remount; unknown cannot unlock retry.
+// [Sync] 2026-10-11: keep the thread-scoped material callback stable so chat refreshes preserve image loading and previews.
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-09-28: render created-task links inside the owning assistant reply above its action row.
 // [Sync] 2026-09-28: remove dispatched and failed inputs from queue controls; surface uncertain outcomes separately.
 // [Sync] 2026-09-27: show task-session source navigation and settled created-task lists.
@@ -84,7 +87,7 @@ import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSess
 // [Sync] 2026-09-07: keep live turn identities in a ref so metadata replay cannot
 //                    recreate the recovery callback and abort an active reconnect stream.
 // [Sync] 2026-09-29: pair a compact full-Thread turn index with the paged message scroller and left navigation rail.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -160,7 +163,7 @@ import {
   claimChatReconnect,
   chatStopMayAbortLocalReaders,
 } from './chatRuntimeState';
-import { requestClaudeThreadStop } from './threadStop';
+import { requestClaudeSubmittedThreadStop, claudeThreadStopPending, subscribeClaudeThreadStop } from './threadStop';
 import {
   captureChatScrollAnchor,
   mergeRecoveredLatestPage,
@@ -303,11 +306,21 @@ export default function ChatPanel({
   voiceId,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const submissionStopPending = useSyncExternalStore(
+    useCallback((listener: () => void) => subscribeClaudeThreadStop(threadId, listener), [threadId]),
+    useCallback(() => claudeThreadStopPending(threadId), [threadId]),
+    () => false,
+  );
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
+  const [imageMaterial, setImageMaterial] = useState<{ threadId: string; file: File } | null>(null);
+  const handleAddImageMaterial = useCallback((file: File) => {
+    setImageMaterial({ threadId, file });
+  }, [threadId]);
+  useEffect(() => { setImageMaterial(null); }, [threadId]);
   const [threadInputs, setThreadInputs] = useState<ThreadInputEntry[]>([]);
   const queueCardEntries = threadInputs.filter(isThreadInputQueueCard);
   const queueOutcomeUnknown = threadInputs.some((entry) => entry.status === 'state_unknown');
@@ -527,6 +540,7 @@ export default function ChatPanel({
     message: ChatUserMessage,
     options: CoordinatedChatSendOptions<Attachment> = {},
   ) => {
+    if (claudeThreadStopPending(threadId)) throw new Error('CHAT_STOP_PENDING');
     await sendCoordinatedChatUserMessage(message, options, {
       onConversationStart,
       setToolChoice: setCurrentToolChoice,
@@ -535,7 +549,7 @@ export default function ChatPanel({
       incrementTurnGeneration: () => { turnGenerationRef.current += 1; },
       dispatch: sendMessage,
     });
-  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage]);
+  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage, threadId]);
 
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
@@ -645,6 +659,7 @@ export default function ChatPanel({
   }, [historicalMessageIds, messages, runtimeRunning, status]);
 
   useEffect(() => {
+    if (submissionStopPending || claudeThreadStopPending(threadId)) return;
     if (!queuedPromptNonce || queuedPromptNonce === lastQueuedNonceRef.current) {
       return;
     }
@@ -678,7 +693,7 @@ export default function ChatPanel({
         { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice },
       );
     })();
-  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendUserMessage]);
+  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendUserMessage, submissionStopPending, threadId]);
 
   const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
@@ -985,8 +1000,8 @@ export default function ChatPanel({
     };
   }, [reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
 
-  const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting);
-  const agentBusy = canStopMainTurn || isStopping;
+  const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting) || submissionStopPending;
+  const agentBusy = canStopMainTurn || isStopping || submissionStopPending;
   const chatLoading = agentBusy || isLoading;
   const visibleTurnNavigation = useMemo(
     () => projectVisibleTurnNavigation(visibleMessages, agentBusy),
@@ -1180,7 +1195,10 @@ export default function ChatPanel({
     let authoritativeIdle = false;
     try {
       const runtimeStatus = await fetchClaudeThreadStatus(threadId);
-      authoritativeIdle = !runtimeStatus.running;
+      if (claudeThreadStopPending(threadId)) {
+        const receipt = await requestClaudeSubmittedThreadStop(threadId);
+        authoritativeIdle = !receipt.running && !claudeThreadStopPending(threadId);
+      } else authoritativeIdle = !runtimeStatus.running;
     } catch {
       // Unknown is not idle. Preserve the lock and last-good transcript.
     }
@@ -1207,14 +1225,14 @@ export default function ChatPanel({
     let stopRequested: boolean | null = null;
     let authoritativeRunning: boolean | null = null;
     try {
-      const stopResult = await requestClaudeThreadStop(threadId);
+      const stopResult = await requestClaudeSubmittedThreadStop(threadId);
       stopRequested = stopResult.stopRequested;
       authoritativeRunning = stopResult.running;
     } catch {
       // Network/malformed/non-2xx is authoritative-unknown.
     } finally {
       if (chatPanelMountedRef.current) {
-        if (chatStopMayAbortLocalReaders(stopRequested, authoritativeRunning)) abortLocalReaders();
+        if (!claudeThreadStopPending(threadId) && chatStopMayAbortLocalReaders(stopRequested, authoritativeRunning)) abortLocalReaders();
         setIsStopping(false);
         if (stopRecoveryTimerRef.current === null) void recoverAfterStop();
       }
@@ -1448,6 +1466,7 @@ export default function ChatPanel({
               <ChatMessageList
                 messages={visibleMessages}
                 threadId={threadId}
+                onAddImageMaterial={handleAddImageMaterial}
                 sourceThread={taskSessionLinks.source}
                 createdTaskLinks={taskSessionLinks.created}
                 onNavigateThread={onNavigateThread}
@@ -1579,8 +1598,14 @@ export default function ChatPanel({
             threadId={threadId}
             workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
             openFileDialogSignal={openFileDialogSignal}
+            imageMaterial={imageMaterial?.threadId === threadId ? imageMaterial.file : undefined}
+            onImageMaterialConsumed={() => setImageMaterial(null)}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
+              if (isStopping || claudeThreadStopPending(threadId)) {
+                setThreadInputError(t('chat.inputDock.stopping'));
+                throw new Error('CHAT_STOP_PENDING');
+              }
               if (agentBusy || inputOwnerLocal) {
                 if (uploadedFiles.length > 0) {
                   setThreadInputError(t('chat.inputQueue.textOnly'));
@@ -1625,7 +1650,7 @@ export default function ChatPanel({
             placeholder={inputPlaceholder}
             loading={chatLoading}
             onStop={canStopMainTurn ? handleStop : undefined}
-            stopPending={isStopping}
+            stopPending={isStopping || submissionStopPending}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}
             mode="full"
         />

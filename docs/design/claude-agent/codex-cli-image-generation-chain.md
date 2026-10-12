@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-10-09: 移除尚不存在的执行记录链接，明确源码基线为本机忽略产物。 -->
+<!-- [Sync] 2026-10-09: IM参考结论区分Runtime与主模型，Gateway主对话证据归G1–G8；两幅源码时序图保持。 -->
 <!-- [Input] 用户提供的/Users/dmeck/project/codex；Codex恢复客户端入口；现行图像API对比与IM设计。 -->
 <!-- [Output] 从上传图片到Agent函数调用、Images HTTP、文件保存和app-server结果通知的源码链路及边界。 -->
 <!-- [Pos] Codex图像执行当前补充证据；修正旧稿仅追到IPC的缺口，不实现IM图像功能。 -->
@@ -89,7 +90,7 @@ sequenceDiagram
 
 ## 4. 保存、历史与后续使用
 
-app-server安装图像扩展时将`config.codex_home`作为save_root，因此该入口默认保存到`{codex_home}/generated_images/{thread_id}/{call_id}.png`。thread/call文件名经过字符替换，不覆盖解释为当前工作空间`files/`。其他调用方未给save_root时，执行器可使用环境cwd的generated_images目录；不将这条分支搬到IM。
+app-server安装图像扩展时将`config.codex_home`作为save_root，因此该入口默认保存到`{codex_home}/generated_images/{thread_id}/{call_id}.png`。thread/call文件名经过字符替换；该目录与IM当前Thread的`files/`存储不同。其他调用方未给save_root时，执行器可使用环境cwd的generated_images目录；不将这条分支搬到IM。
 
 保存失败只记录warning并返回`saved_path=None`，**仍发completed并保留base64结果**。因此“CLI生成成功”与“图片已经落盘”不能视为同一事实。IM现行文件引用方案需要持久文件，仍按其独立保存合同处理，不照搬此成功条件。
 
@@ -157,4 +158,4 @@ sequenceDiagram
 
 此前“只定位到IPC，生成执行未找到”的结论属于原恢复目录范围，现在由这份CLI源码补齐。现行[源码/API对比](codex-image-generation-call-comparison.md)保留原图作为读取日证据，并链接本补充；[IM正式设计](image-generation-interaction-design.md)的用户流程不因上游发现而增加页面或步骤。
 
-该源码支持“Claude主Agent → 内部图像工具 → Admin授权Images能力”的可行架构；不会使Claude自动具备Responses内置工具，也不证明IM的Admin/Provider已发布这两种能力。IM继续只实施一种已授权接口，保持自身文件权限和历史合同。Codex源码的base64结果、codex_home存储、保存失败仍成功和最近图片窗口都不直接照搬。
+该源码为“Claude Code Runtime调用内部图像工具 → Admin授权Images能力”提供执行方式参考；主对话能否经Gateway使用Responses另见[实施说明G1–G8](image-generation-implementation-notes.md)。Runtime不等于Claude主模型。IM本方案只选择独立Images图像执行，新增能力尚未实现，保持自身文件权限和历史合同。Codex源码的base64结果、codex_home存储、保存失败仍成功和最近图片窗口都不直接照搬。

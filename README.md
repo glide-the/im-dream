@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
+<!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
 <!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: replace root Agent.md references with the sole AGENTS.md work contract. -->
 <!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
@@ -28,7 +30,7 @@ Organize thinking approaches, problem-solving paths and execution methods for re
 
 ### Chat conversations
 
-Discuss a concrete problem with an Agent, analyze material or carry out a task. Users can choose a model and Agent, attach reference files, read replies and tool results, search history and revisit earlier turns. During execution, they can add pending messages, adjust direction or move a message to an independent Chat. Saved conversations can be reopened and continued.
+Discuss a concrete problem with an Agent, analyze material or carry out a task. Users can choose a model and Agent, attach reference files, read replies and tool results, search history and revisit earlier turns. During execution, they can add pending messages, adjust direction or move a message to an independent Chat. Saved conversations can be reopened and continued. The Add menu also offers [hand-drawn sketches](docs/prd/chat/sketch-input.md): draw, erase and undo locally, then add a PNG attachment to the message.
 
 ### Writing and diary
 
@@ -54,6 +56,8 @@ Give Agents access to selected external material and tools. The Notion connectio
 
 Read and use reference files and Agent outputs for the current conversation in one place. Users can attach files, open supported Markdown reports, images and diagrams, preview or download files, and reuse the material in later conversation turns. Files are organized around the current conversation. File previews do not provide image generation or video production.
 
+Settings now separates **AI model** (conversation understanding and replies) from **Image model** (explicit `image_gen.imagegen` operations). Image choices come from Admin's published Images capabilities and current callability. Save an Image choice before using the tool; there is no environment, catalog-default or single-candidate fallback. The tool requires Workspace Mode, `images:create` and the matching Admin contract. Uploads and sketches only add material. Native Responses generation/editing now has a Gateway/CLI raw-result bridge to existing files and history. Execution requires explicit Responses configuration, published capabilities, the exact image-turn contract and actual role permissions; failures receive actionable feedback without an Images fallback. Preview, download and history reuse existing Chat paths. Fresh local generation, editing, cancel/retry, downloads and reopened history have been observed, with all seven qualifying image requests checked visibly in the normal Admin console. Cancelled requests with missing usage retain their existing pending settlement state; injected failure checks remain technical validation. See the [specialized PRD](docs/prd/chat/image-model-call-division.md), [design](docs/design/claude-agent/image-model-call-division.md) and [current execution receipt](docs/exec/image-model-call-division-20261010.md).
+
 ### Dream creative workbench
 
 Bring a creative task's ongoing conversation, shared material and Episode outputs together for review and continued work. The current focus is script organization and storyboarding: project-level characters and scenes can be reused across Episodes, while each Episode holds available outlines, scripts, storyboards, prompts and review reports. Users can reopen a saved creative task, continue working with the Agent beside its outputs, or return to the same Chat conversation.
@@ -68,7 +72,7 @@ The primary navigation is **Chat, Dream and Decks**. **More** provides Writing, 
 
 ## Current scope and enablement
 
-Automatic discovery of solution paths, automatic Skills/MCP/Plugin composition, full multi-Agent orchestration and creative-outcome feedback statistics remain future work. Dream does not yet provide a canvas, knowledge base or automatic script-to-finished-video production chain. Native Chat image generation and editing are also not delivered as current product features.
+Automatic discovery of solution paths, automatic Skills/MCP/Plugin composition, full multi-Agent orchestration and creative-outcome feedback statistics remain future work. Dream does not yet provide a canvas, knowledge base or automatic script-to-finished-video production chain.
 
 <details>
 <summary>Deployment and capability requirements</summary>
@@ -273,3 +277,8 @@ Real send-path acceptance requires **create Thread → `POST /api/claude-agent` 
 | Architecture and authentication | [Architecture](docs/architecture/项目架构设计说明.md), [Admin auth/data contract](docs/architecture/admin-auth-data-interaction.md), [backend API](backend/API.md) |
 | Setup and deployment | [Platform status](deploy/README.md), [AutoDL](deploy/autodl-ssh/README.md), [AutoDL recovery](docs/deploy/autodl-recovery.md) |
 | Repository and Agent rules | [Root work contract](AGENTS.md), [Agent behavior](docs/Agent.md), [rules index](docs/rules/README.md) |
+
+
+### Explicit Responses inference prerequisite
+
+The shared Admin Provider form can explicitly select Chat or Responses for a generic OpenAI connection; older configurations keep Chat. Validation, transport and JSON/SSE translation use the selected candidate configuration. This does not change the Image model or enable native image tools. See the [specialized design](docs/design/claude-agent/image-model-call-division.md) and [current execution evidence](docs/exec/image-model-call-division-20261010.md) for the implemented source paths and normal local adoption and remaining full acceptance limits.

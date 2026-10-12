@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Input] Consume the Settings router with an explicit Admin actor and typed SystemConfig adapter.
 # [Output] Verify sanitized Admin patches and fresh read response behavior without Dream database access.
 # [Pos] test node in backend/tests
@@ -43,6 +44,13 @@ class _SystemConfigData:
         assert access_token == "settings-token"
         patch = input_dto.model_dump(mode="json")
         self.calls.append(("patch", patch))
+        self.config.update(patch)
+        return SimpleNamespace(success=True)
+
+    def patch_image_model(self, input_dto, _request_id, *, access_token):
+        assert access_token == 'settings-token'
+        patch = input_dto.model_dump(mode='json')
+        self.calls.append(('patch-image', patch))
         self.config.update(patch)
         return SimpleNamespace(success=True)
 
@@ -226,6 +234,59 @@ class TestSystemConfigRouter(_AdminRouterHarness, unittest.TestCase):
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["detail"]["requiredPlanCode"], "dream")
+        self.assertEqual(self.admin_data.calls, [])
+
+
+class TestIndependentImageConfig(_AdminRouterHarness, unittest.TestCase):
+    def setUp(self):
+        self._start_admin_harness()
+
+    def tearDown(self):
+        self._stop_admin_harness()
+
+    def catalog(self, *, callable=True, images=True):
+        from services.admin_gateway.models import GatewayModel, GatewayModelCatalog
+        entry = GatewayModel(model_alias='image-a', display_name='Image A', protocol='openai',
+            capabilities={'chat': False}, context_window=None, max_output_tokens=None,
+            enabled=True, callable=False, availability='included', required_plan_code=None,
+            upgrade_hint=None, image_generation=images, image_edit=images,
+            image_callable=callable, image_configured=True, image_entitled=callable)
+        return unittest.mock.MagicMock(fetch_catalog=unittest.mock.MagicMock(return_value=GatewayModelCatalog((entry,), None)))
+
+    def test_save_and_refresh_keeps_ai_selection(self):
+        self.saved_config.update(model='chat-a', provider='gateway', unknown={'kept': True})
+        with unittest.mock.patch.object(system_config_router, 'GatewayModelCatalogClient', return_value=self.catalog()):
+            response = self.client.put('/api/system-config', json={'image_model': 'image-a'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['data'], self.saved_config)
+        self.assertEqual(self.saved_config['model'], 'chat-a')
+        self.assertEqual(self.saved_config['image_model'], 'image-a')
+        self.assertEqual([call[0] for call in self.admin_data.calls], ['patch-image', 'get'])
+        self.assertEqual(self.client.get('/api/system-config').json()['image_model'], 'image-a')
+
+    def test_unavailable_or_nonimage_selection_never_writes(self):
+        for callable, images, status in [(False, True, 403), (True, False, 409)]:
+            with unittest.mock.patch.object(system_config_router, 'GatewayModelCatalogClient', return_value=self.catalog(callable=callable, images=images)):
+                response = self.client.put('/api/system-config', json={'image_model': 'image-a'})
+            self.assertEqual(response.status_code, status, response.text)
+            self.assertEqual(self.admin_data.calls, [])
+
+    def test_image_form_without_chat_flag_cannot_be_saved_as_ai(self):
+        catalog = self.catalog()
+        from dataclasses import replace
+        entry = catalog.fetch_catalog.return_value.models[0]
+        from services.admin_gateway.models import GatewayModelCatalog
+        catalog.fetch_catalog.return_value = GatewayModelCatalog((replace(entry, callable=True, capabilities={'image_generation': True, 'image_edit': True}),), None)
+        with unittest.mock.patch.object(system_config_router, 'GatewayModelCatalogClient', return_value=catalog):
+            response = self.client.put('/api/system-config', json={'model': 'image-a'})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.admin_data.calls, [])
+
+    def test_mixed_and_invalid_image_patches_never_fetch_catalog_or_write(self):
+        with unittest.mock.patch.object(system_config_router, 'GatewayModelCatalogClient') as catalog:
+            for patch in [{'image_model': 'image-a', 'model': 'chat-a'}, {'image_model': None}, {'image_model': ' image-a'}]:
+                self.assertEqual(self.client.put('/api/system-config', json=patch).status_code, 422)
+            catalog.assert_not_called()
         self.assertEqual(self.admin_data.calls, [])
 
 

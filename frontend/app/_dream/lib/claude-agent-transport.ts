@@ -1,3 +1,6 @@
+// [Sync] 2026-10-12: observe each POST admission from production SSE, not response headers, for submission-owned Stop.
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+// [Sync] 2026-10-10: preserve known pre-SSE model-selection HTTP 409 codes without changing other HTTP/SSE behavior.
 /**
  * [Input]  /api/claude-agent SSE stream (Pawkeyland-aligned protocol).
  * [Output] UIMessageChunk stream consumed by @ai-sdk/react useChat.
@@ -64,6 +67,7 @@
  * by JSON.parse() so Chinese characters display correctly.
  */
 
+import { beginClaudeThreadSubmission, observeClaudeThreadSubmission, type ClaudeThreadSubmission } from '../components/chat/threadStop';
 import {
   HttpChatTransport,
   type HttpChatTransportInitOptions,
@@ -404,6 +408,7 @@ function convertEvent(
         toolName: event.toolName,
         input: event.input,
         dynamic: true,
+        ...(event.providerExecuted !== undefined ? { providerExecuted: event.providerExecuted } : {}),
       });
       break;
     }
@@ -555,11 +560,68 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   extends HttpChatTransport<UI_MESSAGE>
 {
   private readonly threadId?: string;
+  private readonly pendingSubmissions = new Map<string, ClaudeThreadSubmission>();
+  private readonly responseSubmissions: WeakMap<ReadableStream<Uint8Array>, ClaudeThreadSubmission>;
 
   constructor(options: ClaudeAgentChatTransportInitOptions<UI_MESSAGE> = {}) {
     const { threadId, ...transportOptions } = options;
-    super(transportOptions);
+    const fetcher = transportOptions.fetch ?? fetch;
+    const pending = new Map<string, ClaudeThreadSubmission>();
+    const responses = new WeakMap<ReadableStream<Uint8Array>, ClaudeThreadSubmission>();
+    super({
+      ...transportOptions,
+      fetch: async (input, init) => {
+        const payload = init?.method?.toUpperCase() === 'POST' && typeof init.body === 'string'
+          ? JSON.parse(init.body) as { message?: { id?: string } } : undefined;
+        const submission = payload?.message?.id ? pending.get(payload.message.id) : undefined;
+        if (submission) submission.dispatched = true;
+        let response: Response;
+        try {
+          response = await fetcher(input, init);
+        } catch (error) {
+          if (submission) observeClaudeThreadSubmission(submission, 'unknown');
+          throw error;
+        }
+        if (!response.ok && submission) observeClaudeThreadSubmission(submission, 'rejected');
+        if (response.body && submission) responses.set(response.body, submission);
+        if (response.status === 409) {
+          const payload: unknown = await response.clone().json().catch(() => null);
+          const detail = payload && typeof payload === 'object' && 'detail' in payload
+            ? payload.detail : null;
+          const code = detail && typeof detail === 'object' && 'error_code' in detail
+            ? detail.error_code : null;
+          if (code === 'GATEWAY_MODEL_SELECTION_STALE' || code === 'GATEWAY_MODEL_SELECTION_CONFLICT') {
+            throw new ClaudeAgentTransportError({
+              type: 'error', errorText: 'The selected model is unavailable or has changed.',
+              errorCode: code, retryable: false,
+            });
+          }
+        }
+        return response;
+      },
+    });
     this.threadId = threadId;
+    this.pendingSubmissions = pending;
+    this.responseSubmissions = responses;
+  }
+
+  override async sendMessages(options: Parameters<HttpChatTransport<UI_MESSAGE>['sendMessages']>[0]) {
+    const message = options.messages.at(-1);
+    if (message && this.pendingSubmissions.has(message.id)) throw new Error('CHAT_SUBMISSION_PENDING');
+    const ticket = this.threadId && message
+      ? beginClaudeThreadSubmission(this.threadId, message.id) : undefined;
+    if (ticket) this.pendingSubmissions.set(ticket.messageId, ticket);
+    try {
+      return await super.sendMessages(options);
+    } catch (error) {
+      if (ticket) observeClaudeThreadSubmission(ticket,
+        ticket.dispatched ? 'unknown' : 'rejected');
+      throw error;
+    } finally {
+      if (ticket && this.pendingSubmissions.get(ticket.messageId) === ticket) {
+        this.pendingSubmissions.delete(ticket.messageId);
+      }
+    }
   }
 
   protected processResponseStream(
@@ -574,6 +636,7 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       threadId: this.threadId,
     };
     let sseBuffer = '';
+    const submission = this.responseSubmissions.get(stream);
 
     const dispatch = (
       raw: string,
@@ -581,6 +644,10 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     ): boolean => {
       const events = parseSSEChunk(raw);
       for (const event of events) {
+        if (submission) {
+          observeClaudeThreadSubmission(submission,
+            event.type === 'finish' ? 'terminal' : 'accepted');
+        }
         if (event.type === 'chat-message') {
           // AI SDK owns one assistant response per POST. Close this reader so
           // ChatPanel hydrates the committed user fact and reconnects to the
@@ -598,7 +665,25 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       return true;
     };
 
-    return stream.pipeThrough(
+    const reader = stream.getReader();
+    const observedStream = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const result = await reader.read();
+          if (result.done) {
+            if (submission && submission.phase !== 'terminal' && submission.phase !== 'rejected') {
+              observeClaudeThreadSubmission(submission, 'unknown');
+            }
+            controller.close();
+          } else controller.enqueue(result.value);
+        } catch (error) {
+          if (submission) observeClaudeThreadSubmission(submission, 'unknown');
+          controller.error(error);
+        }
+      },
+      cancel(reason) { return reader.cancel(reason); },
+    });
+    return observedStream.pipeThrough(
       new TransformStream<Uint8Array, UIMessageChunk>({
         transform(chunk, controller) {
           sseBuffer += decoder.decode(chunk, { stream: true });

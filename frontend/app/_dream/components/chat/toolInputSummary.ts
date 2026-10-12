@@ -1,3 +1,4 @@
+// [Sync] 2026-10-10: show image prompt and generate/edit labels in existing live/history tool rows.
 // [Input] Raw tool input objects from ToolUIPart/DynamicToolUIPart (live stream or history replay), including `_partialInputJson` streaming accumulators.
 // [Output] parsePartialInputJson(), resolveToolInputSummary(), summarizeToolInvocation(), isShellTool() — one-line "what is this tool doing" summaries for tool cards/rows.
 // [Pos] tool-input-summary utility node in frontend/app/_dream/components/chat
@@ -46,7 +47,7 @@ export function resolveToolInputSummary(input: unknown): ToolInputSummary {
     return '';
   };
   return {
-    description: pick('description'),
+    description: pick('description', 'prompt'),
     command: pick('command'),
     target: pick('file_path', 'path', 'pattern', 'query', 'url'),
   };
@@ -62,4 +63,13 @@ export function summarizeToolInvocation(toolName: string, input: unknown): strin
   if (description) return description;
   if (isShellTool(toolName)) return command;
   return target || command;
+}
+
+/** Image actions reuse the ordinary tool row; only the business label changes. */
+export function imageToolAction(toolName: string, input: unknown): 'generate' | 'edit' | 'prepare' | null {
+  if (toolName === 'mcp__image_gen__select_image_operation') return 'prepare';
+  if (toolName !== 'mcp__image_gen__imagegen' && toolName !== 'image_generation') return null;
+  const value = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  if (toolName === 'image_generation') return value.operation === 'edit' ? 'edit' : value.operation === 'generate' ? 'generate' : null;
+  return Array.isArray(value.reference_images) && value.reference_images.length > 0 ? 'edit' : 'generate';
 }

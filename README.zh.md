@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
+<!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
 <!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: 根工作合同统一为 AGENTS.md，移除 Agent.md 引用。 -->
 <!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
@@ -30,6 +32,8 @@
 
 围绕具体问题与 Agent 讨论、分析材料或执行任务。用户可以选择模型和 Agent，添加参考文件，阅读回复与工具结果，搜索历史并回到较早的轮次。任务执行期间仍可补充待处理消息、调整方向，或将消息移到独立聊天。保存的对话可再次打开并继续使用。
 
+添加菜单提供[手绘草图](docs/prd/chat/sketch-input.md)：在本机绘制、擦除和撤销，再将 PNG 添加到当前消息。
+
 ### 写作与日记
 
 记录想法、撰写正文，保存并重新打开写作内容。段落下的“深入一下”提供主动获取建议的入口，建议与正文分别展示并随写作记录保留；最新建议支持重新生成或失败重试。普通输入和停顿不会自动生成建议，正文仍由用户编辑。已有日记也可以按日期从日历中打开。
@@ -54,6 +58,8 @@
 
 集中阅读和使用当前对话的参考文件与 Agent 产物。用户可以添加附件，打开支持的 Markdown 报告、图片和图示，预览或下载文件，并在后续对话中继续使用这些材料。文件围绕当前对话组织；文件预览本身不提供图片生成或视频制作能力。
 
+设置现在分别选择 **AI 模型**（主对话理解与回复）和 **Image 模型**（明确要求 `image_gen.imagegen` 执行的图片操作）。Image 候选来自 Admin 公开的 Images 能力与当前调用资格。使用工具前须保存 Image 选择；没有环境变量、目录默认或唯一候选回退。工具需要工作区、`images:create` 和匹配的 Admin 合同。上传和草图只添加素材。Responses内置生成/编辑已接通Gateway、CLI raw结果及原文件/历史；只有公开能力、明确Responses配置、精确capability和实际角色权限满足时可调用，失败不回退到Images。查看、下载和历史复用原 Chat 路径。本轮本机生成、编辑、取消重试、下载和历史重开已观察，七次合格图片执行已在正常Admin后台逐项可见核对。缺usage的取消请求保留原待结算状态；故障注入仍属于技术验证。见[专项 PRD](docs/prd/chat/image-model-call-division.md)、[正式设计](docs/design/claude-agent/image-model-call-division.md)和[本轮执行回执](docs/exec/image-model-call-division-20261010.md)。
+
 ### Dream 创作工作台
 
 将创作任务的持续对话、共享素材和分集成果放在一起，方便查看、审阅和继续创作。当前重点是剧本组织与分镜：项目层管理可跨集复用的人物和场景，分集层阅读大纲、剧本、分镜、提示词和审阅报告。用户可以重新进入已保存的创作任务，在产物旁继续与 Agent 协作，也可以回到同一段 Chat。
@@ -68,7 +74,7 @@
 
 ## 当前范围与启用条件
 
-自动发现解决路径、自动组合 Skills/MCP/Plugin、完整的多 Agent 协作编排，以及创作成果反馈统计仍是后续方向。Dream 尚未提供画布、知识库或从剧本到成片的自动制作链路。Chat 原生图片生成与编辑也尚未作为当前产品功能交付。
+自动发现解决路径、自动组合 Skills/MCP/Plugin、完整的多 Agent 协作编排，以及创作成果反馈统计仍是后续方向。Dream 尚未提供画布、知识库或从剧本到成片的自动制作链路。
 
 <details>
 <summary>部署与能力启用条件</summary>
@@ -273,3 +279,8 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 | 架构与认证 | [项目架构](docs/architecture/项目架构设计说明.md)、[Admin 认证/数据合同](docs/architecture/admin-auth-data-interaction.md)、[后端 API](backend/API.md) |
 | 安装与部署 | [平台状态](deploy/README.md)、[AutoDL](deploy/autodl-ssh/README.md)、[AutoDL 恢复](docs/deploy/autodl-recovery.md) |
 | 仓库与 Agent 规则 | [根工作合同](AGENTS.md)、[Agent 行为](docs/Agent.md)、[规则索引](docs/rules/README.md) |
+
+
+### 主对话Responses协议前提
+
+共享Admin Provider表单可明确选择通用OpenAI连接的Chat或Responses接口，旧配置默认Chat。验证、实际请求与JSON/SSE使用选中候选的同一配置；不替换Image模型，也不因此开放内置图片。两条源码路径、本机采用与本轮尚未完成的完整验收见[专项正式稿](docs/design/claude-agent/image-model-call-division.md)和[执行记录](docs/exec/image-model-call-division-20261010.md)。

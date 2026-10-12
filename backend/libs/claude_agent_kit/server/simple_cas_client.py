@@ -1,3 +1,4 @@
+# [Sync] 2026-10-12: cancellation owns SDK interrupt and disconnect through repeated task cancellation.
 # [Sync] 2026-09-26: queued resumes reject missing-session fallback and expose active-client interrupt.
 # [Input] Consume IClaudeAgentSDKClient contract from libs/claude_agent_kit/types.py.
 # [Output] Provide SimpleClaudeAgentSDKClient backed by ClaudeSDKClient.
@@ -25,6 +26,7 @@ from __future__ import annotations
 import sys
 import asyncio
 import os
+import logging
 from contextlib import AsyncExitStack
 from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
@@ -46,6 +48,9 @@ from .session_files import (
     normalize_session_id,
     read_session_messages,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
@@ -134,6 +139,33 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
                         async for message in client.receive_response():
                             yield message
                         return
+                    except (asyncio.CancelledError, GeneratorExit):
+                        # The iterator may be paused at yield when its consumer
+                        # is cancelled. Interrupt while the CLI reader is alive,
+                        # then exit this exact SDK context. Factory's bounded
+                        # stop wait can cancel us again; it must not abandon
+                        # the already-owned cleanup or orphan the CLI request.
+                        async def cancel_client():
+                            try:
+                                await client.interrupt()
+                            except Exception:
+                                logger.warning("SDK interrupt failed during cancellation", exc_info=True)
+                            finally:
+                                await stack.aclose()
+
+                        cleanup = asyncio.create_task(cancel_client())
+                        while not cleanup.done():
+                            try:
+                                await asyncio.shield(cleanup)
+                            except asyncio.CancelledError:
+                                continue
+                            except Exception:
+                                break
+                        try:
+                            await cleanup
+                        except Exception:
+                            logger.warning("SDK disconnect failed during cancellation", exc_info=True)
+                        raise
                     finally:
                         if self._active_client is client:
                             self._active_client = None

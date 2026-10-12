@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: dispatch only bound Images operations over the existing private broker; stop late publication on close.
 # [Sync] 2026-09-28: dispatch schedule.create through the same strict turn-local Thread Tool provider.
 # [Sync] 2026-09-28: route wait_threads long polls through the current turn's private host provider.
 # [Sync] 2026-09-28: route create/list/read/send Thread Tool commands through the current turn's private host provider.
@@ -40,6 +42,8 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
     ThreadToolCommandResultDTO,
     ThreadToolCommandResponseDTO,
 )
+
+from libs.claude_agent_kit.server.image_generation_protocol import ImageGenerationRequest, ImageSelectionRequest
 
 from models.workflow_run import WorkflowRun
 
@@ -104,6 +108,7 @@ class SessionProjectionBroker:
     ) -> None:
         self._provider = provider
         self._workflow_run_provider = workflow_run_provider
+        self._image_provider = None
         self._thread_tool_provider: ThreadToolCommandProvider | None = None
         self._settings = settings
         self._capability = secrets.token_urlsafe(32)
@@ -147,7 +152,19 @@ class SessionProjectionBroker:
             untrusted = json.loads(raw)
             if not isinstance(untrusted, dict):
                 raise ValueError("Broker request must be an object")
-            if isinstance(untrusted.get("operation"), str) and (
+            if untrusted.get("operation") in {"image.generate", "image.select"}:
+                request = (ImageGenerationRequest if untrusted["operation"] == "image.generate" else ImageSelectionRequest).model_validate(untrusted, strict=True)
+                request_id = request.request_id
+                if not hmac.compare_digest(request.capability, self._capability):
+                    raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
+                with self._lock:
+                    provider = self._image_provider
+                    if self._closed or provider is None:
+                        raise AdminDataError("IMAGE_TOOL_UNAVAILABLE", 503, request_id)
+                # Image HTTP does not block unrelated Session/Thread projection dispatch.
+                result = provider.generate(request) if isinstance(request, ImageGenerationRequest) else provider.select(request)
+                payload = json.dumps({"ok": True, "result": result.model_dump() if hasattr(result, "model_dump") else result}).encode("utf-8") + b"\n"
+            elif isinstance(untrusted.get("operation"), str) and (
                 untrusted["operation"].startswith("thread.")
                 or untrusted["operation"] == "schedule.create"
             ):
@@ -254,6 +271,13 @@ class SessionProjectionBroker:
             )
         return payload if len(payload) <= self._settings.max_bytes else b""
 
+    def bind_image_generation_provider(self, provider) -> None:
+        """Bind Host-only image execution after workspace resolution, before CLI starts."""
+        with self._lock:
+            if self._closed or (self._image_provider is not None and not self._image_provider._closed):
+                raise AdminDataError("IMAGE_TOOL_BINDING_CONFLICT", 503)
+            self._image_provider = provider
+
     def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
         with self._lock:
             if self._closed or self._server is not None or self._thread_tool_provider is not None:
@@ -323,6 +347,8 @@ class SessionProjectionBroker:
             if self._closed:
                 return
             self._closed = True
+            if self._image_provider is not None:
+                self._image_provider.close()
             server, server_thread = self._server, self._server_thread
         if server is not None:
             server.shutdown()

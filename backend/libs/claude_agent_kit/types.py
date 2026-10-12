@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: carry a private image broker tuple; public request DTO and Runtime credentials unchanged.
 # [Sync] 2026-10-07: add server-owned exact tool auto/manual policy and a thread-safe unattended violation marker.
 # [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
@@ -282,6 +284,10 @@ class AgentRunOptions:
     # with exactly one Admin Gateway settlement. Never accept the raw header
     # value from a browser request.
     gateway_idempotency_key: Optional[str] = None
+    # Server-only existing broker projection; absent means no internal image tool.
+    image_generation_broker_env: Optional[dict[str, str]] = field(default=None, repr=False)
+    gateway_image_turn_key: Optional[str] = None
+    image_tool_authorizer: Optional[Callable[[str, str, dict], None]] = field(default=None, repr=False)
     # Whether to resume an existing conversation.
     resume: bool = False
     # A persisted queued message must never turn a missing resume into a new session.

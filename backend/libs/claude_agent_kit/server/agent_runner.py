@@ -1,4 +1,7 @@
+# [Sync] 2026-10-12: explicitly close the owned SDK query iterator when a callback is cancelled.
 # [Sync] 2026-10-11: project only original synthetic compact completion through the existing text path in partial mode.
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: compose reserved image_gen stdio only for Host-bound turns, retaining original confirmation policy.
 # [Sync] 2026-10-07: apply exact per-tool auto/manual overrides after safety guards and record unattended denials across SDK hook threads.
 # [Sync] 2026-09-28: auto-allow authorized Thread orchestration in Auto/full-access mode; manual mode still confirms.
 # [Sync] 2026-09-28: register create/list/read/send Thread Tools and remove task_session_* permissions.
@@ -258,6 +261,7 @@ interface for the AI worker.
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from fnmatch import fnmatchcase
 import inspect
 import json
@@ -401,7 +405,7 @@ _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _INTERNAL_MCP_SERVER_NAMES: frozenset[str] = frozenset(
-    {"user", "memory", "necklace", "editor", "story_workspace"}
+    {"user", "memory", "necklace", "editor", "story_workspace", "image_gen"}
 )
 _MCP_CONFIG_OBJECT_FIELDS: tuple[str, ...] = (
     "type",
@@ -2194,7 +2198,7 @@ def _stdio_env(
     return env
 
 
-def _user_mcp_stdio_config(mcp_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+def _user_mcp_stdio_config(mcp_env: Optional[dict[str, str]] = None, *, module_name: str = "libs.claude_agent_kit.server.user_mcp_stdio") -> McpStdioServerConfig:
     """Build user stdio with the exact Session broker and retrieval-policy env."""
 
     source = mcp_env or {}
@@ -2206,7 +2210,6 @@ def _user_mcp_stdio_config(mcp_env: Optional[dict[str, str]] = None) -> McpStdio
     child_env = _stdio_env(extra_env=allowed_env)
     apply_gateway_credential_tombstones(child_env)
     apply_admin_auth_credential_tombstones(child_env)
-    module_name = "libs.claude_agent_kit.server.user_mcp_stdio"
     bootstrap = (
         "import os,runpy,sys;"
         f"_names={SESSION_USER_MCP_ENV_NAMES!r};"
@@ -3141,6 +3144,10 @@ class ClaudeAgentRunner:
             if opts.allowed_tools is not None
             else _default_allowed_tools()
         )
+        if opts.image_generation_broker_env is not None and "mcp__image_gen__imagegen" not in allowed_tools:
+            allowed_tools.append("mcp__image_gen__imagegen")
+        if opts.image_generation_broker_env is not None and "mcp__image_gen__select_image_operation" not in allowed_tools:
+            allowed_tools.append("mcp__image_gen__select_image_operation")
         tool_choice: ToolChoiceMode = opts.tool_choice
         if tool_choice == "auto":
             for required_tool in _AUTO_MODE_REQUIRED_ALLOWED_TOOLS:
@@ -3268,6 +3275,15 @@ class ClaudeAgentRunner:
             del context
             tool_name = _extract_hook_tool_name(hook_input)
             original_tool_input = _extract_hook_tool_input(hook_input)
+            if tool_name in {"mcp__image_gen__imagegen", "mcp__image_gen__select_image_operation"}:
+                try:
+                    if not tool_use_id or opts.image_tool_authorizer is None:
+                        raise ValueError("Image call identity unavailable")
+                    await asyncio.to_thread(opts.image_tool_authorizer, tool_name, tool_use_id, original_tool_input)
+                    if tool_name == "mcp__image_gen__select_image_operation":
+                        return _explicit_pre_tool_use_allow()
+                except Exception:
+                    return _unattended_pre_tool_deny("IMAGE_CALL_NOT_AUTHORIZED", "The image operation could not be verified. Send a new message with the image operation and current material.")
             tool_input, forced_foreground_subagent = _force_foreground_subagent_input(
                 tool_name,
                 original_tool_input,
@@ -3812,6 +3828,8 @@ class ClaudeAgentRunner:
         # Build SDK options
         # ------------------------------------------------------------------
         mcp_servers: dict[str, McpServerConfig] = {}
+        if opts.image_generation_broker_env is not None and "mcp__image_gen__imagegen" in effective_allowed_tools:
+            mcp_servers["image_gen"] = _user_mcp_stdio_config(opts.image_generation_broker_env, module_name="libs.claude_agent_kit.server.image_gen_stdio")
         if _user_mcp_enabled() and any(
             tool.startswith(_USER_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
@@ -3970,6 +3988,7 @@ class ClaudeAgentRunner:
             sdk_options,
             opts.gateway_access_token,
             gateway_idempotency_key=opts.gateway_idempotency_key,
+            gateway_image_turn_key=opts.gateway_image_turn_key,
         )
         apply_notion_cli_env_to_options(
             sdk_options,
@@ -4012,85 +4031,87 @@ class ClaudeAgentRunner:
                 sdk_options.mcp_servers = _mcp_config_projection
             _inject_mem0_session_hook_env(sdk_options, mcp_env)
             _verify_claude_sdk_env_for_query_stream(sdk_options)
-            async for message in self._sdk_client.query_stream(
-                _generate_messages(), sdk_options
-            ):
-                messages.append(message)
+            async with AsyncExitStack() as query_scope:
+                query_stream = self._sdk_client.query_stream(_generate_messages(), sdk_options)
+                close_query = getattr(query_stream, "aclose", None)
+                if callable(close_query):
+                    query_scope.push_async_callback(close_query)
+                async for message in query_stream:
+                    messages.append(message)
 
-                # Track session ID
-                if isinstance(message, (ResultMessage, StreamEvent)):
-                    if message.session_id:
-                        current_session_id = message.session_id
-                elif isinstance(message, SystemMessage):
-                    sid = (message.data or {}).get("session_id")
-                    if sid:
-                        current_session_id = sid
+                    # Track session ID
+                    if isinstance(message, (ResultMessage, StreamEvent)):
+                        if message.session_id:
+                            current_session_id = message.session_id
+                    elif isinstance(message, SystemMessage):
+                        sid = (message.data or {}).get("session_id")
+                        if sid:
+                            current_session_id = sid
 
-                # Raw message callback
-                await _call(callbacks.on_message, message)
+                    # Raw message callback
+                    await _call(callbacks.on_message, message)
 
-                # The SDK can report terminal protocol failures as an
-                # AssistantMessage.error without raising from query_stream.
-                # Treat that typed error exactly like a raised SDK failure so
-                # the existing on_error -> SSE error channel is preserved.
-                if isinstance(message, AssistantMessage):
-                    assistant_error = getattr(message, "error", None)
-                    if assistant_error:
-                        provider_detail = _assistant_message_error_detail(message)
-                        detail_suffix = (
-                            f" | provider_detail: {provider_detail}"
-                            if provider_detail
-                            else ""
-                        )
-                        raise RuntimeError(
-                            "Claude SDK AssistantMessage error: "
-                            f"{str(assistant_error).strip() or 'unknown'}"
-                            f"{detail_suffix}"
-                        )
+                    # The SDK can report terminal protocol failures as an
+                    # AssistantMessage.error without raising from query_stream.
+                    # Treat that typed error exactly like a raised SDK failure so
+                    # the existing on_error -> SSE error channel is preserved.
+                    if isinstance(message, AssistantMessage):
+                        assistant_error = getattr(message, "error", None)
+                        if assistant_error:
+                            provider_detail = _assistant_message_error_detail(message)
+                            detail_suffix = (
+                                f" | provider_detail: {provider_detail}"
+                                if provider_detail
+                                else ""
+                            )
+                            raise RuntimeError(
+                                "Claude SDK AssistantMessage error: "
+                                f"{str(assistant_error).strip() or 'unknown'}"
+                                f"{detail_suffix}"
+                            )
 
-                # Route to typed handler
-                await self._process_message(
-                    message=message,
-                    callbacks=callbacks,
-                    pending_tool_calls=pending_tool_calls,
-                    emitted_tool_input_ids=emitted_tool_input_ids,
-                    pending_stream_tools=pending_stream_tools,
-                    pending_stream_thinking=pending_stream_thinking,
-                    on_text_accumulate=_accumulate,
-                    include_partial_messages=include_partial_messages,
-                    usage_accumulator=usage,
-                )
+                    # Route to typed handler
+                    await self._process_message(
+                        message=message,
+                        callbacks=callbacks,
+                        pending_tool_calls=pending_tool_calls,
+                        emitted_tool_input_ids=emitted_tool_input_ids,
+                        pending_stream_tools=pending_stream_tools,
+                        pending_stream_thinking=pending_stream_thinking,
+                        on_text_accumulate=_accumulate,
+                        include_partial_messages=include_partial_messages,
+                        usage_accumulator=usage,
+                    )
 
-                # A Claude Runtime may recover from one provider-level
-                # ``max_tokens`` stop inside the same SDK query.  Keep only
-                # the latest terminal reason and decide after the whole SDK
-                # stream ends; raising here would abort that runtime-owned
-                # recovery before a later ``end_turn`` can arrive.
-                if isinstance(message, StreamEvent):
-                    stream_event = message.event or {}
-                    if stream_event.get("type") == "message_delta":
-                        stream_delta = stream_event.get("delta") or {}
-                        stop_reason = stream_delta.get("stop_reason")
+                    # A Claude Runtime may recover from one provider-level
+                    # ``max_tokens`` stop inside the same SDK query.  Keep only
+                    # the latest terminal reason and decide after the whole SDK
+                    # stream ends; raising here would abort that runtime-owned
+                    # recovery before a later ``end_turn`` can arrive.
+                    if isinstance(message, StreamEvent):
+                        stream_event = message.event or {}
+                        if stream_event.get("type") == "message_delta":
+                            stream_delta = stream_event.get("delta") or {}
+                            stop_reason = stream_delta.get("stop_reason")
+                            if isinstance(stop_reason, str) and stop_reason:
+                                terminal_stop_reason = stop_reason
+                    elif isinstance(message, AssistantMessage):
+                        stop_reason = getattr(message, "stop_reason", None)
                         if isinstance(stop_reason, str) and stop_reason:
                             terminal_stop_reason = stop_reason
-                elif isinstance(message, AssistantMessage):
-                    stop_reason = getattr(message, "stop_reason", None)
-                    if isinstance(stop_reason, str) and stop_reason:
-                        terminal_stop_reason = stop_reason
-                if isinstance(message, ResultMessage):
-                    result_message_count += 1
-                    subtype = getattr(message, "subtype", None)
-                    result_message_subtype = subtype if isinstance(subtype, str) else None
-                    result_message_is_error = getattr(message, "is_error", False) is True
-                    raw_duration_ms = getattr(message, "duration_ms", None)
-                    if (
-                        isinstance(raw_duration_ms, (int, float))
-                        and not isinstance(raw_duration_ms, bool)
-                        and math.isfinite(raw_duration_ms)
-                        and raw_duration_ms >= 0
-                    ):
-                        result_duration_ms = int(raw_duration_ms)
-
+                    if isinstance(message, ResultMessage):
+                        result_message_count += 1
+                        subtype = getattr(message, "subtype", None)
+                        result_message_subtype = subtype if isinstance(subtype, str) else None
+                        result_message_is_error = getattr(message, "is_error", False) is True
+                        raw_duration_ms = getattr(message, "duration_ms", None)
+                        if (
+                            isinstance(raw_duration_ms, (int, float))
+                            and not isinstance(raw_duration_ms, bool)
+                            and math.isfinite(raw_duration_ms)
+                            and raw_duration_ms >= 0
+                        ):
+                            result_duration_ms = int(raw_duration_ms)
             full_text = "".join(text_parts)
 
             if terminal_stop_reason == "max_tokens":
@@ -4453,6 +4474,13 @@ class ClaudeAgentRunner:
             elif event_type == "content_block_start":
                 content_block = event.get("content_block") or {}
                 cb_type = content_block.get("type", "")
+
+                if cb_type == "server_tool_use" and content_block.get("name") == "image_generation" and callbacks.on_tool_event:
+                    await _call(callbacks.on_tool_event, ToolEventPayload(type="tool_use_start", tool_name="image_generation",
+                        tool_call_id=content_block.get("id"), input={"gatewayRequestId": content_block.get("gateway_request_id")}, provider_executed=True))
+                elif cb_type == "image_generation_tool_result" and callbacks.on_tool_event:
+                    await _call(callbacks.on_tool_event, ToolEventPayload(type="tool_result", tool_name="image_generation",
+                        tool_call_id=content_block.get("tool_use_id"), output=content_block, provider_executed=True))
 
                 if cb_type == "tool_use":
                     tool_call_id = content_block.get("id")

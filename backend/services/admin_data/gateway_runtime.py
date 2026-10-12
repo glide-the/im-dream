@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: expose current grant scope membership to server-owned image composition.
 # [Input] One Admin-issued gateway-cli grant and the public Runtime delegation client.
 # [Output] Turn-owned renewal lifecycle plus a current opaque bearer snapshot.
 # [Pos] Dream Runtime authorization owner; no service key, signer or database access.
@@ -24,6 +25,9 @@ class AdminGatewayRuntime:
             if self._closed:
                 return
             self._keeper.start()
+
+    def allows(self, scope: str) -> bool:
+        return scope in self._keeper.current("gateway-cli").scopes
 
     def access_token(self) -> str:
         return self._keeper.current("gateway-cli").token

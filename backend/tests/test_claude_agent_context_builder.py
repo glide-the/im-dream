@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: assert files-directory URI semantics and actual workspace-relative mapping.
 # [Input] Consume ClaudeAgentContextBuilder with validated Session projection fixtures.
 # [Output] Verify system_prompt assembly: header, recent sessions block, runtime context,
 #          session count cap, empty-sessions fallback, and render-error degradation.
@@ -137,7 +138,8 @@ class TestBuildSystemPrompt(unittest.TestCase):
         prompt = _run(self._builder().build_system_prompt([]))
 
         self.assertIn("## Workspace File Reference Protocol", prompt)
-        self.assertIn("workspace://files/<path-relative-to-the-current-thread-workspace>", prompt)
+        self.assertIn("workspace://files/<path-relative-to-the-files-directory>", prompt)
+        self.assertIn("The URI maps to `files/<path>` inside the current Thread workspace", prompt)
         self.assertIn("![Generated image](workspace://files/generated-image.png)", prompt)
         self.assertIn("Do not emit `workspace://` when no <workspace_context> is present", prompt)
 

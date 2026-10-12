@@ -1,3 +1,4 @@
+// [Sync] 2026-10-11: provider-executed native image operations have no local pending approval; ordinary and MCP approvals retain their existing policy.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] ToolUIPart/DynamicToolUIPart from the chat message stream; Browser session and CSRF; API_BASE.
@@ -299,6 +300,7 @@ export function resolvePendingToolConfirmation(
   const input = 'input' in part ? part.input : undefined;
   if (input === undefined || input === null) return null;
   const toolName = resolveToolName(part);
+  if (toolName === 'image_generation' && 'providerExecuted' in part && part.providerExecuted === true) return null;
   if (toolName && isEditorWriteTool(toolName)) return null;
   const metadata = (part as unknown as { toolMetadata?: Record<string, unknown> }).toolMetadata;
   // The primary POST transport carries canonical settlement as tool metadata,

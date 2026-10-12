@@ -1,3 +1,5 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
+# [Sync] 2026-10-10: validate endpoint-specific image catalog; Images-only models cannot become text defaults.
 # [Input] Consume an Admin-issued OAuth or entity-delegation bearer and the server-only Gateway key.
 # [Output] Provide strict server-only model capabilities and Claude Code Runtime settings.
 # [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
@@ -20,7 +22,7 @@ from .errors import GatewayInferenceError
 _MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 _ACCESS_TOKEN = re.compile(r"^[A-Za-z0-9._~-]{16,8192}$")
 _PROTOCOLS = frozenset({"anthropic", "openai"})
-_PUBLIC_CAPABILITIES = frozenset({"chat", "json", "tools", "vision", "streaming"})
+_PUBLIC_CAPABILITIES = frozenset({"chat", "json", "tools", "vision", "streaming", "image_generation", "image_edit", "responses_image_generation", "responses_image_edit"})
 _AVAILABILITY = frozenset({
     "included",
     "upgrade_required",
@@ -60,6 +62,21 @@ class GatewayModel:
     claude_code_auto_compact_window: int | None = None
     claude_code_max_context_tokens: int | None = None
 
+    image_callable: bool = False
+    image_generation: bool = False
+    image_edit: bool = False
+    image_configured: bool = False
+    image_entitled: bool = False
+    responses_image: dict[str, bool] | None = None
+
+    @property
+    def is_conversation_model(self) -> bool:
+        # Old text catalogs omit chat; Images-only records must opt into chat.
+        return self.capabilities.get("chat") is not False and (
+            not (self.image_generation or self.image_edit)
+            or self.capabilities.get("chat") is True
+        )
+
     def claude_code_runtime_env(self) -> dict[str, str]:
         """Project configured model fields to the exact server-owned env keys."""
 
@@ -83,14 +100,26 @@ class GatewayModel:
             "modelAlias": self.model_alias,
             "displayName": self.display_name,
             "protocol": self.protocol,
-            "capabilities": self.capabilities,
+            "capabilities": {
+                **{key: value for key, value in self.capabilities.items() if key not in {"image_generation", "image_edit"}},
+                **({"chat": False} if not self.is_conversation_model else {}),
+            },
             "contextWindow": self.context_window,
             "maxOutputTokens": self.max_output_tokens,
             "enabled": self.enabled,
-            "callable": self.callable,
+            "callable": self.callable and self.is_conversation_model,
             "availability": self.availability,
             "requiredPlanCode": self.required_plan_code,
             "upgradeHint": self.upgrade_hint,
+            "images": {
+                "generation": self.image_generation, "edit": self.image_edit,
+                "configured": self.image_configured, "entitled": self.image_entitled,
+                "callable": self.image_callable,
+            },
+            "responsesImage": self.responses_image or {
+                "generation": False, "edit": False, "configured": False,
+                "entitled": False, "callable": False,
+            },
         }
 
 
@@ -98,6 +127,7 @@ class GatewayModel:
 class GatewayModelCatalog:
     models: tuple[GatewayModel, ...]
     default_model_alias: str | None
+    default_image_model_alias: str | None = None
 
 
 def _optional_non_negative_int(value: Any) -> int | None:
@@ -124,12 +154,14 @@ def _optional_positive_runtime_int(value: Any) -> int | None:
 def _parse_model(raw: Any) -> GatewayModel:
     if not isinstance(raw, dict):
         raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
-    if set(raw) != {
+    legacy_keys = {
         "id", "display_name", "protocol", "capabilities",
         "context_window", "max_output_tokens", "enabled", "callable",
         "claude_code_auto_compact_window", "claude_code_max_context_tokens",
         "availability", "required_plan_code", "upgrade_hint",
-    }:
+    }
+    image_keys = {"endpoint_availability", "image_input_token_reserve_per_image", "image_output_token_reserve_per_image"}
+    if set(raw) not in (legacy_keys, legacy_keys | image_keys):
         raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
     alias = raw.get("id")
     display_name = raw.get("display_name")
@@ -165,6 +197,39 @@ def _parse_model(raw: Any) -> GatewayModel:
         ))
     ):
         raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+    endpoints = raw.get("endpoint_availability")
+    image_callable = image_generation = image_edit = False
+    messages_callable = callable_value
+    if "endpoint_availability" in raw:
+        if not isinstance(endpoints, dict) or set(endpoints) not in ({"messages", "chat", "images"}, {"messages", "chat", "images", "responses_image"}):
+            raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+        for name, keys in (("messages", {"callable", "entitled"}), ("chat", {"callable", "entitled"}), ("images", {"callable", "entitled", "configured", "generation", "edit"})):
+            endpoint = endpoints[name]
+            if not isinstance(endpoint, dict) or set(endpoint) != keys or any(type(value) is not bool for value in endpoint.values()):
+                raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+            if endpoint["callable"] and (not callable_value or not endpoint["entitled"]):
+                raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+        images = endpoints["images"]
+        if images["callable"] and (not images["configured"] or not (images["generation"] or images["edit"])):
+            raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+        if images["generation"] != capabilities.get("image_generation", False) or images["edit"] != capabilities.get("image_edit", False):
+            raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+        for key in image_keys - {"endpoint_availability"}:
+            reserve = raw[key]
+            if reserve is not None and (type(reserve) is not int or not 1 <= reserve <= 9_007_199_254_740_991):
+                raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+        messages_callable = endpoints["messages"]["callable"]
+        image_callable, image_generation, image_edit = images["callable"], images["generation"], images["edit"]
+        native = endpoints.get("responses_image")
+        if "responses_image" in endpoints:
+            if (not isinstance(native, dict) or set(native) != {"callable", "entitled", "configured", "generation", "edit"}
+                    or any(type(value) is not bool for value in native.values())
+                    or native["callable"] and (not messages_callable or capabilities.get("chat") is False
+                        or (image_generation or image_edit) and capabilities.get("chat") is not True
+                        or not native["entitled"] or not native["configured"] or not (native["generation"] or native["edit"]))):
+                raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+    elif set(capabilities) & {"image_generation", "image_edit"}:
+        raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
     return GatewayModel(
         model_alias=alias,
         display_name=display_name.strip(),
@@ -179,7 +244,13 @@ def _parse_model(raw: Any) -> GatewayModel:
             raw.get("claude_code_max_context_tokens")
         ),
         enabled=True,
-        callable=callable_value,
+        callable=messages_callable,
+        image_callable=image_callable,
+        image_generation=image_generation,
+        image_edit=image_edit,
+        image_configured=endpoints["images"]["configured"] if endpoints else False,
+        image_entitled=endpoints["images"]["entitled"] if endpoints else False,
+        responses_image=endpoints.get("responses_image") if endpoints else None,
         availability=availability,
         required_plan_code=required_plan_code,
         upgrade_hint=upgrade_hint.strip() if upgrade_hint else None,
@@ -266,10 +337,12 @@ class GatewayModelCatalogClient:
         if default_alias is not None and (
             not isinstance(default_alias, str)
             or not _MODEL_ALIAS.fullmatch(default_alias)
-            or default_alias not in {model.model_alias for model in models if model.callable}
+            or default_alias not in {item["id"] for item in payload["data"] if item["callable"]}
         ):
             raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
-        return GatewayModelCatalog(tuple(models), default_alias)
+        text_default = default_alias if any(m.model_alias == default_alias and m.callable and m.is_conversation_model for m in models) else None
+        image_default = default_alias if any(m.model_alias == default_alias and m.image_callable for m in models) else None
+        return GatewayModelCatalog(tuple(models), text_default, image_default)
 
     def list_models(self, *, timeout: float = 10) -> list[GatewayModel]:
-        return list(self.fetch_catalog(timeout=timeout).models)
+        return [model for model in self.fetch_catalog(timeout=timeout).models if model.is_conversation_model]

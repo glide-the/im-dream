@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-12: distinguish normal login checkpoints from the retained historical token fixture. -->
 # Ink-Dream Playwright project workflow
 
 <!-- [Sync] 2026-09-06: use the sole Next frontend/app owner and private app/_dream source tree. -->
@@ -157,7 +158,11 @@ acceptance.
 
 ## Authentication and navigation
 
-Prefer API registration and localStorage seeding:
+For real-business QA, use the designated existing account and the public production login flow. Read [Authentication checkpoints](auth-checkpoints.md) before retrying a failed or expired login. Current Cookie/CSRF/OAuth contracts come from production source; do not seed a real session into browser storage.
+
+Historical isolated-fixture example below: use it only when that explicitly isolated fixture still implements this exact legacy token DTO. It is not the current normal-login contract; current technical harnesses must use their production DTO/entry.
+
+Prefer API registration and localStorage seeding only for that legacy fixture:
 
 ```ts
 const registration = await request.post(`${API_BASE}/api/register`, {
@@ -176,7 +181,7 @@ await page.addInitScript((authToken) => {
 }, token);
 ```
 
-Register before `page.goto()`. Do not fill the login UI unless login itself is under test.
+For that isolated legacy fixture, register before `page.goto()`. This fixture shortcut does not apply to real-business login or acceptance.
 
 The Writing surface contains an expanded state chooser when no daily state exists. It can intercept pointer events over the top navigation. For a test that only needs another view:
 

@@ -1,7 +1,8 @@
+<!-- [Sync] 2026-10-09: 增补选定Gateway双链路与当前图片协议缺口，保留原十幅时序图及历史API对比。 -->
 <!-- [Input] Codex 交付/语义恢复源码、Claude Code restored-src、Dream/Admin 当前源码、本会话图像 Tool 声明与 OpenAI 官方图像接口文档。 -->
 <!-- [Output] 图像完整业务时序、三套架构及 Image API/Responses API 实际接口对比、CLI 能力判断和最小接入范围。 -->
 <!-- [Pos] Chat图像研究补充；PRD/正式设计拥有业务，image-generation-implementation-notes.md维护拟议实施合同。 -->
-<!-- [Sync] 2026-10-09: 保留2026-10-07调查与全部图示；同步按目的重写后的业务/实施说明归属，未重新观察接口或界面。 -->
+<!-- [Sync] 2026-10-09: 新读用户提供Codex CLI，确认自定义image_gen.imagegen执行独立Images请求；原2026-10-07图示保留并标明范围，当前补齐链路见§18。 -->
 
 <!-- [Sync] 2026-10-09: 补充双钻石重做记录指引，原技术事实及接口边界不变。 -->
 
@@ -11,11 +12,11 @@
 
 上一轮确认了“通过 Tool 发起图像生成”可作为 Dream 的最小接入方向，但 Codex 的工具执行、客户端 item、图片查看器和文件保存来自不同证据边界。本稿将发起、调用、结果、访问、保存、重开、后续编辑和恢复放进同一份对比，避免把几段独立恢复代码拼成已经验证的当前客户端完整链路。
 
-**结论：Codex 的交付应用可以追踪到输入 → IPC → WebSocket RPC → app-server → 通知 → 消息状态。图像生成执行核心、文件写入和完整图片渲染接线尚未定位。后续语义恢复片段提供了图片来源转换、查看、缩放和下载能力；当前会话另有 `image_gen.imagegen` 工具声明。三者不能视为同一个已验收实现。**
+**2026-10-09补充结论：用户新提供的`/Users/dmeck/project/codex`明确实现“主Agent Responses → 自定义函数`image_gen.imagegen` → 独立`images/generations`或`images/edits` → 文件保存与图片item通知”。完整CLI链路及源码见[上传与编辑执行链](codex-cli-image-generation-chain.md)。当前安装App与这个checkout的版本对应、现场界面及真实请求仍未验证。**
 
-对用户提出的两种方案：**Claude Code CLI 不能仅靠换 Key 直接调用 Responses 内置图像工具；两条上游路径都可以接在通用 MCP Tool 后面。Image API 可独立于 Claude 对话模型使用，但仍需图像模型。Codex App 究竟使用哪条上游路径，现有证据不能确定。** 接口字段及这三个判断的来源详见 §15–17。
+对用户提出的两种方案：**Claude Code CLI不能仅靠换Key直接调用Responses内置图像工具；两条上游路径都可以接在通用MCP Tool后面。Image API可独立于Claude对话模型使用，但仍需图像模型。新提供CLI采用独立Images接口，不能仅因主Agent用了Responses就归为内置图像工具方案。** 官方接口及原读取日裁决见§15–17，新源码修订见§18。
 
-完整调用图在这里表示完整覆盖业务阶段；缺少源码的阶段直接标注“未定位”，不补造接口、数据库或 Provider。当前 Codex 图像界面没有现场观察证据：上一轮 Computer Use 访问 `com.openai.codex` 被拒绝。本轮沿用该限制，不绕过、不执行收费生成。
+**§4–10及§17中的“未定位/未知”是2026-10-07仅有恢复客户端时的调查记录，保留原图，不再作为2026-10-09 CLI执行端结论。** 原图完整覆盖业务阶段但当时缺少执行源码；新的完整链路见补充稿。当前Codex图像界面仍没有现场观察证据：上一轮Computer Use访问`com.openai.codex`被拒绝。本轮不绕过、不执行收费生成。
 
 ## 2. 目标与边界
 
@@ -613,7 +614,7 @@ sequenceDiagram
 | 把 Claude 对话模型路由到 Codex Provider 后自动出现内置图像 Tool | **当前 Admin 转换不能支持。** 后台可能请求 Responses，不等于把内置工具能力传给 CLI。 | [protocol-adapters.ts](/Users/dmeck/project/ink-admin-memory/app/lib/gateway/protocol-adapters.ts:258) 的 `adaptProviderRequest` 258（Anthropic→Chat→Responses）与 `adaptProviderResponse` 296；[responses-adapter.ts](/Users/dmeck/project/ink-admin-memory/app/lib/gateway/responses-adapter.ts:113) 的 `responseTools` 113仅构造function、结果193仅提取message/function_call/reasoning、流255。 |
 | MCP 扩展可以完成生成/编辑 | **架构具备通用调用入口，图像实现需补充。** MCP Tool 内可调用任一上游方案。 | C1 tools/list、call、图片转换；D1 internal MCP与tool_result。CLI能执行授权Tool不等于图像适配已实现。用Bash临时curl不是正式接入方案。 |
 | Image API 与模型无关 | **只能说与 Agent 的对话模型解耦。** 生成仍要图像模型与该模型能力。 | §15的顶层model；对话Agent只要支持所需Tool调用即可，实际所选模型仍需验证。 |
-| Codex App 使用 Responses API | **未知，不能宣布其中任一路径。** Tool名/item名/字段相似只构成线索。 | S1–S4只追到外部app-server；T1只有声明；S12恢复字段不是HTTP调用证据。本次在交付src及恢复src查 image_generation、images/generations、images/edits、/v1/responses、image_gen.imagegen 未命中执行调用。未搜索封闭Provider核心或抓取授权真实请求。 |
+| Codex App 使用 Responses API | **未知，不能宣布其中任一路径。** Tool名/item名/字段相似只构成线索。 | S1–S4只追到外部app-server；T1只有声明；S12恢复字段不是HTTP调用证据。原2026-10-07交付src及恢复src调查中，搜索 image_generation、images/generations、images/edits、/v1/responses、image_gen.imagegen 未命中执行调用；当时未读取本轮新增CLI源码，也未抓取授权真实请求。新CLI修订见§18。 |
 
 Dream 当前主运行路径也不会因用户 env 自动取得图像能力。[sdk_env.py](../../../backend/libs/claude_agent_kit/server/sdk_env.py:697) 的 merge 保留服务器 Gateway delegation；[anthropic-handler.ts](/Users/dmeck/project/ink-admin-memory/app/lib/gateway/anthropic-handler.ts:17) 的 `handleAnthropicMessages` 用 Anthropic schema、`messages:create` scope 和现有授权/代理处理。Provider Key 不进入前端或模型上下文，图像 scope 不能假借现有 messages:create 通过。
 
@@ -622,3 +623,24 @@ Dream 当前主运行路径也不会因用户 env 自动取得图像能力。[sd
 评审关注：同样的“发送→调用/授权→最终图→保存→重开→引用编辑”必须覆盖两种上游；流完成标记不代替图片，读取失败不重新生成，stop不承诺远端取消，模型参数不包装成产品配额。现行[正式稿](image-generation-interaction-design.md)说明业务状态与恢复，[实施说明](image-generation-implementation-notes.md)维护Provider、权限、文件合同及技术验收。2026-10-09仅调整文档归属，本稿图示与2026-10-07调查证据保留。
 
 本轮双钻石重做的业务取舍、现行稿评审及文档回执见[2026-10-09重做记录](../../exec/image-design-double-diamond-20261009.md)；本文源码/API事实仍为原读取日证据。
+
+## 18. 新提供Codex CLI的执行链修订（2026-10-09）
+
+新增源码基线HEAD为`a06545b311fe01e51ce855c7aa5d8da21e9e7aaf`，读取时工作区干净。`imagegen_tool_spec`声明namespace中的function；`request_for_call_args`按参考图参数选择生成或编辑；`CodexImagesBackend`使用当前Provider/auth构建`ImagesClient`，后者发JSON POST `images/generations`或`images/edits`。这解决了原稿止于IPC的缺口。没有证据把该调用写成Responses内置`type:"image_generation"`。
+
+默认app-server将本地附件变成inline `input_image`，不另发Files上传；编辑工具可读指定原文件，也可选择历史图片窗口。执行器取首图、尝试保存到codex_home，通知以call ID关联；保存失败仍可返回base64图片，媒体省略选项也会改变通知字段。完整正常/失败时序、动态URL、结果、历史及K1–K19证据见[CLI完整执行链](codex-cli-image-generation-chain.md)，本次回执见[执行记录](../../exec/codex-cli-image-chain-20261009.md)。
+
+本修订只更新源码判断与设计依据，不改IM用户流程，不证明当前安装App版本匹配、Provider真实行为或图像能力已在IM实现。
+
+## 19. IM选定的两条链路与兼容判断（2026-10-09）
+
+主对话为`IM → Claude Code Runtime → Admin /v1/messages → Responses`；执行图片为CLI调用内部`image_gen.imagegen`（建议、未实现）→ Admin Images入口（建议、未实现）→ 独立Images生成或编辑。这与指定Codex CLI的自定义function调用独立Images方向一致，不宣称当前安装App已观察或已使用同版本执行器。
+
+| 对比方案 | 实际交互接口 | CLI/Gateway需要补充 | 本轮决定 |
+|---|---|---|---|
+| 独立Image API | 生成`POST /v1/images/generations`；编辑`POST /v1/images/edits`；完整结果`data[].b64_json`。主对话通过普通function调用执行器。 | Admin图像授权/路由/计费，内部MCP调用、安全文件保存和图片引用；主对话图片输入仍需兼容。 | 采用，图像接入未实现。 |
+| Responses内置图像 | `POST /v1/responses`声明`tools:[{type:"image_generation"}]`；平台执行，`image_generation_call.result`返回图片。 | Gateway构造平台工具、消费图像事件及结果、保存新图并回传CLI/IM可展示输出；不能当作普通function原样透传。 | 可适配的备选，本次不实施。 |
+
+Claude Code发送Messages不是架构上不能适配Responses的理由。当前Admin已经有文本与普通函数转换，但`anthropicContentToOpenAI`先丢掉用户image，`messageText`对实际图片类型又主动拒绝，数组tool_result转为JSON文字，内置图像工具及结果未接通。不是“仅发送相同Key就完整可用”。普通OpenAI、codex managed auth和Provider选择也不能互换。
+
+本方案的主模型负责理解/读图/决定函数调用，图像模型负责生成编辑；CLI是Runtime。主对话图片兼容和独立Images能力都要完成，不在CLI内加入新主循环或建立双接口fallback。具体调用标识、输入输出、图片访问与历史接口、G1–G8源码见[实施说明](image-generation-implementation-notes.md)，完整正常/恢复/状态图见[正式设计](image-generation-interaction-design.md)。本轮仅验证文稿与现有适配器，记录在[执行记录](../../exec/image-gateway-redesign-20261009.md)。

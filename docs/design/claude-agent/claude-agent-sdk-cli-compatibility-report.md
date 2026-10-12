@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-11: pin public Runtime 0.1.12 and separate normal adoption from incomplete real image acceptance. -->
 <!-- [输入] Dream 当前 SDK/Runtime resolver、SDK main、原始模块 Runtime manifest、五包制品和真实业务回执。 -->
 <!-- [输出] 记录自有 Python SDK 与原始模块 Runtime 的接口配对、问题修复、发布门和回滚合同。 -->
 <!-- [定位] Dream 当前 SDK × Runtime 兼容性真相源；历史官方/恢复源码组合只作回归背景。 -->
@@ -8,7 +9,7 @@
 
 # Claude Agent SDK 与原始模块 Runtime 兼容性报告
 
-> 当前结论：Dream 继续通过上游公共 `cli_path` 接口使用自有 SDK distribution；0.1.10 Runtime 实际编译原始模块，不需要在 Dream 中复制 Claude Agent、MCP 或 transport 状态机。不同版本的测试和发布回执不能替代当前制品验证。
+> 当前结论：Dream 继续通过上游公共 `cli_path` 接口使用自有 SDK distribution；0.1.12 Runtime 实际编译原始模块，不需要在 Dream 中复制 Claude Agent、MCP 或 transport 状态机。不同版本的测试和发布回执不能替代当前制品验证。
 
 ## 背景、目标与概念规则
 
@@ -23,12 +24,12 @@ Dream 需要独立发布的 SDK 和 Runtime 支持既有 Chat、工具审批、N
 | SDK 源码/发布身份 | `0.2.145` distribution metadata + checked archive hashes | 发布来源由 SDK 仓库维护；Dream 不用 import 目录猜包身份 |
 | SDK 上游源码 | commit `542fefb3b94be87760b2513fff889b91bb5b6672` | 上游 tree `1c86f3a…` 为 API 基线；下游仅 `_version.py` 记录 distribution 版本 `0.2.145`，其余源文件保持一致 |
 | SDK → CLI 注入 | `ClaudeAgentOptions.cli_path` | 复用上游 transport/process launcher |
-| Runtime npm selector | source contract `@glide-the/ink-claude-code-dream@0.1.10` | package-root `cli.js` 选择 darwin/linux × arm64/x64 平台包；manifest 配对 SDK `0.2.145` |
-| Runtime release state | `0.1.10` 已发布 | 同 SHA 四平台资格、五包公开归档 integrity、全新安装和本机 Dream 启动身份均有回执，见当前发布/接入记录 |
+| Runtime npm selector | source contract `@glide-the/ink-claude-code-dream@0.1.12` | package-root `cli.js` 选择 darwin/linux × arm64/x64 平台包；manifest 配对 SDK `0.2.145` |
+| Runtime release state | `0.1.12` 已发布 | 同 SHA 四平台资格、五包公开归档 integrity、全新安装和本机 Dream 启动身份均有回执，见当前发布/接入记录 |
 | Runtime 对外版本 | `2.1.241 (Claude Code)` | Dream 所需 argv/JSONL/management 兼容标识，不是官方全产品声明 |
 | Runtime 实现 | 原始模块 `src`，入口 `src/entrypoints/cli.tsx` | 默认构建实际编译它；headless/MCP 兼容变换在构建层，不维护第二套运行实现 |
 | Runtime 原始源码结构 | 唯一 `src`，1,902 文件/35 模块目录 | 原始目录/模块/内容/权限摘要不变；重复 `restored-src` 删除，provenance 保留；Anthropic 版权不改 |
-| Runtime 编译器 | Bun `1.4.0` | 四个 native standalone 已分别通过同 SHA 资格；每次升级仍须验证对应宿主和制品，不能复用其他版本结论 |
+| Runtime 编译器 | Bun `1.4.0` | 四个目标平台包已分别通过同 SHA 资格；每次升级仍须验证对应宿主和制品，不能复用其他版本结论 |
 | official 回滚 | Docker `2.1.241` | 仅绝对 `CLAUDE_CODE_CLI_PATH` 显式选择 |
 
 SDK 的 distribution 名改变，公共 Python namespace 不改变。因此 `.venv/.../site-packages/claude_agent_sdk` 是正确安装路径；判断实际包来源应读取 distribution metadata，而不是根据 import 目录名猜测。
@@ -60,7 +61,7 @@ Runtime 解析顺序：调用方 `cli_path` → 绝对 `CLAUDE_CODE_CLI_PATH` �
 
 ## 4. Dream 分发能力边界
 
-npm Runtime 门要求 14 项 Dream 发布能力；local-core 有单独 13 项 portable baseline。当前 `0.1.10` 的通过状态见发布回执；以下能力是每次升级都必须验证的合同，不能因其他版本通过而省略：
+npm Runtime 门要求 14 项 Dream 发布能力；local-core 有单独 13 项 portable baseline。当前 `0.1.12` 的通过状态见发布回执；以下能力是每次升级都必须验证的合同，不能因其他版本通过而省略：
 
 - `protocol.streaming`
 - `protocol.control.bidirectional`
@@ -79,7 +80,7 @@ npm Runtime 门要求 14 项 Dream 发布能力；local-core 有单独 13 项 po
 
 Provider streaming、tool loop、PreToolUse/permission、Gateway `apiKeyHelper` 和普通 Agent/Task 工具是上述协议/扩展能力的必需实现。原始产品模块仍保留在 src，现有 headless profile 按图证明裁剪交互/remote/team/IDE 产品面；共享依赖暂缓项不按目录名删除。
 
-## 5. 本轮发现并修复的协议问题
+## 5. 历史协议问题与当前保留合同
 
 ### 5.1 PreToolUse allow 重复确认
 
@@ -91,7 +92,7 @@ Provider streaming、tool loop、PreToolUse/permission、Gateway `apiKeyHelper` 
 - 无决定：按正常 permission policy 继续。
 - `deny`：不执行工具。
 
-focused regression 8/8 通过；真实 Comfy 两轮各只有一个精确 `get_server_info` 工具调用和一个确认。
+**历史验证结果（非0.1.12本轮验收）**：focused regression 8/8 通过；真实 Comfy 两轮各只有一个精确 `get_server_info` 工具调用和一个确认。
 
 ### 5.2 OAuth refresh token 被旧投影覆盖
 
@@ -104,7 +105,7 @@ focused regression 8/8 通过；真实 Comfy 两轮各只有一个精确 `get_se
 - 不可恢复 `invalid_grant` 删除两处旧 token 并进入 `needs-auth`。
 - discovery/DCR 超时后禁止迟到异步写重新创建凭据。
 
-provider-free OAuth 6/6、management + OAuth 9/9 通过，并覆盖两个 Runtime 进程连续 token rotation。
+**历史验证结果（非0.1.12本轮验收）**：provider-free OAuth 6/6、management + OAuth 9/9 通过，并覆盖两个 Runtime 进程连续 token rotation。
 
 ### 5.3 Gateway `apiKeyHelper`
 
@@ -120,9 +121,9 @@ opaque alias 的默认值和上界，仍由统一 Messages builder 负责首轮�
 
 ## 6. 当前发布与验证状态
 
-SDK `0.2.145`、Runtime `0.1.10` 的精确归档摘要、同 SHA 四平台 CI、五包 registry 回下载、全新安装和本机采用见[发布与本机 Dream 接入记录](../../deploy/runtime-0.1.10-plugin-management-and-dream-adoption.md)。本报告定义兼容规则，执行记录保存命令、制品身份和实际结果；不把历史版本的组件数、许可证或测试数量用作当前制品结论。
+SDK `0.2.145`、Runtime `0.1.12` 的精确归档摘要、同 SHA 四平台 CI、五包 registry 回下载、全新安装和本机采用见[发布与本机 Dream 接入记录](../../deploy/runtime-0.1.12-compact-images-and-dream-adoption.md)。本报告定义兼容规则，执行记录保存命令、制品身份和实际结果；不把历史版本的组件数、许可证或测试数量用作当前制品结论。
 
-selector 的 Node 范围是 `>=22 <25`，平台包包含 standalone binary，运行时不要求用户安装 Bun。Windows、musl、未知 arch 和交叉选择不满足当前平台合同，解析失败不得自动选择其他平台。
+selector 的 Node 范围是 `>=22 <25`，平台包包含core JavaScript，由npm精确依赖Bun `1.4.0`执行；0.1.12同目标sharp/libvips原生依赖随npm安装并验证，用户无需另装ambient/global Bun。Windows、musl、未知 arch 和交叉选择不满足当前平台合同，解析失败不得自动选择其他平台。
 
 ## 7. 完整业务验收与影响范围
 
@@ -132,9 +133,9 @@ selector 的 Node 范围是 `>=22 <25`，平台包包含 standalone binary，运
 
 ## 8. 许可证与发布边界
 
-0.1.10 的实际实现是唯一原始 `src`；重复 `restored-src` 已删除。原始源码进入构建，copyright/source-derived SBOM 如实保留；selector MIT 不重新许可这些模块。用户已确认公开 npm 来源授权，技术资格仍须对应实际制品证据。
+自0.1.11采用、0.1.12延续的实际实现是唯一原始 `src`；重复 `restored-src` 已删除。原始源码进入构建，copyright/source-derived SBOM 如实保留；selector MIT 不重新许可这些模块。用户已确认公开 npm 来源授权，技术资格仍须对应实际制品证据。
 
-不同制品的许可证、构建摘要与业务验收不能互相替代。SDK PyPI 和 Runtime npm 分开发布；Dream 依赖和锁固定 SDK `0.2.145` 与 Runtime `0.1.10`。当前公开归档和本机采用已验收，未来升级仍须同 SHA 资格与对应版本 registry 校验。AutoDL local-core 是独立制品，本次未部署远程环境。
+不同制品的许可证、构建摘要与业务验收不能互相替代。SDK PyPI 和 Runtime npm 分开发布；Dream 依赖和锁固定 SDK `0.2.145` 与 Runtime `0.1.12`。当前公开归档和本机采用已验收，未来升级仍须同 SHA 资格与对应版本 registry 校验。AutoDL local-core 是独立制品，本次未部署远程环境。
 
 完整的版本准备、可复现构建、OIDC 发布、registry smoke、Dream 锁文件更新和回滚命令见
 [`docs/deploy/claude-sdk-runtime-packaging-and-integration.md`](../../deploy/claude-sdk-runtime-packaging-and-integration.md)。

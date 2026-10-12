@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Input] Consume typed Admin SystemConfig operations, shared OAuth auth and Gateway catalog.
 # [Output] Register GET/PUT /api/system-config endpoints.
 # [Pos] system-config route node in backend/routers
@@ -62,6 +63,7 @@ from services.admin_data.system_config_data import (
     AdminSystemConfigData,
     SystemConfigGetInputDTO,
     SystemConfigPatchInputDTO,
+    ImageModelPatchInputDTO,
 )
 from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
@@ -265,9 +267,35 @@ async def put_system_config(
     ``workspace_enabled``, ``sandbox_network_mode``,
     ``sandbox_network_allowed_domains``, ``sandbox_fs_allowed_write_paths``,
     ``im_full_access_enabled``, ``theme``, ``env_vars``.
+    ``image_model`` is an independent single-field write using the appended Admin operation.
     Unknown keys are ignored.
     """
     user_id = current_user["user_id"]
+
+    if "image_model" in request:
+        # Independent writes avoid a partial AI/Image save across two frozen
+        # Admin operation contracts.
+        if set(request) != {"image_model"}:
+            raise HTTPException(status_code=422, detail="Save the Image model separately")
+        image_alias = request["image_model"]
+        if not isinstance(image_alias, str) or not _MODEL_ALIAS_PATTERN.fullmatch(image_alias):
+            raise HTTPException(status_code=422, detail="Invalid Image model alias")
+        actor = current_user.get("_admin_actor")
+        if not isinstance(actor, AdminRequestActor):
+            raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+        try:
+            catalog = await asyncio.to_thread(GatewayModelCatalogClient(access_token=actor.access_token).fetch_catalog)
+        except GatewayInferenceError as exc:
+            raise _gateway_error(exc) from exc
+        selected = next((model for model in catalog.models if model.model_alias == image_alias), None)
+        if selected is None or not (selected.image_generation or selected.image_edit):
+            raise HTTPException(status_code=409, detail={"code": "IMAGE_MODEL_SELECTION_STALE", "message": "Refresh and choose an Image model."})
+        if not selected.image_callable:
+            raise HTTPException(status_code=403, detail={"code": "IMAGE_MODEL_UNAVAILABLE", "message": "The selected Image model is not callable.", "configured": selected.image_configured, "entitled": selected.image_entitled})
+        data = AdminSystemConfigData(owner.client)
+        await invoke_admin_operation(current_user, data.patch_image_model, ImageModelPatchInputDTO(image_model=image_alias))
+        config = await invoke_admin_operation(current_user, data.get_user, SystemConfigGetInputDTO())
+        return {"success": True, "data": _public_system_config(config)}
 
     patch: dict = {}
 
@@ -295,7 +323,7 @@ async def put_system_config(
             (model for model in catalog.models if model.model_alias == model_alias),
             None,
         )
-        if selected is None:
+        if selected is None or not selected.is_conversation_model:
             raise HTTPException(
                 status_code=409,
                 detail={

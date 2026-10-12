@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: preserve legacy text selection while rejecting Images-only aliases at the live catalog boundary.
 # [Input] Consume the authenticated Admin catalog and an explicitly authorized SystemConfig reader.
 # [Output] Resolve the selected callable GatewayModel and compatibility alias projection.
 # [Pos] Server-owned model selection boundary shared by public and internal Dream turns.
@@ -42,7 +43,7 @@ def resolve_platform_model(
         raise GatewayInferenceError("GATEWAY_SYSTEM_CONFIG_UNAVAILABLE", 503)
     catalog = catalog_client_factory(canonical_user_id).fetch_catalog()
     callable_models = {
-        model.model_alias: model for model in catalog.models if model.callable
+        model.model_alias: model for model in catalog.models if model.callable and model.is_conversation_model
     }
     config = system_config_reader(canonical_user_id)
     saved = str(config.get("model") or "").strip()

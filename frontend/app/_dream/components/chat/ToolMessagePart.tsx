@@ -1,3 +1,6 @@
+// [Sync] 2026-10-11: show only actionable image error messages; execution state is independent of approval settlement.
+// [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+// [Sync] 2026-10-10: label the internal image tool by generate/edit intent, retaining ordinary tool states.
 // [Input] EditorWriteApprovalUI, Icons, toolConfirmation helpers; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
 // [Output] Collapsed tool detail card (header + expandable input/output), plus the inline
 //          EditorWriteApproval UI for mcp__editor__ write tools. Generic approvals and
@@ -26,7 +29,7 @@ import type { DynamicToolUIPart, ToolUIPart } from 'ai';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
 import { confirmToolCall, resolveToolName } from './toolConfirmation';
-import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
+import { isShellTool, resolveToolInputSummary, summarizeToolInvocation, imageToolAction } from './toolInputSummary';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import McpAppHostPanel from './mcp-apps/McpAppHostPanel';
 import type { SendMcpAppUserMessage } from './mcp-apps/ImMcpAppHostAdapter';
@@ -34,6 +37,16 @@ import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 import type { ChatUserMessage } from './chatUserMessageIngress';
 
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
+
+function imageFailureMessage(value: unknown): string {
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && 'message' in parsed && typeof parsed.message === 'string' ? parsed.message : '';
+    } catch { return value; }
+  }
+  return value && typeof value === 'object' && 'message' in value && typeof value.message === 'string' ? value.message : '';
+}
 
 function IconTool() {
   return (
@@ -214,6 +227,19 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
     );
   }
 
+  const imageAction = imageToolAction(toolName, input);
+  if (imageAction) {
+    const errorValue = 'errorText' in part && typeof part.errorText === 'string' ? part.errorText
+      : 'error' in part ? part.error : output;
+    const failureText = imageFailureMessage(errorValue);
+    return <div style={{ width: '100%', padding: '0.75rem 0' }}>
+      <div style={{ color: 'var(--color-text-primary)' }}>{t(`chat.imageTool.${imageAction}`)}</div>
+      <StatusRow tone={isError ? 'danger' : isCompleted ? 'success' : 'warning'}
+        label={t(`chat.imageTool.${isError ? 'failed' : isCompleted ? 'completed' : isExecuting ? 'running' : 'incomplete'}`)}
+        icon={isError ? <IconAlert /> : isCompleted ? <IconCheck /> : undefined} />
+      {isError && failureText ? <p role="alert" style={{ whiteSpace: 'pre-wrap', color: 'var(--color-state-error)' }}>{failureText}</p> : null}
+    </div>;
+  }
   return (
     <div style={{ width: '100%' }}>
       <div style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
@@ -222,7 +248,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
             {isExecuting ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : isError ? <IconAlert /> : <IconTool />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{title || toolName}</div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{imageToolAction(toolName, input) ? t(`chat.imageTool.${imageToolAction(toolName, input)}`) : title || toolName}</div>
             {toolSummaryText ? (
               <div style={{ marginTop: '0.15rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{toolSummaryText}</div>
             ) : null}

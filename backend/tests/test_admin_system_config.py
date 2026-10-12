@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual SystemConfig DTO adapter, exact Admin catalog and synthetic HTTP transport.
 # [Output] OAuth/idg separation, raw JSON preservation, closed patches and original receipt recovery evidence.
@@ -19,6 +20,8 @@ from services.admin_data.system_config_data import (
     GET_THREAD_SYSTEM_CONFIG,
     GET_USER_SYSTEM_CONFIG,
     PATCH_USER_SYSTEM_CONFIG,
+    PATCH_USER_IMAGE_MODEL,
+    ImageModelPatchInputDTO,
     SYSTEM_CONFIG_OPERATIONS,
     SystemConfigGetInputDTO,
     SystemConfigPatchInputDTO,
@@ -69,7 +72,7 @@ def _boundary(*, raw='{"theme":"dark"}', patch_failure=None, catalog_operations=
             calls.append(("receipt", request.headers["authorization"], None))
             value = {
                 "status": "committed",
-                "operation": "user-system-config.patch",
+                "operation": request.url.params.get("operation"),
                 "request_id": request_id,
                 "result": {"success": True},
             }
@@ -79,9 +82,9 @@ def _boundary(*, raw='{"theme":"dark"}', patch_failure=None, catalog_operations=
         assert set(envelope) == {"request_id", "input"}
         assert envelope["request_id"] == request_id
         calls.append((operation, request.headers["authorization"], envelope["input"]))
-        if operation == PATCH_USER_SYSTEM_CONFIG.capability.name and patch_failure is not None:
+        if operation in (PATCH_USER_SYSTEM_CONFIG.capability.name, PATCH_USER_IMAGE_MODEL.capability.name) and patch_failure is not None:
             raise patch_failure
-        if operation == PATCH_USER_SYSTEM_CONFIG.capability.name:
+        if operation in (PATCH_USER_SYSTEM_CONFIG.capability.name, PATCH_USER_IMAGE_MODEL.capability.name):
             value = {"success": True}
         else:
             value = {"config_json": raw}
@@ -175,6 +178,20 @@ def test_unknown_patch_uses_original_receipt_without_post_retry():
     assert sum(name == "receipt" for name, _, _ in calls) == 1
 
 
+def test_unknown_image_patch_uses_its_original_operation_receipt_without_post_retry():
+    data, calls, http = _boundary(patch_failure=httpx.ReadTimeout("private upstream body"))
+    try:
+        with pytest.raises(AdminDataError) as lost:
+            data.patch_image_model(ImageModelPatchInputDTO(image_model="image-a"), "original-image-patch", access_token="oauth-user")
+        assert lost.value.outcome_unknown and lost.value.request_id == "original-image-patch"
+        receipt = data.image_model_patch_receipt("original-image-patch", access_token="oauth-user")
+    finally:
+        http.close()
+    assert isinstance(receipt, CommittedReceiptDTO) and receipt.operation == PATCH_USER_IMAGE_MODEL.capability.name
+    assert sum(name == PATCH_USER_IMAGE_MODEL.capability.name for name, _, _ in calls) == 1
+    assert sum(name == "receipt" for name, _, _ in calls) == 1
+
+
 def test_missing_exact_operation_stops_before_domain_request():
     data, calls, http = _boundary(catalog_operations=(GET_USER_SYSTEM_CONFIG, PATCH_USER_SYSTEM_CONFIG))
     try:
@@ -183,3 +200,32 @@ def test_missing_exact_operation_stops_before_domain_request():
     finally:
         http.close()
     assert [name for name, _, _ in calls] == ["capabilities"]
+
+
+def test_independent_image_patch_uses_new_contract_and_keeps_frozen_ai_contract():
+    assert SYSTEM_CONFIG_OPERATIONS[:3] == (GET_USER_SYSTEM_CONFIG, PATCH_USER_SYSTEM_CONFIG, GET_THREAD_SYSTEM_CONFIG)
+    assert PATCH_USER_SYSTEM_CONFIG.capability.contract_sha256 == '4f596ea05fe6adc5d881f5484b41ce40ae3a08358a7332f1b3b964112bd38b72'
+    data, calls, http = _boundary()
+    try:
+        assert data.patch_image_model(ImageModelPatchInputDTO(image_model='image-a'), 'image-save', access_token='oauth-user').success
+    finally:
+        http.close()
+    assert [call for call in calls if call[0] != 'capabilities'] == [
+        ('user-system-config.patch-image-model', 'Bearer oauth-user', {'image_model': 'image-a'})]
+
+
+@pytest.mark.parametrize('value', [{}, {'image_model': None}, {'image_model': ' image-a'},
+    {'image_model': 'image-a', 'model': 'chat-a'}, {'image_model': 3}])
+def test_image_patch_rejects_unrelated_null_or_invalid_fields(value):
+    with pytest.raises(ValidationError):
+        ImageModelPatchInputDTO(**value)
+
+
+def test_missing_image_patch_capability_does_not_write_or_fallback():
+    data, calls, http = _boundary(catalog_operations=SYSTEM_CONFIG_OPERATIONS[:3])
+    try:
+        with pytest.raises(AdminDataError, match='ADMIN_CAPABILITY_UNAVAILABLE'):
+            data.patch_image_model(ImageModelPatchInputDTO(image_model='image-a'), 'missing-image-op', access_token='oauth-user')
+    finally:
+        http.close()
+    assert [call[0] for call in calls] == ['capabilities']

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-12: callback cancellation must close the owned SDK generator before returning.
 # [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
 # [Sync] 2026-10-07: verify exact scheduled auto/manual overrides, strict unresolved denial and unattended network failure markers.
 # [Sync] 2026-09-28: verify Auto/full-access Thread orchestration without duplicate confirmation; manual mode still confirms.
@@ -5083,3 +5084,53 @@ class TestHookDictLiteralContract(_RunnerBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRunnerQueryOwnership(_RunnerBase):
+    async def test_callback_cancellation_closes_sdk_iterator(self):
+        closed = asyncio.Event()
+        entered = asyncio.Event()
+
+        async def stream(prompt, options=None):
+            try:
+                yield _text_delta_event("partial")
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+
+        async def callback(message):
+            entered.set()
+            await asyncio.Event().wait()
+
+        self._mock_client.query_stream = stream
+        task = asyncio.create_task(self.make_runner().run_streaming(
+            opts=AgentRunOptions(thread_id="cancel-callback", user_message="cancel", tool_choice="none"),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda delta: None, on_message=callback),
+        ))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+        self.assertTrue(closed.is_set())
+
+
+    async def test_resource_free_async_iterator_remains_compatible(self):
+        class Iterator:
+            def __init__(self):
+                self.done = False
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                if self.done:
+                    raise StopAsyncIteration
+                self.done = True
+                return _text_delta_event("compatible")
+
+        self._mock_client.query_stream = lambda prompt, options=None: Iterator()
+        deltas = []
+        result = await self.make_runner().run_streaming(
+            opts=AgentRunOptions(thread_id="iterator-contract", user_message="text", tool_choice="none"),
+            callbacks=AgentStreamingCallbacks(on_text_delta=deltas.append),
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(deltas, ["compatible"])

@@ -3,6 +3,11 @@ name: ink-dream-playwright-qa
 description: Run reliable full-business-journey Playwright automation and visual QA for the Ink-Dream repository. Use when Codex needs to create, debug, or execute frontend browser tests; validate authenticated Chat, Dream, Settings, SubAgent, theme, language, responsive, Markdown, console, resize behavior, or a complete Agent-to-file-to-Hook-to-database-to-page projection; use isolated fixtures only for explicitly technical tests; or diagnose flaky local Playwright runs on ports 5173 and 8765.
 ---
 
+<!-- [Input] Repository contracts, selected business scenario and existing authentication checkpoints. -->
+<!-- [Output] Scoped browser validation and resumable evidence without credential contents. -->
+<!-- [Pos] Existing Ink-Dream QA skill, including normal-account session recovery. -->
+<!-- [Sync] 2026-10-12: consult and maintain the successful login source before retrying authentication. -->
+
 # Ink-Dream Playwright QA
 
 Use the repository-local `@playwright/test` runtime. Select the real-business or
@@ -10,6 +15,8 @@ technical-isolation lane explicitly. Produce assertions and evidence, not
 screenshot-only approval.
 
 Read [references/project-workflow.md](references/project-workflow.md) before starting a browser run. Read its SubAgent fixture section only when testing SubAgent projections or timelines.
+
+For authenticated real-business QA, read [references/auth-checkpoints.md](references/auth-checkpoints.md) before login or session recovery. Find the prior successful entry, identity and credential source first; record a new secret-free checkpoint immediately after success. A rejected product password does not invalidate a separately saved Admin credential or an existing management session.
 
 ## Test execution agent
 
@@ -27,7 +34,7 @@ full routing contract from `$luna-test-stage` when available.
 
 ## Non-negotiable rules
 
-- Run Playwright from `frontend/` with the installed `@playwright/test`; do not depend on a global `playwright-cli` or an MCP wrapper.
+- Run technical Playwright stages from `frontend/` with the installed `@playwright/test`. For primary real-business operations, honor an explicitly selected browser plugin and its controller; do not replace its profile or saved-session state with a standalone browser.
 - Inspect `git status --short` first. Preserve unrelated changes and remove only artifacts created by the current QA run.
 - Use an isolated database and absolute workspace root only for explicitly
   technical, provider-free, destructive, migration, or fault-injection tests.

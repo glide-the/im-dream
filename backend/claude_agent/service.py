@@ -1,3 +1,6 @@
+# [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
+# [Sync] 2026-10-10: separate saved AI/Image ownership; validate native Responses results through the Gateway bridge.
+# [Sync] 2026-10-10: bind Host Images and retain only registered, Host-published results in normal/partial final messages.
 # [Sync] 2026-10-07: persist a minimal visible completion for successful scheduled turns that end after tools without model final text.
 # [Sync] 2026-10-07: carry server-owned per-tool approval policy and unattended violation evidence into the shared Agent runner.
 # [Sync] 2026-09-28: accept an Admin-bound scheduled turn ID and pre-persisted input; derive its final message ID from that same turn for verified settlement.
@@ -1556,6 +1559,21 @@ class DreamArtifactSyncAfterCommitError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+def _image_final_text(turn_ctx, fallback: str) -> str:
+    if not turn_ctx.image_results:
+        return fallback
+    parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
+    final = parts[-1].get("text", "") if parts and parts[-1].get("type") == "text" else fallback
+    visible = re.sub(r"```[\s\S]*?```|`[^`]*`", "", final)
+    displayed = set(re.findall(r"!\[[^\]]*\]\((workspace://files/[^\s)]+)\)", visible))
+    additions = []
+    for image in turn_ctx.image_results:
+        if image.uri not in displayed:
+            displayed.add(image.uri)
+            additions.append(f"![Generated image]({image.uri})")
+    return final + ("\n\n" if final and additions else "") + "\n\n".join(additions)
+
+
 _TEXT_PART_ID = "text-0"
 
 
@@ -1583,6 +1601,8 @@ class _TurnContext:
 
     queue: Any  # asyncio.Queue or BusProxyQueue
     confirmation_store: ToolConfirmationStore
+    image_provider: Any = field(default=None, repr=False)
+    image_results: list = field(default_factory=list)
     pending_tool_call_ids: set = field(default_factory=set)
     turn_start_ts: float = field(default_factory=time.monotonic)
     # Dedup sets for SSE emission.
@@ -2257,11 +2277,21 @@ class ClaudeAgentService:
             if gateway_runtime is not None
             else None
         )
+        image_provider = None
+        image_broker_env = None
+        if cwd and gateway_runtime is not None and request.admin_turn_persistence.image_turn_data(
+            actor_id=request.user_id, thread_id=request.thread_id).ready():
+            from services.admin_gateway.images import ImageGenerationProvider
+            from libs.claude_agent_kit.server.session_projection_protocol import SESSION_BROKER_TIMEOUT_ENV
+            image_provider = ImageGenerationProvider(workspace=cwd, runtime=gateway_runtime, turn_key=str(state.current_turn_id), model_alias=sys_cfg.get("image_model"))
+            request.admin_turn_persistence.bind_image_generation_provider(image_provider)
+            image_broker_env = {**session_projection_env, SESSION_BROKER_TIMEOUT_ENV: str(image_provider.timeout + 5)}
         run_options = AgentRunOptions(
             thread_id=claude_session_id_for_agent,
             user_message=user_message_content,
             canonical_user_id=str(request.user_id),
             gateway_access_token=gateway_access_token,
+            image_generation_broker_env=image_broker_env,
             gateway_idempotency_key=(
                 "dream-turn-"
                 + hashlib.sha256(
@@ -2453,6 +2483,7 @@ class ClaudeAgentService:
         )
         turn_ctx = _TurnContext(
             queue=BusProxyQueue(bus),
+            image_provider=image_provider,
             confirmation_store=confirmation_store,
             managed_mcp_server_keys=tuple(sorted(claude_mcp_servers)),
             managed_mcp_app_resource_bindings=managed_mcp_app_resource_bindings,
@@ -2488,6 +2519,8 @@ class ClaudeAgentService:
             # active.  Every terminal/error/cancellation path clears both live
             # policy/Futures and those tombstones before the factory drops the
             # turn context.
+            if execution.turn_context.image_provider is not None:
+                execution.turn_context.image_provider.close()
             execution.turn_context.confirmation_store.cancel_all()
 
     async def _execute_session_inner(
@@ -2506,6 +2539,19 @@ class ClaudeAgentService:
 
         # --- P2 fix: save user message immediately before inference ---
         await self._persist_user_message(execution)
+        provider = execution.turn_context.image_provider
+        if provider is not None:
+            from services.admin_data.image_turn_data import image_material_header
+            options, request = execution.run_options, execution.request
+            data = request.admin_turn_persistence.image_turn_data(actor_id=request.user_id, thread_id=request.thread_id)
+            key = "dream-turn-" + hashlib.sha256(f"{request.user_id}\n{request.thread_id}\n{request.message_id}".encode()).hexdigest()
+            materials = [attachment.id for attachment in (request.attachments or []) if attachment.media_type in {"image/png", "image/jpeg", "image/webp", "image/gif"}]
+            await asyncio.to_thread(provider.bind_turn, data, thread_id=request.thread_id, turn_id=str(execution.state.current_turn_id),
+                turn_key=key, message_id=request.message_id, ai_model=request.model, materials=materials)
+            options.gateway_idempotency_key, options.gateway_image_turn_key = key, key
+            options.image_tool_authorizer = provider.authorize_tool
+            blocks = options.user_message if isinstance(options.user_message, list) else [{"type": "text", "text": options.user_message}]
+            options.user_message = [{"type": "text", "text": image_material_header(key, request.message_id)}, *blocks]
 
         # Emit session metadata header
         await queue.put(
@@ -2590,6 +2636,7 @@ class ClaudeAgentService:
         )
 
         if result.success and getattr(result, "protocol_completed", None) is not False:
+            await self._complete_image_results(execution.turn_context)
             full_text = result.full_text
             # A completed Claude Turn is an immutable conversation fact even
             # when the Dream workspace postcondition requests one repair Turn
@@ -2660,7 +2707,7 @@ class ClaudeAgentService:
                     ) from exc
             await queue.put(
                 _event("message-final", {
-                    "text": full_text,
+                    "text": _image_final_text(execution.turn_context, full_text),
                     "usage": result.usage,
                     "sessionId": result.session_id,
                 })
@@ -2986,6 +3033,24 @@ class ClaudeAgentService:
         )
         execution.request.message_id = result.message_id
 
+    @staticmethod
+    async def _complete_image_results(turn_ctx: _TurnContext) -> None:
+        text = _image_final_text(turn_ctx, "")
+        parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
+        final = parts[-1].get("text", "") if parts and parts[-1].get("type") == "text" else ""
+        if text and text != final:
+            last_event = turn_ctx.collected_parts[-1] if turn_ctx.collected_parts else {}
+            if last_event.get("type") in {"text-start", "text-delta"}:
+                event_id = last_event.get("id", _TEXT_PART_ID)
+                for data in ({"type": "text-delta", "id": event_id, "delta": text[len(final):]}, {"type": "text-end", "id": event_id}):
+                    await turn_ctx.queue.put(_event(data["type"], {key: value for key, value in data.items() if key != "type"}))
+                    turn_ctx.collected_parts.append(data)
+                return
+            event_id = "image-result-final"
+            for data in ({"type": "text-start", "id": event_id}, {"type": "text-delta", "id": event_id, "delta": text}, {"type": "text-end", "id": event_id}):
+                await turn_ctx.queue.put(_event(data["type"], {key: value for key, value in data.items() if key != "type"}))
+                turn_ctx.collected_parts.append(data)
+
     async def _persist_partial_assistant(
         self,
         execution: "_TurnExecution",
@@ -3000,6 +3065,9 @@ class ClaudeAgentService:
         indicator.  If no collectible events exist the call is a no-op.
         """
         turn_ctx = execution.turn_context
+        if turn_ctx.image_provider is not None:
+            turn_ctx.image_provider.close()
+        await self._complete_image_results(turn_ctx)
         if not turn_ctx or not turn_ctx.collected_parts:
             return
 
@@ -3279,6 +3347,14 @@ class ClaudeAgentService:
     def _make_text_done_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
         async def on_text_done(full_text: str) -> None:
             if full_text:
+                if turn_ctx.image_results:
+                    parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
+                    final = parts[-1].get("text", "") if parts and parts[-1].get("type") == "text" else ""
+                    completed = _image_final_text(turn_ctx, "")
+                    if completed != final:
+                        addition = completed[len(final):]
+                        await queue.put(_event("text-delta", {"id": _TEXT_PART_ID, "delta": addition}))
+                        turn_ctx.collected_parts.append({"type": "text-delta", "id": _TEXT_PART_ID, "delta": addition})
                 await queue.put(_event("text-end", {"id": _TEXT_PART_ID}))
                 turn_ctx.collected_parts.append({"type": "text-end", "id": _TEXT_PART_ID})
 
@@ -3321,6 +3397,37 @@ class ClaudeAgentService:
             tool_call_id = payload.tool_call_id
             tool_name = payload.tool_name
             event_type = payload.type
+            # This server-owned choice is retained by Admin and CLI history.
+            # The user sees the ensuing operation, ordinary reply or recovery.
+            if tool_name == "mcp__image_gen__select_image_operation" and turn_ctx.image_provider is not None:
+                return
+            if payload.provider_executed and tool_name == "image_generation":
+                if not isinstance(tool_call_id, str) or not tool_call_id or turn_ctx.image_provider is None:
+                    return
+                if event_type == "tool_use_start":
+                    if tool_call_id in turn_ctx.registered_tool_call_ids:
+                        return
+                    turn_ctx.registered_tool_call_ids.add(tool_call_id)
+                    turn_ctx.tool_name_by_id[tool_call_id] = tool_name
+                    operation = (turn_ctx.image_provider.selected_operation or "").removeprefix("native_")
+                    arguments = {**(payload.input or {}), "operation": operation}
+                    turn_ctx.tool_input_by_id[tool_call_id] = arguments
+                    data = {"toolCallId": tool_call_id, "toolName": tool_name, "input": arguments, "providerExecuted": True}
+                    await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name, "providerExecuted": True}))
+                    await queue.put(_event("tool-input-available", data))
+                    turn_ctx.collected_parts.append({"type": "tool-input-available", **data})
+                elif event_type == "tool_result" and turn_ctx.tool_name_by_id.get(tool_call_id) == tool_name:
+                    try:
+                        result = await asyncio.to_thread(turn_ctx.image_provider.publish_native, payload.output)
+                        output, is_error = result.model_dump(), False
+                        turn_ctx.image_results.extend(result.images)
+                    except Exception as error:
+                        output, is_error = {"code": getattr(error, "code", "IMAGE_RESULT_INVALID"),
+                            "message": "The image result could not be verified or saved. The request was not repeated; check this conversation before sending a new request."}, True
+                    data = {"toolCallId": tool_call_id, "toolName": tool_name, "output": output, "isError": is_error, "providerExecuted": True}
+                    await queue.put(_event("tool-output-available", data))
+                    turn_ctx.collected_parts.append({"type": "tool-output-available", **data})
+                return
 
             # --- thinking_delta: incremental reasoning stream ---
             if event_type == "thinking_delta" and payload.output:
@@ -3428,6 +3535,7 @@ class ClaudeAgentService:
 
             # --- tool_result: tool execution result ---
             if event_type == "tool_result" and tool_call_id:
+                image_call_registered = tool_call_id in turn_ctx.registered_tool_call_ids
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     fallback_name = tool_name or "unknown"
                     logger.warning(
@@ -3490,6 +3598,10 @@ class ClaudeAgentService:
                 evt = {"type": "tool-output-available", **event_data}
                 await queue.put(_event("tool-output-available", event_data))
                 turn_ctx.collected_parts.append(evt)
+                if image_call_registered and not tool_name_conflicts and resolved_tool_name == "mcp__image_gen__imagegen" and not is_error and turn_ctx.image_provider is not None:
+                    owned_result = turn_ctx.image_provider.consume_result(payload.output, turn_ctx.tool_input_by_id.get(tool_call_id))
+                    if owned_result is not None:
+                        turn_ctx.image_results.extend(owned_result.images)
 
                 # Every actor/session-matched Editor result refreshes the single
                 # AgentRunState cache from the Admin-owned turn runtime. Success then publishes the existing
@@ -3792,6 +3904,8 @@ def _sse_events_to_ui_parts(events: list) -> list:
                     "input": event.get("input", {}),
                     "dynamic": True,
                 }
+                if event.get("providerExecuted") is not None:
+                    inv["providerExecuted"] = event["providerExecuted"]
                 parts.append(inv)
                 tool_by_id[tool_id] = inv
 

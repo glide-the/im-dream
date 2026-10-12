@@ -1,3 +1,4 @@
+# [Sync] 2026-10-10: consume Admin Images delegation scopes and actual generic DTO hashes; frozen business DTOs stay unchanged.
 # [Input] Actual Admin purpose DTOs, published identity capabilities and explicit actor credentials.
 # [Output] Immutable entity grants and bearer-only public actions with original-ID receipt recovery.
 # [Pos] Runtime authorization consumer; server creation and public runtime credentials stay separate.
@@ -26,21 +27,21 @@ from .http_transport import request_admin_dto
 from .models import AbsentReceiptDTO, CommittedReceiptDTO, DelegationCapabilityDTO, OperationCapabilityDTO, RequestDTO, SchemaCapabilityDTO, StrictDTO
 
 Purpose = Literal["server-persistence", "gateway-cli", "editor-stdio"]
-RuntimeScope = Literal["dream:read", "dream:write", "messages:create", "messages:count_tokens", "models:list", "editor:read", "editor:write"]
+RuntimeScope = Literal["dream:read", "dream:write", "messages:create", "messages:count_tokens", "models:list", "images:create", "editor:read", "editor:write"]
 DelegationToken = Annotated[str, Field(pattern=r"^idg_[A-Za-z0-9_-]{43}$")]
 EntityReference = Annotated[str, Field(min_length=1)]
 Action = Literal["runtime-delegation.renew", "runtime-delegation.revoke"]
 PURPOSE_SCOPES = {
     "server-persistence": frozenset(("dream:read", "dream:write")),
-    "gateway-cli": frozenset(("messages:create", "messages:count_tokens", "models:list")),
+    "gateway-cli": frozenset(("messages:create", "messages:count_tokens", "models:list", "images:create")),
     "editor-stdio": frozenset(("editor:read", "editor:write")),
 }
 # Digests are generated from Admin's actual input and output JSON schemas.
 DELEGATION_CONTRACT_HASHES = {
-    "runtime-delegation.create": "61186cc930977683a9739b412de0b0837ac482230ba0cf8c493d57f20d918273",
-    "runtime-delegation.renew": "1d611aeb0c70864d330042e2f3825191a0624f177b81a62ba83fae31587117db",
+    "runtime-delegation.create": "e2aa6eac5c34d090c013755270bc9363e2e79b9a05902dfef73ab54494fb5091",
+    "runtime-delegation.renew": "bfcd929e88f4a44b7353446cfb80c410e9a363ede0c94f7f6db4aad7269e4284",
     "runtime-delegation.revoke": "0c4c315146fb80dff05db14eed0ac7b301db1d85827f6a651cc1e1d7b25152f9",
-    "runtime-delegation.receipt": "19bfb6e3eaa0ee783d688035afc347b3f2ec4b6771161e0ba445ed9b890ffdfc",
+    "runtime-delegation.receipt": "ee6832f6ca1f6e23562c04507ada9fe2c58d8bc7928591d6a4bc116fa559e02e",
 }
 DELEGATION_CAPABILITIES = tuple(DelegationCapabilityDTO(name=name, method=method, path=path,
     input_schema_version=1, output_schema_version=1, contract_sha256=DELEGATION_CONTRACT_HASHES[name])
