@@ -2,6 +2,7 @@
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Owned Claude thread id, canonical thread history/status REST endpoints.
 // [Output] One shared history -> status hydration snapshot for Chat and Dream shells.
+// [Sync] 2026-10-12: retain assistant compaction-only history without inventing a text part.
 // [Pos] Minimal session hydration primitive; ChatPanel remains the only live reducer.
 // [Sync] 2026-09-02: hydrate the newest stable keyset page, expose older-page state,
 //                    and replace idle's second full read with a latest-ID probe.
@@ -14,6 +15,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 import { isToolUIPart, type UIMessage } from 'ai';
 
 import { API_BASE } from '../../lib/apiBase';
+import { readContextCompactions } from '../../lib/context-compaction';
 import { filterStoryWorkspaceControlMessages } from '../../lib/story-workspace-guidance';
 import {
   deriveSettledToolCallIdsFromHistory,
@@ -120,7 +122,8 @@ export function filterClaudeThreadVisibleMessages<T extends UIMessage>(
       && typeof message.metadata === 'object'
       && !Array.isArray(message.metadata)
       && (message.metadata as Record<string, unknown>).kind === 'task-session-result')
-      && (message.parts ?? []).some(claudeThreadPartIsVisible),
+      && ((message.parts ?? []).some(claudeThreadPartIsVisible)
+        || (message.role === 'assistant' && readContextCompactions(message.metadata).length > 0)),
   );
 }
 

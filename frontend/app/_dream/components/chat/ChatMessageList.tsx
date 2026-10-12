@@ -1,3 +1,4 @@
+// [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-10-10: show explicit stale/conflicting model selection recovery before Agent execution.
 // [Sync] 2026-10-10: label the internal image tool by generate/edit intent, retaining ordinary tool states.
@@ -67,6 +68,8 @@ import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import UserMessagePart from './UserMessagePart';
+import ContextCompactionMarker from './ContextCompactionMarker';
+import { isCompactionCompletionText, readContextCompactions } from '../../lib/context-compaction';
 import { CreatedTaskSessionList, TaskSessionSourceMarker } from './TaskSessionNavigation';
 import type { TaskSessionLink, TaskSessionLinksSnapshot } from './taskSessionLinks';
 import ToolMessagePart from './ToolMessagePart';
@@ -332,6 +335,10 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
     ? messages.reduce((last, message, index) => message.role === 'assistant'
       && message.parts?.some((part) => part.type === 'text' && Boolean(part.text)) ? index : last, -1)
     : -1;
+  const latestMessage = messages.at(-1);
+  const hasCurrentCompaction = latestMessage?.role === 'assistant' && isLoading
+    && readContextCompactions(latestMessage.metadata)
+      .some((row) => row.state === 'running' || row.state === 'unconfirmed');
 
   useEffect(() => {
     const controllers = historicalProcessControllers.current;
@@ -449,6 +456,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
           : persistedMessage;
         const isLastMessage = index === messages.length - 1;
         const messageMetadata = message.metadata as ChatMetadata | undefined;
+        const compactionRows = message.role === 'assistant' ? readContextCompactions(messageMetadata) : [];
         const isDreamAutoRepair = (
           message.role === 'user'
           && messageMetadata?.kind === 'story-workspace-dream-auto-repair'
@@ -552,6 +560,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
               if (part.type === 'step-start') return null;
 
               if (part.type === 'text' && part.text) {
+                if (message.role === 'assistant' && isCompactionCompletionText(part.text, messageMetadata)) return null;
                 const isUser = message.role === 'user';
                 if (isUser) {
                   return (
@@ -872,6 +881,11 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
             {message.role === 'assistant' && lastTextPartIndex < 0 && scheduledTaskMarkers.length > 0
               ? <ScheduledTaskMarkerList tasks={scheduledTaskMarkers} onOpen={onOpenScheduledTask} />
               : null}
+            {compactionRows.map((row) => <ContextCompactionMarker
+              key={row.id}
+              row={row}
+              isActive={isLastMessage && isLoading && !historicalMessageIds.has(message.id)}
+            />)}
           </div>
         );
       })}
@@ -880,7 +894,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
         <CreatedTaskSessionList links={createdTaskLinks} onNavigateThread={onNavigateThread} />
       ) : null}
 
-      {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
+      {shouldShowLoadingIndicator && !hasCurrentCompaction ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
       {error ? (
         <div
           role="alert"

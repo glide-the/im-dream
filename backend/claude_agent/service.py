@@ -1,3 +1,5 @@
+# [Sync] 2026-10-12: preserve the last root SDK input/window snapshot in existing turn metadata for compact usage.
+# [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: separate saved AI/Image ownership; validate native Responses results through the Gateway bridge.
 # [Sync] 2026-10-10: bind Host Images and retain only registered, Host-published results in normal/partial final messages.
@@ -376,6 +378,7 @@ from services.admin_gateway import (
 )
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
+from claude_agent.context_compaction import ContextCompactionTracker, ContextUsageTracker
 from claude_agent.stream_events import NormalizedAgentEvent
 
 logger = logging.getLogger(__name__)
@@ -1638,6 +1641,9 @@ class _TurnContext:
     current_reasoning_text: list = field(default_factory=list)
     # Raw SSE event dicts collected as they are emitted; converted at persist time.
     collected_parts: list = field(default_factory=list)
+    # SDK-owned status projected into existing message metadata, never controls.
+    compaction: ContextCompactionTracker = field(default_factory=ContextCompactionTracker)
+    context_usage: ContextUsageTracker = field(default_factory=ContextUsageTracker)
 
 
 # ---------------------------------------------------------------------------
@@ -2573,6 +2579,7 @@ class ClaudeAgentService:
             if error_event_emitted:
                 return
             error_event_emitted = True
+            await self._finish_context_compaction(execution, "failed")
             await emit_error(exc)
 
         callbacks = AgentStreamingCallbacks(
@@ -2586,7 +2593,7 @@ class ClaudeAgentService:
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=on_error,
-            on_message=partial(self._persist_sdk_session_from_message, execution),
+            on_message=partial(self._observe_sdk_message, execution),
             on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
             on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
@@ -2636,6 +2643,7 @@ class ClaudeAgentService:
         )
 
         if result.success and getattr(result, "protocol_completed", None) is not False:
+            await self._finish_context_compaction(execution, "unconfirmed")
             await self._complete_image_results(execution.turn_context)
             full_text = result.full_text
             # A completed Claude Turn is an immutable conversation fact even
@@ -3065,14 +3073,17 @@ class ClaudeAgentService:
         indicator.  If no collectible events exist the call is a no-op.
         """
         turn_ctx = execution.turn_context
+        await self._finish_context_compaction(
+            execution, "cancelled" if turn_status == "cancelled" else "failed"
+        )
         if turn_ctx.image_provider is not None:
             turn_ctx.image_provider.close()
         await self._complete_image_results(turn_ctx)
-        if not turn_ctx or not turn_ctx.collected_parts:
+        if not turn_ctx or (not turn_ctx.collected_parts and not turn_ctx.compaction.rows):
             return
 
         asst_parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
-        if not asst_parts:
+        if not asst_parts and not turn_ctx.compaction.rows:
             return
 
         thread_id = execution.request.thread_id
@@ -3080,6 +3091,8 @@ class ClaudeAgentService:
             "is_partial": True,
             "turnId": execution.state.current_turn_id,
             "turnStatus": turn_status,
+            **turn_ctx.compaction.metadata(),
+            **turn_ctx.context_usage.metadata(),
         }
         _attach_story_workspace_dream_assistant_source(
             asst_metadata,
@@ -3106,6 +3119,51 @@ class ClaudeAgentService:
             logger.exception(
                 "Failed to persist partial assistant for thread_id=%s", thread_id
             )
+
+    async def _emit_context_compaction(self, execution: "_TurnExecution") -> None:
+        await execution.turn_context.queue.put(_event("message-metadata", {
+            "sessionId": execution.state.session_id,
+            "turnIndex": execution.state.turn_count,
+            "turnId": execution.state.current_turn_id,
+            **execution.turn_context.compaction.metadata(),
+            **execution.turn_context.context_usage.metadata(),
+        }))
+
+    async def _finish_context_compaction(self, execution: "_TurnExecution", state: str) -> None:
+        compaction_changed = execution.turn_context.compaction.finish(state)
+        usage_changed = execution.turn_context.context_usage.finish(invalidate=state in ("failed", "cancelled"))
+        if compaction_changed or usage_changed:
+            await self._emit_context_compaction(execution)
+
+    async def _observe_sdk_message(self, execution: "_TurnExecution", message: Any) -> None:
+        """Keep init persistence, then project public SDK compaction/context-use facts."""
+        from claude_agent_sdk.types import AssistantMessage, ResultMessage, StreamEvent, SystemMessage
+
+        await self._persist_sdk_session_from_message(execution, message)
+        changed = False
+        tracker = execution.turn_context.compaction
+        usage = execution.turn_context.context_usage
+        if isinstance(message, SystemMessage) and isinstance(message.data, Mapping):
+            changed = tracker.consume(message.subtype, message.data)
+            if changed:
+                usage.invalidate()
+        elif isinstance(message, StreamEvent):
+            usage.observe_stream(message.event, parent=getattr(message, "parent_tool_use_id", None))
+        elif isinstance(message, ResultMessage):
+            changed = usage.observe_result(getattr(message, "model_usage", None), execution.request.model,
+                                           is_error=getattr(message, "is_error", True) is not False)
+        elif (
+            isinstance(message, AssistantMessage)
+            and getattr(message, "model", None) == "<synthetic>"
+            and len(message.content) == 1
+            and isinstance(getattr(message.content[0], "text", None), str)
+        ):
+            changed = tracker.record_completion_text(message.content[0].text)
+        elif isinstance(message, AssistantMessage):
+            usage.observe_assistant(getattr(message, "model", None), getattr(message, "usage", None),
+                                    parent=getattr(message, "parent_tool_use_id", None), error=getattr(message, "error", None))
+        if changed:
+            await self._emit_context_compaction(execution)
 
     async def _persist_sdk_session_from_message(
         self,
@@ -3174,6 +3232,8 @@ class ClaudeAgentService:
                 )
                 final_part_index = _completed_turn_final_part_index(asst_parts)
             asst_metadata["turnId"] = execution.state.current_turn_id
+            asst_metadata.update(turn_ctx.compaction.metadata())
+            asst_metadata.update(turn_ctx.context_usage.metadata())
             source_metadata = execution.request.message_metadata
             if (
                 execution.request.task_result_turn_id == execution.state.current_turn_id
