@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-12: round33 normal Admin visible gate closed for seven real requests; prior failures and unknown cancellation usage remain; final review and Git delivery are separate. -->
 <!-- [Sync] 2026-10-12: round30 官方报告用量修订、六项真实图片结算与重开、独立复核修订和精确发布回执；历史及未验收范围保留。 -->
 <!-- [Input] 用户两种模型用途、公开图片能力与当前验证边界。 -->
 <!-- [Output] 模型选择、素材与图片操作分工的产品规则、页面骨架和验收。 -->
@@ -153,11 +154,11 @@ round30当前：官方计量修订已独立评审、当前75项恢复专项及25
 证据：[正常业务关联回执](/tmp/im-image-model-split-20261010/validation-round30/runtime12-final-business-correlations.json)、[最终重开哈希](/tmp/im-image-model-split-20261010/validation-round30/real-runtime12-final-reopen-hashes.json)、[实际Admin流水](/tmp/im-image-model-split-20261010/validation-round30/admin-runtime12-visible-token-ledger.json)、[正常服务精确采用](/tmp/im-image-model-split-20261010/validation-round30/compact-consumer-normal-backend-adoption.json)。文档/图示检查及最后Git交付状态由执行记录单列，不用业务成功替代必需交付。
 
 
-## round31 停止与重试补充（已实现，完整真实验收未完成）
+## round31 停止与重试补充（已实现；round33补齐正常后台可见复核）
 
 用户在消息提交中或图片生成中按停止，应停止这次发送。服务器尚未开始执行时，页面保留停止处理状态，等这次提交确认后完成停止；不能让后台随后偷偷开始生成。停止处理完成并恢复原会话记录后，用户可以重新发送；这次重试不能被上次停止误取消。生成中取消保留原素材和已有图片，晚到结果不能加入已取消消息；重开原会话显示同样的结果。操作入口继续位于上述桌面与窄屏输入区，不增加确认弹窗。
 
 平台图片价格复用现有价格中心，包括 models.dev 参考单价同步、审核及发布；结算按已发布版本和实际报告用量执行。供应商实际账单未公开，按用户要求排除本专项验收，不增加查询或估算实际账单的流程。历史缺失用量不能因此改成0。round30中费用与停止时点的记录保留为当时证据，round31需要重新验证两条图片链路的取消与重试后才能完成。
 
 
-本轮停止修订已独立评审并采用到正常本机服务。两条链路的实际生成中停止均到达Gateway，重开无取消后新图，主动重试各生成一张新图且查看、下载通过；上传后的主对话编辑及Image工具后续引用编辑已实际执行。完整验收状态仍以执行记录为准：正常Admin管理会话过期，所提供现有账号无法登录管理入口，新增记录的可见后台复核尚未通过。平台缺报告用量的取消记录保留原待处理状态，不宣称已经实际结清。
+本轮停止修订已独立评审并采用到正常本机服务。两条链路的实际生成中停止均到达Gateway，重开无取消后新图，主动重试各生成一张新图且查看、下载通过；上传后的主对话编辑及Image工具后续引用编辑已实际执行。round33已恢复正常Admin管理会话，在公开后台逐项核对七次图片执行的详情和Token流水；五次生成/编辑成功，两个取消未发布晚到图片。完整完成状态及独立终审、交付以执行记录为准。平台缺报告用量的取消记录保留原待处理状态，不宣称已经实际结清。

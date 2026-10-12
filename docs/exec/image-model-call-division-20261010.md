@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-12: round33 normal Admin visible gate closed for seven real requests; prior failures and unknown cancellation usage remain; final review and Git delivery are separate. -->
 <!-- [Sync] 2026-10-12: round30 官方报告用量修订、六项真实图片结算与重开、独立复核修订和精确发布回执；历史及未验收范围保留。 -->
 <!-- [Input] 用户专项授权、五个本机项目源码、现行图片设计和本轮工作区基线。 -->
 <!-- [Output] Expert Prompt Architect执行提示、双钻石计划、调查、独立评审修订及本轮验证回执。 -->
@@ -16,7 +17,7 @@ round28历史状态（保留原文）：当前状态（round28，goal工具实�
 
 round30阶段导航（恢复工作前历史快照；当时的complete不代表round31完成）：本轮六项真实图片操作已交付并结算，历史重开19图且六张新图重新下载SHA一致；正常Admin已可见对应Token流水。当前计量与取消限制、独立复核及发布状态以末节round30最终回执为准，以下round29未确认状态不代表本轮新请求状态。
 
-当前round31导航：用户已恢复停止竞态专项，目标active。修订后两次真实图片取消与五项成功结果、25图历史重开及最新五SHA核对见末节；正常Admin管理登录不可用，完整必需后台验收尚未完成。round30标记complete仅为此前阶段历史，不能作为本轮完成或发布证据。
+当前round33导航：两链真实生成中取消、重试、上传/引用/草图编辑、25图重开与五SHA核对已完成；正常Admin已逐项可见核对七请求及Token流水，之前管理入口阻塞已解除。两取消usage未知保留原待处理状态，目标在最终独立审查、文档验证与Git交付前保持active。round30 complete是恢复工作前历史，不代替本轮交付。
 
 ## Expert Prompt Architect
 
@@ -1235,10 +1236,41 @@ round31交付隔离分支资格r6：复用managed worktree codex/image-model-sto
 
 round31最后真实历史重开：正常AI原选择已恢复后，普通生成需求反馈“当前AI模型不支持图片生成”，两条当次文字请求成功结算且无image-turn.execution/Images/native imageCall；恢复说明要求用户选择支持AI或明确Image工具，没有自动回退。可见刷新、原Chat入口、原Thread历史入口，再点击5页Load earlier messages恢复25张历史图片（原19+本轮control1+合格新图5）。最新五张分别再次打开查看器并下载，与首次五个SHA逐项一致。取消后的两条无图片，旧取消失败req_3e1...的上游成功事实和账本保留，未倒改为新修复通过。实际real-final-history-downloads.json及real-round31-image-matrix.json为当前回执；共29条当次正常账户request、9条执行receipt含修订前对照/失败，新增合格7条图片执行互斥，不能将总数全算修订后通过。
 
-当前完成门禁：源码/文档实现、独立修订、技术资格与上述正常本机可见主流程均已完成；完整必需真实后台复核仍未通过，原Admin管理会话失效且提供凭证被正常登录页拒绝。目标active，不标complete、不用正常库只读查询代替后台可见验收；不重置管理员、不建账户、不注入会话、不改历史结算。缺usage的两取消记录保留既有fail-closed与待保守处理状态，不将供应商黑盒账单当作障碍或猜测零费用。专项交付分支已具体组装、独立审查并通过fresh资格；在完整验收前不宣告生产发布/合并完成，主工作区无关16认证路径、历史提交与缓存原样保留。
+round31当时完成门禁（历史，Admin阻塞由round33解除）：源码/文档实现、独立修订、技术资格与上述正常本机可见主流程均已完成；完整必需真实后台复核仍未通过，原Admin管理会话失效且提供凭证被正常登录页拒绝。目标active，不标complete、不用正常库只读查询代替后台可见验收；不重置管理员、不建账户、不注入会话、不改历史结算。缺usage的两取消记录保留既有fail-closed与待保守处理状态，不将供应商黑盒账单当作障碍或猜测零费用。专项交付分支已具体组装、独立审查并通过fresh资格；在完整验收前不宣告生产发布/合并完成，主工作区无关16认证路径、历史提交与缓存原样保留。
 
 
 最终独立文档复核两项P2已修订：正式稿旧候选标题与当前实现状态统一，执行记录顶端改为round31 active导航；round30完整结果和旧complete工具原文保留为恢复工作前历史，PRD/formal的round30标题明确阶段历史。未改变实际业务状态、接口或账本。
 
 
 round31 r7文档终检主执行者已读取原始command/out/exit：106文件、984本地链接、155源码行号引用，当前缺失0、历史不可读7、外链未在线核对64；42个Mermaid以已安装Chrome与Mermaid11.17.2实际解析42/42、failures0。root Dream/Admin/Runtime与交付worktree diffcheck均0；该结果仅为文档资格。独立最后P2关闭后只改导航/阶段标题，不改图或源码，再执行最终文本inventory与SHA核对，具体raw回执存luna-r7-doc/final-text*。任务01a125f2-f97e-7d33-8859-8b7676ee5688保持active，未调用complete。
+
+
+## round33 正常Admin可见复核与登录恢复（2026-10-12）
+
+Expert Prompt Architect：角色为专项交付负责人；上下文是已资格源码、round31真实两链取消/重试/五图与25图历史，以及本轮恢复的正常Admin可见证据。任务是核对七请求与流水、记录真实登录恢复、修订现行状态、完成独立审查与必要文档检查，再按授权完成Dream PR与默认develop安全同步。约束：不增加模型调用、不改源码/凭据/Schema/原账本，不把unknown取消改成0，不把技术故障注入或旧测试称本轮真实验收。交付包括公开UI证据、实际命令/退出码、当前限制、最新head CI和Git状态。
+计划收敛：七请求已全部逐项打开详情并在Token流水筛选；将历史阻塞注明当时状态，现行稿只报告本轮已观察事实。独立复核完成前目标active；最终文档检查后推送新head并等必需CI，确认合并后按已评审精确144路径本地采用与普通merge保留无关改动。
+
+正常Admin原用户Chrome恢复后显示Dmeck/super_admin，受保护请求页及Token流水正常读取。先前反复页面错误的具体原因是Next进程仍引用旧layout-89e23191663f4acf.js，而磁盘当前完整构建使用layout-ca86eb6d3aba90f5.js，产生ChunkLoadError/500；不是据此得出密码失效。当前源码对前次合格Admin仅文档与生成next-env差异，未增加认证/Gateway代码。主执行者沿原pnpm run start:embedded受控采用现有构建HNsHXqMh8vVl53CTyhai-：Admin54886→84567、PostgreSQL54817→84492，配置hash、数据目录inode/HBA、同构建及Backend88967保持，databaseWrites=0；前端5173在本步前已无监听，没有为补后台证据重跑或重启Dream。脚本adopt-current-admin-build.py实际exit0；[正常采用回执](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/normal-adoption.json)。
+
+本轮没有读取Chrome密码明文、密码重置、新建管理账户、注入Cookie或绕过capability。当前合法既有会话的成功证明来自受保护页面与实际用户记录；不把未观察到的最后登录按键推断为已执行。原独立管理员自动填充成功方法已存在于早期执行记录，主执行者漏读；现已写入现有QA技能与[本机登录检查点](local-auth-checkpoint-20261012.md)，以后先检索最后成功来源。密码管理页面的浏览器拒绝未被绕过。
+
+主执行者通过用户指定Boss投递插件，在正常localhost:3000可见请求页筛选现有用户，逐项打开七请求详情；随后打开Token流水，用公开Gateway Request筛选逐项核对：
+
+| 当次真实操作 | 请求 | 结果 | reserve / capture / release |
+|---|---|---|---|
+| Responses生成中取消 | req_1dd02ce1cbc546399f7e6b30df11eeb3 | cancelled/CLIENT_CANCELLED，usage未知 | 259312 /未捕获 /未释放 |
+| Responses主动重试生成 | req_c944fec51d0f44e2a605a588a8f6a9d5 | succeeded/settled | 261628 /35489 /226139 |
+| Images生成中取消 | req_9ee006a9aa2140638a91a3fe7d4c84fc | cancelled/CLIENT_CANCELLED，usage未知 | 120201 /未捕获 /未释放 |
+| Images主动重试生成 | req_e344d9fa220644358b695017d3a8ecc1 | succeeded/settled | 120201 /322 /119879 |
+| 上传图→Responses编辑 | req_0abb38c96cd347a681ba0241256b582b | succeeded/settled | 283862 /42024 /241838 |
+| 引用图→Images编辑 | req_a97dc4d928d34a91a8cbfb8b45d172eb | succeeded/settled | 125012 /1792 /123220 |
+| 绘制草图→Responses编辑 | req_fb138c6a3dba48d9a8eec7c9104efc48 | succeeded/settled | 303791 /44298 /259493 |
+
+五成功每项都有原reserve/capture/release，恒等式逐项正确；两个取消只有原reserve，仍为settlement_failed/conservative_estimated_capture_pending，HTTP502与CLIENT_CANCELLED明确可见。未知usage不能写0，正常后台没有人工结算入口；没有改写此状态、历史三旧账或供应商账单。原生外层protocol=anthropic/operation=text与实际Responses imageCalls相对应，显式工具为openai/images.generations或images.edits，保持真实调用身份。
+
+[可见验收汇总](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/visible-admin-acceptance.json)、[七项请求详情](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/request-details.json)、[请求行](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/request-rows.json)、[七项流水](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/token-ledgers.json)及同目录截图均实际保存；逐项UI采集和断言实际完成，无额外模型调用。Admin原用户页面保留供复核。
+
+范围保持：本轮只有一个已发布Image候选，不能声称换到第二个真实Image模型；选择保存/失效、解析失败、文件失败和断线恢复的故障注入属于隔离技术验证。没有主动破坏正常服务制造事故，不测公网/远程环境，未知完整上游图片费用不在用户要求的验收范围。目标仍active，下一步仅独立终审、必要文档检查、最新head必需CI与授权Dream合并/default同步；不纳入Admin源码或其他认证改动。
+
+
+round33最终独立验收复核已回读：[评审回执](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/final-acceptance-review.md)。两项当前状态文案P2关闭，无剩余限定P1/P2；七唯一execution、七请求与17流水、五图SHA对应，成功capture合计123925。两取消仅reserve且unknown，不需额外模型调用或人工补结。最终文档、最新head CI/PR88合并、安全develop同步及Goal真实状态统一读取[最终交付状态](/tmp/im-image-model-split-20261010/validation-round33-admin-visible/final-delivery-status.json)；本段写入时这些Git门禁仍在执行，不能用评审通过代替合并。

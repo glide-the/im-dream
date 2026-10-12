@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-12: round33 normal Admin visible gate closed for seven real requests; prior failures and unknown cancellation usage remain; final review and Git delivery are separate. -->
 <!-- [Sync] 2026-10-12: round30 官方报告用量修订、六项真实图片结算与重开、独立复核修订和精确发布回执；历史及未验收范围保留。 -->
 <!-- [Input] 专项PRD、实际CLI报文、Admin精确合同与现有模型/消息/文件模块。 -->
 <!-- [Output] 两项模型选择、互斥执行、正常/恢复/状态图与验收边界。 -->
@@ -769,7 +770,7 @@ sequenceDiagram
 证据：[正常业务关联回执](/tmp/im-image-model-split-20261010/validation-round30/runtime12-final-business-correlations.json)、[最终重开哈希](/tmp/im-image-model-split-20261010/validation-round30/real-runtime12-final-reopen-hashes.json)、[实际Admin流水](/tmp/im-image-model-split-20261010/validation-round30/admin-runtime12-visible-token-ledger.json)、[正常服务精确采用](/tmp/im-image-model-split-20261010/validation-round30/compact-consumer-normal-backend-adoption.json)。文档/图示检查及最后Git交付状态由执行记录单列，不用业务成功替代必需交付。
 
 
-## round31 启动阶段停止与图片执行中取消（已评审、已实现与正常采用，完整真实验收未完成）
+## round31 启动阶段停止与图片执行中取消（已评审、已实现与正常采用；round33补齐后台复核）
 
 背景：round30观察到发送POST尚未被Factory登记时，原Stop返回idle；页面把该瞬时idle当成发送已经结束并断开读取，随后同一POST仍启动。用户已授权修复这个具体竞态。保持原Stop接口、Factory任务所有权、SSE类型、资源策略与图片互斥规则，不增加schema、控制通道或替代执行路径。
 
@@ -845,7 +846,7 @@ stateDiagram-v2
   可重试 --> 提交中: 用户重新发送，新身份
 ```
 
-验收矩阵：技术验证覆盖首Stop早于POST受理、headers不算受理、明确拒绝、网络未知、停止请求跨卸载、旧意图不影响新提交；正常本机真实验证覆盖两条图片链路执行中取消、原会话重开、可见重试、单次新执行、结果查看/下载/保存和Admin正常记录。自然供应商坏结果等故障注入仍单独列技术验证，不伪造真实事故。上游实际账单明确排除；不能据此把缺失用量补成0或改历史账本。本轮设计已独立评审并实现；技术与本机真实操作的覆盖、失败和剩余限制以round31执行记录为准，完整验收仍未完成。
+验收矩阵：技术验证覆盖首Stop早于POST受理、headers不算受理、明确拒绝、网络未知、停止请求跨卸载、旧意图不影响新提交；正常本机真实验证覆盖两条图片链路执行中取消、原会话重开、可见重试、单次新执行、结果查看/下载/保存和Admin正常记录。自然供应商坏结果等故障注入仍单独列技术验证，不伪造真实事故。上游实际账单明确排除；不能据此把缺失用量补成0或改历史账本。本轮设计已独立评审并实现；技术与本机真实操作的覆盖、失败和剩余限制以round31执行记录为准，后台可见复核已由round33实际补齐；独立终审和最终Git交付以执行记录为准。
 
 ### round31 Images HTTP取消所有权补充（已评审、已实现）
 
@@ -856,7 +857,7 @@ Admin原Images接口继续从原Request.signal获得socket断开；成功body解
 独立评审修订：活动loop/task登记、closed检查和close封闭共用原锁；已closed不得dispatch。close只取消持有的当次Task；HTTP协程finally关闭stream/client，worker finally仅删除自己的登记并关闭自有loop，不取消后续请求。Admin保存严格parsed usage（包括合法全0）；decode后取消沿known cancelled结算，结算前一次性标识，结算await后再查signal并阻止200，已结算事实不回滚。
 
 
-### round31 原生取消传播修订（已评审、已实现，完整验收未完成）
+### round31 原生取消传播修订（已评审、已实现；round33补齐后台复核）
 
 Factory继续取消原bg_task；Runner必须在循环体取消或异常时关闭本次SDK异步iterator。SimpleClaudeAgentSDKClient在取消或iterator主动关闭时，趁当前client仍绑定，调用现有SDK interrupt，再退出原SDK context执行disconnect；正常完成不额外interrupt。取消清理由adapter本次独立Task按顺序发送interrupt并退出同一个原SDK context，消费等待阶段再次到达的取消直到该Task收束；复用SDK既有控制和关闭超时，不增加常量、不改Factory停止等待。interrupt失败记录诊断且仍执行原disconnect、保留原取消异常，不转为成功、不重发图片。原后台idle与取消terminal规则不变，文件发布继续关闭；Gateway只能按实际收到的断开与已公开usage结算，不能按页面已停止伪造cancelled。
 
@@ -880,4 +881,4 @@ sequenceDiagram
 ```
 
 
-本轮交付状态：Runner通过原AsyncExitStack只为提供callable aclose的当次query注册关闭回调，普通AsyncIterator兼容；adapter的同client/context清理Task处理二次取消。独立复核无剩余限定P1/P2，四套技术合同297 passed/1 skipped。正常服务采用后，Responses和Images各一次实际执行中取消均到达Gateway并记录CLIENT_CANCELLED，重开无晚到图片，两条主动重试均实际生成、查看、下载；取消未收到usage的记录仍为settlement_failed/conservative_estimated_capture_pending，不把它或供应商账单未知写成零用量。Admin新记录的可见后台验收尚受现有管理会话失效及所提供账号无法登录管理入口限制，因此全套真实E2E未宣告通过。上述修订前的候选与失败证据保留在执行记录和独立评审回执中。
+本轮交付状态：Runner通过原AsyncExitStack只为提供callable aclose的当次query注册关闭回调，普通AsyncIterator兼容；adapter的同client/context清理Task处理二次取消。独立复核无剩余限定P1/P2，四套技术合同297 passed/1 skipped。正常服务采用后，Responses和Images各一次实际执行中取消均到达Gateway并记录CLIENT_CANCELLED，重开无晚到图片，两条主动重试均实际生成、查看、下载；取消未收到usage的记录仍为settlement_failed/conservative_estimated_capture_pending，不把它或供应商账单未知写成零用量。round33已恢复原正常Admin管理会话，可见打开七次请求详情并分别筛选Token流水；五成功已结算且reserve=capture+release，两取消usage未知仅保留reserve，不修改原账本。原后台阻塞已解除，独立最终审查、必需验证与Git交付以执行记录为准。上述修订前的候选与失败证据保留在执行记录和独立评审回执中。

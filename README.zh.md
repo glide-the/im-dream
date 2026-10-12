@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
 <!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
 <!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: 根工作合同统一为 AGENTS.md，移除 Agent.md 引用。 -->
@@ -57,7 +58,7 @@
 
 集中阅读和使用当前对话的参考文件与 Agent 产物。用户可以添加附件，打开支持的 Markdown 报告、图片和图示，预览或下载文件，并在后续对话中继续使用这些材料。文件围绕当前对话组织；文件预览本身不提供图片生成或视频制作能力。
 
-设置现在分别选择 **AI 模型**（主对话理解与回复）和 **Image 模型**（明确要求 `image_gen.imagegen` 执行的图片操作）。Image 候选来自 Admin 公开的 Images 能力与当前调用资格。使用工具前须保存 Image 选择；没有环境变量、目录默认或唯一候选回退。工具需要工作区、`images:create` 和匹配的 Admin 合同。上传和草图只添加素材。Responses内置生成/编辑已接通Gateway、CLI raw结果及原文件/历史；只有公开能力、明确Responses配置、精确capability和实际角色权限满足时可调用，失败不回退到Images。查看、下载和历史复用原 Chat 路径。本机正常生成、编辑、取消与重试已观察；Admin管理入口登录不可用，完整本轮验收仍未完成。见[专项 PRD](docs/prd/chat/image-model-call-division.md)、[正式设计](docs/design/claude-agent/image-model-call-division.md)和[本轮执行回执](docs/exec/image-model-call-division-20261010.md)。
+设置现在分别选择 **AI 模型**（主对话理解与回复）和 **Image 模型**（明确要求 `image_gen.imagegen` 执行的图片操作）。Image 候选来自 Admin 公开的 Images 能力与当前调用资格。使用工具前须保存 Image 选择；没有环境变量、目录默认或唯一候选回退。工具需要工作区、`images:create` 和匹配的 Admin 合同。上传和草图只添加素材。Responses内置生成/编辑已接通Gateway、CLI raw结果及原文件/历史；只有公开能力、明确Responses配置、精确capability和实际角色权限满足时可调用，失败不回退到Images。查看、下载和历史复用原 Chat 路径。本轮本机生成、编辑、取消重试、下载和历史重开已观察，七次合格图片执行已在正常Admin后台逐项可见核对。缺usage的取消请求保留原待结算状态；故障注入仍属于技术验证。见[专项 PRD](docs/prd/chat/image-model-call-division.md)、[正式设计](docs/design/claude-agent/image-model-call-division.md)和[本轮执行回执](docs/exec/image-model-call-division-20261010.md)。
 
 ### Dream 创作工作台
 
