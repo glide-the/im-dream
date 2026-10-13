@@ -1,4 +1,5 @@
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
+// [Sync] 2026-10-14: navigate Reflections Analyze preview tags through the existing Analysis route.
 // [Sync] 2026-10-07: remove the redundant history title/subtitle block below the existing tab/search toolbar.
 // [Sync] 2026-09-27: navigate between source and created task-session Threads from Chat content.
 // [Sync] 2026-09-27: open selected queue messages in an independent right-side task Thread.
@@ -159,6 +160,7 @@ import {
 import {
   readStoryWorkspaceAgentParam,
   readStoryWorkspaceDeckParam,
+  storyWorkspaceAnalysisSectionPath,
 } from '../../router/storyWorkspacePath';
 import {
   createChatThread,
@@ -1455,6 +1457,7 @@ function ChatViewContent({
                     closeSideTask();
                     handleSelectThread(taskThreadId);
                   }}
+                  onOpenReflectionSection={(section) => openDreamRun(storyWorkspaceAnalysisSectionPath(section))}
                   onOpenScheduledTask={openScheduledTask}
                   onConversationSettled={refreshScheduledActivity}
                   voiceSystemPrompt={voiceSystemPrompt}
@@ -1888,7 +1891,7 @@ function ChatViewContent({
         }} onNavigateThread={(taskThreadId) => {
           closeSideTask();
           handleSelectThread(taskThreadId);
-        }} /> : null}
+        }} onOpenReflectionSection={(section) => openDreamRun(storyWorkspaceAnalysisSectionPath(section))} /> : null}
 
         {scheduledTaskDetail ? <ScheduledTaskDetailSidebar
           taskId={scheduledTaskDetail.taskId}

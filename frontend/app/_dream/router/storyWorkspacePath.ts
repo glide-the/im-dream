@@ -16,6 +16,7 @@
 // [Sync] 2026-08-31: register the run-independent creation guide as a static route.
 // [Sync] 2026-08-31: authenticated root resolves to canonical Chat; unsupported historical prefixes are not routes.
 // [Sync] 2026-09-02: carry one opaque Episode UID in the Execution query string.
+// [Sync] 2026-10-14: add one-shot Reflections section navigation on the existing Analysis route.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -87,6 +88,13 @@ export interface StoryWorkspaceNavigationTarget {
 }
 
 export type StoryWorkspaceDreamRouteStage = 'characters' | 'scenes';
+export type StoryWorkspaceAnalysisSection = 'echoes' | 'traits' | 'patterns';
+
+const STORY_WORKSPACE_ANALYSIS_SECTIONS = new Set<StoryWorkspaceAnalysisSection>([
+  'echoes',
+  'traits',
+  'patterns',
+]);
 
 export function trimStoryWorkspaceTrailingSlash(pathname: string): string {
   if (pathname === '/') return pathname;
@@ -306,6 +314,32 @@ export function readStoryWorkspaceDeckParam(query: URLSearchParams): string | nu
 export function readStoryWorkspaceAgentParam(query: URLSearchParams): string | null {
   const agent = query.get('agent');
   return agent && agent.trim() ? agent : null;
+}
+
+/** Read the allowlisted Reflections section requested by the existing Analysis page. */
+export function readStoryWorkspaceAnalysisSectionParam(
+  query: URLSearchParams,
+): StoryWorkspaceAnalysisSection | null {
+  const section = query.get('section');
+  return STORY_WORKSPACE_ANALYSIS_SECTIONS.has(section as StoryWorkspaceAnalysisSection)
+    ? section as StoryWorkspaceAnalysisSection
+    : null;
+}
+
+/** Navigate to the existing Analysis page and request one Reflections section. */
+export function storyWorkspaceAnalysisSectionPath(
+  section: StoryWorkspaceAnalysisSection,
+): string {
+  const query = new URLSearchParams({ section });
+  return `${STORY_WORKSPACE_PATHS.analysis}?${query.toString()}`;
+}
+
+/** Consume only the one-shot Reflections section while preserving unrelated query intent. */
+export function storyWorkspaceAnalysisPathWithoutSection(search = ''): string {
+  const query = new URLSearchParams(search);
+  query.delete('section');
+  const suffix = query.toString();
+  return suffix ? `${STORY_WORKSPACE_PATHS.analysis}?${suffix}` : STORY_WORKSPACE_PATHS.analysis;
 }
 
 /** Run-bound asset routes reuse the Dream file surface at the matching stage. */

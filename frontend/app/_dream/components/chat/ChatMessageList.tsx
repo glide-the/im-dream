@@ -61,6 +61,7 @@
 // [Sync] 2026-09-27: place the settled created-task list inside the latest assistant reply, before its actions.
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
 // [Sync] 2026-10-07: render durable task markers when persisted Tool output and final prose occupy separate assistant messages.
+// [Sync] 2026-10-14: replace exact Reflections Analyze user prompts with one section-navigation tag.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -89,6 +90,8 @@ import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 import { isNavigableUserMessage } from './chatTurnNavigationModel';
 import ScheduledTaskMarkerList from './ScheduledTaskMarker';
 import { decodeScheduledTaskMarker, type ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
+import { parseReflectionAnalysisPreview } from './reflectionAnalysisPreview';
+import type { StoryWorkspaceAnalysisSection } from '../../router/storyWorkspacePath';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -119,6 +122,7 @@ interface ChatMessageListProps {
   onLoadOlder?: () => void | Promise<void>;
   sourceThread?: TaskSessionLinksSnapshot['source'];
   onNavigateThread?: (threadId: string) => void;
+  onOpenReflectionSection?: (section: StoryWorkspaceAnalysisSection) => void;
   createdTaskLinks?: TaskSessionLink[];
   locatedMessageId?: string | null;
   onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
@@ -301,7 +305,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, onAddImageMaterial, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, createdTaskLinks, locatedMessageId, onOpenScheduledTask }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, onAddImageMaterial, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder, sourceThread, onNavigateThread, onOpenReflectionSection, createdTaskLinks, locatedMessageId, onOpenScheduledTask }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -563,6 +567,31 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
                 if (message.role === 'assistant' && isCompactionCompletionText(part.text, messageMetadata)) return null;
                 const isUser = message.role === 'user';
                 if (isUser) {
+                  const isFirstSourceText = index === sourceMessageIndex
+                    && partIndex === message.parts.findIndex((candidate) => candidate.type === 'text' && Boolean(candidate.text));
+                  const leadingAction = isFirstSourceText
+                    ? <TaskSessionSourceMarker source={sourceThread ?? null} onNavigateThread={onNavigateThread} />
+                    : undefined;
+                  const openReflectionSection = onOpenReflectionSection;
+                  const reflectionSection = openReflectionSection
+                    ? parseReflectionAnalysisPreview(part.text)
+                    : null;
+                  if (reflectionSection && openReflectionSection) {
+                    const mode = t(`chat.reflectionAnalysisPreview.modes.${reflectionSection}`);
+                    return (
+                      <div key={partKey} className="reflection-analysis-preview" data-reflection-analysis-preview={reflectionSection}>
+                        {leadingAction}
+                        <button
+                          type="button"
+                          className="reflection-analysis-preview__tag"
+                          aria-label={t('chat.reflectionAnalysisPreview.openAria', { mode })}
+                          onClick={() => openReflectionSection(reflectionSection)}
+                        >
+                          {t('chat.reflectionAnalysisPreview.label', { mode })}
+                        </button>
+                      </div>
+                    );
+                  }
                   return (
                     <UserMessagePart
                       key={partKey}
@@ -570,10 +599,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
                       workspaceSessionId={threadId}
                       sourceLabel={autoRepairSourceLabel}
                       onAddImageMaterial={readonly ? undefined : onAddImageMaterial}
-                      leadingAction={index === sourceMessageIndex
-                        && partIndex === message.parts.findIndex((candidate) => candidate.type === 'text' && Boolean(candidate.text))
-                        ? <TaskSessionSourceMarker source={sourceThread ?? null} onNavigateThread={onNavigateThread} />
-                        : undefined}
+                      leadingAction={leadingAction}
                     />
                   );
                 }

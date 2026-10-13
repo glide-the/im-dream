@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: localize the Reflections Analyze preview tag and its three section labels.
 // [Sync] 2026-10-13: local image import and charcoal editing tools use the existing bilingual Chat namespace.
 // [Sync] 2026-10-12: localize builtin compact usage and unavailable feedback.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
@@ -582,6 +583,15 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        reflectionAnalysisPreview: {
+          label: 'Reflections · {{mode}}',
+          openAria: 'Open Reflections: {{mode}}',
+          modes: {
+            echoes: 'Recurring themes',
+            traits: 'Character traits',
+            patterns: 'Behavior patterns',
+          },
+        },
         activity: {
           title: 'Activity', entry: 'Activity view', close: 'Close activity', refresh: 'Refresh activity', priority: 'Priority', display: 'Display activities', prioritySection: 'Priority section',
           today: 'Today', lastState: 'Last state', retry: 'Reload', empty: 'No activities need attention', chooseTypes: 'Select activity types to display',
@@ -1696,6 +1706,15 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        reflectionAnalysisPreview: {
+          label: '回顾分析 · {{mode}}',
+          openAria: '打开回顾分析：{{mode}}',
+          modes: {
+            echoes: '重复回响',
+            traits: '性格特质',
+            patterns: '行为模式',
+          },
+        },
         activity: {
           title: '活动', entry: '活动视图', close: '关闭活动', refresh: '刷新活动', priority: '优先级', display: '显示活动', prioritySection: '优先级部分',
           today: '今日', lastState: '上次状态', retry: '重新加载', empty: '暂无需要关注的活动', chooseTypes: '选择要显示的活动类型',

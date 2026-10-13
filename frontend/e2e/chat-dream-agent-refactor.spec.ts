@@ -16,6 +16,10 @@
 // [Sync] 2026-09-13: distinguish Edit Session SSE cleanup aborts from failed business requests.
 // [Sync] 2026-09-28: address the existing environment-information entry after task controls were embedded there.
 // [Sync] 2026-09-28: use the current cookie-session DTO, fixture task navigation, and fail on retired task-results polling.
+// [Sync] 2026-10-14: align the historical Deck metadata assertions with the current 思维模式 product label.
+// [Sync] 2026-10-14: type the slash trigger through the visible Tiptap composer before asserting its menu.
+// [Sync] 2026-10-14: align the slash menu locator and built-in compact option with current Chat commands.
+// [Sync] 2026-10-14: serve the current Chat scheduled-task relation and turn-navigation reads in the fixture.
 
 import { expect, test } from '@playwright/test';
 
@@ -172,10 +176,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
   });
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
   page.on('requestfailed', (request) => {
+    const failedUrl = new URL(request.url());
     const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
-      && new URL(request.url()).origin === new URL(WEB_BASE).origin
-      && ['/api/story-workspace/dream-runs', '/api/sessions/events']
-        .includes(new URL(request.url()).pathname);
+      && failedUrl.origin === new URL(WEB_BASE).origin
+      && (['/api/story-workspace/dream-runs', '/api/sessions/events'].includes(failedUrl.pathname)
+        || (failedUrl.pathname === '/api/claude-agent/threads' && failedUrl.search === '?limit=21')
+        || (failedUrl.pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/scheduled-tasks`));
     if (!expectedNavigationAbort && !request.url().includes('react-grab.com') && !request.url().includes('fonts.')) {
       diagnostics.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
     }
@@ -418,6 +424,20 @@ test('Dream active Deck context → workbench → Chat active tab → production
     if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/task-links`) {
       return route.fulfill({ json: { source: null, created: [] } });
     }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/scheduled-tasks`) {
+      return route.fulfill({ json: { created: [], source: null } });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/turn-navigation`) {
+      return route.fulfill({ json: {
+        items: [{
+          message_id: 'history-user-message-e2e',
+          user_preview: '请分析这一段历史内容。',
+          has_attachment: false,
+          assistant_preview: '这是历史轮次的最终答复。',
+          status: 'answered',
+        }],
+      } });
+    }
     if (/^\/api\/claude-agent\/threads\/[^/]+\/inputs$/.test(pathname) && request.method() === 'GET') {
       return route.fulfill({ json: { entries: [], local_owner: false } });
     }
@@ -495,12 +515,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('历史思考链仅在展开后挂载。')).toHaveCount(0);
   await expect(agentSelector).toHaveCount(0);
-  const historicalDeckContext = page.getByRole('button', { name: '环境信息' });
+  const historicalDeckContext = page.getByRole('button', { name: '思维模式信息' });
   await expect(historicalDeckContext).toBeVisible();
   await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await expect(historicalDeckContext).not.toContainText('drama-forge');
   await historicalDeckContext.click();
-  const deckMetadataDialog = page.getByRole('dialog', { name: '环境信息' });
+  const deckMetadataDialog = page.getByRole('dialog', { name: '思维模式信息' });
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
   await expect(deckMetadataDialog.getByRole('button', { name: '故事导演，当前 Agent' })).toBeDisabled();
   await deckMetadataDialog.getByRole('button', { name: '切换到 结构顾问' }).click();
@@ -512,11 +532,13 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
   await historicalDeckContext.click();
   const historicalComposer = page.getByRole('textbox', { name: '聊天输入' });
-  await historicalComposer.fill('/');
-  const commonSkillListbox = page.getByRole('listbox', { name: '已安装的 Skill 指令' });
+  await historicalComposer.click();
+  await historicalComposer.press('/');
+  const commonSkillListbox = page.getByRole('listbox', { name: '聊天指令' });
   await expect(commonSkillListbox).toBeVisible();
-  await expect(commonSkillListbox.getByRole('option')).toHaveCount(5);
+  await expect(commonSkillListbox.getByRole('option')).toHaveCount(6);
   await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Ink & Memory/ })).toBeVisible();
+  await expect(commonSkillListbox.getByRole('option', { name: /\/compact\b/ })).toBeVisible();
   await page.screenshot({ path: '../output/playwright/common-skills-slash-menu.png' });
   await commonSkillListbox.getByRole('option', { name: /\/asr\b/ }).click();
   await expect(historicalComposer).toHaveText('/asr ');

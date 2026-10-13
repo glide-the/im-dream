@@ -3,6 +3,7 @@
 // [Pos] Task-session side-chat surface; reuses the same ChatPanel and transport.
 // [Sync] 2026-09-27: forward persisted task-relation navigation through the owning Chat surface.
 // [Sync] 2026-09-27: open a selected queued message as a separate top-level Chat Thread.
+// [Sync] 2026-10-14: let Reflections preview tags reuse the owning Chat navigation callback.
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
@@ -10,8 +11,9 @@ import { useTranslation } from 'react-i18next';
 import ChatPanel, { type ChatPanelRecoverySnapshot } from './ChatPanel';
 import { hydrateClaudeThreadSession, type ClaudeThreadHydrationSnapshot } from './threadSessionHydration';
 import { IconX } from './Icons';
+import type { StoryWorkspaceAnalysisSection } from '../../router/storyWorkspacePath';
 
-export default function TaskSessionSidebar({ threadId, onClose, onOpenTaskThread, onNavigateThread }: { threadId: string; onClose: () => void; onOpenTaskThread: (threadId: string) => void; onNavigateThread: (threadId: string) => void }) {
+export default function TaskSessionSidebar({ threadId, onClose, onOpenTaskThread, onNavigateThread, onOpenReflectionSection }: { threadId: string; onClose: () => void; onOpenTaskThread: (threadId: string) => void; onNavigateThread: (threadId: string) => void; onOpenReflectionSection?: (section: StoryWorkspaceAnalysisSection) => void }) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<ClaudeThreadHydrationSnapshot | null>(null);
   const [error, setError] = useState(false);
@@ -69,6 +71,7 @@ export default function TaskSessionSidebar({ threadId, onClose, onOpenTaskThread
         onReconnectComplete={recover}
         onOpenTaskThread={onOpenTaskThread}
         onNavigateThread={onNavigateThread}
+        onOpenReflectionSection={onOpenReflectionSection}
         deckId={snapshot.thread?.deck_id ?? undefined}
         voiceId={snapshot.thread?.voice_id ?? undefined}
         className="task-session-side-chat"

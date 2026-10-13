@@ -5,6 +5,8 @@
 // [Sync] 2026-10-13: add analysis-content source and task lifecycle coverage through the production UI/API seams.
 // [Sync] 2026-10-13: prepared tasks remain idle on load and start only from explicit continuation.
 // [Sync] 2026-10-13: definite Notion body-read failures clear preparing state without creating or starting a task.
+// [Sync] 2026-10-14: cover Chat-origin section deep links, report focus, query consumption and browser return.
+// [Sync] 2026-10-14: classify Chat/Analysis route teardown aborts as expected request cleanup.
 //
 // Business scope: the Project, Episode, canonical Story artifacts, Run-private .dream publication, and after-turn
 // Hook are out of scope. The Reflections task is the changed business fact; its public task/report DTOs and visible
@@ -281,7 +283,12 @@ async function installReflectionFixtures(page: Page, options: {
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   page.on('requestfailed', (request) => {
-    if (external(request.url()) || new URL(request.url()).pathname === '/api/sessions/events') return;
+    const url = new URL(request.url());
+    const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
+      && (url.pathname === '/api/sessions/events'
+        || url.pathname === '/api/story-workspace/dream-runs'
+        || (url.pathname === '/api/claude-agent/threads' && url.search === '?limit=21'));
+    if (external(request.url()) || expectedNavigationAbort) return;
     errors.push(`request: ${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
   page.on('response', response => {
@@ -456,6 +463,57 @@ async function openAnalysis(page: Page, viewport = { width: 1440, height: 900 })
   await expect(page.getByRole('heading', { name: 'Reflections', exact: true })).toBeVisible();
 }
 
+test('Chat-origin section navigation opens the matching saved report once and restores clean history', async ({ page }) => {
+  const fixture = await installReflectionFixtures(page, { seedReport: true });
+  fixture.reports.unshift({
+    ...fixture.reports[0],
+    id: 9002,
+    created_at: '2026-10-14T03:00:05Z',
+    report_data: {
+      ...fixture.reports[0].report_data,
+      task_id: 'newer-traits-only-task',
+      echoes: [],
+      patterns: [],
+    },
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${WEB_BASE}/story-workspace/chat`);
+  await expect(page.getByRole('button', { name: 'Chat', exact: true })).toBeVisible();
+  // AnalysisView loads these three resources on route entry. The analysis-content
+  // and deck endpoints are intentionally lazy and only run after the user opens
+  // the Analysis content control, so they are not part of this deep-link read set.
+  const waitForAnalysisReads = () => Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/sessions/aggregate'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/reports'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/reflections/latest'),
+  ]);
+  const firstReads = waitForAnalysisReads();
+  await page.evaluate((href) => {
+    window.history.pushState({ inkDreamView: 'story-workspace' }, '', href);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, '/story-workspace/analysis?section=patterns');
+  await firstReads;
+
+  const patterns = page.locator('[data-reflection-section="patterns"]');
+  await expect(patterns).toBeVisible();
+  await expect(patterns).toHaveAttribute('aria-pressed', 'true');
+  await expect(patterns).toBeFocused();
+  await expect(page.getByText('Review loop', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
+
+  await page.goBack();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/chat`);
+  const restoredReads = waitForAnalysisReads();
+  await page.goForward();
+  await restoredReads;
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
+  await expect(page.getByRole('heading', { name: 'Reflections', exact: true })).toBeVisible();
+  await expect(page.locator('[data-reflection-section="patterns"]')).toHaveCount(0);
+  expect(fixture.unexpectedReflectionRequests).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
 test('default and Notion+Agent analysis create through SSE, save retry, reload, and open the persisted report', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { reportSaveFailureOnce: true });
   await openAnalysis(page);
@@ -585,8 +643,15 @@ test('created empty-input task streams FAILED with no results and keeps source r
 
 test('reconnects an existing active task after reload without creating a new task', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true });
-  await openAnalysis(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${WEB_BASE}/story-workspace/analysis`);
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
   await expect.poll(() => fixture.eventRequests.length).toBeGreaterThan(0);
+  // A recovered task with terminal results opens its existing report after the
+  // resume stream settles; assert that visible consumer rather than the
+  // dashboard heading that only exists before recovery completes.
+  await expect(page.getByRole('button', { name: '← Past Reflections' })).toBeVisible();
+  await expect(page.getByText('Repeated concern', { exact: true })).toBeVisible();
   expect(fixture.createRequests).toEqual([]);
   expect(fixture.startRequests).toEqual([]);
   expect(fixture.errors).toEqual([]);
@@ -679,6 +744,7 @@ test('Notion read and Agent invalidation errors recover through the explicit rel
 
 test('today re-analysis opens the diary picker with the current entries', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { seedReport: true });
+  fixture.reports[0].created_at = new Date().toISOString();
   await openAnalysis(page);
   await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Today already has a Reflections analysis.' });

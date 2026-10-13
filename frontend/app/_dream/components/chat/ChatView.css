@@ -1,7 +1,42 @@
-/* [Input] Chat landing Dream re-entry cards rendered by ChatView. */
-/* [Output] One adaptive, keyboard-safe horizontal card scroller without page overflow. */
-/* [Pos] Local presentation contract for the Chat workspace Dream list. */
+/* [Input] Chat workspace Dream re-entry cards and Reflections Analyze preview labels. */
+/* [Output] An adaptive horizontal Dream scroller plus a bounded, keyboard-visible Reflections tag. */
+/* [Pos] Local presentation contract for the Chat workspace Dream list and message preview label. */
 /* [Sync] 2026-08-14: add responsive horizontal scrolling for initial/in-progress Dreams. */
+/* [Sync] 2026-10-14: add the compact Reflections Analyze message tag and keyboard focus state. */
+
+.reflection-analysis-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.reflection-analysis-preview__tag {
+  max-width: 100%;
+  padding: 0.38rem 0.68rem;
+  border: 1px solid color-mix(in srgb, var(--color-action-link) 38%, var(--color-border-paper));
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-action-link) 8%, var(--color-bg-surface));
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+
+.reflection-analysis-preview__tag:hover {
+  background: color-mix(in srgb, var(--color-action-link) 14%, var(--color-bg-surface));
+}
+
+.reflection-analysis-preview__tag:focus-visible {
+  outline: 2px solid var(--color-action-link);
+  outline-offset: 2px;
+}
 
 .chat-dream-reentry-scroller {
   display: grid;

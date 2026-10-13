@@ -2,6 +2,8 @@
 <!-- [Output] 回归分析内容选择的现行业务规则和桌面、窄屏页面骨架。 -->
 <!-- [Pos] memory 业务 PRD；交互图由正式设计稿所有。 -->
 <!-- [Sync] 2026-10-13: 经发现、定义和方案比较后收敛最小范围。 -->
+<!-- [Sync] 2026-10-14: Analyze Chat 收敛为前端预览标签与现有 ReflectionBlogPage 栏目跳转；不新增 Chat 接口。 -->
+<!-- [Sync] 2026-10-14: Analyze Chat 单标签预览与现有报告栏目定位已实现，并纳入完整 Reflections/Chat 相邻回归。 -->
 # 回归分析：分析内容
 
 ## 背景与问题
@@ -86,8 +88,43 @@ CREATED 表示已保存但尚未启动。进入页面只显示“有一项分析
 
 执行失败保留错误；部分成功保留成功栏目并显示失败栏目。断流按已有任务恢复，不能因查询失败清除活动任务后另建任务。创建响应丢失时显示恢复提示，并使用原 request_key 和选项查询原回执；明确尚未创建的失败允许调整选择。保存失败保留当前结果并提供重试保存。服务端任务报告持久化是历史来源，页面不创建第二份全分析报告。
 
+### Analyze Chat 预览标签（已实现）
+
+Analyze 栏目执行所需的完整冻结输入继续由任务和 Chat 持久化边界保存，不删除、截断或改写。Chat 前端对能够精确识别栏目的服务器生成 user message 不再渲染原始 Markdown 气泡，只在原消息位置上方显示一个标签按钮：`回顾分析 · 重复回响`、`回顾分析 · 性格特质` 或 `回顾分析 · 行为模式`。
+
+点击标签离开 Chat，进入现有回顾分析页，打开包含该栏目的最新已保存报告，并定位、聚焦 `ReflectionBlogPage` 已有的 `echoes`、`traits` 或 `patterns` 栏目按钮。Chat 不增加来源详情、展开、原文查看、加载、失败、重试、确认弹窗或第二个操作。
+
+识别以服务器固定指令 `Complete this Reflections analysis in this turn.` 的最后一次出现为锚，只检查锚点之后的第一个 Markdown 一级标题是否完整等于三个默认工作流标题之一；不扫描锚点之前的 Notion/日记正文，也不按 XML、正文语义或大小猜测。锚点或首个标题不符合规则时保持普通消息渲染。现有消息没有 `task_id/report_id`，所以跳转语义是最新匹配报告，不猜测旧 Thread 对应的精确报告。
+
+本规则只移除匹配消息的 `ChatMarkdown` 和超长 DOM，不减少历史消息的数据库读取、响应字节数或 JSON 解析。完整网络载荷仍是后续可测量风险，不在本轮通过新增接口解决。
+
+桌面骨架：标签在原 user message 的右对齐位置，assistant final 保持原样；不显示空气泡或分析输入卡。
+
+```text
+┌ Chat 历史 ───────────┬ 当前会话 ────────────────────────────┐
+│ <sessions_context>…  │                         [回顾分析 · 行为模式]
+│ 普通对话             │                         （无原始 Analyze 气泡）
+│                      │ 分析结果 final…                         │
+└──────────────────────┴─────────────────────────────────────────┘
+
+点击 → 现有回顾报告页 → [重复回响] [性格折射] [行为轨迹]
+                                                    ↑ 对应栏目
+```
+
+375px 窄屏骨架：沿用单列消息滚动，标签空间不足时整体换行；跳转后目标栏目按钮进入视口并获得焦点。
+
+```text
+┌ 当前会话 ─────────────────┐
+│       [回顾分析 · 行为模式]│
+│       （无原始 Analyze 气泡）│
+│ 分析结果 final…            │
+└────────────────────────────┘
+
+点击 → 回顾报告页的对应栏目按钮
+```
+
 ## 验收与正式设计
 
-正式设计：[分析内容交互设计](../../design/memory/reflections-analysis-content-design.md)。评审、影响和实际回执：[实施记录](../../exec/reflections-analysis-content-20261013.md)。原分区工作流和静态配置历史保留在 [分区需求](../../design/memory/reflections-analysis-prd.md)。
+正式设计：[分析内容交互设计](../../design/memory/reflections-analysis-content-design.md)；Analyze Chat 历史问题与当前实现见 [大型分析会话历史设计](../../design/memory/reflections-analyze-chat-history-design.md)，本轮判断、实现和验证回执见 [大型分析会话执行记录](../../exec/analyze-chat-large-context-design-20261013.md)。既有功能评审、影响和实际回执：[实施记录](../../exec/reflections-analysis-content-20261013.md)。原分区工作流和静态配置历史保留在 [分区需求](../../design/memory/reflections-analysis-prd.md)。
 
 验收必须覆盖默认日记、Notion 正文排除/进入、Agent 指令采用和失效拒绝、键盘与窄屏、页面到任务/事件/报告/历史/再次分析完整链路及中断恢复。文档图和检查不代表功能验收。
