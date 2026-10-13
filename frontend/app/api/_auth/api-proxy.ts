@@ -2,6 +2,7 @@
 // [Output] Credential-selected, origin-checked, cache-free Python HTTP/SSE responses.
 // [Pos] BFF API authentication owner; Python verifies every Admin access token/principal.
 // [Sync] 2026-09-17: reuse the process-owned Admin client instead of exchanging a service token per API request.
+// [Sync] 2026-10-13: renew only definite pre-create Notion authorization rejection once, replaying the original request/key.
 import { randomUUID } from 'node:crypto';
 import { configuredBackendOrigin, forwardBackendRequest } from '../_http-proxy.ts';
 import { AdminBffClient, configuredAdminBffClient } from './admin-client.ts';
@@ -36,7 +37,32 @@ export function createApiProxy(boundary: BffLoginBoundary, admin: Pick<AdminBffC
       if (!incoming.pathname.startsWith('/api/') && incoming.pathname !== '/api' && incoming.pathname !== '/auth/me') throw new BffBoundaryError('BFF_API_PATH_INVALID', 400);
       if (incoming.searchParams.has('token') || incoming.searchParams.has('access_token')) throw new BffBoundaryError('BFF_TOKEN_QUERY_DENIED', 400);
       const authorization = await apiAuthorization(request, boundary, admin);
-      return await forwardBackendRequest(request, origin, authorization, transport);
+      const canReplay = request.method.toUpperCase() === 'POST' && incoming.pathname === '/api/reflections/tasks'
+        && boundary.hasHandleCookie(request);
+      const replay = canReplay ? request.clone() : undefined;
+      const response = await forwardBackendRequest(request, origin, authorization, transport);
+      if (replay && response.status === 401 && !request.signal.aborted
+        && response.headers.get('content-type')?.includes('application/json')) {
+        let detail: unknown;
+        let input: unknown;
+        try {
+          detail = (await response.clone().json())?.detail;
+          input = await replay.clone().json();
+        } catch { /* Non-contract errors are returned unchanged. */ }
+        const rejection = detail as Record<string, unknown> | undefined;
+        const submission = input as { request_key?: unknown; analysis_content?: { include_notion?: unknown } } | undefined;
+        if (rejection?.error_code === 'ACCESS_TOKEN_REQUIRED' && rejection.outcome_unknown === false
+          && rejection.creation_committed !== true && rejection.task_id === undefined
+          && typeof submission?.request_key === 'string' && submission.request_key.length > 0
+          && submission.analysis_content?.include_notion === true) {
+          const renewed = await apiAuthorization(replay, boundary, admin);
+          // This is a definite rejection before any task write, using the same
+          // handle, bytes and idempotency key. No other operation is retried.
+          return await forwardBackendRequest(replay, origin, renewed, transport);
+        }
+      }
+      if (replay?.body) void replay.body.cancel().catch(() => {});
+      return response;
     } catch (error) {
       return bffFailure(error instanceof BffBoundaryError ? error : new BffBoundaryError('BFF_BACKEND_UNAVAILABLE', 502));
     }

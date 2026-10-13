@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: allow an original caller request ID at the existing Admin operation boundary.
 #!/usr/bin/env python3
 # [Input] Consume the Admin request-auth owner and common FastAPI dependency inputs.
 # [Output] Provide bearer-only canonical identity and shared date/text helpers to backend routers.
@@ -84,11 +85,12 @@ async def get_admin_current_user(
 get_current_user = get_admin_current_user
 
 
-async def invoke_admin_operation(current_user: dict, method, input_dto, *, error_handler=None):
+# [Sync] 2026-10-13: allow a caller-owned idempotency key for exact task-create receipt recovery.
+async def invoke_admin_operation(current_user: dict, method, input_dto, *, error_handler=None, request_id: str | None = None):
     actor = current_user.get("_admin_actor")
     if not isinstance(actor, AdminRequestActor):
         raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
-    request_id = str(uuid4())
+    request_id = request_id or str(uuid4())
     try:
         return await run_in_threadpool(method, input_dto, request_id, access_token=actor.access_token)
     except AdminDataError as exc:

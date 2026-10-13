@@ -7,6 +7,7 @@
 # [Sync] 2026-09-17: assert separate user and client_credentials bearer transport.
 # [Sync] 2026-09-18: verify public issuer claims with internal DTO, token and JWKS transport URLs.
 # [Sync] 2026-09-17: recover one read-only transport failure while writes remain single-dispatch.
+# [Sync] 2026-10-13: correlated 413 write errors stay definite; malformed or mismatched envelopes remain unknown without replay.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -94,7 +95,7 @@ def test_reject_orm_extra_fields_and_invalid_principal_dto(config, mutation):
     assert exc.value.code == "ADMIN_RESPONSE_INVALID"
 
 
-@pytest.mark.parametrize("status", [401, 403, 404, 409, 422, 503, 504])
+@pytest.mark.parametrize("status", [401, 403, 404, 409, 413, 422, 503, 504])
 def test_redacted_error_preserves_status_and_request_id(config, status):
     def handler(_):
         return httpx.Response(status, json={"error": {"code": "DOMAIN_FAILURE", "message": "secret SQL credential body"}, "request_id": "request-1"})
@@ -103,6 +104,79 @@ def test_redacted_error_preserves_status_and_request_id(config, status):
         client.principal("token", "request-1")
     assert exc.value.status_code == status and exc.value.request_id == "request-1"
     assert "credential" not in str(exc.value) and "secret SQL" not in repr(exc.value)
+
+
+@pytest.mark.parametrize("code", ["INPUT_TOO_LARGE", "REFLECTION_LAUNCH_SNAPSHOT_TOO_LARGE"])
+def test_correlated_413_write_is_definite_and_never_replayed(config, code):
+    spec = operation()
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            return response(auth_capabilities(config, (spec,)), request_id)
+        return httpx.Response(413, json={
+            "error": {"code": code, "message": "private oversized body"},
+            "request_id": request_id,
+        })
+
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        operations=(spec,),
+    )
+    client.capabilities("bootstrap")
+    with pytest.raises(AdminDataError) as exc:
+        client.execute(
+            spec,
+            PersistNoteInput(session_id="note-1", text="text"),
+            "launch-413",
+            access_token="actor-token",
+        )
+    assert exc.value.code == code
+    assert exc.value.status_code == 413
+    assert exc.value.request_id == "launch-413"
+    assert not exc.value.outcome_unknown
+    assert "private oversized body" not in repr(exc.value)
+    assert [request.headers["x-request-id"] for request in calls] == ["bootstrap", "launch-413"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"error": {"code": "INPUT_TOO_LARGE", "message": "private oversized body"}, "request_id": "other"},
+    {"error": {"code": "INPUT_TOO_LARGE", "message": "private oversized body"}, "request_id": "launch-413", "extra": "bad"},
+    {"error": {"code": "INPUT_TOO_LARGE", "message": "private oversized body"}},
+])
+def test_malformed_or_mismatched_413_write_is_unknown_without_replay(config, payload):
+    spec = operation()
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            return response(auth_capabilities(config, (spec,)), request_id)
+        return httpx.Response(413, json=payload)
+
+    client = AdminDataClient(
+        config,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        operations=(spec,),
+    )
+    client.capabilities("bootstrap")
+    with pytest.raises(AdminDataError) as exc:
+        client.execute(
+            spec,
+            PersistNoteInput(session_id="note-1", text="text"),
+            "launch-413",
+            access_token="actor-token",
+        )
+    assert exc.value.code == "ADMIN_RESPONSE_INVALID"
+    assert exc.value.status_code == 503
+    assert exc.value.request_id == "launch-413"
+    assert exc.value.outcome_unknown
+    assert "private oversized body" not in repr(exc.value)
+    assert [request.headers["x-request-id"] for request in calls] == ["bootstrap", "launch-413"]
 
 
 @pytest.mark.parametrize("current_version", [None, 0, 9_007_199_254_740_991])

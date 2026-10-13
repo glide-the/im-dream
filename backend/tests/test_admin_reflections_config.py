@@ -3,6 +3,7 @@
 # [Pos] Provider-free registered83 consumer tests; no PostgreSQL, filesystem or normal account.
 # [Sync] 2026-09-15: cover committed/absent/failed original receipt recovery after one write POST.
 # [Sync] 2026-09-15: cover the three published Reflections section-config operations.
+# [Sync] 2026-10-13: timeout receipt reads may perform one bounded second GET; writes remain single-dispatch and unknown.
 from __future__ import annotations
 
 import json
@@ -296,7 +297,10 @@ def test_unknown_write_stays_unknown_when_original_receipt_is_unconfirmed(
     assert captured.value.request_id == "write-original"
     assert captured.value.outcome_unknown is True
     assert sum(item.method == "POST" for item in calls) == 1
-    assert sum("/receipts/" in item.url.path for item in calls) == 1
+    receipts = [item for item in calls if "/receipts/" in item.url.path]
+    assert len(receipts) == (2 if receipt_mode == "timeout" else 1)
+    assert all(item.method == "GET" for item in receipts)
+    assert all(item.headers["x-request-id"] == "write-original" for item in receipts)
 
 
 def test_missing_registered_operation_stops_after_capability_read() -> None:

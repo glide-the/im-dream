@@ -3,6 +3,9 @@
 # [Pos] Reflections runtime unit boundary; no PostgreSQL, HTTP server, or real model.
 # [Sync] 2026-09-16: cover source-fenced Gateway grant composition for Reflections.
 # [Sync] 2026-09-15: replace legacy SQLite flow tests with Admin consumer/runtime invariants.
+# [Sync] 2026-10-13: include the current actor ID in the create fixture so the
+#                    production preparation-cache cleanup boundary is exercised.
+# [Sync] 2026-10-13: assert Reflections dispatches through the canonical normalized turn result and waits for the Factory owner.
 
 from __future__ import annotations
 
@@ -43,6 +46,10 @@ from services.admin_data.reflection_task_models import (
 )
 from services.admin_data.session_projection_broker import (
     SessionProjectionBrokerSettings,
+)
+from services.story_workspace.dream_lifecycle_observer import (
+    NormalizedTurnOutcome,
+    NormalizedTurnResult,
 )
 
 
@@ -182,6 +189,31 @@ class ReflectionEventBusTest(unittest.TestCase):
         _run(case())
 
 
+class CanonicalTurnDispatchTest(unittest.IsolatedAsyncioTestCase):
+    async def test_reflections_reuses_canonical_turn_result_and_owner_wait(self):
+        import agent_factory
+
+        calls = []
+        factory = object()
+        request = object()
+
+        async def drain(selected_factory, selected_request, **kwargs):
+            calls.append((selected_factory, selected_request, kwargs))
+            return NormalizedTurnResult(
+                outcome=NormalizedTurnOutcome.COMPLETED,
+                saw_message_final=True,
+                saw_finish=True,
+                finish_reason="stop",
+            )
+
+        with patch.object(agent_factory, "claude_agent_thread_factory", factory), \
+                patch("services.story_workspace.dream_lifecycle_observer.drain_chat_agent_turn", drain):
+            result = await runtime._run_claude_agent_turn(request)
+
+        self.assertEqual(result.outcome, NormalizedTurnOutcome.COMPLETED)
+        self.assertEqual(calls, [(factory, request, {"wait_for_factory_owner": True})])
+
+
 class _RouteOwner:
     def __init__(self, worker) -> None:
         self.worker = worker
@@ -232,7 +264,7 @@ class ReflectionsPrestartSseTest(unittest.TestCase):
                         reflections_routes.ReflectionsTaskCreateRequest(
                             sections=["echoes"], auto_start=False
                         ),
-                        current_user={},
+                        current_user={"user_id": "7"},
                         owner=owner,
                     )
                 self.assertEqual(response.status_code, 202)

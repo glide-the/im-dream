@@ -1,5 +1,7 @@
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Sync] 2026-10-13: pass per-task analysis selection, read candidates and retry the original task report.
+// [Sync] 2026-10-13: prepared tasks start only through an explicit resume action after SSE subscription.
 // [Input] Consume backend REST/SSE endpoints, same-origin session and in-memory CSRF, language storage, and session/deck request data.
 // [Output] Provide frontend API helpers for sessions, decks, voices, Claude Agent SSE calls, analysis reports,
 //          Reflections section analysis, and Reflections section config (GET/PUT/DELETE).
@@ -32,6 +34,7 @@ import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSessio
  *         Reflections-agent async tasks with SSE-first start control.
  */
 
+import { z } from 'zod';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
 import type { EditorState } from '../engine/EditorEngine';
@@ -459,7 +462,9 @@ export interface ReflectionTask {
   task_id: string;
   status: 'CREATED' | 'ASSEMBLING' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'PARTIAL_FAILED' | 'FAILED';
   sections: ReflectionSectionKey[];
+  failed_sections?: ReflectionSectionKey[];
   input_snapshot: Record<string, unknown>;
+  analysis_content?: ReflectionAnalysisContentSummary | null;
   workspace_path?: string | null;
   agent_contract_version?: string | null;
   error_summary?: string | null;
@@ -479,15 +484,72 @@ export interface ReflectionTaskEvent {
   payload: Record<string, unknown>;
 }
 
+export interface ReflectionAnalysisContentOptions {
+  include_notion: boolean;
+  connector_id?: string;
+  deck_id?: string;
+  agent_id?: string;
+  snapshot_version?: string;
+}
+export interface ReflectionAnalysisContentSummary {
+  diary_session_ids: string[] | null;
+  notion: { connector_id: string; snapshot_version: string;
+    pages: { page_id: string; title: string; url: string | null; content_sha256: string; read_at: string }[];
+    empty_page_count: number;
+  } | null;
+  agent: { deck_id: string; agent_id: string; deck_name: string; agent_name: string } | null;
+}
+export interface ReflectionAnalysisContentCandidates {
+  status: 'ready' | 'empty' | 'no_snapshot' | 'disconnected' | 'auth_required' | 'scope_changed';
+  page_count: number;
+  snapshot_version: string | null;
+  connector_id?: string;
+  selection_available: boolean;
+}
+const reflectionAnalysisSummarySchema = z.object({
+  diary_session_ids: z.array(z.string()).nullable(),
+  agent: z.object({ deck_id: z.string(), agent_id: z.string(), deck_name: z.string(), agent_name: z.string() }).nullable(),
+  notion: z.object({ connector_id: z.string(), snapshot_version: z.string(), empty_page_count: z.number().int().nonnegative(),
+    pages: z.array(z.object({ page_id: z.string(), title: z.string(), url: z.string().url().startsWith('https://').nullable(),
+      content_sha256: z.string().regex(/^[0-9a-f]{64}$/), read_at: z.string() })),
+  }).nullable(),
+});
+function normalizeReflectionAnalysisSummary(value: unknown): ReflectionAnalysisContentSummary | null {
+  if (value === undefined || value === null) return null;
+  const parsed = reflectionAnalysisSummarySchema.safeParse(value);
+  if (!parsed.success) throw new Error('Invalid analysis source response');
+  return parsed.data;
+}
+const reflectionAnalysisCandidatesSchema = z.object({
+  status: z.enum(['ready', 'empty', 'no_snapshot', 'disconnected', 'auth_required', 'scope_changed']),
+  page_count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), snapshot_version: z.string().nullable(),
+  connector_id: z.string().optional(), selection_available: z.boolean(),
+}).refine(value => value.status !== 'ready' || value.page_count > 0 && value.snapshot_version !== null);
+
+export async function getReflectionAnalysisContent(): Promise<ReflectionAnalysisContentCandidates> {
+  const response = await fetch(`${API_BASE}/api/reflections/analysis-content`, { headers: getAuthHeaders() });
+  if (!response.ok) throw new Error(`Analysis content could not be loaded (${response.status})`);
+    const parsed = reflectionAnalysisCandidatesSchema.safeParse(await response.json());
+  if (!parsed.success) throw new Error('Invalid analysis content response');
+  return parsed.data;
+}
+export async function ensureReflectionTaskReport(taskId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}/report`, { method: 'POST', headers: authHeaders() });
+  if (!response.ok) throw new Error(currentFrontendLanguage().startsWith('zh')
+    ? '分析结果已保留，报告暂未保存。请重试保存。' : 'The analysis result is retained, but its report could not be saved. Retry saving.');
+}
+
 export interface RunReflectionsTaskOptions {
   sections?: ReflectionSectionKey[];
   sessionIds?: string[];
+  analysisContent?: ReflectionAnalysisContentOptions;
   language?: string;
   onEvent?: (event: ReflectionTaskEvent) => void;
 }
 
 export interface ResumeReflectionsTaskOptions {
   lastEventId?: string;
+  startPrepared?: boolean;
   onEvent?: (event: ReflectionTaskEvent) => void;
 }
 
@@ -531,9 +593,13 @@ function normalizeReflectionTask(raw: unknown): ReflectionTask {
       ? record.sections.filter((s: unknown): s is ReflectionSectionKey =>
           s === 'echoes' || s === 'traits' || s === 'patterns')
       : [],
+    failed_sections: Array.isArray(record.section_states) ? record.section_states.filter(isRecord)
+      .filter(item => item.status === 'FAILED' && ['echoes', 'traits', 'patterns'].includes(String(item.section)))
+      .map(item => item.section as ReflectionSectionKey) : [],
     input_snapshot: isRecord(record.input_snapshot)
       ? record.input_snapshot
       : {},
+    analysis_content: normalizeReflectionAnalysisSummary(isRecord(record.input_snapshot) ? record.input_snapshot.analysis_content : null),
     workspace_path: typeof record.workspace_path === 'string' ? record.workspace_path : null,
     agent_contract_version: typeof record.agent_contract_version === 'string' ? record.agent_contract_version : null,
     error_summary: typeof record.error_summary === 'string' ? record.error_summary : null,
@@ -553,22 +619,86 @@ function reflectionResultsBySection(results: ReflectionResult[]): Record<Reflect
   };
 }
 
+function reflectionKnownFailure(value: unknown): string | undefined {
+  const zh = currentFrontendLanguage().startsWith('zh');
+  const code = typeof value === 'string' ? value.match(/^[A-Z][A-Z0-9_]+/)?.[0] : undefined;
+  const messages: Record<string, [string, string]> = {
+    REFLECTION_AGENT_UNAVAILABLE: ['所选分析 Agent 已不可用，请重新选择。', 'The selected analysis Agent is unavailable. Select it again.'],
+    DECK_ACCESS_DENIED: ['无法使用所选 Deck，请重新选择。', 'The selected Deck is unavailable. Select another Deck.'],
+    NOTION_AUTH_REQUIRED: ['Notion 授权已失效，请重新连接。', 'Reconnect Notion before analyzing.'],
+    NOTION_ANALYSIS_READ_FAILED: ['无法读取完整 Notion 内容，请检查页面权限，或关闭 Notion 后重试。', 'Notion content could not be read. Check page permissions or turn off Notion and retry.'],
+    NOTION_RESOURCE_UNAVAILABLE: ['有 Notion 页面已无法访问，请检查授权与挂载范围后重试。', 'A Notion page is unavailable. Check access and linked resources, then retry.'],
+    NOTION_MARKDOWN_INCOMPLETE: ['Notion 返回的正文不完整，本次分析尚未开始。请稍后重试。', 'Notion returned incomplete content. The analysis has not started. Retry later.'],
+    NOTION_UPSTREAM_UNAVAILABLE: ['Notion 正文服务暂时不可用，本次分析尚未开始。请稍后重试。', 'Notion content is temporarily unavailable. The analysis has not started. Retry later.'],
+    NOTION_UPSTREAM_TIMEOUT: ['Notion 正文读取超时，本次分析尚未开始。请稍后重试。', 'Notion content read timed out. The analysis has not started. Retry later.'],
+    NOTION_RATE_LIMITED: ['Notion 请求暂时受限，本次分析尚未开始。请稍后重试。', 'Notion requests are temporarily limited. The analysis has not started. Retry later.'],
+    NOTION_PERMISSION_DENIED: ['无法读取选定的 Notion 页面，请检查授权后重试。', 'Check the selected Notion page permissions and retry.'],
+    NOTION_CONNECTOR_CHANGED: ['Notion 连接已改变，请重新选择分析内容。', 'The Notion connection changed. Select the analysis content again.'],
+    NOTION_SNAPSHOT_CHANGED: ['Notion 资源已更新，请重新选择分析内容。', 'Notion resources changed. Select the analysis content again.'],
+    NOTION_ANALYSIS_SCOPE_CHANGED: ['已挂载资源已改变，请重新同步后选择。', 'Linked resources changed. Sync and select them again.'],
+    NOTION_SNAPSHOT_UNAVAILABLE: ['尚无可用的 Notion 快照，请先同步资源。', 'Sync Notion resources before analyzing.'],
+    REFLECTION_NO_ANALYZABLE_INPUT: ['没有可分析的正文，请选择有内容的日记或 Notion 页面。', 'Select diary entries or Notion pages with text to analyze.'],
+    ADMIN_CAPABILITY_UNAVAILABLE: ['分析内容暂时不可用，请稍后重试。', 'Analysis content is temporarily unavailable. Retry later.'],
+  };
+  return code && messages[code] ? messages[code][zh ? 0 : 1] : undefined;
+}
+
+async function reflectionCreateError(response: Response): Promise<string> {
+  const zh = currentFrontendLanguage().startsWith('zh');
+  const payload = await response.json().catch(() => null);
+  const detail = isRecord(payload) ? payload.detail : null;
+  const code = typeof detail === 'string' ? detail : isRecord(detail) ? detail.error_code : undefined;
+  const known = reflectionKnownFailure(code);
+  if (known) return known;
+  return response.status === 401 ? (zh ? '请登录后开始分析。' : 'Log in to start an analysis.')
+    : (zh ? '分析未能启动，请检查所选内容后重试。' : 'The analysis could not start. Check the selected content and retry.');
+}
+
+const pendingReflectionSubmissionSchema = z.strictObject({
+  request_key: z.string().uuid(),
+  body: z.strictObject({
+    sections: z.array(z.enum(['echoes', 'traits', 'patterns'])).optional(),
+    auto_start: z.boolean(), language: z.string(), session_ids: z.array(z.string()).optional(),
+    analysis_content: z.strictObject({ include_notion: z.boolean(), connector_id: z.string().optional(),
+      deck_id: z.string().optional(), agent_id: z.string().optional(), snapshot_version: z.string().optional() }).optional(),
+  }),
+});
+
 export async function createReflectionTask(
   sections?: ReflectionSectionKey[],
   autoStart = true,
   language = currentFrontendLanguage(),
   sessionIds?: string[],
+  analysisContent?: ReflectionAnalysisContentOptions,
 ): Promise<ReflectionTask> {
+  const fresh = { sections, auto_start: autoStart, language, session_ids: sessionIds, analysis_content: analysisContent };
+  let submission: z.infer<typeof pendingReflectionSubmissionSchema>;
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION) || 'null');
+    const parsed = pendingReflectionSubmissionSchema.safeParse(stored);
+    submission = parsed.success
+      ? parsed.data
+      : { request_key: crypto.randomUUID(), body: fresh };
+  } catch { submission = { request_key: crypto.randomUUID(), body: fresh }; }
+  localStorage.setItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION, JSON.stringify(submission));
   const res = await fetch(`${API_BASE}/api/reflections/tasks`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sections, auto_start: autoStart, language, session_ids: sessionIds }),
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ...submission.body, request_key: submission.request_key }),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Failed to create reflections task (${res.status}): ${text}`);
+    const failure: unknown = await res.clone().json().catch(() => null);
+    const detail = isRecord(failure) && isRecord(failure.detail) ? failure.detail : null;
+    const outcomeUnknown = detail?.creation_committed === true || detail?.outcome_unknown === true
+      || (res.status >= 500 && detail?.outcome_unknown !== false);
+    if (!outcomeUnknown) localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
+    const message = await reflectionCreateError(res);
+    throw new Error(outcomeUnknown ? `${message} ${currentFrontendLanguage().startsWith('zh')
+      ? '重试会恢复上次提交的分析。' : 'Retry to recover the previous analysis submission.'}` : message);
   }
-  return normalizeReflectionTask(await res.json());
+  const task = normalizeReflectionTask(await res.json());
+  if (!task.task_id) throw new Error('Invalid analysis task response');
+  localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
+  return task;
 }
 
 export async function startReflectionTask(taskId: string): Promise<ReflectionTask> {
@@ -685,7 +815,7 @@ async function waitForReflectionTaskResults(
     const task = await getReflectionTask(taskId);
     if (['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
       if (task.status === 'FAILED') {
-        throw new Error(task.error_summary || 'Reflections task failed');
+        throw new Error(reflectionKnownFailure(task.error_summary) ?? (task.error_summary || 'Reflections task failed'));
       }
       return task.results ?? await getReflectionTaskResults(taskId);
     }
@@ -697,7 +827,7 @@ async function waitForReflectionTaskResults(
 export async function runReflectionsTask(
   options: RunReflectionsTaskOptions = {},
 ): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
-  const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage(), options.sessionIds);
+  const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage(), options.sessionIds, options.analysisContent);
   options.onEvent?.({
     id: 'client-task-created',
     task_id: task.task_id,
@@ -724,9 +854,11 @@ export async function resumeReflectionsTask(
   if (task.status === 'FAILED') {
     throw new Error(task.error_summary || 'Reflections task failed');
   }
+  const startPrepared = task.status === 'CREATED' && options.startPrepared
+    ? () => startReflectionTask(taskId).then(() => undefined) : undefined;
   const results = ['COMPLETED', 'PARTIAL_FAILED'].includes(task.status)
     ? task.results ?? await getReflectionTaskResults(taskId)
-    : await waitForReflectionTaskResults(taskId, options.onEvent, undefined, options.lastEventId);
+    : await waitForReflectionTaskResults(taskId, options.onEvent, startPrepared, options.lastEventId);
   return reflectionResultsBySection(results);
 }
 
@@ -1060,6 +1192,9 @@ export interface SavedAnalysisReport {
     traits?: ReflectionResult[];
     patterns?: ReflectionResult[];
     stats?: { days: number; entries: number; words: number };
+    task_id?: string;
+    failed_sections?: ReflectionSectionKey[];
+    analysis_content?: ReflectionAnalysisContentSummary;
   };
   created_at: string;
 }
@@ -1075,7 +1210,9 @@ export async function getAnalysisReports(limit: number = 10): Promise<SavedAnaly
   }
 
   const data = await response.json() as { reports?: SavedAnalysisReport[] };
-  return data.reports ?? [];
+  return (data.reports ?? []).map(report => ({ ...report, report_data: report.report_data ? {
+    ...report.report_data, analysis_content: normalizeReflectionAnalysisSummary(report.report_data.analysis_content) ?? undefined,
+  } : undefined }));
 }
 
 /**

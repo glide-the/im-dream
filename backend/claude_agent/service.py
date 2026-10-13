@@ -1,3 +1,5 @@
+# [Sync] 2026-10-13: require an explicit image capability from the turn owner; text-only Reflections owners remain valid.
+# [Sync] 2026-10-13: explicit server-owned MCP snapshots carry no dynamically resolved workspace scope.
 # [Sync] 2026-10-12: preserve the last root SDK input/window snapshot in existing turn metadata for compact usage.
 # [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -2041,6 +2043,7 @@ class ClaudeAgentService:
                 get_or_create_thread_runtime_workspace(state.session_id)
             )
 
+        managed_workspace_id: str | None = None
         try:
             snapshot = request.managed_mcp_runtime_snapshot
             if snapshot is not None:
@@ -2285,8 +2288,10 @@ class ClaudeAgentService:
         )
         image_provider = None
         image_broker_env = None
-        if cwd and gateway_runtime is not None and request.admin_turn_persistence.image_turn_data(
-            actor_id=request.user_id, thread_id=request.thread_id).ready():
+        image_data = (request.admin_turn_persistence.image_turn_data(
+            actor_id=request.user_id, thread_id=request.thread_id)
+            if cwd and gateway_runtime is not None else None)
+        if image_data is not None and image_data.ready():
             from services.admin_gateway.images import ImageGenerationProvider
             from libs.claude_agent_kit.server.session_projection_protocol import SESSION_BROKER_TIMEOUT_ENV
             image_provider = ImageGenerationProvider(workspace=cwd, runtime=gateway_runtime, turn_key=str(state.current_turn_id), model_alias=sys_cfg.get("image_model"))
@@ -2550,6 +2555,8 @@ class ClaudeAgentService:
             from services.admin_data.image_turn_data import image_material_header
             options, request = execution.run_options, execution.request
             data = request.admin_turn_persistence.image_turn_data(actor_id=request.user_id, thread_id=request.thread_id)
+            if data is None:
+                raise AdminDataError("IMAGE_TURN_CAPABILITY_UNAVAILABLE", 503)
             key = "dream-turn-" + hashlib.sha256(f"{request.user_id}\n{request.thread_id}\n{request.message_id}".encode()).hexdigest()
             materials = [attachment.id for attachment in (request.attachments or []) if attachment.media_type in {"image/png", "image/jpeg", "image/webp", "image/gif"}]
             await asyncio.to_thread(provider.bind_turn, data, thread_id=request.thread_id, turn_id=str(execution.state.current_turn_id),
