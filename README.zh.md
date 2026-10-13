@@ -1,7 +1,10 @@
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
+<!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
 <!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
 <!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: 根工作合同统一为 AGENTS.md，移除 Agent.md 引用。 -->
+<!-- [Sync] 2026-10-10: document Images source implementation, activation contract and pending real acceptance. -->
+<!-- [Sync] 2026-10-09: describe independent hand-drawn Chat attachment input; AI image generation remains separate. -->
 <!-- [Sync] 2026-10-09: 中文产品名称统一为思维模式，并索引现行业务 PRD。 -->
 <!-- [Input] Notion 项目定位、现行业务设计与 PRD、前端功能、包清单与环境模板。 -->
 <!-- [Output] 按功能模块说明用途与范围的带图产品介绍，以及运维安装与启用条件。 -->
@@ -280,7 +283,6 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 | 安装与部署 | [平台状态](deploy/README.md)、[AutoDL](deploy/autodl-ssh/README.md)、[AutoDL 恢复](docs/deploy/autodl-recovery.md) |
 | 仓库与 Agent 规则 | [根工作合同](AGENTS.md)、[Agent 行为](docs/Agent.md)、[规则索引](docs/rules/README.md) |
 
-
 ### 主对话Responses协议前提
 
-共享Admin Provider表单可明确选择通用OpenAI连接的Chat或Responses接口，旧配置默认Chat。验证、实际请求与JSON/SSE使用选中候选的同一配置；不替换Image模型，也不因此开放内置图片。两条源码路径、本机采用与本轮尚未完成的完整验收见[专项正式稿](docs/design/claude-agent/image-model-call-division.md)和[执行记录](docs/exec/image-model-call-division-20261010.md)。
+共享Admin Provider表单可明确选择通用OpenAI连接的Chat或Responses接口，旧配置默认Chat。验证、实际请求与JSON/SSE使用选中候选的同一配置；不替换Image模型，也不因此开放内置图片。两条源码路径、本机采用与本轮验证边界见[专项正式稿](docs/design/claude-agent/image-model-call-division.md)和[执行记录](docs/exec/image-model-call-division-20261010.md)。

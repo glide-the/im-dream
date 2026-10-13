@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: append matching process-local worker failure observations to public policy reads, preserving Admin-owned state.
 # [Sync] 2026-10-07: adapt request/claim/renew/finish with server process UUID and service-only renew/finish; no legacy sync fallback.
 # [Input] Strict Admin Notion DTO client, one OAuth/delegated actor or scheduled-sync service authority.
 # [Output] Store compatibility API with Registry148-168 reads and frozen owned-execution operations.
@@ -45,6 +46,7 @@ from services.admin_data.notion_connector_data import (
 
 from .errors import NotionSnapshotNotReadyError
 from .sync_policy import SYNC_POLICY_CONFIG_KEY, resolve_sync_policy
+from .sync_status import sync_diagnostics
 
 _worker_identity: tuple[int, str] | None = None
 _worker_identity_lock = RLock()
@@ -143,6 +145,10 @@ class NotionConnectorStore:
         result["sync_policy"] = resolve_sync_policy(
             config.get(SYNC_POLICY_CONFIG_KEY), last_synced_at=value.last_synced_at,
         )
+        result["sync_policy"]["worker_error_code"] = sync_diagnostics.error_for(result)
+        if not value.sources or value.auth_status != "authenticated" or not result["sync_policy"]["effective"]["enabled"]:
+            result["sync_policy"]["schedule_due"] = False
+            result["sync_policy"]["worker_error_code"] = None
         result["sources"] = [self._project_resource(item) for item in value.sources]
         return result
 

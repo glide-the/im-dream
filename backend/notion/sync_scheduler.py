@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: retain safe pre-claim failure observations and log exact allowlisted causes.
 # [Sync] 2026-10-07: delegate latest due and active owner decisions to Admin claim; busy/not_due skip without false success/failure.
 # [Input] Authenticated connector candidates, versioned per-connector sync policy, and the existing Notion facade.
 # [Output] One process-local background loop that requests Admin-owned due runs outside Agent turns.
@@ -9,33 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from . import store
 from .factory import NotionConnectorFacade, build_notion_facade
+from .sync_status import (
+    NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS, NOTION_SYNC_SCHEDULER_INTERVAL_ENV,
+    NotionSyncDiagnostics, scheduler_interval_from_env, sync_diagnostics,
+)
 
 logger = logging.getLogger(__name__)
-
-NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS = 60.0
-NOTION_SYNC_SCHEDULER_INTERVAL_ENV = "INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS"
-
-
-def scheduler_interval_from_env() -> float:
-    raw = os.environ.get(NOTION_SYNC_SCHEDULER_INTERVAL_ENV, "").strip()
-    if not raw:
-        return NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS
-    try:
-        parsed = float(raw)
-    except ValueError:
-        return NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS
-    if not math.isfinite(parsed) or parsed < 5 or parsed > 3600:
-        return NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS
-    return parsed
-
 
 @dataclass(frozen=True)
 class NotionSyncSweepResult:
@@ -54,10 +40,12 @@ class NotionSnapshotSyncWorker:
         candidate_provider: Callable[[], list[dict[str, Any]]] = store.list_sync_candidates,
         facade_factory: Callable[[int, str], NotionConnectorFacade] = build_notion_facade,
         interval_seconds: float | None = None,
+        diagnostics: NotionSyncDiagnostics = sync_diagnostics,
     ) -> None:
         self._candidate_provider = candidate_provider
         self._facade_factory = facade_factory
         self._interval_seconds = interval_seconds or scheduler_interval_from_env()
+        self._diagnostics = diagnostics
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -70,6 +58,7 @@ class NotionSnapshotSyncWorker:
     async def stop(self) -> None:
         task = self._task
         self._task = None
+        self._diagnostics.retain_candidates([])
         if task is None or task.done():
             return
         task.cancel()
@@ -77,6 +66,7 @@ class NotionSnapshotSyncWorker:
 
     async def sync_due_once(self) -> NotionSyncSweepResult:
         candidates = await asyncio.to_thread(self._candidate_provider)
+        self._diagnostics.retain_candidates(candidates)
         attempted = 0
         succeeded = 0
         failed = 0
@@ -96,10 +86,12 @@ class NotionSnapshotSyncWorker:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
                 failed += 1
-                logger.warning("Notion scheduled sync failed safely: code=connector_sync_failed")
+                code = self._diagnostics.failed(connector, error)
+                logger.warning("Notion scheduled sync failed safely: code=%s", code)
             else:
+                self._diagnostics.clear(connector_id)
                 if isinstance(outcome, dict) and outcome.get("synced") is True:
                     succeeded += 1
         return NotionSyncSweepResult(

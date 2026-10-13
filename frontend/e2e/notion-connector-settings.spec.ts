@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: model the server's explicit not-due observation in the healthy overview fixture.
 // [Sync] 2026-10-07: supply the real public session DTO to the authenticated Settings fixture; original full overview/child journey remains.
 // [Input] Running Vite frontend plus production-shaped intercepted Notion connector, capability, Skill, and safe-file DTOs.
 // [Output] Verify placeholders, strict seven-section overview, deferred discovery, four child views, safe links, responsive layout, and dialog-free disconnect.
@@ -77,6 +78,7 @@ test('Notion Settings exposes the seven-section overview and focused child views
       last_attempt_at: '2026-08-29T00:05:00Z',
       last_success_at: '2026-08-29T00:04:00Z',
       next_sync_at: '2026-08-29T00:19:00Z',
+      schedule_due: false,
       last_error_code: null,
       allowed_interval_minutes: [15, 60, 360, 1440],
     },

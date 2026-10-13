@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-13: distinguish due plans, worker claim failures and saved strategy; local capabilities and reviewed execution config are active; normal worker synchronization resumed after authorized service restart. -->
 <!-- [Sync] 2026-10-07: frozen ownership and saved-scope recovery pass isolated technical journeys; normal capability publication and service cutover remain blocked. -->
 <!-- [Sync] 2026-10-06: Calendar consumes selected canonical index; only snapshot-today updates receive metadata verification. -->
 <!-- [Sync] 2026-10-05: synchronize accepted Calendar Search-scope read boundary without selected-body/sync changes. -->
@@ -16,7 +17,7 @@
 
 > 2026-10-06 现行补充：[日历日期文档](../calendar/calendar-right-panel-tabs-prd.md)使用连接器当前索引与当前选择的交集；历史读取当日创建，今天先显示快照，再仅校验快照当天更新项的元数据。日历不执行 Search、同步、选择或正文读取。现有同步需保留上游 created_time/last_edited_time，并对选中独立页面读取元数据更新轻量索引；pages 始终为空。新文档及未记录变化依赖原连接器同步。原完整正文保存在[resource-connector 历史](./resource-connector-pre-snapshot-20261006-history.md)。
 
-- Runtime/data status: 既有连接/索引/Runtime已实现；本次归属合同、接受版本读取与保存恢复源码及隔离技术旅程通过，正常capability发布、旧writer drain与服务切换尚未完成
+- Runtime/data status: 既有连接/索引/Runtime已实现；归属合同、接受版本读取与保存恢复源码及隔离技术旅程通过。2026-10-13 本机只读核对已确认四项同步操作及 schema capability 精确发布；初次诊断时任务领取开关关闭且执行时限未配置；用户授权本机服务切换后，10:43 正常后台同步已成功，来源与策略 revision 保持不变，具体回执见[本机恢复记录](../../exec/notion-scheduled-sync-status-repair-20261013.md#用户授权后的本机恢复回执)。
 - 实际命令及边界：[后端实施回执](../../exec/notion-sync-ownership-dream-integration-20261007.md#13-本仓后端实际复测与范围)、[前端完整旅程回执](../../exec/notion-calendar-sync-refresh-20261007.md#145-r2-完整旅程最终实际回执)
 - 本次前文全文：[归属接入前完整历史](./resource-connector-pre-ownership-20261007-history.md)；正式业务图与恢复规则：[连接器交互稿](../../design/notion-session/connector-interaction.md#6-同步归属与接受快照增量2026-10-07)
 - Detail UI redesign status: Implemented and verified
@@ -107,6 +108,16 @@ Agent 先读取索引定位页面，只在回答确实需要正文时请求一�
 
 当前策略保存是同步校验：合法时 `desired` 与 `effective` 在同一 revision 生效。频率选项由后端返回，它们是受支持的策略选项，不是用户配额。
 
+策略生效仅表示用户的同步开关与频率已保存，不证明后台任务能够开始。服务器分别返回计划是否到期、后台最近一次失败观察和状态刷新间隔：
+
+- 到期且没有正在执行或失败回执时显示“等待同步”，不把过去的时间称为“下次计划”，也不将计划自动推进到未来。
+- 后台任务领取被拒绝或同步失败时，详情和资源链接入口显示“部分可用”；保留最近成功索引、有效授权、用户频率和 revision。
+- 领取前失败只形成当前 Dream 进程的诊断观察，不伪造 Admin run，也不通过旧 patch 接口写同步状态。观察只对相同用户、连接和 `updated_at` 生效；下次成功读取任务裁决或连接版本变化后不再展示旧观察。
+- 页面按服务器刷新间隔串行 GET 当前连接，隐藏时停止，重新可见时读取；用户变更、卸载或业务写入期间取消旧读取。状态刷新不得执行同步或保存，也不得覆盖未保存的策略和资源选择。
+- 开关和频率输入表示尚未保存的 desired 草稿；计划说明始终使用服务器 effective，只有保存成功才改变执行策略。没有来源时说明“选择资源后开始自动同步”。旧后端缺少到期观察时只显示“已连接”和“同步状态暂不可用”，不推断健康或将旧时间称为未来计划。
+
+2026-10-13 初次故障判断依据：当时本机成功索引仍为 10 月 7 日，自动同步已到期，而已保存状态为 `applied`。选择独立的到期判断和进程观察，避免把授权成功当作同步健康，也避免为领取前失败绕过 Admin 归属合同。恢复调度所需的运行配置与发布边界见[修复记录](../../exec/notion-scheduled-sync-status-repair-20261013.md)。
+
 ### 5.7 Skill、Hook、workspace materializer 与 MCP 能力真相
 
 当前已实现能力必须与延期能力分开：
@@ -182,6 +193,7 @@ Calendar：沿用现行窄屏月历和互斥栏目滚动骨架
 | 同步 | 同步中 | 正在构建轻量索引 |
 | 同步 | 已同步 | 存在最近一次成功索引 |
 | 同步 | 同步失败 | 最近一次尝试失败；若有 LKG 则为部分可用 |
+| 同步 | 等待同步 | 自动同步计划已经到期，尚未收到本次成功结果；不声称后台已经失败 |
 | 同步 | 已关闭 | 自动同步关闭；仍可立即同步 |
 | 资源 | 未选择 | 不进入新 thread，不允许按需读取 |
 | 资源 | 待同步 | 已选择但尚未进入成功索引 |

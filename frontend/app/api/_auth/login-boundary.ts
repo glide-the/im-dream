@@ -1,6 +1,8 @@
 // [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
+// [Sync] 2026-10-11: validate browser navigation evidence before selecting an Admin center; preserve callback origin binding.
+// [Sync] 2026-10-11: derive per-request origin/cookies/callback; Admin verifies the same client's published callback before login.
 // [Sync] 2026-09-18: recover the configured public origin from exact proxy headers even when a tunnel rewrites the transport host.
 // [Sync] 2026-09-17: enable loopback proxy mode for Next request URL normalization behind AutoDL.
 // [Sync] 2026-09-16: accept an exact configured Host when Next normalizes the server-internal request URL.
@@ -51,6 +53,28 @@ function exactOrigin(value: string): string {
   } catch {
     throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
   }
+}
+
+/** Address selection is separate from Admin's published callback authorization. */
+export function browserRequestAddress(request: Request, configuredOrigin: string): string {
+  const incoming = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  let candidate: string;
+  if (forwardedHost !== null || forwardedProto !== null) {
+    if (!forwardedHost || !forwardedProto || forwardedHost.includes(',') || forwardedProto.includes(',')) {
+      throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+    }
+    candidate = `${forwardedProto.toLowerCase()}://${forwardedHost.toLowerCase()}`;
+  } else {
+    const host = request.headers.get('host');
+    const configured = new URL(configuredOrigin);
+    candidate = host === null ? incoming.origin
+      : host.toLowerCase() === configured.host.toLowerCase() ? configured.origin
+        : `${incoming.protocol}//${host.toLowerCase()}`;
+  }
+  try { return exactOrigin(candidate); }
+  catch { throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403); }
 }
 
 export function relativeReturnLocation(raw: string): string {
@@ -128,6 +152,19 @@ export class BffLoginBoundary {
       callbackUri: environment.INK_DREAM_BFF_REDIRECT_URI ?? '',
       cookieSecret: environment.INK_DREAM_BFF_COOKIE_SECRET ?? '',
       transactionLifetimeSeconds: Number(rawTTL),
+    });
+  }
+
+  static fromRequest(request: Request, environment: Readonly<Record<string, string | undefined>> = process.env): BffLoginBoundary {
+    const configured = BffLoginBoundary.fromEnvironment(environment);
+    const origin = browserRequestAddress(request, configured.publicOrigin);
+    if (origin === configured.publicOrigin) return configured;
+    const callback = new URL(configured.callbackUri);
+    return new BffLoginBoundary({
+      publicOrigin: origin, internalOrigin: configured.internalOrigin ?? undefined,
+      callbackUri: new URL(callback.pathname, origin).href,
+      cookieSecret: environment.INK_DREAM_BFF_COOKIE_SECRET ?? '',
+      transactionLifetimeSeconds: Number(environment.INK_DREAM_BFF_LOGIN_TTL_SECONDS ?? '600'),
     });
   }
 
@@ -210,6 +247,29 @@ export class BffLoginBoundary {
 
   requireRequestOrigin(request: Request): void {
     this.#requestOrigin(request);
+  }
+
+  /** Navigation requires evidence for the registered callback host, before any credentials leave the page. */
+  browserRequestOrigin(request: Request): string {
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const forwardedProto = request.headers.get('x-forwarded-proto');
+    if (forwardedHost !== null || forwardedProto !== null) {
+      if (forwardedHost === null || forwardedProto === null
+        || forwardedHost.includes(',') || forwardedProto.includes(',')
+        || `${forwardedProto.toLowerCase()}://${forwardedHost.toLowerCase()}` !== this.publicOrigin.toLowerCase()) {
+        throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+      }
+      return this.publicOrigin;
+    }
+    const host = request.headers.get('host');
+    if (host !== null) {
+      if (host.toLowerCase() !== new URL(this.publicOrigin).host.toLowerCase()) {
+        throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+      }
+    } else if (new URL(request.url).origin !== this.publicOrigin) {
+      throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+    }
+    return this.publicOrigin;
   }
 
   requireMutation(request: Request): string {

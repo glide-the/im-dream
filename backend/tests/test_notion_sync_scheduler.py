@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: distinguish past-due plans, pre-claim failures and recovery without Admin state writes or unsafe logging.
 # [Sync] 2026-10-07: assert latest due/busy decisions are delegated to Admin and no false scheduled success.
 # [Input] Synthetic connector policies/candidates and injected Notion facade outcomes.
 # [Output] Verify default/desired/effective policy semantics and due-only background synchronization.
@@ -20,8 +21,11 @@ from notion.sync_policy import (
     resolve_sync_policy,
     sync_policy_is_due,
     update_sync_policy,
+    transition_sync_policy,
 )
 from notion.sync_scheduler import NotionSnapshotSyncWorker
+from notion.sync_status import NotionSyncDiagnostics, sync_failure_code
+from services.admin_data.errors import AdminDataError
 
 
 class TestNotionSyncPolicy(unittest.TestCase):
@@ -41,8 +45,67 @@ class TestNotionSyncPolicy(unittest.TestCase):
         self.assertEqual(first["status"], "disabled")
         self.assertFalse(sync_policy_is_due(first))
 
+    def test_old_success_remains_due_until_success_without_advancing_the_plan(self) -> None:
+        succeeded = datetime(2026, 10, 6, 22, 6, tzinfo=timezone.utc)
+        raw = transition_sync_policy(None, "succeeded", now=succeeded)
+        before = resolve_sync_policy(raw, now=succeeded + timedelta(minutes=14))
+        overdue = resolve_sync_policy(raw, now=succeeded + timedelta(days=6))
+        self.assertFalse(before["schedule_due"])
+        self.assertTrue(overdue["schedule_due"])
+        self.assertEqual(overdue["next_sync_at"], "2026-10-06T22:21:00Z")
+        self.assertEqual(overdue["status"], "applied")
+        self.assertEqual(overdue["last_success_at"], raw["last_success_at"])
+        self.assertEqual(overdue["desired"], before["desired"])
+        for change in (update_sync_policy(raw, enabled=True, interval_minutes=60),
+                       transition_sync_policy(raw, "failed")):
+            self.assertNotIn("schedule_due", change)
+            self.assertNotIn("refresh_after_seconds", change)
+
+    def test_disabled_policy_never_has_a_due_schedule(self) -> None:
+        policy = resolve_sync_policy(update_sync_policy(None, enabled=False, interval_minutes=15))
+        self.assertFalse(policy["schedule_due"])
+        self.assertIsNone(policy["next_sync_at"])
+
+
+class TestNotionSyncDiagnostics(unittest.TestCase):
+    def test_failures_match_actor_and_connector_version_and_are_bounded(self) -> None:
+        diagnostics = NotionSyncDiagnostics()
+        connector = {"id": "a", "user_id": 7, "updated_at": "original"}
+        diagnostics.failed(connector, AdminDataError("NOTION_SYNC_CLAIMS_DISABLED", 503))
+        self.assertEqual(diagnostics.error_for(connector), "NOTION_SYNC_CLAIMS_DISABLED")
+        self.assertIsNone(diagnostics.error_for({**connector, "user_id": 8}))
+        self.assertIsNone(diagnostics.error_for({**connector, "updated_at": "new"}))
+        diagnostics.retain_candidates([])
+        self.assertIsNone(diagnostics.error_for(connector))
+
+    def test_unknown_error_codes_and_messages_never_enter_diagnostics(self) -> None:
+        self.assertEqual(sync_failure_code(AdminDataError("SYNTHETIC_SECRET", 503)), "NOTION_SYNC_FAILED")
+        self.assertEqual(sync_failure_code(RuntimeError("synthetic secret")), "NOTION_SYNC_FAILED")
+
 
 class TestNotionSnapshotSyncWorker(unittest.IsolatedAsyncioTestCase):
+    async def test_claim_failure_is_observed_then_cleared_after_admin_recovers(self) -> None:
+        diagnostics = NotionSyncDiagnostics()
+        connector = {"id": "blocked", "user_id": 7, "updated_at": "same", "sources": [{}]}
+        error = AdminDataError("NOTION_SYNC_CLAIMS_DISABLED", 503)
+        outcomes = [error, {"synced": False}]
+        class Facade:
+            async def sync(self, connector_id):
+                outcome = outcomes.pop(0)
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+        worker = NotionSnapshotSyncWorker(candidate_provider=lambda: [connector],
+            facade_factory=lambda *_: Facade(), diagnostics=diagnostics)
+        with self.assertLogs("notion.sync_scheduler", level="WARNING") as logs:
+            first = await worker.sync_due_once()
+        self.assertEqual(first.failed, 1)
+        self.assertIn("code=NOTION_SYNC_CLAIMS_DISABLED", logs.output[0])
+        self.assertEqual(diagnostics.error_for(connector), error.code)
+        recovered = await worker.sync_due_once()
+        self.assertEqual((recovered.succeeded, recovered.failed), (0, 0))
+        self.assertIsNone(diagnostics.error_for(connector))
+
     async def test_sweep_delegates_latest_due_and_busy_decisions_to_admin(self) -> None:
         old = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         disabled = update_sync_policy(None, enabled=False, interval_minutes=60)

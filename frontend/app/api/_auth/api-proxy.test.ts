@@ -1,3 +1,4 @@
+// [Sync] 2026-10-11: keep native Bearer canonical origin and current-cookie precedence while resolving Browser addresses.
 // [Input] Actual API credential owner/shared stream transport with explicit fake Admin/backend providers.
 // [Output] Cookie precedence, CSRF/origin, header/query isolation, SSE flush and caller-abort contracts.
 // [Pos] Provider-free technical tests; no external HTTP, database, account or model calls.
@@ -12,7 +13,7 @@ import { createServer } from 'node:http';
 import { Agent, fetch as undiciFetch } from 'undici';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApiProxy } from './api-proxy.ts';
+import { createApiProxy, apiRequestBoundary } from './api-proxy.ts';
 import { BffLoginBoundary } from './login-boundary.ts';
 import { forwardBackendRequest } from '../_http-proxy.ts';
 
@@ -28,6 +29,22 @@ function installedUndiciFetch(url: URL | RequestInfo, init?: DispatcherRequestIn
   return undiciFetch(target, init as never) as unknown as Promise<Response>;
 }
 
+test('production API factory preserves native canonical origin and current-cookie precedence', async () => {
+  const environment = { INK_DREAM_PUBLIC_ORIGIN: 'http://localhost:5173', INK_DREAM_BFF_REDIRECT_URI: 'http://localhost:5173/auth/callback', INK_DREAM_BFF_COOKIE_SECRET: 's'.repeat(32) };
+  const local = new Request('http://localhost:5173/api/me', { headers: { authorization: 'Bearer native.token' } });
+  apiRequestBoundary(local, environment).requireRequestOrigin(local);
+  const unknown = new Request('https://unknown.example/api/me', { headers: { authorization: 'Bearer native.token' } });
+  assert.throws(() => apiRequestBoundary(unknown, environment).requireRequestOrigin(unknown), /BFF_ORIGIN_DENIED/);
+  const browser = new Request(publicOrigin + '/api/me', { headers: { cookie: '__Host-ink-dream-browser=invalid', authorization: 'Bearer native.token' } });
+  const boundary = apiRequestBoundary(browser, environment);
+  assert.equal(boundary.publicOrigin, publicOrigin);
+  assert.equal(boundary.hasHandleCookie(browser), true);
+  let resolved = false;
+  const proxy = createApiProxy(boundary, { resolve: async () => { resolved = true; throw Error('must not resolve'); } }, new URL('http://backend.example'));
+  const response = await proxy(browser);
+  assert.equal(response.status, 401);
+  assert.equal(resolved, false);
+});
 function fixture() {
   const boundary = new BffLoginBoundary({ publicOrigin, callbackUri: publicOrigin + '/auth/callback', cookieSecret: 's'.repeat(32) });
   const resolves: string[] = [];

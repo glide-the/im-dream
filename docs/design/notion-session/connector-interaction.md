@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-13: actor/version-bound worker observations cover claim rejection; Settings reads due/outcome state without writes or draft replacement. -->
 <!-- [Sync] 2026-10-07: frozen ownership and accepted snapshots pass isolated technical validation; four current Mermaid diagrams pass parse/render; normal release pending. -->
 <!-- [Sync] 2026-10-06: Calendar consumes selected canonical index; only snapshot-today updates receive metadata verification. -->
 <!-- [Sync] 2026-10-05: synchronize accepted Calendar Search-scope read boundary without selected-body/sync changes. -->
@@ -19,7 +20,7 @@
 
 背景：stored syncing不能证明当前仍存在有效执行者，重启后的私有文件也不能代替Admin接受identity；范围已保存但首同步失败需要分别反馈。目标是让手动、范围首次同步和后台worker复用现有builder，使用Admin的归属/续租/单次原子终止，并保留范围内LKG和原Agent正文权限。概念：选择由Admin resources所有；执行归属与lease由Admin新四operation所有；接受snapshot由Admin current identity及last_synced_at所有；Dream文件只作严格元数据缓存。普通read没有公开selection/auth revision，仍以updatedAt与当前范围、凭证身份保守检查。
 
-边界：无通用多平台框架、Webhook、队列、正文同步或Dream DDL；Admin Drizzle共享合同按精确cap发布。当前本机正常目录缺新cap/四operation，claims开放与旧writer drain未证明，新写fail closed。本文对应的源码已通过Dream83项核心、3项取消边界、52项相关回归及Admin实际消费者6项/公开worker2项隔离技术验证；[完整回执](../../exec/notion-sync-ownership-dream-integration-20261007.md#13-本仓后端实际复测与范围)分别记录命令与验收边界，不能据此宣称正常服务自动恢复已经生效。[变更前全文](./connector-interaction-pre-ownership-20261007-history.md)完整保留。
+边界：无通用多平台框架、Webhook、队列、正文同步或Dream DDL；Admin Drizzle共享合同按精确cap发布。2026-10-07 记录本机目录缺新 capability 与四项 operation；2026-10-13 初次只读核对已确认它们精确发布，但 claims 关闭且执行时限未配置。用户授权后完成本机旧实例停止和物理合同检查，补齐配置并启动正常服务；10:43 正常后台同步已成功，见[本机恢复回执](../../exec/notion-scheduled-sync-status-repair-20261013.md#用户授权后的本机恢复回执)。该回执不宣称远程实例已经切换。本文对应的原归属源码已通过Dream83项核心、3项取消边界、52项相关回归及Admin实际消费者6项/公开worker2项隔离技术验证；[完整回执](../../exec/notion-sync-ownership-dream-integration-20261007.md#13-本仓后端实际复测与范围)分别记录命令与验收边界，不能据此宣称正常服务自动恢复已经生效。[变更前全文](./connector-interaction-pre-ownership-20261007-history.md)完整保留。
 
 ## 1. 单一正式路径
 
@@ -246,3 +247,99 @@ stateDiagram-v2
 验收调用现有公开router与真实DTO；覆盖select/manual/scheduled、busy与保存反馈、数据库分页含pages、串行heartbeat、取消×续租预算、原receipt未知恢复、finish拒绝LKG、成功缓存失败、重启/旧writer/未知正文拒绝、Calendar日期/Thread选择权限、缺精确cap和原业务回归。Dream DI仅证明消费者，Admin锁/CAS/fencing/实际DB原子性使用依赖任务真实隔离DB回执。执行命令、退出码和首次失败/复测由Luna与主任务保存。
 
 当前正常目录已只读证明新四operation与schema缺失；claims/drain未证明。即使源码编译或隔离测试通过，也不能宣称正常自动恢复已启用。不得正常DDL、清legacy owner、停用户服务或fallback旧snapshot.save/状态patch。
+
+## 7. 调度状态观察与恢复（2026-10-13）
+
+`resolve_sync_policy` 根据服务器时钟与最近成功时间计算 `schedule_due`，保留已到期的 `next_sync_at`。`NotionSyncDiagnostics` 保存本进程后台失败的封闭错误码；`NotionConnectorStore` 仅向相同 actor、connector 和 `updated_at` 的连接读取投影 `worker_error_code`。这些字段不改变 Admin 保存的 status、desired、effective、revision，也不进入更新策略的持久化载荷。`refresh_after_seconds` 复用服务器调度扫描配置。
+
+选择此方案的依据是：已保存的 `applied` 不包含任务领取前失败，而旧 patch 写入会绕过执行归属。新增持久化诊断表或第二个控制通道不符合本次范围。进程观察在重启后重新产生，不作为跨实例持久化回执；观察缺失时，到期计划仍显示“等待同步”，不推断已成功。
+
+### 7.1 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant UI as ConnectorNotionDetailPage
+    participant H as useConnectorStatusRefresh
+    participant R as routers.notion
+    participant S as NotionConnectorStore
+    participant W as NotionSnapshotSyncWorker
+    participant A as Admin DTO operations
+    U->>UI: 查看同步策略或资源链接状态
+    H->>R: GET connectors，绑定当前actor与AbortSignal
+    R->>S: list_connectors
+    S->>A: notion.connector.list
+    A-->>S: 已保存策略与最近成功时间
+    S-->>R: schedule_due与匹配的worker_error_code
+    R-->>H: 公开连接DTO及refresh_after_seconds
+    H-->>UI: 显示等待同步或未来计划
+    W->>A: 通过NotionConnectorFacade请求sync-run.claim
+    A-->>W: 合法裁决或完成同步结果
+    W->>W: 清除此前失败观察
+    H->>R: 下一次可见页面串行GET
+    R-->>H: 当前成功状态和新计划
+    H-->>UI: 更新状态，保留未保存草稿
+    Note over H,A: 状态刷新仅GET，不领取任务、不保存策略、不调用Notion
+```
+
+### 7.2 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant W as NotionSnapshotSyncWorker
+    participant F as NotionConnectorFacade
+    participant A as Admin DTO operations
+    participant D as NotionSyncDiagnostics
+    participant S as NotionConnectorStore
+    participant UI as Settings
+    W->>F: sync当前候选
+    F->>A: sync-run.claim
+    A-->>F: claims关闭或必需配置不可用
+    F-->>W: AdminDataError安全code
+    W->>D: 保存actor、connector、updated_at和封闭错误码
+    Note over W,A: 无run，不finish，不patch已保存策略，保留最近成功索引
+    UI->>S: 公开GET连接
+    S->>D: 核对actor与连接版本
+    D-->>S: 匹配错误码或空
+    S-->>UI: worker_error_code与schedule_due
+    UI-->>U: 部分可用，自动同步暂不可用
+    Note over U,A: 运维按原发布边界恢复配置；页面不要求重新授权
+    W->>F: 下一次扫描同一生产同步入口
+    F->>A: sync-run.claim
+    A-->>F: 合法裁决
+    F-->>W: 返回synced结果或busy、not_due
+    W->>D: 清除本连接失败观察
+    UI->>S: 可见页面下一次GET
+    S-->>UI: 当前状态
+    UI-->>U: 显示正常计划或正在同步
+```
+
+### 7.3 页面状态转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> Scheduled: 有效自动策略且计划未到期
+    Scheduled --> Due: 服务器判断计划到期
+    Due --> Unavailable: 匹配的worker领取失败观察
+    Due --> Syncing: Admin返回syncing
+    Unavailable --> Due: 观察清除或连接版本改变且仍到期
+    Unavailable --> Syncing: 当前Admin执行已开始
+    Syncing --> Scheduled: Admin接受成功且下一计划未到期
+    Syncing --> Failed: Admin保存error终态
+    Failed --> Syncing: 下一次合法执行开始
+    Scheduled --> Disabled: 用户保存关闭自动同步
+    Due --> Disabled: 用户保存关闭自动同步
+    Unavailable --> Disabled: 用户保存关闭自动同步
+    Disabled --> Due: 用户保存开启且当前计划到期
+```
+
+### 7.4 验收范围
+
+| 场景 | 预期结果 | 验证类型 |
+| --- | --- | --- |
+| 成功时间停在过去、status仍为applied | 不显示健康或过去的下次计划；显示等待同步 | policy与Settings技术合同 |
+| claim在取得run前拒绝 | 公开GET显示部分可用，数据库策略和最近成功时间保持原值 | 注入Admin拒绝的公开router技术旅程 |
+| 同一连接不同actor或updated_at | 不返回旧失败观察 | 诊断身份合同 |
+| 页面保留未保存开关/资源选择并收到后台新状态 | 草稿不变，只有状态更新，零自动业务写入 | 隔离Chrome旅程 |
+| claims与执行时限恢复 | 仍走request/claim/renew/finish；实际正常同步另需服务切换回执 | 本轮未宣称真实业务恢复 |

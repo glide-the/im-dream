@@ -1,6 +1,7 @@
 // [Input] Same-origin MCP Apps requests and opaque selector/session headers.
 // [Output] Cookie-free Request carrying only server-resolved Admin Bearer and Runtime selectors.
 // [Pos] Explicit Node Apps BFF adapter; existing Runtime continues to validate policy/ownership.
+// [Sync] 2026-10-11: preserve the per-request browser origin through the original Apps adapter.
 // [Sync] 2026-09-14: share API session/CSRF precedence without exposing server credentials to Browser.
 import { apiAuthorization, configuredApiCredentials } from './api-proxy.ts';
 import { forwardRequestHeaders } from '../_http-proxy.ts';
@@ -23,6 +24,6 @@ export async function runtimeRequest(request: Request, boundary: BffLoginBoundar
 }
 
 export async function authorizeRuntimeRequest(request: Request): Promise<Request | Response> {
-  try { const { boundary, admin } = configuredApiCredentials(); return await runtimeRequest(request, boundary, admin); }
+  try { const { boundary, admin } = configuredApiCredentials(request); return await runtimeRequest(request, boundary, admin); }
   catch (error) { return bffFailure(error); }
 }

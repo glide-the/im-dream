@@ -1,6 +1,8 @@
 // [Input] Explicit Admin public authority, optional internal transport origin, confidential client and canonical v1 DTOs.
 // [Output] Process-shared bounded server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
+// [Sync] 2026-10-11: expose the existing transport origin to select validated loopback browser navigation only.
+// [Sync] 2026-10-11: use immutable browser-origin wrappers sharing the original service-token owner.
 // [Sync] 2026-09-18: keep browser/issuer URLs public while routing server-only Admin calls through an exact internal origin.
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
@@ -106,20 +108,30 @@ export function adminBffConfig(environment: Readonly<Record<string, string | und
 
 export class AdminBffClient {
   readonly origin: string;
+  readonly transportOrigin: string;
   readonly issuer: string;
   readonly resource: string;
   readonly #config: AdminBffConfig;
   readonly #fetch: typeof fetch;
   readonly #serviceTokenProvider: ServiceTokenProvider;
+  readonly #browserOrigin: string | undefined;
   #serviceTokenCache: { token: string; expiresAt: number } | undefined;
   #serviceTokenFlight: Promise<string> | undefined;
-  constructor(config: AdminBffConfig, transport: typeof fetch = fetch, serviceTokenProvider?: ServiceTokenProvider) {
+  constructor(config: AdminBffConfig, transport: typeof fetch = fetch, serviceTokenProvider?: ServiceTokenProvider, browserOrigin?: string) {
     this.#config = config;
     this.origin = config.origin;
+    this.transportOrigin = config.transportOrigin;
     this.issuer = config.issuer;
     this.resource = config.resource;
     this.#fetch = transport;
     this.#serviceTokenProvider = serviceTokenProvider ?? (signal => this.#clientCredentialsToken(signal));
+    this.#browserOrigin = browserOrigin === undefined ? undefined : exactServerOrigin(browserOrigin);
+  }
+
+  forBrowserOrigin(origin: string): AdminBffClient {
+    const selected = exactServerOrigin(origin);
+    return this.#browserOrigin === selected ? this
+      : new AdminBffClient(this.#config, this.#fetch, this.#serviceTokenProvider, selected);
   }
 
   async #clientCredentialsToken(signal?: AbortSignal): Promise<string> {
@@ -155,6 +167,7 @@ export class AdminBffClient {
     const serviceToken = await this.#serviceTokenProvider(signal);
     if (!serviceToken || !/^[A-Za-z0-9._~-]+$/.test(serviceToken) || serviceToken.length > 16_384) throw new BffBoundaryError('BFF_SERVICE_AUTH_FAILED', 503);
     const headers = new Headers({ accept: 'application/json', 'x-request-id': requestId });
+    if (this.#browserOrigin !== undefined) headers.set('origin', this.#browserOrigin);
     if (body !== undefined) headers.set('content-type', 'application/json');
     headers.set('authorization', 'Bearer ' + (token ?? serviceToken));
     if (token !== undefined) headers.set('x-ink-dream-service-authorization', 'Bearer ' + serviceToken);
@@ -249,7 +262,9 @@ export function configuredAdminBffClient(
 ): AdminBffClient {
   const config = adminBffConfig(environment);
   const owner = globalThis as AdminBffGlobal;
-  if (!owner.__inkDreamAdminBffClient || !sameConfig(owner.__inkDreamAdminBffClient.config, config)) {
+  if (!owner.__inkDreamAdminBffClient || !sameConfig(owner.__inkDreamAdminBffClient.config, config)
+    || owner.__inkDreamAdminBffClient.client.transportOrigin !== config.transportOrigin
+    || typeof owner.__inkDreamAdminBffClient.client.forBrowserOrigin !== 'function') {
     owner.__inkDreamAdminBffClient = { config, client: new AdminBffClient(config) };
   }
   return owner.__inkDreamAdminBffClient.client;

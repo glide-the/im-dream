@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: retain worker failure/due observations independently of successful authorization and saved policy.
 // [Input] Injected fetch/localStorage boundaries and server-owned Notion connector responses.
 // [Output] Verify fail-closed transport, truthful snapshot status, selection sync, policy DTOs, and read-only capability/Skill/file projections.
 // [Pos] Notion resource connector browser API contract test in frontend/app/_dream/api/__tests__
@@ -98,6 +99,19 @@ test.afterEach(() => {
   else delete (globalThis as { localStorage?: Storage }).localStorage;
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
   else delete (globalThis as { window?: Window }).window;
+});
+
+test('scheduled claim failures preserve authorization and saved policy while exposing server diagnostics', async () => {
+  const payload = connectorPayload();
+  payload.sync_policy = { ...payload.sync_policy, schedule_due: true, refresh_after_seconds: 60,
+    worker_error_code: 'NOTION_SYNC_CLAIMS_DISABLED' } as typeof payload.sync_policy;
+  globalThis.fetch = async () => jsonResponse({ connectors: [payload] });
+  const [connector] = await listConnectors();
+  expect(connector.auth.status).toBe('authenticated');
+  expect(connector.syncPolicy?.status).toBe('applied');
+  expect(connector.syncPolicy?.scheduleDue).toBe(true);
+  expect(connector.syncPolicy?.workerErrorCode).toBe('NOTION_SYNC_CLAIMS_DISABLED');
+  expect(connector.syncPolicy?.refreshAfterSeconds).toBe(60);
 });
 
 test('authenticated selection without a snapshot is not normalized as synced', () => {

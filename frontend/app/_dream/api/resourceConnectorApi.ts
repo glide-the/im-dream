@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: project server due state, worker diagnostics and refresh cadence independently of saved policy status.
 // [Sync] 2026-10-07: retain the public nullable snapshot identity; malformed versions fail closed and missing versions remain unconfirmed.
 // [Sync] 2026-10-05: share cancellable Cookie transport and preserve safe structured codes/Retry-After for Calendar reads.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
@@ -127,6 +128,9 @@ export interface ConnectorSyncPolicy {
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   nextSyncAt?: string;
+  scheduleDue?: boolean;
+  refreshAfterSeconds?: number;
+  workerErrorCode?: string;
   lastErrorCode?: string;
   allowedIntervalMinutes: number[];
 }
@@ -453,6 +457,11 @@ function normalizeSyncPolicy(raw: unknown): ConnectorSyncPolicy | undefined {
     lastAttemptAt: asString(record.last_attempt_at ?? record.lastAttemptAt),
     lastSuccessAt: asString(record.last_success_at ?? record.lastSuccessAt),
     nextSyncAt: asString(record.next_sync_at ?? record.nextSyncAt),
+    scheduleDue: typeof record.schedule_due === 'boolean' ? record.schedule_due : undefined,
+    refreshAfterSeconds: typeof record.refresh_after_seconds === 'number'
+      && Number.isFinite(record.refresh_after_seconds) && record.refresh_after_seconds > 0
+      ? record.refresh_after_seconds : undefined,
+    workerErrorCode: asString(record.worker_error_code),
     lastErrorCode: asString(record.last_error_code ?? record.lastErrorCode),
     allowedIntervalMinutes: allowed,
   };

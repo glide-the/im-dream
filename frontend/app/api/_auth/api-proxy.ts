@@ -1,6 +1,8 @@
+// [Sync] 2026-10-11: keep native Bearer canonical origin and current-cookie precedence while resolving Browser addresses.
 // [Input] Public API requests with opaque Browser handle or explicit native OAuth Bearer.
 // [Output] Credential-selected, origin-checked, cache-free Python HTTP/SSE responses.
 // [Pos] BFF API authentication owner; Python verifies every Admin access token/principal.
+// [Sync] 2026-10-11: use the same request origin for cookie/CSRF and Admin handle resolution.
 // [Sync] 2026-09-17: reuse the process-owned Admin client instead of exchanging a service token per API request.
 // [Sync] 2026-10-13: renew only definite pre-create Notion authorization rejection once, replaying the original request/key.
 import { randomUUID } from 'node:crypto';
@@ -24,10 +26,16 @@ export async function apiAuthorization(request: Request, boundary: BffLoginBound
   return authorization;
 }
 
-export function configuredApiCredentials() {
-  const boundary = BffLoginBoundary.fromEnvironment();
-  const admin = configuredAdminBffClient();
+export function configuredApiCredentials(request: Request) {
+  const boundary = apiRequestBoundary(request);
+  const admin = configuredAdminBffClient().forBrowserOrigin(boundary.publicOrigin);
   return { boundary, admin };
+}
+
+/** Browser cookies use the published request address; native Bearer keeps its original origin contract. */
+export function apiRequestBoundary(request: Request, environment: Readonly<Record<string, string | undefined>> = process.env) {
+  const browser = BffLoginBoundary.fromRequest(request, environment);
+  return browser.hasHandleCookie(request) ? browser : BffLoginBoundary.fromEnvironment(environment);
 }
 
 export function createApiProxy(boundary: BffLoginBoundary, admin: Pick<AdminBffClient, 'resolve'>, origin: URL, transport: typeof fetch = fetch) {
@@ -73,7 +81,7 @@ export async function proxyApiRequest(request: Request): Promise<Response> {
   try {
     const origin = configuredBackendOrigin();
     if (!origin) throw new BffBoundaryError('BFF_BACKEND_NOT_CONFIGURED', 503);
-    const { boundary, admin } = configuredApiCredentials();
+    const { boundary, admin } = configuredApiCredentials(request);
     // Explicit native Bearer verification belongs to Python; only Browser handles
     // require the private Admin service transport/configuration here.
     return await createApiProxy(boundary, admin, origin)(request);

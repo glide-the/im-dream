@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: project due state and worker refresh cadence without advancing overdue plans or policy revisions.
 # [Sync] 2026-10-07: retain product policy projection; persisted syncing no longer acts as an execution mutex.
 # [Input] Connector config JSON, last-success timestamps, and user-selected automatic-sync preferences.
 # [Output] Validated default/desired/effective policy snapshots, monotonic revisions, due decisions, and safe status transitions.
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from .errors import NotionConnectorError
+from .sync_status import scheduler_interval_from_env
 
 SYNC_POLICY_SCHEMA_VERSION = 1
 SYNC_POLICY_CONFIG_KEY = "snapshot_sync_policy"
@@ -122,6 +124,8 @@ def resolve_sync_policy(
         "last_attempt_at": _time_text(last_attempt),
         "last_success_at": _time_text(last_success),
         "next_sync_at": _time_text(next_sync),
+        "schedule_due": next_sync is not None and next_sync <= current_time,
+        "refresh_after_seconds": scheduler_interval_from_env(),
         "last_error_code": (
             str(stored.get("last_error_code"))
             if status == "error" and stored.get("last_error_code")
@@ -158,7 +162,8 @@ def update_sync_policy(
             "last_error_code": None,
         }
     )
-    current.pop("next_sync_at", None)
+    for key in ("next_sync_at", "schedule_due", "refresh_after_seconds"):
+        current.pop(key, None)
     current.pop("allowed_interval_minutes", None)
     current.pop("default", None)
     return current
@@ -196,7 +201,7 @@ def transition_sync_policy(
         current["last_error_code"] = None
     else:
         raise NotionConnectorError("Sync policy transition is invalid.")
-    for key in ("default", "allowed_interval_minutes", "next_sync_at"):
+    for key in ("default", "allowed_interval_minutes", "next_sync_at", "schedule_due", "refresh_after_seconds"):
         current.pop(key, None)
     return current
 

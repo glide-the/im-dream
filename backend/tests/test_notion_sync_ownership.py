@@ -1,3 +1,4 @@
+# [Sync] 2026-10-13: public reads expose scheduled claim denial without patching saved policy or an unclaimed run.
 # [Input] Frozen execution DTOs, public Notion router, and named isolated DI providers.
 # [Output] Verify ownership orchestration, strict accepted snapshots and honest Settings recovery.
 # [Pos] Dream consumer technical journeys; Admin DB receipts prove locking/fencing separately.
@@ -216,6 +217,26 @@ class ExecutionJourney(_ExecutionFixture):
 
 class AsyncExecutionJourney(_ExecutionFixture, unittest.IsolatedAsyncioTestCase):
     # Explicit async cases use the same normal public-facade method; no shadow entry.
+    async def test_claim_denial_is_visible_to_public_reads_without_changing_admin_policy(self):
+        self.select()
+        from notion.sync_status import sync_diagnostics
+        self.state.sync_scripts['notion.sync-run.claim'] = [{'__http_error__': 'NOTION_SYNC_CLAIMS_DISABLED'}]
+        before = deepcopy(self.state._connector(self.connector))
+        worker = NotionSnapshotSyncWorker(candidate_provider=self.flow._background_store.list_sync_candidates,
+            facade_factory=lambda actor, connector: NotionConnectorFacade(actor, self.flow._background_store, connector))
+        try:
+            with self.assertLogs('notion.sync_scheduler', level='WARNING'):
+                outcome = await worker.sync_due_once()
+            self.assertEqual(outcome.failed, 1)
+            after = self.client.get(self.base).json()['connector']
+            self.assertEqual(after['sync_policy']['worker_error_code'], 'NOTION_SYNC_CLAIMS_DISABLED')
+            self.assertEqual(after['sync_policy']['status'], 'applied')
+            self.assertEqual(after['last_synced_at'], before['last_synced_at'])
+            self.assertEqual(self.state._connector(self.connector), before)
+            self.assertNotIn('notion.sync-connector.patch', self.sync_names())
+        finally:
+            sync_diagnostics.clear(self.connector)
+
     async def test_scheduler_busy_and_not_due_skip_without_build_or_failure(self):
         self.select()
         for status in ('busy', 'not_due'):

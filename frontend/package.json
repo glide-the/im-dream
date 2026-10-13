@@ -19,9 +19,9 @@
     "preview": "next start"
   },
   "dependencies": {
-    "@ink-dream/sketch-input": "workspace:*",
-    "@ink-dream/mcp-apps-runtime": "workspace:*",
     "@ai-sdk/react": "^3.0.193",
+    "@ink-dream/mcp-apps-runtime": "workspace:*",
+    "@ink-dream/sketch-input": "workspace:*",
     "@mcp-ui/client": "7.1.1",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",

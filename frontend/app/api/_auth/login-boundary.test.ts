@@ -146,3 +146,21 @@ test('explicit loopback HTTP has no Secure host-prefix, unsafe config never fall
   assert.throws(() => BffLoginBoundary.fromEnvironment({}), BffBoundaryError);
   assert.throws(() => new BffLoginBoundary({ publicOrigin: 'https://dream.example', callbackUri: 'https://dream.example/auth/callback', cookieSecret: 'short' }), BffBoundaryError);
 });
+
+
+test('one server configuration keeps per-origin cookie AAD/callback/CSRF boundaries', () => {
+  const env = { INK_DREAM_PUBLIC_ORIGIN: 'http://localhost:5173', INK_DREAM_BFF_REDIRECT_URI: 'http://localhost:5173/auth/callback', INK_DREAM_BFF_COOKIE_SECRET: cookieSecret };
+  const local = BffLoginBoundary.fromRequest(new Request('http://localhost:5173/auth/start'), env);
+  const remote = BffLoginBoundary.fromRequest(new Request('http://127.0.0.1:5173/auth/start', { headers: {
+    host: 'localhost:5173', 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' } }), env);
+  assert.equal(local.callbackUri, 'http://localhost:5173/auth/callback');
+  assert.equal(remote.callbackUri, 'https://dream.example/auth/callback');
+  const tx = local.createTransaction('/');
+  const raw = local.transactionCookie(tx).split(';')[0].split('=')[1];
+  assert.throws(() => remote.readTransaction(new Request(remote.callbackUri, { headers: { cookie: remote.transactionCookieName + '=' + raw } })), BffBoundaryError);
+  assert.throws(() => remote.requireMutation(new Request(remote.publicOrigin + '/api/settings', { method: 'POST', headers: {
+    cookie: remote.handleCookieName + '=' + handle, origin: local.publicOrigin, 'x-ink-csrf': local.csrfToken(handle) } })), BffBoundaryError);
+  for (const headers of [{ 'x-forwarded-host': 'dream.example' }, { 'x-forwarded-host': 'dream.example,evil.example', 'x-forwarded-proto': 'https' }]) {
+    assert.throws(() => BffLoginBoundary.fromRequest(new Request('http://localhost:5173/auth/start', { headers: headers as Record<string,string> }), env), BffBoundaryError);
+  }
+});

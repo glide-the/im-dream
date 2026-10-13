@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: observe due plans and safe worker failures; authorization alone cannot establish synchronization health.
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
 // [Output] Settings resource-link index with Notion handoff, Claude MCP discovery/OAuth management,
 //          and disabled Feishu/local CLI discovery placeholders.
@@ -14,6 +15,8 @@
 //                    them disabled, and surface server-reported degraded Notion state.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
+import { useAuth } from '../../contexts/AuthContext';
+import { useConnectorStatusRefresh } from '../../hooks/useConnectorStatusRefresh';
 import ClaudeMcpResourceSection from '../claude-mcp/ClaudeMcpResourceSection';
 import {
   IconChevronRight,
@@ -64,11 +67,12 @@ function formatLastInteraction(connector: ResourceConnector | null): string {
 
 function getResourceHealthTone(connector: ResourceConnector | null): ConnectorTone {
   if (!connector) return 'neutral';
-  if (connector.syncPolicy?.status === 'error' || connector.auth.warning) {
+  if (connector.syncPolicy?.status === 'error' || connector.syncPolicy?.workerErrorCode
+    || connector.syncPolicy?.scheduleDue || connector.status === 'syncing' || connector.auth.warning) {
     return 'warning';
   }
   if (connector.status === 'authenticated' || connector.status === 'synced' || connector.auth.status === 'authenticated') {
-    return 'success';
+    return connector.syncPolicy?.scheduleDue === false ? 'success' : 'neutral';
   }
   if (connector.status === 'authenticating' || connector.auth.status === 'authenticating') {
     return 'warning';
@@ -212,23 +216,27 @@ export default function ConnectorSettingsSection({
   onOpenNotionDetail,
   onOpenClaudeMcpDetail,
 }: ConnectorSettingsSectionProps) {
+  const { user, isAuthenticated } = useAuth();
+  const actorKey = JSON.stringify([isAuthenticated, user?.id ?? null]);
+  const actorKeyRef = useRef(actorKey);
+  actorKeyRef.current = actorKey;
   const sectionRef = useRef<HTMLElement>(null);
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadConnectors = useCallback(async () => {
+  const loadConnectors = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const items = await listConnectors();
-      setConnectors(items);
+      const items = await listConnectors(signal);
+      if (!signal?.aborted && actorKeyRef.current === actorKey) setConnectors(items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '资源链接读取失败');
+      if (!signal?.aborted && actorKeyRef.current === actorKey) setError(err instanceof Error ? err.message : '资源链接读取失败');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && actorKeyRef.current === actorKey) setLoading(false);
     }
-  }, []);
+  }, [actorKey]);
 
   useEffect(() => {
     if (focusNonce <= 0) return;
@@ -237,21 +245,36 @@ export default function ConnectorSettingsSection({
   }, [focusNonce]);
 
   useEffect(() => {
-    void loadConnectors();
-  }, [loadConnectors, focusNonce]);
+    const abort = new AbortController();
+    setConnectors([]);
+    if (isAuthenticated) void loadConnectors(abort.signal);
+    else setLoading(false);
+    return () => abort.abort();
+  }, [loadConnectors, focusNonce, isAuthenticated]);
 
   const notionConnector = useMemo(
     () => connectors.find((connector) => connector.platform === 'notion') ?? null,
     [connectors],
   );
+  const refreshConnectorStatus = useCallback(async (signal: AbortSignal) => {
+    try {
+      const items = await listConnectors(signal);
+      if (!signal.aborted && actorKeyRef.current === actorKey) { setConnectors(items); setError(null); }
+    } catch (err) {
+      if (!signal.aborted && actorKeyRef.current === actorKey) setError(err instanceof Error ? err.message : '资源链接读取失败');
+    }
+  }, [actorKey]);
+  useConnectorStatusRefresh(refreshConnectorStatus, notionConnector?.syncPolicy?.refreshAfterSeconds, isAuthenticated && !loading);
   const notionStatusLabel = useMemo(
     () => {
       if (!notionConnector) return '未连接';
-      if (notionConnector.syncPolicy?.status === 'error' || notionConnector.auth.warning) {
+      if (notionConnector.syncPolicy?.status === 'error' || notionConnector.syncPolicy?.workerErrorCode || notionConnector.auth.warning) {
         return '部分可用';
       }
+      if (notionConnector.status === 'syncing') return '同步中';
+      if (notionConnector.syncPolicy?.scheduleDue) return '等待同步';
       if (notionConnector.status === 'authenticated' || notionConnector.status === 'synced' || notionConnector.auth.status === 'authenticated') {
-        return '健康';
+        return notionConnector.syncPolicy?.scheduleDue === false ? '健康' : '已连接';
       }
       if (notionConnector.status === 'authenticating' || notionConnector.auth.status === 'authenticating') {
         return '认证中';

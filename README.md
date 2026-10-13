@@ -1,7 +1,10 @@
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
+<!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
 <!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
 <!-- [Sync] 2026-10-11: pin publicly qualified Runtime0.1.12; normal local adoption and scoped consumer receipt are separate from remote deployment. -->
 <!-- [Sync] 2026-10-10: replace root Agent.md references with the sole AGENTS.md work contract. -->
+<!-- [Sync] 2026-10-10: document Images source implementation, activation contract and pending real acceptance. -->
+<!-- [Sync] 2026-10-09: describe independent hand-drawn Chat attachment input; AI image generation remains separate. -->
 <!-- [Sync] 2026-10-09: document Deck thinking modes and link the current business PRD. -->
 <!-- [Input] Notion product positioning, current business designs and PRDs, frontend features, manifests and environment templates. -->
 <!-- [Output] Illustrated descriptions of module purpose and scope, plus operator setup and enablement conditions. -->
@@ -278,7 +281,6 @@ Real send-path acceptance requires **create Thread → `POST /api/claude-agent` 
 | Setup and deployment | [Platform status](deploy/README.md), [AutoDL](deploy/autodl-ssh/README.md), [AutoDL recovery](docs/deploy/autodl-recovery.md) |
 | Repository and Agent rules | [Root work contract](AGENTS.md), [Agent behavior](docs/Agent.md), [rules index](docs/rules/README.md) |
 
-
 ### Explicit Responses inference prerequisite
 
-The shared Admin Provider form can explicitly select Chat or Responses for a generic OpenAI connection; older configurations keep Chat. Validation, transport and JSON/SSE translation use the selected candidate configuration. This does not change the Image model or enable native image tools. See the [specialized design](docs/design/claude-agent/image-model-call-division.md) and [current execution evidence](docs/exec/image-model-call-division-20261010.md) for the implemented source paths and normal local adoption and remaining full acceptance limits.
+The shared Admin Provider form can explicitly select Chat or Responses for a generic OpenAI connection; older configurations keep Chat. Validation, transport and JSON/SSE translation use the selected candidate configuration. This does not change the Image model or enable native image tools. See the [specialized design](docs/design/claude-agent/image-model-call-division.md) and [current execution evidence](docs/exec/image-model-call-division-20261010.md) for the implemented source paths, normal local adoption and explicit verification limits.

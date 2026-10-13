@@ -1,6 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
+// [Sync] 2026-10-11: local/public navigation, proxy evidence, callback host and fixed issuer/backchannel regression.
 // [Sync] 2026-09-18: verify public browser authority with a separate loopback server transport.
 // [Sync] 2026-09-17: verify configured Admin form actions and confidential-client transport.
 import assert from 'node:assert/strict';
@@ -39,6 +40,9 @@ function fixture() {
     assert.equal(headers.get('x-ink-dream-service'), null);
     assert.equal(headers.get('x-ink-dream-credential'), null);
     assert.equal(init?.redirect, 'manual'); assert.equal(init?.cache, 'no-store');
+    if (path === '/capabilities' && headers.has('origin') && ![publicOrigin, 'http://localhost:5173'].includes(headers.get('origin')!)) {
+      return Response.json({ error: { code: 'DREAM_ORIGIN_DENIED', message: 'Denied' }, request_id: headers.get('x-request-id') }, { status: 403 });
+    }
     const output = outputs[path];
     if (output instanceof Error) throw output;
     return Response.json({ data: output, request_id: headers.get('x-request-id') });
@@ -73,11 +77,51 @@ test('options exposes only configured Admin browser form actions to the exact Dr
     google_action: adminOrigin + '/auth/dream/google',
   });
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].headers.get('origin'), publicOrigin);
 
   const denied = await handlers.options(new Request('https://other.example/auth/options'));
   assert.equal(denied.status, 403);
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 1);
+});
+
+test('local browser selects local Admin without changing issuer, callback or server transport', async () => {
+  const { admin, calls } = fixture();
+  const local = 'http://localhost:5173';
+  const boundary = new BffLoginBoundary({ publicOrigin: local, internalOrigin: 'http://127.0.0.1:5173', callbackUri: local + '/auth/callback', cookieSecret: 'c'.repeat(32) });
+  const handlers = createBffHandlers(boundary, admin);
+  const request = (path: string, headers: Record<string, string> = { host: 'localhost:5173', 'x-forwarded-host': 'localhost:5173', 'x-forwarded-proto': 'http' }) => new Request('http://127.0.0.1:5173' + path, { headers });
+  const options = await handlers.options(request('/auth/options'));
+  assert.deepEqual(await options.json(), { password_action: 'http://localhost:3000/auth/dream/password', google_action: 'http://localhost:3000/auth/dream/google' });
+  const start = await handlers.start(request('/auth/start'));
+  assert.equal(start.status, 303);
+  const authorize = new URL(start.headers.get('location')!);
+  assert.equal(authorize.origin, 'http://localhost:3000');
+  assert.equal(authorize.searchParams.get('redirect_uri'), boundary.callbackUri);
+  assert.equal(admin.issuer, env.INK_ADMIN_AUTH_ISSUER);
+  assert.equal(admin.transportOrigin, adminTransportOrigin);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.headers.get('origin') === local));
+  assert.ok(!start.headers.get('set-cookie')!.includes('Secure'));
+  const deniedHeaders: Record<string, string>[] = [
+    { host: 'attacker.example' },
+    { host: 'localhost:5173', 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' },
+    { host: '127.0.0.1:5173' },
+    { host: 'localhost:5173', 'x-forwarded-host': 'localhost:5173, attacker.example', 'x-forwarded-proto': 'http' },
+    { host: 'localhost:5173', 'x-forwarded-host': 'localhost:5173' },
+  ];
+  for (const headers of deniedHeaders) assert.equal((await handlers.options(request('/auth/options', headers))).status, 403);
+  const unavailable = new AdminBffClient({ ...adminBffConfig(env), transportOrigin: adminOrigin });
+  assert.equal((await createBffHandlers(boundary, unavailable).options(request('/auth/options'))).status, 503);
+});
+
+test('public forwarded browser is not misclassified from Next loopback normalization', async () => {
+  const { admin } = fixture();
+  const boundary = new BffLoginBoundary({ publicOrigin, internalOrigin: 'http://127.0.0.1:5173', callbackUri: publicOrigin + '/auth/callback', cookieSecret: 'c'.repeat(32) });
+  const handlers = createBffHandlers(boundary, admin);
+  const request = new Request('http://127.0.0.1:5173/auth/options', { headers: { host: 'relay.example', 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' } });
+  assert.deepEqual(await (await handlers.options(request)).json(), { password_action: adminOrigin + '/auth/dream/password', google_action: adminOrigin + '/auth/dream/google' });
+  assert.equal((await handlers.options(new Request(request.url, { headers: { host: 'relay.example' } }))).status, 403);
 });
 
 test('callback preserves request/transaction identity and only changes cookies after successful exchange', async () => {
@@ -187,4 +231,66 @@ test('configured Admin client is shared across Next route invocations', () => {
   const first = configuredAdminBffClient(env);
   const second = configuredAdminBffClient({ ...env });
   assert.equal(first, second);
+});
+
+
+test('one BFF configuration selects both published origins with the same service/browser client', async () => {
+  const { admin, calls } = fixture();
+  const local = 'http://localhost:5173';
+  const sameEnvironment = { INK_DREAM_PUBLIC_ORIGIN: local, INK_DREAM_BFF_INTERNAL_ORIGIN: 'http://127.0.0.1:5173',
+    INK_DREAM_BFF_REDIRECT_URI: local + '/auth/callback', INK_DREAM_BFF_COOKIE_SECRET: 'c'.repeat(32) };
+  for (const selected of [local, publicOrigin]) {
+    const selectedURL = new URL(selected);
+    const request = new Request('http://127.0.0.1:5173/auth/start', { headers: {
+      host: '127.0.0.1:5173', 'x-forwarded-host': selectedURL.host, 'x-forwarded-proto': selectedURL.protocol.slice(0,-1) } });
+    const boundary = BffLoginBoundary.fromRequest(request, sameEnvironment);
+    const handlers = createBffHandlers(boundary, admin);
+    const options = await handlers.options(new Request(selected + '/auth/options'));
+    assert.equal(options.status, 200);
+    assert.equal((await options.json()).password_action, (selected === local ? 'http://localhost:3000' : adminOrigin) + '/auth/dream/password');
+    const start = await handlers.start(request);
+    assert.equal(start.status, 303);
+    const destination = new URL(start.headers.get('location')!);
+    assert.equal(destination.searchParams.get('client_id'), 'registered-browser');
+    assert.equal(destination.searchParams.get('redirect_uri'), selected + '/auth/callback');
+    const tx = boundary.readTransaction(new Request(selected + '/auth/callback', { headers: { cookie: start.headers.get('set-cookie')!.split(';')[0] } }));
+    const callback = new Request(selected + '/auth/callback?' + new URLSearchParams({ state: tx.state, code: 'issued-code', iss: admin.issuer }),
+      { headers: { cookie: start.headers.get('set-cookie')!.split(';')[0] } });
+    const result = await handlers.callback(callback);
+    assert.equal(result.status, 303);
+    const session = await handlers.session(new Request(selected + '/auth/session', { headers: { cookie: boundary.handleCookieName + '=' + browserHandle } }));
+    assert.equal(session.status, 200);
+    const latest = calls.filter(call => call.path === '/browser-sessions/exchange').at(-1)!;
+    assert.equal(latest.headers.get('origin'), selected);
+    assert.equal(latest.headers.get('authorization'), 'Bearer service.access.token');
+    assert.equal(latest.body!.redirect_uri, selected + '/auth/callback');
+  }
+  const unknown = new Request('https://unregistered.example/auth/options');
+  const unknownHandlers = createBffHandlers(BffLoginBoundary.fromRequest(unknown, sameEnvironment), admin);
+  const denied = await unknownHandlers.options(unknown);
+  assert.equal(denied.status, 403);
+  assert.ok(!(await denied.text()).includes('password_action'));
+});
+
+test('concurrent browser-origin wrappers share one token owner without changing request origins', async () => {
+  const paths: { path: string; origin: string | null }[] = [];
+  let tokenCalls = 0;
+  const transport: typeof fetch = async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/api/auth/oauth2/token') {
+      tokenCalls++;
+      return Response.json({ access_token: 'issued.service.token', token_type: 'Bearer', expires_in: 300, scope: 'capabilities:read' });
+    }
+    const headers = new Headers(init?.headers);
+    paths.push({ path, origin: headers.get('origin') });
+    return Response.json({ request_id: headers.get('x-request-id'), data: {
+      access_token: 'server.only.token', expires_at: new Date(Date.now()+120000).toISOString(),
+      principal: { subject: 'opaque', canonical_user_id: '42', client_id: 'registered-browser', scopes: ['dream:read'], status: 'active' } } });
+  };
+  const owner = new AdminBffClient(adminBffConfig(env), transport);
+  await Promise.all([owner.forBrowserOrigin(publicOrigin).resolve(browserHandle, 'public-request'),
+    owner.forBrowserOrigin('http://localhost:5173').resolve(browserHandle, 'local-request')]);
+  assert.equal(tokenCalls, 1);
+  assert.deepEqual(paths.map(item => item.origin).sort(), [publicOrigin, 'http://localhost:5173'].sort());
+  assert.equal(owner.origin, adminOrigin);
 });

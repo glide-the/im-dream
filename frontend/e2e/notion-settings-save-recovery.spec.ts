@@ -1,4 +1,7 @@
+// [Sync] 2026-10-13: verify due/blocked/recovered scheduled status through read-only polling while retaining policy drafts.
 // [Input] Public Settings entry, real connector/session DTOs and server-confirmed selection/sync errors.
+// Business scope: connector status changes; saved policy/resource drafts remain intact.
+// Project, Episode, canonical artifacts, Run-private publication, after-turn Hook and Agent turns are outside this isolated Settings journey.
 // [Output] Full resource-save/re-read/manual-sync journeys, strict marker/Retry-After boundaries and late-owner rejection.
 // [Pos] Isolated technical E2E in frontend/e2e; all selection/sync writes stay in named memory fixtures.
 // [Sync] 2026-10-07: cover confirmed saved scope, retained drafts/index, UI-only cooldown and actor/connector ABA cleanup without changing Calendar's 63 cases.
@@ -64,6 +67,10 @@ async function fixture(page: Page, standalone = false) {
   await page.route('**/auth/session', (route) => route.fulfill({ json: { user: {
     id: actor, email: 'settings-recovery@example.test', display_name: 'Settings QA', avatar_url: null,
     role: 'user', created_at: '2026-09-01T00:00:00Z' }, csrf_token: CSRF } }));
+  if (standalone) {
+    await page.route('**/api/claude-mcp/capability', route => route.fulfill({ json: { enabled: false } }));
+    await page.route('**/api/claude-mcp/servers', route => route.fulfill({ json: { servers: [] } }));
+  }
   const fail = async (route: Route, failure: Failure) => {
     const detail: Record<string, unknown> = { error_code: failure.code };
     if (failure.marker !== undefined) detail.selection_saved = failure.marker;
@@ -115,6 +122,7 @@ async function fixture(page: Page, standalone = false) {
     failRead: () => { rereadFailure = true; }, holdRead: () => { holdRead = true; }, held,
     identity: (id: string, chosen = ['db-old']) => { current = connector(id, chosen); },
     actor: (value: string) => { actor = value; },
+    policy: (patch: Record<string, unknown>) => { current = { ...current, sync_policy: { ...current.sync_policy, ...patch } }; },
   };
 }
 
@@ -249,7 +257,13 @@ const settingsModule = `
 import React from 'react'; import { createRoot } from 'react-dom/client';
 import '/app/_dream/i18n.ts'; import '/app/_dream/styles/tokens.css';
 import ConnectorNotionDetailPage from '/app/_dream/components/dashboard/ConnectorNotionDetailPage.tsx';
-createRoot(document.querySelector('#root')).render(React.createElement(ConnectorNotionDetailPage, { onBack: () => {} }));
+import ConnectorSettingsSection from '/app/_dream/components/dashboard/ConnectorSettingsSection.tsx';
+function Host() {
+ const [detail, setDetail] = React.useState(!new URL(location.href).searchParams.has('summary'));
+ return React.createElement(detail ? ConnectorNotionDetailPage : ConnectorSettingsSection,
+   detail ? { onBack: () => setDetail(false) } : { onOpenNotionDetail: () => setDetail(true) });
+}
+createRoot(document.querySelector('#root')).render(React.createElement(Host));
 `;
 test.beforeAll(async () => {
   const port = await new Promise<number>((resolve, reject) => {
@@ -261,7 +275,7 @@ test.beforeAll(async () => {
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false, logLevel: 'silent',
     server: { host: '127.0.0.1', port, strictPort: true }, plugins: [{ name: 'settings-resource-owner-projection', enforce: 'pre',
       configureServer(vite) { vite.middlewares.use(async (request, response, next) => {
-        if (request.url !== '/settings-resource-owner') return next();
+        if (request.url?.split('?')[0] !== '/settings-resource-owner') return next();
         response.setHeader('Content-Type', 'text/html'); response.end(await vite.transformIndexHtml('/settings-resource-owner',
           '<html><head><link rel="icon" href="data:,"></head><body><main id="root"></main><script type="module" src="/settings-resource-owner.js"></script></body></html>'));
       }); },
@@ -271,6 +285,49 @@ test.beforeAll(async () => {
   await server.listen(); standaloneBase = `http://127.0.0.1:${port}/settings-resource-owner`;
 });
 test.afterAll(async () => { await server?.close(); });
+
+test('missing server due observation reports connected with unavailable sync status', async ({ page }) => {
+  const f = await fixture(page, true);
+  await page.goto(`${standaloneBase}?summary=1`);
+  await expect(page.getByText('已连接', { exact: true })).toBeVisible();
+  await expect(page.getByText('健康', { exact: true })).toHaveCount(0);
+  await page.getByRole('button').filter({ has: page.getByRole('heading', { name: 'Notion', exact: true }) }).click();
+  await expect(page.getByText('同步状态暂不可用，请稍后刷新。', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^下次计划/)).toHaveCount(0);
+  expect(f.calls.every(call => call.startsWith('GET '))).toBe(true);
+});
+
+test('scheduled status shows due then blocked then recovered without writing or resetting policy drafts', async ({ page }) => {
+  const f = await fixture(page, true);
+  f.policy({ schedule_due: true, refresh_after_seconds: 60, worker_error_code: null });
+  await pauseClock(page);
+  await page.goto(`${standaloneBase}?summary=1`);
+  await expect(page.getByText('等待同步', { exact: true })).toBeVisible();
+  await expect(page.getByText('健康', { exact: true })).toHaveCount(0);
+  await page.getByRole('button').filter({ has: page.getByRole('heading', { name: 'Notion', exact: true }) }).click();
+  await expect(page.getByText(/已到同步时间，等待后台同步/)).toBeVisible();
+  await expect(page.getByText(/^下次计划/)).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Notion 自动同步频率' }).selectOption('60');
+  await page.getByRole('checkbox', { name: /自动同步/ }).uncheck();
+  f.policy({ worker_error_code: 'NOTION_SYNC_CLAIMS_DISABLED' });
+  const reads = f.reads();
+  await page.clock.fastForward(60_000);
+  await expect.poll(f.reads).toBeGreaterThan(reads);
+  await expect(page.getByText('部分可用', { exact: true })).toBeVisible();
+  await expect(page.getByText('自动同步暂不可用；最近成功索引仍保留。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /自动同步/ })).not.toBeChecked();
+  await expect(page.getByRole('combobox', { name: 'Notion 自动同步频率' })).toHaveValue('60');
+  await expect(page.getByText('NOTION_SYNC_CLAIMS_DISABLED', { exact: true })).toHaveCount(0);
+  f.policy({ schedule_due: false, worker_error_code: null, next_sync_at: '2026-09-28T13:15:00Z' });
+  await page.clock.fastForward(60_000);
+  await expect(page.getByText(/^下次计划/)).toBeVisible();
+  await expect(page.getByText('已连接', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /自动同步/ })).not.toBeChecked();
+  await page.getByRole('button', { name: '资源链接', exact: true }).click();
+  await expect(page.getByText('健康', { exact: true })).toBeVisible();
+  expect(f.calls.every(call => call.startsWith('GET '))).toBe(true);
+  expect(f.saves()).toBe(0); expect(f.syncs()).toBe(0);
+});
 
 test('Settings mounted actor A B A rejects prior scope response and cooldown owner', async ({ page }) => {
   const f = await fixture(page, true); await page.goto(standaloneBase); await resources(page); await selectAdditional(page); await pauseClock(page); f.holdRead();

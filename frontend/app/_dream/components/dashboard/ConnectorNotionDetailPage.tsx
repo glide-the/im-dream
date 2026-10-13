@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: observe worker failures and due plans through serial actor-scoped reads without replacing unsaved policy/resource drafts.
 // [Sync] 2026-10-07: use the browser numeric timeout handle under the shared Node/DOM type declarations; cooldown behavior is unchanged.
 // [Sync] 2026-10-07: distinguish confirmed saved scope from failed first sync, guard Settings resource requests by actor/connector generation, and honor server Retry-After without automatic writes.
 // [Sync] 2026-10-05: reuse the shared NotionMark while retaining Settings-owned auth, selection and sync.
@@ -19,6 +20,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import remarkGfm from 'remark-gfm';
 import NotionMark from '../NotionMark';
 import { useAuth } from '../../contexts/AuthContext';
+import { useConnectorStatusRefresh } from '../../hooks/useConnectorStatusRefresh';
 import {
   createConnector,
   deleteConnector,
@@ -184,7 +186,7 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
   if (!connector) {
     return { label: '未连接', tone: 'warning' };
   }
-  if (connector.syncPolicy?.status === 'error') {
+  if (connector.syncPolicy?.status === 'error' || connector.syncPolicy?.workerErrorCode) {
     return { label: '部分可用', tone: 'warning' };
   }
   if (connector.auth.warning) {
@@ -201,6 +203,9 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
   }
   if (connector.status === 'syncing') {
     return { label: '同步中', tone: 'info' };
+  }
+  if (connector.syncPolicy?.scheduleDue) {
+    return { label: '等待同步', tone: 'warning' };
   }
   if (connector.auth.status === 'authenticated') {
     return connector.lastSyncedAt
@@ -364,6 +369,8 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   actorKeyRef.current = actorKey;
   const [view, setView] = useState<DetailView>('overview');
   const [connector, setConnector] = useState<ResourceConnector | null>(null);
+  const connectorRef = useRef(connector);
+  connectorRef.current = connector;
   const [catalog, setCatalog] = useState<NotionCapabilityCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -414,6 +421,9 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   resourceOwnerKeyRef.current = resourceOwnerKey;
   const resourceCoolingDown = resourceCooldown !== null && resourceCooldown.owner.key === resourceOwnerKey;
   const syncPolicy = connector?.syncPolicy;
+  const desiredPolicyEnabled = syncPolicy?.desired.enabled;
+  const desiredPolicyInterval = syncPolicy?.desired.intervalMinutes;
+  const desiredPolicyRevision = syncPolicy?.desired.revision;
   const detailStatus = getDetailStatus(connector, loading);
   const sourceStats = useMemo(() => {
     const sources = connector?.sources ?? [];
@@ -535,10 +545,30 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   }, [actorKey, isAuthenticated, reloadCatalog]);
 
   useEffect(() => {
-    if (!syncPolicy) return;
-    setPolicyEnabled(syncPolicy.desired.enabled);
-    setPolicyIntervalMinutes(syncPolicy.desired.intervalMinutes);
-  }, [syncPolicy]);
+    if (desiredPolicyEnabled === undefined || desiredPolicyInterval === undefined || desiredPolicyRevision === undefined) return;
+    setPolicyEnabled(desiredPolicyEnabled);
+    setPolicyIntervalMinutes(desiredPolicyInterval);
+  }, [desiredPolicyEnabled, desiredPolicyInterval, desiredPolicyRevision]);
+
+  const refreshConnectorStatus = useCallback(async (signal: AbortSignal) => {
+    const original = connectorRef.current;
+    const generation = connectorLoadGenerationRef.current;
+    try {
+      const next = await listConnectors(signal);
+      if (!signal.aborted && actorKeyRef.current === actorKey
+        && generation === connectorLoadGenerationRef.current && connectorRef.current === original) {
+        setConnector(resolveSingleNotionConnector(next));
+        setPageError(null);
+      }
+    } catch (error) {
+      if (!signal.aborted && actorKeyRef.current === actorKey && generation === connectorLoadGenerationRef.current) {
+        setPageError(getErrorMessage(error, 'Notion 连接状态读取失败'));
+      }
+    }
+  }, [actorKey]);
+  useConnectorStatusRefresh(refreshConnectorStatus, syncPolicy?.refreshAfterSeconds,
+    isAuthenticated && !loading && connectorAuthStatus !== 'authenticating'
+      && !connecting && !disconnecting && !policySaving && !resourceSaving && !syncLoading && !resourceCoolingDown);
 
   useEffect(() => {
     setResourcePage(1);
@@ -980,7 +1010,15 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
               </select>
               <button className="notion-detail__button" disabled={!syncPolicy || policyIntervalMinutes === null || policySaving} onClick={() => void handleSaveSyncPolicy()} type="button">{policySaving ? '保存中' : '保存策略'}</button>
             </div>
-            <p>{syncPolicy?.status === 'error' ? '上次同步失败；最近成功索引仍保留。' : syncPolicy?.status === 'syncing' ? '正在后台同步。' : policyEnabled && syncPolicy ? `下次计划 ${formatDateTime(syncPolicy.nextSyncAt)}` : '自动同步已关闭。'}</p>
+            <p>{syncPolicy?.workerErrorCode ? '自动同步暂不可用；最近成功索引仍保留。'
+              : syncPolicy?.status === 'error' ? '上次同步失败；最近成功索引仍保留。'
+                : syncPolicy?.status === 'syncing' ? '正在后台同步。'
+                  : !syncPolicy ? '连接后可设置自动同步。'
+                    : !syncPolicy.effective.enabled ? '自动同步已关闭。'
+                      : sourceStats.total === 0 ? '选择资源后开始自动同步。'
+                        : syncPolicy.scheduleDue === undefined ? '同步状态暂不可用，请稍后刷新。'
+                        : syncPolicy.scheduleDue ? `已到同步时间，等待后台同步。最近成功 ${formatDateTime(syncPolicy.lastSuccessAt)}`
+                          : `下次计划 ${formatDateTime(syncPolicy.nextSyncAt)}`}</p>
           </div>
           {policyError ? <Notice tone="danger">{policyError}</Notice> : null}
         </IndexSection>
