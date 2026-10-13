@@ -1,0 +1,78 @@
+/* [Input] CharcoalNarrative paper/frame, floating toolbar/toolkit and fragment-sidebar visual structure. */
+/* [Output] Original-style charcoal workspace with responsive tool groups and bounded editing/history viewports. */
+/* [Pos] Complete sketch-input component presentation; no remote texture/fonts or host application imports. */
+/* [Sync] 2026-10-13: preserve source shell instead of the first-version form layout. */
+
+.ink-sketch { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: #1a1a1a; background: #e8e4e1; isolation: isolate; }
+.ink-sketch::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: .13; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch' seed='8'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.45' filter='url(%23grain)'/%3E%3C/svg%3E"); }
+.ink-sketch::after { content: ''; position: absolute; inset: 12px; border: 1px solid rgb(100 100 100 / 20%); outline: 12px solid rgb(255 255 255 / 10%); pointer-events: none; z-index: 1; }
+.ink-sketch button { font: inherit; cursor: pointer; color: #383735; }
+.ink-sketch button:disabled { opacity: .35; cursor: not-allowed; }
+.ink-sketch button:focus-visible, .ink-sketch input:focus-visible, .ink-sketch canvas:focus-visible { outline: 2px solid #68768c; outline-offset: 2px; }
+.ink-sketch button svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+.ink-sketch__brand { position: absolute; top: 16px; left: 18px; display: flex; align-items: center; gap: 10px; z-index: 5; pointer-events: none; }
+.ink-sketch__brand > svg { width: 20px; height: 20px; }
+.ink-sketch__brand h3 { font: 12px/1.4 'Courier New', monospace; letter-spacing: .14em; margin: 0; }
+.ink-sketch__brand p { font: 8px/1.5 'Courier New', monospace; letter-spacing: .12em; text-transform: uppercase; color: #74716d; margin: 2px 0 0; }
+.ink-sketch__controls { position: absolute; top: 12px; right: 60px; z-index: 15; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; max-width: calc(100% - 250px); }
+.ink-sketch__toolbar, .ink-sketch__toolkit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border: 1px solid rgb(150 150 150 / 35%); border-radius: 12px; padding: 6px; background: rgb(255 255 255 / 72%); backdrop-filter: blur(20px); box-shadow: 0 8px 32px rgb(0 0 0 / 10%); }
+.ink-sketch__toolbar button, .ink-sketch__toolkit button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 36px; height: 36px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #77736e; }
+.ink-sketch__toolbar button:hover:not(:disabled), .ink-sketch__toolkit button:hover:not(:disabled) { color: #1a1a1a; background: rgb(255 255 255 / 80%); }
+.ink-sketch__toolbar button[aria-pressed='true'] { background: #fff; color: #1a1a1a; border-color: #dedbd6; box-shadow: 0 1px 4px rgb(0 0 0 / 8%); }
+.ink-sketch__toolkit button[aria-pressed='true'] { background: #242423; color: #fff; box-shadow: 0 2px 4px rgb(0 0 0 / 10%); }
+.ink-sketch__tool-group { display: flex; align-items: center; gap: 2px; padding: 2px; background: rgb(235 234 232 / 70%); border-radius: 9px; }
+.ink-sketch__toolbar output, .ink-sketch__size output { font: 10px 'Courier New', monospace; min-width: 4ch; text-align: center; color: #797570; }
+.ink-sketch__divider { width: 1px; height: 20px; margin: 0 3px; background: #dedbd7; }
+.ink-sketch__toolkit { padding: 8px 12px; border-radius: 16px; gap: 8px; max-height: min(13rem, 35dvh); overflow: auto; }
+.ink-sketch__toolkit button span { font-size: 10px; }
+.ink-sketch__size { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 10px; }
+.ink-sketch__size > svg { width: 14px; height: 14px; }
+.ink-sketch__size input { width: 90px; max-width: 28vw; accent-color: #30302e; }
+.ink-sketch__viewport { position: absolute; inset: 5.5rem 1.5rem 4.5rem; container-type: size; display: grid; place-items: center; overflow: hidden; touch-action: none; }
+.ink-sketch__canvas { display: block; width: min(100%, calc(100cqh * 1.5)); height: auto; aspect-ratio: 3 / 2; max-height: 100%; touch-action: none; mix-blend-mode: multiply; cursor: none; }
+.ink-sketch__canvas[data-tool='pan'] { cursor: grab; }
+.ink-sketch__canvas[aria-disabled='true'] { cursor: not-allowed; }
+.ink-sketch__cursor { position: absolute; pointer-events: none; z-index: 5; }
+.ink-sketch__cursor--pen { width: 42px; height: 42px; transform: scaleX(-1) translate(12%, -88%); color: #181818; filter: drop-shadow(-2px 2px 4px rgb(0 0 0 / 25%)); }
+.ink-sketch__cursor--pen svg { width: 100%; height: 100%; }
+.ink-sketch__cursor--eraser { transform: translate(-50%, -50%); background: rgb(255 255 255 / 80%); border: 1px solid #c9c5bf; border-radius: 50%; box-shadow: 0 2px 8px rgb(0 0 0 / 15%); }
+.ink-sketch__footer { position: absolute; bottom: 18px; left: 20px; right: 20px; display: flex; justify-content: space-between; gap: 12px; z-index: 10; }
+.ink-sketch__footer button { min-height: 44px; border: 1px solid rgb(110 110 110 / 20%); border-radius: 12px; padding: .55rem 1rem; background: rgb(255 255 255 / 70%); backdrop-filter: blur(12px); box-shadow: 0 4px 16px rgb(0 0 0 / 7%); }
+.ink-sketch__footer .ink-sketch__add { background: #252523; color: #fff; }
+.ink-sketch__error, .ink-sketch__status, .ink-sketch__layer-hint { position: absolute; left: 20px; right: 20px; bottom: 70px; z-index: 12; margin: 0; font-size: 12px; background: rgb(255 255 255 / 80%); padding: 6px 10px; border-radius: 8px; }
+.ink-sketch__error { color: #a22b2b; }
+.ink-sketch__status, .ink-sketch__layer-hint { color: #69655f; }
+.ink-sketch__history { position: absolute; inset: 0 auto 0 0; width: clamp(320px, 35%, 420px); max-width: 100%; z-index: 35; display: flex; flex-direction: column; padding: 24px 32px 20px 24px; box-sizing: border-box; background: #f8f5f0; box-shadow: 20px 0 60px rgb(0 0 0 / 15%); }
+.ink-sketch__history[hidden] { display: none; }
+.ink-sketch__history header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+.ink-sketch__history h3 { margin: 0; font: bold 24px Georgia, serif; }
+.ink-sketch__history header p { margin: 6px 0 0; font: 9px 'Courier New', monospace; letter-spacing: .12em; color: #888078; }
+.ink-sketch__history header button { display: grid; place-items: center; width: 40px; height: 40px; background: transparent; border: 0; border-radius: 50%; }
+.ink-sketch__history-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 4px 16px; }
+.ink-sketch__fragment { display: block; position: relative; width: 100%; margin: 0 0 24px; padding: 12px; border: 1px solid #dedbd5; background: white; box-shadow: 0 4px 10px rgb(0 0 0 / 12%); text-align: left; clip-path: polygon(1% 2%, 99% 0%, 100% 98%, 2% 100%); }
+.ink-sketch__fragment:nth-child(even) { clip-path: polygon(0% 0%, 98% 3%, 97% 99%, 1% 97%); }
+.ink-sketch__fragment[aria-current='step'] { box-shadow: inset 0 0 0 2px #76716b, 0 4px 10px rgb(0 0 0 / 12%); }
+.ink-sketch__fragment img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: contain; background: #eae7e2; mix-blend-mode: multiply; }
+.ink-sketch__fragment > span { display: flex; align-items: center; gap: 6px; margin-top: 12px; font: 9px 'Courier New', monospace; color: #777069; }
+.ink-sketch__restore-icon { margin-left: auto; }
+.ink-sketch__fragment time { display: block; margin-top: 8px; font: 8px 'Courier New', monospace; color: #a19a91; }
+.ink-sketch__history-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; min-height: 120px; color: #aaa29a; font: 10px 'Courier New', monospace; text-align: center; }
+.ink-sketch__history-empty svg { width: 40px; height: 40px; }
+.ink-sketch__history-clear { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 0; border-top: 1px solid #dedad3; background: transparent; font-size: 10px; }
+.ink-sketch__history-binding { position: absolute; right: 0; top: 0; bottom: 0; width: 16px; border-left: 1px solid rgb(0 0 0 / 5%); background-color: #e5e0d8; background-image: radial-gradient(circle, rgb(0 0 0 / 9%) 3px, transparent 4px); background-size: 16px 36px; }
+@media (max-width: 800px) {
+  .ink-sketch__controls { top: 58px; left: 16px; right: 16px; max-width: none; align-items: flex-start; }
+  .ink-sketch__toolbar { gap: 2px; padding: 4px; }
+  .ink-sketch__toolbar button { min-width: 32px; height: 36px; }
+  .ink-sketch__divider { margin: 0 1px; height: 16px; }
+  .ink-sketch__viewport { inset: 12rem 12px 4.5rem; }
+  .ink-sketch__toolkit { gap: 4px; padding: 6px; max-width: 100%; }
+  .ink-sketch__size { flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+  .ink-sketch__brand { left: 14px; top: 14px; }
+  .ink-sketch__history { width: 100%; padding: 20px 28px 16px 20px; }
+  .ink-sketch__footer { left: 14px; right: 14px; bottom: 12px; }
+}
+@media (hover: none) { .ink-sketch__cursor { display: none; } .ink-sketch__canvas { cursor: crosshair; } }

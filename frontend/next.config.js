@@ -8,6 +8,7 @@
 //                    explicit Next handlers while proxying other APIs to Python.
 // [Sync] 2026-09-14: bind Turbopack and tracing to this config's directory, not ancestor lockfiles.
 // [Sync] 2026-09-14: runtime API/auth Route Handlers own credentials; disable legacy unauthenticated rewrites.
+// [Sync] 2026-10-13: transpile the independent sketch-input browser workspace source.
 
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,7 @@ const nextConfig = {
   output: standaloneOutput ? 'standalone' : undefined,
   reactStrictMode: true,
   poweredByHeader: false,
+  transpilePackages: ['@ink-dream/sketch-input'],
   turbopack: { root: projectRoot },
   async headers() {
     return [

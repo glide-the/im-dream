@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-13: allow one independent browser component package without moving Dream business or API ownership. -->
 <!-- [Input] Repository guardrails, source ownership, package-manager boundaries, and validation contracts. -->
 <!-- [Output] Human-readable index of the active workspace rules. -->
 <!-- [Pos] Rules reference; executable workspace rules remain in .cursor/rules/*.mdc. -->
@@ -14,6 +15,7 @@ These rule notes are the human-readable companion to the workspace guardrails in
 They are adapted for the current Ink & Memory app:
 
 - `frontend/`: React 19 + Next.js 16 + TypeScript Web shell managed by the sole pnpm workspace/lock; `frontend/app/**` is the sole App Router and `frontend/app/_dream/**` is the sole Dream application source.
+- `frontend/packages/sketch-input/src/**`: independent Browser component package for local image/sketch editing; it cannot import the host application or own upload/model/auth endpoints.
 - `frontend/packages/mcp-apps-runtime/src/**`: legitimate independent server-only package for the MCP Apps Node Runtime. It is not a second Dream application tree and Browser modules must not move into it.
 - `backend/`: FastAPI Python service consuming Admin auth/data operations while retaining Claude Agent/Reflections workflows, shared files, Deck product orchestration, speech recognition, prompt loading, and model configuration.
 - `docs/`: architecture, design, API, and rule notes. Keep docs aligned with source ownership when behavior changes.

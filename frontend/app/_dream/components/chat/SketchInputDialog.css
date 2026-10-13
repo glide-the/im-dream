@@ -1,31 +1,11 @@
-/* [Input] Shared Modal geometry and existing paper/theme tokens. */
-/* [Output] Responsive white drawing paper with wrapping controls and accessible action states. */
-/* [Pos] Scoped Chat sketch-dialog presentation. */
-/* [Sync] 2026-10-09: preserve image colors across themes; reuse Modal scroll and focus ownership. */
+/* [Input] Shared Modal lifecycle and the original-style charcoal component shell. */
+/* [Output] Large paper workspace overlay; host title stays accessible without duplicating the component header. */
+/* [Pos] Chat Modal geometry adapter for the complete sketch-input package. */
+/* [Sync] 2026-10-13: replace the old form dialog sizing with the migrated canvas presentation. */
 
-.modal-surface.sketch-input-dialog { max-width: 52rem; }
-.sketch-input__toolbar, .sketch-input__footer { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
-.sketch-input__toolbar { margin: 1rem 0 .75rem; }
-.sketch-input-dialog button:not(.modal-close) {
-  min-height: 2.75rem; padding: .45rem .85rem; border: 1px solid var(--color-border-paper);
-  border-radius: .6rem; background: var(--color-bg-app); color: var(--color-text-primary); cursor: pointer;
-}
-.sketch-input-dialog button[aria-pressed="true"], .sketch-input-dialog .sketch-input__add {
-  background: var(--color-text-primary); color: var(--color-bg-paper);
-}
-.sketch-input-dialog button:disabled { opacity: .5; cursor: not-allowed; }
-.sketch-input-dialog button:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
-.sketch-input__toolbar-divider { width: 1px; height: 1.5rem; background: var(--color-border-paper); }
-.sketch-input__canvas {
-  display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; box-sizing: border-box;
-  border: 1px solid var(--color-border-paper); border-radius: .5rem; background: #fff;
-  touch-action: none; cursor: crosshair;
-}
-.sketch-input__canvas[aria-disabled="true"] { cursor: wait; }
-.sketch-input__footer { justify-content: space-between; margin-top: 1rem; }
-.sketch-input__error { color: var(--color-state-danger); margin: .75rem 0 0; }
-.sketch-input__status { display: block; margin-top: .5rem; color: var(--color-text-muted); font-size: .8rem; }
-@media (max-width: 480px) {
-  .modal-surface.sketch-input-dialog { padding: .85rem; border-radius: 1rem; }
-  .sketch-input__toolbar-divider { display: none; }
-}
+.modal-surface.sketch-input-dialog { max-width: none; height: calc(100dvh - 2rem); max-height: none; padding: 0; border-radius: 12px; position: relative; }
+.sketch-input-dialog > .modal-header { position: absolute; top: 12px; right: 12px; z-index: 45; }
+.sketch-input-dialog .modal-title { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+.sketch-input-dialog .modal-close { width: 36px; height: 36px; background: rgb(255 255 255 / 75%); border-color: rgb(140 140 140 / 25%); color: #55504a; }
+.sketch-input-dialog > .modal-content { flex: 1; margin: 0; overflow: hidden; }
+@media (max-width: 40rem) { .modal-surface.sketch-input-dialog { height: calc(100dvh - 1rem); } }

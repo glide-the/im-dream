@@ -28,6 +28,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 // [Sync] 2026-09-04: include backend-owned common Skills in slash suggestions without requiring a Deck.
 // [Sync] 2026-10-12: show the built-in compact command with the latest actual context-use snapshot.
+// [Sync] 2026-10-13: bind the package draft to this Thread and pass the existing upload-size policy.
 // [Sync] 2026-09-18: keep the mobile send action visible and make Enter send while Shift+Enter inserts a line break.
 import {
   useCallback,
@@ -957,7 +958,7 @@ export default function AIInputDock({
         )}
         </div>
       </div>
-      <SketchInputDialog open={sketchOpen} disabled={disabled} onClose={() => setSketchOpen(false)}
+      <SketchInputDialog key={threadId} open={sketchOpen} disabled={disabled} maxFileBytes={MAX_UPLOAD_FILE_SIZE_BYTES} onClose={() => setSketchOpen(false)}
         onAdd={async file => (await handleFiles([file], 'click'))[0] ?? false} />
     </div>
   );
