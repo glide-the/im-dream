@@ -3,6 +3,7 @@
 // [Pos] Writing Claude Agent browser transport regression test in frontend/app/_dream/api/__tests__.
 // [Sync] 2026-09-01: replace random Voice inspiration tests with product-level manual Writing SSE contracts.
 // [Sync] 2026-09-06: restore test-owned browser globals so later SSR contracts remain isolated.
+// [Sync] 2026-10-13: assert the current same-origin /api/claude-agent route instead of the retired absolute API base.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -102,7 +103,7 @@ test('manual Writing turn streams ordered deltas on the supplied Session Thread'
   });
 
   expect(calls).toHaveLength(1);
-  expect(calls[0].input).toBe('https://dream.test/api/claude-agent');
+  expect(calls[0].input).toBe('/api/claude-agent');
   expect(deltas).toEqual(['先写', '雨声']);
   expect(completed).toBe('先写雨声');
   const payload = JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>;

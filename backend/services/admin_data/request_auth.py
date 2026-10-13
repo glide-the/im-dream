@@ -28,6 +28,7 @@
 # [Sync] 2026-09-15: register the OAuth-only owned Deck detail read.
 # [Sync] 2026-09-15: register the OAuth-only owned/community Deck list read.
 # [Sync] 2026-09-15: construct one OAuth-owned Editor runtime without projecting its credentials to stdio.
+# [Sync] 2026-10-13: register additive Reflections content operations separately from Registry99.
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
@@ -60,6 +61,7 @@ from .chat_data import CHAT_OPERATIONS
 from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWorkerData
 from .scheduled_task_data import SCHEDULED_TASK_OPERATIONS, SCHEDULED_TASK_V2_OPERATIONS, SCHEDULED_TASK_V3_OPERATIONS
 from .client import AdminDataClient
+from .reflection_analysis_content_data import ANALYSIS_CONTENT_OPERATIONS
 from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
 from .jwt_verifier import AdminJWTVerifier
@@ -164,6 +166,7 @@ class AdminRequestAuth:
                 *SYSTEM_CONFIG_OPERATIONS,
                 *IMAGE_TURN_OPERATIONS,
                 *REFLECTIONS_SECTION_CONFIG_OPERATIONS,
+                *ANALYSIS_CONTENT_OPERATIONS,
                 *LOCAL_DATA_IMPORT_OPERATIONS,
                 *PICTURE_HISTORY_OPERATIONS,
                 *DECK_DEFAULT_OPERATIONS,

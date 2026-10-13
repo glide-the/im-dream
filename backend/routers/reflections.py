@@ -14,6 +14,8 @@
 #                    per-user custom prompt file editing; memory-init now prefers
 #                    user config over static default.
 # [Sync] 2026-09-15: route public section config, task, event, and result ownership through Admin.
+# [Sync] 2026-10-13: read mounted Notion candidates and create immutable task content through additive Admin operations.
+# [Sync] 2026-10-13: bind complete source candidates to the original caller key and clear them after task commit.
 """Reflections analysis router.
 
 Endpoints
@@ -33,8 +35,10 @@ Flow (docs/design/memory/reflections-analysis-prd.md §6):
 from __future__ import annotations
 
 import json
+import hashlib
 import asyncio
 import logging
+from uuid import uuid4
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,14 +61,25 @@ from services.admin_data.reflections_config_data import (
     ReflectionsSectionSaveInputDTO,
 )
 from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.models import CommittedReceiptDTO, Identifier
+from services.admin_data.reflection_task_data import FROZEN_REFLECTION_TASK_CONTRACTS
 from services.admin_data.errors import AdminDataError
+from services.admin_data.reflection_analysis_content_data import (
+    ANALYSIS_CONTENT_CONTRACT_VERSION, AdminReflectionAnalysisContentData,
+    ReflectionAnalysisCreateDTO, ReflectionAnalysisSelectionDTO, ReflectionAgentInputDTO,
+    require_analysis_content_capability, CREATE_WITH_CONTENT,
+)
+from services.admin_data.reflection_analysis_content import (
+    analysis_content_candidates, freeze_notion_analysis_input, clear_notion_analysis_preparation,
+)
 from services.admin_data.reflection_task_models import (
     ReflectionEventListInputDTO,
     ReflectionTaskCreateInputDTO,
     ReflectionTaskCreateSnapshotDTO,
     ReflectionTaskDTO,
     ReflectionTaskLatestInputDTO,
-    ReflectionTaskLookupDTO,
+    ReflectionTaskLookupDTO, Identifier256,
 )
 from services.admin_data.reflection_task_runtime import (
     prepare_reflection_memory_workspace,
@@ -114,6 +129,20 @@ class ReflectionsTaskCreateRequest(BaseModel):
     end_date: Optional[str] = None
     language: Optional[str] = None
     auto_start: bool = True
+    analysis_content: Optional["ReflectionsAnalysisContentRequest"] = None
+    request_key: Optional[Identifier] = None
+
+
+class ReflectionsAnalysisContentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    include_notion: bool = False
+    connector_id: Optional[Identifier256] = None
+    deck_id: Optional[Identifier256] = None
+    agent_id: Optional[Identifier256] = None
+    snapshot_version: Optional[Identifier256] = None
+
+
+ReflectionsTaskCreateRequest.model_rebuild()
 
 
 def _normalize_reflections_language(language: Optional[str]) -> str:
@@ -283,6 +312,45 @@ def _task_response(task: ReflectionTaskDTO, results=None) -> dict[str, Any]:
     return payload
 
 
+async def _content_task_response(task, current_user, owner, results=None):
+    payload = _task_response(task, results)
+    if task.agent_contract_version == ANALYSIS_CONTENT_CONTRACT_VERSION:
+        summary = await invoke_admin_operation(current_user,
+            AdminReflectionAnalysisContentData(owner.client).summary,
+            ReflectionTaskLookupDTO(task_id=task.task_id))
+        payload["input_snapshot"]["analysis_content"] = summary.analysis_content.model_dump(mode="json") if summary.analysis_content else None
+    return payload
+
+
+@router.get("/api/reflections/analysis-content")
+async def get_reflections_analysis_content(
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    from .notion import _connector_facade, _http_error
+    from notion.errors import NotionConnectorNotFoundError, NotionAuthRequiredError, NotionCredentialError
+    try:
+        require_analysis_content_capability(owner.client, "reflections-content-candidates")
+        available = True
+    except AdminDataError as exc:
+        if exc.code != "ADMIN_CAPABILITY_UNAVAILABLE":
+            raise _http_error(exc) from None
+        available = False
+    try:
+        candidates = await asyncio.to_thread(analysis_content_candidates, _connector_facade(current_user, owner))
+    except NotionConnectorNotFoundError:
+        candidates = {"status": "disconnected", "page_count": 0, "snapshot_version": None}
+    except (NotionAuthRequiredError, NotionCredentialError):
+        candidates = {"status": "auth_required", "page_count": 0, "snapshot_version": None}
+    except AdminDataError as exc:
+        if exc.code != "NOTION_ANALYSIS_SCOPE_CHANGED":
+            raise _http_error(exc) from None
+        candidates = {"status": "scope_changed", "page_count": 0, "snapshot_version": None}
+    except Exception as exc:
+        raise _http_error(exc) from None
+    return {**candidates, "selection_available": available}
+
+
 def _reflections_data(owner: AdminRequestAuth):
     try:
         return owner.reflections_data()
@@ -350,29 +418,85 @@ async def create_reflections_task_endpoint(
         sections=requested_sections,
         input_snapshot=input_snapshot,
     )
-    created = await invoke_admin_operation(
-        current_user,
-        data.create,
-        create_input,
-    )
+    selection = body.analysis_content
+    extended_selection = bool(selection and (selection.include_notion or selection.agent_id or selection.deck_id))
+    recovered = None
+    if body.request_key:
+        operation = CREATE_WITH_CONTENT if extended_selection else FROZEN_REFLECTION_TASK_CONTRACTS.operation("reflection-task.create")
+        actor = current_user.get("_admin_actor")
+        if not isinstance(actor, AdminRequestActor):
+            raise HTTPException(503, detail={"error_code": "ADMIN_CONFIGURATION_INVALID"})
+        try:
+            if extended_selection:
+                require_analysis_content_capability(owner.client, body.request_key)
+            receipt = await asyncio.to_thread(owner.client.receipt, operation, body.request_key, access_token=actor.access_token)
+            if isinstance(receipt, CommittedReceiptDTO):
+                recovered = receipt.result
+                actual = recovered.task.input_snapshot
+                if recovered.task.sections != requested_sections or any(getattr(actual, field) != getattr(input_snapshot, field) for field in type(input_snapshot).model_fields):
+                    raise AdminDataError("REFLECTION_SUBMISSION_CONFLICT", 409)
+                if extended_selection:
+                    summary = (await invoke_admin_operation(current_user, AdminReflectionAnalysisContentData(owner.client).summary,
+                        ReflectionTaskLookupDTO(task_id=recovered.task.task_id))).analysis_content
+                    if (summary is None or bool(summary.notion) != selection.include_notion
+                        or (summary.agent.agent_id if summary.agent else None) != selection.agent_id
+                        or (summary.agent.deck_id if summary.agent else None) != selection.deck_id
+                        or (summary.notion.snapshot_version if summary.notion else None) != (selection.snapshot_version if selection.include_notion else None)
+                        or (summary.notion.connector_id if summary.notion else None) != (selection.connector_id if selection.include_notion else None)
+                        or summary.diary_session_ids != body.session_ids):
+                        raise AdminDataError("REFLECTION_SUBMISSION_CONFLICT", 409)
+        except AdminDataError as exc:
+            raise HTTPException(exc.status_code, detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown}) from None
+    if recovered is not None:
+        created = recovered
+    elif extended_selection:
+        from .notion import _connector_facade, _http_error
+        try:
+            require_analysis_content_capability(owner.client, "reflections-content-create")
+            if bool(selection.deck_id) != bool(selection.agent_id):
+                raise AdminDataError("REFLECTION_AGENT_SELECTION_INVALID", 422)
+            notion = await freeze_notion_analysis_input(
+                _connector_facade(current_user, owner), selection.snapshot_version, selection.connector_id,
+                request_key=body.request_key,
+                request_fingerprint=hashlib.sha256(json.dumps(body.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            ) if selection.include_notion else None
+        except Exception as exc:
+            # No task creation has been invoked in this source-read phase.
+            # A failed read is a definite rejection, not an unknown write outcome.
+            error = _http_error(exc)
+            detail = dict(error.detail) if isinstance(error.detail, dict) else {"error_code": error.detail}
+            raise HTTPException(error.status_code, detail={**detail, "outcome_unknown": False}, headers=error.headers) from None
+        extended = ReflectionAnalysisCreateDTO(**create_input.model_dump(), analysis_content=ReflectionAnalysisSelectionDTO(
+            diary_session_ids=body.session_ids, notion=notion, agent=ReflectionAgentInputDTO(deck_id=selection.deck_id, agent_id=selection.agent_id) if selection.agent_id else None))
+        created = await invoke_admin_operation(current_user, AdminReflectionAnalysisContentData(owner.client).create, extended, request_id=body.request_key)
+    else:
+        created = await invoke_admin_operation(current_user, data.create, create_input, request_id=body.request_key)
+    clear_notion_analysis_preparation(current_user["user_id"], body.request_key)
     task = created.task
-    await prepare_reflection_event_bus(
-        task.task_id, worker=_reflections_worker(owner)
-    )
-    if body.auto_start:
-        started = await invoke_admin_operation(
-            current_user,
-            data.start,
-            ReflectionTaskLookupDTO(task_id=task.task_id),
+    try:
+        await prepare_reflection_event_bus(
+            task.task_id, worker=_reflections_worker(owner)
         )
-        task = started.task
-        if not started.terminal or started.report_missing:
-            await _start_worker(task.task_id, owner)
-    return Response(
-        content=json.dumps(_task_response(task), ensure_ascii=False),
-        media_type="application/json",
-        status_code=202,
-    )
+        if body.auto_start:
+            started = await invoke_admin_operation(
+                current_user,
+                data.start,
+                ReflectionTaskLookupDTO(task_id=task.task_id),
+            )
+            task = started.task
+            if not started.terminal or started.report_missing:
+                await _start_worker(task.task_id, owner)
+        return Response(
+            content=json.dumps(await _content_task_response(task, current_user, owner), ensure_ascii=False),
+            media_type="application/json",
+            status_code=202,
+        )
+    except HTTPException as exc:
+        detail = dict(exc.detail) if isinstance(exc.detail, dict) else {"error_code": "REFLECTION_TASK_SETUP_FAILED"}
+        raise HTTPException(exc.status_code, detail={**detail, "creation_committed": True, "task_id": task.task_id}) from None
+    except Exception:
+        logger.exception("Reflections post-create setup failed task_id=%s", task.task_id)
+        raise HTTPException(503, detail={"error_code": "REFLECTION_TASK_SETUP_FAILED", "creation_committed": True, "task_id": task.task_id}) from None
 
 
 @router.post("/api/reflections/tasks/{task_id}/start", status_code=202)
@@ -396,7 +520,7 @@ async def start_reflections_task_endpoint(
     if not started.terminal or started.report_missing:
         await _start_worker(task_id, owner)
     return Response(
-        content=json.dumps(_task_response(started.task), ensure_ascii=False),
+        content=json.dumps(await _content_task_response(started.task, current_user, owner), ensure_ascii=False),
         media_type="application/json",
         status_code=202,
     )
@@ -415,7 +539,7 @@ async def get_reflections_task_endpoint(
         _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id),
     )
     return Response(
-        content=json.dumps(_task_response(result.task, result.results), ensure_ascii=False),
+        content=json.dumps(await _content_task_response(result.task, current_user, owner, result.results), ensure_ascii=False),
         media_type="application/json",
     )
 
@@ -442,6 +566,24 @@ async def get_reflections_task_results_endpoint(
     )
 
 
+@router.post("/api/reflections/tasks/{task_id}/report")
+async def ensure_reflections_report_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    """Recover the original task-linked report after an authorized terminal lookup."""
+    lookup = _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id)
+    started = await invoke_admin_operation(current_user, _reflections_data(owner).start, lookup)
+    if not started.terminal:
+        raise HTTPException(409, detail={"error_code": "REFLECTION_TASK_NOT_TERMINAL"})
+    try:
+        report = await asyncio.to_thread(_reflections_worker(owner).ensure_report, lookup, str(uuid4()))
+    except AdminDataError as exc:
+        raise HTTPException(exc.status_code, detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown}) from None
+    return report.model_dump(mode="json")
+
+
 @router.get("/api/reflections/latest")
 async def get_latest_reflections_endpoint(
     current_user: dict = Depends(get_current_user),
@@ -455,7 +597,7 @@ async def get_latest_reflections_endpoint(
     )
     return Response(
         content=json.dumps(
-            {"task": _task_response(result.task) if result.task else None,
+            {"task": await _content_task_response(result.task, current_user, owner) if result.task else None,
              "results": [item.model_dump(mode="json") for item in result.results]},
             ensure_ascii=False,
         ),

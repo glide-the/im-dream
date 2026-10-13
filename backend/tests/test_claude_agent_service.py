@@ -7,6 +7,8 @@
 # [Sync] 2026-09-16: exercise managed MCP with explicit test authorization matching production composition.
 # [Sync] 2026-09-16: keep legacy fixtures behind a test-only persistence adapter while production requires Admin.
 # [Sync] 2026-09-16: inject Notion persistence through the current Admin turn owner.
+# [Sync] 2026-10-13: construct terminal ResultMessage with the shared required fields across SDK fixture import orders.
+# [Sync] 2026-10-13: explicit ManagedMcpRuntimeSnapshot assembly keeps workspace scope unset and bypasses the dynamic loader.
 # [Sync] 2026-09-15: validate standalone Story output uses Admin and never the removed Dream transaction helper.
 # [Sync] 2026-09-15: verify Editor result refresh uses the Admin runtime cache without Dream DB access.
 # [Sync] 2026-09-15: pass the server-owned workspace metadata owner into Deck packing.
@@ -123,6 +125,8 @@ from libs.claude_agent_kit.types import (
 from services.admin_gateway.models import GatewayModel
 from services.admin_data.session_models import SessionPreviewDTO
 from services.admin_data.agent_turn_persistence import AdminAgentTurnPersistence
+from services.admin_data.gateway_runtime import AdminGatewayRuntime
+from claude_mcp.runtime_snapshot import ManagedMcpRuntimeSnapshot
 from services.admin_data.story_workspace_artifact_data import (
     AdminStoryWorkspaceArtifactProvider,
 )
@@ -437,6 +441,100 @@ class TestStoryWorkspaceOutputTransaction(unittest.IsolatedAsyncioTestCase):
 
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
+    async def test_text_only_owner_with_gateway_skips_image_provider_when_capability_is_absent(self):
+        class TextOnlyGateway(AdminGatewayRuntime):
+            def __init__(self):
+                pass
+
+            def access_token(self):
+                return "idg_text_only"
+
+            def close(self):
+                pass
+
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=lambda *_: "dream-balanced",
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        owner = _LegacyTurnPersistence()
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="text-only-image-branch",
+            message_parts=[{"type": "text", "text": "ordinary text"}],
+            admin_turn_persistence=owner,
+            admin_gateway_runtime=TextOnlyGateway(),
+            # Use the existing production snapshot loader path so this test reaches
+            # the image_data=None branch without depending on the explicit-snapshot
+            # workspace-scope path covered by its separate service tests.
+            managed_mcp_runtime_snapshot=None,
+        )
+        state = AgentRunState(session_id=request.thread_id)
+        with tempfile.TemporaryDirectory(prefix="text-only-image-branch-") as tmp:
+            workspace = Path(tmp).resolve()
+            workspace.mkdir(exist_ok=True)
+            with (
+                unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True, "image_model": "image-only"}),
+                unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=workspace),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertIsNone(execution.turn_context.image_provider)
+        self.assertIsNone(owner.image_turn_data(actor_id="7", thread_id=request.thread_id))
+
+    async def test_text_only_owner_with_explicit_snapshot_skips_dynamic_scope_and_image_provider(self):
+        class TextOnlyGateway(AdminGatewayRuntime):
+            def __init__(self):
+                pass
+
+            def access_token(self):
+                return "idg_text_only_explicit"
+
+            def close(self):
+                pass
+
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=lambda *_: "dream-balanced",
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        owner = _LegacyTurnPersistence()
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="text-only-explicit-snapshot",
+            message_parts=[{"type": "text", "text": "ordinary text"}],
+            admin_turn_persistence=owner,
+            admin_gateway_runtime=TextOnlyGateway(),
+            managed_mcp_runtime_snapshot=ManagedMcpRuntimeSnapshot(),
+        )
+        state = AgentRunState(session_id=request.thread_id)
+        with tempfile.TemporaryDirectory(prefix="text-only-explicit-snapshot-") as tmp:
+            workspace = Path(tmp).resolve()
+            workspace.mkdir(exist_ok=True)
+            with (
+                unittest.mock.patch.object(_db, "get_system_config", return_value={"workspace_enabled": True, "image_model": "image-only"}),
+                unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=workspace),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertIsNone(execution.turn_context.image_provider)
+        self.assertIsNone(execution.turn_context.managed_mcp_workspace_scope)
+        self.managed_mcp_loader.load.assert_not_awaited()
+        self.managed_mcp_workspace_resolver.assert_not_called()
+        self.assertIsNone(owner.image_turn_data(actor_id="7", thread_id=request.thread_id))
+
     async def test_fresh_init_receipt_is_the_next_turn_resume_identity(self):
         from claude_agent_sdk.types import SystemMessage
 
@@ -578,7 +676,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 "workspace-1" if context is not None else None
             ),
         )
-        self._managed_mcp_workspace_patch.start()
+        self.managed_mcp_workspace_resolver = self._managed_mcp_workspace_patch.start()
 
     def tearDown(self) -> None:
         self._managed_mcp_workspace_patch.stop()
@@ -2551,14 +2649,15 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             terminal = service_module.ResultMessage(
                 subtype="error_during_execution",
                 session_id="sdk-session",
+                duration_ms=1,
+                duration_api_ms=0,
+                is_error=True,
+                num_turns=1,
             )
-            # The shared SDK stub intentionally exposes only fields consumed
-            # by production code.  Attach optional real-SDK result fields
-            # after construction so this regression remains import-order safe.
-            terminal.duration_ms = 1
-            terminal.duration_api_ms = 0
+            # The local SDK fallback accepts but does not retain all keyword
+            # fields; retain the terminal marker used by production's guide
+            # interruption classifier across both real and stub DTOs.
             terminal.is_error = True
-            terminal.num_turns = 1
 
             class _InterruptedRunner:
                 async def run_streaming(self, opts, callbacks):

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: classify only the mounted Notion probe GET cancellation during connector refresh/unmount.
 // [Sync] 2026-10-07: classify exact Chat-list and target-Thread schedule-relation aborts during result handoff.
 // [Sync] 2026-10-07: capture the synchronous Thread-handoff phase before asynchronous request-header inspection.
 // [Sync] 2026-10-07: serve v3 repeat, Chat mode, model snapshots and the callable model catalog through production DTO routes.
@@ -189,6 +190,9 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       && path === `/api/claude-agent/scheduled-tasks/${TASK_ID}/run`;
     const expectedNotionCancellation = options.notionFaults && /^\/api\/connectors\/[^/]+\/notion\/(?:documents|today)$/.test(path)
       && ['net::ERR_ABORTED', 'net::ERR_INTERNET_DISCONNECTED'].includes(request.failure()?.errorText ?? '');
+    const expectedNotionProbeCancellation = options.notionFaults && request.method() === 'GET'
+      && path === '/api/connectors' && failure === 'net::ERR_ABORTED'
+      && refererPath.startsWith('/story-workspace/');
     const expectedAuthEntryCancellation = options.authEntryLifecycle && request.method() === 'GET'
       && path === '/auth/options' && request.failure()?.errorText === 'net::ERR_ABORTED';
     if (expectedThreadHandoffAbort) {
@@ -199,7 +203,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com')
       && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedChatListNavigationAbort
       && !expectedScheduledResultNavigationAbort && !expectedUnknownRun && !expectedNotionCancellation
-      && !expectedScheduledRelationNavigationAbort
+      && !expectedScheduledRelationNavigationAbort && !expectedNotionProbeCancellation
       && !expectedAuthEntryCancellation) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }

@@ -2,6 +2,15 @@
 // [Output] Unbuffered abort-aware HTTP/SSE forwarding with credential/header isolation.
 // [Pos] Shared Next-to-Python transport extracted from the existing Claude Agent proxy.
 // [Sync] 2026-09-14: preserve stream/body behavior while removing ambient browser/server credentials.
+// [Sync] 2026-10-13: source preparation may wait past the fetch header deadline; preserve caller cancellation.
+// [Sync] 2026-10-13: sparse Reflections events wait for the task/caller lifetime instead of a response-body idle deadline.
+import { Agent, type Dispatcher } from 'undici';
+
+// A finite mounted-page read completes before task creation sends response headers.
+// It retains upstream connection/body limits and the original caller AbortSignal.
+let reflectionPreparationDispatcher: Agent | undefined;
+let reflectionEventDispatcher: Agent | undefined;
+const REFLECTION_EVENT_PATH = /^\/api\/reflections\/tasks\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/events$/i;
 
 const BACKEND_ORIGIN_KEYS = ['INK_BACKEND_INTERNAL_URL', 'BACKEND_URL'] as const;
 const HOP_BY_HOP_HEADERS = new Set([
@@ -55,10 +64,17 @@ export async function forwardBackendRequest(request: Request, origin: URL, autho
   const incoming = new URL(request.url);
   const upstreamUrl = new URL(incoming.pathname + incoming.search, origin);
   const method = request.method.toUpperCase();
-  const init: RequestInit & { duplex?: 'half' } = {
+  const init: RequestInit & { duplex?: 'half'; dispatcher?: Dispatcher } = {
     method, headers: forwardRequestHeaders(request, authorization), cache: 'no-store',
     redirect: 'manual', signal: request.signal,
   };
+  if (method === 'POST' && incoming.pathname === '/api/reflections/tasks') {
+    reflectionPreparationDispatcher ??= new Agent({ headersTimeout: 0 });
+    init.dispatcher = reflectionPreparationDispatcher;
+  } else if (method === 'GET' && REFLECTION_EVENT_PATH.test(incoming.pathname)) {
+    reflectionEventDispatcher ??= new Agent({ bodyTimeout: 0 });
+    init.dispatcher = reflectionEventDispatcher;
+  }
   if (method !== 'GET' && method !== 'HEAD' && request.body !== null) {
     init.body = request.body;
     init.duplex = 'half';

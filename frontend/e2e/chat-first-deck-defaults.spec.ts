@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: assert the current official Claude Code Plugins heading after changing language.
 // [Input] Authenticated root App, Story Workspace navigation, Deck Manager, and
 //         deterministic production-shaped Deck CRUD responses.
 // [Output] Provider-free browser journey proving Chat-first entry, consumer Deck
@@ -1117,7 +1118,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await page.getByRole('tab', { name: 'Plugins' }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=plugins`);
   await expect(page.getByRole('tabpanel', { name: 'Plugins' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Claude 插件' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Claude Code Plugins', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Deck', exact: true }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=deck`);
   const deckSettingsManager = page.locator('.deck-manager-shell--settings');

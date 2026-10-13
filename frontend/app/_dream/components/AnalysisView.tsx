@@ -1,4 +1,6 @@
 /**
+ * [Sync] 2026-10-13: centralize analysis content, freeze each submission and recover task-linked reports.
+ * [Sync] 2026-10-13: distinguish prepared tasks from running recovery; explicit continuation retains original inputs.
  * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
  *         getAnalysisReports, fetchSessionsAggregate, ReflectionResult,
  *         getReflectionsSectionConfig, saveReflectionsSectionConfig, resetReflectionsSectionConfig,
@@ -21,7 +23,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
-  saveAnalysisReport,
+  ensureReflectionTaskReport,
   getAnalysisReports,
   fetchSessionsAggregate,
   getLatestReflections,
@@ -31,11 +33,14 @@ import {
   runReflectionsTask,
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
+  type ReflectionAnalysisContentOptions,
+  type ReflectionAnalysisContentSummary,
   type ReflectionResult,
   type ReflectionSectionConfig,
   type ReflectionSectionKey,
   type ReflectionTaskEvent,
 } from '../api/voiceApi';
+import ReflectionAnalysisContentControls from './ReflectionAnalysisContentControls';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getDateLocale } from '../i18n';
@@ -69,6 +74,9 @@ type SectionKey = ReflectionSectionKey;
 
 interface AnalysisReport {
   id: number;
+  taskId?: string;
+  failedSections?: ReflectionSectionKey[];
+  analysisContent?: ReflectionAnalysisContentSummary | null;
   echoes: ReflectionResult[];
   traits: ReflectionResult[];
   patterns: ReflectionResult[];
@@ -332,11 +340,12 @@ interface ReanalysisConfirmModalProps {
   onToggleSession: (sessionId: string) => void;
   onSelectAll: () => void;
   onConfirm: () => void;
+  allowNotionOnly?: boolean;
 }
 
 function ReanalysisConfirmModal({
   open, sessions, selectedIds, error, isMobile,
-  onClose, onToggleSession, onSelectAll, onConfirm,
+  onClose, onToggleSession, onSelectAll, onConfirm, allowNotionOnly = false,
 }: ReanalysisConfirmModalProps) {
   if (!open) return null;
   const selected = new Set(selectedIds);
@@ -486,13 +495,13 @@ function ReanalysisConfirmModal({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={selectedCount === 0}
+            disabled={selectedCount === 0 && !allowNotionOnly}
             style={{
               border: '1px solid var(--color-text-body)',
-              background: selectedCount === 0 ? 'var(--color-border-neutral)' : 'var(--color-text-body)',
-              color: selectedCount === 0 ? 'var(--color-text-muted)' : 'var(--color-bg-paper)',
+              background: selectedCount === 0 && !allowNotionOnly ? 'var(--color-border-neutral)' : 'var(--color-text-body)',
+              color: selectedCount === 0 && !allowNotionOnly ? 'var(--color-text-muted)' : 'var(--color-bg-paper)',
               borderRadius: '999px', padding: '10px 20px',
-              cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+              cursor: selectedCount === 0 && !allowNotionOnly ? 'not-allowed' : 'pointer',
               fontSize: '13px', fontWeight: 600,
             }}
           >
@@ -527,8 +536,15 @@ export default function AnalysisView() {
   const [stats, setStats]         = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
   const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
+  const [analysisContent, setAnalysisContent] = useState<ReflectionAnalysisContentOptions>({ include_notion: false });
+  const submittingRef = useRef(false);
+  const [reportSaveError, setReportSaveError] = useState('');
+  const [reportRetryTaskId, setReportRetryTaskId] = useState<string>();
+  const [reportSaving, setReportSaving] = useState(false);
   const [taskStatus, setTaskStatus] = useState('');
   const [activeRecoveryTick, setActiveRecoveryTick] = useState(0);
+  const [preparedTask, setPreparedTask] = useState<ActiveReflectionTaskState | null>(null);
+  const explicitStartTaskIdRef = useRef<string | null>(null);
   const recoveringTaskIdRef = useRef<string | null>(null);
   const [reanalysisDialog, setReanalysisDialog] = useState<ReanalysisDialogState>({
     open: false,
@@ -565,6 +581,9 @@ export default function AnalysisView() {
         const db = await getAnalysisReports(MAX_SAVED_REPORTS);
         const individual: AnalysisReport[] = db.map((r) => ({
           id: r.id,
+          taskId: r.report_data?.task_id,
+          failedSections: r.report_data?.failed_sections,
+          analysisContent: r.report_data?.analysis_content,
           echoes:   (r.report_data?.echoes   || []) as ReflectionResult[],
           traits:   (r.report_data?.traits   || []) as ReflectionResult[],
           patterns: (r.report_data?.patterns || []) as ReflectionResult[],
@@ -573,7 +592,7 @@ export default function AnalysisView() {
         }));
         const byDay = new Map<string, AnalysisReport>();
         for (const r of individual) {
-          const day = new Date(r.timestamp).toDateString();
+          const day = r.taskId ? `task:${r.taskId}` : new Date(r.timestamp).toDateString();
           const existing = byDay.get(day);
           if (!existing) {
             byDay.set(day, { ...r });
@@ -596,7 +615,11 @@ export default function AnalysisView() {
         }
         try {
           const latest = await getLatestReflections();
-          if (latest.task && !isTerminalReflectionTaskStatus(latest.task.status)) {
+          if (latest.task?.status === 'CREATED') {
+            setPreparedTask({ taskId: latest.task.task_id, sections: latest.task.sections,
+              startedAt: new Date(latest.task.created_at || Date.now()).getTime() });
+          }
+          if (latest.task && latest.task.status !== 'CREATED' && !isTerminalReflectionTaskStatus(latest.task.status)) {
             const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
             writeActiveReflectionTask({
               taskId: latest.task.task_id,
@@ -615,7 +638,8 @@ export default function AnalysisView() {
             setActiveRecoveryTick(tick => tick + 1);
             return;
           }
-          if (!hasActiveRecovery && latest.results.length > 0) {
+          if (!hasActiveRecovery && latest.task && isTerminalReflectionTaskStatus(latest.task.status)
+            && latest.results.length > 0 && latest.results.every(result => result.task_id === latest.task?.task_id)) {
             const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
             const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
             const latestPatternsFromTask = latest.results.filter(r => r.section === 'patterns');
@@ -630,26 +654,15 @@ export default function AnalysisView() {
               patterns: latestPatternsFromTask,
               timestamp: new Date(taskTime).getTime() || Date.now(),
               stats: { days: 0, entries: 0, words: 0 },
+              taskId: latest.task?.task_id,
+              failedSections: latest.task?.failed_sections,
+              analysisContent: latest.task?.analysis_content,
             };
-            setSavedReports(prev => {
-              const taskDay = localDateKey(taskReport.timestamp);
-              let mergedExisting = false;
-              const merged = prev.map(report => {
-                if (localDateKey(report.timestamp) !== taskDay) return report;
-                mergedExisting = true;
-                return {
-                  ...report,
-                  echoes: taskReport.echoes.length > 0 ? taskReport.echoes : report.echoes,
-                  traits: taskReport.traits.length > 0 ? taskReport.traits : report.traits,
-                  patterns: taskReport.patterns.length > 0 ? taskReport.patterns : report.patterns,
-                  timestamp: Math.max(report.timestamp, taskReport.timestamp),
-                  stats: report.stats.days || report.stats.entries || report.stats.words ? report.stats : taskReport.stats,
-                };
-              });
-              return (mergedExisting ? merged : [taskReport, ...merged])
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .slice(0, MAX_SAVED_REPORTS);
-            });
+            if (taskReport.taskId && !db.some(report => report.report_data?.task_id === taskReport.taskId)) {
+              setReportRetryTaskId(taskReport.taskId);
+              setReportSaveError(dateLocale.startsWith('zh') ? '分析结果已保留，报告暂未保存。请重试保存。' : 'The analysis result is available, but its report has not been saved.');
+            }
+
           }
         } catch (e) {
           console.warn('[Reflections] latest task load failed:', e);
@@ -672,7 +685,7 @@ export default function AnalysisView() {
         } catch (e) { console.error(e); }
       }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, dateLocale]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -778,10 +791,41 @@ export default function AnalysisView() {
       patterns: report.patterns,
       timestamp: report.timestamp ?? Date.now(),
       stats: report.stats,
+      taskId: report.taskId,
+      failedSections: report.failedSections,
+      analysisContent: report.analysisContent,
     };
     setSelectedReport(wrapped);
     setViewMode('blog');
   }, []);
+
+  const retryReportSave = useCallback(async (taskId: string) => {
+    setReportSaving(true);
+    try {
+      await ensureReflectionTaskReport(taskId);
+      await reloadSavedReports();
+      setReportSaveError(''); setReportRetryTaskId(undefined);
+    } catch (error) {
+      setReportSaveError(error instanceof Error ? error.message : String(error));
+      setReportRetryTaskId(taskId);
+    } finally { setReportSaving(false); }
+  }, [reloadSavedReports]);
+
+  const openTaskReport = useCallback(async (entry: AnalysisReport) => {
+    const taskId = entry.taskId ?? [...entry.echoes, ...entry.traits, ...entry.patterns].find(item => item.task_id)?.task_id;
+    let report = entry;
+    if (taskId) {
+      try {
+        const task = await getReflectionTask(taskId);
+        report = { ...entry, taskId, failedSections: task.failed_sections, analysisContent: task.analysis_content };
+      } catch (error) {
+        setReportSaveError(error instanceof Error ? error.message : String(error));
+      }
+      await retryReportSave(taskId);
+    }
+    localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+    openReflectionBlogReport(report);
+  }, [openReflectionBlogReport, retryReportSave]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -804,8 +848,18 @@ export default function AnalysisView() {
     const restore = async () => {
       let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
       try {
+        const snapshot = await getReflectionTask(active.taskId);
+        if (cancelled) return;
+        if (snapshot.status === 'CREATED' && explicitStartTaskIdRef.current !== active.taskId) {
+          setPreparedTask(active);
+          clearActiveReflectionTask(active.taskId);
+          setTaskStatus('');
+          recoveringTaskIdRef.current = null;
+          return;
+        }
         const bySection = await resumeReflectionsTask(active.taskId, {
           lastEventId: active.lastEventId,
+          startPrepared: explicitStartTaskIdRef.current === active.taskId,
           onEvent: handleTaskEvent,
         });
         if (cancelled) return;
@@ -816,6 +870,8 @@ export default function AnalysisView() {
         setTraits(tr);
         setPatterns(pr);
         clearActiveReflectionTask(active.taskId);
+        setPreparedTask(null);
+        explicitStartTaskIdRef.current = null;
         setTaskStatus('task · restored');
       } catch (e) {
         if (!cancelled) {
@@ -836,78 +892,17 @@ export default function AnalysisView() {
           stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
         };
         const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
-        try {
-          await saveAnalysisReport('full_analysis', reportData);
-          await reloadSavedReports();
-        } catch (e) { console.error(e); }
-        localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
-        openReflectionBlogReport(entry);
+        await openTaskReport(entry);
       }
     };
 
     void restore();
     return () => {
       cancelled = true;
+      if (recoveringTaskIdRef.current === active.taskId) recoveringTaskIdRef.current = null;
     };
-  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, stats.totalDays, stats.totalEntries, stats.totalWords]);
+  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, openTaskReport, stats.totalDays, stats.totalEntries, stats.totalWords]);
 
-
-  // ── Per-section analysis with streaming ──
-  const handleAnalyzeSection = async (section: SectionKey) => {
-    if (!isAuthenticated) {
-      setErrors(p => ({ ...p, [section]: 'Please log in to use reflections.' }));
-      return;
-    }
-    setErrors(p => ({ ...p, [section]: '' }));
-    setStreaming(p => ({ ...p, [section]: '' }));
-    setLoading(p => ({ ...p, [section]: true }));
-
-    const setter = section === 'echoes' ? setEchoes : section === 'traits' ? setTraits : setPatterns;
-
-    try {
-      const bySection = await runReflectionsTask({
-        sections: [section],
-        language: i18n.language,
-        onEvent: handleTaskEvent,
-      });
-      const results = bySection[section];
-      setter(results);
-      setStreaming(p => ({ ...p, [section]: '' }));
-      if (results.length === 0) {
-        setErrors(p => ({ ...p, [section]: 'No results — the Reflections task completed without section output.' }));
-        return;
-      }
-      const entry: AnalysisReport = {
-        id: Date.now(),
-        echoes:   section === 'echoes'   ? results : [],
-        traits:   section === 'traits'   ? results : [],
-        patterns: section === 'patterns' ? results : [],
-        timestamp: Date.now(),
-        stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
-      };
-      if (isAuthenticated) {
-        try {
-          await saveAnalysisReport(`reflections_${section}`, {
-            [section]: results,
-            stats: entry.stats,
-          });
-          await reloadSavedReports();
-        } catch (e) { console.warn('[Reflections] save failed:', e); }
-      } else {
-        const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
-        localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
-        setSavedReports(updated);
-      }
-      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
-      openReflectionBlogReport(entry);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErrors(p => ({ ...p, [section]: msg }));
-      setStreaming(p => ({ ...p, [section]: '' }));
-    } finally {
-      setLoading(p => ({ ...p, [section]: false }));
-    }
-  };
 
   // ── One-click analyze all ──
   const runAnalyzeAll = async (sessionIds?: string[]) => {
@@ -915,6 +910,8 @@ export default function AnalysisView() {
       setErrors({ echoes: 'Please log in to use reflections.', traits: '', patterns: '' });
       return;
     }
+    setReportSaveError(''); setReportRetryTaskId(undefined);
+    setPreparedTask(null);
     setErrors({ echoes: '', traits: '', patterns: '' });
     setStreaming({ echoes: '', traits: '', patterns: '' });
     setTaskStatus('task · preparing');
@@ -930,6 +927,7 @@ export default function AnalysisView() {
       const bySection = await runReflectionsTask({
         language: i18n.language,
         sessionIds,
+        analysisContent: { ...analysisContent },
         onEvent: handleTaskEvent,
       });
       er = bySection.echoes;
@@ -941,6 +939,7 @@ export default function AnalysisView() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setErrors({ echoes: msg, traits: '', patterns: '' });
+      if (!readActiveReflectionTask()) setTaskStatus('');
     } finally {
       setLoading({ echoes: false, traits: false, patterns: false });
       setStreaming({ echoes: '', traits: '', patterns: '' });
@@ -952,29 +951,20 @@ export default function AnalysisView() {
         stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
       };
       const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
-      if (isAuthenticated) {
-        try {
-          await saveAnalysisReport('full_analysis', reportData);
-          await reloadSavedReports();
-        } catch (e) { console.error(e); }
-      } else {
-        const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
-        localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
-        setSavedReports(updated);
-      }
-      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
-      openReflectionBlogReport(entry);
+      await openTaskReport(entry);
     }
   };
 
   const handleAnalyzeAll = async () => {
-    if (anyLoading) return;
-
+    if (anyLoading || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
     const active = readActiveReflectionTask();
     if (active?.taskId) {
       try {
         const task = await getReflectionTask(active.taskId);
-        if (isTerminalReflectionTaskStatus(task.status)) {
+        if (isTerminalReflectionTaskStatus(task.status) || task.status === 'CREATED') {
+          if (task.status === 'CREATED') setPreparedTask(active);
           clearActiveReflectionTask(active.taskId);
         } else {
           const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
@@ -1008,10 +998,7 @@ export default function AnalysisView() {
                 stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
               };
               const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
-              await saveAnalysisReport('full_analysis', reportData);
-              await reloadSavedReports();
-              localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
-              openReflectionBlogReport(entry);
+              await openTaskReport(entry);
             }
           } catch (resumeError) {
             const msg = resumeError instanceof Error ? resumeError.message : String(resumeError);
@@ -1025,7 +1012,8 @@ export default function AnalysisView() {
         }
       } catch (e) {
         console.warn('[Reflections] active task validation failed before analysis start:', e);
-        clearActiveReflectionTask(active.taskId);
+        setErrors({ echoes: e instanceof Error ? e.message : String(e), traits: '', patterns: '' });
+        return;
       }
     }
 
@@ -1037,11 +1025,12 @@ export default function AnalysisView() {
         open: true,
         sessions: candidates,
         selectedIds: candidates.map(session => session.id),
-        error: candidates.length === 0 ? 'No analyzable diary entries are available.' : '',
+        error: candidates.length === 0 && !analysisContent.include_notion ? 'No analyzable diary entries are available.' : '',
       });
       return;
     }
     await runAnalyzeAll();
+    } finally { submittingRef.current = false; }
   };
 
   const handleToggleReanalysisSession = useCallback((sessionId: string) => {
@@ -1063,12 +1052,14 @@ export default function AnalysisView() {
 
   const handleConfirmReanalysis = async () => {
     const selectedIds = reanalysisDialog.selectedIds;
-    if (selectedIds.length === 0) {
+    if (submittingRef.current) return;
+    if (selectedIds.length === 0 && !analysisContent.include_notion) {
       setReanalysisDialog(prev => ({ ...prev, error: 'Select at least one diary entry before re-analyzing.' }));
       return;
     }
     setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
-    await runAnalyzeAll(selectedIds);
+    submittingRef.current = true;
+    try { await runAnalyzeAll(selectedIds); } finally { submittingRef.current = false; }
   };
 
   const anyLoading = loading.echoes || loading.traits || loading.patterns;
@@ -1082,6 +1073,9 @@ export default function AnalysisView() {
     return (
       <ReflectionBlogPage
         report={selectedReport}
+        saveError={selectedReport.taskId === reportRetryTaskId ? reportSaveError : undefined}
+        saving={reportSaving}
+        onRetrySave={selectedReport.taskId === reportRetryTaskId && reportRetryTaskId ? () => { void retryReportSave(reportRetryTaskId); } : undefined}
         onBack={() => setViewMode('dashboard')}
         isMobile={isMobile}
         t={t}
@@ -1141,7 +1135,6 @@ export default function AnalysisView() {
             isMobile={isMobile} t={t}
             loading={loading} streaming={streaming}
             isAuthenticated={isAuthenticated}
-            onAnalyzeSection={handleAnalyzeSection}
             onConfigClick={handleOpenConfig}
           />
         </div>
@@ -1302,6 +1295,7 @@ export default function AnalysisView() {
 
         {/* One-click analyze button */}
         <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', alignItems: 'center' }}>
           <button
             onClick={handleAnalyzeAll}
             disabled={anyLoading}
@@ -1333,6 +1327,20 @@ export default function AnalysisView() {
           >
             {anyLoading ? t('analysis.actions.generating') : t('analysis.actions.generate')}
           </button>
+          <ReflectionAnalysisContentControls value={analysisContent} onChange={setAnalysisContent} authenticated={isAuthenticated} />
+          </div>
+          {preparedTask && !anyLoading && <div role="status" style={{ marginTop: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+            {i18n.language.startsWith('zh') ? '有一项分析尚未开始；继续时使用原分析内容。' : 'An analysis has not started. Continuing uses its original content.'}
+            {' '}<button type="button" onClick={() => {
+              explicitStartTaskIdRef.current = preparedTask.taskId;
+              recoveringTaskIdRef.current = null;
+              writeActiveReflectionTask(preparedTask);
+              setLoading({ echoes: preparedTask.sections.includes('echoes'), traits: preparedTask.sections.includes('traits'), patterns: preparedTask.sections.includes('patterns') });
+              setActiveRecoveryTick(tick => tick + 1);
+            }} style={{ background: 'transparent', border: 0, color: 'var(--color-action-primary)', cursor: 'pointer' }}>
+              {i18n.language.startsWith('zh') ? '继续未开始的分析' : 'Continue unstarted analysis'}
+            </button>
+          </div>}
           {taskStatus && (
             <div style={{
               width: 'min(520px, 100%)',
@@ -1380,7 +1388,6 @@ export default function AnalysisView() {
         <SectionControlsRow
           loading={loading} streaming={streaming} errors={errors}
           isAuthenticated={isAuthenticated} isMobile={isMobile}
-          onAnalyze={handleAnalyzeSection}
           onConfig={handleOpenConfig}
           t={t}
         />
@@ -1399,6 +1406,12 @@ export default function AnalysisView() {
             {[errors.echoes, errors.traits, errors.patterns].filter(Boolean).join(' | ')}
           </div>
         )}
+
+        {reportSaveError && !anyLoading && <div role="alert" style={{ textAlign: 'center', marginBottom: '1rem', color: 'var(--color-state-error)' }}>
+          {reportSaveError} {reportRetryTaskId && <button type="button" disabled={reportSaving} onClick={() => { void retryReportSave(reportRetryTaskId); }}>
+            {i18n.language.startsWith('zh') ? '重试保存' : 'Retry save'}
+          </button>}
+        </div>}
 
         {/* Empty state */}
         {!hasAnyData && !anyLoading && (
@@ -1439,6 +1452,7 @@ export default function AnalysisView() {
         onToggleSession={handleToggleReanalysisSession}
         onSelectAll={handleToggleAllReanalysisSessions}
         onConfirm={handleConfirmReanalysis}
+        allowNotionOnly={analysisContent.include_notion}
       />
 
       {/* Section config modal */}
@@ -1466,14 +1480,13 @@ export default function AnalysisView() {
 // Per-section controls row (dashboard area)
 // ──────────────────────────────────────────────
 function SectionControlsRow({
-  loading, streaming, errors, isAuthenticated, isMobile, onAnalyze, onConfig, t,
+  loading, streaming, errors, isAuthenticated, isMobile, onConfig, t,
 }: {
   loading: Record<string, boolean>;
   streaming: Record<string, string>;
   errors: Record<string, string>;
   isAuthenticated: boolean;
   isMobile: boolean;
-  onAnalyze: (s: SectionKey) => void;
   onConfig: (s: SectionKey) => void;
   t: TFunction;
 }) {
@@ -1526,28 +1539,7 @@ function SectionControlsRow({
                 ⚙
               </button>
             )}
-            {isAuthenticated && (
-              <button
-                onClick={() => !loading[key] && onAnalyze(key)}
-                disabled={loading[key]}
-                style={{
-                  padding: '3px 12px', borderRadius: '12px',
-                  border: '1px solid var(--color-border-paper)',
-                  background: 'transparent', cursor: loading[key] ? 'not-allowed' : 'pointer',
-                  color: 'var(--color-text-body)', fontSize: '11px',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                  opacity: loading[key] ? 0.6 : 1, transition: 'all 0.2s',
-                }}
-                onMouseEnter={e => {
-                  if (!loading[key]) e.currentTarget.style.background = 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                {loading[key] ? '◌' : 'Analyze'}
-              </button>
-            )}
+
           </div>
 
           {/* Streaming progress */}
@@ -1614,7 +1606,7 @@ function DecorativeInkSpots() {
 // ──────────────────────────────────────────────
 function PaperStack({
   echoes, traits, patterns, currentPaper, onPaperChange, isMobile, t,
-  loading, streaming, isAuthenticated, onAnalyzeSection, onConfigClick,
+  loading, streaming, isAuthenticated, onConfigClick,
 }: {
   echoes: ReflectionResult[];
   traits: ReflectionResult[];
@@ -1626,7 +1618,6 @@ function PaperStack({
   loading: Record<string, boolean>;
   streaming: Record<string, string>;
   isAuthenticated: boolean;
-  onAnalyzeSection: (s: SectionKey) => void;
   onConfigClick: (s: SectionKey) => void;
 }) {
   const contentMaxHeight = isMobile ? '280px' : '420px';
@@ -1793,24 +1784,7 @@ function PaperStack({
                           >
                             ⚙
                           </button>
-                          <button
-                            onClick={() => !sectionLoading && onAnalyzeSection(paper.section)}
-                            disabled={sectionLoading}
-                            style={{
-                              padding: '4px 14px', borderRadius: '14px',
-                              border: '1px solid var(--color-border-paper)',
-                              background: 'transparent', cursor: sectionLoading ? 'not-allowed' : 'pointer',
-                              color: 'var(--color-text-body)', fontSize: '11px',
-                              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              opacity: sectionLoading ? 0.6 : 1, transition: 'all 0.2s',
-                            }}
-                            onMouseEnter={e => {
-                              if (!sectionLoading) e.currentTarget.style.background = 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)';
-                            }}
-                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            {sectionLoading ? '◌ Analyzing…' : 'Re-analyze'}
-                          </button>
+
                         </div>
                       )}
                     </div>
@@ -2036,10 +2010,13 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 // Refs: docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
 // ══════════════════════════════════════════════
 function ReflectionBlogPage({
-  report, onBack, isMobile, t, dateLocale,
+  report, onBack, isMobile, t, dateLocale, saveError, saving, onRetrySave,
   formatDaysLabel, formatEntriesLabel, formatWordsLabel,
 }: {
   report: AnalysisReport;
+  saveError?: string;
+  saving?: boolean;
+  onRetrySave?: () => void;
   onBack: () => void;
   isMobile: boolean;
   t: TFunction;
@@ -2122,6 +2099,26 @@ function ReflectionBlogPage({
         </button>
       </div>
 
+      {saveError && <div role="alert" style={{ padding: '8px 16px', color: 'var(--color-state-error)', fontSize: 12 }}>
+        {saveError} {onRetrySave && <button type="button" onClick={onRetrySave} disabled={saving}>{dateLocale.startsWith('zh') ? '重试保存' : 'Retry save'}</button>}
+      </div>}
+      {!!report.failedSections?.length && <div role="status" style={{ padding: '8px 16px', color: 'var(--color-state-error)', fontSize: 12, flexShrink: 0 }}>
+        {dateLocale.startsWith('zh') ? '部分栏目未完成：' : 'Some sections could not finish: '}
+        {report.failedSections.map(section => t(`analysis.papers.${section}.title`)).join('、')}.
+        {' '}{dateLocale.startsWith('zh') ? '已完成的结果已保留，可重新分析。' : 'Completed results are retained. You can analyze again.'}
+      </div>}
+      {report.analysisContent && <div aria-label={dateLocale.startsWith('zh') ? '本次分析来源' : 'Analysis sources'}
+        style={{ padding: '8px 16px', fontSize: 12, color: 'var(--color-text-secondary)', flexShrink: 0 }}>
+        {report.analysisContent.agent && <span>{dateLocale.startsWith('zh') ? '分析 Agent：' : 'Analysis Agent: '}{report.analysisContent.agent.agent_name} · </span>}
+        {report.analysisContent.notion && <details>
+          <summary>Notion · {report.analysisContent.notion.pages.length} {dateLocale.startsWith('zh') ? '个页面' : 'pages'}</summary>
+          <ul style={{ margin: '4px 0', paddingInlineStart: 20, maxHeight: 96, overflowY: 'auto', overflowWrap: 'anywhere' }}>
+            {report.analysisContent.notion.pages.map(page => <li key={page.page_id}>{page.url
+              ? <a href={page.url} target="_blank" rel="noopener noreferrer">{page.title || (dateLocale.startsWith('zh') ? '未命名页面' : 'Untitled page')}</a>
+              : page.title || (dateLocale.startsWith('zh') ? '未命名页面' : 'Untitled page')}</li>)}
+          </ul>
+        </details>}
+      </div>}
       {/* ── Main content area (flex:1, no outer scroll) ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 

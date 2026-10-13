@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: allow analysis-specific labels and restore trigger focus after keyboard selection.
 // [Input] Enabled Decks hydrated with their Agents and the current Agent selection.
 // [Output] Render a Deck-grouped, Agent-selecting cascade for Chat and Dream.
 // [Pos] Shared Deck -> Agent selection boundary.
@@ -22,6 +23,9 @@ interface DeckChatSelectorProps {
   error?: string | null;
   allowNone?: boolean;
   variant?: 'compact' | 'dream';
+  noneLabel?: string;
+  triggerLabel?: string;
+  unavailableSelectionLabel?: string;
 }
 
 interface AgentOption extends DeckAgentSelection {
@@ -58,6 +62,7 @@ export default function DeckChatSelector({
   error,
   allowNone = true,
   variant = 'compact',
+  noneLabel, triggerLabel, unavailableSelectionLabel,
 }: DeckChatSelectorProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
@@ -71,7 +76,8 @@ export default function DeckChatSelector({
   const selected = useMemo(() => decks
     .flatMap((deck) => enabledAgentsOf(deck).map((agent) => ({ deck, agent })))
     .find(({ agent }) => agent.id === selectedAgentId), [decks, selectedAgentId]);
-  const selectedLabel = selected ? agentLabel(selected.agent) : t('chat.deck.noneAgent');
+  const selectedLabel = selected ? agentLabel(selected.agent)
+    : selectedAgentId && unavailableSelectionLabel ? unavailableSelectionLabel : (noneLabel ?? t('chat.deck.noneAgent'));
 
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -165,12 +171,14 @@ export default function DeckChatSelector({
     onChange?.(option ? { deckId: option.deckId, agentId: option.agentId } : undefined);
     setIsOpen(false);
     setQuery('');
+    triggerRef.current?.focus();
   };
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
       setIsOpen(false);
+      triggerRef.current?.focus();
     } else if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActiveIndex((prev) => Math.min(prev + 1, options.length - 1));
@@ -187,7 +195,7 @@ export default function DeckChatSelector({
     <button
       ref={triggerRef}
       type="button"
-      aria-label={t('chat.deck.selectAgentAria')}
+      aria-label={triggerLabel ?? t('chat.deck.selectAgentAria')}
       aria-haspopup="listbox"
       aria-expanded={isOpen}
       title={error || t('chat.deck.selectAgentTitle')}
@@ -202,7 +210,7 @@ export default function DeckChatSelector({
         fontSize: '0.76rem', cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
       } : undefined}
     >
-      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Agent</span>
+      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>{triggerLabel ?? 'Agent'}</span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '10rem', color: 'var(--color-text-primary)' }}>
         {loading ? t('chat.deck.loadingAgents') : selectedLabel}
       </span>
@@ -225,7 +233,7 @@ export default function DeckChatSelector({
             aria-label={t('chat.deck.searchAgentPlaceholder')}
             onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={handleSearchKeyDown}
-            style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--color-border-neutral)', borderRadius: '6px', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '6px 8px', fontSize: '12px', outline: 'none' }}
+            style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--color-border-neutral)', borderRadius: '6px', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '6px 8px', fontSize: '12px', outlineOffset: 2 }}
           />
           <div style={{ maxHeight: popupLayout.listMaxHeight, overflowY: 'auto', overscrollBehavior: 'contain' }}>
             {allowNone && (() => {
@@ -235,7 +243,7 @@ export default function DeckChatSelector({
                   onClick={() => selectOption(undefined)} onMouseEnter={() => setActiveIndex(0)}
                   style={{ padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-muted)', background: isActive ? 'var(--color-bg-hover)' : 'transparent', fontStyle: 'italic' }}>
                   <span aria-hidden="true" style={{ width: '14px', visibility: selectedAgentId ? 'hidden' : 'visible' }}>✓</span>
-                  {t('chat.deck.noneAgent')}
+                  {(noneLabel ?? t('chat.deck.noneAgent'))}
                 </div>
               );
             })()}

@@ -1,4 +1,6 @@
 # [Sync] 2026-10-06: preserve raw page times and add explicit-version metadata-only reads.
+# [Sync] 2026-10-13: body reads reuse explicit API/error ownership and reject incomplete or mismatched Markdown.
+# [Sync] 2026-10-13: complete self-unknown link leaves through official block details without following their URLs or referenced entities.
 # [Input] Server-owned Notion credential home and read-only ntn API endpoints.
 # [Output] Provide searchable resource discovery plus lightweight index and on-demand page read helpers.
 # [Pos] operations node in backend/notion
@@ -25,6 +27,8 @@ import asyncio
 import contextlib
 import json
 import os
+import re
+from html import unescape
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -344,24 +348,97 @@ class NotionOperationClient:
 
     async def get_page(self, page_id: str) -> OperationResult:
         page = await self._run_endpoint(f"v1/pages/{page_id}")
-        markdown = await self._run_endpoint(f"v1/pages/{page_id}/markdown")
+        markdown = await self.get_page_markdown(page_id)
         blocks = await self._run_endpoint(f"v1/blocks/{page_id}/children")
         return OperationResult(
             success=True,
             data={
                 "page": page,
-                "markdown": str(markdown.get("markdown") or ""),
+                "markdown": markdown.data["markdown"],
                 "blocks": list(blocks.get("results") or blocks.get("children") or []),
             },
         )
 
     async def get_page_markdown(self, page_id: str) -> OperationResult:
         """Fetch only the page body needed by the lazy Runtime Read hook."""
+        from .today import api_version, page_identity, NotionTodayError
+        expected = page_identity(page_id)
+        if not expected:
+            raise NotionTodayError("NOTION_RESOURCE_UNAVAILABLE", 404)
+        client = self if self._api_version is not None else NotionOperationClient(self._notion_home, api_version=api_version())
+        complete: dict[str, str] = {}
+        active: set[str] = set()
 
-        markdown = await self._run_endpoint(f"v1/pages/{page_id}/markdown")
+        async def read(identifier: str) -> str:
+            identity = page_identity(identifier)
+            if not identity or identity in active:
+                raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+            if identity in complete:
+                return complete[identity]
+            active.add(identity)
+            response = await client._run_endpoint(f"v1/pages/{identifier}/markdown")
+            if (response.get("object") != "page_markdown" or page_identity(response.get("id")) != identity
+                or not isinstance(response.get("markdown"), str) or type(response.get("truncated")) is not bool
+                or not isinstance(response.get("unknown_block_ids"), list)):
+                raise NotionTodayError("NOTION_UPSTREAM_UNAVAILABLE", 502)
+            unknown = response["unknown_block_ids"]
+            if response["truncated"] and not unknown:
+                raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+            fragments: dict[str, str] = {}
+            for block in unknown:
+                key = page_identity(block)
+                if not key:
+                    raise NotionTodayError("NOTION_UPSTREAM_UNAVAILABLE", 502)
+                if key == identity:
+                    # Markdown cannot render some links and may return the
+                    # same block as unknown. Preserve the official leaf data;
+                    # never fetch the URL or manufacture preview text.
+                    detail = await client._run_endpoint(f"v1/blocks/{block}")
+                    if detail.get("object") != "block" or page_identity(detail.get("id")) != identity:
+                        raise NotionTodayError("NOTION_UPSTREAM_UNAVAILABLE", 502)
+                    if (detail.get("has_children") is not False or detail.get("archived") is True
+                        or detail.get("in_trash") is True):
+                        raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+                    kind = detail.get("type")
+                    value = detail.get(kind) if isinstance(kind, str) else None
+                    if kind == "link_preview" and isinstance(value, dict) and set(value) == {"url"} and isinstance(value["url"], str) and value["url"].strip():
+                        data = {"type": kind, "url": value["url"]}
+                    elif kind == "link_to_page" and isinstance(value, dict):
+                        target = value.get("type")
+                        if (target not in ("page_id", "database_id", "comment_id")
+                            or set(value) != {"type", target} or not page_identity(value.get(target))):
+                            raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+                        data = {"type": kind, "link_to_page": value}
+                    else:
+                        raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+                    fragments[key] = "```json\n" + json.dumps(
+                        data, ensure_ascii=False) + "\n```"
+                else:
+                    fragments[key] = await read(block)
+            replaced: set[str] = set()
+
+            def replace(match: re.Match[str]) -> str:
+                url = unescape(match.group(1))
+                identities = {page_identity(item) for item in re.findall(
+                    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32}", url)}
+                keys = identities.intersection(fragments)
+                if len(keys) != 1:
+                    return match.group(0)
+                key = keys.pop()
+                replaced.add(key)
+                return fragments[key]
+
+            markdown = re.sub(r'<unknown\b[^>]*\burl="([^"]*)"[^>]*?/\s*>', replace, response["markdown"])
+            if replaced != set(fragments):
+                raise NotionTodayError("NOTION_MARKDOWN_INCOMPLETE", 422)
+            active.remove(identity)
+            complete[identity] = markdown
+            return markdown
+
+        markdown = await read(page_id)
         return OperationResult(
             success=True,
-            data={"markdown": str(markdown.get("markdown") or "")},
+            data={"markdown": markdown},
         )
 
     async def get_blocks(self, block_id: str) -> OperationResult:
@@ -396,7 +473,8 @@ class NotionOperationClient:
             proc.kill()
             with contextlib.suppress(Exception):
                 await proc.wait()
-            raise NotionOperationError("Notion did not respond in time. Please retry.") from exc
+            from .today import NotionTodayError
+            raise NotionTodayError("NOTION_UPSTREAM_TIMEOUT", 504) from exc
         except asyncio.CancelledError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()

@@ -2,6 +2,7 @@
 # [Output] Correlated closed response with one bounded read-only transport recovery, preserving unknown write outcomes.
 # [Pos] Shared HTTP parser; holds no service, user, DB or Gateway authentication configuration.
 # [Sync] 2026-09-17: recover one stale read-only transport while never replaying a dispatched write.
+# [Sync] 2026-10-13: preserve correlated 413 rejections as definite failures before task creation.
 """Send exactly the supplied headers, without ambient client cookies or credentials."""
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ def request_admin_dto(http: httpx.Client, *, method: Literal["GET", "POST"], url
     if raw is None or status is None:
         raise unavailable(request_id, write=write)
     if not 200 <= status < 300:
-        if status not in {400, 401, 403, 404, 409, 422, 429, 503, 504}:
+        if status not in {400, 401, 403, 404, 409, 413, 422, 429, 503, 504}:
             raise unavailable(request_id, write=write)
         try:
             error = ErrorEnvelopeDTO.model_validate_json(raw)

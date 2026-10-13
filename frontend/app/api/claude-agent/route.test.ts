@@ -4,6 +4,7 @@
 // [Sync] 2026-09-06: cover reconnect GET and turn POST without a model, database, or browser.
 // [Sync] 2026-09-07: make test-server cleanup idempotent after streamed-request teardown.
 // [Sync] 2026-09-14: use explicit native OAuth protocol and server-owned BFF config after authentication cutover.
+// [Sync] 2026-10-13: provide current server-owned Admin config before native Bearer forwarding; no Admin call is made.
 
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
@@ -86,12 +87,20 @@ test('Claude Agent Route Handler streams reconnect GET before upstream completio
   const previousFallback = process.env.BACKEND_URL;
   const bffKeys = ['INK_DREAM_PUBLIC_ORIGIN', 'INK_DREAM_BFF_REDIRECT_URI', 'INK_DREAM_BFF_COOKIE_SECRET'] as const;
   const previousBff = bffKeys.map(key => process.env[key]);
+  const adminKeys = ['INK_ADMIN_DREAM_BASE_URL', 'INK_ADMIN_DREAM_TRANSPORT_BASE_URL', 'INK_ADMIN_AUTH_ISSUER', 'INK_DREAM_API_RESOURCE', 'INK_ADMIN_DREAM_SERVICE_CLIENT_ID', 'INK_ADMIN_DREAM_SERVICE_SECRET'] as const;
+  const previousAdmin = adminKeys.map(key => process.env[key]);
   try {
     process.env.INK_BACKEND_INTERNAL_URL = await listen(server);
     delete process.env.BACKEND_URL;
     process.env.INK_DREAM_PUBLIC_ORIGIN = 'https://frontend.example';
     process.env.INK_DREAM_BFF_REDIRECT_URI = 'https://frontend.example/auth/callback';
     process.env.INK_DREAM_BFF_COOKIE_SECRET = 's'.repeat(32);
+    process.env.INK_ADMIN_DREAM_BASE_URL = 'https://admin.example';
+    process.env.INK_ADMIN_DREAM_TRANSPORT_BASE_URL = 'https://admin.example';
+    process.env.INK_ADMIN_AUTH_ISSUER = 'https://admin.example/api/auth';
+    process.env.INK_DREAM_API_RESOURCE = 'https://frontend.example/api';
+    process.env.INK_ADMIN_DREAM_SERVICE_CLIENT_ID = 'route-test-client';
+    process.env.INK_ADMIN_DREAM_SERVICE_SECRET = 's'.repeat(32);
 
     const reconnectResponse = await within(proxyClaudeAgentRequest(new Request(
       'https://frontend.example/api/claude-agent/threads/thread-1/stream?cursor=event-7',
@@ -149,6 +158,9 @@ test('Claude Agent Route Handler streams reconnect GET before upstream completio
     else process.env.BACKEND_URL = previousFallback;
     bffKeys.forEach((key, index) => {
       if (previousBff[index] === undefined) delete process.env[key]; else process.env[key] = previousBff[index];
+    });
+    adminKeys.forEach((key, index) => {
+      if (previousAdmin[index] === undefined) delete process.env[key]; else process.env[key] = previousAdmin[index];
     });
     releaseReconnect?.();
     await close(server);

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: retain only an unsettled Reflections submission for exact receipt recovery and clear it with account/import data.
 // [Input] Existing browser storage keys and App's login/local-import cleanup boundaries.
 // [Output] Central storage registry and explicit cleanup list that preserves browser display preferences.
 // [Pos] Frontend storage-key and local-data cleanup policy owner.
@@ -35,6 +36,7 @@ export const STORAGE_KEYS = {
   // Analysis
   ANALYSIS_REPORTS: 'analysisReports',
   REFLECTIONS_ANALYSIS_CLICKED_DATE: 'reflections-analysis-clicked-date',
+  REFLECTIONS_PENDING_SUBMISSION: 'reflections-pending-submission',
   REFLECTIONS_ACTIVE_TASK: 'reflections-active-task',
 
   // Language
@@ -62,6 +64,7 @@ export const LOCAL_IMPORT_CLEANUP_KEYS = [
   STORAGE_KEYS.ANALYSIS_REPORTS,
   STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE,
   STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK,
+  STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION,
 ] as const;
 
 // Type for autocomplete
