@@ -1,6 +1,7 @@
 /**
  * [Sync] 2026-10-13: centralize analysis content, freeze each submission and recover task-linked reports.
  * [Sync] 2026-10-13: distinguish prepared tasks from running recovery; explicit continuation retains original inputs.
+ * [Sync] 2026-10-14: consume Chat Reflections section links by opening and focusing the newest matching saved report.
  * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
  *         getAnalysisReports, fetchSessionsAggregate, ReflectionResult,
  *         getReflectionsSectionConfig, saveReflectionsSectionConfig, resetReflectionsSectionConfig,
@@ -45,6 +46,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getDateLocale } from '../i18n';
 import { useMobile } from '../utils/mobileDetect';
+import {
+  readStoryWorkspaceAnalysisSectionParam,
+  storyWorkspaceAnalysisPathWithoutSection,
+  type StoryWorkspaceAnalysisSection,
+} from '../router/storyWorkspacePath';
 
 // ──────────────────────────────────────────────
 // Constants
@@ -517,7 +523,7 @@ function ReanalysisConfirmModal({
 // Main component
 // ══════════════════════════════════════════════
 export default function AnalysisView() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
   const isMobile = useMobile();
@@ -557,6 +563,13 @@ export default function AnalysisView() {
   const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
   const [currentPaper, setCurrentPaper] = useState(0);
   const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
+  const [savedReportsLoaded, setSavedReportsLoaded] = useState(false);
+  const [requestedBlogSection, setRequestedBlogSection] = useState<StoryWorkspaceAnalysisSection | null>(null);
+  const requestedReflectionSectionRef = useRef<StoryWorkspaceAnalysisSection | null>(
+    typeof window === 'undefined'
+      ? null
+      : readStoryWorkspaceAnalysisSectionParam(new URLSearchParams(window.location.search)),
+  );
 
   // Section config modal
   const [configModal, setConfigModal] = useState<{
@@ -688,6 +701,11 @@ export default function AnalysisView() {
   }, [isAuthenticated, dateLocale]);
 
   useEffect(() => {
+    if (isAuthLoading) {
+      setSavedReportsLoaded(false);
+      return;
+    }
+    let active = true;
     const loadStats = async () => {
       try {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
@@ -707,9 +725,12 @@ export default function AnalysisView() {
           })));
       } catch (e) { console.error(e); }
     };
-    loadStats();
-    reloadSavedReports();
-  }, [isAuthenticated, reloadSavedReports]);
+    setSavedReportsLoaded(false);
+    void Promise.all([loadStats(), reloadSavedReports()]).finally(() => {
+      if (active) setSavedReportsLoaded(true);
+    });
+    return () => { active = false; };
+  }, [isAuthLoading, isAuthenticated, reloadSavedReports]);
 
   // ── Config modal handlers ──
   const handleOpenConfig = useCallback(async (section: SectionKey) => {
@@ -783,7 +804,10 @@ export default function AnalysisView() {
     }
   }, []);
 
-  const openReflectionBlogReport = useCallback((report: Omit<AnalysisReport, 'id' | 'timestamp'> & Partial<Pick<AnalysisReport, 'id' | 'timestamp'>>) => {
+  const openReflectionBlogReport = useCallback((
+    report: Omit<AnalysisReport, 'id' | 'timestamp'> & Partial<Pick<AnalysisReport, 'id' | 'timestamp'>>,
+    initialSection: StoryWorkspaceAnalysisSection | null = null,
+  ) => {
     const wrapped: AnalysisReport = {
       id: report.id ?? Date.now(),
       echoes: report.echoes,
@@ -796,8 +820,22 @@ export default function AnalysisView() {
       analysisContent: report.analysisContent,
     };
     setSelectedReport(wrapped);
+    setRequestedBlogSection(initialSection);
     setViewMode('blog');
   }, []);
+
+  useEffect(() => {
+    const section = requestedReflectionSectionRef.current;
+    if (!savedReportsLoaded || !section) return;
+
+    requestedReflectionSectionRef.current = null;
+    const matchingReport = savedReports.find((report) => report[section].length > 0);
+    if (matchingReport) openReflectionBlogReport(matchingReport, section);
+
+    const href = storyWorkspaceAnalysisPathWithoutSection(window.location.search);
+    window.history.replaceState(window.history.state, '', href);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, [openReflectionBlogReport, savedReports, savedReportsLoaded]);
 
   const retryReportSave = useCallback(async (taskId: string) => {
     setReportSaving(true);
@@ -1076,7 +1114,11 @@ export default function AnalysisView() {
         saveError={selectedReport.taskId === reportRetryTaskId ? reportSaveError : undefined}
         saving={reportSaving}
         onRetrySave={selectedReport.taskId === reportRetryTaskId && reportRetryTaskId ? () => { void retryReportSave(reportRetryTaskId); } : undefined}
-        onBack={() => setViewMode('dashboard')}
+        initialSection={requestedBlogSection}
+        onBack={() => {
+          setRequestedBlogSection(null);
+          setViewMode('dashboard');
+        }}
         isMobile={isMobile}
         t={t}
         dateLocale={dateLocale}
@@ -1208,10 +1250,7 @@ export default function AnalysisView() {
               {savedReports.slice(0, 3).map((report, idx) => (
                 <div
                   key={report.id}
-                  onClick={() => {
-                    setSelectedReport(report);
-                    setViewMode('blog');
-                  }}
+                  onClick={() => openReflectionBlogReport(report)}
                   style={{
                     padding: '1.5rem', background: 'var(--color-bg-surface)',
                     borderRadius: '16px',
@@ -2010,10 +2049,11 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 // Refs: docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
 // ══════════════════════════════════════════════
 function ReflectionBlogPage({
-  report, onBack, isMobile, t, dateLocale, saveError, saving, onRetrySave,
+  report, initialSection, onBack, isMobile, t, dateLocale, saveError, saving, onRetrySave,
   formatDaysLabel, formatEntriesLabel, formatWordsLabel,
 }: {
   report: AnalysisReport;
+  initialSection?: StoryWorkspaceAnalysisSection | null;
   saveError?: string;
   saving?: boolean;
   onRetrySave?: () => void;
@@ -2036,6 +2076,19 @@ function ReflectionBlogPage({
   const firstKey = (blogSections[0]?.key ?? 'echoes') as SectionKey;
   const [activeSection, setActiveSection] = useState<SectionKey>(firstKey);
   const [selectedItemIdx, setSelectedItemIdx] = useState<number | null>(null);
+  const sectionButtonRefs = useRef<Partial<Record<SectionKey, HTMLButtonElement | null>>>({});
+
+  useEffect(() => {
+    if (!initialSection || report[initialSection].length === 0) return;
+    setActiveSection(initialSection);
+    setSelectedItemIdx(null);
+    const frame = window.requestAnimationFrame(() => {
+      const button = sectionButtonRefs.current[initialSection];
+      button?.focus();
+      button?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialSection, report]);
 
   const activeSectionObj = blogSections.find(s => s.key === activeSection) ?? blogSections[0];
   const activeItems = activeSectionObj?.items ?? [];
@@ -2177,6 +2230,9 @@ function ReflectionBlogPage({
                 return (
                   <button
                     key={s.key}
+                    ref={(node) => { sectionButtonRefs.current[s.key] = node; }}
+                    data-reflection-section={s.key}
+                    aria-pressed={isActive}
                     onClick={() => handleSectionChange(s.key)}
                     style={{
                       flex: isMobile ? '1' : 'none',

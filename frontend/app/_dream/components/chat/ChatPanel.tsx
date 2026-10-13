@@ -13,6 +13,7 @@
 // [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 // [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
+// [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
 import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
@@ -155,6 +156,7 @@ import {
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
 import { IconArrowDown } from './Icons';
+import type { StoryWorkspaceAnalysisSection } from '../../router/storyWorkspacePath';
 import {
   shouldApplyChatHistoryRecoverySnapshot,
   type ChatHistoryRecoveryCheckpoint,
@@ -239,6 +241,8 @@ interface ChatPanelProps {
   onOpenTaskThread?: (threadId: string) => void;
   /** Replaces the current canonical Chat Thread after following a persisted task relation. */
   onNavigateThread?: (threadId: string) => void;
+  /** Opens one section in the existing Reflections report page. */
+  onOpenReflectionSection?: (section: StoryWorkspaceAnalysisSection) => void;
   /** Opens a persisted scheduled task created by a successful Tool result. */
   onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
@@ -304,6 +308,7 @@ export default function ChatPanel({
   onOpenSubagentTask,
   onOpenTaskThread,
   onNavigateThread,
+  onOpenReflectionSection,
   onOpenScheduledTask,
   voiceSystemPrompt,
   deckId,
@@ -1474,6 +1479,7 @@ export default function ChatPanel({
                 sourceThread={taskSessionLinks.source}
                 createdTaskLinks={taskSessionLinks.created}
                 onNavigateThread={onNavigateThread}
+                onOpenReflectionSection={onOpenReflectionSection}
                 onOpenScheduledTask={onOpenScheduledTask}
                 isLoading={chatLoading}
                 error={error}

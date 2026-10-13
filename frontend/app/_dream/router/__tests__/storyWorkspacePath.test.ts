@@ -13,6 +13,7 @@
 // [Sync] 2026-08-31: cover the run-independent static creation-guide route.
 // [Sync] 2026-08-31: root resolves to Chat and the removed /ink-and-memory prefix stays unmatched.
 // [Sync] 2026-09-02: cover opaque Episode query selection and index return path.
+// [Sync] 2026-10-14: cover allowlisted Reflections section navigation and one-shot query cleanup.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -22,6 +23,7 @@ import {
   matchStoryWorkspaceRoutePattern,
   parseStoryWorkspaceRunParam,
   readStoryWorkspaceEpisodeParam,
+  readStoryWorkspaceAnalysisSectionParam,
   resolveStoryWorkspacePath,
   storyWorkspaceDreamStageForRoute,
   storyWorkspaceAllowsLegacyReviewPanel,
@@ -34,7 +36,18 @@ import {
   storyWorkspaceDreamPathWithoutRun,
   storyWorkspaceCommitNavigation,
   storyWorkspaceNavigationTarget,
+  storyWorkspaceAnalysisSectionPath,
+  storyWorkspaceAnalysisPathWithoutSection,
 } from '../storyWorkspacePath';
+
+test('Reflections section navigation is allowlisted and consumed without losing other query intent', () => {
+  expect(storyWorkspaceAnalysisSectionPath('echoes')).toBe('/story-workspace/analysis?section=echoes');
+  expect(readStoryWorkspaceAnalysisSectionParam(new URLSearchParams('section=traits'))).toBe('traits');
+  expect(readStoryWorkspaceAnalysisSectionParam(new URLSearchParams('section=unknown'))).toBeNull();
+  expect(readStoryWorkspaceAnalysisSectionParam(new URLSearchParams('section='))).toBeNull();
+  expect(storyWorkspaceAnalysisPathWithoutSection('?section=patterns&from=chat')).toBe('/story-workspace/analysis?from=chat');
+  expect(storyWorkspaceAnalysisPathWithoutSection('?section=patterns')).toBe('/story-workspace/analysis');
+});
 
 const ROUTER_SOURCE = readFileSync(new URL('../story-workspace.tsx', import.meta.url), 'utf8');
 
