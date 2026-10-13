@@ -1,3 +1,4 @@
+// [Sync] 2026-10-13: local image import and charcoal editing tools use the existing bilingual Chat namespace.
 // [Sync] 2026-10-12: localize builtin compact usage and unavailable feedback.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-11: distinguish image operation failure, completion and interrupted history in both languages.
@@ -888,6 +889,14 @@ const resources = {
           sketch: {
             title: 'Draw a sketch', uploadFile: 'Upload files', tools: 'Drawing tools',
             pen: 'Pen', eraser: 'Eraser', undo: 'Undo', redo: 'Redo', clear: 'Clear',
+            layeredCanvas: 'Layered Canvas', layers: 'Layers', history: 'Timeline', toolkit: 'Drawing toolkit',
+            sketchLayer: 'Sketch layer', imageLayer: 'Image layer', eraseTarget: 'Erase target',
+            eraseSketch: 'Erase sketch', eraseImage: 'Erase image', closeHistory: 'Close timeline', clearHistory: 'Clear timeline',
+            restore: 'Restore step', fragments: 'Sketch fragments', noHistory: 'No history recorded yet', layerHidden: 'Show the selected layer to continue drawing.',
+            pan: 'Move', importImage: 'Import image', importing: 'Loading image…',
+            importFailed: 'Could not load the image. Your drawing is kept. Choose another image.',
+            imageTooLarge: 'This image exceeds the upload size limit. Choose a smaller image.',
+            eraserSize: 'Eraser size', zoomIn: 'Zoom in', zoomOut: 'Zoom out', resetView: 'Reset view', zoom: 'Zoom',
             canvas: 'Sketch canvas', return: 'Back', add: 'Add to message', adding: 'Adding…',
             filename: 'Sketch.png', addFailed: 'Could not add the sketch. Your drawing is kept. Try again.',
           },
@@ -1993,6 +2002,14 @@ const resources = {
           sketch: {
             title: '绘制草图', uploadFile: '上传文件', tools: '绘图工具',
             pen: '画笔', eraser: '橡皮', undo: '撤销', redo: '重做', clear: '清空',
+            layeredCanvas: '分层画布', layers: '图层', history: '绘图历史', toolkit: '绘图工具箱',
+            sketchLayer: '笔画图层', imageLayer: '图片图层', eraseTarget: '擦除目标',
+            eraseSketch: '擦除笔画', eraseImage: '擦除图片', closeHistory: '关闭绘图历史', clearHistory: '清空绘图历史',
+            restore: '恢复步骤', fragments: '草图片段', noHistory: '还没有绘图历史', layerHidden: '显示当前图层后可继续绘制。',
+            pan: '移动', importImage: '导入图片', importing: '正在读取图片…',
+            importFailed: '图片读取失败，原绘制内容已保留，请选择其他图片。',
+            imageTooLarge: '图片超过当前上传大小限制，请选择较小图片。',
+            eraserSize: '橡皮大小', zoomIn: '放大', zoomOut: '缩小', resetView: '复位', zoom: '缩放',
             canvas: '草图画布', return: '返回', add: '添加到消息', adding: '正在添加…',
             filename: '草图.png', addFailed: '草图未能添加，绘制内容已保留，请重试。',
           },

@@ -1,178 +1,175 @@
-<!-- [Input] Chat sketch-input PRD, installed Codex composer source, Modal and attachment pipeline. -->
-<!-- [Output] Scoped sketch interactions, sequence/state diagrams and implementation acceptance. -->
-<!-- [Pos] Chat sketch input formal interaction design. -->
-<!-- [Sync] 2026-10-09: approved design implemented; isolated technical checks passed, real-business release gate remains separate. -->
-<!-- [Sync] 2026-10-10: trace main-conversation image boundary and link fresh combined delivery receipts. -->
+<!-- [Sync] 2026-10-13: align the source component shell, layer controls and history after user correction. -->
+<!-- [Input] Current sketch-input PRD, readonly CharcoalNarrative source, Modal and original upload/send APIs. -->
+<!-- [Output] One package boundary, normal/recovery sequences, editor states and acceptance mapping. -->
+<!-- [Pos] Current Chat image/sketch formal interaction design. -->
+<!-- [Sync] 2026-10-13: select modular component package with deterministic charcoal and image composition. -->
 
-# 绘制草图输入交互设计
+# 图片与草图输入交互设计
 
-## 背景、目标与边界
+## 背景与问题
 
-让用户在 Chat 中画出想法，再把草图作为图片发送。业务功能以[PRD](../../prd/chat/sketch-input.md)为准。画布不负责 AI 生成或编辑图片，也不调用 Responses、Images 或 Gateway。
+Chat 已有本地草图和上传通路，需要复用指定组件的绘图能力并形成独立包。来源目录不是上传服务，也不是已工作的 AI 生图入口。业务规则和页面骨架见 [PRD](../../prd/chat/sketch-input.md)，旧设计保留于 [历史原文](sketch-input-interaction-v1-20261009.md)。
 
-## 双钻石结论与证据
+## 目标与边界
 
-发现：现有图片上传解决“已有文件”，缺少“现场手绘”。当前安装包的 `Clt` 注册 Sketch 菜单，`xlt` 打开画布，`ylt` 将 PNG 送入 `addImageAttachment`。收敛问题：缺少的是图片输入方式，不是新的图像模型通道。
+一个 `@ink-dream/sketch-input` pnpm workspace package，公开 `SketchEditor`、受控 `SketchDocument` 和 PNG 输出；不依赖应用 store、Modal、i18n、认证或 API。内部模块为 drawing、history、imageInput、SketchEditor、CharcoalToolbar、ToolkitDashboard 和 HistorySidebar。界面保留来源的纸张纹理、双层画布、左上标识、右上玻璃工具栏/工具箱、左侧纸片历史和自定义绘图光标；宿主 Modal 只承担覆盖、关闭和焦点。宿主仍拥有关闭、草稿、文案、现有文件大小限制、授权上传及消息 DTO。本轮不更改 backend、Admin、Gateway、数据库或 CLI。
 
-发展：比较独立画板、AI 绘图按钮和输入框内的草图弹窗。交付选择：复用输入框、Modal 和上传路径，只补画笔、橡皮与操作历史。取消时保留本地草稿，避免新增丢弃确认。完成后进入既有附件流程。
+## 概念与规则
 
-| 结论 | 证据与证据类型 |
-| --- | --- |
-| Codex 提供手绘输入，完成后作为图片附件 | 安装包 `/Applications/ChatGPT.app/Contents/Resources/app.asar`，`openai-codex-electron 26.1007.21159`，`webview/assets/app-primary-5433e23a397e.js:64` 的 `Clt/xlt/ylt`；`composer-state-ab087c986c03.js:1` 的 `createSketchComposerState` 导出 PNG File 并交给上传适配器。安装包静态源码已确认；当前界面因 Computer Use 限制未实测。原文件与 SHA 在本机忽略目录 `frontend/output/codex-sketch-source-20261009/source-manifest.json`，不作为仓库依赖。 |
-| IM 可以复用现有上传与消息 DTO | `frontend/app/_dream/components/chat/AIInputDock.tsx:333/385/475` 的 `uploadFileToStorage/handleFiles/handleSend`；同目录 `AIInputDock.helpers.ts:40` 的 `toAttachment`；`ChatView.tsx:935/951` 的 `startThreadWithQueuedSend` 与附件转换。源码已实现。 |
-| 弹窗、焦点和图片历史无需另写框架 | `frontend/app/_dream/components/chat/Modal.tsx:61` 的 `Modal`；同目录 `FileMessagePart.tsx:32` 的 `FileMessagePart`；`threadSessionHydration.ts:179/335` 的 `fetchClaudeThreadMessages/hydrateClaudeThreadSession`。源码已实现；本次不修改历史协议。 |
-| 新画布采用白底黑线与本地操作历史 | `frontend/app/_dream/components/chat/SketchInputDialog.tsx:22/81` 的 `SketchInputDialog/add`，同目录 `sketchDrawing.ts:29/42/52` 的 `renderSketch/sketchHasInk/exportSketch`：本轮源码已实现，验证见执行记录。 |
+`SketchDocument` 保存操作数组与 cursor。笔画保存工具、尺寸、points 和 seed；图片操作保存已解码图片，清空操作同时移除图片和笔画。渲染重放操作，先合成图片底层，再将透明笔画层覆盖在白底上；橡皮使用 `destination-out`，目标默认 `sketch`，用户选择 `render` 时擦底图层。两层分别拥有 visible/opacity，当前工具目标被隐藏时不接受绘制；导出合成当前可见层。图像按 contain 放入固定逻辑画布，沿用原草图 PNG 比例与尺寸。源 `CanvasManager` 的颗粒分布和 `CharcoalScene` 的分层合成被复用；源 Math.random 重绘改为 seed 重放，防止撤销后变样。视图 transform 只影响显示；pointer 依据变换后的 boundingClientRect 映射回逻辑坐标。原始 PNG 导出不含 zoom/pan。
 
-## 正常流程与页面状态
+导入仅解码本地 File，禁止组件 fetch 上传或模型服务。类型/大小或解码失败不提交历史操作。图片 object URL 在成功、失败、取消后释放，返回/卸载 abort 当前解码并使旧结果无效。图层和橡皮目标由 ToolkitDashboard 显式控制；导入新图片只替换底图。HistorySidebar 保留纸片缩略图和步骤恢复，清空历史将当前两层像素保存为新的本地起点，不丢弃当前内容。打开历史将焦点移至关闭按钮，关闭、Escape 或恢复步骤将焦点返回历史入口，Escape 此时仅关闭历史抽屉。宿主通过 key 将草稿限定于当前 Thread。
 
-`AIInputDock` 的添加按钮展开两个选项。选择草图后由 `SketchInputDialog` 复用 `Modal` 打开画布。默认画笔；橡皮为局部擦除。每次完整笔画、擦除、清空构成一次可撤销操作。关闭后保留此输入框中的草稿，完成添加后清空画布草稿。
+## Double Diamond 与范围评审
 
-导出读取实际可见画布像素，白底 PNG；通过 RGB 是否存在小于 255 的值判断非白墨迹，不以 PNG 文件大小或 alpha 判空。擦完、撤销或清空后重算。空白或仍在绘制时禁用添加。导出/上传期间避免重复操作。上传失败显示错误并保留笔画；再次添加重新执行现有上传。上传成功关闭弹窗，附件继续提供预览和移除。用户发送时仍由 `handleSend` 交给 `ChatView`。本次不增加已添加附件的笔画编辑，也不持久化矢量文档。
+发现已有生产上传/草图；定义问题为组件模块化及图片描画。整套来源应用会引入叙事、年代、全局 store 与模拟生成；只搬旧草图不能满足指定来源复用。收敛为一个包的本地编辑器，宿主薄适配。选用炭笔/透明擦除/坐标与分层合成，保留现有历史、PNG 和反馈；缩放/移动只服务编辑，保留原图层工具箱和纸片快照历史，排除作品库和 AI 占位。第一版旧表单UI没有满足迁移目标，按用户纠正完整保留原画布外观和布局；第一版文档另见 [版本2原文](sketch-input-package-v2-20261013.md)。所有工具均服务一张待发送图片，无新路由、schema、配额或确认。详细源码判断及输入缺口见 [执行记录](../../exec/sketch-package-20261013.md)。以下包接口为本轮选定实现，实施/验证状态以执行记录为准。
 
-图中发送后的图片输入链路以原 Workspace Mode 已启用为条件。`claude_agent_stream` 仅在已有工作区同步成功后构造 `AttachmentPayload`；关闭工作区时仍可添加并发送附件，但不会构造 PNG 视觉输入，也不会注册图片生成工具。本轮保持该运行边界，不以创建画布开启工作区。下面的主模型输入不是 Responses 内置 `image_generation`。
+## 正常业务时序
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
     participant Dock as AIInputDock
-    participant Sketch as SketchInputDialog
-    participant Modal as Modal
+    participant Dialog as SketchInputDialog / Modal
+    participant Editor as SketchEditor
+    participant Image as imageInput
+    participant Canvas as drawing / history
+    participant Tools as ToolkitDashboard
+    participant History as HistorySidebar
     participant Upload as useFileUpload
-    participant View as ChatView
-    participant API as claude_agent_stream
-    participant Factory as ClaudeAgentThreadFactory
-    participant Service as ClaudeAgentService
-    participant Context as ClaudeAgentContextBuilder
-    participant Runner as ClaudeAgentRunner
-    participant Gateway as Admin Gateway
+    participant Chat as ChatView / FileMessagePart
     User->>Dock: 添加 → 绘制草图
-    Dock->>Sketch: 打开本地草稿
-    Sketch->>Modal: open=true
-    User->>Sketch: 画笔、擦除、撤销或重做
-    User->>Sketch: 添加到消息
-    Sketch->>Sketch: 导出非空白 PNG File
-    Sketch->>Dock: onAdd(File): Promise<boolean>
-    Dock->>Dock: handleFiles，按现有文件规则检查并建立预览
-    opt 存在 workspaceSessionId
-        Dock->>Dock: syncFileToWorkspace，Cookie/CSRF POST /api/workspace/files
+    Dock->>Dialog: open / Thread key
+    Dialog->>Editor: document、labels、maxFileBytes、onAdd
+    opt 导入已有图片
+        User->>Editor: 导入图片，选择本地 File
+        Editor->>Image: 类型/大小检查与 decode，AbortSignal
+        Image-->>Editor: 解码图片，释放 object URL
+        Editor->>Canvas: append 图片操作，保持笔画
     end
-    Dock->>Upload: upload(File)，现有 Cookie/CSRF 上传
-    Upload-->>Dock: 内部结果 key、url、contentType、size
-    Dock-->>Sketch: onAdd 返回 true（handleFiles 返回 boolean[]）
-    Sketch->>Modal: 关闭并清空本地画布草稿
-    User->>Dock: 输入说明并发送
-    Dock->>View: onSendMessage(text, UploadedFile[], toolChoice)
-    View->>API: toAttachment，POST /api/claude-agent
-    API->>API: 原身份认证、Thread授权和附件同步
-    API->>Factory: run_streaming，含当前Thread AttachmentPayload
-    Factory->>Service: 原准备与执行流程
-    Service->>Context: build_user_message，图片字节与规范引用
-    Context-->>Service: image块、参考URI和用户文字
-    Service->>Runner: run_streaming，原Callbacks
-    Runner->>Gateway: Claude Code原Messages请求
-    Gateway->>Gateway: 按选中Provider转换，Responses保留input_image
-    Gateway-->>Runner: 主模型文字或原function工具调用
-    Runner-->>Service: 原文本/Tool回调
-    Service-->>View: 原SSE，原Admin消息持久化
+    User->>Editor: 炭笔 / 橡皮 / 历史 / 视图调整
+    Editor->>Canvas: 逻辑坐标、seed、操作历史
+    Canvas-->>Editor: 白底合成，判定可添加内容
+    opt 图层与历史
+        User->>Tools: 显隐两层 / 擦除目标与大小
+        Tools->>Editor: layers / eraserTarget
+        User->>History: 选择纸片快照或清空历史
+        History->>Editor: 恢复步骤 / 当前两层作为新起点
+    end
+    User->>Editor: 添加到消息
+    Editor->>Canvas: exportSketch，完整逻辑 PNG
+    Editor->>Dialog: onAdd(File)
+    Dialog->>Dock: handleFiles([File], click)
+    opt 已有 workspaceSessionId
+        Dock->>Dock: 原 syncFileToWorkspace
+    end
+    Dock->>Upload: 原 upload，Cookie/CSRF
+    Upload-->>Dock: key、url、metadata
+    Dock-->>Editor: boolean 上传结果
+    Editor->>Dialog: 清空草稿并关闭
+    User->>Dock: 输入文字 / 发送
+    Dock->>Chat: 原 UploadedFile / toAttachment
+    Chat-->>User: FileMessagePart 显示原消息图片
 ```
 
-| 状态 | 触发 / 执行模块 / 输入输出 | 可见反馈与操作 | 退出 |
-| --- | --- | --- | --- |
-| 输入框 | `AIInputDock` 接收文字、普通附件 | 添加菜单、发送/停止保持原行为 | 打开草图 |
-| 空白画布 | `SketchInputDialog` 初次打开或清空 | 可画、返回；不能添加 | 绘制出可见像素 |
-| 草图编辑 | pointer 输入更新笔画 | 可擦除、撤销、重做、清空、返回、添加 | 返回或添加 |
-| 添加中 | PNG File 交给 `handleFiles` | “正在添加”，禁止重复添加与修改；暂不关闭 | 上传成功或失败 |
-| 添加失败 | 导出失败或上传无结果 | 草稿保留，错误与再次添加 | 用户重试或返回 |
-| 待发送附件 | storageKey 进入现有 `UploadedFile` | 预览、移除、文字与发送 | 发送、删除 |
-
-```mermaid
-stateDiagram-v2
-    [*] --> 输入框
-    输入框 --> 空白画布: 打开新草图
-    输入框 --> 草图编辑: 继续保留的草稿
-    空白画布 --> 草图编辑: 画出内容
-    草图编辑 --> 空白画布: 清空或擦至空白
-    空白画布 --> 输入框: 返回
-    草图编辑 --> 输入框: 返回并保留草稿
-    草图编辑 --> 添加中: 添加非空白 PNG
-    添加中 --> 添加失败: 导出或上传失败
-    添加失败 --> 添加中: 再次添加
-    添加失败 --> 输入框: 返回并保留草稿
-    添加中 --> 待发送附件: 上传成功
-    待发送附件 --> 输入框: 发送成功或移除
-    待发送附件 --> 待发送附件: 发送失败恢复附件
-```
-
-## 异常与恢复
+## 异常与恢复时序
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
-    participant Sketch as SketchInputDialog
+    participant Dialog as SketchInputDialog
+    participant Editor as SketchEditor
+    participant Image as imageInput
     participant Dock as AIInputDock
     participant Upload as useFileUpload
-    participant View as ChatView
-    User->>Sketch: 添加到消息
+    User->>Editor: 导入图片
+    Editor->>Image: decode(File, AbortSignal)
+    alt 无效图片或解码失败
+        Image-->>Editor: 错误
+        Editor-->>User: 导入失败；原图片/笔画保留
+    else 用户返回或卸载
+        User->>Dialog: 返回
+        Dialog->>Editor: 卸载编辑视口；宿主仍保存 document
+        Editor->>Image: abort；丢弃迟到结果
+    else 成功
+        Image-->>Editor: 解码图片；提交一个历史操作
+    end
+    User->>Editor: 添加到消息
     alt PNG 导出失败
-        Sketch-->>User: 显示错误，保留画布，可再次添加
-    else PNG 导出成功
-        Sketch->>Dock: onAdd(File): Promise<boolean>
-        Dock->>Upload: 现有 upload(File)
-        alt 网络、权限或上传失败
-            Upload-->>Dock: undefined 或抛出错误
-            Dock->>Dock: 移除未完成附件并释放预览 URL
-            Dock-->>Sketch: false，保留画布
-            Sketch-->>User: 提示再次添加
-            User->>Sketch: 再次添加
+        Editor-->>User: 草稿保留，可重试
+    else 导出成功
+        Editor->>Dock: 原 onAdd / handleFiles
+        Dock->>Upload: 原上传
+        alt 上传拒绝/断网/结果解析失败
+            Upload-->>Dock: undefined 或错误
+            Dock-->>Editor: false；失败附件预览被原路径释放
+            Editor-->>User: 图片和笔画保留，可再次添加
         else 上传成功
-            Dock-->>Sketch: true
+            Dock-->>Editor: true
+            Editor->>Dialog: 清空 document / 关闭
             User->>Dock: 发送
-            Dock->>View: onSendMessage
-            alt 发送拒绝
-                View-->>Dock: Promise reject
-                Dock-->>User: 恢复文字与原附件
-            else 发送成功
-                View-->>Dock: 完成既有发送
+            alt 原发送拒绝
+                Dock-->>User: 原文字和附件恢复
+            else 原发送成功
+                Dock-->>User: 原消息及历史可查看
             end
         end
     end
 ```
 
-添加只是上传并放入待发送附件，消息持久化发生在用户发送后。无生成进度、模型取消或 Tool 解析状态。关闭画布仅返回输入框；上传中的关闭请求暂不生效，避免在完成后重复添加。图片访问失败沿用现有图片消息反馈；重新载入会话只恢复已发送 PNG，不恢复笔画。上传和 Workspace 保存不是跨服务事务，上传失败后可能已有 Workspace 文件，本次不改变既有文件清理语义。
+## 状态与转换
 
-## 职责、关联与持久化
-
-- `SketchInputDialog`：pointer capture、笔画历史、Canvas 重绘、非空白检查、PNG 导出及添加反馈。画布坐标使用固定逻辑画布并按当前显示尺寸映射，窄屏不会改变原图比例。
-- `AIInputDock`：菜单、文件大小检查、唯一附件 ID、blob 预览、上传与发送失败恢复。`onAdd(File): Promise<boolean>` 仅返回本次上传是否成功；附件内容仍由原 `UploadedFile` 管理。`handleFiles(FileList | File[]): Promise<boolean[]>` 返回逐个上传结果，过滤失败的输入返回 false，供草图等待；普通文件调用保持原行为。
-- `useFileUpload`：沿用当前存储配置、Cookie 会话和 CSRF headers；不得在草图组件保存凭证或增加认证捷径。
-- 后端：沿用现有上传接口的身份认证、文件检查和文件访问授权；本次不新建路由。`backend/routers/workspace.py:490` 的 `upload_workspace_files` 经现有用户认证处理上传；`backend/libs/claude_agent_kit/server/workspace_file_sync.py:322` 的 `save_buffer_to_workspace_files` 校验 MIME/大小、整理文件名、选择未占用路径、写文件并返回 hash/时间。画布不代替服务器检查，也不自选覆盖路径。
-- `ChatView/toAttachment`：保留现有 name/type/size/storageKey/url/workspacePath DTO；图片通过现有消息关联持久化，不增加 Tool call ID 或新的媒体协议。
-- Runtime/Gateway/Admin：画布模块不发模型请求。主对话已在[图片功能实施](image-generation-interaction-design.md)中修订 Gateway 图片转换：`anthropicContentToOpenAI` 保留用户图片与 Read 的图片结果，`responseContent/responseInput` 输出 `input_image` 并保留工具 `call_id`；`image_gen.imagegen` 的小 JSON 结果继续作为文字，不改成内置 `image_generation`。源码与隔离协议测试证明转换行为，真实模型理解仍未验收。
-
-主对话的实际关联由 `backend/routers/claude_agent.py` 的 `claude_agent_stream` 在附件同步后提供 `AttachmentPayload.id`，`backend/claude_agent/context_builder.py` 的 `build_user_message` 在图片块旁放入同 Thread `workspace://files/` URI。后续图片工具读取同 URI 的原文件字节；编辑生成新图片，原草图保留。具体执行与恢复见[图片正式设计](image-generation-interaction-design.md)。新增隔离连接测试 `test_uploaded_png_visual_input_and_edit_reference_use_same_file` 使用实际文件保存、ContextBuilder 和 broker，检查视觉块、规范引用与 multipart 编辑输入指向同一 PNG；它没有执行真实 CLI 推理或正常数据库操作。
-
-## 影响与兼容性
-
-画布实现影响输入框添加按钮、画布和文件上传完成回执；画布内粘贴/拖入文件不会触发底层输入框上传；上传文件保留菜单入口，粘贴、拖拽、外部 openFileDialogSignal、文本发送、slash 菜单、消息队列、Stop 及历史恢复协议不变。Workspace Mode 关闭时草图仍可上传，不启用 Workspace。主对话和图片工具的后端及 Gateway 变更归图片功能的影响评估，本轮不再改它们的执行语义，也无 Schema、SDK 或 Runtime 版本变更。
-
-## 验收矩阵与实施顺序
-
-| 需求 | 设计 | 实现 | 验证 |
-| --- | --- | --- | --- |
-| 手画并修改输入图片 | 画布编辑状态、PRD 双屏骨架 | `SketchInputDialog`、`sketchDrawing` | `frontend/e2e/sketch-input.spec.ts` 的操作历史、触摸、判空与 PNG 解码旅程 |
-| 返回后继续，失败可重试 | 正常图、异常图与添加失败状态 | 弹窗本地 actions/cursor 与 onAdd boolean 回执 | 关闭重开、导出失败、403/断网/结果解析失败后重试 |
-| 图片加入现有消息 | 待发送附件状态、职责与关联 | `AIInputDock.handleFiles/handleSend`、`toAttachment` | 上传进度、附件移除、文字/图片 DTO、发送拒绝恢复、旧文件选择 |
-| 保持现有输入功能 | 影响与兼容性 | 原文本/slash/Send/Stop 路径 | `AIInputDockSlashMenuRegression.test.ts`，本轮重新执行 |
-| 主对话图片与继续编辑 | 发送后视觉块、URI与独立图片工具 | 原Router/ContextBuilder、Admin图片适配、内部imagegen | PNG保存→视觉块/引用→实际broker编辑；Admin转换回归；已启用工作区的技术边界 |
-| 真实会话保存和图片理解 | 既有历史及模型通路边界 | 原Admin持久化入口与选中模型 | 未执行真实业务/模型验收，不用前端 fixture 代替 |
-
-| 验收 | 检查范围 | 类型 |
+| 状态 | 输入 / 判断 / 输出 | 可见反馈与恢复 |
 | --- | --- | --- |
-| 画布完整操作 | 打开、画、局部擦除、撤销、重做、清空恢复、空白、关闭继续 | 隔离 Chrome，挂载生产组件 |
-| 添加与恢复 | PNG MIME/非空像素、上传进度、失败保留/重试、仅一次附件 | 隔离 Chrome + HTTP 边界注入 |
-| 发送 | `toAttachment` DTO、文字/图片发送、失败恢复、移除、旧文件入口 | 隔离 Chrome，真实输入组件 |
-| 兼容性 | 当前 slash/Send/Stop 回归，英文中文、窄屏、深色、Tab/Escape | 确定性/隔离 Chrome |
-| 文档 | Markdown 清单、引用、三类 Mermaid 图与状态/实现一致性 | 文档检查 |
-| 真实业务 | 正常账户的发送、文件授权、数据库历史重开、真实模型理解 | 不由前端 harness 代替；本轮不执行 |
+| 空白 | 无图片且无可见笔画 | 可画或导入；不能添加 |
+| 编辑 | document 含图片或可见笔画 | 可修改、历史、视图、返回、添加 |
+| 绘制 | 单一 pointer capture | 禁止历史/添加；pointercancel 丢弃未完成笔画 |
+| 解码 | imageInput 的本轮 AbortSignal | 禁止编辑/添加；返回取消；失败回原草稿 |
+| 导出/上传 | saving callback 与原 onAdd | 显示正在添加，阻止重复添加和关闭 |
+| 添加失败 | 导出异常或 onAdd=false | 错误提示；document 不清空，可重试 |
+| 待发送 | 原 UploadedFile 已上传 | 原预览、移除、发送；失败恢复 |
+| 返回 | 宿主关闭 Modal | document 保留，重开重放；Thread 改变不复用 |
 
-原画布设计的独立评审、实现与 2026-10-09 回执保留在[原执行记录](../../exec/sketch-input-implementation-20261009.md)。本轮重新核对实际源码并修订主对话边界，新增同文件连接测试；完整新命令、图示渲染与未验证部分见[合并交付记录](../../exec/chat-image-sketch-delivery-20261010.md)。原回执不代替本轮验证，真实业务验收未执行。
+```mermaid
+stateDiagram-v2
+    [*] --> 空白
+    空白 --> 绘制: pointerdown
+    编辑 --> 绘制: pointerdown
+    绘制 --> 编辑: pointerup 提交笔画
+    绘制 --> 空白: cancel 且原草稿为空
+    绘制 --> 编辑: cancel 且原草稿有内容
+    空白 --> 解码: 导入图片
+    编辑 --> 解码: 导入或替换图片
+    解码 --> 编辑: 成功提交图片 / 失败且原草稿有内容
+    解码 --> 空白: 失败且原草稿为空
+    解码 --> 返回: 关闭并 abort
+    编辑 --> 空白: 清空 / 撤销 / 擦至空白且无图片
+    空白 --> 编辑: 重做 / 撤销清空
+    编辑 --> 编辑: 图层显隐 / 擦除目标 / 快照恢复 / 清空历史
+    编辑 --> 添加中: 导出当前可见层 PNG
+    添加中 --> 添加失败: 导出或上传失败
+    添加失败 --> 添加中: 重试
+    添加失败 --> 编辑: 修改草稿
+    添加中 --> 待发送: 上传成功并清空草稿
+    空白 --> 返回: 关闭
+    编辑 --> 返回: 关闭并保留
+    返回 --> 编辑: 重开有内容草稿
+    返回 --> 空白: 重开空白草稿
+    待发送 --> [*]: 原发送或移除
+    待发送 --> 待发送: 原发送拒绝恢复
+```
+
+## 模块、影响与验收
+
+| 模块 | 输入 / 输出及边界 | 验收 |
+| --- | --- | --- |
+| drawing | actions → 图片/笔画两层 → 单个白底 Canvas → PNG；seed 固定、透明擦除、图片 contain | 真实 pointer、像素重放一致、导出内容/尺寸、默认只擦笔画及显式擦底图、视图不改变导出 |
+| history | document + action → 新 cursor 分支 | 导入/替换/清空/撤销重做、新操作结束 redo |
+| imageInput | 本地 File / maxFileBytes / AbortSignal → 解码图片或错误 | 取消、损坏图、无效类型/大小、URL 释放、旧请求无效 |
+| SketchEditor / CharcoalToolbar | document/labels/callbacks → 原纸张/悬浮工具 UI 与 File | 原视觉结构、工具/视图、返回、PNG、失败恢复、键盘/触摸/布局 |
+| ToolkitDashboard | layers / eraserTarget / size → 显示或编辑目标 | 两层显隐、笔画/底图擦除、隐藏目标禁画、导出与可见层一致 |
+| HistorySidebar | 操作与纸片缩略图 → cursor 或新起点 | 步骤恢复、分支替换、清空历史保留两层、抽屉焦点与滚动 |
+| SketchInputDialog | Modal / i18n / Thread-owned draft → 原 onAdd | 焦点/滚动、草稿保留、忙态关闭保护、Thread 隔离 |
+| AIInputDock / useFileUpload | 原上传/发送 DTO 与授权 | 真实上传回执/下游图片、失败恢复、旧选择/粘贴/拖拽，slash/Send/Stop 回归 |
+
+包声明使用 `workspace:*` 和 React peer dependency，Next 消费 TS source 并显式 transpile。仅一个锁文件，不添加生产 Vite 根。原 `sketchDrawing.ts` 删除以结束双重实现；共享 Modal、file hooks、transport、后端和数据库不改。视觉输入/模型处理沿用原 Workspace 边界。当前生产模型路径见 [图片设计](image-generation-interaction-design.md)。组件技术验证不调用模型；正常账户的上传、发送和模型调用数量另记于执行记录，不由组件测试推断模型效果。
