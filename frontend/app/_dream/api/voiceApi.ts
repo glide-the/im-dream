@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: expose strict analysis-created history pages with decimal IDs and exact cursors.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Sync] 2026-10-13: pass per-task analysis selection, read candidates and retry the original task report.
@@ -1213,6 +1214,55 @@ export async function getAnalysisReports(limit: number = 10): Promise<SavedAnaly
   return (data.reports ?? []).map(report => ({ ...report, report_data: report.report_data ? {
     ...report.report_data, analysis_content: normalizeReflectionAnalysisSummary(report.report_data.analysis_content) ?? undefined,
   } : undefined }));
+}
+
+export type AnalysisHistoryCursor = { created_at: string; id: string };
+export type AnalysisHistoryReport = Omit<SavedAnalysisReport, 'id' | 'created_at'> & {
+  id: string; created_at: string | null; analysis_created_at: string; task_id: string | null;
+};
+export type AnalysisHistoryPage = { reports: AnalysisHistoryReport[]; next_cursor: AnalysisHistoryCursor | null };
+
+const historyIdSchema = z.string().regex(/^[1-9][0-9]{0,18}$/)
+  .refine(value => BigInt(value) <= 9223372036854775807n);
+const historyTimeSchema = z.iso.datetime({ offset: true });
+const historyCursorSchema = z.object({ created_at: historyTimeSchema, id: historyIdSchema }).strict();
+const historyResultSchema = z.object({
+  title: z.string(), description: z.string(), related_session_ids: z.array(z.string()), evidence: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+}).passthrough();
+const historyPageSchema = z.object({
+  reports: z.array(z.object({
+    id: historyIdSchema, created_at: z.string().nullable(), analysis_created_at: historyTimeSchema,
+    task_id: z.uuid().nullable(),
+    report_data: z.object({
+      echoes: z.array(historyResultSchema).optional(), traits: z.array(historyResultSchema).optional(),
+      patterns: z.array(historyResultSchema).optional(),
+      failed_sections: z.array(z.enum(['echoes', 'traits', 'patterns'])).optional(),
+      stats: z.object({ days: z.number(), entries: z.number(), words: z.number() }).optional(),
+    }).passthrough(),
+  }).passthrough()),
+  next_cursor: historyCursorSchema.nullable(),
+}).strict();
+
+export async function getAnalysisHistory(options: { limit?: number; before?: AnalysisHistoryCursor | null; signal?: AbortSignal } = {}): Promise<AnalysisHistoryPage> {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) query.set('limit', String(options.limit));
+  if (options.before) {
+    query.set('before_created_at', options.before.created_at);
+    query.set('before_id', options.before.id);
+  }
+  const response = await fetch(`${API_BASE}/api/reports/history?${query}`, { headers: getAuthHeaders(), signal: options.signal });
+  if (!response.ok) throw new Error('Analysis history could not be loaded');
+  const data = historyPageSchema.parse(await response.json());
+  if (options.before && data.next_cursor?.created_at === options.before.created_at && data.next_cursor.id === options.before.id) {
+    throw new Error('Analysis history cursor did not advance');
+  }
+  return {
+    reports: data.reports.map(report => ({ ...report, report_data: {
+      ...report.report_data,
+      analysis_content: normalizeReflectionAnalysisSummary(report.report_data.analysis_content) ?? undefined,
+    } } as AnalysisHistoryReport)), next_cursor: data.next_cursor,
+  };
 }
 
 /**

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-14: saved-report section intent uses creation-time history pages, retaining consumption and focus semantics. -->
 <!-- [Input] Reflections Analyze 生成的 user message、现有 Chat 消息渲染、Story Workspace 路由和 ReflectionBlogPage 栏目切换。 -->
 <!-- [Output] 不新增 Chat 接口的 Reflections 消息预览标签与现有报告栏目跳转设计。 -->
 <!-- [Pos] memory 业务正式设计；拥有 Analyze user message 的前端预览映射、标签导航和相邻回归规则。 -->
@@ -106,10 +107,12 @@ Chat 前端通过纯函数执行识别，输入仅为当前 user text，输出�
 
 - 点击标签复用 `ChatViewContent` 现有 `openDreamRun(href)` 的 `pushState + PopStateEvent` 行为，不在 Chat 内增加第二个导航组件。
 - 目标地址为 `/story-workspace/analysis?section={section}`；`section` 只接受 `echoes | traits | patterns`，不是后端接口参数。
-- `AnalysisView` 读取这一项前端导航意图，等待现有 `getAnalysisReports()` 首次读取结束后，在 `savedReports` 中选择按 `timestamp` 最新且目标数组非空的报告，调用现有报告打开逻辑；等待期间不在 Chat 增加加载状态。
+- `AnalysisView` 读取这一项前端导航意图，等待现有 `getAnalysisHistory()` 历史读取及原任务状态回读结束后，在 `savedReports` 中选择服务端按实际分析创建时间/id倒序返回且目标数组非空的最新报告；前三份没有目标栏目时沿原末尾游标继续读取更早页，调用现有报告打开逻辑；等待期间不在 Chat 增加加载状态。
 - `ReflectionBlogPage` 以目标 section 初始化/更新 `activeSection`，渲染完成后通过既有按钮 ref 聚焦对应栏目；`data-reflection-section` 仅用于定位和测试，不产生新控件。
 - 成功打开后清除一次性 `section` 查询，避免用户点击“返回”时自动重开报告。
 - 找不到包含该栏目的报告时，停留在 `AnalysisView` 现有 dashboard/空状态；Chat 不显示新的失败提示或重试按钮。
+
+历史读取失败时，AnalysisView 保留未消费的 section 意图和原有报告，显示历史读取失败与重试；重试成功再完成栏目选择。分页和时间字段以 [分析历史设计](reflections-history-design.md) 为准。
 
 ### 5.4 历史报告边界
 

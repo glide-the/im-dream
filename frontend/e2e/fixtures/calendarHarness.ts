@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: classify exact Reflections history GET lifecycle cancellation only in its explicit fixture lane.
 // [Sync] 2026-10-13: classify only the mounted Notion probe GET cancellation during connector refresh/unmount.
 // [Sync] 2026-10-07: classify exact Chat-list and target-Thread schedule-relation aborts during result handoff.
 // [Sync] 2026-10-07: capture the synchronous Thread-handoff phase before asynchronous request-header inspection.
@@ -23,7 +24,7 @@
 // Business impact: scheduled definitions/revisions and trigger records change inside the isolated DTO fixture;
 // the linked Chat Thread is the visible run-result consumer; diary records and normal Chat transport remain unchanged.
 
-import { expect, type Locator, type Page, type Route } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, type Request as PlaywrightRequest } from '@playwright/test';
 
 export const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:55173';
 export const TASK_ID = 'st_browser_qa_20260929';
@@ -70,6 +71,7 @@ type FixtureOptions = {
   historyCount?: number;
   dayStartsUnavailable?: boolean;
   notionFaults?: boolean;
+  reflectionHistory?: boolean;
   authEntryLifecycle?: boolean;
   longTitle?: boolean;
   taskCount?: number;
@@ -107,8 +109,35 @@ function baseTrigger(task: Task, status: TriggerStatus, hasThread = status === '
   };
 }
 
+/** The production history owner aborts replaced/unmounted reads, including Next Strict Mode setup cleanup. */
+export function isReflectionHistoryCancellation(request: PlaywrightRequest): boolean {
+  const url = new URL(request.url());
+  const referer = request.headers().referer;
+  if (!referer) return false;
+  const source = new URL(referer);
+  const allowedKeys = new Set(['limit', 'before_created_at', 'before_id']);
+  return request.method() === 'GET' && request.failure()?.errorText === 'net::ERR_ABORTED'
+    && url.pathname === '/api/reports/history' && source.origin === url.origin
+    && ['/story-workspace/analysis', '/story-workspace/timeline'].includes(source.pathname)
+    && [...url.searchParams.keys()].every(key => allowedKeys.has(key));
+}
+
+/** Only actual document reload/back handoffs can cancel these Next/auth reads. */
+export function isReflectionHistoryNavigationCancellation(request: PlaywrightRequest, active: boolean): boolean {
+  if (!active || request.method() !== 'GET' || request.failure()?.errorText !== 'net::ERR_ABORTED') return false;
+  const url = new URL(request.url());
+  const referer = request.headers().referer;
+  if (!referer) return false;
+  const source = new URL(referer);
+  return source.origin === url.origin && ['/story-workspace/analysis', '/story-workspace/timeline'].includes(source.pathname)
+    && (url.pathname === '/auth/session' && url.search === ''
+      || ['/story-workspace/analysis', '/story-workspace/timeline'].includes(url.pathname)
+        && url.searchParams.has('_rsc') && [...url.searchParams.keys()].every(key => key === '_rsc'));
+}
+
 export async function installFixtures(page: Page, options: FixtureOptions = {}) {
   let diaryDeleted = false;
+  let reflectionHistoryNavigation = false;
   let taskCount = options.taskCount ?? 1;
   let task = baseTask(options.taskStatus);
   if (options.longTitle) task = { ...task, title: '晨间复盘与长期写作资料整理：'.repeat(8) };
@@ -154,6 +183,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
   });
   page.on('pageerror', (error) => unexpected.push(`pageerror: ${error.stack ?? error.message}`));
   page.on('requestfailed', async (request) => {
+    const historyNavigationPhase = Boolean(options.reflectionHistory && reflectionHistoryNavigation);
     const url = request.url();
     const path = new URL(url).pathname;
     const parsedUrl = new URL(url);
@@ -193,6 +223,8 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     const expectedNotionProbeCancellation = options.notionFaults && request.method() === 'GET'
       && path === '/api/connectors' && failure === 'net::ERR_ABORTED'
       && refererPath.startsWith('/story-workspace/');
+    const expectedHistoryCancellation = options.reflectionHistory && isReflectionHistoryCancellation(request);
+    const expectedHistoryNavigationCancellation = isReflectionHistoryNavigationCancellation(request, historyNavigationPhase);
     const expectedAuthEntryCancellation = options.authEntryLifecycle && request.method() === 'GET'
       && path === '/auth/options' && request.failure()?.errorText === 'net::ERR_ABORTED';
     if (expectedThreadHandoffAbort) {
@@ -204,7 +236,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedChatListNavigationAbort
       && !expectedScheduledResultNavigationAbort && !expectedUnknownRun && !expectedNotionCancellation
       && !expectedScheduledRelationNavigationAbort && !expectedNotionProbeCancellation
-      && !expectedAuthEntryCancellation) {
+      && !expectedAuthEntryCancellation && !expectedHistoryCancellation && !expectedHistoryNavigationCancellation) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
@@ -397,6 +429,9 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
   });
   return {
     getUnexpected: () => unexpected,
+    beginReflectionHistoryNavigation: () => { reflectionHistoryNavigation = true; },
+    endReflectionHistoryNavigation: () => { reflectionHistoryNavigation = false; },
+    isReflectionHistoryNavigationActive: () => reflectionHistoryNavigation,
     getManualRequestKeys: () => manualRequestKeys,
     getDefinitionRequests: () => definitionRequests,
     getEditBodies: () => editBodies,

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-14: historical preview and timeline follow the independent analysis-created history PRD. -->
 <!-- [Input] AnalysisView、DeckChatSelector、NotionSnapshotStore 和 Registry99 任务合同。 -->
 <!-- [Output] 回归分析内容选择的现行业务规则和桌面、窄屏页面骨架。 -->
 <!-- [Pos] memory 业务 PRD；交互图由正式设计稿所有。 -->
@@ -45,7 +46,7 @@
 ```text
 ┌ 回归分析 ──────────────────────────────────────┐
 │ 天数 / 日记 / 字数                               │
-│ 历史报告卡片 → 报告阅读页                         │
+│ [历史回顾 → 时间轴] / 最新三份报告 → 阅读页                         │
 │        [生成分析]  [分析内容 ▾]                  │
 │                     ┌ 分析内容 ─────────────┐   │
 │                     │ [ ] 将 Notion 加入分析 │   │
@@ -128,3 +129,5 @@ Analyze 栏目执行所需的完整冻结输入继续由任务和 Chat 持久化
 正式设计：[分析内容交互设计](../../design/memory/reflections-analysis-content-design.md)；Analyze Chat 历史问题与当前实现见 [大型分析会话历史设计](../../design/memory/reflections-analyze-chat-history-design.md)，本轮判断、实现和验证回执见 [大型分析会话执行记录](../../exec/analyze-chat-large-context-design-20261013.md)。既有功能评审、影响和实际回执：[实施记录](../../exec/reflections-analysis-content-20261013.md)。原分区工作流和静态配置历史保留在 [分区需求](../../design/memory/reflections-analysis-prd.md)。
 
 验收必须覆盖默认日记、Notion 正文排除/进入、Agent 指令采用和失效拒绝、键盘与窄屏、页面到任务/事件/报告/历史/再次分析完整链路及中断恢复。文档图和检查不代表功能验收。
+
+分析历史的最新三份、创建时间与现有时间轴完整读取遵循 [分析历史 PRD](reflections-history-prd.md)。内容选择、任务冻结和报告保存规则继续以本文为准。
