@@ -2,8 +2,10 @@
  * [Sync] 2026-10-13: centralize analysis content, freeze each submission and recover task-linked reports.
  * [Sync] 2026-10-13: distinguish prepared tasks from running recovery; explicit continuation retains original inputs.
  * [Sync] 2026-10-14: consume Chat Reflections section links by opening and focusing the newest matching saved report.
+ * [Sync] 2026-10-14: preview independent analyses by true creation time and navigate to the existing timeline.
+ * [Sync] 2026-10-14: retain the original history heading/grid and empty dashboard layout after scope correction.
  * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
- *         getAnalysisReports, fetchSessionsAggregate, ReflectionResult,
+ *         getAnalysisHistory, fetchSessionsAggregate, ReflectionResult,
  *         getReflectionsSectionConfig, saveReflectionsSectionConfig, resetReflectionsSectionConfig,
  *         ReflectionSectionConfig
  * [Output] Reflections page — warm paper / vintage journal design (CSS design tokens)
@@ -25,7 +27,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
   ensureReflectionTaskReport,
-  getAnalysisReports,
+  getAnalysisHistory,
   fetchSessionsAggregate,
   getLatestReflections,
   getReflectionTask,
@@ -35,7 +37,6 @@ import {
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
   type ReflectionAnalysisContentOptions,
-  type ReflectionAnalysisContentSummary,
   type ReflectionResult,
   type ReflectionSectionConfig,
   type ReflectionSectionKey,
@@ -46,7 +47,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getDateLocale } from '../i18n';
 import { useMobile } from '../utils/mobileDetect';
+import { getLocalDayKey } from '../utils/timezone';
+import { ANALYSIS_HISTORY_PREVIEW_LIMIT, historyReportForReading, type AnalysisReport } from './reflectionHistory';
 import {
+  STORY_WORKSPACE_PATHS,
+  storyWorkspaceCommitNavigation,
   readStoryWorkspaceAnalysisSectionParam,
   storyWorkspaceAnalysisPathWithoutSection,
   type StoryWorkspaceAnalysisSection,
@@ -55,7 +60,6 @@ import {
 // ──────────────────────────────────────────────
 // Constants
 // ──────────────────────────────────────────────
-const MAX_SAVED_REPORTS = 10;
 
 const PROMPT_FILE_ORDER = [
   'WORKFLOW.md',
@@ -77,18 +81,6 @@ const PROMPT_FILE_LABELS: Record<string, string> = {
 // Types
 // ──────────────────────────────────────────────
 type SectionKey = ReflectionSectionKey;
-
-interface AnalysisReport {
-  id: number;
-  taskId?: string;
-  failedSections?: ReflectionSectionKey[];
-  analysisContent?: ReflectionAnalysisContentSummary | null;
-  echoes: ReflectionResult[];
-  traits: ReflectionResult[];
-  patterns: ReflectionResult[];
-  timestamp: number;
-  stats: { days: number; entries: number; words: number };
-}
 
 type AnalysisSessionCandidate = {
   id: string;
@@ -522,7 +514,7 @@ function ReanalysisConfirmModal({
 // ══════════════════════════════════════════════
 // Main component
 // ══════════════════════════════════════════════
-export default function AnalysisView() {
+export default function AnalysisView({ timezone }: { timezone: string }) {
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
@@ -541,6 +533,8 @@ export default function AnalysisView() {
   const [errors, setErrors]       = useState({ echoes: '', traits: '', patterns: '' });
   const [stats, setStats]         = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
+  const statsRef = useRef(stats);
+  statsRef.current = stats;
   const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
   const [analysisContent, setAnalysisContent] = useState<ReflectionAnalysisContentOptions>({ include_notion: false });
   const submittingRef = useRef(false);
@@ -564,6 +558,10 @@ export default function AnalysisView() {
   const [currentPaper, setCurrentPaper] = useState(0);
   const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
   const [savedReportsLoaded, setSavedReportsLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState(false);
+  const historyRequestRef = useRef(0);
+  const historyControllerRef = useRef<AbortController | null>(null);
   const [requestedBlogSection, setRequestedBlogSection] = useState<StoryWorkspaceAnalysisSection | null>(null);
   const requestedReflectionSectionRef = useRef<StoryWorkspaceAnalysisSection | null>(
     typeof window === 'undefined'
@@ -589,115 +587,106 @@ export default function AnalysisView() {
   // ── Load data ──
   const reloadSavedReports = useCallback(async () => {
     const hasActiveRecovery = Boolean(readActiveReflectionTask());
-    if (isAuthenticated) {
-      try {
-        const db = await getAnalysisReports(MAX_SAVED_REPORTS);
-        const individual: AnalysisReport[] = db.map((r) => ({
-          id: r.id,
-          taskId: r.report_data?.task_id,
-          failedSections: r.report_data?.failed_sections,
-          analysisContent: r.report_data?.analysis_content,
-          echoes:   (r.report_data?.echoes   || []) as ReflectionResult[],
-          traits:   (r.report_data?.traits   || []) as ReflectionResult[],
-          patterns: (r.report_data?.patterns || []) as ReflectionResult[],
-          timestamp: new Date(r.created_at).getTime(),
-          stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 },
-        }));
-        const byDay = new Map<string, AnalysisReport>();
-        for (const r of individual) {
-          const day = r.taskId ? `task:${r.taskId}` : new Date(r.timestamp).toDateString();
-          const existing = byDay.get(day);
-          if (!existing) {
-            byDay.set(day, { ...r });
-          } else {
-            if (r.timestamp > existing.timestamp) existing.timestamp = r.timestamp;
-            if (existing.echoes.length === 0 && r.echoes.length > 0) existing.echoes = r.echoes;
-            if (existing.traits.length === 0 && r.traits.length > 0) existing.traits = r.traits;
-            if (existing.patterns.length === 0 && r.patterns.length > 0) existing.patterns = r.patterns;
-          }
-        }
-        const grouped = [...byDay.values()].sort((a, b) => b.timestamp - a.timestamp);
-        setSavedReports(grouped);
-        const latestEchoes   = individual.find(r => r.echoes.length > 0);
-        const latestTraits   = individual.find(r => r.traits.length > 0);
-        const latestPatterns = individual.find(r => r.patterns.length > 0);
-        if (!hasActiveRecovery) {
-          if (latestEchoes)   setEchoes(latestEchoes.echoes);
-          if (latestTraits)   setTraits(latestTraits.traits);
-          if (latestPatterns) setPatterns(latestPatterns.patterns);
-        }
-        try {
-          const latest = await getLatestReflections();
-          if (latest.task?.status === 'CREATED') {
-            setPreparedTask({ taskId: latest.task.task_id, sections: latest.task.sections,
-              startedAt: new Date(latest.task.created_at || Date.now()).getTime() });
-          }
-          if (latest.task && latest.task.status !== 'CREATED' && !isTerminalReflectionTaskStatus(latest.task.status)) {
-            const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
-            writeActiveReflectionTask({
-              taskId: latest.task.task_id,
-              sections,
-              startedAt: new Date(latest.task.started_at || latest.task.created_at || Date.now()).getTime() || Date.now(),
-            });
-            setViewMode('dashboard');
-            setSelectedReport(null);
-            setTaskStatus(`task · ${latest.task.status.toLowerCase()}`);
-            setLoading({
-              echoes: sections.includes('echoes'),
-              traits: sections.includes('traits'),
-              patterns: sections.includes('patterns'),
-            });
-            setStreaming({ echoes: '', traits: '', patterns: '' });
-            setActiveRecoveryTick(tick => tick + 1);
-            return;
-          }
-          if (!hasActiveRecovery && latest.task && isTerminalReflectionTaskStatus(latest.task.status)
-            && latest.results.length > 0 && latest.results.every(result => result.task_id === latest.task?.task_id)) {
-            const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
-            const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
-            const latestPatternsFromTask = latest.results.filter(r => r.section === 'patterns');
-            if (latestEchoesFromTask.length) setEchoes(latestEchoesFromTask);
-            if (latestTraitsFromTask.length) setTraits(latestTraitsFromTask);
-            if (latestPatternsFromTask.length) setPatterns(latestPatternsFromTask);
-            const taskTime = latest.task?.completed_at || latest.task?.updated_at || new Date().toISOString();
-            const taskReport: AnalysisReport = {
-              id: Number(new Date(taskTime)) || Date.now(),
-              echoes: latestEchoesFromTask,
-              traits: latestTraitsFromTask,
-              patterns: latestPatternsFromTask,
-              timestamp: new Date(taskTime).getTime() || Date.now(),
-              stats: { days: 0, entries: 0, words: 0 },
-              taskId: latest.task?.task_id,
-              failedSections: latest.task?.failed_sections,
-              analysisContent: latest.task?.analysis_content,
-            };
-            if (taskReport.taskId && !db.some(report => report.report_data?.task_id === taskReport.taskId)) {
-              setReportRetryTaskId(taskReport.taskId);
-              setReportSaveError(dateLocale.startsWith('zh') ? '分析结果已保留，报告暂未保存。请重试保存。' : 'The analysis result is available, but its report has not been saved.');
-            }
-
-          }
-        } catch (e) {
-          console.warn('[Reflections] latest task load failed:', e);
-        }
-      } catch (e) { console.error(e); }
-    } else {
+    if (!isAuthenticated) {
+      setHistoryLoading(false); setSavedReportsLoaded(true);
       const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
       if (saved) {
         try {
-          const r: AnalysisReport[] = JSON.parse(saved);
-          setSavedReports(r);
-          const le = r.find(x => x.echoes.length > 0);
-          const lt = r.find(x => x.traits.length > 0);
-          const lp = r.find(x => x.patterns.length > 0);
+          const reports: AnalysisReport[] = JSON.parse(saved);
+          const ordered = reports.filter(report => Number.isFinite(report.timestamp))
+            .sort((a, b) => b.timestamp - a.timestamp || (BigInt(b.id) > BigInt(a.id) ? 1 : BigInt(b.id) < BigInt(a.id) ? -1 : 0));
+          setSavedReports(ordered);
           if (!hasActiveRecovery) {
-            if (le) setEchoes(le.echoes);
-            if (lt) setTraits(lt.traits);
-            if (lp) setPatterns(lp.patterns);
+            const latestEchoes = ordered.find(report => report.echoes.length > 0);
+            const latestTraits = ordered.find(report => report.traits.length > 0);
+            const latestPatterns = ordered.find(report => report.patterns.length > 0);
+            if (latestEchoes) setEchoes(latestEchoes.echoes);
+            if (latestTraits) setTraits(latestTraits.traits);
+            if (latestPatterns) setPatterns(latestPatterns.patterns);
           }
-        } catch (e) { console.error(e); }
+        } catch { setHistoryError(true); }
       }
+      return;
     }
+    const request = ++historyRequestRef.current;
+    historyControllerRef.current?.abort();
+    const controller = new AbortController();
+    historyControllerRef.current = controller;
+    const isCurrent = () => !controller.signal.aborted && request === historyRequestRef.current;
+    setHistoryLoading(true); setHistoryError(false); setSavedReportsLoaded(false);
+    let individual: AnalysisReport[] = [];
+    let cursor: import('../api/voiceApi').AnalysisHistoryCursor | null = null;
+    let historyRead = false;
+    try {
+      const page = await getAnalysisHistory({ signal: controller.signal });
+      individual = page.reports.map(historyReportForReading);
+      const requestedSection = requestedReflectionSectionRef.current;
+      cursor = page.next_cursor;
+      // Preserve Chat's latest matching-section intent beyond the server's first history page.
+      while (requestedSection && !individual.some(report => report[requestedSection].length > 0) && cursor) {
+        const older = await getAnalysisHistory({ before: cursor, signal: controller.signal });
+        individual = [...individual, ...older.reports.map(historyReportForReading)]; cursor = older.next_cursor;
+      }
+      if (!isCurrent()) return;
+      historyRead = true;
+      setSavedReports(individual);
+      if (!hasActiveRecovery) {
+        const latestEchoes = individual.find(report => report.echoes.length > 0);
+        const latestTraits = individual.find(report => report.traits.length > 0);
+        const latestPatterns = individual.find(report => report.patterns.length > 0);
+        if (latestEchoes) setEchoes(latestEchoes.echoes);
+        if (latestTraits) setTraits(latestTraits.traits);
+        if (latestPatterns) setPatterns(latestPatterns.patterns);
+      }
+    } catch { if (isCurrent()) setHistoryError(true); }
+    finally { if (isCurrent()) setHistoryLoading(false); }
+    if (!isCurrent()) return;
+    // History availability must not disable the existing task status/recovery path.
+    try {
+      const latest = await getLatestReflections();
+      if (!isCurrent()) return;
+      if (latest.task?.status === 'CREATED' && explicitStartTaskIdRef.current !== latest.task.task_id) {
+        setPreparedTask({ taskId: latest.task.task_id, sections: latest.task.sections,
+          startedAt: new Date(latest.task.created_at || Date.now()).getTime() });
+        const active = readActiveReflectionTask();
+        if (!submittingRef.current && (!active || active.taskId === latest.task.task_id)) {
+          clearActiveReflectionTask(latest.task.task_id);
+          setLoading({ echoes: false, traits: false, patterns: false });
+          setStreaming({ echoes: '', traits: '', patterns: '' });
+          setTaskStatus('');
+        }
+      }
+      if (latest.task && latest.task.status !== 'CREATED' && !isTerminalReflectionTaskStatus(latest.task.status)) {
+        const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+        writeActiveReflectionTask({ taskId: latest.task.task_id, sections,
+          startedAt: new Date(latest.task.started_at || latest.task.created_at || Date.now()).getTime() || Date.now() });
+        setViewMode('dashboard'); setSelectedReport(null);
+        setTaskStatus(`task · ${latest.task.status.toLowerCase()}`);
+        setLoading({ echoes: sections.includes('echoes'), traits: sections.includes('traits'), patterns: sections.includes('patterns') });
+        setStreaming({ echoes: '', traits: '', patterns: '' }); setActiveRecoveryTick(tick => tick + 1);
+        return;
+      }
+      if (!hasActiveRecovery && latest.task && isTerminalReflectionTaskStatus(latest.task.status)
+        && latest.results.length > 0 && latest.results.every(result => result.task_id === latest.task?.task_id)) {
+        const latestEchoes = latest.results.filter(result => result.section === 'echoes');
+        const latestTraits = latest.results.filter(result => result.section === 'traits');
+        const latestPatterns = latest.results.filter(result => result.section === 'patterns');
+        if (latestEchoes.length) setEchoes(latestEchoes);
+        if (latestTraits.length) setTraits(latestTraits);
+        if (latestPatterns.length) setPatterns(latestPatterns);
+        // An updated older task can fall outside the preview. Verify its presence before offering save recovery.
+        while (historyRead && !individual.some(report => report.taskId === latest.task?.task_id) && cursor) {
+          const older = await getAnalysisHistory({ before: cursor, signal: controller.signal });
+          individual = [...individual, ...older.reports.map(historyReportForReading)]; cursor = older.next_cursor;
+        }
+        if (!isCurrent()) return;
+        if (historyRead && !individual.some(report => report.taskId === latest.task?.task_id)) {
+          setReportRetryTaskId(latest.task.task_id);
+          setReportSaveError(dateLocale.startsWith('zh') ? '分析结果已保留，报告暂未保存。请重试保存。' : 'The analysis result is available, but its report has not been saved.');
+        }
+      }
+    } catch (error) { if (isCurrent()) console.warn('[Reflections] latest task load failed:', error); }
+    finally { if (isCurrent() && historyRead) setSavedReportsLoaded(true); }
   }, [isAuthenticated, dateLocale]);
 
   useEffect(() => {
@@ -727,9 +716,9 @@ export default function AnalysisView() {
     };
     setSavedReportsLoaded(false);
     void Promise.all([loadStats(), reloadSavedReports()]).finally(() => {
-      if (active) setSavedReportsLoaded(true);
+      if (active) setHistoryLoading(false);
     });
-    return () => { active = false; };
+    return () => { active = false; historyControllerRef.current?.abort(); historyRequestRef.current += 1; };
   }, [isAuthLoading, isAuthenticated, reloadSavedReports]);
 
   // ── Config modal handlers ──
@@ -815,6 +804,7 @@ export default function AnalysisView() {
       patterns: report.patterns,
       timestamp: report.timestamp ?? Date.now(),
       stats: report.stats,
+      createdAt: report.createdAt,
       taskId: report.taskId,
       failedSections: report.failedSections,
       analysisContent: report.analysisContent,
@@ -855,15 +845,17 @@ export default function AnalysisView() {
     if (taskId) {
       try {
         const task = await getReflectionTask(taskId);
-        report = { ...entry, taskId, failedSections: task.failed_sections, analysisContent: task.analysis_content };
+        if (!task.created_at || !Number.isFinite(new Date(task.created_at).getTime())) throw new Error(t('analysis.history.failed'));
+        report = { ...entry, timestamp: new Date(task.created_at).getTime(), createdAt: task.created_at, taskId, failedSections: task.failed_sections, analysisContent: task.analysis_content };
       } catch (error) {
         setReportSaveError(error instanceof Error ? error.message : String(error));
+        return;
       }
       await retryReportSave(taskId);
     }
     localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
     openReflectionBlogReport(report);
-  }, [openReflectionBlogReport, retryReportSave]);
+  }, [openReflectionBlogReport, retryReportSave, t]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -927,7 +919,7 @@ export default function AnalysisView() {
       if (!cancelled && (er.length || tr.length || pr.length)) {
         const reportData = {
           echoes: er, traits: tr, patterns: pr,
-          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+          stats: { days: statsRef.current.totalDays, entries: statsRef.current.totalEntries, words: statsRef.current.totalWords },
         };
         const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
         await openTaskReport(entry);
@@ -939,7 +931,7 @@ export default function AnalysisView() {
       cancelled = true;
       if (recoveringTaskIdRef.current === active.taskId) recoveringTaskIdRef.current = null;
     };
-  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, openTaskReport, stats.totalDays, stats.totalEntries, stats.totalWords]);
+  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, openTaskReport]);
 
 
   // ── One-click analyze all ──
@@ -1055,8 +1047,8 @@ export default function AnalysisView() {
       }
     }
 
-    const todayKey = localDateKey(Date.now());
-    const hasTodayReport = savedReports.some(report => localDateKey(report.timestamp) === todayKey);
+    const todayKey = getLocalDayKey(Date.now(), timezone);
+    const hasTodayReport = savedReports.some(report => getLocalDayKey(report.timestamp, timezone) === todayKey);
     if (hasTodayReport) {
       const candidates = analyzableSessions.filter(session => session.has_text !== false);
       setReanalysisDialog({
@@ -1122,6 +1114,7 @@ export default function AnalysisView() {
         isMobile={isMobile}
         t={t}
         dateLocale={dateLocale}
+        timezone={timezone}
         formatDaysLabel={formatDaysLabel}
         formatEntriesLabel={formatEntriesLabel}
         formatWordsLabel={formatWordsLabel}
@@ -1233,25 +1226,36 @@ export default function AnalysisView() {
         </div>
 
         {/* Past reports */}
-        {savedReports.length > 0 && (
-          <div style={{ marginBottom: '3rem' }}>
+        {(savedReports.length > 0 || historyError) && (
+        <section aria-label={t('analysis.pastReflections')} aria-busy={historyLoading} style={{ marginBottom: '3rem' }}>
+          <div>
             <h2 style={{
               fontSize: '20px', fontWeight: 500, color: 'var(--color-text-body)',
               marginBottom: '1.5rem', textAlign: 'center',
               fontFamily: 'Georgia, serif', fontStyle: 'italic',
             }}>
-              {t('analysis.pastReflections')}
+              <button type="button" onClick={() => {
+                storyWorkspaceCommitNavigation(window.history, { ...window.history.state, inkDreamView: 'story-workspace' }, STORY_WORKSPACE_PATHS.timeline, false);
+                window.dispatchEvent(new PopStateEvent('popstate'));
+              }} style={{ font: 'inherit', color: 'inherit', border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}>
+                {t('analysis.pastReflections')}
+              </button>
             </h2>
+            {historyError && <div role="alert">{t('analysis.history.failed')} <button type="button" onClick={() => { void reloadSavedReports(); }}>{t('analysis.history.retry')}</button></div>}
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
               gap: isMobile ? '1rem' : '1.5rem', marginBottom: '2rem',
             }}>
-              {savedReports.slice(0, 3).map((report, idx) => (
-                <div
+              {savedReports.slice(0, ANALYSIS_HISTORY_PREVIEW_LIMIT).map((report, idx) => (
+                <button
+                  type="button"
                   key={report.id}
+                  data-analysis-report-id={report.id}
+                  aria-label={t('analysis.history.open', { date: new Date(report.timestamp).toLocaleString(dateLocale, { timeZone: timezone }) })}
                   onClick={() => openReflectionBlogReport(report)}
                   style={{
+                    textAlign: 'left', font: 'inherit', minWidth: 0, width: '100%',
                     padding: '1.5rem', background: 'var(--color-bg-surface)',
                     borderRadius: '16px',
                     border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
@@ -1269,7 +1273,7 @@ export default function AnalysisView() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', fontWeight: 500 }}>
                       {new Date(report.timestamp).toLocaleDateString(dateLocale, {
-                        month: 'short', day: 'numeric', year: 'numeric',
+                        month: 'short', day: 'numeric', year: 'numeric', timeZone: timezone,
                       })}
                     </div>
                     {idx === 0 && (
@@ -1326,10 +1330,11 @@ export default function AnalysisView() {
                       </span>
                     )}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
+        </section>
         )}
 
         {/* One-click analyze button */}
@@ -2048,11 +2053,13 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 // Visual work is constrained to magazine-style polish and clearer selected/playing feedback.
 // Refs: docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
 // ══════════════════════════════════════════════
-function ReflectionBlogPage({
-  report, initialSection, onBack, isMobile, t, dateLocale, saveError, saving, onRetrySave,
+export function ReflectionBlogPage({
+  report, initialSection, onBack, backLabel, isMobile, t, dateLocale, timezone, saveError, saving, onRetrySave,
   formatDaysLabel, formatEntriesLabel, formatWordsLabel,
 }: {
   report: AnalysisReport;
+  timezone: string;
+  backLabel?: string;
   initialSection?: StoryWorkspaceAnalysisSection | null;
   saveError?: string;
   saving?: boolean;
@@ -2066,6 +2073,8 @@ function ReflectionBlogPage({
   formatWordsLabel: (n: number) => string;
 }) {
   const date = new Date(report.timestamp);
+  const backButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (!initialSection) backButtonRef.current?.focus(); }, [initialSection]);
 
   const blogSections: { key: SectionKey; icon: string; items: ReflectionResult[]; kind: 'echo' | 'trait' | 'pattern' }[] = [
     ...(report.echoes.length > 0 ? [{ key: 'echoes' as SectionKey, icon: '🔄', items: report.echoes, kind: 'echo' as const }] : []),
@@ -2094,11 +2103,11 @@ function ReflectionBlogPage({
   const activeItems = activeSectionObj?.items ?? [];
   const selectedItem = selectedItemIdx !== null ? (activeItems[selectedItemIdx] ?? null) : null;
 
-  const monthStr    = date.toLocaleDateString('en', { month: 'short' }).toUpperCase();
-  const dayStr      = date.getDate();
-  const yearStr     = date.getFullYear();
+  const monthStr    = date.toLocaleDateString('en', { month: 'short', timeZone: timezone }).toUpperCase();
+  const dayStr      = date.toLocaleDateString('en', { day: 'numeric', timeZone: timezone });
+  const yearStr     = date.toLocaleDateString('en', { year: 'numeric', timeZone: timezone });
   const fullDateStr = date.toLocaleDateString(dateLocale, {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: timezone,
   });
 
   const handleSectionChange = (key: SectionKey) => { setActiveSection(key); setSelectedItemIdx(null); };
@@ -2123,7 +2132,7 @@ function ReflectionBlogPage({
   );
 
   return (
-    <div style={{
+    <div role="region" aria-label={t('analysis.history.report')} style={{
       width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden',
@@ -2142,13 +2151,14 @@ function ReflectionBlogPage({
         display: 'flex', alignItems: 'center',
       }}>
         <button
+          ref={backButtonRef}
           onClick={onBack}
           style={{ background: 'none', border: '1px solid var(--color-border-paper)', borderRadius: '20px', padding: '4px 14px', cursor: 'pointer', color: 'var(--color-text-body)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s', whiteSpace: 'nowrap' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
           onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
         >
           <span>←</span>
-          <span>{t('analysis.pastReflections')}</span>
+          <span>{backLabel ?? t('analysis.pastReflections')}</span>
         </button>
       </div>
 

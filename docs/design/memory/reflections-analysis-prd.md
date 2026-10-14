@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-14: 当前历史展示及时间语义由 [分析历史 PRD](../../prd/memory/reflections-history-prd.md) 接管；下文按日合并为历史原文。 -->
 <!-- [Sync] 2026-10-13: 统一入口、Notion 内容、分析 Agent 和报告恢复由当前 memory PRD 接管；保留原文供历史参考。 -->
 > 当前入口、分析内容及仅 Notion 重分析规则见 [现行需求](../../prd/memory/reflections-analysis-content-prd.md)。本文其余既有分区协议继续适用；旧独立 Analyze、至少一条日记以及失败后重复确认规则不再作为当前要求。[变更前完整原文](reflections-analysis-prd-pre-content-20261013-history.md)。
 
@@ -15,6 +16,9 @@
 > [Sync] 2026-09-15: 后台task/result/event/report已切换到Admin Registry99冻结合同；Dream保留Agent、EventBus、SSE、静态default合并和共享文件写入。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
+
+> 现行分析历史、创建时间与完整时间轴读取由 [分析历史 PRD](../../prd/memory/reflections-history-prd.md) 和 [交互设计](reflections-history-design.md) 接管。下文旧按日合并说明作为历史保留。
+
 
 ---
 

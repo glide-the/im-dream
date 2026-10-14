@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: add task-created recap entries with the original timeline card, spacing and load control.
 // [Input] Persisted Writing sessions, historical daily pictures, Voice metadata, and the selected timezone.
 // [Output] Read-only Story Workspace timeline with historical picture viewing and comment context.
 // [Pos] Timeline/Collections surface in frontend/app/_dream/components
@@ -7,7 +8,9 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } fr
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { Commentor, EditorState, TextCell } from '../engine/EditorEngine';
-import type { VoiceConfig } from '../api/voiceApi';
+import { getAnalysisHistory, type AnalysisHistoryCursor, type VoiceConfig } from '../api/voiceApi';
+import { ReflectionBlogPage } from './AnalysisView';
+import { appendHistoryReports, historyReportForReading, type AnalysisReport } from './reflectionHistory';
 import { findNormalizedPhrase } from '../utils/textNormalize';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -53,9 +56,12 @@ interface CollectionsViewProps {
 }
 
 export default function CollectionsView({ isVisible, voiceConfigs, timezone }: CollectionsViewProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
   const isMobile = useMobile();
+  const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
+  const returnButtonRef = useRef<HTMLElement | null>(null);
+  const returnReportIdRef = useRef<string | null>(null);
   return (
     <div style={{
       width: '100%',
@@ -65,13 +71,32 @@ export default function CollectionsView({ isVisible, voiceConfigs, timezone }: C
       background: 'var(--color-bg-app)',
       overflow: 'hidden'
     }}>
+      {selectedReport && <ReflectionBlogPage
+        key={selectedReport.id}
+        report={selectedReport} backLabel={t('nav.timeline')} timezone={timezone} isMobile={isMobile} t={t} dateLocale={dateLocale}
+        formatDaysLabel={n => t('analysis.statsLabels.daysCount', { count: n })}
+        formatEntriesLabel={n => t('analysis.statsLabels.entriesCount', { count: n })}
+        formatWordsLabel={n => t('analysis.statsLabels.wordsCount', { value: n.toLocaleString() })}
+        onBack={() => {
+          setSelectedReport(null);
+          requestAnimationFrame(() => {
+            const original = returnButtonRef.current;
+            const restored = original?.isConnected ? original : returnReportIdRef.current
+              ? document.querySelector<HTMLButtonElement>(`[data-analysis-report-id="${CSS.escape(returnReportIdRef.current)}"]`) : null;
+            restored?.focus({ preventScroll: true });
+          });
+        }}
+      />}
+      <div style={{ width: '100%', height: '100%', display: selectedReport ? 'none' : 'flex' }}>
       <TimelinePage
-        isVisible={isVisible}
+        onOpenReport={(report, button) => { returnButtonRef.current = button; returnReportIdRef.current = String(report.id); setSelectedReport(report); }}
+        isVisible={isVisible && !selectedReport}
         voiceConfigs={voiceConfigs}
         dateLocale={dateLocale}
         timezone={timezone}
         isMobile={isMobile}
       />
+      </div>
     </div>
   );
 }
@@ -220,6 +245,9 @@ interface TimelineCardProps {
   onImageClick: (picture: TimelinePicture) => void;
   side: 'left' | 'right';
   isMobile: boolean;
+  report?: AnalysisReport;
+  timezone: string;
+  onOpenReport?: (report: AnalysisReport, button: HTMLElement) => void;
 }
 
 function TimelineCard({
@@ -232,15 +260,21 @@ function TimelineCard({
   t,
   onImageClick,
   side,
-  isMobile
+  isMobile,
+  report,
+  timezone,
+  onOpenReport,
 }: TimelineCardProps) {
-  const cardCursor = dayData?.picture ? 'pointer' : 'default';
+  const cardCursor = report || dayData?.picture ? 'pointer' : 'default';
+  const CardTag = report ? 'button' : 'div';
   const textContent = textByDate.get(day.date);
   const firstLine = firstLineByDate.get(day.date);
   const commentCount = dayData?.comments?.length || 0;
 
   let description = '';
-  if (day.isToday && !dayData?.picture) {
+  if (report) {
+    description = t('analysis.pastReflections');
+  } else if (day.isToday && !dayData?.picture) {
     description = '';
   } else if (firstLine) {
     description = firstLine;
@@ -257,9 +291,14 @@ function TimelineCard({
   const textAlign = isMobile ? 'left' : (isLeftSide ? 'right' : 'left');
 
   return (
-    <div
-      onClick={() => {
-        if (dayData?.picture) {
+    <CardTag
+      type={report ? 'button' : undefined}
+      data-analysis-report-id={report?.id}
+      aria-label={report ? t('analysis.history.open', { date: new Date(report.timestamp).toLocaleString(dateLocale, { timeZone: timezone }) }) : undefined}
+      onClick={event => {
+        if (report) {
+          onOpenReport?.(report, event.currentTarget);
+        } else if (dayData?.picture) {
           onImageClick(dayData.picture);
         }
       }}
@@ -277,9 +316,10 @@ function TimelineCard({
         boxSizing: 'border-box',
         background: 'color-mix(in srgb, var(--color-bg-app) 80%, transparent)',
         borderRadius: '8px',
+        ...(report ? { border: 0, margin: 0, font: 'inherit', color: 'inherit', appearance: 'none' as const, textAlign: 'inherit' as const } : {}),
       }}
       onMouseEnter={e => {
-        if (dayData?.picture) {
+        if (report || dayData?.picture) {
           e.currentTarget.style.transform = 'scale(1.02)';
           e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
         }
@@ -322,7 +362,7 @@ function TimelineCard({
 
       {/* Image - on the inner side (near center line) */}
       <div style={{ flexShrink: 0 }}>
-        {dayData?.picture ? (
+        {dayData?.picture && !report ? (
           <div>
             <img
               src={`data:image/${dayData.picture.base64?.startsWith('iVBOR') ? 'png' : 'jpeg'};base64,${dayData.picture.base64}`}
@@ -351,15 +391,19 @@ function TimelineCard({
             fontSize: '20px',
             color: 'var(--color-text-muted)',
           }}>
+            {report && <span aria-hidden="true">📖</span>}
           </div>
         )}
       </div>
-    </div>
+    </CardTag>
   );
 }
 
 // @@@ Timeline page - combines pictures and comments by date
+type TimelineRow = { key: string; date: string; day?: TimelineDay; report?: AnalysisReport; reportIndex?: number };
+
 interface TimelinePageProps {
+  onOpenReport: (report: AnalysisReport, button: HTMLElement) => void;
   isVisible: boolean;
   voiceConfigs: Record<string, VoiceConfig>;
   dateLocale: string;
@@ -367,8 +411,9 @@ interface TimelinePageProps {
   isMobile: boolean;
 }
 
-function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile }: TimelinePageProps) {
+function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile, onOpenReport }: TimelinePageProps) {
   const { t } = useTranslation();
+  const slotHeight = SLOT_HEIGHT;
   const { isAuthenticated } = useAuth();
   const [days, setDays] = useState<TimelineDay[]>([]);
   const [sessionSummaries, setSessionSummaries] = useState<Map<string, SessionSummary>>(new Map());
@@ -390,6 +435,56 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
   const loadedRangesRef = useRef<Set<string>>(new Set());
   const cardInset = isMobile ? '1rem' : '2rem';
   const cardTopOffset = isMobile ? 20 : 32;
+  const [analysisReports, setAnalysisReports] = useState<AnalysisReport[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState(false);
+  const [hasMoreAnalyses, setHasMoreAnalyses] = useState(false);
+  const historyCursorRef = useRef<AnalysisHistoryCursor | null>(null);
+  const historyBusyRef = useRef(false);
+  const historyControllerRef = useRef<AbortController | null>(null);
+  const timelineRowsRef = useRef<TimelineRow[]>([]);
+  const scrollAnchorRef = useRef<{ key: string; delta: number } | null>(null);
+
+  const rememberScroll = useCallback(() => {
+    const top = scrollContainerRef.current?.scrollTop ?? 0;
+    const index = Math.max(0, Math.floor((top - cardTopOffset) / slotHeight));
+    const row = timelineRowsRef.current[index];
+    if (row) scrollAnchorRef.current = { key: row.key, delta: top - index * slotHeight };
+  }, [cardTopOffset, slotHeight]);
+
+  const rememberScrollRef = useRef(rememberScroll);
+  rememberScrollRef.current = rememberScroll;
+
+  const loadAnalysisHistory = useCallback(async (reset = false) => {
+    if (!isAuthenticated || historyBusyRef.current) return;
+    historyBusyRef.current = true;
+    const controller = new AbortController();
+    historyControllerRef.current = controller;
+    setHistoryLoading(true); setHistoryError(false);
+    try {
+      const page = await getAnalysisHistory({ before: reset ? null : historyCursorRef.current, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!reset) rememberScrollRef.current();
+      const reports = page.reports.map(historyReportForReading);
+      setAnalysisReports(previous => reset ? appendHistoryReports([], reports) : appendHistoryReports(previous, reports));
+      historyCursorRef.current = page.next_cursor;
+      setHasMoreAnalyses(page.next_cursor !== null);
+    } catch {
+      if (!controller.signal.aborted) setHistoryError(true);
+    } finally {
+      if (!controller.signal.aborted) { historyBusyRef.current = false; setHistoryLoading(false); }
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    historyControllerRef.current?.abort();
+    historyBusyRef.current = false;
+    historyCursorRef.current = null;
+    setAnalysisReports([]); setHasMoreAnalyses(false); setHistoryError(false);
+    if (isAuthenticated) { void loadAnalysisHistory(true); }
+    else setHistoryLoading(false);
+    return () => { historyControllerRef.current?.abort(); historyBusyRef.current = false; };
+  }, [isAuthenticated, timezone, loadAnalysisHistory]);
 
   const mergeSessions = useCallback((sessions: SessionSummary[]) => {
     setSessionSummaries(prev => {
@@ -531,8 +626,10 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
   }, [isAuthenticated, timezone, dateLocale, mergePictures, loadRange]);
 
   const loadPastChunk = useCallback(async () => {
-    if (loadingPast || !hasMorePast || days.length === 0) return;
+    if (initialLoading || pendingInitialScroll || loadingPast || historyBusyRef.current || historyError || (!hasMorePast && !hasMoreAnalyses) || days.length === 0) return;
     setLoadingPast(true);
+    if (hasMoreAnalyses) await loadAnalysisHistory();
+    if (!hasMorePast) { setLoadingPast(false); return; }
     const firstDay = days[0];
     const firstDate = startOfDay(new Date(firstDay.date));
     const desiredStart = addDays(firstDate, -CHUNK_SIZE);
@@ -547,21 +644,12 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
     }
 
     const newDays = buildDayRange(actualStart, actualEnd);
-    const container = scrollContainerRef.current;
-    const prevScroll = container?.scrollTop ?? 0;
-    const addedCount = newDays.length;
+    rememberScroll();
 
     setDays(prev => {
       const existing = new Set(prev.map(d => d.date));
       const merged = [...newDays.filter(d => !existing.has(d.date)), ...prev];
       return merged;
-    });
-
-    requestAnimationFrame(() => {
-      if (container) {
-        container.scrollTop = prevScroll + addedCount * SLOT_HEIGHT;
-        setScrollTopValue(container.scrollTop);
-      }
     });
 
     if (isAuthenticated) {
@@ -571,7 +659,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
     const reachedMin = actualStart.getTime() <= minDate.getTime();
     setHasMorePast(!reachedMin);
     setLoadingPast(false);
-  }, [days, hasMorePast, isAuthenticated, loadRange, loadingPast]);
+  }, [days, hasMorePast, hasMoreAnalyses, historyError, initialLoading, pendingInitialScroll, isAuthenticated, loadRange, loadAnalysisHistory, loadingPast, rememberScroll]);
 
   // @@@ Group items by date
   const timelineByDate = useMemo(() => {
@@ -598,9 +686,32 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
     return map;
   }, [datesWithSessions, allCommentsByDate, picturesByDate]);
 
+  const timelineRows = useMemo(() => {
+    const rows: TimelineRow[] = days.map(day => ({ key: `day:${day.date}`, date: day.date, day }));
+    analysisReports.forEach((report, reportIndex) => {
+      const date = getLocalDayKey(report.createdAt ?? report.timestamp, timezone);
+      if (date) rows.push({ key: `analysis:${report.id}`, date, report, reportIndex });
+    });
+    return rows.sort((a, b) => a.date.localeCompare(b.date)
+      || (a.report && b.report ? b.reportIndex! - a.reportIndex! : a.report ? 1 : b.report ? -1 : 0));
+  }, [days, analysisReports, timezone]);
+  timelineRowsRef.current = timelineRows;
+
+  useLayoutEffect(() => {
+    const anchor = scrollAnchorRef.current;
+    const container = scrollContainerRef.current;
+    if (!anchor || !container || pendingInitialScroll || !isVisible) return;
+    const index = timelineRows.findIndex(row => row.key === anchor.key);
+    if (index >= 0) {
+      container.scrollTop = index * slotHeight + anchor.delta;
+      setScrollTopValue(container.scrollTop);
+    }
+    scrollAnchorRef.current = null;
+  }, [timelineRows, pendingInitialScroll, isVisible, slotHeight]);
+
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container || initialLoading || !isVisible) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -642,11 +753,11 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
       container.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', handleResize);
     };
-  }, [loadPastChunk]);
+  }, [loadPastChunk, initialLoading, isVisible]);
 
   // @@@ Set initial scroll position to show today's row centered
   useLayoutEffect(() => {
-    if (!isVisible || initialLoading || !scrollContainerRef.current || !pendingInitialScroll) return;
+    if (!isVisible || initialLoading || historyLoading || !scrollContainerRef.current || !pendingInitialScroll) return;
     const container = scrollContainerRef.current;
     requestAnimationFrame(() => {
       const bottom = Math.max(0, container.scrollHeight - container.clientHeight);
@@ -654,24 +765,24 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
       setScrollTopValue(bottom);
       setPendingInitialScroll(false);
     });
-  }, [days, initialLoading, isVisible, pendingInitialScroll]);
+  }, [timelineRows, initialLoading, historyLoading, isVisible, pendingInitialScroll]);
 
   const visibleMetrics = useMemo(() => {
     if (viewportHeight === 0) {
-      return { renderStart: 0, renderEnd: days.length - 1 };
+      return { renderStart: 0, renderEnd: timelineRows.length - 1 };
     }
-    const effectiveScroll = Math.max(0, scrollTopValue - 32);
-    const firstVisibleIndex = Math.floor(effectiveScroll / SLOT_HEIGHT);
-    const visibleCount = Math.ceil((viewportHeight || 0) / SLOT_HEIGHT) + 1;
+    const effectiveScroll = Math.max(0, scrollTopValue - cardTopOffset);
+    const firstVisibleIndex = Math.floor(effectiveScroll / slotHeight);
+    const visibleCount = Math.ceil((viewportHeight || 0) / slotHeight) + 1;
     const renderStart = Math.max(0, firstVisibleIndex - VIRTUAL_BUFFER);
-    const renderEnd = Math.min(days.length - 1, firstVisibleIndex + visibleCount + VIRTUAL_BUFFER);
+    const renderEnd = Math.min(timelineRows.length - 1, firstVisibleIndex + visibleCount + VIRTUAL_BUFFER);
     return { renderStart, renderEnd };
-  }, [days.length, scrollTopValue, viewportHeight]);
+  }, [timelineRows.length, scrollTopValue, viewportHeight, cardTopOffset, slotHeight]);
 
   const { renderStart, renderEnd } = visibleMetrics;
-  const renderedDays = days.slice(renderStart, renderEnd + 1);
-  const totalHeight = days.length > 0
-    ? (days.length - 1) * SLOT_HEIGHT + CARD_HEIGHT + 32
+  const renderedRows = timelineRows.slice(renderStart, renderEnd + 1);
+  const totalHeight = timelineRows.length > 0
+    ? (timelineRows.length - 1) * slotHeight + CARD_HEIGHT + cardTopOffset
     : 0;
 
   // @@@ Reload comments for a specific date from backend
@@ -753,6 +864,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
   return (
     <div
       ref={scrollContainerRef}
+      data-testid="timeline-scroll"
       style={{
         width: '100%',
         height: '100%',
@@ -785,15 +897,19 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
             background: 'linear-gradient(180deg, transparent 0%, var(--color-border-paper) 2%, var(--color-border-paper) 98%, transparent 100%)',
             transform: 'translateX(-50%)',
             zIndex: 1,
-            opacity: 1
+            opacity: 1,
+            pointerEvents: 'none',
           }}
         />
 
-        {/* Manual load controls */}
-        {hasMorePast && (
+        {/* Keep the original earlier-days control; recap pages follow the same scroll/load action. */}
+        {(hasMorePast || hasMoreAnalyses || historyError) && (
           <button
-            onClick={loadPastChunk}
-            disabled={loadingPast}
+            onClick={() => { if (historyError) void loadAnalysisHistory(analysisReports.length === 0); else void loadPastChunk(); }}
+            disabled={loadingPast || historyLoading}
+            data-analysis-history-error={historyError ? 'true' : undefined}
+            title={historyError ? t('analysis.history.failed') : undefined}
+            aria-label={historyError ? `${t('analysis.history.failed')} ${t('analysis.history.retry')}` : undefined}
             style={{
               position: 'absolute',
               top: '0.5rem',
@@ -805,26 +921,28 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
               color: 'var(--color-text-secondary)',
               borderRadius: '6px',
               cursor: loadingPast ? 'wait' : 'pointer',
-              zIndex: 20,
+              zIndex: timelineRows.length + 1,
               fontSize: '12px'
             }}
           >
-            {loadingPast ? 'Loading…' : 'Load earlier days'}
+            {historyError ? t('analysis.history.retry') : loadingPast || historyLoading ? 'Loading…' : 'Load earlier days'}
           </button>
         )}
 
-        {/* Cards */}
-        {renderedDays.map((day, localIndex) => {
+        {/* Independent report rows retain all same-day analyses. */}
+        {renderedRows.map((row, localIndex) => {
+          const day = row.day ?? makeTimelineDay(new Date(`${row.date}T12:00:00`));
           const globalIndex = renderStart + localIndex;
           const dayData = timelineByDate.get(day.date);
-          const hasData = timelineByDate.has(day.date);
+          const hasData = Boolean(row.report) || timelineByDate.has(day.date);
           const isLeftSide = globalIndex % 2 === 0;
-          const topPosition = globalIndex * SLOT_HEIGHT;
+          const topPosition = globalIndex * slotHeight;
 
           return (
             <div
-              key={day.date}
-              data-date={day.date}
+              key={row.key}
+              data-date={row.date}
+              data-analysis-id={row.report?.id}
               style={{
                 position: 'absolute',
                 top: `${topPosition + cardTopOffset}px`,
@@ -835,7 +953,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                 paddingLeft: isMobile ? 0 : (isLeftSide ? '0' : '24px'),
                 height: `${CARD_HEIGHT}px`,
                 width: isMobile ? 'min(88vw, 460px)' : 'auto',
-                zIndex: days.length - globalIndex, // Stack order for overlapping
+                zIndex: timelineRows.length - globalIndex, // Stack order for overlapping
               }}
             >
               {/* Timeline dot */}
@@ -853,10 +971,14 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                   border: '3px solid var(--color-bg-app)',
                   boxShadow: '0 2px 6px var(--color-shadow-medium)',
                   zIndex: 10,
+                  pointerEvents: 'none',
                 }}
               />
 
               <TimelineCard
+                report={row.report}
+                timezone={timezone}
+                onOpenReport={(report, button) => { rememberScroll(); onOpenReport(report, button); }}
                 day={day}
                 dayData={dayData}
                 hasData={hasData}

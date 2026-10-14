@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-14: add owner-scoped report history pagination; existing list/save and task protocols remain unchanged. -->
 <!-- [Sync] 2026-10-07: document owner-scoped scheduled Thread activity reads and fail-closed operation requirements. -->
 <!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
 <!-- [Sync] 2026-09-29: document owner-scoped Chat turn-navigation excerpts and no-store response. -->
@@ -1297,3 +1298,11 @@ Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI check
 公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../docs/design/deck/deck-detail-version-history.md)。
 
 GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../docs/design/deck/deck-detail-version-history.md)。
+
+## 分析历史分页
+
+`GET /api/reports/history` 使用原认证入口，查询参数为可选 `limit`（默认10）及成对的 `before_created_at`、`before_id`。游标来自上一页 `next_cursor`，时间为带时区的 ISO 字符串，id 为 PostgreSQL bigint 十进制字符串。参数缺一、非法时间、非法身份或非正 limit 返回422；缺精确 operation/schema capability 返回503，不回退旧受限列表。
+
+返回 `reports` 和 `next_cursor`。每份记录包含字符串 `id`、`report_type`、`report_data`、报告保存时的 `created_at`、服务器外键 `task_id`（可空）及实际 `analysis_created_at`。任务关联报告用本账户 task.created_at；无关联旧分析用其记录自己的创建时间。排序为分析创建时间/id倒序；下一页严格早于末尾游标。没有更多记录时 next_cursor=null。读取不会生成、补存或修改报告。
+
+Admin 的追加 `analysis-report.history-page` 使用已有三项 identity/unified/reflection-task-persistence capabilities 和 `dream:read`，旧冻结 list/save DTO不改变。契约和流程见 [分析历史设计](../docs/design/memory/reflections-history-design.md)。本接口要求对应 Admin 代码及精确 operation capability 可用；本轮未部署。

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: preserve original timeline geometry while inserting task recap records and reusing earlier-days loading.
 // [Input] Authenticated Story Workspace Reflections route and public Reflections task/content DTOs.
 // [Output] Provider-free browser journeys for source selection, task SSE/recovery, report persistence,
 //          idempotent creation retry, partial failure, Notion source states, and responsive keyboard UI.
@@ -13,7 +14,7 @@
 // Analysis page are the consumers. The fixture owns only public API responses and protocol events.
 
 import { expect, test, type Page } from '@playwright/test';
-import { installFixtures, WEB_BASE } from './fixtures/calendarHarness';
+import { installFixtures, isReflectionHistoryCancellation, isReflectionHistoryNavigationCancellation, WEB_BASE } from './fixtures/calendarHarness';
 
 test.use({ channel: 'chrome' });
 test.setTimeout(60_000);
@@ -64,7 +65,9 @@ type FixtureTask = {
 };
 
 type FixtureReport = {
-  id: number;
+  id: number | string;
+  analysis_created_at?: string;
+  task_id?: string | null;
   created_at: string;
   report_data: {
     echoes: FixtureResult[];
@@ -102,6 +105,12 @@ type FixtureState = {
   holdSse: boolean;
   releaseSse?: () => void;
   unexpectedReflectionRequests: string[];
+  historyReadFailureOnce?: boolean;
+  historyReadFailureUntilRetry?: boolean;
+  historyMoreFailureOnce?: boolean;
+  historyRequests: string[];
+  holdTaskLookup?: boolean;
+  releaseTaskLookup?: () => void;
 };
 
 const TASK_ID = '6f6f5df3-0d11-4d63-8f4d-9e8a0f20c901';
@@ -232,8 +241,9 @@ async function installReflectionFixtures(page: Page, options: {
   createNotionReadFailureOnce?: boolean;
   agentReadFailureOnce?: boolean;
   noAnalyzableInputAfterSse?: boolean;
+  holdTaskLookup?: boolean;
 } = {}) {
-  const base = await installFixtures(page, { diaryCount: 1 });
+  const base = await installFixtures(page, { diaryCount: 1, reflectionHistory: true });
   const state: FixtureState = {
     taskId: TASK_ID,
     taskStatus: options.taskStatus ?? 'COMPLETED',
@@ -254,8 +264,9 @@ async function installReflectionFixtures(page: Page, options: {
       : [resultFor('echoes'), resultFor('traits'), resultFor('patterns')],
     activeTaskOnLoad: options.activeTaskOnLoad ?? false,
     holdSse: options.holdSse ?? false,
-    unexpectedReflectionRequests: [],
+    unexpectedReflectionRequests: [], historyRequests: [], holdTaskLookup: options.holdTaskLookup,
   };
+  const taskLookupResolvers: Array<() => void> = [];
   let createNotionReadFailureOnce = options.createNotionReadFailureOnce ?? false;
   if (options.seedReport) state.reports = [makeReport(state)];
   if (options.activeTaskOnLoad) state.taskStatus = options.taskStatus ?? 'RUNNING';
@@ -288,7 +299,8 @@ async function installReflectionFixtures(page: Page, options: {
       && (url.pathname === '/api/sessions/events'
         || url.pathname === '/api/story-workspace/dream-runs'
         || (url.pathname === '/api/claude-agent/threads' && url.search === '?limit=21'));
-    if (external(request.url()) || expectedNavigationAbort) return;
+    if (external(request.url()) || expectedNavigationAbort || isReflectionHistoryCancellation(request)
+      || isReflectionHistoryNavigationCancellation(request, base.isReflectionHistoryNavigationActive())) return;
     errors.push(`request: ${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
   page.on('response', response => {
@@ -306,10 +318,35 @@ async function installReflectionFixtures(page: Page, options: {
         updated_at: '2026-10-12T03:00:00Z', has_text: true, word_count: 42 }], timezone: 'UTC',
     } });
   });
-  await page.route('**/api/reports*', async route => {
+  await page.route(/\/api\/reports(?:\/history)?(?:\?|$)/, async route => {
     state.reportApiRequests.push(`${route.request().method()} /api/reports`);
     if (route.request().method() === 'GET') {
-      await route.fulfill({ json: { reports: state.reports } });
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/reports/history') {
+        state.historyRequests.push(url.search);
+        const more = url.searchParams.has('before_id');
+        if ((!more && (state.historyReadFailureOnce || state.historyReadFailureUntilRetry)) || (more && state.historyMoreFailureOnce)) {
+          state.historyReadFailureOnce = false; state.historyMoreFailureOnce = false;
+          allowHttpError(503, url.pathname);
+          await route.fulfill({ status: 503, json: { detail: 'ADMIN_CAPABILITY_UNAVAILABLE' } });
+          return;
+        }
+        const reports = state.reports.map(report => ({ ...report, id: String(report.id),
+          task_id: report.task_id !== undefined ? report.task_id : report.report_data.task_id,
+          analysis_created_at: report.analysis_created_at ?? (report.report_data.task_id === state.taskId ? makeTask(state).created_at : report.created_at),
+        })).sort((a, b) => {
+          const time = a.analysis_created_at === b.analysis_created_at ? 0 : a.analysis_created_at > b.analysis_created_at ? -1 : 1;
+          return time || (BigInt(a.id) > BigInt(b.id) ? -1 : BigInt(a.id) < BigInt(b.id) ? 1 : 0);
+        });
+        const beforeId = url.searchParams.get('before_id');
+        const start = beforeId ? reports.findIndex(report => report.id === beforeId) + 1 : 0;
+        const limit = Number(url.searchParams.get('limit') ?? 10);
+        const selected = reports.slice(start, start + limit);
+        const last = selected.at(-1);
+        await route.fulfill({ json: { reports: selected,
+          next_cursor: reports.length > start + limit && last ? { id: last.id, created_at: last.analysis_created_at } : null,
+        } });
+      } else await route.fulfill({ json: { reports: state.reports } });
       return;
     }
     if (route.request().method() === 'POST') {
@@ -436,7 +473,7 @@ async function installReflectionFixtures(page: Page, options: {
         await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_UNAVAILABLE' } } });
         return;
       }
-      state.reports = [makeReport(state)];
+      state.reports = [makeReport(state), ...state.reports.filter(report => report.id !== 9001)];
       await route.fulfill({ status: 200, json: { saved: true } });
       return;
     }
@@ -445,6 +482,10 @@ async function installReflectionFixtures(page: Page, options: {
       return;
     }
     if (request.method() === 'GET') {
+      if (state.holdTaskLookup) await new Promise<void>(resolve => {
+        taskLookupResolvers.push(resolve);
+        state.releaseTaskLookup = () => { state.holdTaskLookup = false; taskLookupResolvers.splice(0).forEach(release => release()); };
+      });
       const task = makeTask(state, state.taskStatus);
       state.taskResponses.push(task);
       await route.fulfill({ json: task });
@@ -465,15 +506,14 @@ async function openAnalysis(page: Page, viewport = { width: 1440, height: 900 })
 
 test('Chat-origin section navigation opens the matching saved report once and restores clean history', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { seedReport: true });
-  fixture.reports.unshift({
+  for (let index = 0; index < 12; index += 1) fixture.reports.unshift({
     ...fixture.reports[0],
-    id: 9002,
+    id: 9002 + index,
     created_at: '2026-10-14T03:00:05Z',
     report_data: {
       ...fixture.reports[0].report_data,
-      task_id: 'newer-traits-only-task',
-      echoes: [],
-      patterns: [],
+      task_id: `40000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      echoes: [], patterns: [],
     },
   });
   await page.setViewportSize({ width: 375, height: 812 });
@@ -484,7 +524,7 @@ test('Chat-origin section navigation opens the matching saved report once and re
   // the Analysis content control, so they are not part of this deep-link read set.
   const waitForAnalysisReads = () => Promise.all([
     page.waitForResponse(response => new URL(response.url()).pathname === '/api/sessions/aggregate'),
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/reports'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/reports/history'),
     page.waitForResponse(response => new URL(response.url()).pathname === '/api/reflections/latest'),
   ]);
   const firstReads = waitForAnalysisReads();
@@ -499,6 +539,7 @@ test('Chat-origin section navigation opens the matching saved report once and re
   await expect(patterns).toHaveAttribute('aria-pressed', 'true');
   await expect(patterns).toBeFocused();
   await expect(page.getByText('Review loop', { exact: true })).toBeVisible();
+  expect(fixture.historyRequests.some(query => new URLSearchParams(query).has('before_id'))).toBe(true);
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
 
   await page.goBack();
@@ -543,7 +584,7 @@ test('default and Notion+Agent analysis create through SSE, save retry, reload, 
   await page.getByRole('button', { name: 'Retry save', exact: true }).click();
   await expect.poll(() => fixture.reportRequests.length).toBe(2);
   expect(fixture.reportRequests).toEqual([TASK_ID, TASK_ID]);
-  await expect(page.getByText('Past Reflections', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Past Reflections', exact: false })).toBeVisible();
   await page.getByRole('button', { name: /Past Reflections/ }).click();
   await page.getByRole('button', { name: 'Analysis content', exact: false }).click();
   const nextContent = page.getByRole('region', { name: 'Analysis content options' });
@@ -551,7 +592,7 @@ test('default and Notion+Agent analysis create through SSE, save retry, reload, 
   expect(fixture.createRequests[0].analysis_content).toMatchObject({ include_notion: true, snapshot_version: SNAPSHOT_VERSION, agent_id: AGENT_ID });
 
   await page.reload();
-  await expect(page.getByText('Past Reflections', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Past Reflections', exact: false })).toBeVisible();
   await page.getByText('Latest', { exact: true }).locator('..').click();
   await expect(page.getByText('Repeated concern', { exact: true })).toBeVisible();
   expect(fixture.unexpectedReflectionRequests).toEqual([]);
@@ -676,8 +717,11 @@ test('prepared task stays idle on load and explicit continuation starts its orig
 });
 
 test('new analysis beside a prepared task uses the current Notion selection', async ({ page }) => {
-  const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true, taskStatus: 'CREATED' });
+  const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true, taskStatus: 'CREATED', holdTaskLookup: true });
   await openAnalysis(page);
+  await expect.poll(() => Boolean(fixture.releaseTaskLookup)).toBe(true);
+  await expect(page.getByText('42', { exact: true })).toBeVisible();
+  fixture.releaseTaskLookup?.();
   await expect(page.getByRole('button', { name: 'Continue unstarted analysis', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Analysis content', exact: false }).click();
   await page.getByRole('checkbox', { name: 'Include Notion in analysis' }).check();
@@ -783,4 +827,207 @@ test('desktop and narrow content controls support keyboard selection and nested 
   const overflow = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   expect(overflow.width).toBeLessThanOrEqual(overflow.client + 1);
   expect(fixture.errors).toEqual([]);
+});
+
+
+function historyFixtures(count: number): FixtureReport[] {
+  return Array.from({ length: count }, (_, index) => {
+    // Intentional: report saving/order differs from analysis creation and diary range.
+    const created = new Date(Date.UTC(2026, 9, 13, 16, 1 - index)).toISOString();
+    return { id: String(9007199254741000n + BigInt(index)), created_at: '2026-12-01T00:00:00Z',
+      analysis_created_at: created, task_id: `80000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      report_data: { echoes: [{ ...resultFor('echoes'), related_session_ids: [], title: `History insight ${index}`, description: `Distinct report content ${index}` }],
+        traits: [], patterns: [], stats: { days: 120, entries: 9, words: 42 }, task_id: `80000000-0000-4000-8000-${String(index).padStart(12, '0')}`, analysis_content: null } };
+  });
+}
+
+async function installTimelineReads(page: Page) {
+  await page.route('**/api/pictures/range*', route => route.fulfill({ json: { pictures: [] } }));
+}
+
+for (const count of [0, 1, 3, 31]) test(`history preview keeps latest three independent analyses from ${count} records`, async ({ page }) => {
+  const fixture = await installReflectionFixtures(page);
+  fixture.reports = historyFixtures(count);
+  await installTimelineReads(page);
+  await openAnalysis(page);
+  const history = page.getByRole('region', { name: 'Past Reflections', exact: true });
+  if (count === 0) await expect(history).toHaveCount(0);
+  else {
+    await expect(history.locator('[data-analysis-report-id]')).toHaveCount(Math.min(count, 3));
+    expect(await history.locator('[data-analysis-report-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-analysis-report-id'))))
+      .toEqual(fixture.reports.slice(0, 3).map(report => String(report.id)));
+    const card = history.locator('[data-analysis-report-id]').first();
+    await card.focus(); await page.keyboard.press('Enter');
+    await expect(page.getByText('History insight 0', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Past Reflections', exact: false })).toBeFocused();
+    await page.getByRole('button', { name: 'Past Reflections', exact: false }).click();
+  }
+  if (count === 0) await page.getByRole('button', { name: 'Timeline', exact: true }).click();
+  else await history.getByRole('button', { name: 'Past Reflections', exact: false }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/timeline`);
+  if (count === 0) {
+    await expect(page.locator('[data-analysis-report-id]')).toHaveCount(0);
+    await expect(page.getByText('No analysis reports yet.')).toHaveCount(0);
+  }
+  else await expect(page.locator(`[data-analysis-report-id="${fixture.reports[0].id}"]`)).toBeVisible();
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
+for (const width of [1440, 375]) test(`analysis history navigates and reads older reports with stable return at ${width}px`, async ({ page }, testInfo) => {
+  const fixture = await installReflectionFixtures(page);
+  fixture.reports = historyFixtures(31);
+  // Equal creation instants require decimal-id descending order; independent same-day reports stay separate.
+  fixture.reports[1].analysis_created_at = fixture.reports[0].analysis_created_at;
+  fixture.reports[30].analysis_created_at = '2025-09-30T16:00:00Z';
+  await installTimelineReads(page);
+  await page.route('**/api/preferences', route => route.fulfill({ json: { first_login_completed: true, timezone: 'Asia/Shanghai' } }));
+  await openAnalysis(page, { width, height: 812 });
+  const preview = page.getByRole('region', { name: 'Past Reflections', exact: true });
+  await expect(preview.locator('[data-analysis-report-id]')).toHaveCount(3);
+  expect(await preview.locator('[data-analysis-report-id]').first().getAttribute('data-analysis-report-id')).toBe(String(fixture.reports[1].id));
+  const entry = preview.getByRole('button', { name: 'Past Reflections', exact: false });
+  await entry.focus(); await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/timeline`);
+  const scroll = page.getByTestId('timeline-scroll');
+  await expect(page.locator(`[data-analysis-report-id="${fixture.reports[1].id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-analysis-id="${fixture.reports[1].id}"]`)).toHaveAttribute('data-date', '2026-10-14');
+  const rows = await scroll.locator('[data-date]').evaluateAll(nodes => nodes.map(node => {
+    const element = node as HTMLElement;
+    return { top: Number.parseFloat(element.style.top), height: element.getBoundingClientRect().height };
+  }).sort((a, b) => a.top - b.top));
+  expect(rows.length).toBeGreaterThan(1);
+  for (const row of rows) {
+    expect(row.height).toBe(100);
+    expect(row.top % 70).toBe(width === 375 ? 20 : 32);
+  }
+  for (let index = 1; index < rows.length; index += 1) expect(rows[index].top - rows[index - 1].top).toBe(70);
+  await expect(page.getByRole('button', { name: 'Load earlier analyses' })).toHaveCount(0);
+  const target = page.locator(`[data-analysis-report-id="${fixture.reports[1].id}"]`);
+  const before = await scroll.evaluate(node => node.scrollTop);
+  await target.focus(); await page.keyboard.press('Space');
+  const reader = page.getByRole('region', { name: 'Analysis report', exact: true });
+  await expect(reader.getByText('History insight 1', { exact: true })).toBeVisible();
+  await expect(reader.getByRole('button', { name: 'Timeline', exact: false })).toBeFocused();
+  await reader.getByRole('button', { name: 'Timeline', exact: false }).click();
+  await expect(target).toBeFocused();
+  expect(await scroll.evaluate(node => node.scrollTop)).toBe(before);
+  fixture.historyMoreFailureOnce = true;
+  await scroll.evaluate(node => { node.scrollTop = 0; });
+  const retry = page.locator('[data-analysis-history-error="true"]');
+  await expect(retry).toBeVisible();
+  await expect(retry).toHaveAttribute('title', 'Analysis history could not be loaded.');
+  const failedCursor = fixture.historyRequests.at(-1);
+  const failedRequestIndex = fixture.historyRequests.length - 1;
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  expect(fixture.historyRequests[failedRequestIndex + 1]).toBe(failedCursor);
+  // Earlier recap pages use the original timeline load action and scrolling.
+  for (let index = 0; index < 4; index += 1) {
+    await scroll.evaluate(node => { node.scrollTop = 0; });
+    await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toHaveCount(0);
+    if (await page.locator(`[data-analysis-report-id="${fixture.reports[30].id}"]`).count()) break;
+    await page.getByRole('button', { name: 'Load earlier days', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole('button', { name: 'Load earlier analyses' })).toHaveCount(0);
+  await scroll.evaluate(node => { node.scrollTop = 0; });
+  const oldest = page.locator(`[data-analysis-report-id="${fixture.reports[30].id}"]`);
+  await expect(oldest).toBeVisible();
+  await expect(page.locator(`[data-analysis-id="${fixture.reports[30].id}"]`)).toHaveAttribute('data-date', '2025-10-01');
+  await oldest.click();
+  await reader.getByRole('button', { name: 'History insight 30', exact: false }).click();
+  await expect(reader.getByText('Distinct report content 30', { exact: true })).toBeVisible();
+  await reader.getByRole('button', { name: 'Timeline', exact: false }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`analysis-timeline-${width}.png`) });
+  fixture.base.beginReflectionHistoryNavigation();
+  await page.reload();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/timeline`);
+  await expect(page.locator(`[data-analysis-report-id="${fixture.reports[1].id}"]`)).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
+  await expect(page.getByRole('region', { name: 'Past Reflections', exact: true }).locator('[data-analysis-report-id]')).toHaveCount(3);
+  fixture.base.endReflectionHistoryNavigation();
+  expect(fixture.reportRequests).toEqual([]);
+  expect(fixture.createRequests).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
+test('history first-read failure retries while the original task and entry remain available', async ({ page }) => {
+  const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true, taskStatus: 'CREATED', seedActiveTaskStorage: false });
+  fixture.historyReadFailureUntilRetry = true;
+  fixture.reports = historyFixtures(1);
+  await openAnalysis(page);
+  await expect(page.getByRole('alert').filter({ hasText: 'Analysis history could not be loaded.' })).toContainText('Analysis history could not be loaded.');
+  await expect(page.getByRole('button', { name: 'Continue unstarted analysis', exact: false })).toBeVisible();
+  fixture.historyReadFailureUntilRetry = false;
+  await page.getByRole('alert').filter({ hasText: 'Analysis history could not be loaded.' }).getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('[data-analysis-report-id]')).toHaveCount(1);
+  expect(fixture.startRequests).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+
+test('visible analysis creation reaches saved preview and the same timeline report', async ({ page }) => {
+  const fixture = await installReflectionFixtures(page);
+  await installTimelineReads(page);
+  await openAnalysis(page);
+  await expect(page.getByRole('region', { name: 'Past Reflections', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Analysis report' }).getByText('Repeated concern', { exact: true })).toBeVisible();
+  expect(fixture.createRequests).toHaveLength(1);
+  expect(fixture.startRequests).toEqual([TASK_ID]);
+  expect(fixture.eventRequests).toEqual([TASK_ID]);
+  expect(fixture.reportRequests).toContain(TASK_ID);
+  await page.getByRole('button', { name: 'Past Reflections', exact: false }).click();
+  await expect(page.getByRole('region', { name: 'Past Reflections', exact: true }).locator('[data-analysis-report-id="9001"]')).toBeVisible();
+  await page.getByRole('region', { name: 'Past Reflections', exact: true }).getByRole('button', { name: 'Past Reflections', exact: false }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/timeline`);
+  const report = page.locator('[data-analysis-report-id="9001"]');
+  await expect(report).toBeVisible();
+  const writesBeforeReading = fixture.reportRequests.length;
+  await report.click();
+  await expect(page.getByRole('region', { name: 'Analysis report' }).getByText('Repeated concern', { exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'Analysis report' }).getByRole('button', { name: 'Timeline', exact: false }).click();
+  await expect(report).toBeFocused();
+  expect(fixture.reportRequests.length).toBe(writesBeforeReading);
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
+
+test('timeline diary and historical picture still open beside an analysis report', async ({ page }) => {
+  const fixture = await installReflectionFixtures(page);
+  fixture.reports = historyFixtures(1);
+  await page.clock.install({ time: new Date('2026-10-14T01:00:00Z') });
+  const pictureDate = '2026-10-13';
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9H0AAAAASUVORK5CYII=';
+  await page.route(/\/api\/sessions(?:\/range)?(?:\?|$)/, async route => {
+    if (route.request().method() !== 'GET') { await route.fallback(); return; }
+    await route.fulfill({ json: { sessions: [{ id: 'note_existing_qa', date_key: pictureDate,
+      first_line: 'Original diary remains visible', created_at: `${pictureDate}T07:00:00Z`, updated_at: `${pictureDate}T07:00:00Z` }] } });
+  });
+  await page.route('**/api/pictures/range*', route => route.fulfill({ json: { pictures: [{ date: pictureDate, base64: png, prompt: 'Historical picture' }] } }));
+  await page.route(`**/api/pictures/${pictureDate}/full`, route => route.fulfill({ json: { image_base64: png } }));
+  await page.route('**/api/sessions/batch', route => route.fulfill({ json: { sessions: [{ id: 'note_existing_qa',
+    editor_state: { cells: [], commentors: [] }, created_at: `${pictureDate}T07:00:00Z`, updated_at: `${pictureDate}T07:00:00Z` }] } }));
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${WEB_BASE}/story-workspace/timeline`);
+  await expect(page.getByText('Original diary remains visible', { exact: true })).toBeVisible();
+  await page.getByRole('img', { name: 'Historical picture', exact: true }).click();
+  await expect(page.getByText('Starred Comments', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Generated image' })).toBeVisible();
+  await expect(page.getByText('No comments for this day', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '×', exact: true }).click();
+  await expect(page.getByText('Starred Comments', { exact: true })).toHaveCount(0);
+  const report = page.locator(`[data-analysis-report-id="${fixture.reports[0].id}"]`);
+  await report.click();
+  const reader = page.getByRole('region', { name: 'Analysis report' });
+  await reader.getByRole('button', { name: 'History insight 0', exact: false }).click();
+  await expect(reader.getByText('Distinct report content 0', { exact: true })).toBeVisible();
+  await reader.getByRole('button', { name: 'Timeline', exact: false }).click();
+  await expect(page.getByText('Original diary remains visible', { exact: true })).toBeVisible();
+  expect(fixture.errors).toEqual([]); expect(fixture.base.getUnexpected()).toEqual([]);
 });

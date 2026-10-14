@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: localize complete analysis history loading, errors, reading and pagination.
 // [Sync] 2026-10-14: localize the Reflections Analyze preview tag and its three section labels.
 // [Sync] 2026-10-13: local image import and charcoal editing tools use the existing bilingual Chat namespace.
 // [Sync] 2026-10-12: localize builtin compact usage and unavailable feedback.
@@ -187,6 +188,7 @@ const resources = {
           words: 'Words'
         },
         pastReflections: 'Past Reflections',
+        history: { report: 'Analysis report', retry: 'Retry', loading: 'Loading analysis history…', failed: 'Analysis history could not be loaded.', empty: 'No analysis reports yet.', loadMore: 'Load earlier analyses', open: 'Open analysis created {{date}}', label: 'Analysis' },
         report: {
           latest: 'Latest',
           patternCount: '{{count}} patterns'
@@ -1310,6 +1312,7 @@ const resources = {
           words: '字数'
         },
         pastReflections: '历史回顾',
+        history: { report: '分析报告', retry: '重试', loading: '正在读取分析历史…', failed: '暂时无法读取分析历史。', empty: '暂无分析报告。', loadMore: '加载更早分析', open: '打开创建于{{date}}的分析', label: '分析' },
         report: {
           latest: '最新',
           patternCount: '{{count}} 个模式'

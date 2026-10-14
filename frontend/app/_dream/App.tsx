@@ -1,3 +1,4 @@
+// [Sync] 2026-10-14: pass the account timezone to analysis report history and reading.
 // [Sync] 2026-10-07: login/import cleanup uses the explicit key list and retains browser language/theme.
 // [Sync] 2026-10-05: Calendar delegates Notion recovery to the canonical Settings Resources route without changing Chat handoff.
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
@@ -1702,7 +1703,7 @@ export default function App() {
               ),
               analysis: (
                 <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'auto' }}>
-                  <AnalysisView />
+                  <AnalysisView timezone={userTimezone} />
                 </div>
               ),
               chat: (

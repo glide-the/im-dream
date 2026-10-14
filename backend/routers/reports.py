@@ -1,3 +1,4 @@
+# [Sync] 2026-10-14: add strict owner-scoped creation-time history pagination while preserving list/save.
 #!/usr/bin/env python3
 # [Input] Consume typed Admin analysis-report operations and shared auth dependency.
 # [Output] Register /api/reports endpoints.
@@ -11,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from services.admin_data.reflection_history_data import AdminReflectionHistoryData, ReflectionHistoryCursorDTO, ReflectionHistoryInputDTO
 from services.admin_data.errors import AdminDataError
 from services.admin_data.reflection_task_models import (
     AnalysisReportListInputDTO,
@@ -70,6 +72,33 @@ async def get_reports(limit: int = 10,
             }
             for item in result.reports
         ]
+    }
+
+
+@router.get("/api/reports/history")
+async def get_report_history(
+    limit: int = 10,
+    before_created_at: str | None = None,
+    before_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    """Read all saved analysis history through exact creation-time/id keyset pages."""
+    if (before_created_at is None) != (before_id is None):
+        raise HTTPException(status_code=422, detail="Invalid history cursor")
+    before = None if before_created_at is None else _validated_report_input(
+        ReflectionHistoryCursorDTO, created_at=before_created_at, id=before_id,
+    )
+    result = await invoke_admin_operation(
+        current_user, AdminReflectionHistoryData(owner.client).page,
+        _validated_report_input(ReflectionHistoryInputDTO, limit=limit, before=before),
+    )
+    return {
+        "reports": [{"id": item.id, "report_type": item.report_type,
+            "report_data": item.report_data(), "created_at": item.created_at,
+            "task_id": item.task_id, "analysis_created_at": item.analysis_created_at,
+        } for item in result.reports],
+        "next_cursor": result.next_cursor.model_dump() if result.next_cursor else None,
     }
 
 
