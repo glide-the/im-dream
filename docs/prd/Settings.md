@@ -1,5 +1,9 @@
 # Settings PRD
 
+<!-- [Sync] 2026-10-15: 个人设置拟新增唯一L3记忆回应section，详细规则/骨架由memory业务PRD拥有；未实现。 -->
+
+> 新增的L3“记忆回应”设计建议见[Memory PRD](memory/reflections-agent-memory-prd.md)。它配置个人主题回应行为，沿现有设置外壳，不修改Reflections或报告阅读页面。下方原有设置规范保留。
+
 > Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
 > **[Sync] 2026-05-27**: 新增用户 API 配置区域（现 §4.3.7，`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
 > **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对除问答表单外的已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。

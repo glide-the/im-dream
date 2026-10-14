@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-14: 区分程序性工作区与未实现的个人记忆设计，旧流程原文保留并标明现行归属。 -->
 > [Input] `backend/libs/claude_agent_kit/server/memory_workspace.py`,
 >         `backend/routers/reflections.py`, `backend/reflections_config.py`,
 >         `frontend/app/_dream/api/voiceApi.ts`,
@@ -12,6 +13,10 @@
 > [Sync] 2026-09-15: 用户自定义分区配置改由Admin OAuth操作持久化；初始化先校验Admin Thread归属和配置，再访问共享文件系统。
 
 # Memory Workspace 设计
+
+> [Sync] 2026-10-15：L2 `memory_distillation.md` 是每份保存报告的跨Thread派生文档，不能与本文件的Thread程序性规则目录混为一体；读取经业务Tool和服务器文件发布合同。L3主题、执行器及唯一行为设置以[现行正式稿](reflections-agent-memory-interaction-design.md)为准，均未实现；下方历史原文保留。
+
+> [Sync] 2026-10-14：本文的程序性工作区定位继续有效。报告到持久个人 Agent Memory 的新增方案见[正式交互设计](reflections-agent-memory-interaction-design.md)，该方案尚未实现。本文保留旧流程原文；下方关于后台无 Admin 续期授权/继续使用 Dream 数据库、独立 Analyze 和按日合并的旧描述不作为现行规则。当前任务/来源/报告与恢复以[分析内容设计](reflections-analysis-content-design.md)和[历史设计](reflections-history-design.md)为准，本轮源码核对见[证据记录](../../exec/reflections-agent-memory-design-review-20261014.md)。
 
 ## 1. 定位
 

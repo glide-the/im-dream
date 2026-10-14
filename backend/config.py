@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: centralize memory worker polling as a technical operation setting.
 # [Input] Environment-backed runtime policy values and repository prompt files.
 # [Output] Central configuration for voice archetypes, screenplay Deck defaults,
 #          default Claude plugins, and Calendar Notion API-date/URL-host policy.
@@ -18,6 +19,26 @@ NOTION_ALLOWED_URL_HOSTS = frozenset(host.strip().lower() for host in os.environ
     "INK_NOTION_ALLOWED_URL_HOSTS", "www.notion.so,notion.so,www.notion.site,notion.site,app.notion.com"
 ).split(",") if host.strip())
 import math
+
+
+def memory_resolve_timeout_seconds() -> float:
+    try:
+        value = float(os.getenv("MEMORY_RESOLVE_TIMEOUT_SECONDS", os.getenv("INK_ADMIN_DREAM_TIMEOUT_SECONDS", "10")))
+    except (TypeError, ValueError):
+        raise ValueError("MEMORY_RESOLVE_TIMEOUT_SECONDS must be positive") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("MEMORY_RESOLVE_TIMEOUT_SECONDS must be positive")
+    return value
+
+
+def memory_poll_seconds() -> float:
+    try:
+        value = float(os.getenv("MEMORY_POLL_SECONDS", "2"))
+    except (TypeError, ValueError):
+        raise ValueError("MEMORY_POLL_SECONDS must be positive") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("MEMORY_POLL_SECONDS must be positive")
+    return value
 
 
 def scheduled_task_poll_seconds() -> float:

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: freeze today rerun fixture at its actual analysis creation day.
 // [Sync] 2026-10-14: preserve original timeline geometry while inserting task recap records and reusing earlier-days loading.
 // [Input] Authenticated Story Workspace Reflections route and public Reflections task/content DTOs.
 // [Output] Provider-free browser journeys for source selection, task SSE/recovery, report persistence,
@@ -787,8 +788,8 @@ test('Notion read and Agent invalidation errors recover through the explicit rel
 });
 
 test('today re-analysis opens the diary picker with the current entries', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-13T03:00:05Z') });
   const fixture = await installReflectionFixtures(page, { seedReport: true });
-  fixture.reports[0].created_at = new Date().toISOString();
   await openAnalysis(page);
   await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Today already has a Reflections analysis.' });

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: dispatch closed memory commands to the turn-bound Host provider.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: dispatch only bound Images operations over the existing private broker; stop late publication on close.
 # [Sync] 2026-09-28: dispatch schedule.create through the same strict turn-local Thread Tool provider.
@@ -44,6 +45,8 @@ from libs.claude_agent_kit.server.session_projection_protocol import (
 )
 
 from libs.claude_agent_kit.server.image_generation_protocol import ImageGenerationRequest, ImageSelectionRequest
+
+from libs.claude_agent_kit.server.reflection_memory_tool import MemoryRequest, MemoryResult, MemoryResponse
 
 from models.workflow_run import WorkflowRun
 
@@ -127,6 +130,7 @@ class SessionProjectionBroker:
         self._server: _ThreadingBroker | None = None
         self._server_thread: threading.Thread | None = None
         self._closed = False
+        self._memory_provider = None
 
     @staticmethod
     def _error(
@@ -164,6 +168,20 @@ class SessionProjectionBroker:
                 # Image HTTP does not block unrelated Session/Thread projection dispatch.
                 result = provider.generate(request) if isinstance(request, ImageGenerationRequest) else provider.select(request)
                 payload = json.dumps({"ok": True, "result": result.model_dump() if hasattr(result, "model_dump") else result}).encode("utf-8") + b"\n"
+            elif untrusted.get("operation") in {"memory.list", "memory.read", "memory.resolve"}:
+                request = MemoryRequest.model_validate(untrusted, strict=True)
+                request_id = request.request_id
+                if not hmac.compare_digest(request.capability, self._capability):
+                    raise AdminDataError("SESSION_BROKER_DENIED", 401, request_id)
+                with self._action_lock:
+                    with self._lock:
+                        if self._closed or self._memory_provider is None:
+                            raise AdminDataError("MEMORY_TOOL_UNAVAILABLE", 503, request_id)
+                        provider = self._memory_provider
+                    result = provider.perform_memory_tool(request)
+                if type(result) is not MemoryResult:
+                    raise AdminDataError("ADMIN_RESPONSE_INVALID", 503, request_id)
+                payload = MemoryResponse(ok=True, result=result).model_dump_json().encode("utf-8") + b"\n"
             elif isinstance(untrusted.get("operation"), str) and (
                 untrusted["operation"].startswith("thread.")
                 or untrusted["operation"] == "schedule.create"
@@ -277,6 +295,18 @@ class SessionProjectionBroker:
             if self._closed or (self._image_provider is not None and not self._image_provider._closed):
                 raise AdminDataError("IMAGE_TOOL_BINDING_CONFLICT", 503)
             self._image_provider = provider
+
+    def bind_memory_provider(self, provider) -> None:
+        with self._lock:
+            if self._closed or self._server is not None or self._memory_provider is not None:
+                raise AdminDataError("MEMORY_TOOL_BINDING_INVALID", 503)
+            self._memory_provider = provider
+
+    def refresh_memory_authorization(self, current_user) -> None:
+        with self._lock:
+            provider = self._memory_provider
+        if provider is not None:
+            provider.refresh_authorization(current_user)
 
     def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
         with self._lock:

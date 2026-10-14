@@ -1,0 +1,22 @@
+/* [Input] Existing Settings card/theme styles and flexible viewport. */
+/* [Output] One responsive behavior section without nested page scrolling. */
+/* [Pos] Memory response Settings layout. */
+/* [Sync] 2026-10-15: desktop columns collapse naturally on narrow screens. */
+.memory-behavior { display: grid; gap: 1rem; min-width: 0; }
+.memory-behavior header h1 { margin: 0 0 .5rem; }
+.memory-behavior p { line-height: 1.6; }
+.memory-behavior__themes { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,18rem),1fr)); gap: 1rem; }
+.memory-behavior fieldset { min-width: 0; margin: 0; }
+.memory-behavior legend { font-weight: 600; padding: 0 .3rem; }
+.memory-behavior__toggle { display: flex; align-items: center; gap: .7rem; cursor: pointer; }
+.memory-behavior__toggle input { width: 1.1rem; height: 1.1rem; accent-color: var(--color-action-primary); flex-shrink: 0; }
+.memory-behavior__action { display: grid; gap: .6rem; margin-top: 1rem; }
+.memory-behavior select { width: 100%; min-width: 0; background: var(--color-bg-surface-solid); color: inherit; border: 1px solid var(--color-border-paper); border-radius: .5rem; padding: .6rem; font: inherit; }
+.memory-behavior__buttons { display: flex; flex-wrap: wrap; gap: .75rem; }
+.memory-behavior button { border: 1px solid var(--color-border-paper); background: var(--color-bg-surface-solid); color: inherit; border-radius: .5rem; padding: .65rem 1rem; cursor: pointer; font: inherit; }
+.memory-behavior button:disabled { opacity: .55; cursor: default; }
+.memory-behavior__message { margin: 0; padding: .8rem; border-left: 3px solid currentColor; }
+
+.memory-behavior fieldset { padding: .85rem 0; border-bottom: 1px solid var(--color-border-paper); }
+.memory-behavior button:hover:not(:disabled) { background: var(--color-bg-hover); }
+.memory-behavior button:focus-visible, .memory-behavior select:focus-visible, .memory-behavior input:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 3px; }

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: classify only memory Settings GET aborts from React cleanup/reload in its explicit fixture lane.
 // [Sync] 2026-10-14: classify exact Reflections history GET lifecycle cancellation only in its explicit fixture lane.
 // [Sync] 2026-10-13: classify only the mounted Notion probe GET cancellation during connector refresh/unmount.
 // [Sync] 2026-10-07: classify exact Chat-list and target-Thread schedule-relation aborts during result handoff.
@@ -73,6 +74,7 @@ type FixtureOptions = {
   notionFaults?: boolean;
   reflectionHistory?: boolean;
   authEntryLifecycle?: boolean;
+  memorySettingsLifecycle?: boolean;
   longTitle?: boolean;
   taskCount?: number;
   diaryCount?: number;
@@ -227,6 +229,9 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     const expectedHistoryNavigationCancellation = isReflectionHistoryNavigationCancellation(request, historyNavigationPhase);
     const expectedAuthEntryCancellation = options.authEntryLifecycle && request.method() === 'GET'
       && path === '/auth/options' && request.failure()?.errorText === 'net::ERR_ABORTED';
+    const expectedMemorySettingsCleanup = options.memorySettingsLifecycle && request.method() === 'GET'
+      && path === '/api/memory/behavior' && failure === 'net::ERR_ABORTED'
+      && refererPath === '/story-workspace/settings/behavior';
     if (expectedThreadHandoffAbort) {
       threadHandoffAborts.push({ method: request.method(), path, query: parsedUrl.search,
         error: failure, pagePath: new URL(page.url()).pathname, refererPath });
@@ -236,7 +241,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedChatListNavigationAbort
       && !expectedScheduledResultNavigationAbort && !expectedUnknownRun && !expectedNotionCancellation
       && !expectedScheduledRelationNavigationAbort && !expectedNotionProbeCancellation
-      && !expectedAuthEntryCancellation && !expectedHistoryCancellation && !expectedHistoryNavigationCancellation) {
+      && !expectedMemorySettingsCleanup && !expectedAuthEntryCancellation && !expectedHistoryCancellation && !expectedHistoryNavigationCancellation) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });

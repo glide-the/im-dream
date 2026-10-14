@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-10-14: 保留旧 Mem0 目标原文，补充当前存根事实及报告到个人记忆设计指引。 -->
+<!-- [Sync] 2026-10-15: 现行建议改为两个L2读取Tool及一个L3 resolver，独立每轮行为snapshot；不扩大原生Read/Runtime env。 -->
 > **迁移来源**: Pawkeyland docs/app/design/Claude Code Runtime 服务入参与SSE响应报文整理.md
 > **Ink & Memory 适配**: API 端点路径一致（`POST /api/claude-agent`）；necklace/pet/Mem0 等 Pawkeyland 专属字段已移除。
 > **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。  
@@ -92,6 +94,8 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 - `backend/claude_agent/thread_factory.py` 是 SSE 入口（Factory 模式），驱动 Phase 1（`service.assemble_context`）+ Phase 2（`create_agent_runner`）+ Phase 3（`service.execute_session`）+ Phase 4（`_fire_session_ended`），并维护每会话 `asyncio.Lock`、`AgentRunStatePool` 享元、10 分钟 TTL 清扫器。
 - `backend/claude_agent/service.py` 在 Phase 1 / Phase 3 内完成上下文构建、pet-agent 调用和 SSE 事件出流；`run_streaming` 入口已删，对外只暴露 `assemble_context` + `execute_session` + `confirm_tool`。
 - `backend/claude_agent/context_builder.py` 只渲染Service已经验证的近期Session投影，并把运行时和显式诊断 `long_term_profile` 覆盖拼进 prompt；正式长期记忆由 Mem0 memory MCP 按需召回。
+
+> [Sync] 2026-10-14：上一句关于 Mem0 正式召回保留为历史目标说明，不作为当前能力。当前 `recall_shared_stories` 的 gateway/search 仍为注释存根且默认关闭；未实现正式持久事实读取。报告到个人记忆的[新交互设计](../memory/reflections-agent-memory-interaction-design.md)和[本轮源码证据](../../exec/reflections-agent-memory-design-review-20261014.md)分别说明建议能力与现有实现，不修改本文件其他 Agent/SSE 合同。
 
 #### 4.1.1 Common Skill Slash catalog
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: route owner memory response settings.
 // [Input] Browser pathname/search strings.
 // [Output] Pure story-workspace route resolution seams: static route table,
 //          parameterized route patterns (C10-①/②), URLSearchParams query
@@ -34,6 +35,7 @@ export type StoryWorkspaceStaticRoute =
   | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
+  | 'settings-behavior'
   | 'settings-model'
   | 'settings-about';
 
@@ -57,6 +59,7 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   'settings-work': '/story-workspace/settings/work',
   'settings-resources': '/story-workspace/settings/resources',
   'settings-plugins': '/story-workspace/settings/plugins',
+  'settings-behavior': '/story-workspace/settings/behavior',
   'settings-model': '/story-workspace/settings/model',
   'settings-about': '/story-workspace/settings/about',
 };
@@ -371,6 +374,7 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'settings-work'
     || match.route === 'settings-resources'
     || match.route === 'settings-plugins'
+    || match.route === 'settings-behavior'
     || match.route === 'settings-model'
     || match.route === 'settings-about'
   ) return false;

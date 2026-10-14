@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: freeze owner memory settings and current message before each turn broker starts.
 #!/usr/bin/env python3
 # [Sync] 2026-10-12: project closed contextUsage snapshots through owner-checked history DTOs.
 # [Sync] 2026-10-12: expose closed compaction display metadata in the original owned history DTO.
@@ -1442,6 +1443,10 @@ async def _claude_agent_stream_impl(
             },
         ) from None
 
+    from services.memory.behavior import MemoryTurnProvider
+    memory_current_text = message_text
+    memory_provider = await run_in_threadpool(MemoryTurnProvider, owner.client, current_user, memory_current_text, thread_id, message_id)
+    turn_persistence.bind_memory_provider(memory_provider)
     turn_persistence.bind_thread_tool_provider(_ThreadToolTurnProvider(
         loop=asyncio.get_running_loop(), current_user=current_user, chat=chat,
         owner=owner, source_thread_id=thread_id, source_message_id=message_id,

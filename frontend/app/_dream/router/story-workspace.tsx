@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: render memory behavior through the existing Settings shell.
 // [Input] Browser location/history, Story Workspace layout/sidebar, and route page skeletons.
 // [Output] Resolve canonical Story Workspace paths and render every authenticated surface inside its shared layout.
 // [Pos] Story Workspace state-router adapter for the existing App architecture.
@@ -185,6 +186,7 @@ function renderStoryWorkspaceRoute(
     case 'settings-work':
     case 'settings-resources':
     case 'settings-plugins':
+    case 'settings-behavior':
     case 'settings-model':
     case 'settings-about':
       return renderSettings
@@ -398,6 +400,7 @@ export function StoryWorkspaceRouter({
     || activeRoute === 'settings-work'
     || activeRoute === 'settings-resources'
     || activeRoute === 'settings-plugins'
+    || activeRoute === 'settings-behavior'
     || activeRoute === 'settings-model'
     || activeRoute === 'settings-about'
     || activeRoute === 'subscription';

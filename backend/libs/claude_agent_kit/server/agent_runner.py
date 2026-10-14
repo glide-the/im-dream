@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: allow the three exact user memory Tools.
 # [Sync] 2026-10-12: explicitly close the owned SDK query iterator when a callback is cancelled.
 # [Sync] 2026-10-11: project only original synthetic compact completion through the existing text path in partial mode.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -389,6 +390,9 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "Skill",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
     *(f"mcp__user__{name}" for name in THREAD_TOOL_SPECS),
+    "mcp__user__list_memory_distillations",
+    "mcp__user__read_memory_distillation",
+    "mcp__user__resolve_memory_behavior",
     *allowed_editor_tool_names(),
     *story_workspace_allowed_tool_names(),
 ]
@@ -581,6 +585,9 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     "mcp__user__list_threads",
     "mcp__user__read_thread",
     "mcp__user__wait_threads",
+    "mcp__user__list_memory_distillations",
+    "mcp__user__read_memory_distillation",
+    "mcp__user__resolve_memory_behavior",
     # Business Thread orchestration is re-authorized by the host provider
     # against the current actor and source/target ownership. Auto mode follows
     # the non-blocking task contract; manual mode still confirms below.

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: register additive memory artifact/settings contracts.
 # [Sync] 2026-10-14: register additive history-page without requiring it for unrelated operations.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: request Images only when the authenticated actor already has images:create.
@@ -63,6 +64,7 @@ from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWor
 from .scheduled_task_data import SCHEDULED_TASK_OPERATIONS, SCHEDULED_TASK_V2_OPERATIONS, SCHEDULED_TASK_V3_OPERATIONS
 from .client import AdminDataClient
 from .reflection_analysis_content_data import ANALYSIS_CONTENT_OPERATIONS
+from .memory_data import MEMORY_OPERATIONS
 from .reflection_history_data import HISTORY_OPERATIONS
 from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
@@ -170,6 +172,7 @@ class AdminRequestAuth:
                 *REFLECTIONS_SECTION_CONFIG_OPERATIONS,
                 *ANALYSIS_CONTENT_OPERATIONS,
                 *HISTORY_OPERATIONS,
+                *MEMORY_OPERATIONS,
                 *LOCAL_DATA_IMPORT_OPERATIONS,
                 *PICTURE_HISTORY_OPERATIONS,
                 *DECK_DEFAULT_OPERATIONS,
