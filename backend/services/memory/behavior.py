@@ -1,12 +1,13 @@
 # [Input] Authenticated current turn, frozen owner policy and owner-verified L2 versions.
 # [Output] Bounded current-task plans; no policy writes, psychological diagnosis or hidden model calls.
 # [Pos] Host memory provider; taxonomy is data, never executable prompt text.
+# [Sync] 2026-10-15: direct current-task refusal supports both Chinese word orders; source taxonomy remains immutable.
 # [Sync] 2026-10-15: revisioned turn snapshot and fixed action execution.
 from __future__ import annotations
 from dataclasses import dataclass
 import re
 import time
-from config import memory_resolve_timeout_seconds
+from config import memory_resolve_timeout_seconds,MEMORY_CURRENT_TASK_BOUNDARY_PATTERN
 from uuid import uuid4
 from services.admin_data.memory_data import AdminMemoryData,EmptyDTO,ListDTO,LookupDTO,SettingsDTO
 from services.admin_data.request_auth import AdminRequestActor
@@ -23,6 +24,11 @@ ACTIONS={
  'connect_goal_to_choice':'结合用户当前说出的目标解释选项与取舍，不声称存在唯一正确选择。',
  'acknowledge_only':'简短回应用户当前说出的价值与需要，不承诺结果或排他关系。',
 }
+def _has_explicit_boundary(text: str) -> bool:
+    return bool(re.search(MEMORY_CURRENT_TASK_BOUNDARY_PATTERN,text,re.I)
+                or re.search(POLICY['explicit_boundary'],text,re.I)
+                or re.search(POLICY['interpretation_rejection'],text,re.I))
+
 @dataclass(frozen=True,slots=True)
 class BehaviorPolicySnapshot:
     owner_id:str
@@ -56,7 +62,7 @@ class MemoryTurnProvider:
                 if message.role!='user': continue
                 text='\n'.join(part.get('text','') for part in message.parts if isinstance(part,dict) and part.get('type')=='text')
                 if re.search(POLICY['boundary_restore'],text): self.scoped_boundary=False
-                elif re.search(POLICY['explicit_boundary'],text,re.I) or re.search(POLICY['interpretation_rejection'],text,re.I): self.scoped_boundary=True
+                elif _has_explicit_boundary(text): self.scoped_boundary=True
             if re.search(POLICY['boundary_restore'],self.current_text): self.scoped_boundary=False
         except (AdminDataError,ValueError): self.snapshot=None
     def refresh_authorization(self,current_user):
@@ -79,7 +85,7 @@ class MemoryTurnProvider:
             return MemoryResult(status=a.state,artifact=Reference(artifact_id=a.artifact_id,revision=a.revision),report_id=a.report_id,document=document,document_sha256=a.document_sha256 if document else None,reason=a.error_code)
         if self.snapshot is None: return MemoryResult(status='unavailable',reason='当前设置读取失败，本轮不使用记忆回应策略。',plans=[])
         rev=self.snapshot.revision
-        if self.scoped_boundary or re.search(POLICY['explicit_boundary'],self.current_text,re.I) or re.search(POLICY['interpretation_rejection'],self.current_text,re.I): return MemoryResult(status='explicit_boundary',policy_revision=rev,plans=[],reason='尊重当前任务边界，继续具体帮助。')
+        if self.scoped_boundary or _has_explicit_boundary(self.current_text): return MemoryResult(status='explicit_boundary',policy_revision=rev,plans=[],reason='尊重当前任务边界，继续具体帮助。')
         desired=self.snapshot.desired()
         if not desired.enabled: return MemoryResult(status='disabled',policy_revision=rev,plans=[])
         current_tags=set(classify(self.current_text))

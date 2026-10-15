@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: recognize current-task refusal clauses independently of frozen report-conversion rules.
 # [Sync] 2026-10-15: centralize memory worker polling as a technical operation setting.
 # [Input] Environment-backed runtime policy values and repository prompt files.
 # [Output] Central configuration for voice archetypes, screenplay Deck defaults,
@@ -19,6 +20,16 @@ NOTION_ALLOWED_URL_HOSTS = frozenset(host.strip().lower() for host in os.environ
     "INK_NOTION_ALLOWED_URL_HOSTS", "www.notion.so,notion.so,www.notion.site,notion.site,app.notion.com"
 ).split(",") if host.strip())
 import math
+
+# Host instruction grammar, independent of immutable L2/L3 conversion/taxonomy.
+# Match a direct refusal clause in either verb/topic order, excluding quoted
+# instructions embedded after an unrelated clause prefix. No UI/operator knob.
+MEMORY_CURRENT_TASK_BOUNDARY_PATTERN = (
+    r"(?:^|[，,。！？!?；;\n])\s*(?:(?:这次|现在|请|也|先|我|你)\s*)*"
+    r"(?:不要|别再|别|不想|不用|不需要)[^，,。！？!?；;\n]*?"
+    r"(?:(?:解释|分析|谈|聊|追问)[^，,。！？!?；;\n]*(?:心理|情绪|感受|历史回顾)"
+    r"|(?:心理|情绪|感受|历史回顾)[^，,。！？!?；;\n]*(?:解释|分析|讨论|提及))"
+)
 
 
 def memory_resolve_timeout_seconds() -> float:

@@ -1,7 +1,7 @@
 <!-- [Input] 已批准的L2/L3设计、Notion正文证据、Dream/Admin分支源码。 -->
 <!-- [Output] 实现合同、页面骨架、业务时序/状态图、Tools及验收矩阵。 -->
-<!-- [Pos] Memory现行正式稿；已实现与尚未发布/真实验收严格区分。 -->
-<!-- [Sync] 2026-10-15: 按最小实现更新；来源整理不追加模型调用，批准稿完整归档。 -->
+<!-- [Pos] Memory现行正式稿；实现、正常采用与真实验收覆盖分别记录。 -->
+<!-- [Sync] 2026-10-15: 同步正常0082/0083启用及真实链路覆盖；当前任务拒绝句法独立于冻结源规则，历史原文保留。 -->
 # Reflections L2 蒸馏与 L3 记忆回应交互设计
 
 ## 背景与问题
@@ -12,7 +12,7 @@
 
 ## 目标与边界
 
-本分支已实现下述模块；**正常服务未发布新 Admin capability，真实模型验收尚未完成**。Admin 前向 migration 与 DTO 在配套分支，Dream 检查精确 capability/operation 摘要，缺失时只关闭记忆域。实际命令与回执见[实现记录](../../exec/reflections-l2-l3-implementation-20261015.md)。
+本分支已实现下述模块；用户授权后正常 Admin 已应用0082/0083，精确 `dream.memory.v1` 与九个操作可用，正常 Dream 已采用。真实账户/模型已完成三模式报告、L2/L3生成、三个Tool及设置保存/重开。实际报告没有匹配主题，非空 `resolved` 行动尚无真实验收证据，独立 Admin 管理页面登录复核也未完成。Dream仍检查精确 capability/operation 摘要，缺失时只关闭记忆域。实际命令、拒绝边界修复复测与逐项结算回执见[实现记录](../../exec/reflections-l2-l3-implementation-20261015.md)。
 
 [批准的实现前版本](reflections-agent-memory-interaction-design-pre-implementation-20261015-history.md)和[更早历史稿](reflections-agent-memory-interaction-design-pre-l2-l3-20261015-history.md)完整保留。仅新增 Settings“记忆回应”，不改 Reflections/报告/时间轴/Deck 页面，不增加提取确认、诊断、自由策略 prompt 或真实记忆手工写入 Tool。
 
@@ -34,7 +34,7 @@
 | [MemoryWorker](../../../backend/services/memory/worker.py) | 独立 after-report polling；调用 Admin discover/claim/stage/publish/fail。没有报告不创建 artifact；不更改分析任务终态 |
 | [documents.py](../../../backend/services/memory/documents.py) | `convert` 整理已有观察、精确重复合并全部来源；`convert_theme` 固定标签匹配；生成 JSON frontmatter 与 Markdown JSON正文并计算摘要 |
 | [files.py](../../../backend/services/memory/files.py) | 服务器私有根、UUID/版本路径、非符号链接目录和普通文件校验；临时文件/fsync/rename/复读校验 |
-| Admin `memoryService.ts` | 两张表：memory_artifact、memory_behavior_settings；归属、lease fencing、规范 UTF-8、状态、CAS及原请求回执。Drizzle `0082_reflections_memory` 发布 `dream.memory.v1` |
+| Admin `memoryService.ts` | 两张表：memory_artifact、memory_behavior_settings；归属、lease fencing、规范 UTF-8、状态、CAS及原请求回执。Drizzle `0082_reflections_memory` 发布 `dream.memory.v1`；0083前向补齐既有受限DATA角色两表SELECT/INSERT/UPDATE，fresh ACL计划采用同一权限，无DELETE或其他角色扩权 |
 | [MemoryTurnProvider](../../../backend/services/memory/behavior.py) | 绑定 owner/当前消息/Thread；读取 fresh 设置生成 immutable BehaviorPolicySnapshot；返回当前任务的固定回应计划 |
 | [reflection_memory_tool.py](../../../backend/libs/claude_agent_kit/server/reflection_memory_tool.py)、现有 user MCP/broker | 三个严格业务工具；子进程只有私有 broker capability，没有 Admin token、owner或数据库凭证 |
 | [MemoryBehaviorSettings](../../../frontend/app/_dream/views/story-workspace/MemoryBehaviorSettings.tsx) | 现有 Settings 栏目；draft、保存/核实/同请求重试/冲突处理 |
@@ -86,6 +86,8 @@ L3引文必须是该L2观察或evidence原有字符串；引用的item必须属�
 ```
 
 返回来源复用现有 Reflections 历史，不创造按 report_id 直达的 URL 合同；按保存的分析时间定位，Notion URL 来自既有来源摘要。用户否认分析或拒绝心理话题，当前 Thread 停止使用历史主题策略；明确重新允许时恢复。反馈只保存在原 Chat 消息中，不改变全局 desired 或历史 L2/L3。其他 Thread 的长期行为偏好由设置页控制。
+
+当前任务边界由 `MemoryTurnProvider._has_explicit_boundary` 在主题读取之前判断；`config.MEMORY_CURRENT_TASK_BOUNDARY_PATTERN` 识别直接拒绝指令中的“解释我的心理”和“情绪分析”等词序，与已发布的否认/拒绝规则组合。Thread历史按消息顺序回放，明确重新允许时清除当前范围；引用翻译例句不作为直接指令。此修复只调整当前用户指令的解释，不重写冻结 `policy.json`、历史L2/L3、主题版本或全局设置。
 
 ## Agent任务与最小 Tools
 
@@ -250,11 +252,11 @@ stateDiagram-v2
 | 中断、未知、重开 | canonical发布恢复不转换；未知stage不标失败；L3失败L2可读；缺文件同字节恢复 |
 | 设置默认/关闭/保存 | 默认关闭且保留主题选择；恢复默认只改草稿；保存CAS与原回执；当前turn不变、下一轮fresh |
 | 设置失败/冲突/重开 | 不用假默认覆盖；保留草稿；当前账户原命令可核实/重试；冲突展示最新已保存值 |
-| Agent实际使用 | read仅提供历史分析；resolve只返回当前任务允许动作；明确拒绝/否认及Thread内恢复生效；不宣称最终采纳 |
+| Agent实际使用 | read仅提供历史分析；resolve只返回当前任务允许动作；直接拒绝支持两种中文词序，引用翻译不误触发；Thread内拒绝持续及明确恢复生效；不宣称最终采纳 |
 | 桌面/窄屏与键盘 | 现有导航、自然单列、无横向滚动、键盘可操作、无新增确认弹窗 |
 | 相邻回归/缺capability | 现有Notion冻结、Deck/Agent选择、Reflections报告/SSE/历史保持；记忆域缺capability关闭，原流程可用 |
-| 真实模型链路 | 正常Dream/Admin/Gateway/真实账户及既有实体，Run/Thread/request/结算在正常Admin可查；当前尚未完成 |
+| 真实模型链路 | 正常Dream/Admin/Gateway/真实账户及既有实体，Run/Thread/request/结算写正常数据库；报告54的L2/空L3、三个Tools、设置已验证；非空策略及管理页面登录复核仍缺证据 |
 
 评审结论：实际入口、用户操作和Agent调用均已收敛；复用报告、来源冻结、身份、MCP/broker、Chat记录与Settings。删去额外页面、确认、计数触发、自由策略、独立语义模型Thread/预算、再生成配置和新反馈Tool。两表+小型后台worker支持规范文件与desired，不另建心理系统。保留必要失败、版本、来源和权限边界。
 
-限制明确：来源整理/规则分类没有真实语义模型质量证明；历史批量回填、按report_id的精确UI深链不在首版；原始引用不新增逐字原文核验。文档检查与技术验证不是功能真实验收，正常capability发布后的真实账户/模型闭环仍待完成。
+限制明确：真实样本18条观察均未命中固定复合主题规则，因此本轮只能证明空L3与 `no_match` 路径，不能证明非空策略覆盖或心理效果；历史批量回填、按report_id的精确UI深链不在首版；原始引用不新增逐字原文核验。正常记录的SQL核对不能冒充独立管理页面已登录复核，文档检查与技术验证也不代替真实模型验收。具体正常覆盖和待核对事项以实现记录为准。

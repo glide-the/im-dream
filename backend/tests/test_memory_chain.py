@@ -1,6 +1,7 @@
 # [Input] Production source conversion, private files, Host resolver and real strict DTOs.
 # [Output] Provider-free complete memory chain, snapshot/refusal, recovery and owner-boundary evidence.
 # [Pos] Isolated memory technical validation; no normal database or provider calls.
+# [Sync] 2026-10-15: reproduce normal-model Chinese refusal miss and Thread history recovery without changing source conversion.
 # [Sync] 2026-10-15: initial L2/L3 business-contract cases.
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -184,6 +185,30 @@ def test_rejected_interpretation_remains_thread_scoped_and_can_be_reopened(chain
     assert p.perform_memory_tool(request('memory.resolve',artifacts=[{'artifact_id':a.artifact_id,'revision':1}])).status=='explicit_boundary'
     reopened=provider('现在可以聊我的感受了。我工作卡住了，很沮丧。')
     assert reopened.perform_memory_tool(request('memory.resolve',artifacts=[{'artifact_id':a.artifact_id,'revision':1}])).status=='resolved'
+
+@pytest.mark.parametrize('text',[
+    '这次不要根据历史回顾解释我的心理，也不要延伸情绪分析。请先检查这次的记忆回应是否应该停用，然后只帮我把当前事情整理成一个最小行动清单。',
+    '也不要延伸情绪分析，只帮我整理待办。',
+    '请不要根据回顾解释我的心理。',
+])
+def test_direct_current_refusal_precedes_empty_or_matching_themes(chain,text):
+    _,a,data,_,provider,request=chain
+    result=provider(text).perform_memory_tool(request('memory.resolve',artifacts=[{'artifact_id':a.artifact_id,'revision':1}]))
+    assert result.status=='explicit_boundary' and result.policy_revision==1 and result.plans==[]
+    data.read.assert_not_called()
+
+def test_quoted_refusal_is_a_translation_task_not_a_new_boundary(chain):
+    _,a,_,_,provider,request=chain
+    result=provider('请翻译句子“不要根据历史回顾解释我的心理”。').perform_memory_tool(request('memory.resolve',artifacts=[{'artifact_id':a.artifact_id,'revision':1}]))
+    assert result.status=='no_match'
+
+def test_natural_refusal_survives_thread_reopen_and_explicit_restore(chain,monkeypatch):
+    _,a,_,_,provider,request=chain
+    history=SimpleNamespace(messages=[SimpleNamespace(role='user',parts=[{'type':'text','text':'这次不要根据历史回顾解释我的心理，也不要延伸情绪分析。'}])])
+    monkeypatch.setattr('services.admin_data.chat_data.AdminChatData',lambda _:SimpleNamespace(list_messages=lambda *args,**kwargs:history))
+    refs=[{'artifact_id':a.artifact_id,'revision':1}]
+    assert provider('我工作卡住了，很沮丧。').perform_memory_tool(request('memory.resolve',artifacts=refs)).status=='explicit_boundary'
+    assert provider('现在可以聊我的感受了。我工作卡住了，很沮丧。').perform_memory_tool(request('memory.resolve',artifacts=refs)).status=='resolved'
 
 def test_theme_conversion_retry_reads_published_l2_without_rewriting_it(chain,monkeypatch):
     source,a,*_=chain
