@@ -1,6 +1,7 @@
 > [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, actor/thread Notion projection, frontend tool confirmation flow.
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
+> [Sync] 2026-10-15: synchronize the already-implemented `wait_threads` and three Reflections memory tools in the low-sensitivity inventory and matrix; no permission behavior changes.
 > [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
 > [Sync] 2026-06-09: implementation note added for hook payload normalization (`tool_name`/`toolName`, `tool_input`/`toolInput`) and auto-mode retention of `Skill` in effective `allowed_tools`.
 > [Sync] 2026-06-09: Settings-controlled `im_full_access_enabled` added; when enabled, exposed non-answer-form tools receive explicit PreToolUse allow after `.editor/` virtual-index redirects.
@@ -88,8 +89,9 @@ Current auto-allow inventory:
 | Built-in read/search | `Read`, `Glob`, `Grep`, `LS`, `NotebookRead` only when resolved inside the current thread workspace; `TodoRead`, `WebFetch`, `WebSearch`, `BashOutput` |
 | MCP resource query | `ListMcpResources`, `ReadMcpResource` |
 | Workspace files area | `Read` / `Write` / `Edit` / `MultiEdit` only when the resolved target is inside `{cwd}/files/**` |
-| Session and Thread orchestration | `mcp__user__get_sessions_range`, `mcp__user__list_threads`, `mcp__user__read_thread`, `mcp__user__create_thread`, `mcp__user__send_message_to_thread` |
+| Session and Thread orchestration | `mcp__user__get_sessions_range`, `mcp__user__list_threads`, `mcp__user__read_thread`, `mcp__user__wait_threads`, `mcp__user__create_thread`, `mcp__user__send_message_to_thread` |
 | Memory query | `mcp__memory__recall_shared_stories` |
+| Reflections memory query and response-action resolution | `mcp__user__list_memory_distillations`, `mcp__user__read_memory_distillation`, `mcp__user__resolve_memory_behavior` |
 | Necklace query | `mcp__necklace__*` names returned by `allowed_necklace_tool_names()` |
 | Editor context switch | `mcp__editor__switch_editor` |
 | Skill invocation | `Skill` |
@@ -107,6 +109,13 @@ idempotent command, and then enters the same ThreadFactory and admission path as
 Chat. Auto mode therefore executes them without a duplicate confirmation.
 Manual mode continues to route both commands through the visible confirmation
 dock.
+
+The three Reflections memory tools list versions, read persisted distillations,
+and resolve response actions from the current turn and behavior settings. They
+do not create analyses or modify memory or settings. `MemoryTurnProvider` binds
+calls to the current actor; requested artifact versions are checked through
+Admin. This documents the existing `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` entries
+in `agent_runner.py`, without changing their classification.
 
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
 
@@ -218,7 +227,9 @@ This remains true in full-access mode.
 | `Write` outside `{cwd}/files/**` | Confirm | Confirm | Not exposed |
 | `Skill` | Allow | Confirm | Not exposed |
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
+| `mcp__user__list_threads` / `mcp__user__read_thread` / `mcp__user__wait_threads` | Allow | Confirm | Not exposed |
 | `mcp__user__create_thread` / `mcp__user__send_message_to_thread` | Allow | Confirm | Not exposed |
+| `mcp__user__list_memory_distillations` / `mcp__user__read_memory_distillation` / `mcp__user__resolve_memory_behavior` | Allow | Confirm | Not exposed |
 | `EnterPlanMode` / `ExitPlanMode` | Allow | Confirm | Not exposed |
 | `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |

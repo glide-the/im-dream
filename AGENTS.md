@@ -1,6 +1,7 @@
 <!-- [Input] 仓库工作边界、用户产品要求与现行文档维护合同。 -->
 <!-- [Output] Agent 必须遵守的设计、实现、数据、验证与工作区规则。 -->
 <!-- [Pos] 唯一根工作合同，统一维护仓库、产品设计、实现与验证规则。 -->
+<!-- [Sync] 2026-10-15: 增加 Claude Agent workflow、Tool description 与 low-sensitivity 分类约束及规则入口。 -->
 <!-- [Sync] 2026-10-10: 删除非标准根 Agent.md 后，AGENTS.md 成为唯一根工作合同。 -->
 <!-- [Sync] 2026-10-10: 产品方案进入正文前必须完成 Double Diamond 的发现、定义、方案比较与交付收敛。 -->
 <!-- [Sync] 2026-10-05: 明确按业务模块存放 PRD；PRD 正文包含骨架，正式设计稿正文包含业务时序、交互及状态图。 -->
@@ -17,7 +18,16 @@
 - Root repository maintenance and Agent contract: `AGENTS.md`
 - Folder contracts: `**/.folder.md`
 - Rules index: `docs/rules/README.md`
+- Claude Agent tool rules: `docs/rules/claude-agent-tools.md`
+- Claude Agent permission policy: `docs/design/claude-agent/claude-agent-permission-policy.md`
 - Cursor rules: `.cursor/rules/*.mdc`
+
+## Claude Agent 说明与权限规则
+
+- 修改 Claude Agent 的上下文说明、工具描述或权限分类前，必须先读取 [Rules index](docs/rules/README.md) 中的 [Claude Agent 工具规则](docs/rules/claude-agent-tools.md)。
+- `*_WORKFLOW` 及同类注入说明，只描述当前相关 Tools 的基本概念和使用方法；不得夹带其他工具、数据源路由或无关业务策略。
+- `*_TOOL_SPECS` 及同类注册定义中的工具描述，只说明该 Tool 的定位与职责；参数约束由 schema 表达，不加入业务场景、跨工具流程或额外行为引导。
+- `_LOW_SENSITIVITY*` 及同类权限分类，必须依据 [Claude-Agent Permission Policy](docs/design/claude-agent/claude-agent-permission-policy.md) 的 low-sensitivity 定义、明确例外和决策顺序；未知工具按 high-sensitivity 处理，不得凭名称、提示词或“只读”声明放行。权限分类变更须同步该策略和对应权限验证。
 
 ## Validation
 - Run requested validation commands after meaningful changes.
