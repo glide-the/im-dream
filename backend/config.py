@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: clause polarity guards exclude explicitly denied theoretical substitution from v2 classification.
 # [Sync] 2026-10-15: recognize current-task refusal clauses independently of frozen report-conversion rules.
 # [Sync] 2026-10-15: centralize memory worker polling as a technical operation setting.
 # [Input] Environment-backed runtime policy values and repository prompt files.
@@ -30,6 +31,17 @@ MEMORY_CURRENT_TASK_BOUNDARY_PATTERN = (
     r"(?:(?:解释|分析|谈|聊|追问)[^，,。！？!?；;\n]*(?:心理|情绪|感受|历史回顾)"
     r"|(?:心理|情绪|感受|历史回顾)[^，,。！？!?；;\n]*(?:解释|分析|讨论|提及))"
 )
+
+# Clause polarity grammar for current classification; a negated substitution
+# must not be turned into a historical theme or a current response plan.
+MEMORY_CLASSIFICATION_NEGATION_GUARDS = {
+    "TAG_DEF_EMO_RATIONAL": (
+        r"(?:没有|并未|并非|不是|不再|未曾|不会|不想|不要)"
+        r"[^。！？!?；;\n]*(?:用|借助|调用|通过|依靠|运用)"
+        r"[^。！？!?；;\n]*(?:理论|理性|逻辑|科学|概率|精神分析)"
+        r"[^。！？!?；;\n]*(?:代替|回避|掩盖|隔离|合理化|而非直接|而不是直接)"
+    ),
+}
 
 
 def memory_resolve_timeout_seconds() -> float:

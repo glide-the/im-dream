@@ -2,9 +2,10 @@
 <!-- [Output] 实现范围、测试层级、真实账户检查点和可复查证据。 -->
 <!-- [Pos] Reflections 记忆实现执行记录；不代替产品规则。 -->
 <!-- [Sync] 2026-10-15: 追加正常0082/0083采用、真实报告/文件/Tool/结算证据及中文拒绝修复；先前阻塞记录作为阶段历史保留。 -->
+<!-- [Sync] 2026-10-15: 续行核对18条零主题，按原词表修订版本化分类，并以同源新版本补齐非空真实验收。 -->
 # Reflections L2/L3 实现与验收
 
-当前交付状态：本机正常 Admin 已应用0082/0083并启用精确 `dream.memory.v1`，Dream正常服务已采用；指定账户与既有写作Agent使用 `deepseek-v4-pro` 完成一次三模式回顾和同Thread四轮对话。报告54生成18条L2，三个Tools均有真实回执，修复后的直接拒绝返回 `explicit_boundary`，20个关联请求全部成功结算。非空L3策略没有真实验收覆盖，独立Admin管理页面登录复核未完成，不能宣称全部验收项通过。下文前段保留首次实现时的阶段记录；其“未迁移/未调用”结论以“本机正常发布与真实模型验收续行”及最终回执为后续状态。
+当前交付状态：正常Admin已发布分类v2（0085），同一报告54的18条L2正文与冻结来源保持原摘要，v2追加1条L3；指定账户/既有写作Agent/deepseek-v4-pro实际读取后，两轮分别返回resolved + respect_distance（revision1）、resolved + help_only（revision2），并给出符合动作的可见建议。七轮对话刷新重开一致；验收后恢复原desired为revision3。新增8请求全部成功结算，合计28个SDK session关联请求逐项账本守恒。非空主题/策略缺口已补齐到本次单主题两动作范围；独立Admin管理页面登录未复核。439/582等统计已定位到明确源码口径差异，未逐条复查原冻结输入，见末尾。下文前段保留阶段历史，“未发布/未调用/非空未验收”等旧结论以末尾v2正常回执为后续状态。
 
 优化提示词执行依据：在新分支中依次实现报告到 L2 文件、只读 Agent Tools、L3 固定主题与当前任务策略、现有 Settings 中的行为设置。复用生产入口；先隔离验证，再使用用户指定的已有账户及现有执行对象和模型验收。不合并、不发布，不修改无关数据或凭证。
 
@@ -167,3 +168,77 @@ Optimized Prompt 修订依据：只修复当前消息的拒绝句法，覆盖“
 Luna仅关闭自己的59697临时文档服务和Chrome context；具名profile目录作为本机harness生成物保留、无锁无进程。完整命令回执保存在 `output/docs/reflections-l2-l3-design-20261015/release-checks/final-document-validation.log`。本节与功能验收结果分开；写入本节后复跑Markdown引用/差异检查，未改正式稿的三个图块。
 
 正常Settings截图中的Next开发提示有控制台依据：三条hydration属性差异均指向浏览器扩展在body注入的 `mpa-version` / `mpa-extension-id`，保存/重开与设置控件已正常验证。诊断摘要为normal-settings-console-diagnostic.json；没有隐藏错误、修改扩展或为此更改产品RootLayout。此观察与纯文档harness的404分开记录。
+
+## 非空主题与策略验收续行
+
+Optimized Prompt 执行依据：读取报告54派生的18条真实观察及证据，逐条对照当前规则和已连接Notion的标签定义/判断指南，说明为什么没有主题；只修复有正文依据的漏识别与标签含义偏移，不把一般焦虑、技术钻研或关系边界强行心理归类。已经发布的v1合同、migration、来源和文件不改字节。按需要追加版本化分类及Admin精确capability、保留旧版读取和权限边界，用原生产Worker对已登记报告追加同源新版本，无需重做日记分析。先由Luna做确定性回归，主Agent在具名隔离库验证前向发布，再沿已授权正常服务采用。真实验收仍使用指定账户、既有写作Deck/Agent和deepseek-v4-pro，经可见Chat和Settings验证非空主题、允许动作、实际回应、设置下一轮生效、重开及正常Gateway结算。最多三轮新增Chat，不另做三模式模型分析，不新增用户页面/Tool，不合并/推送/远程发布，不询问用户。
+
+发现：文件ready、摘要与解析正常；36段观察/证据没有被旧排除规则拦截，全部未命中字面组合。原词表明确“理论解释情感问题”的理智化标签；v1只接受“用/通过/依靠→理性/分析→回避/掩盖/隔离→感受/情绪”，漏掉报告中“理论框架分析自己，而非直接描述感受”的明确替代表达。v1的喜爱向往、正面肯定及拒绝深入三个标签还分别误写成求爱、寻求认可和压抑需求。泛化焦虑没有明确时间限制或灾难化后果，仍不应改成时间紧迫标签。
+
+定义与选择：保留四主题、十六Tag、原设置和三个Tools，只升级分类规则。排除原地修改v1及直接覆写报告54文件，也不为验收重跑长日记。新规则v2与v1并存；严格业务DTO需要容纳新版本，因此以新增内部v2操作注册保留原九个操作的descriptor，Agent仍只看原三个Tool。新增capability只发布规则/协议，不新建表或索引。生产Worker在v2发现时只纳入新报告或已有v1登记报告，复用原冻结source_json追加v2，旧版文件和20条原结算不变；未登记历史报告不回填。当前行为策略只采用当前v2标签，旧L2继续可读。
+
+验收场景：新v2派生仍对应原18条观察，至少一条有完整源片段支持的理智化主题；普通Chat读取刚整理的观察，并在当前表达同样相关且设置启用时返回resolved及尊重距离动作，助手不强迫心理解释。随后在原设置页选择“直接帮助当前任务”，同Thread下一轮应采用新revision与help_only。必要的第三轮只用于边界/恢复或实际缺陷定向复测；真实模型与账本不用于故障注入。
+
+Optimized Prompt 场景修订：自动审批拒绝把新编的第一人称关系困扰/情绪陈述发送到真实模型，UI核对仍为原4轮、空草稿且未生成。验收改为概述用户已明确授权核对的原回顾观察：“用理论分析而非直接表达感受”，请求处理已有观察并给出具体下一步；这是测试话语的概述，不冒充源文件逐字引文，不新增个人情绪事实。当前Thread原有拒绝通过明确允许讨论该观察的普通话语恢复。使用原UI、Tool和生产执行入口，没有通过脚本、接口或其他控制器绕过拒绝；减少发送内容的替代场景已被正常执行。
+
+### 18条观察的判断与最小修复
+
+本轮重新读取[标签详细定义](https://app.notion.com/p/2b230b7547c380a7b0e2c4d0db258273)和[判断指南](https://app.notion.com/p/2b230b7547c380ad8d07ea227fee69e0)。v1的零命中是分类规则问题，不是文件损坏/发布失败：原36段观察与证据排除命中仍为0。第14条有“理论框架分析自己，而非直接描述感受”的明确替代行为；v1限定的动词、固定词序和“回避/掩盖/隔离”字面组合没有覆盖它。v2按同句中的理论使用、分析行为、情感对象和明确替代关系识别，未扩大成看到理论或焦虑就归类。
+
+其他17条不强行打标：有的是阅读/内省/写作习惯，有的是正常关系边界或技术钻研；一般职业、身心及财务压力也没有直接证明死线、灾难化后果、比较或自我苛责等细分条件。逐条item ID、前后Tag和理由保存在[v2十八条判断](../../output/docs/reflections-l2-l3-design-20261015/v2-eighteen-observation-audit.json)，不复制私人正文。v2同时按原词表纠正喜爱向往/正面肯定/拒绝深入的误义；这些纠正不等于本轮已对全部十六Tag完成真实验收。
+
+只读评审发现的两个问题已修订并回归：明确“并非/没有/不再用理论替代感受”不生成该主题，也不返回该策略；否定只作用于对应句，不抹去另一句的正向表达。已有冻结source时不再先解析当前report/task JSON，具名隔离验证以损坏的当前报告JSON证明仍可完成同源v2派生。原v1规则、源合同、已保存文件和旧操作descriptor保持原字节/摘要。
+
+### 本机v2采用与真实业务结果
+
+Admin提交 `19fc5b7`。0084是误在root生成后保留原字节的空custom占位，0085在scratch完成后一次导入，只有精确capability发布，没有新表/索引/权限或业务数据回填。主Agent具名隔离库验证后，经官方runner在原正常 `ink-memory` 仅应用0084/0085；当前status为current，86/86、pendingTags=[]。精确classification SHA为 `524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79`。旧Admin/Dream进程所有权核对、确认对话停止后优雅关闭，构建后按原正常配置恢复；前端5173保持原Node24服务。
+
+| 真实步骤 | 实际结果 |
+| --- | --- |
+| 生产Worker自动处理既有报告54 | 新artifact `b5390074-bb2b-439f-b737-893e0d755042` revision1，L2/L3 ready；18条L2、1条TAG_DEF_EMO_RATIONAL / THEME_DEFENSE；未重新分析日记 |
+| 同源及旧版保护 | v1/v2 source SHA均 `8f06926ca3219d3a537f013912f5db37f03f20d49dce6f28929d669546dea575`；L2 body SHA均 `bc06fce1ce02c06ed49f23f12afe4d75c6b14a26c5fe50cb9a6e1843fc7ad67b`；新L3精确引用第14条原观察；v1两文件摘要不变，新文件均0600 |
+| 第5轮：沿旧缓存引用判定 | Agent只传v1 artifact，返回no_match；这条旧版不允许执行当前v2策略，未误称已采用 |
+| 第6轮：要求重新读取当前整理结果 | list→listed，read→新v2 ready且文件SHA一致，resolve→resolved、policy_revision1、plan=respect_distance、source_item_ids精确指向第14条 |
+| 第6轮实际可见回答 | 明确尊重边界，不追问心理话题；给出在理论段落前补具体事实坐标的写作建议。证明该次回答的可见行为，不推断心理效果 |
+| 正常Settings修改/保存/重开 | 防御主题改为“直接帮助当前任务”，显示保存成功，普通重开仍为help_only，正常DB revision2 |
+| 第7轮同Thread | resolve→resolved、policy_revision2、plan=help_only，仍引用同v2来源；实际回答直接给出一条写作动作，没有个人诊断或心理追问 |
+| 验收结束恢复 | 通过同设置页将防御主题恢复respect_distance；desired与验收前逐项一致、总开关仍开启，revision3；重开值一致 |
+| 对话持久化 | 正常历史重开同Thread，7个用户/7个助手消息、原写作Agent、最新回答逐字相同，无新模型调用 |
+| 正常Gateway/账本 | 新增3轮Chat、8个request，全部deepseek-v4-pro、HTTP200、settled+succeeded；连同前轮共28个SDK session精确关联请求，逐请求reserve=capture+release且capture=charged；本轮新增capture 527,676 tokens |
+
+新L2文件SHA `5230f0922581e19b1bb17befdfde2e02159715f63298dec3873270d6b52aee22`，新L3 SHA `9328b57c100214a96851f2741d58a5d069373a1bcbb83bd014ec2da58f8e66b9`。独立管理页面登录未在本轮恢复，以上正常数据库/原UI回执不冒称该页面已登录复核。439/582统计口径不在本次分类修复中改写。
+
+### 本轮具体命令与验证层级
+
+| 命令 | 结果 |
+| --- | --- |
+| Dream：`PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_memory_chain.py backend/tests/test_claude_agent_runner.py::TestClaudeAgentRunnerMcpDefaults::test_user_mcp_exposes_session_retrieval_and_thread_tools` | Luna最终exit0，54 passed in1.56s；包含Settings精确v2校验；首次2个旧操作名称断言失败已修订，原日志保留 |
+| Admin：`corepack pnpm exec vitest run app/lib/dream/memoryV2Registration.test.ts` | exit0，3 passed；原九操作fingerprint、v2精确gate和严格版本拒绝 |
+| Admin：`corepack pnpm exec tsc --noEmit`；受影响文件`corepack pnpm exec eslint` | 最终均exit0，日志列出实际文件清单；不是功能真实验收 |
+| Admin：`corepack pnpm build` | Luna exit0，DB bundles、Next webpack/TypeScript与20/20页面完成；主Agent随后恢复正常服务 |
+| Admin cwd：`node --import tsx /Users/dmeck/project/ink-dream-memory/output/docs/reflections-l2-l3-design-20261015/verify-memory-v2-isolated.mts` | 主Agent exit0；具名库ink_memory_classification_v2_qa_20261015，完整前向历史/同源升级/损坏live报告隔离故障/旧文件/双目录/跨owner/原回执；结束删除库与自有临时文件 |
+| Admin cwd：`node --import tsx /Users/dmeck/project/ink-dream-memory/output/docs/reflections-l2-l3-design-20261015/normal-memory-v2-release.mts --apply`及`--post-status` | 主Agent均exit0；预先匹配唯一0084/0085 pending和原数据目录/system identifier，正式runner仅发布该集合；post current/86条，无pending |
+| Admin cwd：`node --import tsx /Users/dmeck/project/ink-dream-memory/output/docs/reflections-l2-l3-design-20261015/normal-business-v2-receipt.mts v2-final 6d0f1b97-1257-482a-910d-a9f675a3d6da` | 主Agentexit0，同正常数据库只读事务；导出状态/摘要/Tool计划/结算，不导出日记、凭证或模型推理 |
+| `backend/.venv/bin/python output/docs/reflections-l2-l3-design-20261015/verify-v2-normal-acceptance.py` | 主Agentexit0；真实7轮、非空源计划/两种动作/revision1→2、恢复desired至3、8新增与28合计成功请求、逐项账本断言通过 |
+
+核心回执：[v2真实验收汇总](../../output/docs/reflections-l2-l3-design-20261015/v2-normal-acceptance-summary.json)、[正常文件](../../output/docs/reflections-l2-l3-design-20261015/v2-normal-files-receipt.json)、[正常数据库](../../output/docs/reflections-l2-l3-design-20261015/normal-business-v2-final.json)、[UI重开](../../output/docs/reflections-l2-l3-design-20261015/v2-ui-persistence-receipt.json)、[真实对话截图](../../output/docs/reflections-l2-l3-design-20261015/v2-resolved-chat.jpg)。技术日志在output同目录v2-checks，不与真实模型结果混写。正常服务、本轮派生版本、全部对话/请求/结算保留；未合并、推送或远程发布。
+
+### 最终服务采用与文档核对
+
+Settings DTO在最终复核中收窄为当前精确`memory-rules-v2`；历史artifact DTO仍允许v1/v2，旧文件继续可读。54项定向回归通过后，核对自有正常后端PID65819的cwd/启动参数并优雅停止，确认8765释放，再用原`backend/.venv/bin/python backend/server.py`与原配置恢复为PID65948。普通Settings页重新加载后总开关=true、防御=respect_distance，说明最终校验已被正常服务采用；未增加模型调用，revision仍为验收恢复后的3。
+
+| 文档检查命令 | 实际结果 |
+| --- | --- |
+| `node output/docs/reflections-l2-l3-design-20261015/validate-implementation-docs.mjs` | exit0，10个Markdown、35个本地引用、3个Mermaid，failures=[]；v1冻结摘要、双仓v2 policy、v2精确合同与历史稿均检查 |
+| `node output/docs/reflections-l2-l3-design-20261015/chrome-mermaid-parse.mjs` | exit0，已安装Chrome实际解析3/3；pageErrors=[]，一条本机文档harness资源404单独保留 |
+| 两仓各自`git diff --check` | 均exit0；Admin已提交且clean。本文补录后再次检查Markdown引用和差异，不把文档检查作为功能验收 |
+
+独立Luna原始命令与清理回执在`output/docs/reflections-l2-l3-design-20261015/v2-checks/final-summary.log`；仅关闭其49980文档服务和Chrome context，无残留锁或harness进程。正常服务继续运行。
+
+补录本节后独立复跑文档验证exit0：当前10个Markdown、36个本地引用、3个Mermaid、failures=[]；两仓diff检查exit0，Admin仍clean。回执为`output/docs/reflections-l2-l3-design-20261015/v2-checks/post-record-doc-validation.log`，未重复模型调用或数据库操作。
+
+### 相邻统计口径核对
+
+独立源码核对已确认统计不同：总览[aggregate](../../backend/routers/sessions.py)仅在`text.strip()`非空时增加篇数；Admin `app/lib/dream/reflectionTaskService.ts:170-184`冻结报告以全部来源Session的`sessions.length`计数，不过滤空正文。两端不是同一“篇数”定义。天数也不同：总览优先updated_at并转浏览器时区，报告优先created_at并截ISO日期；字数分别为Dream `backend/routers/deps.py:116`的CJK字符/其他空白分词混合算法与报告的单纯空白分词。
+
+两端均查`user_sessions`，没有日记类型/软删除字段筛选；报告另支持可选来源ID和日期范围（Admin `reflectionTaskRepository.ts:152-161`）。报告保存取冻结`snapshot.stats`，不是模型或L2/L3转换改写。以上足以说明439/582、170/172及字数不能直接等同比较；本次未逐条复查冻结输入，因此不声称差额143条已逐条证明都是空正文。未在分类修复中改写历史报告或扩展为统计功能重构。

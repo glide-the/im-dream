@@ -1,6 +1,7 @@
 # [Input] Production source conversion, private files, Host resolver and real strict DTOs.
 # [Output] Provider-free complete memory chain, snapshot/refusal, recovery and owner-boundary evidence.
 # [Pos] Isolated memory technical validation; no normal database or provider calls.
+# [Sync] 2026-10-15: cover versioned Notion-aligned rules and immutable v1 compatibility.
 # [Sync] 2026-10-15: reproduce normal-model Chinese refusal miss and Thread history recovery without changing source conversion.
 # [Sync] 2026-10-15: initial L2/L3 business-contract cases.
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 from services.admin_data.memory_data import ArtifactDTO,SourceDTO,SettingsDTO,AdminMemoryData,MEMORY_OPERATIONS,MEMORY_REQUIREMENTS,EmptyDTO
 from services.admin_data.request_auth import AdminRequestActor
-from services.memory.documents import convert,decode,digest,classify,POLICY,validate_document
+from services.memory.documents import convert,decode,digest,classify,POLICY,POLICIES,validate_document
 from services.memory.files import publish,read
 from services.memory.behavior import MemoryTurnProvider,BehaviorPolicySnapshot
 from libs.claude_agent_kit.server.reflection_memory_tool import MemoryRequest
@@ -24,11 +25,11 @@ def chain(tmp_path,monkeypatch):
     monkeypatch.setenv('MEMORY_ARTIFACT_ROOT',str(tmp_path/'memory'))
     task=str(uuid4());rid='9007199254740993';result=str(uuid4())
     source=SourceDTO.model_validate({'analysis_content':None,'task_id':task,'report_id':rid,'report_sha256':'a'*64,'start_date':None,'end_date':None,'completed_sections':['echoes','patterns'],'created_at':STAMP,'echoes':[{'id':result,'task_id':task,'section':'echoes','title':'工作受阻后的感受','description':'我工作卡住时感到挫败，面对截止时间也感到焦虑。','related_session_ids':['note-1'],'evidence':'我觉得工作卡住了，很沮丧；截止时间让我紧张。','confidence':'medium','created_at':STAMP}],'traits':[],'patterns':[],'failed_sections':['traits']})
-    a=ArtifactDTO(artifact_id=str(uuid4()),revision=1,report_id=rid,state='running',theme_state='pending',created_at=STAMP,source_sha256=digest(source.model_dump_json()),conversion_revision='memory-rules-v1',document=None,document_sha256=None,body_sha256=None,byte_length=None,theme_document=None,theme_sha256=None,metadata=None,error_code=None)
+    a=ArtifactDTO(artifact_id=str(uuid4()),revision=1,report_id=rid,state='running',theme_state='pending',created_at=STAMP,source_sha256=digest(source.model_dump_json()),conversion_revision='memory-rules-v2',document=None,document_sha256=None,body_sha256=None,byte_length=None,theme_document=None,theme_sha256=None,metadata=None,error_code=None)
     document,body,theme,meta=convert(source,a)
     a=a.model_copy(update={'state':'ready','theme_state':'ready','document':document,'document_sha256':digest(document),'body_sha256':body,'byte_length':len(document.encode()),'theme_document':theme,'theme_sha256':digest(theme),'metadata':meta})
     desired={'enabled':True,'themes':{t['id']:{'enabled':True,'action':t['default_action']} for t in POLICY['themes']}}
-    settings=SettingsDTO(owner_id=OWNER,catalog=[{k:t[k] for k in ('id','label','actions','default_action')} for t in POLICY['themes']],revision=1,taxonomy_revision='memory-rules-v1',default={**desired,'enabled':False},desired=desired,updated_at=STAMP)
+    settings=SettingsDTO(owner_id=OWNER,catalog=[{k:t[k] for k in ('id','label','actions','default_action')} for t in POLICY['themes']],revision=1,taxonomy_revision='memory-rules-v2',default={**desired,'enabled':False},desired=desired,updated_at=STAMP)
     data=Mock();data.settings.return_value=settings;data.read.return_value=a
     monkeypatch.setattr('services.memory.behavior.AdminMemoryData',lambda _:data)
     monkeypatch.setattr('services.admin_data.chat_data.AdminChatData',lambda _:SimpleNamespace(list_messages=lambda *args,**kwargs:SimpleNamespace(messages=[])))
@@ -73,6 +74,57 @@ def test_empty_report_has_no_l2_or_l3(chain):
 
 @pytest.mark.parametrize('text',['数据库迁移必须先完成，截止时间是周五。','请写小说，角色觉得工作受阻很沮丧。','我已经不觉得有压力了。','不是我，是同事工作卡住很沮丧。','只修复代码，不要分析情绪。'])
 def test_current_task_counterexamples_do_not_trigger(text): assert classify(text)==[]
+
+@pytest.mark.parametrize('text',[
+    '面对关系困扰，作者用理论框架分析自己，而非直接描述感受。',
+    '我在用理论分析来代替直接表达感受。',
+    '我通过理性分析回避自己的情绪。',
+])
+def test_v2_recognizes_explicit_theory_substitution_without_first_person_requirement(text):
+    assert 'TAG_DEF_EMO_RATIONAL' in classify(text)
+
+@pytest.mark.parametrize('text',[
+    '作者对心理学理论有长期阅读习惯。',
+    '我用理论分析整理工程代码的结构。',
+    '作者求职焦虑，担心生存压力。',
+    '失眠、情绪低落、自我怀疑反复出现。',
+    '作者在亲密关系中主动拉开距离，决定自己的边界。',
+    '我希望被爱，也渴望被认可。',
+    '我并非用理论分析来代替直接表达感受。',
+    '我没有用理论分析来代替直接表达感受。',
+    '我不再用理论分析回避自己的情绪。',
+])
+def test_v2_does_not_invent_subtypes_from_general_distress_or_changed_tag_meanings(text):
+    assert classify(text)==[]
+
+@pytest.mark.parametrize('text,tag',[
+    ('我好想去看日出，那让我觉得很自由。','TAG_VAL_EMO_LOVE'),
+    ('我喜欢自己的创作与生活。','TAG_VAL_EMO_LOVE'),
+    ('我觉得今天的自己超棒。','TAG_VAL_GEN_AFFIRM'),
+    ('我相信我们一定能做到的，这个方向是对的。','TAG_VAL_GEN_AFFIRM'),
+])
+def test_v2_value_tags_follow_reference_definitions(text,tag): assert tag in classify(text)
+
+def test_v2_theory_polarity_is_scoped_to_the_matching_sentence():
+    assert 'TAG_DEF_EMO_RATIONAL' in classify('我以前没有用理论分析来代替直接表达感受。现在我用理论分析来代替直接表达感受。')
+
+def test_active_v2_settings_reject_legacy_taxonomy_while_artifact_reads_allow_it(chain):
+    _,artifact,_,settings,*_=chain
+    legacy=settings.model_dump();legacy['taxonomy_revision']='memory-rules-v1'
+    with pytest.raises(ValidationError): SettingsDTO.model_validate(legacy)
+    assert ArtifactDTO.model_validate({**artifact.model_dump(),'conversion_revision':'memory-rules-v1'}).conversion_revision=='memory-rules-v1'
+
+def test_v1_files_remain_readable_and_are_not_reclassified_for_behavior(chain):
+    source,current,data,_,provider,request=chain
+    old=current.model_copy(update={'conversion_revision':'memory-rules-v1'})
+    doc,body,theme,meta=convert(source,old)
+    old=old.model_copy(update={'document':doc,'document_sha256':digest(doc),'body_sha256':body,'byte_length':len(doc.encode()),'theme_document':theme,'theme_sha256':digest(theme),'metadata':meta})
+    data.read.return_value=old
+    assert validate_document(old)[0]['conversion_revision']=='memory-rules-v1'
+    assert read(old)==doc
+    result=provider('我工作卡住了，很沮丧。').perform_memory_tool(request('memory.resolve',artifacts=[{'artifact_id':old.artifact_id,'revision':1}]))
+    assert result.status=='no_match'
+    assert POLICIES['memory-rules-v1']['revision']=='memory-rules-v1'
 
 def test_policy_is_frozen_and_next_turn_reads_new_revision(chain):
     _,a,data,settings,provider,request=chain
@@ -239,7 +291,7 @@ def test_public_settings_get_uses_authenticated_owner(public_settings):
     browser,client,settings=public_settings
     response=browser.get('/api/memory/behavior')
     assert response.status_code==200 and response.json()['owner_id']==OWNER
-    assert client.execute.call_args.args[0].capability.name=='memory.behavior.get'
+    assert client.execute.call_args.args[0].capability.name=='memory.v2.behavior.get'
     assert client.execute.call_args.kwargs=={'access_token':'synthetic-owner-token'}
 
 def test_public_settings_save_forwards_original_key_and_revision(public_settings):
@@ -248,7 +300,7 @@ def test_public_settings_save_forwards_original_key_and_revision(public_settings
     response=browser.put('/api/memory/behavior',headers={'X-Request-ID':key},json={'expected_revision':1,'desired':settings.desired.model_dump()})
     assert response.status_code==200
     operation,value,request=client.execute.call_args.args
-    assert operation.capability.name=='memory.behavior.save' and request==key and value.expected_revision==1
+    assert operation.capability.name=='memory.v2.behavior.save' and request==key and value.expected_revision==1
     assert client.execute.call_args.kwargs['access_token']=='synthetic-owner-token'
 
 def test_public_settings_unknown_result_preserves_safe_error_and_key(public_settings):

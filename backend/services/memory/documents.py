@@ -1,15 +1,17 @@
 # [Input] Frozen persisted report results and exact source metadata.
 # [Output] UTF-8 L2/L3 documents, digests and compound expression classification.
 # [Pos] Deterministic memory conversion; observations do not become personal facts.
-# [Sync] 2026-10-15: source-preserving converter and fixed published taxonomy.
+# [Sync] 2026-10-15: classify versioned frozen sources; v1 bytes remain readable and v2 adds explicit theoretical substitution.
 from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
 import re
+from config import MEMORY_CLASSIFICATION_NEGATION_GUARDS
 from services.admin_data.memory_data import ArtifactDTO, SourceDTO, MetadataDTO
 
-POLICY=json.loads(Path(__file__).with_name('policy.json').read_text())
+POLICIES={p['revision']:p for p in (json.loads(Path(__file__).with_name(name).read_text()) for name in ('policy.json','policy-v2.json'))}
+POLICY=POLICIES['memory-rules-v2']
 REVISION=POLICY['revision']
 THEMES={t['id']:t for t in POLICY['themes']}
 TAG_THEME={tag:t['id'] for t in POLICY['themes'] for tag in t['tags']}
@@ -30,11 +32,21 @@ def decode(document: str) -> tuple[dict,list]:
     if not isinstance(records,list): raise ValueError('MEMORY_DOCUMENT_INVALID')
     return header,records
 
-def classify(text: str) -> list[str]:
-    if any(re.search(POLICY[key],text,re.I) for key in ('excluded_expression','explicit_boundary','negated_expression')): return []
-    return [tag for tag,pattern in POLICY['tag_patterns'].items() if re.search(pattern,text,re.I)]
+def classify(text: str, revision: str = REVISION) -> list[str]:
+    policy=POLICIES[revision]
+    if any(re.search(policy[key],text,re.I) for key in ('excluded_expression','explicit_boundary','negated_expression')): return []
+    if revision=='memory-rules-v1':
+        return [tag for tag,pattern in policy['tag_patterns'].items() if re.search(pattern,text,re.I)]
+    clauses=re.split(r'[。！？!?；;\n]',text)
+    return [tag for tag,pattern in policy['tag_patterns'].items() if any(
+        re.search(pattern,clause,re.I) and not (
+            tag in MEMORY_CLASSIFICATION_NEGATION_GUARDS
+            and re.search(MEMORY_CLASSIFICATION_NEGATION_GUARDS[tag],clause,re.I)
+        ) for clause in clauses
+    )]
 
 def convert(source:SourceDTO, artifact:ArtifactDTO):
+    policy=POLICIES[artifact.conversion_revision]
     records=[];by_text={};completed=list(source.completed_sections)
     for section in ('echoes','traits','patterns'):
         values=getattr(source,section)
@@ -49,7 +61,7 @@ def convert(source:SourceDTO, artifact:ArtifactDTO):
             records.append(row);by_text[key]=row
     metadata=MetadataDTO(task_id=source.task_id,report_id=source.report_id,completed_sections=completed,failed_sections=source.failed_sections,item_count=len(records),theme_count=0)
     if not records: return None,None,None,metadata
-    header={'schema_version':1,'artifact_id':artifact.artifact_id,'revision':artifact.revision,'report_id':source.report_id,'task_id':source.task_id,'source_sha256':artifact.source_sha256,'report_digest':source.report_sha256,'analysis_content':source.analysis_content.model_dump() if source.analysis_content is not None else None,'conversion_revision':REVISION,'execution_mode':POLICY['execution_mode'],'model_id':None,'thread_id':None,'turn_id':None,'completed_sections':completed,'failed_sections':source.failed_sections,'observation_period':{'start_date':source.start_date,'end_date':source.end_date,'report_created_at':source.created_at}}
+    header={'schema_version':1,'artifact_id':artifact.artifact_id,'revision':artifact.revision,'report_id':source.report_id,'task_id':source.task_id,'source_sha256':artifact.source_sha256,'report_digest':source.report_sha256,'analysis_content':source.analysis_content.model_dump() if source.analysis_content is not None else None,'conversion_revision':artifact.conversion_revision,'execution_mode':policy['execution_mode'],'model_id':None,'thread_id':None,'turn_id':None,'completed_sections':completed,'failed_sections':source.failed_sections,'observation_period':{'start_date':source.start_date,'end_date':source.end_date,'report_created_at':source.created_at}}
     l2,body_sha=encode(header,'Reflections 记忆蒸馏',records)
     l3=None
     try:
@@ -65,23 +77,24 @@ def convert_theme(source,artifact,header,records,body_sha):
         expressions=[row['observation'],*(s['evidence'] for s in row['sources'])]
         tag_excerpts={}
         for text in expressions:
-            for tag in classify(text): tag_excerpts.setdefault(tag,text)
+            for tag in classify(text,artifact.conversion_revision): tag_excerpts.setdefault(tag,text)
         for tag,excerpt in tag_excerpts.items():
             theme=TAG_THEME[tag]
-            themes.append({'theme_record_id':digest(row['item_id']+tag),'THEME':theme,'Focus':row['title'],'Polarity':None,'Attribution':None,'TriggeringConditions':excerpt,'TriggeringTagId':tag,'source_distillation_id':artifact.artifact_id,'source_distillation_revision':artifact.revision,'source_body_sha256':body_sha,'taxonomy_revision':REVISION,'source_item_ids':[row['item_id']],'source_excerpt':excerpt,'evidence_kind':'analysis_inference','observation_period':row['observation_period']})
-    l3,_=encode({**header,'source_distillation_id':artifact.artifact_id,'source_distillation_revision':artifact.revision,'source_body_sha256':body_sha,'taxonomy_revision':REVISION},'Reflections 记忆主题',themes)
+            themes.append({'theme_record_id':digest(row['item_id']+tag),'THEME':theme,'Focus':row['title'],'Polarity':None,'Attribution':None,'TriggeringConditions':excerpt,'TriggeringTagId':tag,'source_distillation_id':artifact.artifact_id,'source_distillation_revision':artifact.revision,'source_body_sha256':body_sha,'taxonomy_revision':artifact.conversion_revision,'source_item_ids':[row['item_id']],'source_excerpt':excerpt,'evidence_kind':'analysis_inference','observation_period':row['observation_period']})
+    l3,_=encode({**header,'source_distillation_id':artifact.artifact_id,'source_distillation_revision':artifact.revision,'source_body_sha256':body_sha,'taxonomy_revision':artifact.conversion_revision},'Reflections 记忆主题',themes)
     return l3,len(themes)
 
 def validate_document(artifact:ArtifactDTO, *, theme=False):
+    if artifact.conversion_revision not in POLICIES: raise ValueError('MEMORY_RULES_UNAVAILABLE')
     document=artifact.theme_document if theme else artifact.document
     expected_sha=artifact.theme_sha256 if theme else artifact.document_sha256
     if document is None or expected_sha is None: raise ValueError('MEMORY_DOCUMENT_UNAVAILABLE')
     if digest(document)!=expected_sha: raise ValueError('MEMORY_DOCUMENT_INVALID')
     header,records=decode(document)
-    for k,v in {'artifact_id':artifact.artifact_id,'revision':artifact.revision,'report_id':artifact.report_id,'source_sha256':artifact.source_sha256,'conversion_revision':REVISION}.items():
+    for k,v in {'artifact_id':artifact.artifact_id,'revision':artifact.revision,'report_id':artifact.report_id,'source_sha256':artifact.source_sha256,'conversion_revision':artifact.conversion_revision}.items():
         if header.get(k)!=v: raise ValueError('MEMORY_SOURCE_MISMATCH')
     if theme:
-        if header.get('source_body_sha256')!=artifact.body_sha256 or header.get('taxonomy_revision')!=REVISION: raise ValueError('MEMORY_SOURCE_MISMATCH')
+        if header.get('source_body_sha256')!=artifact.body_sha256 or header.get('taxonomy_revision')!=artifact.conversion_revision: raise ValueError('MEMORY_SOURCE_MISMATCH')
         _,l2_records=validate_document(artifact)
         l2_items={item['item_id']:item for item in l2_records}
         for row in records:

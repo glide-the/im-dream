@@ -2,6 +2,7 @@
 <!-- [Output] 实现合同、页面骨架、业务时序/状态图、Tools及验收矩阵。 -->
 <!-- [Pos] Memory现行正式稿；实现、正常采用与真实验收覆盖分别记录。 -->
 <!-- [Sync] 2026-10-15: 同步正常0082/0083启用及真实链路覆盖；当前任务拒绝句法独立于冻结源规则，历史原文保留。 -->
+<!-- [Sync] 2026-10-15: 追加v2分类和同源派生，保留v1字节/内部协议；非空真实验收见执行记录。 -->
 # Reflections L2 蒸馏与 L3 记忆回应交互设计
 
 ## 背景与问题
@@ -12,7 +13,7 @@
 
 ## 目标与边界
 
-本分支已实现下述模块；用户授权后正常 Admin 已应用0082/0083，精确 `dream.memory.v1` 与九个操作可用，正常 Dream 已采用。真实账户/模型已完成三模式报告、L2/L3生成、三个Tool及设置保存/重开。实际报告没有匹配主题，非空 `resolved` 行动尚无真实验收证据，独立 Admin 管理页面登录复核也未完成。Dream仍检查精确 capability/operation 摘要，缺失时只关闭记忆域。实际命令、拒绝边界修复复测与逐项结算回执见[实现记录](../../exec/reflections-l2-l3-implementation-20261015.md)。
+本分支已实现下述模块；正常Admin已应用0082/0083及0084/0085，存储与 `dream.memory.classification.v2` 精确capability均可用，Dream已采用。真实报告54原18条L2观察正文保持不变，v2追加1条有精确来源的L3；真实Agent读取新版本后返回resolved，默认respect_distance与保存后下一轮help_only分别采用revision1/2，实际可见回答符合允许动作；七轮历史重开一致。验收后恢复原desired为revision3。独立Admin管理页面登录复核仍未完成；正常数据库请求/结算已核对。Dream仍精确检查capability/operation摘要，缺失时只关闭记忆域。实际命令与回执见[实现记录](../../exec/reflections-l2-l3-implementation-20261015.md)。
 
 [批准的实现前版本](reflections-agent-memory-interaction-design-pre-implementation-20261015-history.md)和[更早历史稿](reflections-agent-memory-interaction-design-pre-l2-l3-20261015-history.md)完整保留。仅新增 Settings“记忆回应”，不改 Reflections/报告/时间轴/Deck 页面，不增加提取确认、诊断、自由策略 prompt 或真实记忆手工写入 Tool。
 
@@ -34,7 +35,7 @@
 | [MemoryWorker](../../../backend/services/memory/worker.py) | 独立 after-report polling；调用 Admin discover/claim/stage/publish/fail。没有报告不创建 artifact；不更改分析任务终态 |
 | [documents.py](../../../backend/services/memory/documents.py) | `convert` 整理已有观察、精确重复合并全部来源；`convert_theme` 固定标签匹配；生成 JSON frontmatter 与 Markdown JSON正文并计算摘要 |
 | [files.py](../../../backend/services/memory/files.py) | 服务器私有根、UUID/版本路径、非符号链接目录和普通文件校验；临时文件/fsync/rename/复读校验 |
-| Admin `memoryService.ts` | 两张表：memory_artifact、memory_behavior_settings；归属、lease fencing、规范 UTF-8、状态、CAS及原请求回执。Drizzle `0082_reflections_memory` 发布 `dream.memory.v1`；0083前向补齐既有受限DATA角色两表SELECT/INSERT/UPDATE，fresh ACL计划采用同一权限，无DELETE或其他角色扩权 |
+| Admin `memoryService.ts` | 两张表：memory_artifact、memory_behavior_settings；归属、lease fencing、规范 UTF-8、状态、CAS及原请求回执。Drizzle `0082_reflections_memory`发布存储capability，0085追加classification.v2；0083前向补齐既有受限DATA角色两表SELECT/INSERT/UPDATE，fresh ACL计划采用同一权限，无DELETE或其他角色扩权 |
 | [MemoryTurnProvider](../../../backend/services/memory/behavior.py) | 绑定 owner/当前消息/Thread；读取 fresh 设置生成 immutable BehaviorPolicySnapshot；返回当前任务的固定回应计划 |
 | [reflection_memory_tool.py](../../../backend/libs/claude_agent_kit/server/reflection_memory_tool.py)、现有 user MCP/broker | 三个严格业务工具；子进程只有私有 broker capability，没有 Admin token、owner或数据库凭证 |
 | [MemoryBehaviorSettings](../../../frontend/app/_dream/views/story-workspace/MemoryBehaviorSettings.tsx) | 现有 Settings 栏目；draft、保存/核实/同请求重试/冲突处理 |
@@ -45,7 +46,7 @@
 
 发布先保存 canonical bytes 为 publishing，再原子发布并复读校验，最后 ready/empty。未知 stage/publish 结果不伪称回滚，不换来源重新调用模型；过期 claim 由相同 service 恢复。L3 转换/发布失败保持 L2 ready，单独 theme_state=failed，后台再次处理同一来源。转换失败也按配置 lease 间隔重试，避免热循环。
 
-首版 revision=1；同来源/规则重复发现不新建文件，丢失文件恢复同一版本、同一字节。不提供新语义再生成入口或 generation_key 配置；用户修正原始来源后复用现有回顾，生成新报告。能力 applied_at 之后的新报告自动发现，历史报告不在本轮批量回填。
+每个artifact首版revision=1；同来源/规则重复发现不新建文件，丢失文件恢复同一版本、同一字节。v2规则发布后，生产Worker为新报告或已经登记v1的报告追加独立v2 artifact；已有报告复用原source_json，L2观察正文body保持原字节，不重新分析日记、不覆写v1文件。未登记的旧报告不回填。用户修正原始来源仍复用现有回顾生成新报告；不新增再生成页面、generation_key或人工任务系统。
 
 ## 分析模式、L2信息与 L3 主题
 
@@ -64,7 +65,11 @@
 | THEME_PRESSURE | TAG_PRE_WORK_TIME、TAG_PRE_WORK_MUST、TAG_PRE_EMO_COMP、TAG_PRE_EMO_SELF |
 | THEME_VALUE | TAG_VAL_WORK_MEANING、TAG_VAL_EMO_LOVE、TAG_VAL_GEN_CONN、TAG_VAL_GEN_AFFIRM |
 
-单一发布源为 Admin `config/memory-policy.json`，Dream [policy.json](../../../backend/services/memory/policy.json)保持相同字节；规则 revision 为 memory-rules-v1。六字段为 THEME、Focus、Polarity、Attribution、TriggeringConditions、TriggeringTagId。追加 source_distillation_id/revision/body_sha256、source_item_ids、source_excerpt、evidence_kind、observation_period。本版 Focus 是原观察标题，缺少维度依据的 Polarity/Attribution 为 null。
+单一发布源为 Admin `config/memory-policy-v2.json`，Dream [policy-v2.json](../../../backend/services/memory/policy-v2.json)保持相同字节；当前规则revision为memory-rules-v2。原Admin `memory-policy.json`与Dream [policy.json](../../../backend/services/memory/policy.json)作为v1原字节保留。六字段为THEME、Focus、Polarity、Attribution、TriggeringConditions、TriggeringTagId。追加source_distillation_id/revision/body_sha256、source_item_ids、source_excerpt、evidence_kind、observation_period。本版Focus是原观察标题，缺少维度依据的Polarity/Attribution为null。
+
+v2修正已核对的缺口：明确使用理论/分析替代直接描述感受时，无需第一人称或固定“回避”字样即可匹配TAG_DEF_EMO_RATIONAL，仍要求同句中的理论使用、情感对象和替代行为证据。普通理论阅读、健康边界或技术钻研不归类。喜爱向往/正面肯定按原词表识别，不等同于渴望被爱/认可；拒绝深入按话题阻断定义，当前用户拒绝仍优先作为Thread边界处理。泛化焦虑缺少死线、后果、比较或自我苛责条件时保持无细分Tag。
+
+原九个Admin操作descriptor保持冻结，新增内部`memory.v2.*`九操作承载双版本读取和v2写入，复用同一Service、两表、MCP/broker及三个Agent Tool。前向0085仅发布`dream.memory.classification.v2`，不新建共享结构；缺capability时关闭本域。v1客户端的目录仅返回v1，v2客户端可以读取两版；当前行为策略只采用v2，避免旧标签误义影响当前动作。Settings desired/revision不因规则升级变化，v1/v2保存回执按原operation和request ID分别恢复。
 
 L3引文必须是该L2观察或evidence原有字符串；引用的item必须属于该版本，主题/Tag组合必须合法。无主题生成 records=[]。规则排除规范用语、纯技术内容、引用/虚构/他人、否定/已变化表达，保守范围会漏掉部分混合技术与感受表达，不能用该空结果证明没有情绪。
 
@@ -145,22 +150,23 @@ sequenceDiagram
     U->>R: 现有入口选择来源与Deck/Agent，发起回顾
     R->>A: 既有reflection-report.ensure保存报告
     A-->>R: 原report_id与分析终态
-    W->>A: memory.artifacts.discover / claim
+    W->>A: memory.v2.artifacts.discover / claim
+    A->>A: 新报告或已登记v1来源，追加v2，旧版不变
     A-->>W: 已完成栏目、冻结来源、claim
     W->>D: convert(source, artifact)
     D-->>W: L2 / 同版本L3 / 摘要 / metadata
-    W->>A: memory.artifacts.stage保存canonical UTF-8
+    W->>A: memory.v2.artifacts.stage保存canonical UTF-8
     A-->>W: publishing与摘要
     W->>F: 原子发布L2/L3并复读校验
     F-->>W: 验证结果
-    W->>A: memory.artifacts.publish
+    W->>A: memory.v2.artifacts.publish
     A-->>W: ready或empty；L3独立状态
     U->>S: 修改草稿并保存
-    S->>A: memory.behavior.save(expected_revision, request_id)
+    S->>A: memory.v2.behavior.save(expected_revision, request_id)
     A-->>S: desired / revision / 原请求回执
     S-->>U: 已保存，下一次回应使用此设置
     U->>M: 当前普通对话任务
-    H->>A: fresh memory.behavior.get
+    H->>A: fresh memory.v2.behavior.get
     A-->>H: owner default / desired / revision
     H->>H: 冻结BehaviorPolicySnapshot与当前消息
     M->>H: list_memory_distillations / read_memory_distillation
@@ -200,7 +206,7 @@ sequenceDiagram
     alt 响应丢失或结果未知
         S-->>U: 保留草稿与原命令；允许离开
         U->>S: 重开并核实保存结果
-        S->>A: 原memory.behavior.save receipt
+        S->>A: 原memory.v2.behavior.save receipt
         A-->>S: committed原结果或absent
         S-->>U: 已保存或同请求重试入口
     else revision冲突
@@ -222,7 +228,7 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending: 新报告登记
+    [*] --> pending: 新报告或规则升级追加artifact
     pending --> running: service领取claim
     running --> publishing: canonical字节持久化
     running --> failed: 确定转换失败
@@ -252,11 +258,11 @@ stateDiagram-v2
 | 中断、未知、重开 | canonical发布恢复不转换；未知stage不标失败；L3失败L2可读；缺文件同字节恢复 |
 | 设置默认/关闭/保存 | 默认关闭且保留主题选择；恢复默认只改草稿；保存CAS与原回执；当前turn不变、下一轮fresh |
 | 设置失败/冲突/重开 | 不用假默认覆盖；保留草稿；当前账户原命令可核实/重试；冲突展示最新已保存值 |
-| Agent实际使用 | read仅提供历史分析；resolve只返回当前任务允许动作；直接拒绝支持两种中文词序，引用翻译不误触发；Thread内拒绝持续及明确恢复生效；不宣称最终采纳 |
+| Agent实际使用 | read仅提供历史分析；resolve只返回当前任务允许动作；v1引用不执行v2策略，重新读取v2后可返回非空计划；直接拒绝与明确否认优先、Thread内边界可恢复；Tool回执不单独证明最终采纳 |
 | 桌面/窄屏与键盘 | 现有导航、自然单列、无横向滚动、键盘可操作、无新增确认弹窗 |
 | 相邻回归/缺capability | 现有Notion冻结、Deck/Agent选择、Reflections报告/SSE/历史保持；记忆域缺capability关闭，原流程可用 |
-| 真实模型链路 | 正常Dream/Admin/Gateway/真实账户及既有实体，Run/Thread/request/结算写正常数据库；报告54的L2/空L3、三个Tools、设置已验证；非空策略及管理页面登录复核仍缺证据 |
+| 真实模型链路 | 正常Dream/Admin/Gateway/真实账户及既有实体；报告54的18条L2→v2单条L3→实际Agent读取/非空计划→实际回答→设置变化下一轮生效→七轮重开；新增8请求、合计28请求成功结算；管理页面登录复核仍未完成 |
 
 评审结论：实际入口、用户操作和Agent调用均已收敛；复用报告、来源冻结、身份、MCP/broker、Chat记录与Settings。删去额外页面、确认、计数触发、自由策略、独立语义模型Thread/预算、再生成配置和新反馈Tool。两表+小型后台worker支持规范文件与desired，不另建心理系统。保留必要失败、版本、来源和权限边界。
 
-限制明确：真实样本18条观察均未命中固定复合主题规则，因此本轮只能证明空L3与 `no_match` 路径，不能证明非空策略覆盖或心理效果；历史批量回填、按report_id的精确UI深链不在首版；原始引用不新增逐字原文核验。正常记录的SQL核对不能冒充独立管理页面已登录复核，文档检查与技术验证也不代替真实模型验收。具体正常覆盖和待核对事项以实现记录为准。
+限制明确：v1样本18条零命中，v2对同一冻结来源识别1条明确理论替代感受，其他17条保留在L2；本轮真实证明该单主题和两种允许动作，不推广为全部十六Tag或心理效果验收。未登记历史报告回填、按report_id的精确UI深链不在首版；原始引用未新增逐字原文核验。正常SQL回执不等于管理页面已登录复核，文档/技术验证不替代真实模型验收。具体剩余事项见实现记录。

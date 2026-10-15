@@ -1,7 +1,7 @@
 # [Input] Frozen Admin memory schemas and authenticated host identity.
 # [Output] Strict source-bound memory DTO consumer, with no SQL or actor/path inputs.
 # [Pos] Additive Admin memory transport.
-# [Sync] 2026-10-15: bind exact artifact and settings operations.
+# [Sync] 2026-10-15: bind appended exact v2 operations and read both frozen artifact revisions.
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -39,7 +39,7 @@ class SettingsDTO(ChatStrictDTO):
     owner_id: str
     catalog: list[CatalogDTO]
     revision: Annotated[int,Field(ge=0,le=2147483647)]
-    taxonomy_revision: Literal['memory-rules-v1']
+    taxonomy_revision: Literal['memory-rules-v2']
     default: DesiredDTO
     desired: DesiredDTO
     updated_at: str | None
@@ -61,7 +61,7 @@ class ArtifactDTO(ChatStrictDTO):
     theme_state: Literal['pending','ready','empty','failed']
     created_at: str
     source_sha256: Sha
-    conversion_revision: Literal['memory-rules-v1']
+    conversion_revision: Literal['memory-rules-v1','memory-rules-v2']
     document: str | None
     document_sha256: Sha | None
     body_sha256: Sha | None
@@ -119,11 +119,11 @@ class ListResultDTO(ChatStrictDTO):
     artifacts: list[ArtifactDTO]
     next_cursor: CursorDTO | None
 
-_CONTRACT=json.loads(Path(__file__).with_name('memory_contract.json').read_text())
+_CONTRACT=json.loads(Path(__file__).with_name('memory_contract_v2.json').read_text())
 _TYPES=[(EmptyDTO,DiscoverDTO),(EmptyDTO,ClaimResultDTO),(StageDTO,ArtifactDTO),(PublishDTO,ArtifactDTO),(FailDTO,ArtifactDTO),(ListDTO,ListResultDTO),(LookupDTO,ArtifactDTO),(EmptyDTO,SettingsDTO),(SettingsSaveDTO,SettingsDTO)]
 MEMORY_OPERATIONS=tuple(DomainOperation(OperationCapabilityDTO.model_validate(o['capability']), inp, out) for o,(inp,out) in zip(_CONTRACT['operations'],_TYPES,strict=True))
 MEMORY_REQUIREMENTS=tuple(SchemaCapabilityDTO(capability=v['capability'],version=v['version'],contract_sha256=v['contractSha256']) for v in _CONTRACT['operations'][0]['requirements'])
-_OPERATIONS={op.capability.name:op for op in MEMORY_OPERATIONS}
+_OPERATIONS={op.capability.name.replace("memory.v2.","memory."):op for op in MEMORY_OPERATIONS}
 class AdminMemoryData:
     def __init__(self,client:AdminDataClient): self.client=client
     def invoke(self,name,input_dto,request_id,*,access_token=None):

@@ -1,6 +1,7 @@
 # [Input] Authenticated current turn, frozen owner policy and owner-verified L2 versions.
 # [Output] Bounded current-task plans; no policy writes, psychological diagnosis or hidden model calls.
 # [Pos] Host memory provider; taxonomy is data, never executable prompt text.
+# [Sync] 2026-10-15: execute only current-version themes while preserving legacy reads.
 # [Sync] 2026-10-15: direct current-task refusal supports both Chinese word orders; source taxonomy remains immutable.
 # [Sync] 2026-10-15: revisioned turn snapshot and fixed action execution.
 from __future__ import annotations
@@ -13,7 +14,7 @@ from services.admin_data.memory_data import AdminMemoryData,EmptyDTO,ListDTO,Loo
 from services.admin_data.request_auth import AdminRequestActor
 from services.admin_data.errors import AdminDataError
 from libs.claude_agent_kit.server.reflection_memory_tool import MemoryResult,Summary,Cursor,Reference,Plan
-from .documents import POLICY,THEMES,TAG_THEME,classify,validate_document
+from .documents import POLICY,REVISION,THEMES,TAG_THEME,classify,validate_document
 from .files import read
 ACTIONS={
  'acknowledge_then_help':'简短承接用户当前表达的困难，然后继续解决当前任务；不要替用户诊断。',
@@ -98,7 +99,7 @@ class MemoryTurnProvider:
         for ident,version in refs:
             if time.monotonic()>=deadline: raise AdminDataError("MEMORY_RESOLVE_TIMEOUT",503,request.request_id)
             a=self.data.read(LookupDTO(artifact_id=ident,revision=version),request.request_id,access_token=token)
-            if a.state!='ready' or a.theme_state!='ready': continue
+            if a.state!='ready' or a.theme_state!='ready' or a.conversion_revision!=REVISION: continue
             read(a);read(a,theme=True)
             _,records=validate_document(a,theme=True)
             for row in records:
