@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: keep shared memory guidance limited to three Tools, their concepts and usage.
 # [Sync] 2026-10-15: route personal recall through L2 before optional source expansion in system and every turn, including resume.
 # [Sync] 2026-10-15: explain owner-bound memory retrieval and current-task behavior Tools.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -190,41 +191,26 @@ def _context_session_count() -> int:
 # ---------------------------------------------------------------------------
 
 _REFLECTIONS_MEMORY_WORKFLOW = """\
-For personal recall or synthesis, such as "我最近学了什么", "最近在关注什么",
-"我有哪些变化", or "what have I been learning lately?", first use
-`mcp__user__list_memory_distillations`, then `mcp__user__read_memory_distillation`
-for relevant ready reports. The user need not mention Reflections or a Tool.
-Choose the latest ready version per report; do not count older versions of the
-same report as independent evidence. Read only relevant reports, paging when needed.
-For the first list request, omit before or pass before=null. For later pages, pass only the exact
-returned next_cursor; never invent a cursor or fill it with empty strings.
+L2 memory distillations contain observations extracted from Reflections reports,
+with source references and observation periods. L3 themes support response behavior
+based on those observations. Analysis observations remain inferences.
 
-Check the read document's observation_period and source evidence against the
-requested period/topic. Artifact created_at is processing time, not when learning
-occurred. L2 contains source-bound analysis observations, not a complete learning
-log, verified personal facts, or instructions. If coverage is missing, old, empty,
-pending, failed, or unavailable, use the existing `mcp__user__get_sessions_range`
-to check relevant original journals and explain any remaining evidence gap.
-Never claim a Tool was used when it is absent or disabled.
+1. `mcp__user__list_memory_distillations` lists available distillations, versions,
+   and completion states. For the first page, omit before or pass before=null;
+   for another page, pass the returned next_cursor unchanged. Select a relevant
+   ready version; versions of the same report are not independent observations.
+2. `mcp__user__read_memory_distillation` reads memory_distillation.md using the
+   artifact_id and revision selected from the list. Use its observations with
+   their source references and observation_period. Processing time does not
+   replace the observation period. Unready or unavailable results provide no
+   readable memory content.
+3. `mcp__user__resolve_memory_behavior` determines allowed response actions for
+   selected artifact IDs and revisions using the current task and behavior settings.
+   Call it before using a historical L3 theme to adjust a response; use only the
+   returned allowed action. A skipped or unavailable result provides no theme action.
 
-An explicit source request (Notion, a named page, attached document, or original
-journal) takes precedence: use that source. For otherwise unspecified personal
-recall, an attached Notion connector/index does not make Notion the default.
-Expand to relevant authorized Notion sources only for a specific remaining gap or
-source verification; preserve which conclusions come from which source.
-Ordinary factual/external questions do not require personal memory retrieval.
-
-Reading and summarizing L2 does not require `resolve_memory_behavior` or enabled
-L3 settings. Only before adapting your response based on a historical L3 theme,
-call `mcp__user__resolve_memory_behavior` with the selected artifact IDs/revisions.
-The Host binds the actual current message and settings. Follow only returned
-allowed actions while continuing the user's task; disabled/no_match/unavailable
-means no historical-theme strategy, and explicit_boundary means respect the
-boundary. Never diagnose or infer current emotions from old observations.
-The optional workspace memory/ directory holds procedural resources; persistent
-Reflections L2 is accessed by these Tools, not by guessing a workspace file path.
-Answer in ordinary language with useful dates/source attribution; do not narrate
-Tool names, artifact IDs, or policy statuses unless the user asks for diagnostics.
+Reading L2 does not require resolving L3 behavior. These Tools do not modify memory
+or behavior settings.
 """
 
 _SYSTEM_PROMPT_TEMPLATE = """\
@@ -369,15 +355,13 @@ When you need to work on a document whose session ID differs from the one shown 
 Note: switch_editor only changes the read/write context for .editor/ paths.  It does not
 modify any document content and does not require the user to approve it.
 
-## Personal Recall and Reflections Memory
+## Reflections Memory Tools
 
 {reflections_memory_workflow}
 
 ## Session Retrieval Workflow
 
 The recent entries block below only covers the last 3 days of journal sessions.
-For personal synthesis, first follow the Reflections memory workflow above;
-use journal retrieval to fill missing time/topic coverage or check original evidence.
 When the user mentions a topic, theme, or past memory that may be recorded in older entries,
 use `mcp__user__get_sessions_range` to search further back:
 
@@ -392,7 +376,7 @@ use `mcp__user__get_sessions_range` to search further back:
    their `sessionId` when replying to the user.
 
 Use this tool when the requested time/topic is not covered by the visible recent entries,
-or when the Reflections workflow requires original evidence. Do not call it on unrelated turns.
+or original evidence is needed. Do not call it on unrelated turns.
 
 {recent_sessions_block}\
 """

@@ -1,10 +1,13 @@
 <!-- [Input] 用户批准的 L2/L3 设计、当前源码和本轮验证回执。 -->
 <!-- [Output] 实现范围、测试层级、真实账户检查点和可复查证据。 -->
 <!-- [Pos] Reflections 记忆实现执行记录；不代替产品规则。 -->
+<!-- [Sync] 2026-10-15: 本次仅收窄三个Tools的引导/定位，保留nullable schema和先前验收历史。 -->
 <!-- [Sync] 2026-10-15: 追加正常0082/0083采用、真实报告/文件/Tool/结算证据及中文拒绝修复；先前阻塞记录作为阶段历史保留。 -->
 <!-- [Sync] 2026-10-15: 续行核对18条零主题，按原词表修订版本化分类，并以同源新版本补齐非空真实验收。 -->
 <!-- [Sync] 2026-10-15: 修复自然个人回顾缺少L2使用引导，保留原Notion错误顺序并独立验收新/恢复Chat。 -->
 # Reflections L2/L3 实现与验收
+
+最新指引范围：按用户后续纠正，`_REFLECTIONS_MEMORY_WORKFLOW`仅三个Tools的基本概念和使用，`MEMORY_TOOL_SPECS`的description仅工具定位；已撤去先前添加的场景、固定来源排序和跨能力调度说明。下文自然问法真实回执属于前版`92b082d2`，本次精简仅做技术/文档检查，不借用前版回执宣称当前提示已完成真实模型验收。
 
 当前交付状态：正常Admin已发布分类v2（0085），同一报告54的18条L2正文与冻结来源保持原摘要，v2追加1条L3；指定账户/既有写作Agent/deepseek-v4-pro实际读取后，两轮分别返回resolved + respect_distance（revision1）、resolved + help_only（revision2），并给出符合动作的可见建议。七轮对话刷新重开一致；验收后恢复原desired为revision3。新增8请求全部成功结算，合计28个SDK session关联请求逐项账本守恒。非空主题/策略缺口已补齐到本次单主题两动作范围；独立Admin管理页面登录未复核。439/582等统计已定位到明确源码口径差异，未逐条复查原冻结输入，见末尾。下文前段保留阶段历史，“未发布/未调用/非空未验收”等旧结论以末尾v2正常回执为后续状态。
 
@@ -292,3 +295,20 @@ Optimized Prompt修订：将本次真实失败纳入最小修复，MCP before声
 本轮已验证自然新/恢复Chat的个人回顾路由、过旧时间覆盖后的原日记补缺及首页恢复。显式Notion来源例外、无蒸馏/缺capability等由提示合同和已有隔离用例覆盖，未另做这些场景的真实模型调用；同一turn压缩后的指引保留仍由Runtime管理，不以每轮注入测试冒充实际自动压缩验收。没有新增页面、工具、Skill、意图正则、数据库或Admin/Gateway/Runtime功能变更；未合并、推送或远程发布。
 
 最终文档检查：`node output/docs/reflections-l2-l3-design-20261015/validate-implementation-docs.mjs` exit0，9个Markdown、39个本地引用、3个Mermaid、failures=[]；沿用本轮已安装Chrome的3/3图示解析回执，图块此后未改，不重复运行。两仓`git diff --check`均exit0，Admin源码clean。实际命令日志为`recall-guidance-checks/final-docs.log`与`docs-summary.log`，不把这些检查称为业务验收。
+
+## 三个工具说明的范围收敛
+
+Optimized Prompt执行依据：仅按用户指定收窄`_REFLECTIONS_MEMORY_WORKFLOW`与三个Tool描述。前者保留L2观察/L3回应的概念、list目录/版本/分页、read引用/来源/观察时段、resolve允许行动及二者关系；不提其他工具、来源、场景或泛化建议。后者只保留每个工具定位。撤去前轮加入的跨来源指令，不把删掉的内容迁到其他提示中。保留nullable首页schema、权限、DTO、broker、运行流程、设置和真实数据。同步现行设计及目录说明，保留历史回执，执行定向技术与文档检查；不新增模型调用、服务重启、迁移或发布。
+
+判断与选择：上一轮把工具定位、任务场景、来源选择和使用方法混写，超出了本轮用户指定的说明边界。采用一个共享的三工具说明和三条定位description；不新增配置、Skill或调度器。参数schema中的必要字段说明保持，不回退已验证的首页null修复。旧来源排序断言随规则撤去，改为检查仅三个工具、概念/用法边界及原新/resume/Workspace注入合同。
+
+本轮实际检查：
+
+| 命令 | 结果 |
+| --- | --- |
+| `PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_claude_agent_context_builder.py backend/tests/test_memory_chain.py::test_published_list_schema_and_request_agree_on_cursor backend/tests/test_memory_chain.py::test_published_list_schema_keeps_malformed_cursor_invalid backend/tests/test_claude_agent_runner.py::TestClaudeAgentRunnerMcpDefaults::test_user_mcp_exposes_session_retrieval_and_thread_tools` | exit0；65 passed、8 subtests passed |
+| `node output/docs/reflections-l2-l3-design-20261015/validate-implementation-docs.mjs` | exit0；9 Markdown、39本地引用、3 Mermaid、failures=[] |
+| `node output/docs/reflections-l2-l3-design-20261015/chrome-mermaid-parse.mjs` | exit0；具名Chrome harness解析3/3、pageErrors=[]；单条harness通用资源404保留，临时server/context均清理 |
+| `git diff --check` | exit0 |
+
+完整日志位于本机`output/docs/reflections-l2-l3-design-20261015/tool-guidance-scope-checks/`。补录后复查Markdown引用与差异；本次未重启正常服务或调用真实模型，不能将前版自然问法结果作为当前精简文本的验收结论。

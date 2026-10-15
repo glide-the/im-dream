@@ -3,6 +3,7 @@
 #         defines the virtual resource names embedded in this template.
 # [Output] Provide build_workspace_context_block to ClaudeAgentContextBuilder.build_user_message.
 # [Pos] workspace-context-prompt node in backend/claude_agent
+# [Sync] 2026-10-15: remove memory-specific source routing from attached Notion guidance.
 # [Sync] 2026-10-15: scope attached Notion instructions to selected source work; personal recall follows shared L2 guidance first.
 # [Sync] 2026-05-28: initial implementation — standalone workspace context prompt
 #                    for edit-point context assembly integration.
@@ -202,8 +203,6 @@ def _render_notion_context_block(cwd: str) -> str:
 
     lines = [
         "Notion lightweight index (.notion/):",
-        "  Use this workflow after selecting Notion as the task's source; attachment alone does not select it.",
-        "  For unspecified personal recall, follow the Reflections L2 workflow before expanding sources.",
         f"  Status: {snapshot_state} | {database_count} databases | {page_count} pages | snapshot {snapshot_version}",
         f"  Connector ID: {connector_id}",
     ]
