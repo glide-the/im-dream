@@ -1,6 +1,7 @@
 <!-- [Input] Admin Session DTOs, turn-bound grants, strict broker projections and server-owned response configuration. -->
 <!-- [Output] Diary labels/retrieval rules, production data flow, bounded transport and recovery contracts. -->
 <!-- [Pos] Current diary retrieval interaction design; earlier database examples remain explicitly historical. -->
+<!-- [Sync] 2026-10-15: link the standalone private-broker contract for shared client/protocol/permissions and all consumers. -->
 <!-- [Sync] 2026-10-06: document startup/new-turn response-budget adoption and actual normal/failure/state flows. -->
 # 笔记标签（labels）与跨 Session 协作检索设计方案
 
@@ -335,6 +336,8 @@ that predate the visible recent entries.  Do not call it on every turn.
 ---
 
 ## 6. 私有broker与子进程环境路径
+
+客户端、Host broker、协议/权限边界、两种 owner、Memory 继承复用及其他业务调用统一见 [SessionProjectionBrokerClient 与 MemoryBrokerClient 设计](session-projection-broker-design.md)。本节保留日记检索的调用路径。
 
 Factory在admission后先启动turn persistence与broker；Service只有在broker已经可用时组装Runtime options：
 

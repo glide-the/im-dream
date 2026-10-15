@@ -1,6 +1,7 @@
 <!-- [Input] 已批准的L2/L3设计、Notion正文证据、Dream/Admin分支源码。 -->
 <!-- [Output] 实现合同、页面骨架、业务时序/状态图、Tools及验收矩阵。 -->
 <!-- [Pos] Memory现行正式稿；实现、正常采用与真实验收覆盖分别记录。 -->
+<!-- [Sync] 2026-10-15: link standalone MemoryBrokerClient reuse, wire/permission boundaries and shared consumers. -->
 <!-- [Sync] 2026-10-15: 使用指引仅保留三个Tools的概念与调用，Tool描述仅定位；此前自然问法验收属于前版。 -->
 <!-- [Sync] 2026-10-15: 同步正常0082/0083启用及真实链路覆盖；当前任务拒绝句法独立于冻结源规则，历史原文保留。 -->
 <!-- [Sync] 2026-10-15: 追加v2分类和同源派生，保留v1字节/内部协议；非空真实验收见执行记录。 -->
@@ -30,6 +31,8 @@
 依据：[0602沟通索引](https://app.notion.com/p/29a30b7547c3808b8d49f801bdce65d4)、[三层架构](https://app.notion.com/p/2b630b7547c3801e9991c517d94a1e2e)、[设备记忆系统正文](https://app.notion.com/p/29c30b7547c380d3aec4cafc97f97df5)、[主题词表](https://app.notion.com/p/2b230b7547c380a7b0e2c4d0db258273)、[维度/触发定义](https://app.notion.com/p/2b230b7547c380ad8d07ea227fee69e0)、[回应策略参考](https://app.notion.com/p/2b530b7547c3807a869ded024184f7b6)。指定问题[父页/锚点](https://app.notion.com/p/3f930b7547c380adb4def30db8c1f2e2#72130b7547c3824495fe01acc06d0ba6)单独区块无正文，父页相关文字已读但存在截断；附件未读取。资料主张、用户纠正和代码状态分别记录，不能以历史讨论证明已发布。
 
 ## 执行模块、来源与持久化
+
+`MemoryBrokerClient` 如何继承现有 `SessionProjectionBrokerClient`、三个内部 operation 的协议、Host 绑定及权限边界，见[私有 broker 独立设计](../claude-agent/session-projection-broker-design.md)。该文档说明已有实现，不新增 Memory broker 或工具。
 
 | 模块 | 当前职责 |
 | --- | --- |
