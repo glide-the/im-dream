@@ -3,6 +3,7 @@
 <!-- [Pos] Memory现行正式稿；实现、正常采用与真实验收覆盖分别记录。 -->
 <!-- [Sync] 2026-10-15: 同步正常0082/0083启用及真实链路覆盖；当前任务拒绝句法独立于冻结源规则，历史原文保留。 -->
 <!-- [Sync] 2026-10-15: 追加v2分类和同源派生，保留v1字节/内部协议；非空真实验收见执行记录。 -->
+<!-- [Sync] 2026-10-15: 个人学习/变化回顾先L2，原文补缺与显式Notion来源例外；自然问法和恢复对话验收独立记录。 -->
 # Reflections L2 蒸馏与 L3 记忆回应交互设计
 
 ## 背景与问题
@@ -98,11 +99,19 @@ L3引文必须是该L2观察或evidence原有字符串；引用的item必须属�
 
 比较：已有 get_sessions_range 提供原始日记范围，workspace Read 只适合当前 Thread，已有 Thread Tools 操作对话。它们不能跨 Thread 安全定位 report派生版本，也没有当前任务策略快照。采用已有 user MCP、私有 broker、身份和报告能力，新增两个读取工具与一个策略工具。三分析模式作为源数据，不做模式数量对应工具数量；不暴露数据库 CRUD、L3写入、设置写入、诊断或自由文件路径。
 
+### 自然问法与来源选择
+
+用户不需要知道工具名称。“我最近学了什么”“最近在关注什么”“我有哪些变化”等未指定来源的个人回顾，Agent先list目录，再read相关ready报告的最新版本；同报告旧版本不重复当证据。读取后按`observation_period`和来源核对问题时段/主题，不能把artifact处理时间当学习发生时间。L2是分析观察，不是完整学习日志；不足、过旧、空结果、处理中或不可用时，复用`get_sessions_range`补查相关原日记，并说明尚缺的证据。
+
+用户明确指定Notion、页面、附件或原日记时按指定来源；未指定时，已挂载Notion索引不自动决定检索入口。只有具体剩余缺口或来源核实需要时才扩展已授权的相关Notion内容，分别交代来源。普通外部知识或写作任务不为此额外查个人记忆。普通L2学习摘要不需要resolve，也不受L3行为开关限制；仅准备按历史L3主题改变回应时才resolve。回答使用普通语言、日期与必要来源，不默认输出Tool名、artifact ID或policy状态。
+
+执行位置复用`ClaudeAgentContextBuilder`：同一指引进入system prompt和每轮`<reflections_memory_tools>`，使新Chat、缓存system的resume、Workspace Mode关闭时都可获得；现有`<workspace_context>`中的Notion步骤只在选定该来源后使用。程序资源`memory/`仍是procedural目录，不复制L2文件、不新增Skill、关键词路由器、接口或权限。
+
 | 项目 | list_memory_distillations | read_memory_distillation | resolve_memory_behavior |
 | --- | --- | --- | --- |
 | 状态/使用者 | 本分支新增；当前 Agent 找相关回顾 | 本分支新增；Agent读选定版本 | 本分支新增；Agent拟参考历史主题回应时 |
 | 时机 | 用户询问过去观察、需个人上下文时 | 目录选出相关报告后 | 已有相关L2且准备调整回应前 |
-| 输入 | 可选limit默认20（技术分页上限100）、before ISO时间/ID游标 | artifact_id、revision必填 | artifacts=[artifact_id,revision]；当前消息/owner/Thread/snapshot由Host绑定 |
+| 输入 | 可选limit默认20（技术分页上限100）；首页before省略/null，翻页仅用上页next_cursor，空/半游标拒绝 | artifact_id、revision必填 | artifacts=[artifact_id,revision]；当前消息/owner/Thread/snapshot由Host绑定 |
 | 输出 | status=listed、元数据、完成/失败栏目、next_cursor | 业务状态、文档、摘要、report_id | resolved/disabled/no_match/explicit_boundary/unavailable、policy_revision、至多一个plan、来源项 |
 | 读写影响 | 只读业务目录 | 只读业务记忆；文件丢失允许恢复已存规范字节，不分析、不改版本 | 读取同版本L3与本轮snapshot，固定规则判断；不调用模型，不改记忆/设置 |
 | 权限 | owner OAuth/服务身份和精确capability | 同左，report/artifact/version归属；文件根/类型/长度/摘要 | 同左；实际消息、Thread、policy由Host固定，模型不能传owner/current_text/effective |
@@ -165,15 +174,24 @@ sequenceDiagram
     S->>A: memory.v2.behavior.save(expected_revision, request_id)
     A-->>S: desired / revision / 原请求回执
     S-->>U: 已保存，下一次回应使用此设置
-    U->>M: 当前普通对话任务
+    U->>M: 普通个人回顾，如我最近学了什么
     H->>A: fresh memory.v2.behavior.get
     A-->>H: owner default / desired / revision
     H->>H: 冻结BehaviorPolicySnapshot与当前消息
     M->>H: list_memory_distillations / read_memory_distillation
     H-->>M: owner范围文件、原报告与来源
-    M->>H: resolve_memory_behavior(选定版本)
-    H->>H: 当前任务、拒绝边界、标签/引文、开关校验
-    H-->>M: 允许的单一plan或跳过
+    M->>M: 核对observation_period、来源与问题覆盖
+    opt 时段或主题覆盖不足，需要原文
+        M->>H: 既有get_sessions_range补查相关日记
+        H-->>M: 实际匹配或空结果
+    end
+    alt 仅整理学习或历史观察
+        M->>M: 按实际日期和证据摘要，无需resolve
+    else 准备按历史L3改变回应
+        M->>H: resolve_memory_behavior(选定版本)
+        H->>H: 当前任务、拒绝边界、标签/引文、开关校验
+        H-->>M: 允许的单一plan或跳过
+    end
     M-->>U: 继续当前任务；原Chat记录工具结果
 ```
 
@@ -259,6 +277,7 @@ stateDiagram-v2
 | 设置默认/关闭/保存 | 默认关闭且保留主题选择；恢复默认只改草稿；保存CAS与原回执；当前turn不变、下一轮fresh |
 | 设置失败/冲突/重开 | 不用假默认覆盖；保留草稿；当前账户原命令可核实/重试；冲突展示最新已保存值 |
 | Agent实际使用 | read仅提供历史分析；resolve只返回当前任务允许动作；v1引用不执行v2策略，重新读取v2后可返回非空计划；直接拒绝与明确否认优先、Thread内边界可恢复；Tool回执不单独证明最终采纳 |
+| 自然个人回顾 | 不出现Tool名的“我最近学了什么”在新/恢复Chat先list/read；按观察时段回答，原文补缺，不强制resolve或默认先Notion；显式Notion/原日记请求保留原入口；关闭L3不影响L2 |
 | 桌面/窄屏与键盘 | 现有导航、自然单列、无横向滚动、键盘可操作、无新增确认弹窗 |
 | 相邻回归/缺capability | 现有Notion冻结、Deck/Agent选择、Reflections报告/SSE/历史保持；记忆域缺capability关闭，原流程可用 |
 | 真实模型链路 | 正常Dream/Admin/Gateway/真实账户及既有实体；报告54的18条L2→v2单条L3→实际Agent读取/非空计划→实际回答→设置变化下一轮生效→七轮重开；新增8请求、合计28请求成功结算；管理页面登录复核仍未完成 |

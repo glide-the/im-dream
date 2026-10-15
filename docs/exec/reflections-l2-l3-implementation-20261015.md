@@ -3,9 +3,12 @@
 <!-- [Pos] Reflections 记忆实现执行记录；不代替产品规则。 -->
 <!-- [Sync] 2026-10-15: 追加正常0082/0083采用、真实报告/文件/Tool/结算证据及中文拒绝修复；先前阻塞记录作为阶段历史保留。 -->
 <!-- [Sync] 2026-10-15: 续行核对18条零主题，按原词表修订版本化分类，并以同源新版本补齐非空真实验收。 -->
+<!-- [Sync] 2026-10-15: 修复自然个人回顾缺少L2使用引导，保留原Notion错误顺序并独立验收新/恢复Chat。 -->
 # Reflections L2/L3 实现与验收
 
 当前交付状态：正常Admin已发布分类v2（0085），同一报告54的18条L2正文与冻结来源保持原摘要，v2追加1条L3；指定账户/既有写作Agent/deepseek-v4-pro实际读取后，两轮分别返回resolved + respect_distance（revision1）、resolved + help_only（revision2），并给出符合动作的可见建议。七轮对话刷新重开一致；验收后恢复原desired为revision3。新增8请求全部成功结算，合计28个SDK session关联请求逐项账本守恒。非空主题/策略缺口已补齐到本次单主题两动作范围；独立Admin管理页面登录未复核。439/582等统计已定位到明确源码口径差异，未逐条复查原冻结输入，见末尾。下文前段保留阶段历史，“未发布/未调用/非空未验收”等旧结论以末尾v2正常回执为后续状态。
+
+后续自然问法交付：针对“我最近学了什么”错误优先Notion，补齐system/每轮/workspace使用指引和MCP首页nullable游标声明；修复后的新/恢复Chat均实际list→read→按需补查原日记，未用Notion或resolve。沿用户当前GPT-6.1-Sol，四轮中前两轮暴露的问题原样保留，后两轮均无Tool错误；20个新增正常请求成功结算。自然问法回执与上述显式指令/策略验收分开，详见本文末尾。
 
 优化提示词执行依据：在新分支中依次实现报告到 L2 文件、只读 Agent Tools、L3 固定主题与当前任务策略、现有 Settings 中的行为设置。复用生产入口；先隔离验证，再使用用户指定的已有账户及现有执行对象和模型验收。不合并、不发布，不修改无关数据或凭证。
 
@@ -242,3 +245,50 @@ Settings DTO在最终复核中收窄为当前精确`memory-rules-v2`；历史art
 独立源码核对已确认统计不同：总览[aggregate](../../backend/routers/sessions.py)仅在`text.strip()`非空时增加篇数；Admin `app/lib/dream/reflectionTaskService.ts:170-184`冻结报告以全部来源Session的`sessions.length`计数，不过滤空正文。两端不是同一“篇数”定义。天数也不同：总览优先updated_at并转浏览器时区，报告优先created_at并截ISO日期；字数分别为Dream `backend/routers/deps.py:116`的CJK字符/其他空白分词混合算法与报告的单纯空白分词。
 
 两端均查`user_sessions`，没有日记类型/软删除字段筛选；报告另支持可选来源ID和日期范围（Admin `reflectionTaskRepository.ts:152-161`）。报告保存取冻结`snapshot.stats`，不是模型或L2/L3转换改写。以上足以说明439/582、170/172及字数不能直接等同比较；本次未逐条复查冻结输入，因此不声称差额143条已逐条证明都是空正文。未在分类修复中改写历史报告或扩展为统计功能重构。
+
+## 自然个人回顾的使用引导修复
+
+Optimized Prompt执行依据：用户反馈普通workspace问“我最近学了什么”先调用Notion。核对当前Tool注册、system/每轮上下文、Workspace Mode和恢复路径，修复真实的使用指引缺口；复用已有list/read、原日记检索和必要resolve，保留用户指定来源，不新增Skill、意图路由器、页面、DTO、数据表或权限。明确观察时段与处理时间不同，L2摘要独立于L3开关，缺少证据不能编造。先做确定性合同回归；沿已授权的正常本机服务、账户与deepseek-v4-pro，用不含工具名的自然问法做最多两轮真实Chat，覆盖新/恢复对话，保留模型/请求回执，不修改真实记忆或设置，不合并/远程发布。
+
+发现：用户实际反馈对话`cdc100a7-5916-4459-bdfe-f07d4fe1787e`的可见首问确为“我最近学了什么”；首轮先启动notion-session，再读取`.notion/`索引，不能把此前显式要求“查看已整理记忆”的成功验收当成自然问法已通过。源码中`build_user_message`每轮无条件加入memory block，`service.py`每轮调用，不是cwd/resume漏注入；缺口是抽象触发语没有说明自然个人回顾如何选择L2，system旧日记流程与更具体的Notion索引说明也没有该优先关系。源码和实际顺序共同支持该判断，但不能证明某一句提示独自导致模型选择。
+
+定义与比较：仅加Tool描述不足以统一system及workspace来源；新增规则路由/Skill又重复模型任务选择。采用同一工作流文本进入system和每轮memory block，补三个Tool描述，并给workspace Notion流程增加来源选择前提。个人回顾先list/read→核对时段/来源→必要时原日记补缺；显式Notion/页面优先指定来源；仅按历史L3改变行为才resolve。程序记忆目录不改，旧system缓存的下一轮仍获得新指引。
+
+场景修订的Optimized Prompt依据：本轮正常Settings只读显示当前AI模型已由用户改为`GPT-6.1-Sol`，不再沿用前轮deepseek假设。保持当前模型选择不变，以用户反馈的同一普通Chat验证恢复路径，再以新Chat验证无显式Tool名的首问。仍限两轮，无模型设置/真实记忆/行为设置写入；以正常Gateway实际resolved_model记录最终型号。
+
+本节实现、技术回归和真实验收结果分别补录，原错误首轮保留，不覆盖历史对话。
+
+### 实际调用暴露的分页声明缺口
+
+第一轮恢复原反馈Chat后，自然原问实际先list（一次空游标校验错误，随后正常listed）→read报告54的v2→get_sessions_range补最近一个月原日记；未调用Notion或resolve，回答说明旧回顾并非近期学习记录。该轮5个正常请求全部`gpt-6.1-sol`成功结算，保留首个Tool错误。
+
+第二轮新Chat选择原写作Deck/具体Agent，自然首问却连续5次用空artifact_id/created_at调用list，被严格校验拒绝，最终转原日记，未read；该轮不能计为L2链路通过。查明MCP向模型公布的before只有object，而生产MemoryRequest、ListDTO及Admin早已允许null为首页。源码未发现Gateway把before强制required的重写，不把模型填参原因归咎于未经证明的strict转换。
+
+Optimized Prompt修订：将本次真实失败纳入最小修复，MCP before声明改为既有游标或null，首页可省略/null并给默认null，保持空/半游标拒绝和原排序/权限；不把非法对象静默转首页，不改Admin或Runtime。补schema/DTO/真实broker合同回归。首两轮及失败回执保留，为核实该实质修复，额外最多两轮普通原问，分别在失败Thread恢复与新Chat中验证list(null/省略)→read，仍不写记忆或设置，不新增模型分析任务。
+
+### 技术验证与正常服务恢复
+
+`PYTHONPATH=backend backend/.venv/bin/python -m pytest -q`按文件分开进程运行：context_builder最终60 passed、8 subtests；memory_chain最终58 passed（包括新增5组schema/DTO和生产broker首页）；service 47 passed、9 subtests；runner精确Tool目录1 passed。最初四目标组合命令在允许loopback后为160 passed、17 subtests、1 failed，失败来自跨模块替换SDK ResultMessage stub后不接受duration_ms；失败测试及service全文件独立运行均通过，未为它改生产代码或写skip，也未把组合命令称为全绿。原sandbox loopback失败和有界升级后通过的日志分别保留。完整命令见本机`recall-guidance-checks/summary.log`，最终两文件回执为`context-nullable-final.log`和`memory-nullable-final.log`。
+
+原正常后端由VSCode调试器启动且早于修改，按原backend cwd、PYTHONPATH、`.venv/bin/python server.py`及`.env`加载修复；Code UI未授权，未通过其他控制器操纵Code。后续重载自有正常后端时，Admin出现9个data连接等待advisory锁、1个idle-in-transaction的池耗尽，真实capabilities调用返回ADMIN_TIMEOUT，未据此放宽校验或发起修复后的模型调用。仅从正常DB读取连接状态/锁等待元数据，不读取SQL参数/日记，也不终止单个DB会话。主Agent优雅停止本轮后端，按原官方`corepack pnpm run start:embedded`恢复Admin/PostgreSQL，再启动同一正常Dream；未运行migration、回填或改环境配置。恢复后原data目录身份核对一致、capabilities exact_memory_ready=true，池无等待锁/idle transaction，Dream健康检查200；前端5173保持原服务。临时模型设置标签已关闭，使用用户原标签继续，未更换账户或模型。
+
+### 修复后真实自然问法结果
+
+所有新增问句均为原文“我最近学了什么”，没有给工具名、报告ID或预期调用顺序。使用正常账户`dmeck@suoxya.com`、既有写作Deck `f9727b8d-4e0f-421a-a3dd-0cdd8ea78da0`及其Agent `9869b112-02cb-4a69-be63-294ae6e609e3`（原反馈cdc对话保持其原无Agent选择），模型保持当前Settings选中的GPT-6.1-Sol。没有修改模型设置、行为设置或真实记忆。
+
+| 场景 | 真实Tool顺序与结果 | 正常Gateway请求 |
+| --- | --- | --- |
+| 原反馈cdc对话第二轮 | 首次空游标错误→重试listed→read ready→原日记补查；无新Notion/resolve；错误保留 | 新增5条，全成功 |
+| 首个新Chat `20c39da8-1d75-4b87-94b7-86d29b4e99bb` 首轮 | 5次空游标错误→原日记，未read；明确不算通过 | 7条，全成功结算；Tool错误不等于Gateway失败 |
+| nullable修复后同20c对话第二轮 | list(before=null)一次listed→read报告54/v2 ready→get_sessions_range；无Tool错误、Notion或resolve | 新增4条，全成功 |
+| nullable修复后新Chat `1ef8faae-5a4c-4696-9f2e-4c22abc522ed` 首轮 | list(before=null)一次listed→同v2 read ready→get_sessions_range；无Tool错误、Notion或resolve | 4条，全成功 |
+
+后两轮read均返回artifact `b5390074-bb2b-439f-b737-893e0d755042` revision1及原文件SHA `5230f0922581e19b1bb17befdfde2e02159715f63298dec3873270d6b52aee22`。可见回答均说明材料主要指向4—7月，最近一个月记录不足，区分历史研究方向与已掌握/近期新收获；没有强制心理回应或输出内部policy状态。新Chat刷新后从普通历史重新打开，最新回答逐字相同，无新模型调用。
+
+本次四轮合计20个新增请求，实际resolved_model均`gpt-6.1-sol`、HTTP200、settled+succeeded，SDK session逐项关联。requested_model为同一个正常路由别名`codex-7c4d6162-84bd-40bc-8464-dc2ea09bfb15-gpt-6.1-sol`，不能要求其字符串等于resolved_model；首版回执核对脚本的此项错误断言已修正，不作为业务失败。逐请求reserve=capture+release、capture=allowance_charged_tokens，新增capture合计635,072 tokens。正常数据库中的记忆版本/摘要及behavior revision3、desired与验收前完全一致。
+
+主Agent执行`backend/.venv/bin/python output/docs/reflections-l2-l3-design-20261015/verify-recall-normal-acceptance.py`最终exit0，核对上述顺序、首次null、正文摘要、原错误、设置/版本、重开及账本。[自然问法汇总](../../output/docs/reflections-l2-l3-design-20261015/recall-normal-acceptance-summary.json)、[恢复Chat正常回执](../../output/docs/reflections-l2-l3-design-20261015/normal-business-recall-repaired-resume.json)、[新Chat正常回执](../../output/docs/reflections-l2-l3-design-20261015/normal-business-recall-repaired-fresh.json)、[历史重开](../../output/docs/reflections-l2-l3-design-20261015/recall-ui-persistence.json)、[实际页面](../../output/docs/reflections-l2-l3-design-20261015/recall-repaired-fresh-chat.jpg)均为本机保留、Git忽略的证据；真实Run/Thread/请求/失败和结算未清理。
+
+本轮已验证自然新/恢复Chat的个人回顾路由、过旧时间覆盖后的原日记补缺及首页恢复。显式Notion来源例外、无蒸馏/缺capability等由提示合同和已有隔离用例覆盖，未另做这些场景的真实模型调用；同一turn压缩后的指引保留仍由Runtime管理，不以每轮注入测试冒充实际自动压缩验收。没有新增页面、工具、Skill、意图正则、数据库或Admin/Gateway/Runtime功能变更；未合并、推送或远程发布。
+
+最终文档检查：`node output/docs/reflections-l2-l3-design-20261015/validate-implementation-docs.mjs` exit0，9个Markdown、39个本地引用、3个Mermaid、failures=[]；沿用本轮已安装Chrome的3/3图示解析回执，图块此后未改，不重复运行。两仓`git diff --check`均exit0，Admin源码clean。实际命令日志为`recall-guidance-checks/final-docs.log`与`docs-summary.log`，不把这些检查称为业务验收。

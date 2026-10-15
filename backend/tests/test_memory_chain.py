@@ -2,6 +2,7 @@
 # [Output] Provider-free complete memory chain, snapshot/refusal, recovery and owner-boundary evidence.
 # [Pos] Isolated memory technical validation; no normal database or provider calls.
 # [Sync] 2026-10-15: cover versioned Notion-aligned rules and immutable v1 compatibility.
+# [Sync] 2026-10-15: first-page cursor schema matches nullable production DTO/broker and still rejects malformed pagination.
 # [Sync] 2026-10-15: reproduce normal-model Chinese refusal miss and Thread history recovery without changing source conversion.
 # [Sync] 2026-10-15: initial L2/L3 business-contract cases.
 from types import SimpleNamespace
@@ -221,6 +222,12 @@ def test_real_private_broker_round_trip_uses_bound_owner_and_current_message(cha
     broker.start()
     try:
         client=MemoryBrokerClient.from_env(broker.child_env())
+        data.list.return_value=SimpleNamespace(artifacts=[a],next_cursor=None)
+        for values in ({},{'before':None}):
+            listed=client.command('memory.list',values,'fixture-list-'+str(len(values)))
+            assert listed.status=='listed' and listed.artifacts[0].artifact_id==a.artifact_id
+            assert data.list.call_args.args[0].before is None
+            assert data.list.call_args.kwargs['access_token']=='synthetic-owner-token'
         result=client.command('memory.read',{'artifact_id':a.artifact_id,'revision':1},'fixture-read')
         assert result.document==a.document
         resolved=client.command('memory.resolve',{'artifacts':[{'artifact_id':a.artifact_id,'revision':1}]},'fixture-resolve')
@@ -228,6 +235,24 @@ def test_real_private_broker_round_trip_uses_bound_owner_and_current_message(cha
         assert all(call.kwargs['access_token']=='synthetic-owner-token' for call in data.read.call_args_list)
         with pytest.raises(ValidationError):client.command('memory.resolve',{'artifacts':[],'current_text':'invented'},'invalid-call')
     finally:broker.close()
+
+@pytest.mark.parametrize('before',[None,{'created_at':STAMP,'artifact_id':'d2868c04-b6e5-45dc-88c4-f32d12857619'}])
+def test_published_list_schema_and_request_agree_on_cursor(before):
+    from jsonschema import Draft202012Validator
+    from libs.claude_agent_kit.server.reflection_memory_tool import MEMORY_TOOL_SPECS
+    validator=Draft202012Validator(MEMORY_TOOL_SPECS['list_memory_distillations'][1])
+    for values in ({},{'before':before}):
+        validator.validate(values)
+        request=MemoryRequest(capability='A'*43,request_id='cursor-contract',operation='memory.list',**values)
+        assert (request.before is None)==(not values or before is None)
+
+@pytest.mark.parametrize('before',[{}, {'created_at':'','artifact_id':''}, {'created_at':STAMP}])
+def test_published_list_schema_keeps_malformed_cursor_invalid(before):
+    from jsonschema import Draft202012Validator
+    from libs.claude_agent_kit.server.reflection_memory_tool import MEMORY_TOOL_SPECS
+    assert list(Draft202012Validator(MEMORY_TOOL_SPECS['list_memory_distillations'][1]).iter_errors({'before':before}))
+    with pytest.raises(ValidationError):
+        MemoryRequest(capability='A'*43,request_id='cursor-invalid',operation='memory.list',before=before)
 
 def test_rejected_interpretation_remains_thread_scoped_and_can_be_reopened(chain,monkeypatch):
     _,a,_,_,provider,request=chain
