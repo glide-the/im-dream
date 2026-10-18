@@ -1,6 +1,7 @@
 <!-- [Input] backend/libs/claude_agent_kit/server/session_projection_protocol.py、reflection_memory_tool.py、各工具调用点，以及 backend/services/admin_data/session_projection_broker.py 和 turn/Reflections owner。 -->
-<!-- [Output] 私有 broker 的职责、wire 协议、权限边界、Memory 复用、完整消费者和恢复合同。 -->
+<!-- [Output] 私有 broker 的职责、传输协议、权限边界、Memory 复用、完整消费者和恢复合同。 -->
 <!-- [Pos] Claude Agent 私有 broker 现行实现设计；业务规则仍由各领域设计与服务所有。 -->
+<!-- [Sync] 2026-10-18: 直接定义传输协议的编码、分帧与消息结构，删除与其他协议的对比表述。 -->
 <!-- [Sync] 2026-10-15: 依据当前源码集中说明 SessionProjectionBrokerClient 与 MemoryBrokerClient，不修改功能或权限。 -->
 
 # SessionProjectionBrokerClient 与 MemoryBrokerClient 设计
@@ -35,7 +36,7 @@
 
 源码入口：[客户端与公共 DTO](../../../backend/libs/claude_agent_kit/server/session_projection_protocol.py)、[Host broker](../../../backend/services/admin_data/session_projection_broker.py)、[普通 turn owner](../../../backend/services/admin_data/turn_persistence.py)。
 
-注意两个同名概念：wire 的 `capability` 是当前 broker 的随机 bearer 凭证；Admin schema capability 是带版本/摘要的业务合同准入条件。两者用途和生命周期不同。
+请求字段 `capability` 定义为当前 broker 的随机 bearer 凭证，用于校验调用方对该通道的访问。Admin schema capability 定义业务合同的版本与摘要，用于业务操作的准入检查。
 
 ## 4. 组成、启动与配置
 
@@ -64,23 +65,25 @@
 
 依据：[Service 注入](../../../backend/claude_agent/service.py)、[Runner 子进程配置](../../../backend/libs/claude_agent_kit/server/agent_runner.py)、[user MCP 环境清理](../../../backend/libs/claude_agent_kit/server/user_mcp_stdio.py)。
 
-## 5. Wire 协议
+## 5. 传输协议（wire protocol）
+
+传输协议定义通信双方交换消息时遵守的字节编码、消息分帧、字段结构、交互顺序和错误表示。本文的私有 broker 通过 TCP 传输 UTF-8 编码的 JSON，每条消息以换行字节 `0x0A` 结束；每条连接承载一次请求和一次响应。
 
 ### 5.1 一次连接、一次请求、一次响应
 
 `_round_trip(request, request_id, read_timeout_seconds=None)` 每次创建一条 TCP 连接：
 
-1. DTO 序列化为 UTF-8 JSON，加一个 `\n` 后发送。
+1. DTO 序列化为 UTF-8 JSON，追加换行字节 `0x0A` 后发送。
 2. Host 读取一行，按 `max_bytes + 1` 检查空输入、超长或缺少结尾换行。
 3. Host 解析业务 DTO，检查 capability，以 `hmac.compare_digest` 比较当前 bearer，再调用绑定 provider。
 4. Host 编码结果并检查响应上限。超限整体返回 `SESSION_BROKER_RESPONSE_TOO_LARGE`，不截断正文或返回部分成功；错误帧本身仍超限时返回空字节。
 5. 客户端读取一行并检查长度和换行，移除结尾换行，将字节交给具体业务响应解析器。
 
-这不是 HTTP、SSE 或 MCP wire，也不复用长连接。`_round_trip` 不解释 `result`、不判断业务成功、不自动重试，也没有发送前请求大小检查；请求上限由 Host 执行。`status_code` 是错误 DTO 的字段，不是这条 TCP 连接的 HTTP 状态。Host 尚未读完请求便发生 socket timeout 时不保证结构化回包，见 §12。
+`_round_trip` 返回去除结尾换行的响应字节，业务客户端方法负责按响应 DTO 解析 `result` 并判断业务结果。每次调用只发送一次请求，重试和结果恢复由具体业务流程处理。请求大小上限由 Host 检查。`status_code` 是错误 DTO 中的整数状态码，与 `code`、`request_id` 一起表示本次操作的错误。Host 尚未读完请求便发生 socket timeout 时不保证结构化回包，见 §12。
 
 ### 5.2 请求族与响应族
 
-| 请求族 | wire 请求及 selector | 响应及客户端方法 |
+| 请求族 | 请求字段及资源选择参数 | 响应及客户端方法 |
 | --- | --- | --- |
 | Session | 无 `operation` 字段；`capability`、`request_id`、`start_date`、`end_date`、`include_text`；真实日期且起止有序 | `SessionProjectionResponseDTO` → `SessionProjectionResultDTO.sessions`；`list_sessions()` |
 | 当前 Run | `operation="workflow-run.current"`；仅 capability/request_id，没有 Run、workspace、actor 或 Thread selector | `WorkflowRunProjectionResponseDTO` → 当前 `WorkflowRun`；`current_workflow_run()` |
@@ -97,9 +100,9 @@ Thread/Schedule 六种请求均带 `capability`、`request_id`、`operation`、`
 | `thread.read` | 必填 `thread_id`；可选 `message_limit`，范围 1..100 或 null |
 | `thread.send` | 必填 `thread_id` 和非空 `prompt` |
 | `thread.wait` | 必填 `targets`，1..8 个不同 thread_id，可附 after_cursor；`timeout_ms` 为 0..120000 或 null，null 的 client 等待预算按 120000ms 计算 |
-| `schedule.create` | 必填非空 `title`、`prompt` 和 `schedule_rule`；当前 wire 仅接受 once/daily/interval 的闭集字段，hourly/weekly 差异见 §12 |
+| `schedule.create` | 必填非空 `title`、`prompt` 和 `schedule_rule`；当前请求 DTO 仅接受 once/daily/interval 的闭集字段，hourly/weekly 差异见 §12 |
 
-图片生成的 wire 在 `ImageGenerationRequest` 中带 `prompt`、`reference_images`、`source_call_id`；选择请求在 `ImageSelectionRequest.arguments` 中带操作、prompt 和引用，外层另带实际调用 ID。引用限定为 `workspace://files/...`；当前选中模型、actor、Gateway token 均不从请求中接收。原始 SDK `source_call_id` 与 user MCP 派生的 `tool_call_id` 不是同一种调用身份，不能互换。
+图片生成请求 `ImageGenerationRequest` 带 `prompt`、`reference_images`、`source_call_id`；选择请求在 `ImageSelectionRequest.arguments` 中带操作、prompt 和引用，外层另带实际调用 ID。引用限定为 `workspace://files/...`；当前选中模型、actor、Gateway token 均不从请求中接收。原始 SDK `source_call_id` 与 user MCP 派生的 `tool_call_id` 不是同一种调用身份，不能互换。
 
 公共 `_StrictDTO` 禁止额外字段、类型隐式转换和 NaN/Infinity，并冻结实例、隐藏校验错误输入。Memory 和图片定义各自的严格 DTO，并非继承公共 `_StrictDTO` 的全部配置。未知 operation 不会透传；它最终不能通过对应的闭集请求校验。
 
@@ -109,7 +112,7 @@ Thread 业务确实允许目标 `thread_id` 和 `targets`，Memory 允许 artifa
 
 公共及 Memory 响应的成功形状为 `ok=true`、非空 `result`、空 `error`；失败为 `ok=false`、空 `result`、非空 `error`。错误 DTO 只有 `code`、`status_code`、可选 `request_id`，不含统一 `outcome_unknown` 字段。图片响应使用自己的 envelope 校验。
 
-**公共和 Memory 成功 envelope 没有回显 `request_id`，也没有客户端成功 ID 比对。** 这里依靠一条连接只承载一个请求来关联响应；错误 ID 被转交，缺失时使用本地 ID，不执行相等比较。Admin HTTP 层另有自己的响应合同校验，不能把它描述成 broker 成功 envelope 的能力。图片生成是例外：`request_image()` 会比对 `ImageGenerationResult.requestId`；图片选择没有相同的回显检查。
+公共和 Memory 的成功响应通过一条连接中的单次请求与响应建立关联，成功 envelope 不包含 `request_id`。错误响应携带的 ID 被转交，缺失时使用本地 ID。图片生成由 `request_image()` 比对 `ImageGenerationResult.requestId`；图片选择由 `request_image_selection()` 校验成功 envelope 的字段集合和结果对象类型。
 
 `request_id` 用于一次请求的追踪与下游调用，不是通用幂等键：Thread 方法每次生成新的 UUID，并独立携带实际 MCP `tool_call_id`；Memory 直接使用 MCP request identity 派生的 `call_id`。Thread 创建、定时任务和图片的业务幂等/结果恢复由各领域服务决定。
 
@@ -152,7 +155,7 @@ Thread 业务确实允许目标 `thread_id` 和 `targets`，Memory 允许 artifa
 
 ### 7.1 三个入口和内部字段
 
-| 模型可见入口 | `command()` / wire | 输入及结果 |
+| 模型可见入口 | `command()` 的内部操作 | 输入及结果 |
 | --- | --- | --- |
 | `list_memory_distillations` | `memory.list` | `limit` 可省略，当前默认 20、schema 范围 1..100；`before` 可省略或为 null，下一页原样使用 `next_cursor`。返回 `listed`、版本目录、完成状态和 cursor |
 | `read_memory_distillation` | `memory.read` | 必填 `artifact_id` + `revision`；返回该版本状态、report_id、来源文档和 SHA；只有 ready 读取正文 |
