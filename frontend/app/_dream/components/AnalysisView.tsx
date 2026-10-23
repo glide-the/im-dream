@@ -1,4 +1,6 @@
 /**
+ * [Sync] 2026-10-23: report sources include frozen diary scope and explicitly label Notion pages read.
+ * [Sync] 2026-10-23: repeat-day dialog shares the page content draft and inline Notion/Agent controls.
  * [Sync] 2026-10-13: centralize analysis content, freeze each submission and recover task-linked reports.
  * [Sync] 2026-10-13: distinguish prepared tasks from running recovery; explicit continuation retains original inputs.
  * [Sync] 2026-10-14: consume Chat Reflections section links by opening and focusing the newest matching saved report.
@@ -338,16 +340,19 @@ interface ReanalysisConfirmModalProps {
   onToggleSession: (sessionId: string) => void;
   onSelectAll: () => void;
   onConfirm: () => void;
-  allowNotionOnly?: boolean;
+  analysisContent: ReflectionAnalysisContentOptions;
+  onAnalysisContentChange: (selection: ReflectionAnalysisContentOptions) => void;
+  authenticated: boolean;
 }
 
 function ReanalysisConfirmModal({
   open, sessions, selectedIds, error, isMobile,
-  onClose, onToggleSession, onSelectAll, onConfirm, allowNotionOnly = false,
+  onClose, onToggleSession, onSelectAll, onConfirm, analysisContent, onAnalysisContentChange, authenticated,
 }: ReanalysisConfirmModalProps) {
   if (!open) return null;
   const selected = new Set(selectedIds);
   const selectedCount = selectedIds.length;
+  const allowNotionOnly = analysisContent.include_notion;
 
   return (
     <div
@@ -373,7 +378,7 @@ function ReanalysisConfirmModal({
           display: 'flex', flexDirection: 'column',
         }}
       >
-        <div style={{ padding: isMobile ? '1.35rem' : '1.75rem 1.9rem 1.25rem' }}>
+        <div style={{ padding: isMobile ? '1.35rem' : '1.75rem 1.9rem 1.25rem', flexShrink: 0 }}>
           <div style={{
             fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase',
             color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '0.7rem',
@@ -393,11 +398,14 @@ function ReanalysisConfirmModal({
             fontSize: '13px', lineHeight: 1.7,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           }}>
-            Re-running will create a new analysis. Choose the diary entries that should be included this time.
+            Re-running will create a new analysis. Choose the diary entries and analysis content for this run.
           </p>
         </div>
 
-        <div style={{ padding: isMobile ? '0 1.35rem 1rem' : '0 1.9rem 1.2rem', overflowY: 'auto', flex: 1 }}>
+        <div style={{ padding: isMobile ? '0 1.35rem 1rem' : '0 1.9rem 1.2rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <ReflectionAnalysisContentControls value={analysisContent} onChange={onAnalysisContentChange} authenticated={authenticated} inline />
+          </div>
           <button
             type="button"
             onClick={onSelectAll}
@@ -476,6 +484,7 @@ function ReanalysisConfirmModal({
 
         <div style={{
           padding: isMobile ? '1rem 1.35rem 1.35rem' : '1rem 1.9rem 1.75rem',
+          flexShrink: 0,
           borderTop: '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
           display: 'flex', justifyContent: 'flex-end', gap: '0.75rem',
         }}>
@@ -1371,7 +1380,7 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
           >
             {anyLoading ? t('analysis.actions.generating') : t('analysis.actions.generate')}
           </button>
-          <ReflectionAnalysisContentControls value={analysisContent} onChange={setAnalysisContent} authenticated={isAuthenticated} />
+          {!reanalysisDialog.open && <ReflectionAnalysisContentControls value={analysisContent} onChange={setAnalysisContent} authenticated={isAuthenticated} />}
           </div>
           {preparedTask && !anyLoading && <div role="status" style={{ marginTop: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
             {i18n.language.startsWith('zh') ? '有一项分析尚未开始；继续时使用原分析内容。' : 'An analysis has not started. Continuing uses its original content.'}
@@ -1496,7 +1505,12 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
         onToggleSession={handleToggleReanalysisSession}
         onSelectAll={handleToggleAllReanalysisSessions}
         onConfirm={handleConfirmReanalysis}
-        allowNotionOnly={analysisContent.include_notion}
+        analysisContent={analysisContent}
+        onAnalysisContentChange={selection => {
+          setAnalysisContent(selection);
+          setReanalysisDialog(prev => ({ ...prev, error: '' }));
+        }}
+        authenticated={isAuthenticated}
       />
 
       {/* Section config modal */}
@@ -2073,6 +2087,7 @@ export function ReflectionBlogPage({
   formatWordsLabel: (n: number) => string;
 }) {
   const date = new Date(report.timestamp);
+  const diaryScopeCount = report.analysisContent?.diary_session_ids?.length ?? report.stats.entries;
   const backButtonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => { if (!initialSection) backButtonRef.current?.focus(); }, [initialSection]);
 
@@ -2170,18 +2185,22 @@ export function ReflectionBlogPage({
         {report.failedSections.map(section => t(`analysis.papers.${section}.title`)).join('、')}.
         {' '}{dateLocale.startsWith('zh') ? '已完成的结果已保留，可重新分析。' : 'Completed results are retained. You can analyze again.'}
       </div>}
-      {report.analysisContent && <div aria-label={dateLocale.startsWith('zh') ? '本次分析来源' : 'Analysis sources'}
-        style={{ padding: '8px 16px', fontSize: 12, color: 'var(--color-text-secondary)', flexShrink: 0 }}>
-        {report.analysisContent.agent && <span>{dateLocale.startsWith('zh') ? '分析 Agent：' : 'Analysis Agent: '}{report.analysisContent.agent.agent_name} · </span>}
-        {report.analysisContent.notion && <details>
-          <summary>Notion · {report.analysisContent.notion.pages.length} {dateLocale.startsWith('zh') ? '个页面' : 'pages'}</summary>
+      <div role="region" aria-label={dateLocale.startsWith('zh') ? '本次分析来源' : 'Analysis sources'}
+        style={{ padding: '8px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 16px',
+          fontSize: 12, color: 'var(--color-text-secondary)', flexShrink: 0, overflowWrap: 'anywhere' }}>
+        <span>{dateLocale.startsWith('zh') ? `日记范围 · ${diaryScopeCount} 篇` : `Diary scope · ${diaryScopeCount} entries`}</span>
+        {report.analysisContent?.agent && <span>{dateLocale.startsWith('zh') ? '分析 Agent：' : 'Analysis Agent: '}{report.analysisContent.agent.agent_name}</span>}
+        {report.analysisContent?.notion && <details style={{ minWidth: 0, maxWidth: '100%' }}>
+          <summary>{dateLocale.startsWith('zh')
+            ? `Notion · 已读取 ${report.analysisContent.notion.pages.length} 个页面`
+            : `Notion · Pages read: ${report.analysisContent.notion.pages.length}`}</summary>
           <ul style={{ margin: '4px 0', paddingInlineStart: 20, maxHeight: 96, overflowY: 'auto', overflowWrap: 'anywhere' }}>
             {report.analysisContent.notion.pages.map(page => <li key={page.page_id}>{page.url
               ? <a href={page.url} target="_blank" rel="noopener noreferrer">{page.title || (dateLocale.startsWith('zh') ? '未命名页面' : 'Untitled page')}</a>
               : page.title || (dateLocale.startsWith('zh') ? '未命名页面' : 'Untitled page')}</li>)}
           </ul>
         </details>}
-      </div>}
+      </div>
       {/* ── Main content area (flex:1, no outer scroll) ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 

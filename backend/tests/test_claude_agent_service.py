@@ -1,3 +1,4 @@
+# [Sync] 2026-10-23: ordinary turn fixtures return no task-owned Notion runtime, preserving Chat projection coverage.
 # [Sync] 2026-10-07: scheduled tool-only completions persist a visible final receipt for durable result settlement.
 # [Sync] 2026-09-28: server result turns can ignore, but do not erase, the cached browser Editor snapshot.
 # [Sync] 2026-09-26: bound Thread resume missing/false/contract-mismatch cases fail closed.
@@ -152,6 +153,7 @@ def _managed_loader(snapshot=None):
 
 
 def _bind_test_grant(owner, *, run_id=None):
+    owner.notion_turn_runtime.return_value = None
     owner.current_grant.return_value = SimpleNamespace(
         token="idg_test-managed-mcp",
         run_id=run_id,

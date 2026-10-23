@@ -3,6 +3,7 @@
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Sync] 2026-10-13: pass per-task analysis selection, read candidates and retry the original task report.
 // [Sync] 2026-10-13: prepared tasks start only through an explicit resume action after SSE subscription.
+// [Sync] 2026-10-23: task creation selects Notion scope; body-read errors occur during Agent execution.
 // [Input] Consume backend REST/SSE endpoints, same-origin session and in-memory CSRF, language storage, and session/deck request data.
 // [Output] Provide frontend API helpers for sessions, decks, voices, Claude Agent SSE calls, analysis reports,
 //          Reflections section analysis, and Reflections section config (GET/PUT/DELETE).
@@ -629,10 +630,12 @@ function reflectionKnownFailure(value: unknown): string | undefined {
     NOTION_AUTH_REQUIRED: ['Notion 授权已失效，请重新连接。', 'Reconnect Notion before analyzing.'],
     NOTION_ANALYSIS_READ_FAILED: ['无法读取完整 Notion 内容，请检查页面权限，或关闭 Notion 后重试。', 'Notion content could not be read. Check page permissions or turn off Notion and retry.'],
     NOTION_RESOURCE_UNAVAILABLE: ['有 Notion 页面已无法访问，请检查授权与挂载范围后重试。', 'A Notion page is unavailable. Check access and linked resources, then retry.'],
-    NOTION_MARKDOWN_INCOMPLETE: ['Notion 返回的正文不完整，本次分析尚未开始。请稍后重试。', 'Notion returned incomplete content. The analysis has not started. Retry later.'],
-    NOTION_UPSTREAM_UNAVAILABLE: ['Notion 正文服务暂时不可用，本次分析尚未开始。请稍后重试。', 'Notion content is temporarily unavailable. The analysis has not started. Retry later.'],
-    NOTION_UPSTREAM_TIMEOUT: ['Notion 正文读取超时，本次分析尚未开始。请稍后重试。', 'Notion content read timed out. The analysis has not started. Retry later.'],
-    NOTION_RATE_LIMITED: ['Notion 请求暂时受限，本次分析尚未开始。请稍后重试。', 'Notion requests are temporarily limited. The analysis has not started. Retry later.'],
+    NOTION_MARKDOWN_INCOMPLETE: ['Notion 返回的正文不完整，请稍后重试分析。', 'Notion returned incomplete content. Retry the analysis later.'],
+    NOTION_UPSTREAM_UNAVAILABLE: ['Notion 正文服务暂时不可用，请稍后重试分析。', 'Notion content is temporarily unavailable. Retry the analysis later.'],
+    NOTION_UPSTREAM_TIMEOUT: ['分析期间读取 Notion 正文超时，请重试分析。', 'Notion content read timed out during analysis. Retry the analysis.'],
+    REFLECTION_NOTION_WORKSPACE_REQUIRED: ['请在设置中启用工作区，以使用 Notion 连接器按需读取。', 'Enable Workspace Mode in Settings to read Notion through the connector.'],
+    REFLECTION_NOTION_EVIDENCE_UNCONFIRMED: ['Notion 来源证据保存结果尚未确认，请查看原任务后重试。', 'Notion source evidence could not be confirmed. Check the original task before retrying.'],
+    NOTION_RATE_LIMITED: ['Notion 请求暂时受限，请稍后重试分析。', 'Notion requests are temporarily limited. Retry the analysis later.'],
     NOTION_PERMISSION_DENIED: ['无法读取选定的 Notion 页面，请检查授权后重试。', 'Check the selected Notion page permissions and retry.'],
     NOTION_CONNECTOR_CHANGED: ['Notion 连接已改变，请重新选择分析内容。', 'The Notion connection changed. Select the analysis content again.'],
     NOTION_SNAPSHOT_CHANGED: ['Notion 资源已更新，请重新选择分析内容。', 'Notion resources changed. Select the analysis content again.'],

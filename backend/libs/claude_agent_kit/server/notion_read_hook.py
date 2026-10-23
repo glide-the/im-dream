@@ -1,3 +1,4 @@
+# [Sync] 2026-10-23: reuse the Read redirect with a host-owned task evidence reader.
 # [Input] Runtime Read calls, thread-local Notion index, and thread-private credential projection.
 # [Output] Redirect authorized `.notion/pages/<id>.json` reads to a private temporary live Markdown payload.
 # [Pos] lazy Notion page-read hook in libs/claude_agent_kit/server.
@@ -185,6 +186,7 @@ async def apply_notion_page_read_redirect(
     credential_home: str | None,
     tmp_workspace: str | None,
     tmp_paths: list[str],
+    page_reader=None,
 ) -> dict[str, Any] | None:
     """Resolve an authorized Notion page only when Claude calls ``Read``."""
 
@@ -212,6 +214,8 @@ async def apply_notion_page_read_redirect(
                 "page_id": page_id,
                 "snapshot": snapshot,
             }
+        elif page_reader is not None:
+            payload = await page_reader(page_id)
         else:
             home = _validated_home(credential_home, workspace)
             result = await NotionOperationClient(home).get_page_markdown(page_id)

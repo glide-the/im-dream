@@ -1,261 +1,264 @@
-<!-- [Input] 当前 memory PRD、AnalysisView、Reflections task engine 和 Admin Registry99。 -->
-<!-- [Output] 请求、冻结输入、交互、异常恢复、业务图和验收映射。 -->
-<!-- [Pos] 回归分析内容选择正式交互设计。 -->
-<!-- [Sync] 2026-10-13: 选定紧凑展开方案；同步已实现接口和回执恢复边界，验证状态由实施记录持有。 -->
-<!-- [Sync] 2026-10-13: 明确稳定RTA的无token续期投影及最后回复解析失败，图示保留原权限和最大寿命。 -->
-<!-- [Sync] 2026-10-13: 明确长来源准备与稀疏栏目事件的精确路由传输期限及调用方取消。 -->
-<!-- [Sync] 2026-10-13: Reflections dispatcher复用服务器模型选择，透传所选模型的CLI配置快照。 -->
-<!-- [Sync] 2026-10-13: 末尾列出冻结引用ID并保持严格拒绝；实际报告53完整验收由本机执行回执持有。 -->
-# 回归分析内容选择交互设计
+<!-- [Input] 当前 Reflections 页面、任务执行、Notion Read hook 与 Admin 来源合同。 -->
+<!-- [Output] 选择、创建、按需读取、证据保存、恢复及业务图。 -->
+<!-- [Pos] 回顾分析内容选择现行交互与技术衔接设计。 -->
+<!-- [Sync] 2026-10-23: 明确 Dream 共享客户端注册范围及 execute 的本地注册校验。 -->
+<!-- [Sync] 2026-10-23: ReflectionBlogPage 复用冻结日记选择与报告统计，补齐来源栏数量和窄屏换行。 -->
+<!-- [Sync] 2026-10-23: 创建只保存范围，执行时复用连接器 Read，按实际读取记录报告证据。 -->
+# 回顾分析内容选择交互设计
 
 ## 背景与问题
 
-现行日记任务已经持久化并支持事件回放。缺口是 Notion 的来源读取和任务输入冻结、分析 Agent 选择及分散入口。历史设计的分区配置、事件合同仍保留；本稿接管新增内容选择和统一入口。
+`AnalysisView` 提供日记、Notion 和分析 Agent 选择。此前创建请求逐页读取全部挂载正文，完成后返回任务 ID；来源数量较大时，页面长时间停留在准备阶段，单页超时结束整次创建。
+
+Notion 连接器已有索引投影、页面 `Read` 重定向和 `NotionOperationClient.get_page_markdown`。当前实现复用这些模块，创建阶段保存已授权范围，Agent 在栏目执行期间按需读取页面，成功读取后保存实际证据。
 
 ## 目标与边界
 
-采用总按钮旁的紧凑展开面板。相比独立设置页，它保留提交上下文且只需页面内存；相比多步骤配置向导，它不增加步骤或全局配置。复用 `DeckChatSelector` 的分组、搜索、键盘和视口定位，增加可选名称文案，保持 Chat 默认公开值和行为。
+用户继续使用原生成入口及当天再次分析弹窗。弹窗内直接展示 `ReflectionAnalysisContentControls inline`，和页面共享 `analysisContent`。Deck 提供分组，提交值为成对的 `deck_id`、`agent_id`。
 
-Notion 候选只读取现有授权快照索引。提交时调用现有正文读取接口，检查完整范围后冻结读取结果。无需建立同步或新资源平台。Deck 分组 Agent 作为分析视角只选择指令；不注入模型、环境变量、Chat 插件或 Dream 创建故事协议。
+本次新增内容属于 Admin 内部任务范围与证据操作，Agent 继续使用既有 `Read`。栏目、模型选择、RTA、任务状态、消息保存、SSE、报告入口和 L2/L3 工具沿现行合同执行。正常 Chat 的 Notion 连接器路径保持原合同。
+
+发现与定义：全量读取位于 create 返回之前，启动依赖该返回。方案比较：前置全量读取持续占用请求；后台预读全量引入独立准备阶段；现有 Read hook 能按栏目需要读取并形成证据。交付采用现有 Read hook 和任务绑定的 Host 回调，复用现有 JSON 列与事务。
 
 ## 概念与规则
 
-默认和选择保留、范围、去重、引用及正文版本按 [PRD](../../prd/memory/reflections-analysis-content-prd.md) 执行。Admin 继续拥有 PostgreSQL task/result/event/report，Dream 拥有正文读取、任务执行和工作区文件；浏览器不提交正文、Agent prompt、凭证或主机路径。
+| 对象 | 定义与执行模块 |
+| --- | --- |
+| default | Notion 关闭，Agent 未选择，沿原日记范围分析 |
+| desired | `AnalysisView.analysisContent`；页面与再次分析弹窗共享，取消保留，页面卸载或刷新恢复默认 |
+| effective | Admin 已保存的日记选择、Notion 元数据快照和 Agent 指令；创建后固定 |
+| revision | 任务与栏目继续采用原 revision；Notion 索引通过 `snapshot_version` 标识；本次没有新增全局配置版本 |
+| Notion 可读范围 | Admin 从当前账户、连接器、已接受索引及挂载选择解析的元数据快照。索引只含页面标识、标题、链接等元数据 |
+| 实际读取证据 | 页面首次成功读取后保存的正文、page_id、标题、URL、SHA-256 和 read_at；空正文保留读取记录，结果引用要求正文非空 |
+| 读取入口 | 现有 `Read(.notion/pages/<page_id>.json)`；现有 hook 校验工作区索引，再调用绑定任务的 `ReflectionNotionRuntime.read_page` |
+| 恢复 | 同一任务重复读取复用 Admin 已保存页面；每次读取仍执行当前权限和挂载范围校验；原 SSE、结果及报告恢复继续采用 task_id |
+| Workspace Mode | 沿现有 Notion Read 的工作区前提；关闭时以 `REFLECTION_NOTION_WORKSPACE_REQUIRED` 拒绝栏目执行，提示在设置中启用 |
+| v1 兼容 | `reflections-analysis-content-v1` 继续读取原冻结正文；新增任务采用 `reflections-analysis-content-v2` |
 
-现有冻结 DTO 不能增加未知字段。最小前向扩展采用 Admin `reflection_task.analysis_content_json` 可空列和独立追加操作，保留全部 Registry99 旧操作描述及旧任务。新任务在一个事务内创建并保存服务器解析的分析输入；worker 通过新增 service-only 读取恢复同一输入。缺失新增 capability 时拒绝新增选择，默认日记继续旧路径。default 是关闭 Notion/未选 Agent，desired 是下次页面选项，effective 是 Admin 事务提交的任务输入；revision 只沿用 Admin task 状态 revision，索引 snapshot_version 单独表示来源版本。这个字段是任务输入，不新增全局配置或额外版本系统。
+### 页面交互
 
-### 接口与数据
+页面骨架和当天弹窗的桌面、窄屏布局由 [PRD](../../prd/memory/reflections-analysis-content-prd.md) 所有。面板显示“可按需读取 N 个已挂载页面”；该数字表示可读范围。报告的 Notion 来源摘要包含实际读取的非空页面及空正文数量。
 
-以下接口已经实现；本机 Admin 已发布 0081 和精确 capability，其他实例启用前仍须确认对应能力。发布与真实验收状态由[本机执行记录](../../exec/reflections-analysis-content-local-release-real-acceptance-20261013.md)持有，接口存在不代表验收通过：
+`ReflectionBlogPage` 的原来源栏始终展示日记范围。数量优先取 `analysisContent.diary_session_ids.length`，空数组为 0；值为 null 或旧报告缺少来源摘要时使用已保存的 `report.stats.entries`。该数量描述任务选择范围。Notion 摘要沿用 `analysisContent.notion.pages.length`，文案为“Notion · 已读取 N 个页面”；原链接列表和展开操作保持。来源栏使用 flex wrap 与元素最大宽度约束，窄屏按内容换行。生成、历史列表和时间线共用同一阅读组件；刷新后从历史读取同一保存值。
 
-| 边界 | 输入 | 输出/校验 |
+当天已有报告时，`handleAnalyzeAll` 打开原 `ReanalysisConfirmModal`，日记默认全选当前候选，内容选择继承页面值。弹窗打开期间卸载页面同名组件，保留唯一的 `#reflection-analysis-content`。弹窗标题与操作区固定，中间内容区滚动；Agent 列表沿原固定定位选择器。
+
+确认条件为 `selectedIds.length > 0 || analysisContent.include_notion`。确认经 `handleConfirmReanalysis → runAnalyzeAll(selectedIds) → runReflectionsTask` 提交当时选择。取消关闭弹窗并保留本页内容选择，重开重新初始化日记选择。打开选项只读取元数据，确认前不读取页面正文。
+
+创建成功后，前端先订阅 events，再经原 start 接口启动。正文读取发生在执行期间。单页失败通过现有 Read 返回安全错误；失败或未读取页面无法用于结果引用。栏目可以使用成功取得的证据完成分析；零结果、栏目失败和部分成功沿原任务规则展示。
+
+零结果任务保留完成状态和实际读取记录。现行 `reflection-report.ensure` 在持久化结果为空时返回 `report_id=null`、`created=false`，报告列表保持原记录。正文为空的读取计入 `empty_page_count`，结果引用排除该页面。
+
+### 内部合同与存储
+
+公开 `/api/reflections/tasks`、`start`、`events`、`results`、`report` 保持现有路径与请求选项。新增内部操作如下，全部由 Admin 现有统一数据入口承接：
+
+| 操作 | 身份、输入 | 输出与副作用 |
 | --- | --- | --- |
-| GET /api/reflections/analysis-content | 无 | 当前连接器、快照标识、去重页面数和可读状态；无正文 |
-| POST /api/reflections/tasks | 原字段 + analysis_content `{include_notion, connector_id?, deck_id?, agent_id?, snapshot_version?}` + request_key? | 归属、Agent enabled、快照/授权稳定、正文读取后才创建任务 |
-| POST /api/reflections/tasks/{task_id}/report | 原 task_id，OAuth | 读取/确认原终态任务归属并调用幂等 report ensure；不再调用模型 |
-| Admin reflection-task.create-with-content | 原 create + 已解析 Notion 输入、Deck/Agent 标识 | 在事务内重新校验归属并解析 Agent prompt，保存冻结输入，返回原 task DTO |
-| Admin reflection-task.analysis-content | task_id，OAuth | 来源摘要、选择、空正文数，无正文和 prompt |
-| Admin reflection-task.analysis-content-load | task_id，service-only | 原服务绑定任务的冻结 Notion 正文和 Agent prompt，严格 DTO |
+| `reflection-task.v2.create-with-content` | OAuth `dream:write`；日记选择、Notion connector_id/snapshot_version、Deck/Agent | 校验归属、当前授权和索引版本；在事务中保存元数据快照及 Agent prompt，返回原 task DTO |
+| `reflection-task.v2.analysis-content` | OAuth `dream:read`；task_id | 归属校验后返回来源摘要，去除正文和 prompt |
+| `reflection-task.v2.analysis-content-load` | service `reflections:execute`；task_id | 校验任务所属服务，返回该任务范围和已记录证据 |
+| `reflection-task.v2.notion-context` | 相同 service；task/section/thread/revision/page 绑定 | 校验当前 RUNNING 任务、栏目及原范围与当前范围交集；返回已记录页面或 null |
+| `reflection-task.v2.notion-evidence` | 相同 service、相同绑定和读取结果 | 再次校验权限、页面身份与 SHA；保存首个读取结果，已有记录返回原值 |
 
-新增私有输入中的 diary_session_ids 为 null 时沿用原全部日记，[] 明确不选择日记，非空集合必须与原 input_snapshot.session_ids 相同；原 Registry99 的空数组含义保持不变。
+五项属于服务间业务操作。Agent 工具清单沿原 Read；这些操作不注册为 Agent Tools。Reflections RTA 的六项原操作保持原值。Host 在每次读取前后核对活跃 RTA，服务身份的来源操作单独校验任务、栏目、Thread 和 revision。
 
-Notion 页面输入分别保存 page_id、title、url、snapshot_version、read_at、markdown、content_sha256。摘要由服务器对实际正文生成。页面标识不进入 Session list 或 related_session_ids。Agent 输入保存 Deck/Agent ID 与 Admin 解析的 `system_prompt`，公开输出只返回名称和标识。
+存储复用 `reflection_task.analysis_content_json`，v2 通过 `agent_contract_version` 区分，报告来源摘要保持原公开结构。本次没有新增表、列或 migration。内部操作在 Admin 注册表末尾追加，v1 descriptor 保留。Dream 的 `AdminRequestAuth` 将 `SCOPE_OPERATIONS` 注册到共享 `AdminDataClient`；消费端校验已发布的 `dream.reflection-analysis-content.v1` schema capability 和五个精确操作 descriptor，`execute` 校验本地注册对象与 Admin descriptor。缺失时 fail closed。
 
-单次Native Notion CLI读取遵循现有`INK_NOTION_OPERATION_TIMEOUT_SECONDS`配置；超时终止并回收该子进程，返回NOTION_UPSTREAM_TIMEOUT，未完成全部页面时不能创建分析任务。本机采用的实际期限由发布回执记录，不作为产品页面数量或用户配额。
+`ReflectionNotionRuntime.project` 复用 `NotionSnapshotStore.project_thread` 投影原范围的 `.notion` 索引，清除该栏目 Thread 的 CLI 凭证投影。Agent 子进程只接收索引和 Read 返回值，Host 回调持有读取能力。普通 Chat 继续采用原连接器与凭证投影路径。
 
-最终输出指令在有效工作流之后追加本次冻结非空pages的准确page_id清单，要求related_notion_page_ids逐字复制并检查成员关系；正文中的链接和近似UUID不能作为引用标识来源。空页ID不在可引用清单。ReflectionsTaskEngine继续拒绝任何不在冻结范围内的标识，不自动纠正或过滤该错误。
-
-### 交互
-
-api-proxy 对精确 `POST /api/reflections/tasks` 使用独立 `headersTimeout=0` dispatcher，允许完整来源准备在返回响应头前结束；对精确 `GET /api/reflections/tasks/{uuid}/events` 使用另一个 `bodyTimeout=0` dispatcher，允许栏目间没有事件时继续等待。两者继续传递调用方 AbortSignal、原认证和无缓冲响应流；其余路由采用原期限，不新增心跳、轮询或自动重提分析。
-
-ClaudeAgentReflectionsRunner在原Gateway grant的`models:list`权限内调用现有GatewayModelCatalogClient，复用resolve_platform_model与thread-bound SystemConfig选择可调用模型。将model_alias及claude_code_runtime_env服务器快照传入ClaudeAgentRunRequest；选中分析Agent只提供指令，不覆盖模型配置。缺少目录、模型或权限时拒绝启动并关闭RTA/Gateway owner。compact/context/max output值沿用模型目录，全局effort继续来自资源策略LKG，不在本功能增加或提高策略值。
-
-执行时，选中 Agent 只提供分析视角；各栏目现有有效 `WORKFLOW.md`（含字段定义和栏目目的）、`MEMORY_ANSWER_PROMPT.md`、语言和引用规则在冻结来源之后再次传给模型。通过现有 `mcp__user__get_sessions_range` 按需读取冻结日记；不能只按metadata判断正文不可用。证据不支持任何insight时返回明确空JSON数组，不生成普通解释或追问。正常 Agent 终态后读取最后一条 assistant 文本；无法解析结果时以 `REFLECTION_ANALYSIS_OUTPUT_INVALID` 标记栏目失败，不回退到中间回复或把普通聊天回复记成零结果完成。明确的空 JSON 数组仍可表示无结果。RTA 续期保持内部 bearer 和原 maximum expiry；Admin 先移除 token 再用现有严格 metadata DTO 校验公开续期返回值，错误事务不提交。
-
-“分析内容”有 aria-expanded 和 aria-controls；打开后焦点保持入口，Tab 进入开关与 Agent 选择。Escape 先关闭 Agent 列表并恢复选择器焦点，再关闭面板并恢复展开入口；外部点击关闭面板。面板使用现有颜色和焦点，宽度受内容视口约束，内部滚动不移动 Agent 弹层。
-
-读取候选和 Deck 时使用请求世代或 effect 清理忽略旧响应；卸载清除请求结果。创建结果尚未确认时，浏览器仅保存 request_key 和原选项，查询原 Admin receipt 恢复相同 task_id；明确失败后清除记录。每次提交立即锁定，保存当时选择，运行期间面板编辑只影响下一次。默认 Agent 加载失败不阻止原分析；已选项无效不可静默清空。 已选 Agent 从候选中消失时显示不可用名称及重选提示；Notion 候选版本变化时保留原选择并提示重新开启，不静默换用新范围。未连接、无快照、空正文、读取失败分别反馈。
+首次读取调用 `NotionOperationClient.get_page_markdown`，完整性与未知区块补读继续采用原实现。Host 先保存证据，确认保存结果后返回正文；保存结果未知时查询同页记录核实 SHA，禁止自动重发写入。RTA 关闭、连接撤销、页面移出当前挂载范围或绑定变化均拒绝读取。新增挂载页面留待下一次任务。
 
 ### 正常业务时序
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant V as AnalysisView
+    participant V as AnalysisView / ReanalysisConfirmModal
     participant A as voiceApi
-    participant B as api-proxy
-    participant R as routers.reflections
-    participant N as NotionConnectorFacade
-    participant D as Admin 数据边界
+    participant API as routers.reflections
+    participant D as Admin Reflections v2
     participant E as ReflectionsTaskEngine
-    participant P as AdminReflectionSectionPersistence
-    participant Q as ClaudeAgentReflectionsRunner
-    participant M as GatewayModelCatalogClient
-    U->>V: 进入回归分析，展开分析内容
-    V->>A: 读取候选与 Deck
-    A->>R: GET analysis-content
-    R->>N: get_current_snapshot
-    N-->>R: 已授权的挂载索引和版本
-    R-->>V: 页面数及来源状态
-    U->>V: 设置 Notion 开关和分析 Agent
-    U->>V: 点击总分析
-    V->>A: runReflectionsTask（固定本次选择）
-    A->>B: POST tasks，auto_start=false，原request_key
-    B->>D: 原handle resolve，取得现行用户token
-    B->>R: 原请求和用户token，Cookie不转发
-    R->>N: 校验版本并 get_page_markdown
-    N-->>R: 去重页面正文及读取回执
-    R->>R: 有界私有候选，绑定actor/key/请求指纹
-    alt 正文读取后原token已过期
-        R-->>B: 401 ACCESS_TOKEN_REQUIRED，明确尚未创建
-        B->>D: 原handle resolve，按现行规则续期一次
-        B->>R: 原body和request_key，新用户token
-        R->>N: 复用原候选，重新校验来源/版本/凭证
+    participant R as ClaudeAgentReflectionsRunner
+    participant F as ClaudeAgentThreadFactory / ClaudeAgentService
+    participant K as ClaudeAgentRunner
+    participant H as notion_read_hook
+    participant N as ReflectionNotionRuntime
+    participant C as NotionOperationClient
+    participant B as ReflectionEventBus
+    participant S as Reflections SSE
+    U->>V: 选择日记、Notion 和分析 Agent，确认生成
+    V->>A: runReflectionsTask，固定本次页面值
+    A->>API: POST tasks，auto_start=false，request_key
+    API->>D: v2.create-with-content
+    D->>D: 校验身份、归属、挂载索引和 Agent，事务保存范围
+    D-->>API: task_id，v2 标识
+    API-->>A: 202，任务及来源摘要
+    A->>S: 原 events 订阅
+    S-->>A: connected 与历史事件
+    A->>API: POST tasks/task_id/start
+    API->>D: 原 reflection-task.start
+    API->>E: start_reflections_task
+    E->>D: 原 worker-load 与 v2.analysis-content-load
+    D-->>E: 冻结日记、Notion 索引、Agent 指令及已有证据
+    E->>D: 原 section.begin
+    D-->>E: 栏目 Thread、revision 和 RTA
+    E->>R: run_section
+    R->>R: 建立栏目 owner，选定模型并绑定 Notion runtime
+    R->>F: drain_chat_agent_turn，冻结请求
+    F->>N: project，投影原范围的 .notion 元数据
+    F->>D: 经栏目 owner 保存用户消息
+    F->>K: run_streaming，当前模型与服务器配置
+    loop Agent 按需要读取页面
+        K->>H: Read .notion/pages/page_id.json
+        H->>H: 工作区路径与索引成员校验
+        H->>N: 绑定 Host 的 read_page
+        N->>N: 校验活跃 RTA
+        N->>D: v2.notion-context，任务和栏目绑定
+        D->>D: 原范围与当前挂载范围、身份及运行状态校验
+        D-->>N: 已保存页面或 null
+        opt 页面尚未读取
+            N->>C: get_page_markdown，现有账户凭证
+            C-->>N: 完整正文
+            N->>D: v2.notion-evidence，正文、SHA、read_at
+            D-->>N: 已持久化的首个读取记录
+        end
+        N-->>H: 已确认的正文与证据标识
+        H-->>K: 原 Read 重定向结果
+        K-->>F: 原内部文本、工具及轮次回调
+        F-->>R: drain 消费内部 Agent 流
     end
-    R->>D: create-with-content
-    D->>D: 校验归属和 Agent，事务保存冻结输入
-    D-->>R: task_id
-    R->>R: 清理原key私有候选
-    A->>R: 订阅 events，再 POST start
-    R->>E: start_reflections_task
-    E->>D: worker-load + analysis-content-load
-    D-->>E: 冻结日记、来源正文和 Agent prompt
-    E->>Q: run_section，冻结输入和原栏目绑定
-    Q->>P: 启动 owner、原Gateway grant与到期前续期
-    Q->>P: thread-bound system_config
-    P->>D: 原 thread-system-config.get
-    D-->>Q: 账户现有模型选择
-    Q->>M: fetch_catalog，原models:list grant
-    M-->>Q: 可调用模型及服务器CLI配置
-    Q->>Q: resolve_platform_model，保持配置值
-    par 栏目运行
-        Q->>Q: 原ThreadFactory执行，传入model/runtime_env与冻结输入
-    and 到期前且未达 maximum
-        P->>D: reflection-section.authority-renew
-        D->>D: 更新加密 bearer 的到期时间，移除 token 后校验 metadata
-        D-->>P: 原绑定和 maximum，新 expires_at，无 token
+    F->>D: 经栏目 owner 保存 assistant 与会话绑定
+    F-->>R: completion 与 owner_completion
+    R->>R: 关闭资源，读取转录，解析最终 JSON
+    R->>R: 校验本栏目成功读取的引用
+    R-->>E: 结构化结果
+    E->>D: section.finish，保存结果与实际引用
+    E->>B: publish 栏目事件
+    B->>D: required TaskPersistenceObserver 保存事件
+    D-->>B: 已提交
+    B-->>S: 推进 sequence 并发送订阅队列
+    S-->>V: 栏目状态和结果数量
+    E->>D: finalize 与 report.ensure
+    alt 有可保存的结果
+        D->>D: 报告保存实际来源摘要
+        V-->>U: 原报告阅读与历史入口，显示日记范围和 Notion 已读取数量
+    else 零结果
+        D-->>E: report_id=null，created=false
+        V-->>U: 原任务完成与零结果展示
     end
-    Q->>Q: 解析最后 assistant 文本
-    Q-->>E: 原结果JSON或栏目错误
-    E->>E: 检查来源引用
-    E->>D: section finish，event append，report ensure
-    E-->>A: 原事件流和终态
-    A->>R: tasks detail/results
-    R-->>V: 结果及来源摘要
-    V-->>U: 阅读报告，重载历史
 ```
 
-### 异常和恢复
+Agent 内部流由 drain 消费；Reflections SSE 发送已持久化任务事件。完整执行合同见 [Agent 执行设计](reflections-agent-interaction-design.md)。
+
+### 异常与恢复时序
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
     participant V as AnalysisView
-    participant B as api-proxy
-    participant R as routers.reflections
-    participant D as Admin 数据边界
-    participant E as ReflectionsTaskEngine
-    participant P as AdminReflectionSectionPersistence
-    U->>V: 提交当前选择
-    V->>B: POST tasks，原request_key
-    B->>R: 当前用户授权和原请求
-    opt 来源读完后用户token已过期
-        R-->>B: 明确401，outcome_unknown=false，无创建
-        B->>D: 原handle resolve一次
-        alt 会话仍有效
-            B->>R: 相同body/key，新token
-            R->>R: actor/指纹匹配，原候选未过期
-            R->>D: 当前来源复核与正常创建事务
-        else 会话已撤销或续期失败
-            B-->>V: 登录或授权错误，未创建
-            V-->>U: 恢复当前登录后重试
+    participant API as routers.reflections
+    participant D as Admin Reflections
+    participant R as Runner / ReflectionNotionRuntime
+    participant H as notion_read_hook
+    participant C as NotionOperationClient
+    U->>V: 提交来源选择
+    V->>API: 原 POST tasks 与 request_key
+    alt 创建权限、索引版本或 Agent 校验失败
+        API-->>V: 明确错误，未进入执行
+        V-->>U: 调整来源或重选后提交
+    else 创建响应未知
+        V->>API: 原 request_key 和原选项
+        API->>D: 查询原 receipt，兼容已有 v1 回执
+        D-->>V: 相同 task_id 或明确失败
+    else 创建并启动成功
+        H->>R: 按需读取一个页面
+        R->>D: 任务、栏目、RTA 和当前范围校验
+        alt 授权撤销、范围外或绑定变化
+            D-->>R: 明确拒绝
+            R-->>H: 安全读取错误，正文不返回
+        else 尚无读取记录
+            R->>C: 原正文读取
+            alt 超时或正文不完整
+                C-->>R: 原安全错误码
+                R-->>H: Read 错误结果
+                Note over R,H: 失败页不登记为可引用证据
+            else 完整读取成功
+                R->>D: 保存首个读取结果
+                alt 保存结果未知
+                    R->>D: 查询同一页已有记录
+                    D-->>R: 原证据及 SHA 或 null
+                    R->>R: SHA 匹配才返回；禁止重放 POST
+                else 明确保存失败
+                    D-->>R: 错误
+                    R-->>H: 证据未确认，正文不返回
+                end
+            end
+        else 本任务已有证据
+            D-->>R: 返回原正文及读取身份
+            R-->>H: 复用原证据
         end
+        R->>R: 最终引用仅接受成功读取且正文非空的页面
+        R->>D: 原 section.finish，完成或失败
     end
-    alt Notion 授权/快照/页面读取失败或 Agent 失效
-        R-->>V: 明确错误，任务尚未启动
-        V-->>U: 重试加载、重新授权或关闭 Notion/重选 Agent
-    else 创建结果未知
-        R-->>V: outcome_unknown 或 creation_committed
-        V-->>U: 保留选项，显示恢复提示
-        U->>V: 重试
-        V->>R: 原 request_key 和原选项
-        R->>D: 查询原 receipt，不重读正文或重建任务
-        D-->>V: 原 task_id
-    else 创建成功
-        R-->>V: 固定 task_id
-        V->>R: events + start
-        R->>E: 执行
-        opt 栏目续期写入结果未知
-            P->>D: 查询相同 task 和原 request ID receipt
-            D-->>P: committed 或 absent
-            P->>P: absent 时不重复 POST，原权限到期后拒绝持久化
-        end
-        alt 流中断
-            V->>R: 用原 task_id 与 Last-Event-ID 恢复
-            R->>D: 原任务和持久事件读取
-            D-->>V: 当前状态与回放，不能另建任务
-        end
-        alt 部分栏目模型目录/权限失败、引用不匹配或最后回复无法解析
-            E->>D: 保存成功栏目和失败摘要
-            E-->>V: PARTIAL_FAILED
-            V-->>U: 成功结果与失败栏目反馈
-        else 无正文或全部失败
-            E->>D: 无正文时 fatal-fail，未调用模型
-            E-->>V: FAILED，显示可操作反馈且不保存空报告
-        end
-        alt report ensure 失败
-            E-->>V: 保存失败，保留任务结果
-            U->>V: 重试保存
-            V->>R: POST 原 tasks/task_id/report
-            R->>D: 读取原终态与归属校验，再 report ensure
-            D->>D: 幂等保存原报告
-            D-->>V: 历史可读取
-        end
+    opt 页面离开、断流或重新打开
+        V->>API: 原 task_id 与 Last-Event-ID
+        API->>D: 权限校验、当前状态和事件回放
+        D-->>V: 原任务及结果
+        V-->>U: 原进度、失败反馈或报告保存重试
     end
 ```
 
 ### 状态转换
 
-AnalysisView 将 CREATED 作为准备任务：读取时保留 task_id 和原输入，显示明确继续入口，结束页面等待。该入口通过 resumeReflectionsTask 的显式 startPrepared 选项，在 SSE 已订阅后调用原 start 接口。普通加载不传该选项。新生成不复用未启动任务；ASSEMBLING/QUEUED/RUNNING 等已启动状态仍按原 ID 恢复并锁定提交。
-
-Notion正文准备在创建事务之前执行。Next `_http-proxy.ts` 仅对POST /api/reflections/tasks使用专用server-owned Undici dispatcher，不应用默认300秒响应头等待；仍透传原AbortSignal和请求流，保留连接、响应体及Notion单页超时。其他路由保留原传输。代理断开只表示观察中断，浏览器按原request_key查回执，不另建任务。
-
-完成读取的Notion候选只在服务器内存短期保存，键绑定canonical actor、原request_key和完整请求指纹；source context、snapshot metadata、credential identity、正文和read_at保持原值。容量和有效期由明确服务器配置限制，不是产品来源配额；候选不授予权限。每次使用仍执行当前来源/索引/凭证复核和Admin事务归属/SHA/Agent校验，创建提交或确定来源失效后清理。只有Browser任务创建的明确401 ACCESS_TOKEN_REQUIRED、outcome_unknown=false且无creation_committed时，api-proxy才能通过原handle resolve续期一次并重发原body/key；其他路由、native Bearer、未知写入和已提交创建不自动重试。Cookie、refresh token和私有候选不进入浏览器响应或Python授权头；现行access token有效期保持300秒。重载或进程重启不把候选当作持久任务或完成回执。
-
-NotionOperationClient.get_page_markdown复用既有server-owned API版本与remote_error分类；校验page_markdown响应ID、markdown字符串、truncated布尔值和unknown_block_ids数组。按接口返回的UUID补读未知子树并替换对应unknown占位；请求内复用重复子树，拒绝循环、不匹配占位和无法补齐的截断。真实接口可能对link_preview和link_to_page返回以自身ID标记的unknown：此时读取相同ID的`v1/blocks/{id}`，只接受ID匹配、未删除、无子块且结构完整的叶子。link_preview仅含URL；link_to_page仅含原生联合type和对应page_id/database_id/comment_id UUID。将原结构编码为Markdown内的JSON代码块，保留块的全部内容；不访问URL目标或读取被引用实体，不扩大已选页面范围。其他自引用或无法完整读取的块仍拒绝。补读失败原样传递安全状态码，完整后才冻结正文及SHA，仍只保留原分析页面身份。来源读取失败在创建前明确拒绝；页面清除“准备中”并显示错误。不得因此省略无法读取页面或改变授权。
-
-latest 返回的最新任务和最近完成结果可能属于不同任务。只有终态任务且全部 result.task_id 与当前 task_id 匹配，页面才提供该任务报告的保存恢复；历史结果不得绑定到 CREATED 或失败的新任务。
-
-栏目执行复用`drain_chat_agent_turn`及原ChatStreamAdapter/Factory completion分类，等待Factory owner退出后才关闭权限owner。只有正常finish及持久message-final证明完成；error、取消或缺少终态明确进入栏目失败，不能因空transcript标成完成。Reflections的六操作RTA不含图像能力；`AdminAgentTurnPersistence.image_turn_data`默认None，共享Service仅在owner显式提供可用图像数据时初始化图像Provider，现有Chat实现保持原权限/持久化流程。
-
-Reflections显式提供空`ManagedMcpRuntimeSnapshot()`，不触发动态MCP配置加载或额外权限读取；对应`managed_mcp_workspace_scope`初始化为None。其他调用未提供显式快照时，仍由既有loader在原Admin权限内解析workspace scope，不改变该路径。
-
-Admin既有`DREAM_DATA_MAX_BODY_BYTES`限制领域请求体，`DREAM_REFLECTIONS_LAUNCH_SNAPSHOT_MAX_BYTES`限制冻结日记/来源快照；Dream各消费边界仍限制响应字节。发布时需按实际完整输入协调现有服务配置，不把这些技术预算包装成页面数额度。共享HTTP parser只接受request_id匹配的严格错误DTO：413保留原错误码和明确拒绝，outcome_unknown=false，不能转成未知提交；损坏或不匹配响应仍保持原未知写入与receipt保护，不自动重放。
-
 ```mermaid
 stateDiagram-v2
-    [*] --> 关闭
-    关闭 --> 加载: 展开并读取
-    加载 --> 可用: 候选和 Deck 成功
-    加载 --> 空: 未连接或无挂载页面
-    加载 --> 失败: 读取失败
-    失败 --> 加载: 重试
-    可用 --> 关闭: Escape或外部点击
-    空 --> 关闭: 收起
-    可用 --> 提交: 总分析并锁定选择
-    空 --> 提交: 关闭Notion并使用可分析日记
-    提交 --> 失败: 归属或输入校验失败
-    提交 --> 提交待确认: 创建响应丢失
-    提交待确认 --> 提交: 原request_key重试
-    提交 --> 执行: 创建和启动成功
-    提交 --> 未开始: 已创建但启动前离开
-    未开始 --> 未开始: 页面读取，不启动模型
-    未开始 --> 执行: 明确继续原输入，订阅后start
-    未开始 --> 提交: 按当前选项生成新分析
-    执行 --> 恢复: 流中断或页面重载
-    恢复 --> 执行: 回放和继续同一任务
-    执行 --> 完成: 全部成功且报告保存
-    执行 --> 部分失败: 栏目部分成功
-    执行 --> 失败: 全部失败或无正文，后者未调用模型
-    完成 --> 可用: 返回并再次分析
-    部分失败 --> 可用: 查看结果后再次分析
-    执行 --> 报告未保存: 结果终态但report ensure失败
-    报告未保存 --> 完成: 原task幂等保存成功
+    [*] --> 选择
+    选择 --> 再次选择: 当天已有报告，打开原弹窗
+    再次选择 --> 再次选择: 修改日记或共享内容选择
+    再次选择 --> 选择: 取消，保留内容选择
+    选择 --> 创建: 生成且当天无报告
+    再次选择 --> 创建: 来源选择满足条件并确认
+    创建 --> 选择: 明确拒绝，显示错误
+    创建 --> 回执恢复: 创建结果未知
+    回执恢复 --> 已创建: 查得原任务
+    创建 --> 已创建: 范围与指令保存成功
+    已创建 --> 已创建: 重开只读；显示继续入口
+    已创建 --> 执行: events 建立后显式 start
+    执行 --> 按需读取: Agent 请求范围内页面
+    按需读取 --> 执行: 返回已确认的实际证据
+    按需读取 --> 执行: 返回读取错误，失败页不可引用
+    执行 --> 栏目失败: 引用未读取或空正文页面、轮次失败、输出无效
+    执行 --> 栏目完成: 输出和实际来源校验成功
+    栏目完成 --> 执行: 执行剩余栏目
+    栏目失败 --> 执行: 执行剩余栏目
+    执行 --> 报告可读: 原任务终态且报告保存成功
+    执行 --> 零结果完成: 原任务终态且无持久化结果
+    执行 --> 报告未保存: 原 report ensure 失败
+    报告未保存 --> 报告可读: 原 task_id 幂等重试保存
+    执行 --> 恢复观察: 页面离开或流中断
+    恢复观察 --> 执行: 原任务仍运行，恢复事件
+    恢复观察 --> 报告可读: 原任务终态并读取报告
+    恢复观察 --> 零结果完成: 原任务完成且结果为空
 ```
 
-## 需求、设计、实现与测试映射
+## 验收条件与交付边界
 
-| 需求 | 设计 | 实现位置 | 必要验证 |
-| --- | --- | --- | --- |
-| 默认与开关 | 默认仅日记，启用读取固定范围 | AnalysisView / reflections | 默认无 Notion、开关正文隔离 |
-| Agent | 分组选择并采用服务器指令 | DeckChatSelector / Admin 内容操作 | 切换、停用、越权和伪造 prompt 拒绝 |
-| 固定输入与来源 | 事务保存，service-only 恢复 | Admin 新增列/操作、engine | 选择变化不影响运行；重载原正文 |
-| 统一入口 | 去除栏目按钮，保留配置和状态 | SectionControlsRow | 完整页面、配置、历史回归 |
-| 可访问性 | 展开语义、焦点、键盘、视口边界 | AnalysisView / 现有 selector | 桌面与窄屏、Escape、外部点击 |
-| 完整旅程 | 原任务/事件/报告合同 | voiceApi / engine / Admin | 配置到报告、保存重试、断流和再次分析 |
-| Notion 异常 | 不静默缩减范围 | 内容读取 | 未连接、无快照、空正文、失效、失败 |
+| 范围 | 后续功能验收条件 |
+| --- | --- |
+| 创建 | 选择 Notion 后，create 阶段只访问 Admin 元数据，未调用页面正文接口，沿原订阅/start 路径启动 |
+| 选择 | 主页面和同日弹窗共用 Notion/Agent 值，日记范围按原确认提交，取消保留内容选择 |
+| 按需读取 | Agent 能读取原索引，并经原 Read hook 读取所需页面；未使用的页面无正文请求 |
+| 证据 | 返回正文之前已确认 Admin 保存；正文 SHA、读取时间与报告来源一致；同任务后续栏目复用原记录 |
+| 权限 | 越权账户/服务、错误 Thread/revision、范围外页面、撤销授权及未读取引用均拒绝 |
+| 异常 | 超时、空正文、保存失败和未知写入有明确结果；未知写入只查原页面记录 |
+| 恢复 | 原任务事件、结果、报告重开和保存重试保持原合同；新任务重新记录来源选择 |
+| 来源栏 | 具体日记选择优先于报告统计；全量选择与旧报告使用报告统计；仅 Notion 显示 0 篇；刷新重开保留同一范围；Notion 显示已读取数量和原来源链接 |
+| 兼容 | v1 原冻结输入、日记默认分析、Chat 连接器和 L2/L3 工具保持原行为 |
+| 窄屏 | 弹窗内容滚动、固定操作区、Agent 浮层和键盘路径采用原响应式组件 |
 
-## 实施状态
+实现及创建 503 修复已加载到本机服务。[测试执行记录](../../exec/reflections-notion-on-demand-validation-20261023.md)分别保存技术回归、隔离集成及正常账户模型回执：报告 56 三栏各 6 条、按需读取 23 个 Notion 页面、历史与刷新重开、37 个正常 Gateway 请求完成结算。日记范围和“已读取”来源文案已补齐；本次展示修订的验证单独追加到执行记录。故障分支与窄屏交互保留各自验证范围。缺少 Admin 新操作时拒绝新路径。本次未新增共享数据库结构，未来结构变更仍由 Admin Drizzle migration 与 capability 前置。
 
-接口、Admin 0081 前向扩展和页面已实现；图示不代表验收。新增路径依赖精确的 dream.reflection-analysis-content.v1，未发布时 fail closed。评审和本轮实际证据在 [实施记录](../../exec/reflections-analysis-content-20261013.md)。
+历史原文：[全量读取与同日弹窗版本](reflections-analysis-content-design-pre-notion-on-demand-20261023-history.md)、[同日弹窗补充前稿](reflections-analysis-content-design-pre-reanalysis-content-20261023-history.md)。
+
+源码索引：[创建路由](../../../backend/routers/reflections.py)、[Engine 与 Runner](../../../backend/reflections_agent.py)、[现有 Read hook](../../../backend/libs/claude_agent_kit/server/notion_read_hook.py)、[任务 Host](../../../backend/services/admin_data/reflection_notion_runtime.py)、[Admin 范围与证据服务](../../../../ink-admin-memory/app/lib/dream/reflectionNotionScopeService.ts)。

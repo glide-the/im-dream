@@ -1,6 +1,7 @@
 # [Input] Production Reflections source assembly, typed content contracts, router and actual section Runner.
 # [Output] Provider-free coverage of scope, frozen bodies, references, Agent instructions and task report recovery.
 # [Pos] Technical harness only; boundary replies are synthetic and no model or business database is used.
+# [Sync] 2026-10-23: retain v1 source helpers while checking v2 route gates and actual-read citation evidence.
 # [Sync] 2026-10-13: verify the complete affected backend execution path and fail-closed source assembly.
 # [Sync] 2026-10-13: canonical normalized turn failures close reflection owners before transcript parsing.
 # [Sync] 2026-10-13: cover bounded request-bound source preparation cache recovery,
@@ -384,7 +385,7 @@ class ContentContractTest(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].related_session_ids, [])
         self.assertIn("Weekly notes", result[0].evidence)
-        self.assertNotIn(content.notion.pages[0].content_sha256, result[0].evidence)
+        self.assertIn(content.notion.pages[0].content_sha256, result[0].evidence)
         with self.assertRaises(AdminDataError):
             runtime.ReflectionsTaskEngine._validate_results([{ "related_session_ids": ["session-a"], "related_notion_page_ids": ["other-page"] }], _snapshot(), content)
         with self.assertRaises(AdminDataError):
@@ -752,25 +753,23 @@ class RouterInputTest(unittest.TestCase):
         async def case():
             owner = _RouteOwner(_AppendWorker())
             with (tempfile.TemporaryDirectory() as root, patch.object(routes, "invoke_admin_operation", AsyncMock(return_value=ReflectionTaskGetOutputDTO(task=_task(root), results=[]))),
-                  patch.object(routes, "freeze_notion_analysis_input", AsyncMock(side_effect=AssertionError("Notion must be excluded"))),
-                  patch.object(routes, "require_analysis_content_capability", side_effect=AssertionError("legacy capability only"))):
+                  patch.object(content_module, "NotionOperationClient", side_effect=AssertionError("Notion must be excluded")),
+                  patch.object(routes, "require_scope_capability", side_effect=AssertionError("legacy capability only"))):
                 response = await routes.create_reflections_task_endpoint(routes.ReflectionsTaskCreateRequest(auto_start=False), current_user={"user_id": "7"}, owner=owner)
                 self.assertEqual(response.status_code, 202)
         asyncio.run(case())
 
-    def test_failed_notion_read_is_a_definite_rejection_before_any_task_write(self):
+    def test_missing_scope_capability_is_a_definite_rejection_before_any_task_write(self):
         async def case():
             from fastapi import HTTPException
             owner = _RouteOwner(_AppendWorker())
-            with (patch.object(routes, "require_analysis_content_capability"),
-                  patch("routers.notion._connector_facade", return_value=object()),
-                  patch.object(routes, "freeze_notion_analysis_input", AsyncMock(side_effect=AdminDataError("NOTION_ANALYSIS_READ_FAILED", 502))),
+            with (patch.object(routes, "require_scope_capability", side_effect=AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503)),
                   patch.object(routes, "invoke_admin_operation", AsyncMock(side_effect=AssertionError("No task write is allowed"))) as write):
                 with self.assertRaises(HTTPException) as failure:
                     await routes.create_reflections_task_endpoint(routes.ReflectionsTaskCreateRequest(auto_start=False,
                         analysis_content=routes.ReflectionsAnalysisContentRequest(include_notion=True, connector_id=CONNECTOR, snapshot_version=VERSION)), current_user={}, owner=owner)
-                self.assertEqual(failure.exception.status_code, 502)
-                self.assertEqual(failure.exception.detail, {"error_code": "NOTION_ANALYSIS_READ_FAILED", "outcome_unknown": False})
+                self.assertEqual(failure.exception.status_code, 503)
+                self.assertEqual(failure.exception.detail, {"error_code": "ADMIN_CAPABILITY_UNAVAILABLE", "outcome_unknown": False})
                 write.assert_not_awaited()
         asyncio.run(case())
 
@@ -793,14 +792,14 @@ class RouterInputTest(unittest.TestCase):
                 body = routes.ReflectionsTaskCreateRequest(auto_start=False, request_key=key, sections=["echoes"], language="en", session_ids=["session-a"],
                     analysis_content=routes.ReflectionsAnalysisContentRequest(include_notion=True, connector_id=CONNECTOR,
                         snapshot_version=VERSION, deck_id="deck-analysis", agent_id="agent-analysis"))
-                with (patch.object(routes, "require_analysis_content_capability"),
+                with (patch.object(routes, "require_scope_capability"),
                       patch.object(routes, "invoke_admin_operation", AsyncMock(return_value=ReflectionAnalysisSummaryOutputDTO(analysis_content=public))) as invoke,
                       patch.object(routes, "prepare_reflection_event_bus", AsyncMock()),
-                      patch.object(routes, "freeze_notion_analysis_input", AsyncMock(side_effect=AssertionError("Original receipt must avoid re-reading"))) as read):
+                      patch.object(content_module, "NotionOperationClient", side_effect=AssertionError("Original receipt must avoid re-reading")) as read):
                     response = await routes.create_reflections_task_endpoint(body, current_user=actor.current_user_projection(), owner=owner)
                     self.assertEqual(response.status_code, 202)
                     self.assertEqual(json.loads(response.body)["task_id"], task.task_id)
-                    read.assert_not_awaited()
+                    read.assert_not_called()
                     self.assertTrue(all(call.args[1].__name__ == "summary" for call in invoke.call_args_list))
         asyncio.run(case())
 

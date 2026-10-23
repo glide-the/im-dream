@@ -1,3 +1,4 @@
+# [Sync] 2026-10-23: forward the bound Notion reader into the existing page Read hook.
 # [Sync] 2026-10-15: allow the three exact user memory Tools.
 # [Sync] 2026-10-12: explicitly close the owned SDK query iterator when a callback is cancelled.
 # [Sync] 2026-10-11: project only original synthetic compact completion through the existing text path in partial mode.
@@ -3306,6 +3307,7 @@ class ClaudeAgentRunner:
                 tool_input,
                 workspace_path=cwd,
                 credential_home=opts.notion_credential_home,
+                page_reader=opts.notion_page_reader,
                 tmp_workspace=opts.claude_tmp_workspace,
                 tmp_paths=_notion_redirect_tmp_paths,
             )
