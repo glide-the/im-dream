@@ -16,6 +16,7 @@
 [Sync] 2026-09-16: remove Dream PostgreSQL credentials from local, AutoDL and Alibaba deployment contracts.
 [Sync] 2026-09-16: move Google/Session/JWT secret ownership to Admin, retire Google Cloud SQLite sync, and retain only the server-only Next BFF handle secret in Dream.
 [Sync] 2026-09-18: add the AutoDL restart/redeploy recovery appendix and keep instance public origins deployment-injected.
+[Sync] 2026-10-18: index existing macOS Natapp service start, restart, stop, reload, status and logs.
 -->
 
 ## 定位
@@ -41,6 +42,7 @@
 | [`data-sync.md`](data-sync.md) | 历史 SQLite/GCS 回执说明 | 仅用于识别旧脚本行为；共享业务数据由 Admin PostgreSQL/Drizzle 管理，不得执行该 SQLite 同步作为当前发布步骤 |
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径；旧 SQLite 数据维护命令不属于当前业务数据合同 |
 | [`natapp-edge-relay.md`](natapp-edge-relay.md) | NATAPP 边缘转发文档 | 说明现有公开域名到显式 Dream/Admin relay origins 的原子切换、验证、上游降级识别与回滚 |
+| [`natapp-macos-services.md`](natapp-macos-services.md) | macOS Natapp 服务维护 | 已有两个服务的启动、重启、停止、恢复加载、状态查询和日志检查 |
 | [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
 | [`autodl.md`](autodl.md) | AutoDL 直宿主部署文档 | 说明 frozen pnpm/standalone Next、Node MCP Apps、FastAPI、固定 sandbox capability、验证与回滚 |
 | [`autodl-recovery.md`](autodl-recovery.md) | AutoDL 恢复与维护 | 说明实例重启后的 Admin-first 恢复、动态 WebUI origin、状态/日志、完整发布和失败处理 |

@@ -3,9 +3,12 @@
 [Output] 两份 nginx 站点的可恢复切换、验证和回滚操作合同。
 [Pos] 仅改变阿里云边缘代理；不发布或停止 AutoDL/NATAPP/Admin/Dream 服务。
 [Sync] 2026-09-12: 新增从旧 AutoDL 映射切换到显式 NATAPP origins 的操作路径。
+[Sync] 2026-10-18: 关联 macOS 本机隧道启动、状态检查及恢复手册。
 -->
 
 # NATAPP 边缘转发切换
+
+本机隧道的开机启动、手动触发和认证排障见 [macOS Natapp 双隧道服务](natapp-macos-services.md)。
 
 ## 边界与拓扑
 
