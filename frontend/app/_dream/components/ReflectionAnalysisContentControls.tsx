@@ -1,6 +1,7 @@
 // [Input] Page-local analysis selection, existing Deck APIs and metadata-only Reflections candidates.
 // [Output] Compact accessible analysis-content panel; opening never starts sync or inference.
 // [Pos] Reflections configuration presentation; reuses DeckChatSelector without changing Chat semantics.
+// [Sync] 2026-10-23: share inline rerun controls and describe the mounted index as an on-demand reading range.
 // [Sync] 2026-10-13: add overall Notion inclusion and Deck-grouped analysis Agent selection.
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,12 +14,14 @@ interface Props {
   value: ReflectionAnalysisContentOptions;
   onChange: (selection: ReflectionAnalysisContentOptions) => void;
   authenticated: boolean;
+  inline?: boolean;
 }
 
-export default function ReflectionAnalysisContentControls({ value, onChange, authenticated }: Props) {
+export default function ReflectionAnalysisContentControls({ value, onChange, authenticated, inline = false }: Props) {
   const { i18n } = useTranslation();
   const zh = i18n.language.startsWith('zh');
   const [open, setOpen] = useState(false);
+  const expanded = inline || open;
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [deckLoading, setDeckLoading] = useState(false);
@@ -52,7 +55,7 @@ export default function ReflectionAnalysisContentControls({ value, onChange, aut
   }, [open]);
 
   useEffect(() => {
-    if (!open || !authenticated) return;
+    if (!expanded || !authenticated) return;
     let disposed = false;
     setLoading(true); setDeckLoading(true); setNotionError(false); setDeckError(false);
     void getReflectionAnalysisContent().then(result => {
@@ -63,7 +66,7 @@ export default function ReflectionAnalysisContentControls({ value, onChange, aut
       .catch(() => { if (!disposed) setDeckError(true); })
       .finally(() => { if (!disposed) setDeckLoading(false); });
     return () => { disposed = true; };
-  }, [authenticated, open, revision]);
+  }, [authenticated, expanded, revision]);
 
   const ready = candidates?.status === 'ready' && candidates.selection_available && !notionError && !loading;
   const staleNotion = value.include_notion && ready && (value.connector_id !== candidates?.connector_id
@@ -80,20 +83,20 @@ export default function ReflectionAnalysisContentControls({ value, onChange, aut
     : candidates?.status === 'scope_changed' ? (zh ? '已挂载资源已改变，请在设置中重新同步。' : 'Linked resources changed. Sync them again in Settings.')
     : candidates?.status === 'empty' ? (zh ? '没有已挂载的 Notion 页面。' : 'No Notion pages are linked.')
     : staleNotion ? (zh ? 'Notion 资源已更新，请关闭再开启 Notion，选择最新内容。' : 'Notion resources changed. Turn Notion off and on to select the current content.')
-    : candidates?.status === 'ready' ? (zh ? `本次使用全部 ${candidates.page_count} 个已挂载页面。` : `Use all ${candidates.page_count} linked pages for this analysis.`) : '';
+    : candidates?.status === 'ready' ? (zh ? `可按需读取 ${candidates.page_count} 个已挂载页面。` : `Read from ${candidates.page_count} linked pages as needed.`) : '';
 
-  return <div ref={root} style={{ display: 'inline-flex' }} onKeyDown={event => {
-    if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); setOpen(false); trigger.current?.focus(); }
+  return <div ref={root} style={{ display: inline ? 'block' : 'inline-flex' }} onKeyDown={event => {
+    if (!inline && event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); setOpen(false); trigger.current?.focus(); }
   }}>
-    <button type="button" ref={trigger} aria-expanded={open} aria-controls="reflection-analysis-content"
+    {!inline && <button type="button" ref={trigger} aria-expanded={open} aria-controls="reflection-analysis-content"
       onClick={() => setOpen(current => !current)} style={{ border: '1px solid var(--color-border-paper)', borderRadius: 24,
         background: 'var(--color-bg-app)', color: 'var(--color-text-body)', padding: '12px 18px', cursor: 'pointer' }}>
       {zh ? '分析内容' : 'Analysis content'} <span aria-hidden="true">{open ? '▴' : '▾'}</span>
-    </button>
-    {open && layout && <div id="reflection-analysis-content" role="region" aria-label={zh ? '分析内容选项' : 'Analysis content options'}
-      style={{ ...layout, position: 'fixed', boxSizing: 'border-box', zIndex: 900, overflowY: 'auto', overscrollBehavior: 'contain',
+    </button>}
+    {expanded && (inline || layout) && <div id="reflection-analysis-content" role="region" aria-label={zh ? '分析内容选项' : 'Analysis content options'}
+      style={{ ...(inline ? { width: '100%' } : layout), position: inline ? 'relative' : 'fixed', boxSizing: 'border-box', zIndex: inline ? undefined : 900, overflowY: inline ? undefined : 'auto', overscrollBehavior: 'contain',
         background: 'var(--color-bg-surface-solid)', border: '1px solid var(--color-border-paper)', borderRadius: 16,
-        padding: 18, boxShadow: '0 8px 24px var(--color-shadow-medium)', textAlign: 'left', display: 'grid', gap: 12 }}>
+        padding: 18, boxShadow: inline ? undefined : '0 8px 24px var(--color-shadow-medium)', textAlign: 'left', display: 'grid', gap: 12 }}>
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--color-text-primary)' }}>
         <input type="checkbox" checked={value.include_notion} disabled={!ready && !value.include_notion}
           onChange={event => onChange({ ...value, include_notion: event.target.checked,

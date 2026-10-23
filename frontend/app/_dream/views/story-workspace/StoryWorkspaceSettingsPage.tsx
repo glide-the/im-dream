@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: add one owner memory behavior section.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Settings route section, existing resource/plugin managers, and the Work-owned Deck management surface.
@@ -14,6 +15,7 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
+import MemoryBehaviorSettings from './MemoryBehaviorSettings';
 import AboutView from '../../components/AboutView';
 import { IconMonitor, IconMoon, IconSun } from '../../components/chat/Icons';
 import ClaudeMcpServerDetailPage from '../../components/claude-mcp/ClaudeMcpServerDetailPage';
@@ -38,6 +40,7 @@ export type StoryWorkspaceSettingsSection =
   | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
+  | 'settings-behavior'
   | 'settings-model'
   | 'settings-about'
   | 'settings-subscription';
@@ -199,6 +202,11 @@ export function StoryWorkspaceSettingsPage({
       searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-work'], t('settings.workspace.navigation.work'), t('settings.workspace.work.tabs.deck'), t('settings.workspace.work.description')],
     },
     {
+      id: 'settings-behavior', label: t('settings.workspace.navigation.behavior', { defaultValue: currentLanguage.startsWith('zh') ? '记忆回应' : 'Memory responses' }), icon: FaCog,
+      path: '/story-workspace/settings/behavior',
+      searchKeys: STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-behavior'],
+    },
+    {
       id: 'settings-model', label: t('settings.workspace.navigation.model'), icon: FaRobot,
       path: '/story-workspace/settings/model',
       searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-model'], t('settings.workspace.navigation.model'), t('settings.workspace.model.title'), t('settings.workspace.model.description')],
@@ -208,7 +216,7 @@ export function StoryWorkspaceSettingsPage({
       path: '/story-workspace/settings/about',
       searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-about'], t('settings.workspace.navigation.about'), t('settings.workspace.about.title'), t('settings.workspace.about.description')],
     },
-  ], [t]);
+  ], [t, currentLanguage]);
   const searchableNavItems = useMemo<SettingsNavItem[]>(() => [
     ...navItems.map(item => item.id === 'settings-work' ? {
       ...item,
@@ -303,6 +311,8 @@ export function StoryWorkspaceSettingsPage({
     >
       <div className="story-workspace-settings__card"><ModelConfigSection /></div>
     </SettingsSection>
+  ) : activeSection === 'settings-behavior' ? (
+    <MemoryBehaviorSettings />
   ) : activeSection === 'settings-subscription' ? (
     <StoryWorkspaceSubscriptionPage />
   ) : activeSection === 'settings-about' ? (
@@ -426,6 +436,7 @@ export function storyWorkspaceSettingsSectionForRoute(route: StoryWorkspaceStati
     || route === 'settings-work'
     || route === 'settings-resources'
     || route === 'settings-plugins'
+    || route === 'settings-behavior'
     || route === 'settings-model'
     || route === 'settings-about'
     || route === 'subscription'

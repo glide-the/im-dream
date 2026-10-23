@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: bind and refresh memory actor through the original turn broker.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: expose Host image-provider binding through the original turn broker owner.
 # [Sync] 2026-09-28: bind the Thread Tool host provider before the current turn broker starts and refresh its request authorization at confirmation time.
@@ -712,6 +713,9 @@ class AdminTurnPersistence(
         return AdminImageTurnData(self._client, lambda: self.current_grant(actor_id=actor_id, thread_id=thread_id),
             canonical_user_id=self._resolution.canonical_user_id)
 
+    def bind_memory_provider(self, provider) -> None:
+        self._session_projection_broker.bind_memory_provider(provider)
+
     def bind_thread_tool_provider(self, provider: ThreadToolCommandProvider) -> None:
         """Bind one server-owned actor/turn before starting the child broker."""
         self._session_projection_broker.bind_thread_tool_provider(provider)
@@ -726,6 +730,7 @@ class AdminTurnPersistence(
                 raise AdminDataError("THREAD_TOOL_UNAVAILABLE", 503)
             provider = self._thread_tool_provider
         provider.refresh_authorization(current_user)
+        self._session_projection_broker.refresh_memory_authorization(current_user)
 
     def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
         metadata: dict | None, history_final_text: str | None = None,

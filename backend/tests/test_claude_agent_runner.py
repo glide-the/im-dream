@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: exact user MCP inventory includes the three owner-bound memory Tools.
 # [Sync] 2026-10-12: callback cancellation must close the owned SDK generator before returning.
 # [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
 # [Sync] 2026-10-07: verify exact scheduled auto/manual overrides, strict unresolved denial and unattended network failure markers.
@@ -3940,6 +3941,7 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
         self.assertEqual(tool_names, {
             "get_sessions_range", "create_scheduled_task", "create_thread", "list_threads",
             "read_thread", "send_message_to_thread", "wait_threads",
+            "list_memory_distillations", "read_memory_distillation", "resolve_memory_behavior",
         })
         self.assertEqual(tool_names, set(USER_MCP_TOOL_NAMES))
 

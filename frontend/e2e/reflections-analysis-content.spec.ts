@@ -1,3 +1,6 @@
+// [Sync] 2026-10-23: verify persisted diary scope/read counts, legacy and Notion-only reports across locales and widths.
+// [Sync] 2026-10-23: verify on-demand copy, inline rerun controls and return position after keyboard focus.
+// [Sync] 2026-10-15: freeze today rerun fixture at its actual analysis creation day.
 // [Sync] 2026-10-14: preserve original timeline geometry while inserting task recap records and reusing earlier-days loading.
 // [Input] Authenticated Story Workspace Reflections route and public Reflections task/content DTOs.
 // [Output] Provider-free browser journeys for source selection, task SSE/recovery, report persistence,
@@ -504,6 +507,44 @@ async function openAnalysis(page: Page, viewport = { width: 1440, height: 900 })
   await expect(page.getByRole('heading', { name: 'Reflections', exact: true })).toBeVisible();
 }
 
+for (const scenario of [
+  { name: 'selected', width: 1440, zh: false, notion: true, diaryIds: ['first', 'second'], expectedDiary: 2 },
+  { name: 'selected', width: 375, zh: true, notion: true, diaryIds: ['first', 'second'], expectedDiary: 2 },
+  { name: 'Notion-only', width: 375, zh: false, notion: true, diaryIds: [], expectedDiary: 0 },
+  { name: 'legacy', width: 1440, zh: false, notion: false, diaryIds: null, expectedDiary: 9 },
+]) test(`saved report sources show ${scenario.name} diary scope at ${scenario.width}px`, async ({ page }, testInfo) => {
+  const fixture = await installReflectionFixtures(page, { seedReport: true, includeNotion: scenario.notion });
+  const saved = fixture.reports[0];
+  saved.report_data.stats.entries = 9;
+  saved.report_data.analysis_content = scenario.name === 'legacy' ? null : {
+    ...contentSummary(scenario.notion, true), diary_session_ids: scenario.diaryIds,
+  };
+  if (scenario.zh) await page.addInitScript(() => localStorage.setItem('ink-language', 'zh'));
+  await page.setViewportSize({ width: scenario.width, height: 812 });
+  const openSaved = async () => {
+    await page.goto(`${WEB_BASE}/story-workspace/analysis`);
+    await page.locator('[data-analysis-report-id="9001"]').click();
+  };
+  await openSaved();
+  const sources = page.getByRole('region', { name: scenario.zh ? '本次分析来源' : 'Analysis sources', exact: true });
+  const diaryLabel = scenario.zh ? `日记范围 · ${scenario.expectedDiary} 篇` : `Diary scope · ${scenario.expectedDiary} entries`;
+  await expect(sources.getByText(diaryLabel, { exact: true })).toBeVisible();
+  if (scenario.notion) {
+    await sources.locator('summary').click();
+    await expect(sources.locator('summary')).toHaveText(scenario.zh ? 'Notion · 已读取 1 个页面' : 'Notion · Pages read: 1');
+    await expect(sources.getByRole('link', { name: 'Weekly notes' })).toHaveAttribute('href', 'https://www.notion.so/reflection-page');
+  } else await expect(sources.locator('details')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`report-sources-${scenario.name}-${scenario.width}.png`) });
+  await page.reload();
+  await page.locator('[data-analysis-report-id="9001"]').click();
+  await expect(sources.getByText(diaryLabel, { exact: true })).toBeVisible();
+  expect(fixture.createRequests).toEqual([]);
+  expect(fixture.startRequests).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
 test('Chat-origin section navigation opens the matching saved report once and restores clean history', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { seedReport: true });
   for (let index = 0; index < 12; index += 1) fixture.reports.unshift({
@@ -563,7 +604,7 @@ test('default and Notion+Agent analysis create through SSE, save retry, reload, 
   await contentButton.click();
   const contentRegion = page.getByRole('region', { name: 'Analysis content options' });
   await expect(contentRegion).toBeVisible();
-  await expect(contentRegion.getByText('Use all 1 linked pages for this analysis.')).toBeVisible();
+  await expect(contentRegion.getByText('Read from 1 linked pages as needed.')).toBeVisible();
   const includeNotion = contentRegion.getByRole('checkbox', { name: 'Include Notion in analysis' });
   await expect(includeNotion).toBeEnabled();
   await expect(includeNotion).not.toBeChecked();
@@ -777,7 +818,7 @@ test('Notion read and Agent invalidation errors recover through the explicit rel
   await region.getByRole('checkbox', { name: 'Include Notion in analysis' }).check();
   await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
   await expect.poll(() => fixture.createRequests.length).toBe(1);
-  await expect(page.getByText('Notion content is temporarily unavailable. The analysis has not started. Retry later.', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Notion content is temporarily unavailable. Retry the analysis later.', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('task · preparing', { exact: true })).toHaveCount(0);
   expect(fixture.taskResponses).toEqual([]);
   expect(fixture.startRequests).toEqual([]);
@@ -787,16 +828,64 @@ test('Notion read and Agent invalidation errors recover through the explicit rel
 });
 
 test('today re-analysis opens the diary picker with the current entries', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-13T03:00:05Z') });
   const fixture = await installReflectionFixtures(page, { seedReport: true });
-  fixture.reports[0].created_at = new Date().toISOString();
   await openAnalysis(page);
   await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Today already has a Reflections analysis.' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('A diary entry', { exact: true })).toBeVisible();
-  await expect(dialog.getByRole('checkbox')).toBeChecked();
-  await expect(dialog.getByText('Re-running will create a new analysis. Choose the diary entries that should be included this time.', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('checkbox', { name: 'A diary entry' })).toBeChecked();
+  const content = dialog.getByRole('region', { name: 'Analysis content options' });
+  await expect(content).toBeVisible();
+  await expect(page.locator('#reflection-analysis-content')).toHaveCount(1);
+  await expect(content.getByRole('button', { name: 'Analysis Agent' })).toBeEnabled();
+  await expect(dialog.getByText('Re-running will create a new analysis. Choose the diary entries and analysis content for this run.', { exact: true })).toBeVisible();
   expect(fixture.createRequests).toEqual([]);
+});
+
+for (const width of [1440, 375]) test(`same-day rerun retains shared content choices and submits Notion-only at ${width}px`, async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-10-13T03:00:05Z') });
+  const fixture = await installReflectionFixtures(page, { seedReport: true });
+  await openAnalysis(page, { width, height: 700 });
+  const more = page.getByRole('button', { name: 'More', exact: true });
+  if (width === 375 && await more.getAttribute('aria-expanded') === 'true') await more.click();
+  await page.getByRole('button', { name: 'Analysis content', exact: false }).click();
+  const panel = page.getByRole('region', { name: 'Analysis content options' });
+  await panel.getByRole('checkbox', { name: 'Include Notion in analysis' }).check();
+  await panel.getByRole('button', { name: 'Analysis Agent' }).click();
+  await page.getByRole('listbox').getByRole('option', { name: /Reflective analyst/ }).click();
+  await page.getByRole('button', { name: 'Analysis content', exact: false }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Today already has a Reflections analysis.' });
+  const content = dialog.getByRole('region', { name: 'Analysis content options' });
+  await expect(content.getByRole('checkbox', { name: 'Include Notion in analysis' })).toBeChecked();
+  await expect(content.getByRole('button', { name: 'Analysis Agent' })).toContainText('Reflective analyst');
+  await expect(page.locator('#reflection-analysis-content')).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.createRequests).toEqual([]);
+  await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
+  await expect(content.getByRole('checkbox', { name: 'Include Notion in analysis' })).toBeChecked();
+  await dialog.getByRole('button', { name: /^Clear all/ }).click();
+  const confirm = dialog.getByRole('button', { name: 'Re-analyze selected', exact: true });
+  await content.getByRole('checkbox', { name: 'Include Notion in analysis' }).uncheck();
+  await expect(confirm).toBeDisabled();
+  await content.getByRole('checkbox', { name: 'Include Notion in analysis' }).check();
+  await expect(confirm).toBeEnabled();
+  await expect(confirm).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`rerun-content-${width}.png`) });
+  await confirm.click();
+  await expect.poll(() => fixture.createRequests.length).toBe(1);
+  expect(fixture.createRequests[0].session_ids).toEqual([]);
+  expect(fixture.createRequests[0].analysis_content).toMatchObject({ include_notion: true, connector_id: CONNECTOR_ID,
+    snapshot_version: SNAPSHOT_VERSION, deck_id: DECK_ID, agent_id: AGENT_ID });
+  await expect.poll(() => fixture.startRequests.length).toBe(1);
+  await expect.poll(() => fixture.reportRequests.length).toBe(1);
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.unexpectedReflectionRequests).toEqual([]);
 });
 
 test('desktop and narrow content controls support keyboard selection and nested Escape ownership', async ({ page }) => {
@@ -904,8 +993,9 @@ for (const width of [1440, 375]) test(`analysis history navigates and reads olde
   for (let index = 1; index < rows.length; index += 1) expect(rows[index].top - rows[index - 1].top).toBe(70);
   await expect(page.getByRole('button', { name: 'Load earlier analyses' })).toHaveCount(0);
   const target = page.locator(`[data-analysis-report-id="${fixture.reports[1].id}"]`);
+  await target.focus();
   const before = await scroll.evaluate(node => node.scrollTop);
-  await target.focus(); await page.keyboard.press('Space');
+  await page.keyboard.press('Space');
   const reader = page.getByRole('region', { name: 'Analysis report', exact: true });
   await expect(reader.getByText('History insight 1', { exact: true })).toBeVisible();
   await expect(reader.getByRole('button', { name: 'Timeline', exact: false })).toBeFocused();

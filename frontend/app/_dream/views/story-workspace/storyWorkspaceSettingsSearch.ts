@@ -1,3 +1,4 @@
+// [Sync] 2026-10-15: index memory response settings.
 // [Input] Searchable settings navigation items and the user's free-text query.
 // [Output] Stable, token-aware navigation matches derived from labels, routes, section keys and aliases.
 // [Pos] Pure search policy for the Story Workspace Settings sidebar; routing remains owned by the page.
@@ -26,6 +27,7 @@ export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
     '/story-workspace/settings/plugins', '/story-workspace/settings/work?tab=plugins',
     '插件 市场 工作流 运行时',
   ],
+  'settings-behavior': ['settings-behavior', '/story-workspace/settings/behavior', 'memory behavior reflections 记忆 回应 回顾'],
   'settings-model': [
     'settings-model', 'model', 'ai', '/story-workspace/settings/model',
     '模型',

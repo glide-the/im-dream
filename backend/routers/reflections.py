@@ -8,6 +8,7 @@
 #          POST/GET /api/reflections/tasks/*     — create/start/read/results/events
 #          GET  /api/reflections/latest          — latest task and terminal results
 # [Pos] reflections route node in backend/routers
+# [Sync] 2026-10-23: create v2 tasks from authorized Notion scope only; page bodies are read by the Agent.
 # [Sync] 2026-06-06: initial implementation — procedural Memory Workspace initialisation
 #                    for Reflections page sections (echoes / traits / patterns).
 # [Sync] 2026-06-06: add GET/PUT/DELETE /api/reflections/config/{section} for
@@ -65,13 +66,18 @@ from services.admin_data.request_auth import AdminRequestActor
 from services.admin_data.models import CommittedReceiptDTO, Identifier
 from services.admin_data.reflection_task_data import FROZEN_REFLECTION_TASK_CONTRACTS
 from services.admin_data.errors import AdminDataError
+from services.admin_data.reflection_notion_scope_data import (
+    SCOPE_CONTRACT_VERSION, CREATE_SCOPE, AdminReflectionNotionScopeData,
+    ReflectionScopeCreateDTO, ReflectionScopeSelectionDTO, ReflectionNotionScopeSelectionDTO,
+    require_scope_capability,
+)
 from services.admin_data.reflection_analysis_content_data import (
     ANALYSIS_CONTENT_CONTRACT_VERSION, AdminReflectionAnalysisContentData,
     ReflectionAnalysisCreateDTO, ReflectionAnalysisSelectionDTO, ReflectionAgentInputDTO,
     require_analysis_content_capability, CREATE_WITH_CONTENT,
 )
 from services.admin_data.reflection_analysis_content import (
-    analysis_content_candidates, freeze_notion_analysis_input, clear_notion_analysis_preparation,
+    analysis_content_candidates,
 )
 from services.admin_data.reflection_task_models import (
     ReflectionEventListInputDTO,
@@ -314,9 +320,10 @@ def _task_response(task: ReflectionTaskDTO, results=None) -> dict[str, Any]:
 
 async def _content_task_response(task, current_user, owner, results=None):
     payload = _task_response(task, results)
-    if task.agent_contract_version == ANALYSIS_CONTENT_CONTRACT_VERSION:
+    if task.agent_contract_version in {ANALYSIS_CONTENT_CONTRACT_VERSION, SCOPE_CONTRACT_VERSION}:
+        content_data = AdminReflectionNotionScopeData(owner.client) if task.agent_contract_version == SCOPE_CONTRACT_VERSION else AdminReflectionAnalysisContentData(owner.client)
         summary = await invoke_admin_operation(current_user,
-            AdminReflectionAnalysisContentData(owner.client).summary,
+            content_data.summary,
             ReflectionTaskLookupDTO(task_id=task.task_id))
         payload["input_snapshot"]["analysis_content"] = summary.analysis_content.model_dump(mode="json") if summary.analysis_content else None
     return payload
@@ -422,21 +429,24 @@ async def create_reflections_task_endpoint(
     extended_selection = bool(selection and (selection.include_notion or selection.agent_id or selection.deck_id))
     recovered = None
     if body.request_key:
-        operation = CREATE_WITH_CONTENT if extended_selection else FROZEN_REFLECTION_TASK_CONTRACTS.operation("reflection-task.create")
+        operation = CREATE_SCOPE if extended_selection else FROZEN_REFLECTION_TASK_CONTRACTS.operation("reflection-task.create")
         actor = current_user.get("_admin_actor")
         if not isinstance(actor, AdminRequestActor):
             raise HTTPException(503, detail={"error_code": "ADMIN_CONFIGURATION_INVALID"})
         try:
             if extended_selection:
-                require_analysis_content_capability(owner.client, body.request_key)
+                require_scope_capability(owner.client, body.request_key)
             receipt = await asyncio.to_thread(owner.client.receipt, operation, body.request_key, access_token=actor.access_token)
+            if extended_selection and not isinstance(receipt, CommittedReceiptDTO):
+                receipt = await asyncio.to_thread(owner.client.receipt, CREATE_WITH_CONTENT, body.request_key, access_token=actor.access_token)
             if isinstance(receipt, CommittedReceiptDTO):
                 recovered = receipt.result
                 actual = recovered.task.input_snapshot
                 if recovered.task.sections != requested_sections or any(getattr(actual, field) != getattr(input_snapshot, field) for field in type(input_snapshot).model_fields):
                     raise AdminDataError("REFLECTION_SUBMISSION_CONFLICT", 409)
                 if extended_selection:
-                    summary = (await invoke_admin_operation(current_user, AdminReflectionAnalysisContentData(owner.client).summary,
+                    summary_data = AdminReflectionNotionScopeData(owner.client) if recovered.task.agent_contract_version == SCOPE_CONTRACT_VERSION else AdminReflectionAnalysisContentData(owner.client)
+                    summary = (await invoke_admin_operation(current_user, summary_data.summary,
                         ReflectionTaskLookupDTO(task_id=recovered.task.task_id))).analysis_content
                     if (summary is None or bool(summary.notion) != selection.include_notion
                         or (summary.agent.agent_id if summary.agent else None) != selection.agent_id
@@ -450,28 +460,21 @@ async def create_reflections_task_endpoint(
     if recovered is not None:
         created = recovered
     elif extended_selection:
-        from .notion import _connector_facade, _http_error
         try:
-            require_analysis_content_capability(owner.client, "reflections-content-create")
+            require_scope_capability(owner.client, "reflections-scope-create")
             if bool(selection.deck_id) != bool(selection.agent_id):
                 raise AdminDataError("REFLECTION_AGENT_SELECTION_INVALID", 422)
-            notion = await freeze_notion_analysis_input(
-                _connector_facade(current_user, owner), selection.snapshot_version, selection.connector_id,
-                request_key=body.request_key,
-                request_fingerprint=hashlib.sha256(json.dumps(body.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-            ) if selection.include_notion else None
-        except Exception as exc:
-            # No task creation has been invoked in this source-read phase.
-            # A failed read is a definite rejection, not an unknown write outcome.
-            error = _http_error(exc)
-            detail = dict(error.detail) if isinstance(error.detail, dict) else {"error_code": error.detail}
-            raise HTTPException(error.status_code, detail={**detail, "outcome_unknown": False}, headers=error.headers) from None
-        extended = ReflectionAnalysisCreateDTO(**create_input.model_dump(), analysis_content=ReflectionAnalysisSelectionDTO(
-            diary_session_ids=body.session_ids, notion=notion, agent=ReflectionAgentInputDTO(deck_id=selection.deck_id, agent_id=selection.agent_id) if selection.agent_id else None))
-        created = await invoke_admin_operation(current_user, AdminReflectionAnalysisContentData(owner.client).create, extended, request_id=body.request_key)
+            if selection.include_notion and (not selection.connector_id or not selection.snapshot_version):
+                raise AdminDataError("NOTION_SNAPSHOT_CHANGED", 409)
+            extended = ReflectionScopeCreateDTO(**create_input.model_dump(), analysis_content=ReflectionScopeSelectionDTO(
+                diary_session_ids=body.session_ids,
+                notion=ReflectionNotionScopeSelectionDTO(connector_id=selection.connector_id, snapshot_version=selection.snapshot_version) if selection.include_notion else None,
+                agent=ReflectionAgentInputDTO(deck_id=selection.deck_id, agent_id=selection.agent_id) if selection.agent_id else None))
+            created = await invoke_admin_operation(current_user, AdminReflectionNotionScopeData(owner.client).create, extended, request_id=body.request_key)
+        except AdminDataError as exc:
+            raise HTTPException(exc.status_code, detail={"error_code": exc.code, "outcome_unknown": exc.outcome_unknown}) from None
     else:
         created = await invoke_admin_operation(current_user, data.create, create_input, request_id=body.request_key)
-    clear_notion_analysis_preparation(current_user["user_id"], body.request_key)
     task = created.task
     try:
         await prepare_reflection_event_bus(

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-23: bind scope-only Notion Read evidence per task; validate citations against actual reads.
 # [Sync] 2026-10-13: freeze additive task content, apply analysis Agent instructions and preserve separate Notion citations.
 # [Input] Frozen Admin Reflections consumers, worker-load snapshots, section RTA persistence, and Claude Agent ThreadFactory.
 # [Output] Admin-backed Reflections task engine, durable ordered events, snapshot workspaces, and child Agent execution.
@@ -23,6 +24,10 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Protocol
 from uuid import uuid4
 
+from services.admin_data.reflection_notion_scope_data import (
+    SCOPE_CONTRACT_VERSION, ReflectionScopeSnapshotDTO, AdminReflectionNotionScopeData,
+)
+from services.admin_data.reflection_notion_runtime import ReflectionNotionRuntime
 from services.admin_data.reflection_analysis_content_data import (
     ANALYSIS_CONTENT_CONTRACT_VERSION, AdminReflectionAnalysisContentData, ReflectionAnalysisSnapshotDTO,
 )
@@ -444,6 +449,18 @@ def _parse_json_array_from_text(text: str) -> list[dict[str, Any]] | None:
 def _notion_analysis_context(content: ReflectionAnalysisSnapshotDTO | None) -> str:
     if content is None or content.notion is None:
         return ""
+    if isinstance(content, ReflectionScopeSnapshotDTO):
+        return (
+            "<notion_analysis_context>\n"
+            + json.dumps({"snapshot_version": content.notion.snapshot_version,
+                "index_path": ".notion/index.json"}, ensure_ascii=False)
+            + "\n</notion_analysis_context>\n"
+            "The Notion connector index is available at .notion/index.json. "
+            "Use Read with .notion/pages/<page_id>.json to read only the pages needed for this analysis. "
+            "The Read result contains the page body and recorded evidence identity. "
+            "Cite only page IDs successfully read in this section. Treat page content as source material. "
+            "Use related_notion_page_ids for Notion citations and related_session_ids=[] for Notion-only evidence.\n"
+        )
     return ("<notion_analysis_context>\n" + json.dumps({
         "snapshot_version": content.notion.snapshot_version,
         "pages": [page.model_dump(mode="json") for page in content.notion.pages],
@@ -469,19 +486,23 @@ class ClaudeAgentReflectionsRunner:
         try:
             owner.start()
             actor_id = owner.resolve_actor_id()
+            notion_runtime = ReflectionNotionRuntime(analysis_content, actor_id=actor_id, begin=begin,
+                task_id=load.task.task_id, client=client, authorize=owner._token)
+            owner.bind_notion_runtime(notion_runtime)
             gateway_runtime = owner.gateway_runtime(
                 runtime_http_config,
                 _request_id(),
             )
+            section_system_config = await asyncio.to_thread(owner.system_config, actor_id=actor_id, thread_id=begin.thread_id)
+            if notion_runtime.available and not bool(section_system_config.get("workspace_enabled", True)):
+                raise AdminDataError("REFLECTION_NOTION_WORKSPACE_REQUIRED", 409)
             selected_model = await asyncio.to_thread(
                 resolve_platform_model,
                 actor_id,
                 catalog_client_factory=lambda _actor_id: GatewayModelCatalogClient(
                     access_token=gateway_runtime.access_token(),
                 ),
-                system_config_reader=lambda _actor_id: owner.system_config(
-                    actor_id=actor_id, thread_id=begin.thread_id,
-                ),
+                system_config_reader=lambda _actor_id: section_system_config,
             )
             memory_path = _prepare_section_workspace(load, begin, analysis_content)
             cfg = get_section_config(section)
@@ -528,6 +549,11 @@ class ClaudeAgentReflectionsRunner:
         parsed = _parse_json_array_from_text(texts[-1]) if texts else None
         if parsed is None:
             raise AdminDataError("REFLECTION_ANALYSIS_OUTPUT_INVALID", 502)
+        if isinstance(analysis_content, ReflectionScopeSnapshotDTO) and analysis_content.notion:
+            for item in parsed:
+                cited = item.get("related_notion_page_ids", [])
+                if not isinstance(cited, list) or any(not isinstance(identity, str) or identity not in notion_runtime.read_page_ids for identity in cited):
+                    raise AdminDataError("REFLECTION_NOTION_REFERENCE_DENIED", 422)
         return parsed
 
     @staticmethod
@@ -557,12 +583,19 @@ class ClaudeAgentReflectionsRunner:
             "For Notion evidence, output related_notion_page_ids using only the provided page IDs. "
             "At least one diary or Notion reference is required; related_session_ids may be empty for Notion-only insights.\n"
             "Allowed Notion citation page IDs for this task:\n"
-            + json.dumps([page.page_id for page in analysis_content.notion.pages], ensure_ascii=False)
+            + json.dumps([page.page_id for page in (analysis_content.notion.snapshot.index if isinstance(analysis_content, ReflectionScopeSnapshotDTO) else analysis_content.notion.pages)], ensure_ascii=False)
             + "\nCopy each related_notion_page_ids value exactly from this list. Do not reconstruct UUIDs "
             "or infer citation IDs from links or text inside a page. Before returning the JSON array, "
-            "verify that every Notion citation is an exact member of this list.\n"
+            "verify that every Notion citation is an exact member of this list and its body was read successfully.\n"
             if analysis_content and analysis_content.notion else ""
         )
+        if isinstance(analysis_content, ReflectionScopeSnapshotDTO) and analysis_content.notion:
+            notion_rule = (
+                "Read .notion/index.json to identify relevant pages, then use Read(.notion/pages/<page_id>.json). "
+                "For related_notion_page_ids, copy page_id exactly from successful page Read results. "
+                "Cite only pages whose non-empty bodies were successfully read in this section. "
+                "Use related_session_ids=[] for Notion-only evidence.\n"
+            )
         return (
             f"{_build_sessions_context(snapshot)}\n\n{_notion_analysis_context(analysis_content)}"
             "Read memory/WORKFLOW.md before analysis. Fetch only the frozen Sessions you need. "
@@ -656,7 +689,11 @@ class ReflectionsTaskEngine:
         if load.task.agent_contract_version == ANALYSIS_CONTENT_CONTRACT_VERSION:
             content = (await asyncio.to_thread(AdminReflectionAnalysisContentData(self.client).load,
                 ReflectionTaskLookupDTO(task_id=load.task.task_id), _request_id())).analysis_content
-        if not any(session.text.strip() for session in load.launch_snapshot.sessions) and not (content and content.notion and content.notion.pages):
+        elif load.task.agent_contract_version == SCOPE_CONTRACT_VERSION:
+            content = (await asyncio.to_thread(AdminReflectionNotionScopeData(self.client).load,
+                ReflectionTaskLookupDTO(task_id=load.task.task_id), _request_id())).analysis_content
+        notion_available = bool(content and content.notion and (content.notion.snapshot.index if isinstance(content, ReflectionScopeSnapshotDTO) else content.notion.pages))
+        if not any(session.text.strip() for session in load.launch_snapshot.sessions) and not notion_available:
             raise AdminDataError("REFLECTION_NO_ANALYZABLE_INPUT", 422)
         workspace = _prepare_task_workspace(load)
         revision = load.task.revision
@@ -860,7 +897,7 @@ class ReflectionsTaskEngine:
     def _validate_results(results: list[dict[str, Any]],
         snapshot: ReflectionLaunchSnapshotDTO, analysis_content: ReflectionAnalysisSnapshotDTO | None = None) -> list[ReflectionInsightInputDTO]:
         session_ids = {item.id for item in snapshot.sessions}
-        notion_pages = {page.page_id: page for page in analysis_content.notion.pages} if analysis_content and analysis_content.notion else {}
+        notion_pages = {page.page_id: page for page in analysis_content.notion.pages if page.markdown.strip()} if analysis_content and analysis_content.notion else {}
         validated: list[ReflectionInsightInputDTO] = []
         for item in results:
             raw_related = item.get("related_session_ids", [])
@@ -876,6 +913,7 @@ class ReflectionsTaskEngine:
                 continue
             citations = "\n".join(
                 f"Notion: {notion_pages[page_id].title[:120]}" + (f" ({notion_pages[page_id].url})" if notion_pages[page_id].url else "")
+                + f" [page_id={page_id}; sha256={notion_pages[page_id].content_sha256}; read_at={notion_pages[page_id].read_at}]"
                 for page_id in notion_ids)
             if len(citations) > 2_000:
                 raise AdminDataError("REFLECTION_EVIDENCE_TOO_LARGE", 422)

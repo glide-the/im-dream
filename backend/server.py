@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: own the capability-gated Reflections memory worker and behavior router.
 #!/usr/bin/env python3
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume backend/.env, HTTP requests, Admin auth/data clients, and runtime config.
@@ -265,6 +266,7 @@ from routers.system_config import router as system_config_router
 from routers.gateway_models import router as gateway_models_router
 from routers.workspace import router as workspace_router
 from routers.reflections import router as reflections_router
+from routers.memory import router as memory_router
 from routers.voices import (
     DeckCreateRequest,
     DeckUpdateRequest,
@@ -349,6 +351,21 @@ def _print_claude_runtime_identity(distribution: Any, cli_path: str) -> None:
         + json.dumps(identity, ensure_ascii=False, sort_keys=True),
         flush=True,
     )
+
+
+@app.on_event("startup")
+async def startup_memory_worker():
+    from services.memory.worker import MemoryWorker
+    worker = MemoryWorker(app.state.admin_request_auth.client)
+    app.state.memory_worker = worker
+    worker.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_memory_worker():
+    worker = getattr(app.state, "memory_worker", None)
+    if worker is not None:
+        await worker.close()
 
 
 @app.on_event("startup")
@@ -577,6 +594,7 @@ app.include_router(system_config_router)
 app.include_router(gateway_models_router)
 app.include_router(workspace_router)
 app.include_router(reflections_router)
+app.include_router(memory_router)
 
 
 @app.websocket("/ws/speech-recognition")

@@ -1,0 +1,3221 @@
+{
+  "schema": {
+    "capability": "dream.memory.classification.v2",
+    "version": 1,
+    "contract_sha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+  },
+  "operations": [
+    {
+      "contract": {
+        "name": "memory.v2.artifacts.discover",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "discovered": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "discovered"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.artifacts.discover",
+        "kind": "write",
+        "user_scope": null,
+        "background_scope": "reflections:execute",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "14ee0d52844d2547efee4976f5eb9ad5c19e1369a259d09eb2b2e18e79cb8dd1"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.artifacts.claim",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "artifact_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 2147483647
+                    },
+                    "report_id": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "running",
+                        "publishing",
+                        "ready",
+                        "empty",
+                        "failed"
+                      ]
+                    },
+                    "theme_state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "empty",
+                        "failed"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "source_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "conversion_revision": {
+                      "type": "string",
+                      "enum": [
+                        "memory-rules-v1",
+                        "memory-rules-v2"
+                      ]
+                    },
+                    "document": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "document_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "body_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "byte_length": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "theme_document": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "theme_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "metadata": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "task_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "report_id": {
+                              "type": "string",
+                              "pattern": "^[1-9][0-9]{0,18}$"
+                            },
+                            "completed_sections": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "echoes",
+                                  "traits",
+                                  "patterns"
+                                ]
+                              }
+                            },
+                            "failed_sections": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "echoes",
+                                  "traits",
+                                  "patterns"
+                                ]
+                              }
+                            },
+                            "item_count": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "theme_count": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "task_id",
+                            "report_id",
+                            "completed_sections",
+                            "failed_sections",
+                            "item_count",
+                            "theme_count"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "error_code": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "artifact_id",
+                    "revision",
+                    "report_id",
+                    "state",
+                    "theme_state",
+                    "created_at",
+                    "source_sha256",
+                    "conversion_revision",
+                    "document",
+                    "document_sha256",
+                    "body_sha256",
+                    "byte_length",
+                    "theme_document",
+                    "theme_sha256",
+                    "metadata",
+                    "error_code"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "claim_token": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "analysis_content": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "diary_session_ids": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "notion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "connector_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
+                                    "snapshot_version": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
+                                    "pages": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "page_id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "url": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          },
+                                          "content_sha256": {
+                                            "type": "string",
+                                            "pattern": "^[0-9a-f]{64}$"
+                                          },
+                                          "read_at": {
+                                            "type": "string",
+                                            "format": "date-time",
+                                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                          }
+                                        },
+                                        "required": [
+                                          "page_id",
+                                          "title",
+                                          "url",
+                                          "content_sha256",
+                                          "read_at"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "empty_page_count": {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "connector_id",
+                                    "snapshot_version",
+                                    "pages",
+                                    "empty_page_count"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "agent": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "deck_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
+                                    "agent_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
+                                    "deck_name": {
+                                      "type": "string"
+                                    },
+                                    "agent_name": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "deck_id",
+                                    "agent_id",
+                                    "deck_name",
+                                    "agent_name"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "diary_session_ids",
+                            "notion",
+                            "agent"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "task_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "report_id": {
+                      "type": "string"
+                    },
+                    "report_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "start_date": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "end_date": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "echoes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "task_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "section": {
+                            "type": "string",
+                            "enum": [
+                              "echoes",
+                              "traits",
+                              "patterns"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "related_session_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "evidence": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "confidence": {
+                            "type": "string",
+                            "enum": [
+                              "high",
+                              "medium",
+                              "low"
+                            ]
+                          },
+                          "created_at": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "task_id",
+                          "section",
+                          "title",
+                          "description",
+                          "related_session_ids",
+                          "evidence",
+                          "confidence",
+                          "created_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "traits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "task_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "section": {
+                            "type": "string",
+                            "enum": [
+                              "echoes",
+                              "traits",
+                              "patterns"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "related_session_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "evidence": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "confidence": {
+                            "type": "string",
+                            "enum": [
+                              "high",
+                              "medium",
+                              "low"
+                            ]
+                          },
+                          "created_at": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "task_id",
+                          "section",
+                          "title",
+                          "description",
+                          "related_session_ids",
+                          "evidence",
+                          "confidence",
+                          "created_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "patterns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "task_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "section": {
+                            "type": "string",
+                            "enum": [
+                              "echoes",
+                              "traits",
+                              "patterns"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "related_session_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "evidence": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "confidence": {
+                            "type": "string",
+                            "enum": [
+                              "high",
+                              "medium",
+                              "low"
+                            ]
+                          },
+                          "created_at": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "task_id",
+                          "section",
+                          "title",
+                          "description",
+                          "related_session_ids",
+                          "evidence",
+                          "confidence",
+                          "created_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "failed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "completed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "analysis_content",
+                    "task_id",
+                    "report_id",
+                    "report_sha256",
+                    "created_at",
+                    "start_date",
+                    "end_date",
+                    "echoes",
+                    "traits",
+                    "patterns",
+                    "failed_sections",
+                    "completed_sections"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact",
+            "claim_token",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.artifacts.claim",
+        "kind": "write",
+        "user_scope": null,
+        "background_scope": "reflections:execute",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "685f1647bf5c9800a6410f712656f575ce113d3b9e521936980e7d73b1e70157"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.artifacts.stage",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "claim_token": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "report_id": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}$"
+                },
+                "completed_sections": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "echoes",
+                      "traits",
+                      "patterns"
+                    ]
+                  }
+                },
+                "failed_sections": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "echoes",
+                      "traits",
+                      "patterns"
+                    ]
+                  }
+                },
+                "item_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "theme_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "task_id",
+                "report_id",
+                "completed_sections",
+                "failed_sections",
+                "item_count",
+                "theme_count"
+              ],
+              "additionalProperties": false
+            },
+            "theme_error_code": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "MEMORY_THEME_CONVERSION_FAILED"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "claim_token",
+            "document",
+            "body_sha256",
+            "theme_document",
+            "metadata",
+            "theme_error_code"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "report_id": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "publishing",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "theme_state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "conversion_revision": {
+              "type": "string",
+              "enum": [
+                "memory-rules-v1",
+                "memory-rules-v2"
+              ]
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "document_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byte_length": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "report_id": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "completed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "failed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "item_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "theme_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "task_id",
+                    "report_id",
+                    "completed_sections",
+                    "failed_sections",
+                    "item_count",
+                    "theme_count"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "report_id",
+            "state",
+            "theme_state",
+            "created_at",
+            "source_sha256",
+            "conversion_revision",
+            "document",
+            "document_sha256",
+            "body_sha256",
+            "byte_length",
+            "theme_document",
+            "theme_sha256",
+            "metadata",
+            "error_code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.artifacts.stage",
+        "kind": "write",
+        "user_scope": null,
+        "background_scope": "reflections:execute",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "2609f04267b3aabd667366d1bf74c5a739f3a414179c412fc2cb7170f5f11874"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.artifacts.publish",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "claim_token": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "document_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_published": {
+              "type": "boolean"
+            },
+            "theme_error_code": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "MEMORY_THEME_CONVERSION_FAILED",
+                    "MEMORY_THEME_PUBLICATION_FAILED"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "claim_token",
+            "document_sha256",
+            "theme_sha256",
+            "theme_published",
+            "theme_error_code"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "report_id": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "publishing",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "theme_state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "conversion_revision": {
+              "type": "string",
+              "enum": [
+                "memory-rules-v1",
+                "memory-rules-v2"
+              ]
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "document_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byte_length": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "report_id": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "completed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "failed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "item_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "theme_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "task_id",
+                    "report_id",
+                    "completed_sections",
+                    "failed_sections",
+                    "item_count",
+                    "theme_count"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "report_id",
+            "state",
+            "theme_state",
+            "created_at",
+            "source_sha256",
+            "conversion_revision",
+            "document",
+            "document_sha256",
+            "body_sha256",
+            "byte_length",
+            "theme_document",
+            "theme_sha256",
+            "metadata",
+            "error_code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.artifacts.publish",
+        "kind": "write",
+        "user_scope": null,
+        "background_scope": "reflections:execute",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "23eae8a131b4140e60f5dcf99bba52b22db500c91f85987580f57d35cbfaefbf"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.artifacts.fail",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "claim_token": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "error_code": {
+              "type": "string",
+              "enum": [
+                "MEMORY_CONVERSION_FAILED",
+                "MEMORY_PUBLICATION_FAILED"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "claim_token",
+            "error_code",
+            "retryable"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "report_id": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "publishing",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "theme_state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "conversion_revision": {
+              "type": "string",
+              "enum": [
+                "memory-rules-v1",
+                "memory-rules-v2"
+              ]
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "document_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byte_length": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "report_id": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "completed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "failed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "item_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "theme_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "task_id",
+                    "report_id",
+                    "completed_sections",
+                    "failed_sections",
+                    "item_count",
+                    "theme_count"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "report_id",
+            "state",
+            "theme_state",
+            "created_at",
+            "source_sha256",
+            "conversion_revision",
+            "document",
+            "document_sha256",
+            "body_sha256",
+            "byte_length",
+            "theme_document",
+            "theme_sha256",
+            "metadata",
+            "error_code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.artifacts.fail",
+        "kind": "write",
+        "user_scope": null,
+        "background_scope": "reflections:execute",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "7842ddf44f01c01dc02ca5fd3b53f70a44ceab862469940dfb944a1e875f54b4"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.distillations.list",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "before": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "artifact_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "created_at",
+                    "artifact_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "limit",
+            "before"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 2147483647
+                  },
+                  "report_id": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "running",
+                      "publishing",
+                      "ready",
+                      "empty",
+                      "failed"
+                    ]
+                  },
+                  "theme_state": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "ready",
+                      "empty",
+                      "failed"
+                    ]
+                  },
+                  "created_at": {
+                    "type": "string"
+                  },
+                  "source_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "conversion_revision": {
+                    "type": "string",
+                    "enum": [
+                      "memory-rules-v1",
+                      "memory-rules-v2"
+                    ]
+                  },
+                  "document": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "document_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "body_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "byte_length": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "theme_document": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "theme_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "task_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "report_id": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "completed_sections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "echoes",
+                                "traits",
+                                "patterns"
+                              ]
+                            }
+                          },
+                          "failed_sections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "echoes",
+                                "traits",
+                                "patterns"
+                              ]
+                            }
+                          },
+                          "item_count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "theme_count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "task_id",
+                          "report_id",
+                          "completed_sections",
+                          "failed_sections",
+                          "item_count",
+                          "theme_count"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "error_code": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "artifact_id",
+                  "revision",
+                  "report_id",
+                  "state",
+                  "theme_state",
+                  "created_at",
+                  "source_sha256",
+                  "conversion_revision",
+                  "document",
+                  "document_sha256",
+                  "body_sha256",
+                  "byte_length",
+                  "theme_document",
+                  "theme_sha256",
+                  "metadata",
+                  "error_code"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "artifact_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "created_at",
+                    "artifact_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifacts",
+            "next_cursor"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.distillations.list",
+        "kind": "read",
+        "user_scope": "dream:read",
+        "background_scope": null,
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "19a35e7ed9a1b32a80f5fee772b721ab95b5785ec512332e9742e65a07c21dbf"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.distillations.read",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647
+            },
+            "report_id": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "publishing",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "theme_state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "empty",
+                "failed"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "conversion_revision": {
+              "type": "string",
+              "enum": [
+                "memory-rules-v1",
+                "memory-rules-v2"
+              ]
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "document_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byte_length": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "report_id": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "completed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "failed_sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "echoes",
+                          "traits",
+                          "patterns"
+                        ]
+                      }
+                    },
+                    "item_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "theme_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "task_id",
+                    "report_id",
+                    "completed_sections",
+                    "failed_sections",
+                    "item_count",
+                    "theme_count"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "artifact_id",
+            "revision",
+            "report_id",
+            "state",
+            "theme_state",
+            "created_at",
+            "source_sha256",
+            "conversion_revision",
+            "document",
+            "document_sha256",
+            "body_sha256",
+            "byte_length",
+            "theme_document",
+            "theme_sha256",
+            "metadata",
+            "error_code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.distillations.read",
+        "kind": "read",
+        "user_scope": "dream:read",
+        "background_scope": null,
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "45fc64aba3a3f6b5fda13c3260cf8396ab31cadcc58decfcbdd1acb7231a0298"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.behavior.get",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "owner_id": {
+              "type": "string"
+            },
+            "catalog": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "default_action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "actions",
+                  "default_action"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "taxonomy_revision": {
+              "type": "string",
+              "const": "memory-rules-v2"
+            },
+            "default": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "themes": {
+                  "type": "object",
+                  "properties": {
+                    "THEME_FRUSTRATION": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "acknowledge_then_help",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_DEFENSE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "respect_distance",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_PRESSURE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "prioritize_actions",
+                            "acknowledge_then_help",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_VALUE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "connect_goal_to_choice",
+                            "acknowledge_only",
+                            "help_only"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "THEME_FRUSTRATION",
+                    "THEME_DEFENSE",
+                    "THEME_PRESSURE",
+                    "THEME_VALUE"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "themes"
+              ],
+              "additionalProperties": false
+            },
+            "desired": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "themes": {
+                  "type": "object",
+                  "properties": {
+                    "THEME_FRUSTRATION": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "acknowledge_then_help",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_DEFENSE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "respect_distance",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_PRESSURE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "prioritize_actions",
+                            "acknowledge_then_help",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_VALUE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "connect_goal_to_choice",
+                            "acknowledge_only",
+                            "help_only"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "THEME_FRUSTRATION",
+                    "THEME_DEFENSE",
+                    "THEME_PRESSURE",
+                    "THEME_VALUE"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "themes"
+              ],
+              "additionalProperties": false
+            },
+            "updated_at": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "owner_id",
+            "catalog",
+            "revision",
+            "taxonomy_revision",
+            "default",
+            "desired",
+            "updated_at"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.behavior.get",
+        "kind": "read",
+        "user_scope": "dream:read",
+        "background_scope": null,
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "d004056b2096f4de8295d5ee7fa106cc186a335a2b4210dfdd40163c238e3358"
+      }
+    },
+    {
+      "contract": {
+        "name": "memory.v2.behavior.save",
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483646
+            },
+            "desired": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "themes": {
+                  "type": "object",
+                  "properties": {
+                    "THEME_FRUSTRATION": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "acknowledge_then_help",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_DEFENSE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "respect_distance",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_PRESSURE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "prioritize_actions",
+                            "acknowledge_then_help",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_VALUE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "connect_goal_to_choice",
+                            "acknowledge_only",
+                            "help_only"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "THEME_FRUSTRATION",
+                    "THEME_DEFENSE",
+                    "THEME_PRESSURE",
+                    "THEME_VALUE"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "themes"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "expected_revision",
+            "desired"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "owner_id": {
+              "type": "string"
+            },
+            "catalog": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "default_action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "actions",
+                  "default_action"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "taxonomy_revision": {
+              "type": "string",
+              "const": "memory-rules-v2"
+            },
+            "default": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "themes": {
+                  "type": "object",
+                  "properties": {
+                    "THEME_FRUSTRATION": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "acknowledge_then_help",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_DEFENSE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "respect_distance",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_PRESSURE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "prioritize_actions",
+                            "acknowledge_then_help",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_VALUE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "connect_goal_to_choice",
+                            "acknowledge_only",
+                            "help_only"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "THEME_FRUSTRATION",
+                    "THEME_DEFENSE",
+                    "THEME_PRESSURE",
+                    "THEME_VALUE"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "themes"
+              ],
+              "additionalProperties": false
+            },
+            "desired": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "themes": {
+                  "type": "object",
+                  "properties": {
+                    "THEME_FRUSTRATION": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "acknowledge_then_help",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_DEFENSE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "respect_distance",
+                            "help_only",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_PRESSURE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "prioritize_actions",
+                            "acknowledge_then_help",
+                            "ask_support_type"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "THEME_VALUE": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "connect_goal_to_choice",
+                            "acknowledge_only",
+                            "help_only"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "action"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "THEME_FRUSTRATION",
+                    "THEME_DEFENSE",
+                    "THEME_PRESSURE",
+                    "THEME_VALUE"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "themes"
+              ],
+              "additionalProperties": false
+            },
+            "updated_at": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "owner_id",
+            "catalog",
+            "revision",
+            "taxonomy_revision",
+            "default",
+            "desired",
+            "updated_at"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "requirements": [
+        {
+          "capability": "identity.better-auth.v1",
+          "version": 1,
+          "contractSha256": "1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"
+        },
+        {
+          "capability": "dream.schema.unified.v1",
+          "version": 1,
+          "contractSha256": "8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"
+        },
+        {
+          "capability": "dream.reflection-task-persistence.v1",
+          "version": 1,
+          "contractSha256": "52340d24e76db9ee91dfbe8748ebaf3b0f3c2d20f15367c1c096d2e869d4753f"
+        },
+        {
+          "capability": "dream.memory.v1",
+          "version": 1,
+          "contractSha256": "d08fae4c65a4ee448d64e80ebfcb371c2fbfb0a9fe1091825971c35756aacbc6"
+        },
+        {
+          "capability": "dream.memory.classification.v2",
+          "version": 1,
+          "contractSha256": "524f90e1af9526db91ee2d1f9ae6cfb3d210e56e3e5217aacead82dae57efb79"
+        }
+      ],
+      "capability": {
+        "name": "memory.v2.behavior.save",
+        "kind": "write",
+        "user_scope": "dream:write",
+        "background_scope": null,
+        "input_schema_version": 1,
+        "output_schema_version": 1,
+        "contract_sha256": "bfdb7ed28c31f110b952234083cc51be632ea2f14a232912f7d5ca0884d9f6a0"
+      }
+    }
+  ]
+}

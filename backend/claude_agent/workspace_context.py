@@ -1,8 +1,10 @@
-# [Input] None — self-contained prompt template module.
+# [Input] Server-resolved Thread cwd/editor identity and attached local Notion indexes.
 #         Runtime dependency: libs.claude_agent_kit.server.editor_index.EDITOR_RESOURCES
 #         defines the virtual resource names embedded in this template.
 # [Output] Provide build_workspace_context_block to ClaudeAgentContextBuilder.build_user_message.
 # [Pos] workspace-context-prompt node in backend/claude_agent
+# [Sync] 2026-10-15: remove memory-specific source routing from attached Notion guidance.
+# [Sync] 2026-10-15: scope attached Notion instructions to selected source work; personal recall follows shared L2 guidance first.
 # [Sync] 2026-05-28: initial implementation — standalone workspace context prompt
 #                    for edit-point context assembly integration.
 # [Sync] 2026-05-29: add Document editing workflow section so Agent receives in-message

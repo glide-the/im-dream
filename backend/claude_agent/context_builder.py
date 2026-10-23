@@ -1,3 +1,6 @@
+# [Sync] 2026-10-15: keep shared memory guidance limited to three Tools, their concepts and usage.
+# [Sync] 2026-10-15: route personal recall through L2 before optional source expansion in system and every turn, including resume.
+# [Sync] 2026-10-15: explain owner-bound memory retrieval and current-task behavior Tools.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Sync] 2026-10-10: define workspace URI paths relative to files/, avoiding duplicate or omitted namespace.
@@ -187,6 +190,29 @@ def _context_session_count() -> int:
 # System prompt template
 # ---------------------------------------------------------------------------
 
+_REFLECTIONS_MEMORY_WORKFLOW = """\
+L2 memory distillations contain observations extracted from Reflections reports,
+with source references and observation periods. L3 themes support response behavior
+based on those observations. Analysis observations remain inferences.
+
+1. `mcp__user__list_memory_distillations` lists available distillations, versions,
+   and completion states. For the first page, omit before or pass before=null;
+   for another page, pass the returned next_cursor unchanged. Select a relevant
+   ready version; versions of the same report are not independent observations.
+2. `mcp__user__read_memory_distillation` reads memory_distillation.md using the
+   artifact_id and revision selected from the list. Use its observations with
+   their source references and observation_period. Processing time does not
+   replace the observation period. Unready or unavailable results provide no
+   readable memory content.
+3. `mcp__user__resolve_memory_behavior` determines allowed response actions for
+   selected artifact IDs and revisions using the current task and behavior settings.
+   Call it before using a historical L3 theme to adjust a response; use only the
+   returned allowed action. A skipped or unavailable result provides no theme action.
+
+Reading L2 does not require resolving L3 behavior. These Tools do not modify memory
+or behavior settings.
+"""
+
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a thoughtful writing assistant for Ink & Memory — a reflective journaling app.
 
@@ -329,6 +355,10 @@ When you need to work on a document whose session ID differs from the one shown 
 Note: switch_editor only changes the read/write context for .editor/ paths.  It does not
 modify any document content and does not require the user to approve it.
 
+## Reflections Memory Tools
+
+{reflections_memory_workflow}
+
 ## Session Retrieval Workflow
 
 The recent entries block below only covers the last 3 days of journal sessions.
@@ -345,8 +375,8 @@ use `mcp__user__get_sessions_range` to search further back:
 5. Review returned `match`, `labels`, and `excerpt` fields, then reference useful sessions by
    their `sessionId` when replying to the user.
 
-Only call this tool when the user's message suggests they are referring to events or themes
-that predate the visible recent entries.  Do not call it on every turn.
+Use this tool when the requested time/topic is not covered by the visible recent entries,
+or original evidence is needed. Do not call it on unrelated turns.
 
 {recent_sessions_block}\
 """
@@ -439,6 +469,7 @@ class ClaudeAgentContextBuilder:
         )
         return _SYSTEM_PROMPT_TEMPLATE.format(
             configurable_system_prompt_block=configurable_system_prompt_block,
+            reflections_memory_workflow=_REFLECTIONS_MEMORY_WORKFLOW,
             recent_sessions_block=recent_sessions_block
         )
 
@@ -469,7 +500,7 @@ class ClaudeAgentContextBuilder:
         all ``type == "text"`` entries and appended as the final content block.
 
         Returns a list of content blocks in the order expected by Claude:
-        attachment image blocks first, then the ``<runtime_context>`` block
+        shared Reflections guidance, attachment image blocks, then the ``<runtime_context>`` block
         (unless *include_runtime_context* is False), then the
         ``<workspace_context>`` block (when *cwd* is provided, with
         *editor_session_id* embedded so the agent can pass it to write tools),
@@ -484,6 +515,12 @@ class ClaudeAgentContextBuilder:
         context assembly.
         """
         blocks: list[dict[str, Any]] = []
+        blocks.append({"type": "text", "text": (
+            "<reflections_memory_tools>\n"
+            + _REFLECTIONS_MEMORY_WORKFLOW
+            + "\n"
+            "</reflections_memory_tools>"
+        )})
 
         # Attach any user-supplied image assets.
         if attachments:

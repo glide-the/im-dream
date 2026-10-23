@@ -1,5 +1,6 @@
+# [Sync] 2026-10-15: register owner-bound L2 list/read and L3 resolution Tools.
 # [Input] Consume MCP Server/types, Session retrieval and strict Dream Thread Tool contracts.
-# [Output] Provide create_user_mcp_server() with Session retrieval and five Thread Tools.
+# [Output] Provide create_user_mcp_server() with Session retrieval and six Thread Tools and three memory Tools.
 # [Pos] mcp-server node in libs/claude_agent_kit/server.
 # [Sync] 2026-09-28: add wait_threads as a host-authorized long-poll tool result in the current parent turn.
 # [Sync] 2026-09-28: expose host-authorized create/list/read/send Thread Tools over the existing broker.
@@ -27,8 +28,9 @@ from .sessions_tool import (
     handle_get_sessions_range,
 )
 from .thread_tool import THREAD_TOOL_SPECS, handle_thread_tool
+from .reflection_memory_tool import MEMORY_TOOL_SPECS, handle_memory_tool
 
-USER_MCP_TOOL_NAMES: frozenset[str] = frozenset({GET_SESSIONS_RANGE_TOOL_NAME, *THREAD_TOOL_SPECS})
+USER_MCP_TOOL_NAMES: frozenset[str] = frozenset({GET_SESSIONS_RANGE_TOOL_NAME, *THREAD_TOOL_SPECS, *MEMORY_TOOL_SPECS})
 
 
 def create_user_mcp_server() -> McpServer:
@@ -45,7 +47,7 @@ def create_user_mcp_server() -> McpServer:
                 inputSchema=GET_SESSIONS_RANGE_TOOL_SPEC.input_schema,
             )
         ] + [mcp_types.Tool(name=name, description=description, inputSchema=schema)
-             for name, (description, schema) in THREAD_TOOL_SPECS.items()]
+             for name, (description, schema) in {**THREAD_TOOL_SPECS, **MEMORY_TOOL_SPECS}.items()]
 
     @server.call_tool()  # type: ignore[misc]
     async def call_tool(
@@ -54,6 +56,9 @@ def create_user_mcp_server() -> McpServer:
     ) -> list[mcp_types.TextContent]:
         if name == GET_SESSIONS_RANGE_TOOL_NAME:
             result_text = handle_get_sessions_range(arguments)
+        elif name in MEMORY_TOOL_SPECS:
+            call_id = sha256(repr(server.request_context.request_id).encode("utf-8")).hexdigest()
+            result_text = handle_memory_tool(name, arguments, call_id)
         elif name in THREAD_TOOL_SPECS:
             # MCP request identity is transport-owned; a model cannot choose
             # the command key or pass actor/session/process identifiers.

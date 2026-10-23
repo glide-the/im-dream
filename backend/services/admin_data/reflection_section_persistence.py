@@ -1,5 +1,6 @@
 # [Input] Admin section.begin RTA, worker service consumer and immutable launch snapshot.
 # [Output] Server-only child Thread persistence/config owner with snapshot Session broker and renewal.
+# [Sync] 2026-10-23: bind the task Notion adapter without expanding the RTA operation allowlist.
 # [Pos] Reflections Agent turn authority; RTA never enters CLI, MCP, env, workspace, logs or public DTOs.
 # [Sync] 2026-09-16: exchange the live RTA for a separate source-fenced Gateway runtime grant.
 # [Sync] 2026-09-15: add exact six-operation RTA composition and original-request write recovery.
@@ -243,6 +244,17 @@ class AdminReflectionSectionPersistence(AdminAgentTurnPersistence):
         self._write_lock = RLock()
         self._close_lock = Lock()
         self._closed = False
+        self._notion_runtime = None
+
+    def bind_notion_runtime(self, runtime):
+        self._token()
+        self._notion_runtime = runtime
+
+    def notion_turn_runtime(self, *, actor_id: str, thread_id: str):
+        self._require_binding(actor_id=actor_id, thread_id=thread_id)
+        if self._notion_runtime is None:
+            raise AdminDataError("ADMIN_CONFIGURATION_INVALID", 503)
+        return self._notion_runtime
 
     @property
     def task_id(self) -> str:

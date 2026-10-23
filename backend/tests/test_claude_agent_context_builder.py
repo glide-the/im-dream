@@ -1,3 +1,4 @@
+# [Sync] 2026-10-15: verify three-Tool-only memory guidance across cached/resumed turns and workspace modes.
 # [Sync] 2026-10-10: assert files-directory URI semantics and actual workspace-relative mapping.
 # [Input] Consume ClaudeAgentContextBuilder with validated Session projection fixtures.
 # [Output] Verify system_prompt assembly: header, recent sessions block, runtime context,
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import sys
 import tempfile
 import unittest
@@ -41,6 +43,7 @@ import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before libs.clau
 from claude_agent.context_builder import (
     ClaudeAgentContextBuilder,
     _NO_SESSIONS_TEXT,
+    _REFLECTIONS_MEMORY_WORKFLOW,
     _SESSIONS_HEADER,
     _render_session_entry,
 )
@@ -188,6 +191,25 @@ class TestBuildSystemPrompt(unittest.TestCase):
         self.assertIn("Default retrieval is character fuzzy matching", prompt)
         self.assertIn('retrieval_mode="vector"', prompt)
 
+    def test_memory_guidance_contains_only_three_tools_and_their_usage(self):
+        prompt = _run(self._builder().build_system_prompt([]))
+        self.assertIn(_REFLECTIONS_MEMORY_WORKFLOW, prompt)
+        self.assertLess(
+            prompt.index("## Reflections Memory Tools"),
+            prompt.index("## Session Retrieval Workflow"),
+        )
+        expected = {'list_memory_distillations', 'read_memory_distillation', 'resolve_memory_behavior'}
+        self.assertEqual(set(re.findall(r'mcp__user__(\w+)', _REFLECTIONS_MEMORY_WORKFLOW)), expected)
+        self.assertIn("before=null", _REFLECTIONS_MEMORY_WORKFLOW)
+        self.assertIn("observation_period", _REFLECTIONS_MEMORY_WORKFLOW)
+        self.assertIn("Reading L2 does not require resolving L3 behavior", _REFLECTIONS_MEMORY_WORKFLOW)
+        from libs.claude_agent_kit.server.reflection_memory_tool import MEMORY_TOOL_SPECS
+        for text in [_REFLECTIONS_MEMORY_WORKFLOW, *(spec[0] for spec in MEMORY_TOOL_SPECS.values())]:
+            for unrelated in ('Notion', 'get_sessions_range', 'workspace', '我最近学了什么'):
+                self.assertNotIn(unrelated, text)
+        for name, (description, _) in MEMORY_TOOL_SPECS.items():
+            self.assertFalse(any(other in description for other in expected - {name}))
+
     def test_configured_system_prompt_is_lower_priority_block(self):
         prompt = _run(
             self._builder().build_system_prompt(
@@ -257,6 +279,23 @@ class TestBuildUserMessage(unittest.TestCase):
         blocks = self.builder.build_user_message(self._parts("Hello there"))
         self.assertIsInstance(blocks, list)
         self.assertTrue(all(isinstance(b, dict) for b in blocks))
+
+    def test_memory_guidance_survives_resume_and_workspace_mode_without_rewriting_user(self):
+        # A resumed runtime may retain an older system prompt. The actual current
+        # user blocks must still carry Tool usage, even without runtime/cwd.
+        with tempfile.TemporaryDirectory(prefix="ink-recall-context-") as workspace:
+            for cwd in (None, workspace):
+                for resume in (False, True):
+                    for include_runtime in (False, True):
+                        with self.subTest(cwd=bool(cwd), resume=resume, runtime=include_runtime):
+                            blocks = self.builder.build_user_message(
+                                self._parts("请继续"), cwd=cwd, resume=resume,
+                                include_runtime_context=include_runtime,
+                            )
+                            memory_blocks = [b['text'] for b in blocks if '<reflections_memory_tools>' in b.get('text', '')]
+                            self.assertEqual(len(memory_blocks), 1)
+                            self.assertIn(_REFLECTIONS_MEMORY_WORKFLOW, memory_blocks[0])
+                            self.assertEqual(blocks[-1], {'type': 'text', 'text': '请继续'})
 
     def test_dream_turn_injects_trusted_run_context_and_host_sync_contract(self):
         context = StoryWorkspaceDreamRunContext(

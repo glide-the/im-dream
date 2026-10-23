@@ -2,6 +2,7 @@
 # [Sync] 2026-10-10: carry a private image broker tuple; public request DTO and Runtime credentials unchanged.
 # [Sync] 2026-10-07: add server-owned exact tool auto/manual policy and a thread-safe unattended violation marker.
 # [Sync] 2026-09-15: add the Admin Editor cache loader used after a successful context switch.
+# [Sync] 2026-10-23: carry a server-only task-scoped Notion Read callback; no child credentials.
 # [Input] None — defines standalone type contracts for ClaudeAgentKit.
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
 #          IClaudeAgentSDKClient to server and application layers.
@@ -326,6 +327,7 @@ class AgentRunOptions:
     # Exact server-owned {thread}/.notion-home projection. The Read hook consumes
     # it directly and sdk_env derives the same turn's NOTION_* Runtime binding.
     notion_credential_home: Optional[str] = field(default=None, repr=False)
+    notion_page_reader: Optional[Callable[[str], Any]] = field(default=None, repr=False)
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.

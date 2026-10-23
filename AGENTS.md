@@ -1,6 +1,8 @@
 <!-- [Input] 仓库工作边界、用户产品要求与现行文档维护合同。 -->
 <!-- [Output] Agent 必须遵守的设计、实现、数据、验证与工作区规则。 -->
 <!-- [Pos] 唯一根工作合同，统一维护仓库、产品设计、实现与验证规则。 -->
+<!-- [Sync] 2026-10-18: 文档按技术、产品及项目执行记录使用对应术语，直接定义对象与行为，禁止逻辑话术。 -->
+<!-- [Sync] 2026-10-15: 增加 Claude Agent workflow、Tool description 与 low-sensitivity 分类约束及规则入口。 -->
 <!-- [Sync] 2026-10-10: 删除非标准根 Agent.md 后，AGENTS.md 成为唯一根工作合同。 -->
 <!-- [Sync] 2026-10-10: 产品方案进入正文前必须完成 Double Diamond 的发现、定义、方案比较与交付收敛。 -->
 <!-- [Sync] 2026-10-05: 明确按业务模块存放 PRD；PRD 正文包含骨架，正式设计稿正文包含业务时序、交互及状态图。 -->
@@ -17,7 +19,16 @@
 - Root repository maintenance and Agent contract: `AGENTS.md`
 - Folder contracts: `**/.folder.md`
 - Rules index: `docs/rules/README.md`
+- Claude Agent tool rules: `docs/rules/claude-agent-tools.md`
+- Claude Agent permission policy: `docs/design/claude-agent/claude-agent-permission-policy.md`
 - Cursor rules: `.cursor/rules/*.mdc`
+
+## Claude Agent 说明与权限规则
+
+- 修改 Claude Agent 的上下文说明、工具描述或权限分类前，必须先读取 [Rules index](docs/rules/README.md) 中的 [Claude Agent 工具规则](docs/rules/claude-agent-tools.md)。
+- `*_WORKFLOW` 及同类注入说明，只描述当前相关 Tools 的基本概念和使用方法；不得夹带其他工具、数据源路由或无关业务策略。
+- `*_TOOL_SPECS` 及同类注册定义中的工具描述，只说明该 Tool 的定位与职责；参数约束由 schema 表达，不加入业务场景、跨工具流程或额外行为引导。
+- `_LOW_SENSITIVITY*` 及同类权限分类，必须依据 [Claude-Agent Permission Policy](docs/design/claude-agent/claude-agent-permission-policy.md) 的 low-sensitivity 定义、明确例外和决策顺序；未知工具按 high-sensitivity 处理，不得凭名称、提示词或“只读”声明放行。权限分类变更须同步该策略和对应权限验证。
 
 ## Validation
 - Run requested validation commands after meaningful changes.
@@ -63,18 +74,23 @@
 - 图中的模块和已实现接口按当前代码命名；建议接口明确标注“建议、未实现”。图示与正文、状态表、验收矩阵保持一致，不用图示暗示已实现或已验收；历史图示不删除或覆盖。
 - 评审直接检查 PRD 的页面骨架和正式设计稿的业务交互图，文档验证检查 Markdown 清单、引用路径和 Mermaid 语法；不得将文档检查称为功能或真实业务验收。
 
-## 设计文档用语（强制）
+## 文档用语与术语归属（强制）
 
-- 不得增加“可信”“不可信”“物化”等含糊的概念标签或抽象符号。它们不能代替程序行为定义，只会增加理解成本；已有设计稿也应按具体语境改写。
-- 使用程序设计专业用语，并写明执行模块、输入输出、判断条件及失败处理。例如分别说明身份认证、权限校验、schema 校验、调用 ID 匹配、数据转换、文件生成、数据库持久化，而不是用一个笼统形容词概括。
-- 不做全局同义词替换：描述数据来自何处、经过哪些检查、存在哪里；正文、表格、时序图和示例注释必须保持一致。已有代码标识符、协议字段和官方产品名称保持原样，不为文档清理改程序接口。
-- 本次及后续相关项目的功能变更，必须按上方“通用产品设计原则”同步受影响设计稿，覆盖正常流程、状态转换、失败反馈、影响范围和验收，不增加无关抽象、确认或架构。
-- 已废弃的实现说明不作为现行设计规范。不得因此整份删除仍承载功能、接口、流程或测量方法的设计稿，也不得删除或覆盖历史版本原文；需要重写时将现行稿与历史稿分别保存并明确索引。清理文档不授权删除相关程序、接口或测试。
+- 本节适用于仓库文档的新增、修改和评审，覆盖正文、表格、图注及示例说明。
+- 禁止使用“不是”“可是”“但是”“也是”及同类逻辑话术。直接定义对象、职责、规则、执行条件、状态转换和结果；禁止通过概念对比、转折、类比或附加判断表达业务描述。
+- 技术文档使用技术术语，描述模块、接口、协议、字段、数据类型、输入输出、认证、权限校验、schema 校验、调用 ID 匹配、数据转换、持久化、超时、重试和失败恢复，明确执行模块及处理条件。
+- 产品文档使用产品术语，描述用户目标、用户任务、角色、页面入口、操作、信息展示、反馈、业务规则、业务状态及验收条件。
+- 产品需求到技术实现的过程记录使用项目管理术语，记录需求范围、工作项、负责人、依赖、里程碑、交付物、进度、风险、阻塞项、变更和验收状态；通过需求项、任务项、交付物和验收证据建立追踪关系。
+- 按内容所属领域分别说明产品规则、技术设计和交付进度；术语使用保持领域归属，业务描述采用具体业务对象、操作和结果。
+- 禁止增加“可信”“不可信”“物化”等含糊标签或抽象符号；按实际行为说明数据来源、身份认证、资源归属、校验步骤、数据转换及存储位置。
+- 文档修订须逐项核对定义和行为，禁止全局同义词替换；正文、表格、时序图和示例注释保持一致。已有代码标识符、协议字段和官方产品名称保持原样，程序接口变更须按功能变更范围处理。
+- 功能变更按“通用产品设计原则”同步受影响设计稿，覆盖正常流程、状态转换、失败反馈、影响范围和验收；新增抽象、确认步骤及架构须具有对应业务需求。
+- 废弃实现说明标注历史状态，现行稿与历史稿分别保存并维护索引。保留仍承载功能、接口、流程或测量方法的设计稿，保留历史版本原文。文档清理的授权范围仅限文档，相关程序、接口和测试的删除须具有单独授权。
 
 ## Claude Agent 资源策略领域执行规则
 
 1. `default`、Admin `desired` 与 Dream `effective` 必须保持独立；只有 fresh snapshot 的 revision 与四项值全部匹配 desired，才能声明 applied。
-2. 四项资源值统一为 `1..9_007_199_254_740_991` 的正安全整数，且组合内存字节必须精确；这些是 JSON/TypeScript 技术边界，不是产品配额，不得使用 0 或其他 sentinel 关闭保护。
+2. 四项资源值统一为 `1..9_007_199_254_740_991` 的正安全整数，且组合内存字节必须精确；数值范围用于 JSON/TypeScript 表示与校验，产品配额依据产品规则定义；不得使用 0 或其他 sentinel 关闭保护。
 3. Admin 只向 PostgreSQL 写 desired；Dream 只由独立 provider/composition root 读取并应用，不新增 Dream HTTP、消息队列、restart、kill 或 shell 控制通道。
 4. desired invalid、PostgreSQL/capability unavailable 或后台异常时保留 last-known-good effective 与 revision；后台同步失败不得传播到 Agent turn。
 5. 只有更高且合法的 revision 才替换配置并推进 LKG；同 revision/同值只刷新 diagnostics，同 revision/异值或 revision 回滚均为 invalid。
