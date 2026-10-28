@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: load the Agent selector through one shared Deck/Agent catalog request.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-14: navigate Reflections Analyze preview tags through the existing Analysis route.
 // [Sync] 2026-10-07: remove the redundant history title/subtitle block below the existing tab/search toolbar.
@@ -137,7 +138,7 @@ import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { getDateLocale } from '../../i18n';
-import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
+import { listDecksWithVoices, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
 import {
@@ -488,21 +489,10 @@ function ChatViewContent({
     let cancelled = false;
     setIsLoadingDecks(true);
     setDeckLoadError(null);
-    void listDecks()
-      .then(async (decks) => {
-        // @@@ Hydrate each deck with its voices (same pattern as DeckManager) so the
-        // Dream Deck selector can preview the agents bundled with each deck.
-        const hydrated = await Promise.all(
-          decks.map(async (deck) => {
-            try {
-              return await getDeck(deck.id);
-            } catch {
-              return deck;
-            }
-          }),
-        );
+    void listDecksWithVoices()
+      .then((decks) => {
         if (cancelled) return;
-        const enabledDecks = hydrated.filter((deck) => deck.enabled);
+        const enabledDecks = decks.filter((deck) => deck.enabled);
         setAvailableDecks(enabledDecks);
         setSelectedDeckId((current) => (
           current && enabledDecks.some((deck) => deck.id === current) ? current : undefined

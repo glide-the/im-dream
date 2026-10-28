@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-28: 完整目录聚合、单次请求、会话去重及失败恢复。 -->
 <!-- [Input] Current Admin Registry105/106/122-129 Deck DTO contracts and Dream Runtime boundaries. -->
 <!-- [Output] Dream/Chat Deck consumption, failure and ownership behavior. -->
 <!-- [Pos] Current Deck consumption design; Admin owns data access, Dream owns product/Runtime/files. -->
@@ -108,3 +109,97 @@ fail closed。
 - `backend/services/admin_data/deck_plugin_binding_data.py`
 - `backend/services/deck/chat_context.py`
 - `backend/services/deck/agent_type_runtime.py`
+
+
+## 9. Deck / Agent 目录读取
+
+### 背景与问题
+
+Chat 选择器和全局 Voice 配置曾分别读取 Deck 列表，再逐项读取全部 Deck 详情。N 个 Deck 对应每个调用方 1 + N 次浏览器请求，选择器等待全部详情返回。
+
+### 目标与边界
+
+`GET /api/decks/catalog` 一次返回当前用户可访问的 Deck 列表与其有序 `voices`。该接口复用 Admin 的用户列表可见性、顺序、策略字段及原 Voice 字段；数据库 schema、选择规则、Thread 创建和 Runtime 行为保持现行合同。会话事件订阅、系统配置和存储策略分别由其现有模块读取。
+
+### 概念与规则
+
+- Admin `deck.catalog` 接受空输入，使用认证主体确定用户，要求 `dream:read` 与现有 Deck schema capability。操作描述追加到 Registry 尾部，已有操作描述和 hash 保持。
+- `DeckVoiceRepository.catalog` 复用 `list(false)`，按返回的 Deck ID 集合一次查询全部 Voice；空列表直接返回。列表策略装饰继续由现有 `list` 负责。
+- Dream `AdminDeckListData.catalog` 校验精确 operation capability、严格 DTO、Deck ID 唯一性、Voice ID 唯一性和 `voice.deck_id` 对应关系，再执行原 Memory 字段转换。
+- `listDecksWithVoices` 为 Chat、全局 Voice 初始化、Deck 管理和 Reflections提供同一传输。相同 transport 与当前会话 CSRF 的在途读取共享 Promise；成功或失败后释放，下一次显式读取获取新数据。会话变更后拒绝旧响应。
+- 成功读取对应一次浏览器目录请求与一次 Admin 领域读取。Admin 共享传输层保留现有只读恢复规则：网络超时后使用相同 request ID 再尝试一次，第二次使用现有较短超时；领域消费者继续读取完整目录。
+- 页面加载期间保持既有禁用和加载文案；成功后按现有 enabled 规则展示。失败沿现有错误反馈结束加载；重新进入、刷新或现有重试入口发起完整目录读取。
+- 发布顺序为 Admin 发布 `deck.catalog` → Dream 后端与前端更新。缺少 operation capability 时 Dream 返回结构化不可用响应。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant C as ChatView
+    participant V as voiceApi
+    participant D as deckReadApi
+    participant R as voices.router
+    participant A as Admin DeckVoiceRepository
+    U->>C: 打开新对话
+    C->>D: listDecksWithVoices
+    V->>D: 同一会话初始化 Voice 配置
+    D->>D: 同 transport 与会话共享在途读取
+    D->>R: GET /api/decks/catalog
+    R->>A: deck.catalog 空输入和当前用户委托
+    A->>A: list(false) 并按 Deck ID 集合读取 Voice
+    A-->>R: Deck 列表和有序 Voice DTO
+    R->>R: 校验 capability、DTO 与 ID 对应关系
+    R-->>D: 完整目录
+    D-->>C: 当前会话目录
+    D-->>V: 同一目录
+    C-->>U: 启用 Agent 选择入口
+```
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant C as ChatView
+    participant D as deckReadApi
+    participant R as voices.router
+    participant A as Admin
+    C->>D: 读取目录
+    D->>R: GET /api/decks/catalog
+    R->>A: 校验并调用 deck.catalog
+    alt capability 缺失或响应非法
+        A-->>R: 不可用或非法响应
+        R-->>D: 结构化失败
+        D-->>C: 结束加载并返回错误
+        C-->>U: 既有加载失败反馈
+        U->>C: 重新进入页面
+        C->>D: 发起新目录读取
+    else 读取期间会话变更
+        A-->>R: 原用户目录
+        R-->>D: 原读取响应
+        D->>D: 当前会话 CSRF 校验失败
+        D-->>C: 拒绝旧会话响应
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading: 进入页面
+    Loading --> Ready: 当前会话目录读取成功
+    Loading --> Failed: 读取失败或会话已变更
+    Ready --> Loading: 现有刷新或重新进入
+    Failed --> Loading: 重新进入或现有重试
+```
+
+验收：选择器的目录加载发起一次完整读取；相同会话并发调用共享该请求；读取过程无逐项 Deck 详情请求；空目录保留空状态；失败结束加载且新读取可恢复；技术测试回执与正常账户验收分别记录。
+
+
+## 10. 提交范围与技术验证入口（2026-10-29）
+
+提交范围覆盖 Admin 目录操作、Dream 目录转发和原 Web 选择器调用方。数据库 schema 与已有业务写操作保持现行合同。
+
+| 工作目录 | 验证命令 |
+| --- | --- |
+| Dream backend/ | `./.venv/bin/python -m pytest -q tests/test_admin_deck_list_routes.py tests/test_admin_deck_detail_routes.py` |
+| Admin 根目录 | `pnpm exec vitest run app/lib/dream/deckCatalog.test.ts app/lib/dream/deckVoiceDto.test.ts app/lib/dream/deckVoiceRepository.test.ts app/lib/dream/deckVoiceService.test.ts app/lib/dream/deckPluginBindingRegistration.test.ts --reporter=default` |
+| Dream frontend/ 与 Admin 根目录 | `pnpm exec tsc --noEmit --incremental false --pretty false` |
+| Dream frontend/ | `E2E_WEB_BASE=http://127.0.0.1:5174 pnpm exec playwright test --config=e2e/deck-catalog.config.ts --reporter=line --workers=1` |
+
+浏览器验证使用安装版 Chrome 和具名隔离前端进程；HTTP、认证和模型边界由 fixture 提供。目录传输检查并发调用共享单次请求，完整 Chat 页面检查选择器可操作前逐项 Deck 详情 GET 数量为 0。Markdown 引用、目录清单、Mermaid 和受影响文件定向代码检查另行记录回执。
