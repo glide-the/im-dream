@@ -1,3 +1,4 @@
+# [Sync] 2026-10-28: align timeout evidence with the existing bounded read-only transport recovery and original request ID.
 # [Input] Actual Deck detail route/Auth/DTO with controlled Admin aggregates and original Memory values.
 # [Output] Original fields/numbers/time and closed malformed/entity/permission failure evidence.
 # [Pos] Provider-free public Deck read harness; no database or copied policy implementation.
@@ -70,6 +71,7 @@ def boundary(monkeypatch):
             assert request.headers["authorization"] == "Bearer read-token" and "cookie" not in request.headers
             assert json.loads(request.content) == {"request_id":rid,"input":{"deck_id":"deck-1"}}
             calls.append(rid)
+            outputs.setdefault("timeouts", []).append(request.extensions["timeout"])
             value = outputs["deck"]
             if isinstance(value, Exception): raise value
             value = {"deck":value}
@@ -150,8 +152,9 @@ def test_runtime_delegation_is_not_deck_management_authority(boundary):
     assert browser.get("/api/decks/deck-1", headers={"authorization":"Bearer idg_synthetic"}).status_code == 401 and not calls
 
 
-def test_read_timeout_has_one_original_request_and_no_retry(boundary):
+def test_read_timeout_retains_original_request_with_bounded_transport_recovery(boundary):
     browser, outputs, calls, *_ = boundary; outputs["deck"] = httpx.ReadTimeout("private token/body")
     response = browser.get("/api/decks/deck-1", headers=HEADERS)
     assert response.status_code == 504 and response.json()["detail"] == {"error_code":"ADMIN_TIMEOUT","request_id":calls[0],"outcome_unknown":False}
-    assert len(calls) == 1 and "private" not in response.text
+    assert len(calls) == 2 and calls[0] == calls[1] and "private" not in response.text
+    assert outputs["timeouts"][1]["read"] == min(2.0, outputs["timeouts"][0]["read"])

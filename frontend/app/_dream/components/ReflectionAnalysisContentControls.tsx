@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: analysis Agent choices use one shared Deck/Agent catalog read.
 // [Input] Page-local analysis selection, existing Deck APIs and metadata-only Reflections candidates.
 // [Output] Compact accessible analysis-content panel; opening never starts sync or inference.
 // [Pos] Reflections configuration presentation; reuses DeckChatSelector without changing Chat semantics.
@@ -5,7 +6,7 @@
 // [Sync] 2026-10-13: add overall Notion inclusion and Deck-grouped analysis Agent selection.
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getDeck, getReflectionAnalysisContent, listDecks,
+import { getReflectionAnalysisContent, listDecksWithVoices,
   type Deck, type ReflectionAnalysisContentCandidates, type ReflectionAnalysisContentOptions,
 } from '../api/voiceApi';
 import DeckChatSelector from './deck/DeckChatSelector';
@@ -61,7 +62,7 @@ export default function ReflectionAnalysisContentControls({ value, onChange, aut
     void getReflectionAnalysisContent().then(result => {
       if (!disposed) setCandidates(result);
     }).catch(() => { if (!disposed) setNotionError(true); }).finally(() => { if (!disposed) setLoading(false); });
-    void listDecks().then(items => Promise.all(items.filter(deck => deck.enabled).map(deck => getDeck(deck.id))))
+    void listDecksWithVoices()
       .then(items => { if (!disposed) setDecks(items.filter(deck => deck.enabled)); })
       .catch(() => { if (!disposed) setDeckError(true); })
       .finally(() => { if (!disposed) setDeckLoading(false); });

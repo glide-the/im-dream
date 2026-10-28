@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-28: expose one authenticated Deck/Agent catalog read before the dynamic Deck route.
 # [Sync] 2026-09-15: both public Deck list modes use Admin without default or filesystem side effects.
 # [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
 # [Sync] 2026-09-15: four public Voice operations use Admin; Deck chat-context/internal data remains pending.
@@ -45,7 +46,7 @@ from services.admin_data.deck_default_data import (
 )
 from services.admin_data.deck_mutation_data import AdminDeckMutationData, DeckUpdateRequestDTO
 from services.admin_data.deck_detail_data import AdminDeckDetailData
-from services.admin_data.deck_list_data import AdminDeckListData, DeckListInputDTO
+from services.admin_data.deck_list_data import AdminDeckListData, DeckListInputDTO, DeckCatalogInputDTO
 from services.admin_data.deck_version_models import DeckIdInputDTO
 from services.admin_data.models import DeckDeleteBlockedDetailsDTO
 from services.admin_data.voice_data import (
@@ -100,6 +101,12 @@ def _deck_list_data(request: Request) -> AdminDeckListData:
 async def list_decks(published: bool = False, current_user: dict = Depends(get_current_user), data: AdminDeckListData = Depends(_deck_list_data)):
     """Read actor Decks or the collectable community aggregate through Admin."""
     return await invoke_admin_operation(current_user, data.list, DeckListInputDTO(community=published))
+
+
+@router.get("/api/decks/catalog")
+async def read_deck_catalog(current_user: dict = Depends(get_current_user), data: AdminDeckListData = Depends(_deck_list_data)):
+    """Read owned Decks with ordered Voices through a single Admin operation."""
+    return await invoke_admin_operation(current_user, data.catalog, DeckCatalogInputDTO())
 
 
 def _deck_default_data(request: Request) -> AdminDeckDefaultData:

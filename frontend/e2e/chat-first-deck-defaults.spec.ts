@@ -1,3 +1,5 @@
+// [Sync] 2026-10-28: require successful replacement reads for cancelled auth/session and connector lifecycle GETs.
+// [Sync] 2026-10-28: serve complete Deck/Agent catalogs through the additive bulk read endpoint.
 // [Sync] 2026-10-13: assert the current official Claude Code Plugins heading after changing language.
 // [Input] Authenticated root App, Story Workspace navigation, Deck Manager, and
 //         deterministic production-shaped Deck CRUD responses.
@@ -17,7 +19,7 @@
 // [Sync] 2026-08-16: restore pre-01a00576 Agent/Prompt/plugin-ref maintenance and
 //                    CozeLoop-inspired durable draft/explicit content commits inside the popup.
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Request } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 const PREVIEW_DREAM_RUN_ID = 'run_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
@@ -215,6 +217,18 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
   const expectedLifecycleAborts: string[] = [];
+  const replacementReadPaths = new Set(['/auth/session', '/api/connectors']);
+  const cancelledReads: {path: string; order: number}[] = [];
+  const successfulReads: {path: string; order: number}[] = [];
+  const requestOrder = new WeakMap<Request, number>();
+  let nextRequestOrder = 0;
+  page.on('request', request => requestOrder.set(request, ++nextRequestOrder));
+  page.on('response', response => {
+    const request = response.request(), path = new URL(response.url()).pathname;
+    if (request.method() === 'GET' && response.ok() && replacementReadPaths.has(path)) {
+      successfulReads.push({path, order: requestOrder.get(request) ?? 0});
+    }
+  });
   const expectedHttpFailureDiagnostics: string[] = [];
   const expectedHttpFailures = new Map<number, number>();
   const isKnownExternal = (url: string) => (
@@ -249,11 +263,13 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
       && (
         ['/auth/options', '/api/story-workspace/dream-runs', '/api/sessions/events',
           '/api/deck-plugins/installations'].includes(pathname)
+        || replacementReadPaths.has(pathname)
         || (pathname === '/api/claude-agent/threads' && search === '?limit=21')
       )
     );
     if (isExpectedLifecycleAbort) {
       expectedLifecycleAborts.push(`${request.method()} ${pathname}${search}`);
+      if (replacementReadPaths.has(pathname)) cancelledReads.push({path: pathname, order: requestOrder.get(request) ?? 0});
     } else if (!isKnownExternal(request.url())) {
       diagnostics.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
     }
@@ -518,7 +534,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
       await route.fulfill({ json: { runs: [] } });
       return;
     }
-    if (pathname === '/api/decks' && request.method() === 'GET') {
+    if ((pathname === '/api/decks' || pathname === '/api/decks/catalog') && request.method() === 'GET') {
       deckListReads += 1;
       if (failNextDeckRead) {
         failNextDeckRead = false;
@@ -1467,8 +1483,12 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(refreshedDetailsDialog.getByText('Select an agent from the list to edit')).toBeVisible();
   expect(unexpectedApiRequests).toEqual([]);
   await testInfo.attach('expected-lifecycle-aborts', {
-    body: JSON.stringify(expectedLifecycleAborts, null, 2), contentType: 'application/json',
+    body: JSON.stringify({expectedLifecycleAborts, cancelledReads, successfulReads}, null, 2), contentType: 'application/json',
   });
+  for (const cancelled of cancelledReads) expect(
+    successfulReads.some(read => read.path === cancelled.path && read.order > cancelled.order),
+    `Replacement GET ${cancelled.path}`,
+  ).toBe(true);
   await expect.poll(() => diagnostics).toEqual([]);
   expect(expectedHttpFailureDiagnostics).toHaveLength(4);
   expect(expectedHttpFailures.get(503)).toBe(0);

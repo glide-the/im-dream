@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: load Deck cards and Agents with one catalog read after explicit reconciliation.
 // [Input] Existing Deck/Agent CRUD APIs, PDF-led home, original create defaults, and pre-refactor maintenance editor.
 // [Output] Resilient Deck home/Work manager with Deck preview, create-first editing, and related Chat cleanup.
 // [Pos] Deck manager orchestration node in frontend/app/_dream/components.
@@ -15,8 +16,7 @@ import {
   createVoice,
   deleteDeck,
   deleteVoice,
-  getDeck,
-  listDecks,
+  listDecksWithVoices,
   reconcileDefaultDeckPlugin,
   syncDeck,
   updateDeck,
@@ -88,15 +88,7 @@ export default function DeckManager({
           );
         }
       }
-      const fetchedDecks = await listDecks();
-      const decksWithVoices = await Promise.all(fetchedDecks.map(async (deck) => {
-        try {
-          return await getDeck(deck.id);
-        } catch (deckError) {
-          console.error(`Failed to load agents for Deck ${deck.id}:`, deckError);
-          return deck;
-        }
-      }));
+      const decksWithVoices = await listDecksWithVoices();
       setDecks(decksWithVoices);
       setError(null);
       setRefreshError(null);

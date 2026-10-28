@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: serve complete Agent catalogs and reject per-Deck selector detail hydration.
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
 //          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
@@ -165,6 +166,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
     realPersistenceModelAndBilling: 'out-of-scope',
   });
   const diagnostics: string[] = [];
+  const deckDetailReads: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'GET' && [
+      `/api/decks/${dreamDeck.id}`, `/api/decks/${actorSystemDefaultDeck.id}`,
+    ].includes(new URL(request.url()).pathname)) deckDetailReads.push(new URL(request.url()).pathname);
+  });
   const unexpectedApiRequests: string[] = [];
   let launchBody: Record<string, unknown> | null = null;
   let historicalChatTurnBody: Record<string, unknown> | null = null;
@@ -221,7 +228,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
     if (pathname === '/api/decks/defaults/reconcile' && request.method() === 'POST') {
       return route.fulfill({ json: { deck_id: actorSystemDefaultDeck.id, reconciled: false, reason: 'refs_preserved' } });
     }
-    if (pathname === '/api/decks' && request.method() === 'GET') {
+    if ((pathname === '/api/decks' || pathname === '/api/decks/catalog') && request.method() === 'GET') {
       const decks = url.searchParams.get('published') === 'true'
         ? [dreamDeck]
         : [actorSystemDefaultDeck, dreamDeck];
@@ -496,6 +503,8 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(page.getByRole('tab', { name: '聊天历史' })).toBeVisible();
   const agentSelector = page.getByRole('button', { name: '为本次对话选择一个 Agent' });
   await expect(agentSelector).toBeVisible();
+  await expect(agentSelector).toBeEnabled();
+  expect(deckDetailReads).toEqual([]);
   await page.getByRole('button', { name: historicalThread.title }).click();
   await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
   const historicalAssistantTurn = page.locator('[data-chat-assistant-turn="history-completed-turn-e2e"]');
@@ -635,7 +644,7 @@ test('Dream home reaches the final run at a narrow low-height viewport', async (
     if (pathname === '/api/decks/defaults/reconcile') {
       return route.fulfill({ json: { deck_id: dreamDeck.id, reconciled: false, reason: 'refs_preserved' } });
     }
-    if (pathname === '/api/decks') return route.fulfill({ json: { decks: [dreamDeck] } });
+    if (pathname === '/api/decks' || pathname === '/api/decks/catalog') return route.fulfill({ json: { decks: [dreamDeck] } });
     if (pathname === '/api/story-workspace/dream-runs') return route.fulfill({ json: { runs } });
     if (pathname === '/api/sessions' || pathname === '/api/sessions/range') return route.fulfill({ json: { sessions: [] } });
     if (pathname === '/api/sessions/events') return route.fulfill({ contentType: 'text/event-stream', body: ': connected\n\n' });

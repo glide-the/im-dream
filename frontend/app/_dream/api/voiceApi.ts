@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: hydrate enabled Voice configs from one shared Deck/Agent catalog request.
 // [Sync] 2026-10-14: expose strict analysis-created history pages with decimal IDs and exact cursors.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
@@ -39,6 +40,8 @@ import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSessio
 import { z } from 'zod';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
+import { listDecksWithVoices } from './deckReadApi';
+export { listDecksWithVoices };
 import type { EditorState } from '../engine/EditorEngine';
 import { consumeClaudeAgentSseStream } from '../lib/claude-agent-sse-utils';
 import { ClaudeAgentTransportError } from '../lib/claude-agent-transport';
@@ -1560,36 +1563,22 @@ export async function forkVoice(voiceId: string, targetDeckId: string): Promise<
  */
 export async function loadVoicesFromDecks(): Promise<Record<string, VoiceConfig>> {
   try {
-    const decks = await listDecks();
+    const decks = await listDecksWithVoices();
     const voiceConfigs: Record<string, VoiceConfig> = {};
 
-    // Load voices from each enabled deck
     for (const deck of decks) {
       if (!deck.enabled) continue;
-
-      try {
-        const fullDeck = await getDeck(deck.id);
-
-        if (fullDeck.voices) {
-          for (const voice of fullDeck.voices) {
-            if (!voice.enabled) continue;
-
-            // @@@ Convert Voice to VoiceConfig format
-            // Key by voice.id (UUID) so backend can find it in database
-            voiceConfigs[voice.id] = {
-              name: voice.name,
-              systemPrompt: voice.system_prompt,
-              enabled: voice.enabled,
-              icon: voice.icon,
-              color: voice.color,
-              thread_id: voice.thread_id,
-              memory_workspace_config: voice.memory_workspace_config
-            };
-          }
-        }
-      } catch (err) {
-        console.error(`Failed to load voices from deck ${deck.id}:`, err);
-        // Continue loading other decks even if one fails
+      for (const voice of deck.voices || []) {
+        if (!voice.enabled) continue;
+        voiceConfigs[voice.id] = {
+          name: voice.name,
+          systemPrompt: voice.system_prompt,
+          enabled: voice.enabled,
+          icon: voice.icon,
+          color: voice.color,
+          thread_id: voice.thread_id,
+          memory_workspace_config: voice.memory_workspace_config,
+        };
       }
     }
 

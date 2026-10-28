@@ -1,3 +1,4 @@
+# [Sync] 2026-10-28: prove catalog single dispatch, ownership relations, empty output and capability failures.
 # [Input] Actual public Deck list/Auth/DTO and controlled owned/community aggregates.
 # [Output] Original mode-dependent fields, counts, authority and malformed/capability failure evidence.
 # [Pos] Provider-free Deck list harness; no SQL, default initialization or policy copy.
@@ -13,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from routers.voices import router
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
-from services.admin_data.deck_list_data import LIST_DECKS
+from services.admin_data.deck_list_data import LIST_DECKS, READ_DECK_CATALOG
 from services.admin_data.deck_version_data import DECK_VERSION_SCHEMA_REQUIREMENTS
 from services.admin_data.request_auth import AdminRequestAuth
 from tests.test_admin_deck_detail_routes import aggregate
@@ -33,8 +34,8 @@ def boundary(monkeypatch):
     monkeypatch.setattr(database,"get_db",lambda *_a,**_kw:pytest.fail("Deck lists must not query Dream PG"))
     assert not hasattr(database,"get_user_decks") and not hasattr(database,"get_published_decks")
     config = AdminDataConfig(base_url="https://admin.example",issuer="https://admin.example/api/auth",resource="https://dream.example/api",service_client_id="dream-service",service_secret="s"*32)
-    outputs = {"decks":[list_item()]}; calls = []
-    schemas = [x.model_dump() for x in DECK_VERSION_SCHEMA_REQUIREMENTS]; operations = [LIST_DECKS.capability.model_dump()]
+    outputs = {"decks":[list_item()], "catalog":[{**list_item(), "voices":aggregate()["voices"]}]}; calls = []
+    schemas = [x.model_dump() for x in DECK_VERSION_SCHEMA_REQUIREMENTS]; operations = [LIST_DECKS.capability.model_dump(), READ_DECK_CATALOG.capability.model_dump()]
     class ListVerifier(Verifier):
         def verify(self,token,*,required_scopes):
             if token.startswith("idg_"):raise AdminDataError("INVALID_ACCESS_TOKEN",401)
@@ -46,13 +47,14 @@ def boundary(monkeypatch):
         elif request.url.path.endswith("/principal"):
             value = {"subject":"opaque-ba-subject","canonical_user_id":"42","client_id":"dream-browser","scopes":["dream:read"],"status":"active"}
         else:
-            assert request.url.path.endswith("/operations/deck.list") and request.headers["authorization"]=="Bearer read-token" and "cookie" not in request.headers
-            body = json.loads(request.content); assert set(body)=={"request_id","input"} and body["request_id"]==rid and set(body["input"])=={"community"}
-            calls.append((body["input"],rid)); value = outputs["decks"]
+            catalog = request.url.path.endswith("/operations/deck.catalog")
+            assert (catalog or request.url.path.endswith("/operations/deck.list")) and request.headers["authorization"]=="Bearer read-token" and "cookie" not in request.headers
+            body = json.loads(request.content); assert set(body)=={"request_id","input"} and body["request_id"]==rid and set(body["input"])==(set() if catalog else {"community"})
+            calls.append((body["input"],rid)); outputs.setdefault("timeouts", []).append(request.extensions["timeout"]); value = outputs["catalog" if catalog else "decks"]
             if isinstance(value,Exception):raise value
             value = {"decks":value}
         return httpx.Response(200,json={"request_id":rid,"data":value})
-    http = httpx.Client(transport=httpx.MockTransport(handler)); client = AdminDataClient(config,client=http,operations=(LIST_DECKS,))
+    http = httpx.Client(transport=httpx.MockTransport(handler)); client = AdminDataClient(config,client=http,operations=(LIST_DECKS,READ_DECK_CATALOG))
     app = FastAPI(); app.state.admin_request_auth = AdminRequestAuth(config,client=client,verifier=ListVerifier()); app.include_router(router)
     with TestClient(app) as browser:yield browser,outputs,calls,schemas,operations
     http.close()
@@ -116,7 +118,66 @@ def test_runtime_delegate_cannot_manage_deck_lists(boundary):
     assert browser.get("/api/decks",headers={"authorization":"Bearer idg_synthetic"}).status_code==401 and not calls
 
 
-def test_read_timeout_preserves_original_request_without_retry(boundary):
+def test_read_timeout_preserves_original_request_with_bounded_transport_recovery(boundary):
     browser,outputs,calls,*_=boundary;outputs["decks"]=httpx.ReadTimeout("private token")
     response=browser.get("/api/decks",headers=HEADERS)
-    assert response.status_code==504 and response.json()["detail"]=={"error_code":"ADMIN_TIMEOUT","request_id":calls[0][1],"outcome_unknown":False} and len(calls)==1
+    assert response.status_code==504 and response.json()["detail"]=={"error_code":"ADMIN_TIMEOUT","request_id":calls[0][1],"outcome_unknown":False} and len(calls)==2
+    assert calls[0] == calls[1] and outputs["timeouts"][1]["read"] == min(2.0, outputs["timeouts"][0]["read"])
+
+
+def test_catalog_is_one_read_with_existing_voice_projection(boundary):
+    browser, _, calls, *_ = boundary
+    response = browser.get("/api/decks/catalog", headers=HEADERS)
+    assert response.status_code == 200 and len(calls) == 1 and calls[0][0] == {}
+    deck = response.json()["decks"][0]
+    assert deck["id"] == "deck-1" and deck["owner_id"] == 42
+    assert "author_display_name" not in deck and deck["total_voice_count"] == 3
+    voice = deck["voices"][0]
+    assert voice["deck_id"] == deck["id"] and voice["enabled"] is False
+    assert voice["memory_workspace_config"]["big"] == 9007199254740993
+    assert "memory_workspace_config_json" not in voice
+
+
+def test_empty_catalog_is_a_successful_single_read(boundary):
+    browser, outputs, calls, *_ = boundary
+    outputs["catalog"] = []
+    response = browser.get("/api/decks/catalog", headers=HEADERS)
+    assert response.status_code == 200 and response.json() == {"decks": []} and len(calls) == 1
+
+
+@pytest.mark.parametrize("mutation", ["missing-voices", "cross-deck", "duplicate-deck", "duplicate-voice", "extra-voice-field"])
+def test_invalid_catalog_is_closed_without_detail_fallback(boundary, mutation):
+    browser, outputs, calls, *_ = boundary
+    deck = outputs["catalog"][0]
+    if mutation == "missing-voices": deck.pop("voices")
+    elif mutation == "cross-deck": deck["voices"][0]["deck_id"] = "private-other-deck"
+    elif mutation == "duplicate-deck": outputs["catalog"].append(copy.deepcopy(deck))
+    elif mutation == "duplicate-voice": deck["voices"].append(copy.deepcopy(deck["voices"][0]))
+    else: deck["voices"][0]["private"] = "private detail"
+    response = browser.get("/api/decks/catalog", headers=HEADERS)
+    assert response.status_code == 503 and len(calls) == 1
+    assert response.json()["detail"]["error_code"] == "ADMIN_RESPONSE_INVALID"
+    assert "private" not in response.text
+
+
+@pytest.mark.parametrize("mutation", ["missing", "hash", "schema"])
+def test_catalog_requires_its_exact_published_capability(boundary, mutation):
+    browser, _, calls, schemas, operations = boundary
+    if mutation == "missing": operations.pop()
+    elif mutation == "hash": operations[-1]["contract_sha256"] = "0" * 64
+    else: schemas.pop()
+    assert browser.get("/api/decks/catalog", headers=HEADERS).status_code == 503 and not calls
+
+
+def test_catalog_timeout_keeps_bounded_same_request_transport_recovery(boundary):
+    browser, outputs, calls, *_ = boundary
+    outputs["catalog"] = httpx.ReadTimeout("private token")
+    response = browser.get("/api/decks/catalog", headers=HEADERS)
+    assert response.status_code == 504 and len(calls) == 2 and calls[0] == calls[1] and "private" not in response.text
+    assert outputs["timeouts"][1]["read"] == min(2.0, outputs["timeouts"][0]["read"])
+
+
+def test_catalog_rejects_runtime_delegation_before_domain_read(boundary):
+    browser, _, calls, *_ = boundary
+    assert browser.get("/api/decks/catalog", headers={"authorization":"Bearer idg_synthetic"}).status_code == 401
+    assert not calls

@@ -32,6 +32,7 @@
 # [Sync] 2026-09-15: register the OAuth-only owned/community Deck list read.
 # [Sync] 2026-09-15: construct one OAuth-owned Editor runtime without projecting its credentials to stdio.
 # [Sync] 2026-10-13: register additive Reflections content operations separately from Registry99.
+# [Sync] 2026-10-28: register the exact deck.catalog read capability alongside unchanged list/detail operations.
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
@@ -87,7 +88,7 @@ from .social_data import SOCIAL_OPERATIONS
 from .voice_data import VOICE_OPERATIONS
 from .deck_mutation_data import DECK_MUTATION_OPERATIONS
 from .deck_detail_data import READ_DECK_DETAIL
-from .deck_list_data import LIST_DECKS
+from .deck_list_data import LIST_DECKS, READ_DECK_CATALOG
 from .preflight_data import EXECUTE_PREFLIGHT, READ_PREFLIGHT
 from .run_data import RUN_OPERATIONS
 from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
@@ -204,6 +205,7 @@ class AdminRequestAuth:
                 *RUN_OPERATIONS,
                 READ_DECK_DETAIL,
                 LIST_DECKS,
+                READ_DECK_CATALOG,
                 READ_PREFLIGHT,
                 EXECUTE_PREFLIGHT,
                 ENSURE_DEFAULT_WORKSPACE,
