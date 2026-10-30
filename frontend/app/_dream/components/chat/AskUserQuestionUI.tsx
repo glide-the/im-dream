@@ -2,6 +2,7 @@
 // [Output] Interactive question form — rendered unframed inside the floating ToolConfirmationDock
 //          above AIInputDock (framed/showHeader/label props keep the legacy card look available).
 // [Pos] ask-user-question component node in frontend/app/_dream/components/chat
+// [Sync] 2026-10-28: share original question normalization with native; keep Web fields, answer keys, validation and DOM.
 // [Sync] 2026-05-27: add null guard for undefined input at useMemo start to prevent crash when tool is in input-streaming state.
 // [Sync] 2026-07-08: use the semantic on-action text token for dark-mode-safe submit buttons.
 // [Sync] 2026-07-20: add framed/showHeader/submitLabel/cancelLabel props so the form can render
@@ -24,31 +25,8 @@ import {
 } from './askUserQuestionAnswers';
 
 export type { QuestionOption } from './askUserQuestionAnswers';
-
-export interface QuestionField {
-  id?: string;
-  question?: string;
-  label?: string;
-  header?: string;
-  type?: 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'number';
-  options?: QuestionOption[];
-  required?: boolean;
-  default?: string | number | boolean | string[];
-  placeholder?: string;
-  description?: string;
-  multiSelect?: boolean;
-}
-
-export interface AskUserQuestionInput {
-  questions?: QuestionField[];
-  question?: string;
-  message?: string;
-  text?: string;
-  prompt?: string;
-  options?: string[];
-  choices?: string[];
-  default?: string;
-}
+import {normalizeAskUserQuestions,type AskUserQuestionInput,type QuestionField} from './askUserQuestionModel';
+export type {AskUserQuestionInput,QuestionField} from './askUserQuestionModel';
 
 interface AskUserQuestionUIProps {
   input: AskUserQuestionInput;
@@ -99,35 +77,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
   const buttonStyle: CSSProperties = compact
     ? { borderRadius: '999px', padding: '0.42rem 0.85rem', fontSize: '0.8rem' }
     : { borderRadius: '999px', padding: '0.8rem 1rem', fontSize: '0.88rem' };
-  const questions = useMemo<QuestionField[]>(() => {
-    if (!input) {
-      return [{ id: 'answer', question: t('chat.askUser.fallbackQuestion'), type: 'text', required: true }];
-    }
-    if (input.questions?.length) {
-      return input.questions.map((question, index) => {
-        const hasOptions = Array.isArray(question.options) && question.options.length > 0;
-        return {
-          id: question.id || `q${index}`,
-          question: question.question || question.label || question.header || t('chat.askUser.questionNumber', { number: index + 1 }),
-          type: question.type || (hasOptions ? 'radio' : 'text'),
-          options: question.options,
-          required: question.required ?? true,
-          default: question.default,
-          placeholder: question.placeholder,
-          description: question.description,
-          multiSelect: question.multiSelect,
-        };
-      });
-    }
-
-    const questionText = input.question || input.message || input.text || input.prompt;
-    if (questionText) {
-      const options = input.options || input.choices;
-      return [{ id: 'answer', question: questionText, type: options?.length ? 'radio' : 'text', options, required: true, default: input.default }];
-    }
-
-    return [{ id: 'answer', question: t('chat.askUser.fallbackQuestion'), type: 'text', required: true }];
-  }, [input, t]);
+  const questions = useMemo<QuestionField[]>(() => normalizeAskUserQuestions(input,t), [input,t]);
 
   const [answers, setAnswers] = useState<Record<string, unknown>>(() => {
     const initial: Record<string, unknown> = {};

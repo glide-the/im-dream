@@ -1,0 +1,10 @@
+/* [Input] RN host marker and existing Story Workspace layout. */
+/* [Output] Business content fills the WebView above the RN-owned bottom navigation. */
+/* [Pos] Scoped platform layout adapter; original Web styles retain their selectors. */
+html[data-mobile-host='react-native'] .story-workspace-layout__main {
+  padding-bottom: 0;
+}
+html[data-mobile-host='react-native'] .story-workspace-writing-split {
+  left: 0;
+  bottom: 0;
+}

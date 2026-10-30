@@ -1,4 +1,5 @@
 # [Sync] 2026-10-12: cancellation owns SDK interrupt and disconnect through repeated task cancellation.
+# [Sync] 2026-10-25: accept an application-owned SDK transport factory without changing query/control ownership.
 # [Sync] 2026-09-26: queued resumes reject missing-session fallback and expose active-client interrupt.
 # [Input] Consume IClaudeAgentSDKClient contract from libs/claude_agent_kit/types.py.
 # [Output] Provide SimpleClaudeAgentSDKClient backed by ClaudeSDKClient.
@@ -30,10 +31,13 @@ import logging
 from contextlib import AsyncExitStack
 from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
 from claude_agent_sdk.types import ClaudeAgentOptions  # type: ignore[import-untyped]
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import Transport
 
 from ..types import IClaudeAgentSDKClient
 from .sdk_env import (
@@ -65,8 +69,9 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
     server/server/simple-cas-client.ts.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, transport_factory: Callable[[ClaudeAgentOptions], Transport] | None = None) -> None:
         self._active_client: ClaudeSDKClient | None = None
+        self._transport_factory = transport_factory
         self.require_existing_session = False
 
     async def interrupt(self) -> None:
@@ -108,9 +113,10 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
                     try:
                         # SDK connect cleans up its own failed initialization.
                         # query has not consumed prompt or dispatched model/tools.
-                        client = await stack.enter_async_context(
-                            ClaudeSDKClient(options=effective_options)
-                        )
+                        client_options: dict[str, Any] = {"options": effective_options}
+                        if self._transport_factory is not None:
+                            client_options["transport"] = self._transport_factory(effective_options)
+                        client = await stack.enter_async_context(ClaudeSDKClient(**client_options))
                     except Exception as exc:
                         marker = f"No conversation found with session ID: {resume_id}"
                         if (

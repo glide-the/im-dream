@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: separate saved AI/Image ownership; validate native Responses results through the Gateway bridge.
 # [Input] Existing turn-local broker tuple; model supplies only prompt and reference_images.
@@ -14,7 +15,7 @@ from .image_generation_protocol import ImageToolInput, ImageSelectionInput, requ
 from .session_projection_protocol import SESSION_BROKER_ENV_NAMES, SessionProjectionBrokerClient, SessionProjectionProtocolError
 
 
-def create_image_gen_server():
+def create_image_gen_server(*, environment=None):
     from mcp.server import Server
     from mcp.types import Tool, TextContent
     server = Server("image_gen")
@@ -34,7 +35,7 @@ def create_image_gen_server():
             source_id = values.get("claudecode/toolUseId") if isinstance(values, dict) else None
             if not isinstance(source_id, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", source_id) is None:
                 raise SessionProjectionProtocolError("IMAGE_CALL_ID_REQUIRED", 403)
-            client = SessionProjectionBrokerClient.from_env(dict(os.environ))
+            client = SessionProjectionBrokerClient.from_env(dict(os.environ if environment is None else environment))
             if name == "select_image_operation":
                 input_dto = ImageSelectionInput.model_validate(arguments)
                 selected = await asyncio.to_thread(request_image_selection, client, input_dto.model_dump(), source_id)

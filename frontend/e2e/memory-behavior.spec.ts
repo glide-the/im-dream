@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: lock one initial production-build GET while editing before the explicit save.
 // [Input] Production Settings UI with externally injected, strict public memory DTO responses.
 // [Output] Desktop/narrow save, conflict, unknown result, reload and read failure journeys.
 // [Pos] Provider-free browser validation; no normal account/database/model mutation.
@@ -19,17 +20,18 @@ async function fixture(page:Page,mode:'normal'|'unknown'|'conflict'|'read-fail'=
  let snapshot={owner_id:'memory-fixture-user',revision:0,taxonomy_revision:'memory-rules-v1',default:desired,desired:structuredClone(desired),catalog:themes,updated_at:null as string|null};
  const requests:{id:string;body:{expected_revision:number;desired:typeof desired}}[]=[];
  let fault=mode==='read-fail';
+ let reads=0;
  await page.route('**/api/memory/behavior**',async route=>{
   const req=route.request();
   if(req.method()==='GET'&&new URL(req.url()).pathname.includes('/receipt/')) {await route.fulfill({json:{status:'committed',result:snapshot}});return;}
-  if(req.method()==='GET') {if(fault){await route.fulfill({status:503,json:{detail:'unavailable'}});}else await route.fulfill({json:snapshot});return;}
+  if(req.method()==='GET') {reads++;if(fault){await route.fulfill({status:503,json:{detail:'unavailable'}});}else await route.fulfill({json:snapshot});return;}
   const body=req.postDataJSON();requests.push({id:req.headers()['x-request-id'],body});
   if(mode==='conflict'){await route.fulfill({status:409,json:{detail:{error_code:'MEMORY_SETTINGS_CONFLICT',outcome_unknown:false}}});return;}
   snapshot={...snapshot,revision:1,desired:body.desired,updated_at:'2026-10-15T01:00:00Z'};
   if(mode==='unknown'){await route.fulfill({status:503,json:{detail:{error_code:'ADMIN_OPERATION_UNAVAILABLE',outcome_unknown:true}}});return;}
   await route.fulfill({json:snapshot});
  });
- return {base,requests,recoverRead:()=>{fault=false;}};
+ return {base,requests,getReadCount:()=>reads,recoverRead:()=>{fault=false;}};
 }
 async function open(page:Page) {
  await page.goto(`${WEB_BASE}/story-workspace/settings/behavior`);
@@ -39,6 +41,7 @@ test('desktop save, exact desired payload and persisted reopen',async({page})=>{
  const lane=await fixture(page);await open(page);
  const enabled=page.getByRole('checkbox',{name:'使用回顾记忆调整回应'});await expect(enabled).not.toBeChecked();
  await enabled.check();await page.getByRole('combobox',{name:'压力 回应方式'}).selectOption('acknowledge_then_help');
+ expect(lane.getReadCount()).toBe(1);
  await page.getByRole('button',{name:'保存',exact:true}).click();
  await expect(page.getByRole('status')).toHaveText('已保存，下一次回应使用此设置。');
  await page.screenshot({path:'/private/tmp/ink-l2-l3-memory-behavior-desktop-20261015.png',fullPage:true});

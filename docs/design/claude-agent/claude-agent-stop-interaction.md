@@ -1,155 +1,144 @@
-# Claude Agent 前端主动停止交互方案
+<!-- [Input] 原Chat停止入口、ThreadFactory、Service持久化和iOS独立执行验收。 -->
+<!-- [Output] 当前停止操作、取消等待、部分回复保存、失败恢复与验收合同。 -->
+<!-- [Pos] Chat与Dream共用停止交互设计；页面骨架由Chat排队输入PRD维护。 -->
+<!-- [Sync] 2026-10-25: Stop响应等待与任务清理独立，重复请求保留已开始的取消清理。 -->
 
-> **版本**: 2026-06-25 v1 — 最小实现稿  
-> **关联代码**:
-> - `frontend/app/_dream/components/chat/ChatPanel.tsx` — 停止按钮动作与前端流中断
-> - `frontend/app/_dream/components/chat/AIInputDock.tsx` — 停止中按钮状态
-> - `backend/routers/claude_agent.py` — `POST /api/claude-agent/threads/{thread_id}/stop`
-> - `backend/claude_agent/thread_factory.py` — 当前 turn 取消与完成确认
-> - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾
+# Claude Agent 停止交互
 
-> **[Sync 2026-09-27 / current composer behavior]** Chat 运行中输入和单一发送/停止操作位以 [Chat 排队输入 PRD](../../prd/chat/queued-input.md) 为准：有草稿显示发送，空草稿且主轮次运行显示停止。本文保留 Stop API 与当前 turn 取消语义。
+## 背景与问题
 
-> **[Sync 2026-08-11 / current deployment boundary]** Stop 仍是拥有 active turn 的
-> `ClaudeAgentThreadFactory` 进程内控制操作。active-turn registry、`/status`、pending
-> confirmation Future 和 HTTP stream routing 都没有迁入 Redis。Redis EventBus 只为
-> 已知 `(session_id, turn_id)` 共享事件 replay/writer/单终态，不能定位或取消另一个
-> Worker/Pod 的 task。当前 backend Dockerfile 启动单个 uvicorn worker，Cloud Run
-> backend 固定 `--max-instances=1`，因此当前 Stop 契约成立；未来放宽部署并发前必须
-> 先增加分布式 owner discovery/routing/Stop/confirmation 设计与验收。另，Stop 响应
-> 不确定时的当前 UI 契约是保持输入锁并 status+reconnect，不能因为本地 reader 已
-> abort 就宣称 cancelled。
+Chat与Dream沿用同一Thread运行、流式展示、停止及历史恢复。原设计要求停止后保存已生成内容。`ClaudeAgentService.execute_session()`在取消时调用`_persist_partial_assistant()`，随后发送原finish及关闭事件流。慢保存期间，原`stop_thread()`的等待期限会对同一任务再次发送取消，清理可能提前结束。
 
-## 1. 问题判断
+本次沿原接口修正取消等待，保留原前端交互、身份校验、持久化、终态及恢复。此前完整原文保留于[历史稿](history/claude-agent-stop-interaction-before-bounded-wait-20261025.md)。页面骨架与运行中输入规则见[Chat排队输入PRD](../../prd/chat/queued-input.md)。
 
-当前“前端无法主动停止 Agent”的根因不是 Claude SDK session ID 持久化本身，而是 2026-06-09 的 SSE 重连设计改变了断线语义：
+## 目标与边界
 
-1. `ChatPanel` 的停止按钮只调用 AI SDK `stop()` 并 abort 本地 reconnect fetch。
-2. `ClaudeAgentThreadFactory.run_streaming()` 在客户端断开时只 `unsubscribe` 当前 SSE reader。
-3. 后台 `state.bg_task` 会继续执行 `ClaudeAgentService.execute_session()`，以便刷新页面或切换会话后可以通过 `GET /threads/{id}/stream` 重连。
-4. 因此前端“停止生成”只停止了本地消费流，没有向后端表达“用户要终止当前 turn”。
+用户可停止当前主轮次，查看已保存的部分回复，继续使用同一会话。普通断流、切页与网络中断继续沿原重连语义执行。停止请求与当前Thread归属校验、业务权限和模型权限保持。
 
-应处理的位置：
+运行任务归当前`ClaudeAgentThreadFactory`实例所有。iOS中该实例位于应用进程；原服务器部署继续由原实例执行。跨Worker定位、持久取消表、宿主补存、离线数据库及新增业务状态均无本次工作项。Mac relay、Admin认证及资源策略配置保持各自原职责。
 
-| 层 | 处理方式 |
-|---|---|
-| 前端 Chat UI | stop 按钮同时中断本地流并调用后端 stop API |
-| 后端 Route | 校验 thread 属于当前用户后转发停止请求 |
-| ThreadFactory | 取消当前 `bg_task`，不删除 chat thread |
-| Service | 在 `CancelledError` 路径 flush 已收集 assistant parts，并发布 SSE 收尾 |
-| DB 持久化 | 沿用现有 `_persist_partial_assistant`，不新增表或状态列 |
+## 概念与规则
 
-## 2. 目标与非目标
+| 对象 | 当前规则 |
+| --- | --- |
+| 输入区 | 空草稿且主轮次运行时显示原停止按钮；有草稿时按原排队输入入口发送 |
+| 停止请求 | `ChatPanel.handleStop()`调用`requestClaudeSubmittedThreadStop()`；等待期间沿原输入锁和按钮状态处理 |
+| 接口 | `POST /api/claude-agent/threads/{thread_id}/stop`校验当前用户与Thread归属，转交原Factory |
+| 取消 | 对运行任务发送首次取消请求；已处于取消流程的同一任务继续完成原清理 |
+| 响应等待 | 原`INK_AGENT_STOP_WAIT_S`仅约束停止响应等待；`asyncio.shield()`保留正在执行的原任务清理 |
+| 响应字段 | 原`ok/thread_id/stop_requested/running/lifecycle`保持；期限到达且任务仍运行时返回`running=true` |
+| 部分回复 | Service继续通过原AdminTurnPersistence保存`is_partial=true/turnStatus=cancelled`；随后发送原finish，Factory清理并转为idle |
+| 客户端恢复 | 受理、超时、非2xx及畸形响应均沿原status/history恢复；原响应与权威读取共同决定输入恢复 |
+| 会话 | 停止当前轮次保留Thread和Claude Session；普通断流只解除订阅 |
 
-目标：
+原默认等待值为3秒，原客户端请求期限为10秒，均为技术配置事实。本次保持原值，用户任务与产品规则不增加时间限制。
 
-| 目标 | 方案 |
-|---|---|
-| 前端可主动停止正在运行的 Agent | 新增拥有鉴权和 thread 所有权校验的 stop API |
-| 不破坏 SSE 重连 | 普通断线仍只 unsubscribe；只有 stop API 会 cancel 后台 turn |
-| 保留已生成内容 | 复用 `_persist_partial_assistant` 保存部分 assistant parts |
-| 避免消费者挂住 | 取消路径发布 `finish` 和 sentinel，关闭 EventBus reader |
-| 保持最小改动 | 不新增全局任务队列、durable cancellation 表、Redis replay 或复杂状态机 |
+### 正常业务时序
 
-非目标：
-
-| 非目标 | 原因 |
-|---|---|
-| 删除 Claude SDK session / chat thread | 停止当前 turn 不等于删除会话 |
-| 关闭所有用户会话 | stop API 只作用于当前 thread |
-| 持久化“stopping/stopped”业务状态 | 当前需求只需要实时控制；权威历史仍是 `chat_message` |
-| 替换 EventBus 重连架构 | 重连是现有目标能力，停止应作为显式控制命令加入 |
-
-## 3. 交互方案
-
-### 3.1 前端状态
-
-| 状态 | 触发 | UI |
-|---|---|---|
-| `running` | `useChat.status` 为 `submitted/streaming` 或 reconnect 中 | 空草稿显示停止按钮；有草稿显示发送按钮并进入当前 Thread 队列 |
-| `stopping` | 用户点击停止，stop API 请求未返回 | 空草稿时停止按钮禁用并显示加载图标；有草稿时按队列入口的服务端回执决定是否接受，失败保留草稿 |
-| `stopped` | history/status 恢复证明当前主 turn 已 idle/terminal | 停止按钮消失，恢复输入 |
-| `failed/uncertain` | stop API 非 2xx、超时、响应畸形或 `running=true` | 保持输入锁；立即读取 status 并重连当前 thread stream，直到权威 idle/terminal 后才声明 cancelled |
-
-前端点击停止时执行：
-
-1. abort 当前 reconnect fetch。
-2. 调用 AI SDK `stop()` 中断当前浏览器流消费。
-3. `POST /api/claude-agent/threads/{thread_id}/stop`。
-4. API 返回后触发一次 thread message reload，让 UI 看到部分持久化结果。
-
-并发点击处理：`stopping` 为 true 时停止按钮禁用，重复点击不发第二个请求。
-
-### 3.2 后端 API
-
-```http
-POST /api/claude-agent/threads/{thread_id}/stop
-Authorization: Bearer <token>
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Panel as ChatPanel
+    participant Stop as threadStop.ts
+    participant Route as claude_agent_stop_thread
+    participant Factory as ClaudeAgentThreadFactory
+    participant Service as ClaudeAgentService
+    participant Admin as AdminTurnPersistence
+    User->>Panel: 空草稿时点击原停止按钮
+    Panel->>Stop: requestClaudeSubmittedThreadStop(threadId)
+    Stop->>Route: POST /api/claude-agent/threads/{thread_id}/stop
+    Route->>Route: 原用户与Thread归属校验
+    Route->>Factory: stop_thread(thread_id)
+    Factory->>Service: 对bg_task发送首次取消
+    Service->>Admin: 原部分助手消息保存
+    Admin-->>Service: 原写入回执
+    Service-->>Panel: 原finish与流结束
+    Service-->>Factory: 取消清理完成
+    Factory-->>Route: stop_requested=true,running=false,lifecycle=idle
+    Route-->>Stop: 原停止DTO
+    Stop-->>Panel: 校验Thread与响应字段
+    Panel->>Route: 原status与messages读取
+    Route-->>Panel: idle与已保存历史
+    Panel-->>User: 显示部分回复，恢复输入
 ```
 
-响应：
+### 异常与恢复时序
 
-```json
-{
-  "ok": true,
-  "thread_id": "thread-id",
-  "stop_requested": true,
-  "running": false,
-  "lifecycle": "idle"
-}
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Panel as ChatPanel
+    participant Route as claude_agent_stop_thread
+    participant Factory as ClaudeAgentThreadFactory
+    participant Service as ClaudeAgentService
+    participant Admin as AdminTurnPersistence
+    User->>Panel: 点击原停止按钮
+    Panel->>Route: 原POST stop
+    Route->>Factory: 原授权通过后调用stop_thread
+    Factory->>Service: 首次取消
+    Service->>Admin: 保存部分回复，等待原回执
+    alt 响应等待期限到达
+        Factory-->>Route: stop_requested=true,running=true
+        Route-->>Panel: 原DTO
+    else 客户端读取超时或连接失败
+        Route--xPanel: 未取得确定响应
+    end
+    Panel->>Route: 保持原输入锁，读取status及history
+    opt 另一停止请求到达同一取消任务
+        Route->>Factory: stop_thread(thread_id)
+        Factory->>Factory: 保留已开始的取消清理
+        Factory-->>Route: 原running及lifecycle
+    end
+    Admin-->>Service: 原保存回执或原错误处理
+    Service-->>Panel: 原终态事件
+    Service-->>Factory: 原清理完成
+    Panel->>Route: 原恢复读取
+    Route-->>Panel: 权威状态与已保存消息
+    Panel-->>User: 按原结果展示内容或失败反馈
+    Note over Panel,Factory: iOS进程退出后按原status/history/JSONL重入，未知结果不自动重发
 ```
 
-语义：
+### 状态转换
 
-- `404`: thread 不存在或不属于当前用户。
-- `200 + stop_requested=false`: thread 当前没有运行中的 in-memory turn，接口保持幂等。
-- `200 + stop_requested=true`: 已向当前 turn 发出取消请求。
-- `running=true`: 后端已请求取消，但在配置的等待窗口内任务尚未完全退出。
+下图使用原Factory状态。停止受理和响应等待均沿running状态处理；页面反馈由原停止请求状态与恢复读取决定。
 
-等待窗口由 `INK_AGENT_STOP_WAIT_S` 配置，默认值在 ThreadFactory 层集中定义，避免在路由或前端硬编码策略。
+```mermaid
+stateDiagram-v2
+    [*] --> not_found: 当前进程尚无该Thread任务
+    not_found --> running: 用户通过原入口发起轮次
+    running --> running: Stop受理，原取消清理尚未结束
+    running --> running: 响应等待到期或重复Stop
+    running --> idle: 原部分保存与任务清理结束
+    idle --> idle: Stop返回stop_requested=false
+    idle --> running: 用户提交下一轮
+    running --> not_found: iOS进程退出，结果按原历史确认
+    idle --> not_found: 原实例释放
+```
 
-### 3.3 SSE 与持久化
+## 源码与影响范围
 
-取消路径沿用 `execute_session()` 的 `CancelledError` 分支：
+| 模块 | 当前处理 |
+| --- | --- |
+| [ChatPanel](../../../frontend/app/_dream/components/chat/ChatPanel.tsx) | 原handleStop、recoverAfterStop与权威历史恢复；本次业务代码保持 |
+| [threadStop](../../../frontend/app/_dream/components/chat/threadStop.ts) | 原请求去重、10秒期限、CSRF与DTO校验；本次保持 |
+| [原Stop路由](../../../backend/routers/claude_agent.py) | 原get_current_user与Thread归属校验；本次保持 |
+| [ThreadFactory](../../../backend/claude_agent/thread_factory.py) | `bg_task.cancelling()`保留首次取消；有界等待使用shield，期限到达返回原快照 |
+| [Service](../../../backend/claude_agent/service.py) | 原部分助手写入、finish及取消异常继续传递；本次保持 |
+| [Factory测试](../../../backend/tests/test_claude_agent_thread_factory.py) | 受控慢清理、重复Stop、单一终态及取消期间错误 |
 
-1. 调用 `_persist_partial_assistant()` 保存已收集的 reasoning/tool/text parts。
-2. 向 EventBus 发布 `finish`，`finishReason="stop"`。
-3. 发布 sentinel `None` 关闭所有 active/reconnect reader。
-4. `_run_turn_task()` finally 清理 `turn_context/event_bus/bg_task` 并把 lifecycle 从 `running` 标为 `idle`。
+修复适用于使用该Factory的iOS、Web与原服务器路径。原admission顺序、lease、队列、SDK控制、权限及会话恢复合同保持。
 
-不发布 `error`，因为用户停止是预期操作，不应显示为失败。
+## 设计评审与验收
 
-## 4. 方案审查
+复用原取消任务、原响应字段与原持久化。等待期限与清理分别完成，原running状态已覆盖慢清理，无新增状态或配置。正常与异常图复用真实模块和原接口。
 
-结论：采用。
+| 验收项 | 预期结果 | 验证方式与前提 |
+| --- | --- | --- |
+| 正常停止 | 原DTO受理、原部分回复保存、单一finish、输入恢复 | 原账户页面执行并核对正常业务记录 |
+| 保存慢于响应等待 | 返回原running=true，清理继续，完成后idle | Factory受控gate技术回归；真实业务单独核对 |
+| 重复Stop | 同一任务取消清理完整，部分保存不被追加取消打断 | Factory并发与重复请求技术回归 |
+| 取消期间异常 | 原错误反馈与单一终态保留 | Factory及Service既有隔离回归 |
+| 请求超时 | 原输入锁、status/history恢复及未知结果处理 | 原前端隔离回归与真实网络复验 |
+| 普通断流与重开 | 原任务、已保存消息和Session按现有能力恢复 | 原重连回归；iOS重新进入单独验收 |
 
-设计符合目标，且没有过度设计：
-
-- 复用已有 `bg_task.cancel()`、`_persist_partial_assistant()`、EventBus 和 `/status` 语义。
-- 新增 API 是显式用户控制命令，不改变普通 SSE 断线重连行为。
-- 不新增数据库字段；停止结果由当前运行态和已持久化消息自然表达。
-- 不把“停止”扩展成跨进程任务控制平台；Redis 只共享已知 turn 的 stream/replay/
-  terminal arbitration，不共享 active-turn owner、status、Stop 或 confirmation。
-
-保留的设计点：
-
-- thread 所有权校验。
-- 幂等 stop API。
-- bounded wait，确保前端 reload 尽量读到部分持久化结果。
-- SSE sentinel，避免重连消费者挂住。
-
-明确不做的设计点：
-
-- 不实现 durable cancellation record。
-- 不新增前端全局 Agent store。
-- 不修改 Editor Write `/api/sessions/events` 同步机制。
-- 不把 `DELETE /api/claude-agent/session` 复用为停止按钮入口，因为它语义是销毁会话，且不是 thread-scoped UI 控制。
-
-## 5. 验收标准
-
-1. 点击 Chat 输入框停止按钮会调用后端 stop API，而不是只 abort 浏览器流。
-2. 后端运行中的 `bg_task` 被取消，`GET /threads/{id}/status` 不再持续返回 `running=true`。
-3. 取消过程中已产生的 assistant parts 会以 `metadata.is_partial=true` 保存。
-4. SSE active/reconnect reader 收到 `finish` 后结束，不再靠 keepalive 挂起。
-5. 未运行时调用 stop API 返回 200，且 `stop_requested=false`。
-6. 不影响普通断线重连：没有调用 stop API 的 tab 切换、刷新、网络断开仍保持后台 turn 可重连。
+2026-10-25的慢清理复现已取得失败回执；修复后143项回归与19项子用例通过。独立Simulator首段回复停止验收退出0，取得原Stop受理DTO、页面终态、正常部分助手is_partialtrue/turnStatuscancelled与现有取消结算，原Session字节前缀保持。普通重开已恢复同一部分回复，物理iPhone资格继续待验收；对应证据以[移动执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-25-首段回复停止自动化验收)的对应回执核定，隔离测试通过不推进真实业务验收。

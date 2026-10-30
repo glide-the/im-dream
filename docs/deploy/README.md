@@ -1,4 +1,10 @@
-# docs/deploy
+<!-- [Sync] 2026-10-29: 本机Admin 3000传输、旧SSH转发卸载、Simulator普通env装配及原网页登录读取回执按范围登记。 -->
+<!-- [Sync] 2026-10-28: 登记 VS Code Chrome 调试实例的扩展隔离与 hydration mismatch 排查。 -->
+<!-- [Sync] 2026-10-25: 移动部署沿用既有关闭Claude命令沙箱配置；索引区分设计、候选配置和完整业务验收。 -->
+<!-- [Sync] 2026-10-24: 移动发布稿同步iOS范围收敛及当前真机签名前提。 -->
+<!-- [Sync] 2026-10-25: 移动发布索引记录iOS开发签名、Wi-Fi安装与Simulator真实业务回执。 -->
+<!-- [Sync] 2026-10-24: 移动发布稿同步第一代码切片；完整Python、CLI、签名与商店发布保持未完成。 -->
+<!-- [Sync] 2026-10-24: 索引iOS/Android移动应用方案；完整端侧Runtime、签名与发布状态为待实施。 -->
 <!--
 [Input] Executable deployment entries and platform-specific release contracts.
 [Output] Index the supported deployment paths, ownership boundaries, and public service origins.
@@ -18,6 +24,9 @@
 [Sync] 2026-09-18: add the AutoDL restart/redeploy recovery appendix and keep instance public origins deployment-injected.
 [Sync] 2026-10-18: index existing macOS Natapp service start, restart, stop, reload, status and logs.
 -->
+
+<!-- [Sync] 2026-10-30: 索引 iPhone 开发安装、临时包检查与商店发布操作手册。 -->
+# docs/deploy
 
 ## 定位
 
@@ -46,6 +55,8 @@
 | [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
 | [`autodl.md`](autodl.md) | AutoDL 直宿主部署文档 | 说明 frozen pnpm/standalone Next、Node MCP Apps、FastAPI、固定 sandbox capability、验证与回滚 |
 | [`autodl-recovery.md`](autodl-recovery.md) | AutoDL 恢复与维护 | 说明实例重启后的 Admin-first 恢复、动态 WebUI origin、状态/日志、完整发布和失败处理 |
+| [`mobile-app-release.md`](mobile-app-release.md) | iOS/Android路线与打包发布设计 | 端侧采用现有关闭Claude命令沙箱配置；保留系统沙箱与业务权限，完整工具、真机、Android及发行继续验收 |
+| [`ios-iphone-install-release.md`](ios-iphone-install-release.md) | iPhone 实机操作手册 | 当前 RN 工程、开发签名、临时包、TestFlight 与 App Store 路径及回执 |
 | [`release-system-design.md`](release-system-design.md) | 历史发布体系设计 | 保留旧 Vite/npm/nginx/SQLite/GCS 判断；不是当前操作手册 |
 | [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md) | Claude SDK/Runtime 打包发布与 Dream 集成 | PyPI SDK、npm 五包、OIDC、精确版本/哈希、验证和回滚的中文执行手册 |
 | [`claude-registry-release-acceptance.md`](claude-registry-release-acceptance.md) | Claude registry 发布后验收 | provider-free 校验 PyPI/npm 制品身份、安装和 fail-closed 条件 |
@@ -104,6 +115,33 @@ capability）单列在 [AutoDL 手册](autodl.md)，不混入下表的通用容�
 | API 访问 | Next rewrite 同源 fallback，或 runtime-config 显式 API base | 浏览器直连 `http://127.0.0.1:8765`；`BACKEND_URL` 由容器入口投影为 `INK_BACKEND_INTERNAL_URL` 供 Next rewrite 使用 | 同一 Next rewrite fallback；可用 `REMOTE_API_BASE_URL` 改为跨域直连 | 浏览器跨域直连后端；Cloud Run整体仍需配置修正与发布验收 |
 | Claude-agent Bash sandbox | 本机进程使用宿主运行时 | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | Cloud Run 不使用 Docker Compose runtime 权限模型 |
 | 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager；Docker 外层容器是主隔离边界 | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库；Docker 外层容器是主隔离边界 | 不依赖本地端口和本地数据卷 |
+
+## VS Code Chrome 调试
+
+本机 `.vscode/launch.json` 的 `Frontend: Next.js + Chrome` 沿用 `frontend: dev` 任务，补充以下 Chrome 启动选项：
+
+```json
+{
+  "userDataDir": true,
+  "runtimeArgs": ["--disable-extensions"]
+}
+```
+
+`userDataDir` 使用 VS Code 管理的独立 Chrome 用户目录，`runtimeArgs` 禁用该调试实例的扩展。日常 Chrome 用户目录和扩展配置保留。修改后重新启动 Frontend 调试会话；浏览器刷新沿用原进程参数。独立用户目录拥有自己的登录会话，登录使用现有网页流程。
+
+React hydration mismatch 表示服务端 HTML 与客户端首次渲染的 DOM 存在差异。错误包含 `body` 的 `mpa-version`、`mpa-extension-id`、`mpa-installed-at` 属性时，检查扩展在 React 初始化前注入的属性。页面根布局、SSR、认证及业务接口保持现有实现，继续检测应用自身的渲染差异。
+
+`.vscode/` 由当前 Git 规则忽略；上述配置示例随本部署说明保存，供其他工作区复用。仅启动 Frontend 配置时，后端需已运行；完整本机调试使用现有 `Full Stack: Backend + Frontend` 复合入口。
+
+官方资料，查阅日期 2026-10-28：[Next.js hydration error](https://nextjs.org/docs/messages/react-hydration-error)、[VS Code browser debugging](https://code.visualstudio.com/docs/nodejs/browser-debugging)、[JavaScript debugger options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md)。
+
+## 本机 Admin 3000 连接
+
+2026-10-29当前测试连接用户已有的本机Admin。`frontend/.env.local`与`backend/.env`的`INK_ADMIN_DREAM_TRANSPORT_BASE_URL`均为`http://localhost:3000`；Backend的`INK_GATEWAY_BASE_URL`使用同一地址。认证issuer、公开Admin身份和resource按该Admin自身声明配置。当前Admin声明`https://ink-admin.suoxya.com/api/auth`，服务端传输使用本机地址；原认证协议和权限保持。
+
+连接前执行`lsof -nP -iTCP:3000 -sTCP:LISTEN`并核对进程cwd。当前本机Node与旧SSH转发曾同时占用IPv6/IPv4的3000；本轮通过`launchctl bootout gui/$(id -u)/com.ink-memory.admin-ecs-relay`卸载该具名旧转发，再以`launchctl disable gui/$(id -u)/com.ink-memory.admin-ecs-relay`停用其后续自动启动；保留plist及本机Node/PostgreSQL。卸载后`localhost`、`127.0.0.1`与`[::1]`均连接本机Node。后续服务切换先核对监听归属，再按用户指定拓扑调整现有env。
+
+Dream浏览器当前使用`http://localhost:5173`，与本机Admin现有允许来源及OAuth客户端回调对应。Simulator沿用同一普通env；候选中的`localhost:3000`连接Mac Admin。物理iPhone的loopback归手机自身，连接Mac需要有效HTTPS地址及原授权来源配置。本文记录当前Simulator连接，物理设备网络另验。完整执行证据见[移动交付执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-29本机admin-3000连接)。
 
 ## AutoDL 生产认证配置
 

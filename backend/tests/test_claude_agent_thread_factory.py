@@ -4,6 +4,7 @@
 #          observer hooks, Phase 1/4 extrinsic/intrinsic state contracts,
 #          per-session lock serialisation.
 # [Pos] test node in backend/tests
+# [Sync] 2026-10-26: a recovered committed reply drains the original queue without synthesizing a current SDK terminal.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_thread_factory.py.
 #                    Removed: pet/persona/mem0/IdentityService stubs.
 #                    ENV: PAWKEYLAND_RUNNER_TTL_S → INK_AGENT_TTL_S.
@@ -18,6 +19,7 @@
 # [Sync] 2026-09-16: retire the service-level Dream SQL binding error after Admin moved conflicts to ingress.
 # [Sync] 2026-09-28: distinguish first-turn completion from the Factory owner's queued-input lifecycle.
 # [Sync] 2026-09-28: resolve owner completion even when shutdown rejects a stream before starting its turn.
+# [Sync] 2026-10-25: preserve pending cancellation cleanup across the Stop wait deadline and repeated Stop requests.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -520,6 +522,32 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         self.assertTrue(first_completed)
         self.assertTrue(owner_still_running)
 
+    def test_recovered_reply_keeps_sdk_observation_false_and_checks_the_queue(self):
+        original_execute = self.factory._service.execute_session
+        executions = []
+
+        async def recovered(execution):
+            await original_execute(execution)
+            execution.sdk_terminal_received = False
+            execution.committed_response_recovered = True
+            executions.append(execution)
+
+        self.factory._service.execute_session = recovered
+        self.factory._claim_next_input = unittest.mock.AsyncMock(return_value=None)
+
+        async def collect():
+            stream = self.factory.run_streaming(_make_request("recovered-owner"))
+            frames = [frame async for frame in stream]
+            await stream.owner_completion
+            return frames, await stream.completion
+
+        with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
+            frames, completion = _run(collect())
+        self.factory._claim_next_input.assert_awaited_once()
+        self.assertTrue(completion.saw_finish)
+        self.assertTrue(frames)
+        self.assertFalse(executions[0].sdk_terminal_received)
+
     def test_rejected_stream_resolves_owner_completion_without_starting_turn(self):
         async def collect():
             await self.factory.aclose()
@@ -1020,6 +1048,107 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             1,
         )
         self.assertIn('"finishReason":"stop"', "".join(frames).replace(" ", ""))
+
+    def test_stop_deadline_and_repeat_preserve_pending_cleanup(self):
+        request = _make_request("slow_stop", thread_id="thread_slow_stop")
+
+        async def scenario():
+            entered, saving, release, saved = (
+                asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event()
+            )
+            cleanup_interrupted = []
+
+            async def execute(execution):
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    saving.set()
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        cleanup_interrupted.append(True)
+                        raise
+                    saved.set()
+                    await execution.turn_context.queue.put(
+                        NormalizedAgentEvent.create(
+                            "finish", {"finishReason": "stop", "cancelled": True}
+                        )
+                    )
+                    await execution.turn_context.queue.put(None)
+                    raise
+
+            self.factory._service.execute_session = execute
+            frames: list[str] = []
+            with (
+                unittest.mock.patch(
+                    "claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner
+                ),
+                unittest.mock.patch.object(thread_factory_module, "_STOP_WAIT_SECONDS", 0.01),
+            ):
+                consumer = asyncio.create_task(self._collect_frames(request, frames))
+                await asyncio.wait_for(entered.wait(), timeout=0.5)
+                try:
+                    first = await asyncio.wait_for(
+                        self.factory.stop_thread(request.thread_id), timeout=0.5
+                    )
+                    await asyncio.wait_for(saving.wait(), timeout=0.5)
+                    self.assertTrue(first["stop_requested"])
+                    self.assertTrue(first["running"])
+                    self.assertEqual(first["lifecycle"], "running")
+                    self.assertFalse(saved.is_set())
+                    repeated = await asyncio.wait_for(
+                        self.factory.stop_thread(request.thread_id), timeout=0.5
+                    )
+                    self.assertTrue(repeated["stop_requested"])
+                    self.assertTrue(repeated["running"])
+                    self.assertEqual(cleanup_interrupted, [])
+                finally:
+                    release.set()
+                    await asyncio.wait_for(consumer, timeout=1.0)
+            self.assertTrue(saved.is_set())
+            self.assertEqual(cleanup_interrupted, [])
+            self.assertEqual(self.factory.session_snapshot(request.thread_id)["lifecycle"], "idle")
+            self.assertEqual(
+                sum('"type":"finish"' in frame.replace(" ", "") for frame in frames), 1
+            )
+
+        _run(scenario())
+
+    def test_stop_cleanup_error_keeps_existing_error_terminal(self):
+        request = _make_request("stop_error", thread_id="thread_stop_error")
+
+        async def scenario():
+            entered = asyncio.Event()
+
+            async def execute(_execution):
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    raise RuntimeError("isolated cancellation cleanup failure") from None
+
+            self.factory._service.execute_session = execute
+            frames: list[str] = []
+            with unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner
+            ):
+                consumer = asyncio.create_task(self._collect_frames(request, frames))
+                await asyncio.wait_for(entered.wait(), timeout=0.5)
+                stopped = await self.factory.stop_thread(request.thread_id)
+                await asyncio.wait_for(consumer, timeout=0.5)
+            return stopped, frames
+
+        stopped, frames = _run(scenario())
+        self.assertTrue(stopped["stop_requested"])
+        self.assertFalse(stopped["running"])
+        self.assertEqual(stopped["lifecycle"], "idle")
+        self.assertEqual(
+            sum('"type":"error"' in frame.replace(" ", "") for frame in frames), 1
+        )
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames), 1
+        )
 
     def test_stop_after_service_terminal_does_not_add_second_finish(self):
         request = _make_request("terminal_stop", thread_id="thread_terminal_stop")

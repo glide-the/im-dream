@@ -2,6 +2,7 @@
 # [Output] Unknown-write receipt-only recovery, owner/source checks and native file identity evidence.
 # [Pos] Provider-free technical tests; no normal account, model, schema or service.
 # [Sync] 2026-10-10: exercise the new turn contract independently of the browser fixture.
+# [Sync] 2026-10-26: recover a known same-message bind conflict only from its original matching receipt; retain attempt IDs, scope and unknown-write guards.
 import base64
 import hashlib
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from services.admin_data.image_turn_data import (
     NativeImageSummaryDTO, BIND_IMAGE_TURN, SELECT_IMAGE_OPERATION,
     image_input_digest, image_receipt_key,
 )
-from services.admin_data.models import CommittedReceiptDTO
+from services.admin_data.models import AbsentReceiptDTO, CommittedReceiptDTO
 from services.admin_data.errors import AdminDataError
 from tests.test_image_generation_tool import picture, bound
 from tests._image_turn_fixtures import select_provider
@@ -58,6 +59,93 @@ def test_unknown_write_does_not_issue_other_image_operations():
     selection=ImageTurnSelectInputDTO(thread_id='thread',turn_key=dto.turn_key,source_call_id='actual',arguments={'operation':'none','prompt':'Discuss image_gen','reference_images':[]})
     with pytest.raises(AdminDataError,match='IMAGE_TURN_OUTCOME_UNKNOWN'): data.select(selection)
     assert len(client.calls)==1 and not client.receipts
+
+
+def conflicted_binding():
+    client, grant, data, dto = boundary()
+    original = ImageTurnBindOutputDTO(**dto.model_dump(), canonical_user_id='7', run_id=None)
+    client.committed = original
+    conflict = AdminDataError('OPERATION_REQUEST_CONFLICT', 409)
+
+    def execute(operation, submitted, key, **kwargs):
+        client.calls.append((operation, submitted, key, kwargs))
+        raise conflict
+
+    client.execute = execute
+    return client, grant, data, dto.model_copy(update={'turn_id': 'next-attempt'}), original, conflict
+
+
+def test_known_same_message_bind_conflict_reuses_original_receipt():
+    client, grant, data, retry, original, _ = conflicted_binding()
+    assert data.bind(retry) == original
+    assert original.turn_id != retry.turn_id
+    assert len(client.calls) == len(client.receipts) == 1
+    assert client.receipts[0] == (BIND_IMAGE_TURN, image_receipt_key(retry.turn_key), {'access_token': grant.token})
+    assert client.committed == original
+
+
+def test_known_bind_conflict_preserves_existing_run_binding():
+    client, grant, data, retry, original, _ = conflicted_binding()
+    grant.run_id = 'run-bound'
+    client.committed = original.model_copy(update={'run_id': grant.run_id})
+    assert data.bind(retry).run_id == grant.run_id
+    assert len(client.calls) == len(client.receipts) == 1
+
+
+@pytest.mark.parametrize('field,value', [
+    ('canonical_user_id', '8'), ('run_id', 'other-run'), ('thread_id', 'other-thread'),
+    ('turn_key', 'dream-turn-' + 'b' * 64), ('message_id', 'other-message'),
+    ('ai_model', 'other-ai'), ('image_model', 'other-image'),
+    ('materials', [{'uri': 'workspace://files/other.png', 'sha256': 'b' * 64}]),
+])
+def test_known_bind_conflict_rejects_changed_receipt_business_fields(field, value):
+    client, _, data, retry, original, conflict = conflicted_binding()
+    client.committed = ImageTurnBindOutputDTO.model_validate({**original.model_dump(), field: value})
+    with pytest.raises(AdminDataError) as caught:
+        data.bind(retry)
+    assert caught.value is conflict
+    assert len(client.calls) == len(client.receipts) == 1
+    assert client.committed.model_dump()[field] == value
+
+
+@pytest.mark.parametrize('receipt_kind', ['absent', 'wrong-request', 'wrong-operation'])
+def test_known_bind_conflict_requires_the_exact_committed_receipt(receipt_kind):
+    client, _, data, retry, original, conflict = conflicted_binding()
+
+    def receipt(operation, key, **kwargs):
+        client.receipts.append((operation, key, kwargs))
+        if receipt_kind == 'absent':
+            return AbsentReceiptDTO(request_id=key, operation=operation.capability.name, status='absent')
+        return CommittedReceiptDTO(request_id='other-key' if receipt_kind == 'wrong-request' else key,
+            operation='image-turn.select' if receipt_kind == 'wrong-operation' else operation.capability.name,
+            status='committed', result=original)
+
+    client.receipt = receipt
+    with pytest.raises(AdminDataError) as caught:
+        data.bind(retry)
+    assert caught.value is conflict
+    assert len(client.calls) == len(client.receipts) == 1
+
+
+@pytest.mark.parametrize('code,status', [('ACCESS_DENIED', 403), ('ADMIN_UNAVAILABLE', 503)])
+def test_other_definite_bind_errors_do_not_read_a_receipt(code, status):
+    client, _, data, dto = boundary()
+    client.failure = AdminDataError(code, status)
+    with pytest.raises(AdminDataError) as caught:
+        data.bind(dto)
+    assert caught.value is client.failure
+    assert len(client.calls) == 1 and not client.receipts
+
+
+def test_unknown_bind_outcome_does_not_accept_another_attempt():
+    client, _, data, dto = boundary()
+    client.failure = AdminDataError('ADMIN_UNAVAILABLE', 503, None, True)
+    with pytest.raises(AdminDataError):
+        data.bind(dto)
+    client.failure = None
+    with pytest.raises(AdminDataError, match='IMAGE_TURN_OUTCOME_UNKNOWN'):
+        data.bind(dto.model_copy(update={'turn_id': 'next-attempt'}))
+    assert len(client.calls) == 1 and not client.receipts
 
 
 @pytest.mark.parametrize('field,value',[('purpose','gateway-cli'),('thread_id','other')])

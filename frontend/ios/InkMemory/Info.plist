@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- [Input] iOS bundle identity and supported interface orientations. -->
+<!-- [Output] Native application metadata consumed by Xcode and iOS. -->
+<!-- [Pos] InkMemory iOS target property-list contract. -->
+<!-- [Sync] 2026-10-29: register the target-specific MCP resource callback; normal account login retains its existing Web callback. -->
+<!-- [Sync] 2026-10-27: register the existing Excalifont and Xiaolai assets for equivalent native typography. -->
+<!-- [Sync] 2026-10-27: own the RN architecture flag and attachment camera purpose in application metadata. -->
+<!-- [Sync] 2026-10-25: describe the remaining Mac Dream Web connection after Admin moved to public HTTPS. -->
+<!-- [Sync] 2026-10-25: declare the build-supplied LAN host and local-network access for normal localhost Web authentication. -->
+<!-- [Sync] 2026-10-24: declare complete phone/tablet orientations for the local WebView host. -->
+<!-- [Sync] 2026-10-24: remove unused attachment limits and external-host configuration. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>Ink &amp; Memory</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>LSRequiresIPhoneOS</key>
+  <true/>
+  <key>InkMcpOAuthCallbackURI</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp:/oauth/callback</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp</string></array>
+    </dict>
+  </array>
+  <key>RCTNewArchEnabled</key>
+  <false/>
+  <key>UIViewControllerBasedStatusBarAppearance</key>
+  <false/>
+  <key>InkDreamDevelopmentHost</key>
+  <string>$(DREAM_LAN_HOST)</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Connect to the Ink &amp; Memory Dream Web service running on this Mac.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>拍摄照片并作为你选择的对话附件上传。</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+  <key>UILaunchScreen</key>
+  <dict/>
+  <key>UIAppFonts</key>
+  <array>
+    <string>fonts/Excalifont-Regular.ttf</string>
+    <string>fonts/Xiaolai-Regular.ttf</string>
+  </array>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+</dict>
+</plist>

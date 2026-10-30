@@ -1,7 +1,7 @@
 // [Sync] 2026-10-28: bulk catalog reads share in-flight requests per transport and session; settled reads are released.
-// [Input] Authenticated Deck catalog endpoint and an optional platform HTTP transport.
+// [Input] Authenticated Deck catalog/list/detail endpoints and an optional platform HTTP transport.
 // [Output] Existing Deck DTOs and original error behavior.
-// [Pos] Shared catalog read owner for Chat, Voice initialization and Deck/Reflections choices.
+// [Pos] Deck read owner re-exported by voiceApi; native imports avoid unrelated chat runtime modules.
 import type {Deck} from './voiceApi';
 import {browserRequestHeaders,getBrowserCsrfToken} from '../lib/browserSession';
 import {API_BASE} from '../lib/apiBase';
@@ -29,6 +29,16 @@ export function listDecksWithVoices(transport: typeof fetch = fetch): Promise<De
   return request;
 }
 
+export async function listDecks(transport:typeof fetch=fetch):Promise<Deck[]> {
+  const response=await transport(`${API_BASE}/api/decks`,{headers:authHeaders()});
+  if(!response.ok){const error=await response.json();throw new Error(error.detail || 'List decks failed');}
+  const data=await response.json();return data.decks;
+}
+export async function getDeck(deckId:string,transport:typeof fetch=fetch):Promise<Deck> {
+  const response=await transport(`${API_BASE}/api/decks/${deckId}`,{headers:authHeaders()});
+  if(!response.ok){const error=await response.json();throw new Error(error.detail || 'Get deck failed');}
+  return response.json();
+}
 function authHeaders(): Record<string, string> {
   const csrf=getBrowserCsrfToken();if(!csrf)throw new Error('Not authenticated');
   return {'Content-Type':'application/json',...browserRequestHeaders({},csrf)};

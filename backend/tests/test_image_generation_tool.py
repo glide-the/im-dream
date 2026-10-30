@@ -123,10 +123,13 @@ def test_uploaded_png_visual_input_and_edit_reference_use_same_file(bound):
         [{"type": "text", "text": "Keep the drawing layout and make the lines red"}],
         attachments=[attachment], include_runtime_context=False,
     )
-    assert blocks[0] == {"type": "image", "source": {
+    image_indexes = [index for index, block in enumerate(blocks) if block["type"] == "image"]
+    assert len(image_indexes) == 1
+    image_index = image_indexes[0]
+    assert blocks[image_index] == {"type": "image", "source": {
         "type": "base64", "media_type": "image/png", "data": attachment.data,
     }}
-    assert blocks[1] == {"type": "text", "text": "Reference image for editing: " + reference}
+    assert blocks[image_index + 1] == {"type": "text", "text": "Reference image for editing: " + reference}
     assert blocks[-1]["text"] == "Keep the drawing layout and make the lines red"
     result = request_image(client, {"prompt": blocks[-1]["text"], "reference_images": [reference]})
     assert len(transport.calls) == 1
@@ -610,3 +613,4 @@ def test_owned_image_http_cancel_closes_socket_before_headers(tmp_path):
         server.shutdown()
         server.server_close()
         worker.join(3)
+# [Sync] 2026-10-25: validate image/reference adjacency after existing context prefixes without changing message assembly.

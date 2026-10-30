@@ -1,9 +1,13 @@
+// [Sync] 2026-10-28: explicit full-history sharing accepts the native HTTP owner; Web keeps its original default.
+// [Sync] 2026-10-28: message-process reads accept the same optional native HTTP adapter as history; Web default remains fetch.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Owned Claude thread id, canonical thread history/status REST endpoints.
 // [Output] One shared history -> status hydration snapshot for Chat and Dream shells.
 // [Sync] 2026-10-12: retain assistant compaction-only history without inventing a text part.
-// [Pos] Minimal session hydration primitive; ChatPanel remains the only live reducer.
+// [Pos] Shared session hydration primitive; renderers reuse the canonical SSE projection.
+// [Sync] 2026-10-27: allow the RN HTTP adapter to reuse canonical history/status hydration.
+// [Sync] 2026-10-28: forward an optional transport through the complete history/status/stabilization sequence; Web defaults remain fetch.
 // [Sync] 2026-09-02: hydrate the newest stable keyset page, expose older-page state,
 //                    and replace idle's second full read with a latest-ID probe.
 // [Sync] 2026-09-02: map final-only assistant rows and fetch canonical process
@@ -148,9 +152,10 @@ function rawClaudeThreadMessageToUIMessage(
 
 export async function fetchClaudeThreadStatus(
   threadId: string,
+  transport: typeof fetch = fetch,
 ): Promise<ChatThreadStatusResult> {
   try {
-    const response = await fetch(
+    const response = await transport(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
       { headers: { ...browserRequestHeaders() } },
     );
@@ -182,6 +187,7 @@ export async function fetchClaudeThreadStatus(
 export async function fetchClaudeThreadMessages(
   threadId: string,
   options: FetchClaudeThreadMessagesOptions = {},
+  transport: typeof fetch = fetch,
 ): Promise<ClaudeThreadHistorySnapshot> {
   try {
     const params = new URLSearchParams();
@@ -191,7 +197,7 @@ export async function fetchClaudeThreadMessages(
       params.set('known_latest_message_id', options.knownLatestMessageId);
     }
     const query = params.size > 0 ? `?${params.toString()}` : '';
-    const response = await fetch(
+    const response = await transport(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages${query}`,
       {
         headers: { ...browserRequestHeaders() },
@@ -270,9 +276,10 @@ export async function fetchClaudeThreadMessageProcess(
   threadId: string,
   messageId: string,
   signal?: AbortSignal,
+  transport: typeof fetch = fetch,
 ): Promise<UIMessage> {
   try {
-    const response = await fetch(
+    const response = await transport(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`
       + `/messages/${encodeURIComponent(messageId)}/process`,
       {
@@ -314,8 +321,9 @@ export async function fetchClaudeThreadMessageProcess(
 export function fetchFullClaudeThreadMessages(
   threadId: string,
   signal?: AbortSignal,
+  transport: typeof fetch = fetch,
 ): Promise<ClaudeThreadHistorySnapshot> {
-  return fetchClaudeThreadMessages(threadId, { full: true, signal });
+  return fetchClaudeThreadMessages(threadId, { full: true, signal }, transport);
 }
 
 /** A specific persisted internal command can prove settlement even when its
@@ -337,15 +345,16 @@ export function claudeThreadExpectedDispatchIsTerminal(
  */
 export async function hydrateClaudeThreadSession(
   threadId: string,
+  transport: typeof fetch = fetch,
 ): Promise<ClaudeThreadHydrationSnapshot> {
   const { history, status } = await loadChatHistoryThenRuntimeStatus(
-    () => fetchClaudeThreadMessages(threadId),
-    () => fetchClaudeThreadStatus(threadId),
+    () => fetchClaudeThreadMessages(threadId, {}, transport),
+    () => fetchClaudeThreadStatus(threadId, transport),
     async (current) => {
-      if (!current.latestMessageId) return fetchClaudeThreadMessages(threadId);
+      if (!current.latestMessageId) return fetchClaudeThreadMessages(threadId, {}, transport);
       const stabilized = await fetchClaudeThreadMessages(threadId, {
         knownLatestMessageId: current.latestMessageId,
-      });
+      }, transport);
       return stabilized.unchanged ? current : stabilized;
     },
   );

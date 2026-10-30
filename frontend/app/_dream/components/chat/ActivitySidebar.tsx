@@ -2,6 +2,8 @@
 // [Output] Theme-adaptive 20rem sidebar or accessible full-width mobile drawer with one list scroller and display menu.
 // [Pos] Chat activity presentation; no task control, notification persistence or Agent transport ownership.
 // [Sync] 2026-10-07: preserve source recovery, layered Escape/focus behavior and original Chat history capabilities.
+// [Sync] 2026-10-27: omit mobile-excluded Dream source controls in the RN host.
+// [Sync] 2026-10-28: retain a newly opened display menu when a delayed scroll event reports its opening position.
 
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +13,7 @@ import { IconCheck, IconMoreHorizontal, IconSearch, IconX } from './Icons';
 import type { ActivityFilters, ActivityRow, ActivitySource } from './activitySidebarModel';
 import type { ActivityReadState } from './useActivitySidebarData';
 import './ActivitySidebar.css';
+import {isReactNativeHost} from '../../platform/mobileHost';
 
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function focusableWithin(element: HTMLElement): HTMLElement[] {
@@ -56,7 +59,7 @@ export default function ActivitySidebar(props: Props) {
   const previousSearchOpen = useRef(props.searchOpen);
   const initialSearchOpen = useRef(props.searchOpen);
   const focusedRow = useRef<{ key: string; index: number } | null>(null);
-  const [menu, setMenu] = useState<{ top: number; right: number } | null>(null);
+  const [menu, setMenu] = useState<{ top: number; right: number; scrollTop: number } | null>(null);
   const onCloseRef = useRef(props.onClose);
   onCloseRef.current = props.onClose;
   const closeMenu = () => { setMenu(null); menuButtonRef.current?.focus(); };
@@ -141,7 +144,7 @@ export default function ActivitySidebar(props: Props) {
     (rows[Math.min(focused.index, rows.length - 1)]?.querySelector<HTMLElement>('button,a') ?? titleRef.current)?.focus();
   }, [props.rows, props.groups, menu, props.searchOpen]);
 
-  const selectedSources = (['scheduled', 'chat', 'dream'] as const).filter((source) => props.filters[source]);
+  const selectedSources = (['scheduled', 'chat', 'dream'] as const).filter((source) => props.filters[source] && (!isReactNativeHost() || source !== 'dream'));
   const title = (value: string | null) => value || t('chat.history.fallbackTitle');
   const time = (at: number) => Number.isFinite(at) ? new Intl.DateTimeFormat(getDateLocale(i18n.language), { hour: '2-digit', minute: '2-digit' }).format(at) : '';
   const deleteButton = (id: string) => <button type="button" className="activity-sidebar__delete" aria-label={t('chat.history.deleteThread')} title={t('chat.history.deleteThread')}
@@ -157,7 +160,7 @@ export default function ActivitySidebar(props: Props) {
         <button type="button" className="activity-sidebar__icon" aria-label={t('chat.activity.close')} title={t('chat.activity.close')} onClick={props.onClose}><IconX /></button>
       </div>
     </header>
-    <div ref={bodyRef} className="activity-sidebar__body" onScroll={(event) => { if (menu) setMenu(null); props.onScroll(event); }}
+    <div ref={bodyRef} className="activity-sidebar__body" onScroll={(event) => { if (menu && event.currentTarget.scrollTop !== menu.scrollTop) setMenu(null); props.onScroll(event); }}
       onFocusCapture={(event) => {
         const row = (event.target as HTMLElement).closest<HTMLElement>('[data-activity-key]');
         if (!row) { focusedRow.current = null; return; }
@@ -170,7 +173,7 @@ export default function ActivitySidebar(props: Props) {
             aria-haspopup="menu" aria-expanded={Boolean(menu)} onClick={() => {
               if (menu) { closeMenu(); return; }
               const rect = menuButtonRef.current!.getBoundingClientRect();
-              setMenu({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 208)), right: Math.max(8, window.innerWidth - rect.right) });
+              setMenu({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 208)), right: Math.max(8, window.innerWidth - rect.right), scrollTop: bodyRef.current?.scrollTop ?? 0 });
             }}><IconMoreHorizontal /></button>
         </div>
         {props.filters.priority ? <>
@@ -219,7 +222,7 @@ export default function ActivitySidebar(props: Props) {
         items[next]?.focus();
       } else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
     }}>
-      {(['priority', 'scheduled', 'chat', 'dream'] as const).map((key) => <button key={key} type="button" role="menuitemcheckbox" aria-checked={props.filters[key]}
+      {(['priority', 'scheduled', 'chat', 'dream'] as const).filter(key => !isReactNativeHost() || key !== 'dream').map((key) => <button key={key} type="button" role="menuitemcheckbox" aria-checked={props.filters[key]}
         onClick={() => props.onFiltersChange({ ...props.filters, [key]: !props.filters[key] })}>{t(key === 'priority' ? 'chat.activity.prioritySection' : `chat.activity.source.${key}`)}{props.filters[key] ? <IconCheck /> : <span />}</button>)}
     </div> : null}
   </aside>;

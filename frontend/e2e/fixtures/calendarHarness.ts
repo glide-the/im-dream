@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: serve the existing bulk Deck catalog DTO during Settings boot reads.
 // [Sync] 2026-10-15: classify only memory Settings GET aborts from React cleanup/reload in its explicit fixture lane.
 // [Sync] 2026-10-14: classify exact Reflections history GET lifecycle cancellation only in its explicit fixture lane.
 // [Sync] 2026-10-13: classify only the mounted Notion probe GET cancellation during connector refresh/unmount.
@@ -420,7 +421,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     // Boot calls unrelated to this isolated UI contract are production-shaped empty reads.
     // No request writes a backend, database, model or worker; diary writes stay in memory.
     if (request.method() === 'GET') {
-      await route.fulfill({ json: path === '/api/decks' ? { decks: [] }
+      await route.fulfill({ json: (path === '/api/decks' || path === '/api/decks/catalog') ? { decks: [] }
         : path === '/api/default-voices' ? {} : path === '/api/claude-agent/threads' ? { threads: [] } : {} });
       return;
     }

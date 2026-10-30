@@ -1,3 +1,8 @@
+# [Input] Immutable plugin init profiles, requirements and the platform-owned Python executor.
+# [Output] Original workspace initialization, managed venv and requirements/version receipts.
+# [Pos] Shared plugin setup; platform binding changes command execution without changing init rules.
+# [Sync] 2026-10-26: bind venv cache receipts to their current absolute directory so moved caches rebuild original interpreter entry points.
+# [Sync] 2026-10-26: support an explicitly bound guest Python executor; preserve the server subprocess default.
 """Workspace init profiles and managed per-plugin Python runtimes.
 
 Design: docs/design/deck/drama-forge-workspace-init-design.md §4/§5.
@@ -37,12 +42,33 @@ INIT_PROFILE_RELATIVE_PATH = Path(".ink") / "workspace-init.json"
 INIT_PROFILE_SCHEMA_VERSION = "workspace-init/v1"
 RUNTIME_RECEIPT_NAME = "runtime-receipt.json"
 VENV_DIR_NAME = "venv"
+_python_execution = None
 
 
 class WorkspaceInitError(RuntimeError):
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(message)
+
+
+def bind_python_execution(executable: str, version: str, runner) -> None:
+    global _python_execution
+    if (_python_execution is not None or not isinstance(executable, str)
+        or not executable.startswith('/') or '\x00' in executable
+        or not isinstance(version, str) or re.fullmatch(r'\d+\.\d+\.\d+', version) is None
+        or not callable(runner)):
+        raise WorkspaceInitError('CLAUDE_PLUGIN_RUNTIME_FAILED', 'Invalid or already bound Python execution')
+    _python_execution = (executable, version, runner)
+
+
+def _run_python(argv, **options):
+    if _python_execution is None:
+        return subprocess.run(argv, **options)
+    return _python_execution[2](argv, **options)
+
+
+def _python_version() -> str:
+    return _python_execution[1] if _python_execution is not None else sys.version.split()[0]
 
 
 @dataclass(frozen=True)
@@ -386,10 +412,11 @@ def _check_min_version(min_version: str | None) -> None:
             "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
             f"python.min_version is not a version string: {min_version!r}",
         ) from exc
-    if sys.version_info[: len(want)] < want:
+    actual = tuple(map(int, _python_execution[1].split('.'))) if _python_execution is not None else sys.version_info
+    if actual[: len(want)] < want:
         raise WorkspaceInitError(
             "CLAUDE_PLUGIN_RUNTIME_FAILED",
-            f"managed Python {sys.version.split()[0]} does not satisfy "
+            f"managed Python {_python_version()} does not satisfy "
             f"min_version {min_version}",
         )
 
@@ -411,6 +438,7 @@ def ensure_plugin_venv(
     slot = runtime_root / "plugin-runtimes" / slot_name
     slot.mkdir(parents=True, exist_ok=True)
     venv_dir = slot / VENV_DIR_NAME
+    venv_path = str(venv_dir.resolve())
     receipt_path = slot / RUNTIME_RECEIPT_NAME
     requirements_hash = _requirements_digest(Path(packed_dir), spec)
 
@@ -424,13 +452,15 @@ def ensure_plugin_venv(
                     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     receipt = {}
-                if receipt.get("requirements_sha256") == requirements_hash:
+                if (receipt.get("requirements_sha256") == requirements_hash
+                    and receipt.get("venv_path") == venv_path):
                     return venv_dir
 
             if venv_dir.exists():
                 shutil.rmtree(venv_dir)
-            create = subprocess.run(
-                [sys.executable, "-m", "venv", str(venv_dir)],
+            create = _run_python(
+                [(_python_execution[0] if _python_execution is not None else sys.executable),
+                    "-m", "venv", *(["--copies"] if _python_execution is not None else []), str(venv_dir)],
                 capture_output=True,
                 text=True,
                 timeout=180,
@@ -440,7 +470,7 @@ def ensure_plugin_venv(
                     "CLAUDE_PLUGIN_RUNTIME_FAILED",
                     f"venv creation failed: {(create.stderr or '')[-500:]}",
                 )
-            install = subprocess.run(
+            install = _run_python(
                 [
                     str(interpreter), "-m", "pip", "install",
                     "--disable-pip-version-check", "--no-input",
@@ -463,7 +493,8 @@ def ensure_plugin_venv(
                         "artifact_digest": artifact_digest,
                         "requirements": spec.requirements,
                         "requirements_sha256": requirements_hash,
-                        "python_version": sys.version.split()[0],
+                        "venv_path": venv_path,
+                        "python_version": _python_version(),
                         "created_at": _now(),
                     },
                     ensure_ascii=False,

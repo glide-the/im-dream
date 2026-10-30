@@ -3,10 +3,12 @@
 // [Pos] Browser auth context; Admin/Dream servers own all OAuth credentials.
 // [Sync] 2026-09-17: let restored Dream forms submit directly to Admin while keeping browser state token-free.
 // [Sync] 2026-09-15: commit only the current Browser owner snapshot after asynchronous session loading.
-import { createContext, useContext, useEffect, useState } from 'react';
+// [Sync] 2026-10-27: publish only authenticated state to the RN navigation owner.
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { isBrowserSessionCurrent, loadBrowserSession, revokeBrowserSession, type BrowserUser } from '../lib/browserSession';
+import {isReactNativeHost, reportMobileHostRoute} from '../platform/mobileHost';
 
 interface AuthContextType {
   user: BrowserUser | null;
@@ -22,6 +24,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   useEffect(() => {
+    if (!isLoading) reportMobileHostRoute(user !== null, authError !== null);
+  }, [isLoading, user, authError]);
+  useEffect(() => {
     const abort = new AbortController();
     // Discard retired credentials without adopting or transmitting them.
     try { localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN); } catch { /* Cookie auth does not depend on Browser storage. */ }
@@ -36,10 +41,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => abort.abort();
   }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try { await revokeBrowserSession(); setUser(null); setAuthError(null); }
     catch { setAuthError('Unable to log out. Please try again.'); }
-  };
+  }, []);
+  useEffect(() => {
+    if (!isReactNativeHost()) return;
+    const requestLogout = () => { void logout(); };
+    window.addEventListener('ink:host-logout', requestLogout);
+    return () => window.removeEventListener('ink:host-logout', requestLogout);
+  }, [logout]);
   return <AuthContext.Provider value={{ user, isLoading, authError, logout, isAuthenticated: user !== null }}>{children}</AuthContext.Provider>;
 }
 

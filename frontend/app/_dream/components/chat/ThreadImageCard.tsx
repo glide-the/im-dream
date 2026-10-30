@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: retain the original card DOM/CSS while sharing its export DTO definitions.
 // [Input] ExportChatMessage blocks (text/reasoning/tool), resolved Workspace image data,
 //         thread title, i18n labels, and optional ExportPendingConfirmation.
 // [Output] The warm-paper long-image card (Ink & Memory UI Design v2.1 tokens: Warm Canvas bg,
@@ -15,70 +16,8 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import remarkGfm from 'remark-gfm';
 import { isWorkspaceUri } from './workspaceUri';
 
-export interface ExportToolBlock {
-  kind: 'tool';
-  toolName: string;
-  title?: string;
-  summary?: string;
-  status: 'executing' | 'completed' | 'error';
-  /** Per-row amber badge label (待确认 / 待回答) when this part awaits a user decision. */
-  pendingLabel?: string;
-  /** Terminal-card header label (e.g. localized "Terminal" / "Write"). */
-  terminalLabel?: string;
-  command?: string;
-  output?: string;
-  outputTruncated?: boolean;
-  exitCode?: string | null;
-  /** Right-aligned colored status text on the terminal header (Written / Write failed…). */
-  statusLabel?: string;
-  /** Completed editor-write parts render as a quiet success row instead of a terminal card. */
-  isEditorWrite?: boolean;
-}
-
-export type ExportBlock =
-  | { kind: 'text'; text: string }
-  | { kind: 'reasoning'; text: string }
-  | ExportToolBlock;
-
-export interface ExportChatMessage {
-  role: 'user' | 'assistant';
-  blocks: ExportBlock[];
-  files: string[];
-}
-
-export interface ExportConfirmationQuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface ExportConfirmationQuestion {
-  question: string;
-  required?: boolean;
-  description?: string;
-  options: ExportConfirmationQuestionOption[];
-}
-
-export interface ExportPendingConfirmation {
-  kind: 'confirm' | 'askuser' | 'sandbox-network' | 'reject-only';
-  title: string;
-  badge: string;
-  /** Mono detail block for the generic confirm variant (command or truncated JSON). */
-  detail?: string;
-  /** Pre-localized info rows for the sandbox-network variant ("Host: …" / "Network policy: …"). */
-  infoRows?: string[];
-  questions?: ExportConfirmationQuestion[];
-  primaryActionLabel: string;
-  secondaryActionLabel: string;
-}
-
-export interface ExportImageLabels {
-  you: string;
-  assistant: string;
-  footer: string;
-  thinking: string;
-  truncated: string;
-  workspaceImageUnavailable: string;
-}
+import type {ExportToolBlock, ExportBlock, ExportChatMessage, ExportConfirmationQuestionOption, ExportConfirmationQuestion, ExportPendingConfirmation, ExportImageLabels} from './chatImageProjection';
+export type {ExportToolBlock, ExportBlock, ExportChatMessage, ExportConfirmationQuestionOption, ExportConfirmationQuestion, ExportPendingConfirmation, ExportImageLabels} from './chatImageProjection';
 
 const EXPORT_MARKDOWN_COMPONENTS: Components = {
   p: ({ children }) => <p style={{ margin: '0 0 0.65em', lineHeight: 1.75 }}>{children}</p>,

@@ -1,3 +1,6 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
+# [Sync] 2026-10-26: authorized Dream file reads recover the same accepted confirmation through the original exact-message coordinator.
+# [Sync] 2026-10-26: submit and recovery carry the current OAuth gateway factory into the original claimed turn.
 # [Input] Admin-authorized Story Workspace DTOs, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow orchestration; all relational access belongs to Admin DTO/ORM services.
@@ -45,7 +48,9 @@ try:
     )
     from services.story_workspace.dream_confirmation_service import (
         StoryWorkspaceDreamConfirmationCoordinator,
+        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationError,
+        StoryWorkspaceDreamGatewayRuntimeFactory,
         story_workspace_confirmation_command_json,
         story_workspace_persisted_confirmation,
         story_workspace_validate_confirmation_projection,
@@ -105,7 +110,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.dream_confirmation_service import (
         StoryWorkspaceDreamConfirmationCoordinator,
+        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationError,
+        StoryWorkspaceDreamGatewayRuntimeFactory,
         story_workspace_confirmation_command_json,
         story_workspace_persisted_confirmation,
         story_workspace_validate_confirmation_projection,
@@ -269,7 +276,8 @@ class _StoryWorkspaceApplicationSupport:
     @staticmethod
     def _dream_agent_thread_factory() -> Any | None:
         try:
-            from agent_factory import claude_agent_thread_factory
+            from claude_agent.runtime_owner import get_thread_factory
+            claude_agent_thread_factory = get_thread_factory()
 
             return claude_agent_thread_factory
         except Exception:
@@ -323,21 +331,39 @@ class _StoryWorkspaceApplicationSupport:
 class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
     """Consume Admin authority/ORM contracts and project shared files locally."""
 
+    def __init__(
+        self, *, dream_confirmation_coordinator: StoryWorkspaceDreamConfirmationCoordinator | None = None,
+    ) -> None:
+        self._dream_confirmation_coordinator = (
+            dream_confirmation_coordinator or _DREAM_CONFIRMATION_COORDINATOR
+        )
+
     async def get_dream_files(
         self,
         workflow_run_id: str,
         *,
         actor: dict[str, str],
         artifact_data: AdminStoryWorkspaceArtifactData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
     ) -> Any:
-        projection = await asyncio.to_thread(
+        projection, pending = await asyncio.to_thread(
             self._get_dream_files_sync,
             workflow_run_id,
             actor,
             artifact_data,
+            confirmation_data,
             access_token,
         )
+        if pending is not None:
+            try:
+                self._dream_confirmation_coordinator.schedule(
+                    StoryWorkspaceDreamConfirmationDispatch.from_admin(pending),
+                    gateway_runtime_factory=gateway_runtime_factory,
+                )
+            except Exception:
+                logger.warning("Dream confirmation recovery deferred for run_id=%s", workflow_run_id)
         return self._attach_dream_agent_activity(
             projection,
             workflow_run_id=workflow_run_id,
@@ -589,6 +615,7 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         workflow_run_id: str,
         actor: dict[str, str],
         artifact_data: AdminStoryWorkspaceArtifactData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
     ) -> Any:
         authority = self._authority(workflow_run_id, actor, artifact_data, access_token)
@@ -613,7 +640,7 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         except StoryWorkspaceDreamFileError as exc:
             self._raise_dream_file_error(exc)
         self._require_dream_output_for_ready_status(workflow_run, projection)
-        return projection.model_copy(
+        projection = projection.model_copy(
             update={
                 "confirmation_accepted": authority.confirmation_accepted,
                 "confirmation_dispatched": authority.confirmation_dispatched,
@@ -622,6 +649,22 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
                 ),
             }
         )
+        pending = None
+        if (
+            workflow_run.status is RunStatus.CONFIRMED
+            and authority.confirmation_accepted
+            and not authority.confirmation_dispatched
+        ):
+            try:
+                pending = confirmation_data.pending_dispatch(
+                    workflow_run_id, thread_id, uuid4().hex, access_token=access_token,
+                )
+            except AdminDataError as exc:
+                logger.warning(
+                    "Dream confirmation recovery read deferred for run_id=%s code=%s",
+                    workflow_run_id, exc.code,
+                )
+        return projection, pending
 
     def _episode_registry_context(
         self,
@@ -973,6 +1016,7 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
         run_data: AdminRunData,
         confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
     ) -> Any:
         """Validate shared files, persist through Admin, then queue Runtime."""
 
@@ -990,7 +1034,7 @@ class DreamConfirmationApplicationService(_StoryWorkspaceApplicationSupport):
         if dispatch is None:
             return accepted
         try:
-            self._dream_confirmation_coordinator.schedule(dispatch)
+            self._dream_confirmation_coordinator.schedule(dispatch, gateway_runtime_factory=gateway_runtime_factory)
         except Exception:
             logger.exception(
                 "Dream confirmation scheduling deferred for run_id=%s message_id=%s",

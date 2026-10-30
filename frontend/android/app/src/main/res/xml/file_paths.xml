@@ -1,0 +1,9 @@
+<!-- [Input] Application-private files imported through the Android document picker. -->
+<!-- [Output] Narrow FileProvider access for explicit share intents. -->
+<!-- [Pos] Android file-sharing path policy. -->
+<!-- [Sync] 2026-10-24: expose only the mobile-files directory through FileProvider. -->
+
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="mobile_files" path="mobile-files/" />
+</paths>
+

@@ -1,3 +1,5 @@
+// [Sync] 2026-10-29: Work plugin reads/install/uninstall accept an explicit native HTTP transport; original payloads, CSRF and Web defaults remain.
+// [Sync] 2026-10-29: Deck reference saves accept the same optional platform transport as reads; payload and Web defaults remain.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Settings → Plugins (Claude Code) server API contracts.
@@ -164,7 +166,8 @@ export class ClaudePluginApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// [Sync] 2026-10-28: read-only catalog/ref/receipt callers may supply a platform transport; Web defaults and all mutations remain.
+async function request<T>(path: string, init: RequestInit = {}, transport:typeof fetch=fetch): Promise<T> {
   const headers = new Headers(init.headers);
   const csrfToken = getBrowserCsrfToken();
   for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
@@ -173,7 +176,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(apiUrl(path), {
+  const response = await transport(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers,
@@ -196,9 +199,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-export async function listClaudePluginInstallations(): Promise<ClaudePluginInstallationsResult> {
+export async function listClaudePluginInstallations(transport:typeof fetch=fetch): Promise<ClaudePluginInstallationsResult> {
   return request<ClaudePluginInstallationsResult>(
-    '/api/claude-plugins/installations',
+    '/api/claude-plugins/installations',{},transport,
   );
 }
 
@@ -206,7 +209,7 @@ export async function installClaudePlugin(input: {
   packageSpec?: string;
   marketplaceEntryId?: string;
   sourceType?: ClaudePluginSourceType;
-}): Promise<{
+}, transport:typeof fetch=fetch): Promise<{
   accepted: boolean;
   operation_id: string;
   package_spec: string;
@@ -219,20 +222,20 @@ export async function installClaudePlugin(input: {
       ...(input.marketplaceEntryId ? { marketplace_entry_id: input.marketplaceEntryId } : {}),
       ...(input.sourceType ? { source_type: input.sourceType } : {}),
     }),
-  });
+  }, transport);
 }
 
-export async function listClaudePluginMarketplace(): Promise<ClaudePluginMarketplaceResult> {
-  return request('/api/claude-plugins/marketplace');
+export async function listClaudePluginMarketplace(transport:typeof fetch=fetch): Promise<ClaudePluginMarketplaceResult> {
+  return request('/api/claude-plugins/marketplace',{},transport);
 }
 
-export async function getClaudePluginOperation(operationId: string): Promise<ClaudePluginOperation> {
-  return request(`/api/claude-plugins/operations/${encodeURIComponent(operationId)}`);
+export async function getClaudePluginOperation(operationId: string,transport:typeof fetch=fetch): Promise<ClaudePluginOperation> {
+  return request(`/api/claude-plugins/operations/${encodeURIComponent(operationId)}`,{},transport);
 }
 
-export async function listClaudePluginOperations(limit = 10): Promise<ClaudePluginOperation[]> {
+export async function listClaudePluginOperations(limit = 10,transport:typeof fetch=fetch): Promise<ClaudePluginOperation[]> {
   const payload = await request<{ operations: ClaudePluginOperation[] }>(
-    `/api/claude-plugins/operations?limit=${limit}`,
+    `/api/claude-plugins/operations?limit=${limit}`,{},transport,
   );
   return payload.operations;
 }
@@ -241,16 +244,16 @@ export async function getClaudePluginInstallation(installationId: string): Promi
   return request(`/api/claude-plugins/installations/${encodeURIComponent(installationId)}`);
 }
 
-export async function uninstallClaudePlugin(installationId: string): Promise<ClaudePluginInstallation> {
+export async function uninstallClaudePlugin(installationId: string,transport:typeof fetch=fetch): Promise<ClaudePluginInstallation> {
   return request(`/api/claude-plugins/installations/${encodeURIComponent(installationId)}/uninstall`, {
     method: 'POST',
     body: JSON.stringify({}),
-  });
+  },transport);
 }
 
-export async function listDeckClaudePluginRefs(deckId: string): Promise<DeckClaudePluginRef[]> {
+export async function listDeckClaudePluginRefs(deckId: string,transport:typeof fetch=fetch): Promise<DeckClaudePluginRef[]> {
   const payload = await request<{ refs: DeckClaudePluginRef[] }>(
-    `/api/decks/${encodeURIComponent(deckId)}/claude-plugins`,
+    `/api/decks/${encodeURIComponent(deckId)}/claude-plugins`,{},transport,
   );
   return payload.refs;
 }
@@ -258,16 +261,17 @@ export async function listDeckClaudePluginRefs(deckId: string): Promise<DeckClau
 export async function putDeckClaudePluginRefs(
   deckId: string,
   refs: Array<{ plugin_installation_id: string; enabled: boolean; order_index: number }>,
+  transport:typeof fetch=fetch,
 ): Promise<DeckClaudePluginRef[]> {
   const payload = await request<{ refs: DeckClaudePluginRef[] }>(
     `/api/decks/${encodeURIComponent(deckId)}/claude-plugins`,
-    { method: 'PUT', body: JSON.stringify({ refs }) },
+    { method: 'PUT', body: JSON.stringify({ refs }) },transport,
   );
   return payload.refs;
 }
 
-export async function getThreadPluginLoadReceipt(threadId: string): Promise<PluginLoadReceipt> {
-  return request(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/plugin-load-receipt`);
+export async function getThreadPluginLoadReceipt(threadId: string,transport:typeof fetch=fetch): Promise<PluginLoadReceipt> {
+  return request(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/plugin-load-receipt`,{},transport);
 }
 
 export function shortDigest(digest: string): string {

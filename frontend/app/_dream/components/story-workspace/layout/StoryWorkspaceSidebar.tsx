@@ -1,8 +1,8 @@
+// [Sync] 2026-10-29: narrow More opens one full-page five-item menu; desktop disclosure and routes remain.
 // [Sync] 2026-09-14: failed logout retains the real session and shows safe feedback in the user menu.
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
-// [Output] Render the collapsible desktop Story Workspace navigation sidebar with
-//          Chat/Dream/Decks plus a More disclosure for restored legacy entries.
-// [Pos] Story Workspace left layout region.
+// [Output] Render the desktop sidebar and the narrow full-page Writing/Timeline/Reflections/Theme/Settings menu.
+// [Pos] Story Workspace desktop sidebar and narrow bottom-navigation region.
 // [Sync] 2026-08-14: temporarily hide Writing, Timeline, and Analysis entries while
 //                    retaining their routes and content for authorized deep links.
 // [Sync] 2026-08-14: order visible entries as Chat, Dream, then Decks.
@@ -31,6 +31,8 @@ import {
 } from 'react-icons/fa';
 import { useAuth } from '../../../contexts/AuthContext';
 import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
+import Modal from '../../chat/Modal';
+import {MORE_NAVIGATION_ITEMS} from './moreNavigation';
 
 const storyWorkspaceMainNavPaths = {
   writing: '/story-workspace/writing',
@@ -58,6 +60,7 @@ export function StoryWorkspaceSidebar({
   const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [mobileMoreOpen,setMobileMoreOpen]=useState(false);
   const [showMoreNavigation, setShowMoreNavigation] = useState(() => (
     currentPath === storyWorkspaceMainNavPaths.writing
     || currentPath === storyWorkspaceMainNavPaths.timeline
@@ -101,12 +104,22 @@ export function StoryWorkspaceSidebar({
     }
   }, [currentPath]);
 
+  useEffect(()=>{
+    const media=window.matchMedia('(max-width: 767px)');
+    const closeWhenWide=()=>{if(!media.matches)setMobileMoreOpen(false);};
+    const closeAfterHistoryNavigation=()=>setMobileMoreOpen(false);
+    media.addEventListener('change',closeWhenWide);
+    window.addEventListener('popstate',closeAfterHistoryNavigation);
+    return()=>{media.removeEventListener('change',closeWhenWide);window.removeEventListener('popstate',closeAfterHistoryNavigation);};
+  },[]);
+
   const handleToggleTheme = () => {
     toggleTheme();
   };
 
   const handleNavigate = (path: string) => {
     setShowMoreNavigation(false);
+    setMobileMoreOpen(false);
     setShowUserMenu(false);
     onNavigate(path);
   };
@@ -114,7 +127,7 @@ export function StoryWorkspaceSidebar({
   return (
     <div
       className={`story-workspace-sidebar${collapsed ? ' story-workspace-sidebar--collapsed' : ''}`}
-      data-mobile-more-open={showMoreNavigation ? 'true' : 'false'}
+      data-mobile-more-open={mobileMoreOpen ? 'true' : 'false'}
     >
       <style>{`
         .story-workspace-sidebar {
@@ -513,9 +526,9 @@ export function StoryWorkspaceSidebar({
           aria-controls="story-workspace-more-navigation"
           aria-expanded={showMoreNavigation}
           aria-label={collapsed ? t('nav.more') : undefined}
-          className="story-workspace-sidebar__nav-button story-workspace-sidebar__more-button"
+          className="story-workspace-sidebar__nav-button story-workspace-sidebar__more-button story-workspace-sidebar__more-button--desktop"
           aria-current={showMoreNavigation || currentPath === storyWorkspaceMainNavPaths.writing || currentPath === storyWorkspaceMainNavPaths.timeline || currentPath === storyWorkspaceMainNavPaths.analysis ? 'page' : undefined}
-          onClick={() => setShowMoreNavigation((visible) => !visible)}
+          onClick={()=>setShowMoreNavigation(visible=>!visible)}
           title={collapsed ? t('nav.more') : undefined}
           type="button"
         >
@@ -525,6 +538,9 @@ export function StoryWorkspaceSidebar({
             aria-hidden="true"
             className={`story-workspace-sidebar__disclosure-chevron${showMoreNavigation ? ' story-workspace-sidebar__disclosure-chevron--open' : ''}`}
           />
+        </button>
+        <button type="button" className="story-workspace-sidebar__nav-button story-workspace-sidebar__more-button story-workspace-sidebar__more-button--narrow" aria-controls="story-workspace-narrow-more-items" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} aria-current={mobileMoreOpen||currentPath===storyWorkspaceMainNavPaths.writing||currentPath===storyWorkspaceMainNavPaths.timeline||currentPath===storyWorkspaceMainNavPaths.analysis?'page':undefined} onClick={()=>{setShowUserMenu(false);setMobileMoreOpen(true);}}>
+          <FaEllipsisH aria-hidden="true" className="story-workspace-sidebar__icon"/><span className="story-workspace-sidebar__label">{t('nav.more')}</span>
         </button>
         {showMoreNavigation ? (
           <div
@@ -630,6 +646,20 @@ export function StoryWorkspaceSidebar({
           ) : null}
         </div>
       </footer>
+      <Modal open={mobileMoreOpen} title={t('nav.more')} closeLabel={t('chat.history.close')} onClose={()=>setMobileMoreOpen(false)} surfaceClassName="story-workspace-narrow-more-page">
+        <nav id="story-workspace-narrow-more-items" aria-label={t('nav.more')} className="story-workspace-narrow-more-page__items">
+          {MORE_NAVIGATION_ITEMS.map(item=>{
+            const Icon=item.id==='writing'?FaPenNib:item.id==='timeline'?FaStream:item.id==='analysis'?FaChartLine:item.id==='theme'?(isDark?FaSun:FaMoon):FaCog;
+            return <button key={item.id} type="button" onClick={()=>item.id==='theme'?handleToggleTheme():handleNavigate(item.path)}>
+              <Icon aria-hidden="true"/><span>{t(item.labelKey)}</span><FaChevronRight aria-hidden="true"/>
+            </button>;
+          })}
+        </nav>
+        <div className="story-workspace-narrow-more-page__account">
+          <span>{displayName}</span><button type="button" onClick={()=>void logout()}>Logout</button>
+          {authError?<p role="alert">{authError}</p>:null}
+        </div>
+      </Modal>
     </div>
   );
 }

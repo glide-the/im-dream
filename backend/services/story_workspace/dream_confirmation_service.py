@@ -1,3 +1,5 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
+# [Sync] 2026-10-26: compose current OAuth gateway runtime after the original exact claim and pass it into the existing Dream request.
 """Validate Dream files and deliver Admin-owned confirmation work to Runtime."""
 
 # [Input] Registry120/121 DTOs, shared-file projection and claim-bound Admin turn owner.
@@ -8,7 +10,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import logging
@@ -38,6 +40,8 @@ try:
         canonical_confirmation_command,
     )
     from services.story_workspace.dream_lifecycle_observer import drain_chat_agent_turn
+    from services.admin_data.workflow_data import AdminWorkflowResolution
+    from services.admin_data.gateway_runtime import AdminGatewayRuntime
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_RELATIONS_MAX,
@@ -59,6 +63,8 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         canonical_confirmation_command,
     )
     from backend.services.story_workspace.dream_lifecycle_observer import drain_chat_agent_turn
+    from backend.services.admin_data.workflow_data import AdminWorkflowResolution
+    from backend.services.admin_data.gateway_runtime import AdminGatewayRuntime
 
 
 _logger = logging.getLogger(__name__)
@@ -82,6 +88,7 @@ StoryWorkspaceDreamConfirmationDispatcher = Callable[
     [str, str, str, list, dict, AdminStoryWorkspaceConfirmationTurnOwner],
     Awaitable[bool],
 ]
+StoryWorkspaceDreamGatewayRuntimeFactory = Callable[[AdminWorkflowResolution], AdminGatewayRuntime]
 
 
 @dataclass(frozen=True)
@@ -235,7 +242,8 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
         try:
             selected_factory = factory
             if selected_factory is None:
-                from agent_factory import claude_agent_thread_factory
+                from claude_agent.runtime_owner import get_thread_factory
+                claude_agent_thread_factory = get_thread_factory()
                 selected_factory = claude_agent_thread_factory
             selected_request_factory = request_factory
             if selected_request_factory is None:
@@ -248,7 +256,10 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 admin_workflow_resolution=owner.workflow,
                 admin_deck_chat_context=owner.deck,
                 admin_turn_persistence=owner.persistence,
+                admin_gateway_runtime=owner.gateway,
             )
+            if owner.gateway is not None:
+                await asyncio.to_thread(owner.gateway.start)
             await asyncio.to_thread(owner.persistence.start)
             result = await drain_chat_agent_turn(selected_factory, request)
             return result.completed
@@ -259,7 +270,7 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
             return False
         finally:
             try:
-                await asyncio.to_thread(owner.persistence.close)
+                await asyncio.to_thread(owner.close)
             except Exception:
                 _logger.exception(
                     "Dream confirmation Admin owner close failed for thread_id=%s message_id=%s",
@@ -364,15 +375,23 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             turn_claim=claim,
         )
 
-    def schedule(self, dispatch: Optional[StoryWorkspaceDreamConfirmationDispatch]) -> bool:
+    def schedule(
+        self, dispatch: Optional[StoryWorkspaceDreamConfirmationDispatch], *,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
+    ) -> bool:
         if dispatch is None or dispatch.message_id in self._in_flight:
             return False
         retry = self._retry_state.get(dispatch.message_id)
         if retry is not None and self._clock() < retry.not_before:
             return False
-        return self._schedule_claimed(self._claim(dispatch.message_id))
+        return self._schedule_claimed(
+            self._claim(dispatch.message_id), gateway_runtime_factory=gateway_runtime_factory,
+        )
 
-    def _schedule_claimed(self, claimed: StoryWorkspaceDreamConfirmationDispatch | None) -> bool:
+    def _schedule_claimed(
+        self, claimed: StoryWorkspaceDreamConfirmationDispatch | None, *,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
+    ) -> bool:
         if (
             claimed is None
             or claimed.turn_claim is None
@@ -383,7 +402,9 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         if retry is not None and self._clock() < retry.not_before:
             self._set_claim_lease(claimed, max(retry.not_before - self._clock(), 0.0))
             return False
-        task = asyncio.create_task(self._consume_and_ack(claimed), name=f"dream-confirmation-{claimed.message_id}")
+        task = asyncio.create_task(self._consume_and_ack(
+            claimed, gateway_runtime_factory=gateway_runtime_factory,
+        ), name=f"dream-confirmation-{claimed.message_id}")
         self._in_flight[claimed.message_id] = task
         return True
 
@@ -441,10 +462,14 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             if not renewed:
                 return False
 
-    async def _consume_and_ack(self, dispatch: StoryWorkspaceDreamConfirmationDispatch) -> None:
+    async def _consume_and_ack(
+        self, dispatch: StoryWorkspaceDreamConfirmationDispatch, *,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
+    ) -> None:
         completion_observed = False
         heartbeat: Optional[asyncio.Task[bool]] = None
         turn_task: Optional[asyncio.Task[bool]] = None
+        owner: AdminStoryWorkspaceConfirmationTurnOwner | None = None
 
         async def stop_heartbeat() -> None:
             nonlocal heartbeat
@@ -463,6 +488,8 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 dispatch.turn_claim,
                 self._request_id_factory(),
             )
+            if gateway_runtime_factory is not None:
+                owner = replace(owner, gateway=await asyncio.to_thread(gateway_runtime_factory, owner.workflow))
             heartbeat = asyncio.create_task(
                 self._renew_owned_claim(dispatch), name=f"dream-confirmation-lease-{dispatch.message_id}"
             )
@@ -507,6 +534,11 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             if turn_task is not None and not turn_task.done():
                 turn_task.cancel()
                 await asyncio.gather(turn_task, return_exceptions=True)
+            if owner is not None and turn_task is None:
+                try:
+                    await asyncio.to_thread(owner.close)
+                except Exception:
+                    _logger.warning("Dream confirmation owner cleanup failed for message_id=%s", dispatch.message_id)
             if self._in_flight.get(dispatch.message_id) is asyncio.current_task():
                 self._in_flight.pop(dispatch.message_id, None)
 

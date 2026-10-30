@@ -1,3 +1,5 @@
+// [Sync] 2026-10-29: retain conflict feedback after refresh and commit the reviewed preview revision; conflicts require a new preview.
+// [Sync] 2026-10-29: share content-version lifecycle through optional native transport; original Web calls and CAS recovery remain.
 // [Input] Deck aggregate version transport and a stable Deck id.
 // [Output] Recoverable draft state/history plus preview/commit CAS actions.
 // [Pos] Deck editor content-version lifecycle hook.
@@ -15,7 +17,7 @@ import {
   type DeckContentVersionState,
 } from '../api/deckVersionApi';
 
-export function useDeckContentVersions(deckId: string) {
+export function useDeckContentVersions(deckId: string, transport:typeof fetch=fetch) {
   const [state, setState] = useState<DeckContentVersionState | null>(null);
   const [history, setHistory] = useState<DeckContentVersionHistory | null>(null);
   const [preview, setPreview] = useState<DeckContentVersionPreview | null>(null);
@@ -31,8 +33,8 @@ export function useDeckContentVersions(deckId: string) {
     setError(null);
     try {
       const [nextState, nextHistory] = await Promise.all([
-        getDeckContentVersionState(deckId),
-        includeHistory ? listDeckContentVersions(deckId) : Promise.resolve(null),
+        getDeckContentVersionState(deckId,transport),
+        includeHistory ? listDeckContentVersions(deckId,transport) : Promise.resolve(null),
       ]);
       if (id === requestId.current) {
         setState(nextState);
@@ -50,7 +52,7 @@ export function useDeckContentVersions(deckId: string) {
     } finally {
       if (id === requestId.current) setLoading(false);
     }
-  }, [deckId]);
+  }, [deckId,transport]);
 
   useEffect(() => {
     setState(null);
@@ -60,41 +62,48 @@ export function useDeckContentVersions(deckId: string) {
     return () => { requestId.current += 1; };
   }, [deckId, refresh]);
 
-  const prepare = useCallback(async () => {
-    if (!state) return null;
+  const prepare = useCallback(async (freshState?: DeckContentVersionState) => {
+    const source=freshState??state;
+    if (!source) return null;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await previewDeckContentVersion(deckId, state);
+      const result = await previewDeckContentVersion(deckId, source,transport);
       setPreview(result);
       return result;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '版本差异预览失败。');
+      const message=cause instanceof Error ? cause.message : '版本差异预览失败。';
       if (cause instanceof DeckVersionApiError && cause.status === 409) await refresh();
+      setError(message);
       return null;
     } finally {
       setSubmitting(false);
     }
-  }, [deckId, refresh, state]);
+  }, [deckId, refresh, state,transport]);
 
   const commit = useCallback(async (description: string) => {
-    if (!state) return null;
+    const source=preview??state;
+    if (!source) return null;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await commitDeckContentVersion(deckId, state, description);
+      const result = await commitDeckContentVersion(deckId, source, description,transport);
       setState(result.state);
       setPreview(null);
       await refresh(true);
       return result;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '版本提交失败，草稿未丢失。');
-      if (cause instanceof DeckVersionApiError && cause.status === 409) await refresh();
+      const message=cause instanceof Error ? cause.message : '版本提交失败，草稿未丢失。';
+      if (cause instanceof DeckVersionApiError && cause.status === 409) {
+        await refresh();
+        setPreview(null);
+      }
+      setError(message);
       return null;
     } finally {
       setSubmitting(false);
     }
-  }, [deckId, refresh, state]);
+  }, [deckId, refresh, state,preview,transport]);
 
   return {
     state,

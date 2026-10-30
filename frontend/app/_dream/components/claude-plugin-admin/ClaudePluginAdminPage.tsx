@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: reuse original plugin state through useClaudePluginAdmin; DOM/CSS, keyboard focus and menu behavior remain.
 // [Input] claudePluginAdminApi typed client, Settings / Work container, and Deck create-menu interaction pattern.
 // [Output] Settings-owned Claude Code plugin admin with one accessible create menu, global Marketplace
 //          select/confirm/install/result flow, recent operations, shared installation list, and uninstall.
@@ -6,7 +7,6 @@
 // [Sync] 2026-10-10: distinguish the Claude Code Plugins list from Dream workflows using product-facing copy.
 
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -23,35 +23,10 @@ import {
   FaSyncAlt,
   FaTimes,
 } from 'react-icons/fa';
-import {
-  ClaudePluginApiError,
-  getClaudePluginOperation,
-  installClaudePlugin,
-  listClaudePluginInstallations,
-  listClaudePluginMarketplace,
-  listClaudePluginOperations,
-  shortDigest,
-  uninstallClaudePlugin,
-  type ClaudePluginInstallation,
-  type ClaudePluginMarketplaceEntry,
-  type ClaudePluginOperation,
-} from '../../api/claudePluginAdminApi';
+import {shortDigest,type ClaudePluginInstallation,type ClaudePluginMarketplaceEntry,type ClaudePluginOperation} from '../../api/claudePluginAdminApi';
+import useClaudePluginAdmin,{type ClaudePluginDialog as ActiveDialog,type MarketplaceStep} from '../../hooks/useClaudePluginAdmin';
+import {MARKETPLACE_STEPS,componentSummary} from './claudePluginPresentation';
 import './ClaudePluginAdminPage.css';
-
-const SPEC_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*(@v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)?$/;
-const OPERATION_LIMIT = 8;
-const OPERATION_POLL_INTERVAL_MS = 2_000;
-
-type ActiveDialog = 'install' | 'marketplace' | 'operations' | null;
-type MarketplaceStep = 'select' | 'confirm' | 'installing' | 'result';
-
-function errorMessage(error: unknown): string {
-  return error instanceof ClaudePluginApiError
-    ? `${error.code}: ${error.message}`
-    : error instanceof Error
-      ? error.message
-      : String(error);
-}
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -170,13 +145,6 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return <span className="claude-plugin-admin__field-label">{children}</span>;
 }
 
-const MARKETPLACE_STEPS: Array<{ id: MarketplaceStep; label: string }> = [
-  { id: 'select', label: '选择插件' },
-  { id: 'confirm', label: '确认安装' },
-  { id: 'installing', label: '正在安装' },
-  { id: 'result', label: '可以使用' },
-];
-
 function MarketplaceStageRail({ step }: { step: MarketplaceStep }) {
   const current = MARKETPLACE_STEPS.findIndex((item) => item.id === step);
   return (
@@ -193,19 +161,6 @@ function MarketplaceStageRail({ step }: { step: MarketplaceStep }) {
       ))}
     </ol>
   );
-}
-
-function componentSummary(entry: ClaudePluginMarketplaceEntry): string {
-  const inventory = entry.component_inventory ?? {};
-  const values = [
-    ['skills', inventory.skills],
-    ['commands', inventory.commands],
-    ['agents', inventory.agents],
-    ['MCP', inventory.mcpServers],
-  ].filter(([, count]) => typeof count === 'number' && count > 0);
-  return values.length
-    ? values.map(([label, count]) => `${count} ${label}`).join(' · ')
-    : '已通过 manifest 与目录校验';
 }
 
 function MarketplaceEntryCard({
@@ -330,119 +285,12 @@ function ActionDialog({
 }
 
 export default function ClaudePluginAdminPage() {
-  const [installations, setInstallations] = useState<ClaudePluginInstallation[]>([]);
-  const [operations, setOperations] = useState<ClaudePluginOperation[]>([]);
-  const [spec, setSpec] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [canManage, setCanManage] = useState(false);
-  const [trackedOperationId, setTrackedOperationId] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
-  const [marketplaceEntries, setMarketplaceEntries] = useState<ClaudePluginMarketplaceEntry[]>([]);
-  const [marketplaceLoading, setMarketplaceLoading] = useState(false);
-  const [marketplaceError, setMarketplaceError] = useState<string | null>(null);
-  const [marketplaceStep, setMarketplaceStep] = useState<MarketplaceStep>('select');
-  const [selectedMarketplaceEntryId, setSelectedMarketplaceEntryId] = useState<string | null>(null);
-  const [marketplaceOperationId, setMarketplaceOperationId] = useState<string | null>(null);
-  const [marketplaceResult, setMarketplaceResult] = useState<ClaudePluginOperation | null>(null);
-  const pollRef = useRef<number | null>(null);
+  const {installations,operations,spec,setSpec,error,installError,successMessage,loading,refreshing,busy,canManage,activeDialog,setActiveDialog,marketplaceEntries,marketplaceLoading,marketplaceError,setMarketplaceError,marketplaceStep,setMarketplaceStep,selectedMarketplaceEntryId,setSelectedMarketplaceEntryId,marketplaceOperationId,marketplaceResult,refresh,loadMarketplace,handleInstall,handleMarketplaceInstall,handleUninstall,selectedMarketplaceEntry,activeMarketplaceOperation,openDialog:openSharedDialog}=useClaudePluginAdmin();
+  const [menuOpen,setMenuOpen]=useState(false);
   const menuBoundaryRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const menuFocusIndexRef = useRef(0);
-
-  const refresh = useCallback(async (initial = false) => {
-    if (initial) setLoading(true);
-    else setRefreshing(true);
-    try {
-      const [installResult, recentOperations] = await Promise.all([
-        listClaudePluginInstallations(),
-        listClaudePluginOperations(OPERATION_LIMIT),
-      ]);
-      setInstallations(installResult.installations);
-      setOperations(recentOperations);
-      setCanManage(Boolean(installResult.permissions?.can_manage_shared_plugins));
-      setError(null);
-    } catch (reason) {
-      setCanManage(false);
-      setError(errorMessage(reason));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh(true);
-  }, [refresh]);
-
-  const loadMarketplace = useCallback(async () => {
-    setMarketplaceLoading(true);
-    setMarketplaceError(null);
-    try {
-      const result = await listClaudePluginMarketplace();
-      setMarketplaceEntries(result.entries);
-      setSelectedMarketplaceEntryId((current) => (
-        current && result.entries.some((entry) => entry.id === current)
-          ? current
-          : result.entries[0]?.id ?? null
-      ));
-    } catch (reason) {
-      setMarketplaceEntries([]);
-      setSelectedMarketplaceEntryId(null);
-      setMarketplaceError(errorMessage(reason));
-    } finally {
-      setMarketplaceLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeDialog !== 'marketplace') return;
-    void loadMarketplace();
-  }, [activeDialog, loadMarketplace]);
-
-  useEffect(() => {
-    if (!trackedOperationId) return undefined;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const operation = await getClaudePluginOperation(trackedOperationId);
-        if (stopped) return;
-        setOperations((current) => {
-          const rest = current.filter((item) => item.id !== operation.id);
-          return [operation, ...rest].slice(0, OPERATION_LIMIT);
-        });
-        if (operation.status === 'ready' || operation.status === 'error') {
-          setTrackedOperationId(null);
-          if (operation.id === marketplaceOperationId) {
-            setMarketplaceResult(operation);
-            setMarketplaceStep('result');
-            setMarketplaceOperationId(null);
-            void loadMarketplace();
-          }
-          setSuccessMessage(
-            operation.status === 'ready'
-              ? `${operation.requested_package_spec} 安装完成。`
-              : null,
-          );
-          void refresh();
-        }
-      } catch {
-        // A transient poll failure must not replace the last visible operation state.
-      }
-    };
-    void tick();
-    pollRef.current = window.setInterval(tick, OPERATION_POLL_INTERVAL_MS);
-    return () => {
-      stopped = true;
-      if (pollRef.current !== null) window.clearInterval(pollRef.current);
-    };
-  }, [trackedOperationId, refresh, marketplaceOperationId, loadMarketplace]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -471,13 +319,7 @@ export default function ClaudePluginAdminPage() {
 
   const openDialog = (dialog: Exclude<ActiveDialog, null>) => {
     setMenuOpen(false);
-    setInstallError(null);
-    if (dialog === 'marketplace') {
-      setMarketplaceStep('select');
-      setMarketplaceResult(null);
-      setMarketplaceError(null);
-    }
-    setActiveDialog(dialog);
+    openSharedDialog(dialog);
   };
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -504,80 +346,6 @@ export default function ClaudePluginAdminPage() {
     }
   };
 
-  const handleInstall = useCallback(async () => {
-    const trimmed = spec.trim();
-    if (!SPEC_PATTERN.test(trimmed)) {
-      setInstallError('包名格式应为 <plugin>@<marketplace>，例如 superpowers@claude-plugins-official');
-      return;
-    }
-    if (!canManage) {
-      setInstallError('当前账户没有共享插件管理权限。');
-      return;
-    }
-    setBusy(true);
-    setInstallError(null);
-    setSuccessMessage(null);
-    try {
-      const accepted = await installClaudePlugin({ packageSpec: trimmed });
-      setTrackedOperationId(accepted.operation_id);
-      setSpec('');
-      setActiveDialog('operations');
-    } catch (reason) {
-      setInstallError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
-  }, [canManage, spec]);
-
-  const handleMarketplaceInstall = useCallback(async () => {
-    const entry = marketplaceEntries.find((item) => item.id === selectedMarketplaceEntryId);
-    if (!entry) {
-      setMarketplaceError('请选择一个 Marketplace 插件。');
-      setMarketplaceStep('select');
-      return;
-    }
-    if (!canManage) {
-      setMarketplaceError('当前账户没有共享插件管理权限。');
-      return;
-    }
-    setBusy(true);
-    setMarketplaceError(null);
-    setMarketplaceResult(null);
-    try {
-      const accepted = await installClaudePlugin({ marketplaceEntryId: entry.id });
-      setMarketplaceOperationId(accepted.operation_id);
-      setTrackedOperationId(accepted.operation_id);
-      setMarketplaceStep('installing');
-    } catch (reason) {
-      setMarketplaceError(errorMessage(reason));
-      setMarketplaceStep('confirm');
-    } finally {
-      setBusy(false);
-    }
-  }, [canManage, marketplaceEntries, selectedMarketplaceEntryId]);
-
-  const handleUninstall = useCallback(async (installationId: string) => {
-    if (!canManage) return;
-    setBusy(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      await uninstallClaudePlugin(installationId);
-      await refresh();
-      setSuccessMessage('插件已卸载。');
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
-  }, [canManage, refresh]);
-
-  const selectedMarketplaceEntry = marketplaceEntries.find(
-    (entry) => entry.id === selectedMarketplaceEntryId,
-  ) ?? null;
-  const activeMarketplaceOperation = marketplaceOperationId
-    ? operations.find((operation) => operation.id === marketplaceOperationId) ?? null
-    : null;
 
   return (
     <section aria-labelledby="claude-plugin-admin-title" className="claude-plugin-admin">

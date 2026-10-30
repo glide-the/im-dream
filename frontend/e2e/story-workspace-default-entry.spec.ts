@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: align the existing entry fixture with current public session and top-level password-form contracts; preserve navigation assertions.
 // [Input] Authenticated root App entry with deterministic API responses.
 // [Output] Browser regression proving authenticated root entry is canonical Story
 //          Workspace Chat with restored collapsible navigation and global UI typography.
@@ -16,11 +17,14 @@ import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chromium', viewport: { width: 1440, height: 900 } });
 
 test('password login at root opens canonical Story Workspace Chat', async ({ page }) => {
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
+  const expectedLifecycleAborts: string[] = [];
+  let successfulHistoryReads=0;
+  page.on('response',response=>{const request=response.request(),url=new URL(response.url());if(request.method()==='GET'&&response.ok()&&url.pathname==='/api/claude-agent/threads'&&url.search==='?limit=21')successfulHistoryReads++;});
   const isKnownExternal = (url: string) => (
     url.includes('react-grab.com')
     || url.includes('fonts.googleapis.com')
@@ -34,6 +38,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       message.type() === 'error'
       && !isKnownExternal(message.text())
       && !isKnownPreAuthVoiceError(message.text())
+      && !(new URL(message.location().url || WEB_BASE).pathname === '/auth/session' && message.text().includes('401'))
     ) {
       diagnostics.push(`console: ${message.text()}`);
     }
@@ -44,7 +49,10 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       failedRequest.failure()?.errorText === 'net::ERR_ABORTED'
       && failedRequest.url().includes('/api/story-workspace/dream-runs')
     );
-    if (!isKnownExternal(failedRequest.url()) && !isExpectedNavigationAbort) {
+    const historyUrl=new URL(failedRequest.url());
+    const isRetiredHistoryRead=failedRequest.method()==='GET'&&failedRequest.failure()?.errorText==='net::ERR_ABORTED'&&historyUrl.pathname==='/api/claude-agent/threads'&&historyUrl.search==='?limit=21';
+    if(isRetiredHistoryRead)expectedLifecycleAborts.push('GET '+historyUrl.pathname+historyUrl.search);
+    if (!isKnownExternal(failedRequest.url()) && !isExpectedNavigationAbort && !isRetiredHistoryRead) {
       diagnostics.push(`${failedRequest.failure()?.errorText ?? 'request failed'} ${failedRequest.url()}`);
     }
   });
@@ -91,19 +99,26 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       notFoundPhrases: [],
     },
   };
+  // Date-only fixture clock keeps the saved Writing Session on its declared day; real timers continue.
+  await page.clock.setFixedTime(new Date(writingSession.created_at));
+  let authenticated=false,passwordSubmissions=0;
+  await page.route(`${WEB_BASE}/auth/**`,async route=>{
+    const request=route.request(),pathname=new URL(request.url()).pathname;
+    if(pathname==='/auth/session'&&request.method()==='GET')return route.fulfill(authenticated?{json:{user:{id:'101',email,display_name:'Story Workspace Default Entry',avatar_url:null,role:'user',created_at:null},csrf_token:'c'.repeat(43)}}:{status:401,json:{}});
+    if(pathname==='/auth/options'&&request.method()==='GET')return route.fulfill({json:{password_action:WEB_BASE+'/auth/dream/password',google_action:WEB_BASE+'/auth/dream/google'}});
+    if(pathname==='/auth/dream/password'&&request.method()==='POST'){
+      expect(request.isNavigationRequest()).toBe(true);
+      const input=new URLSearchParams(request.postData()??'');
+      expect(input.get('email')).toBe(email);expect(input.get('password')).toBe(password);expect(input.get('mode')).toBe('login');
+      passwordSubmissions++;authenticated=true;
+      return route.fulfill({status:303,headers:{location:WEB_BASE+'/story-workspace/chat'},body:''});
+    }
+    unexpectedApiRequests.push(request.method()+' '+pathname);
+    return route.fulfill({status:501,json:{detail:'Unexpected fixture auth operation'}});
+  });
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
-    if (pathname === '/api/login' && request.method() === 'POST') {
-      await route.fulfill({ json: { token: 'story-workspace-default-token' } });
-      return;
-    }
-    if (pathname === '/api/me') {
-      await route.fulfill({
-        json: { id: 101, email, display_name: 'Story Workspace Default Entry' },
-      });
-      return;
-    }
     if (pathname === '/api/sessions') {
       await route.fulfill({
         json: request.method() === 'GET'
@@ -156,7 +171,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       } });
       return;
     }
-    if (pathname === '/api/decks') {
+    if (pathname === '/api/decks' || pathname === '/api/decks/catalog') {
       await route.fulfill({ json: { decks: [] } });
       return;
     }
@@ -168,6 +183,9 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       } });
       return;
     }
+    if (pathname === '/api/connectors') { await route.fulfill({json:[]});return; }
+    if (pathname === '/api/claude-agent/skill-commands') { await route.fulfill({json:{commands:[]}});return; }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/inputs`) { await route.fulfill({json:{entries:[],local_owner:true}});return; }
     if (pathname === '/api/claude-agent/threads') {
       await route.fulfill({ json: { threads: [] } });
       return;
@@ -175,6 +193,8 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
     if (pathname === `/api/claude-agent/threads/${writingThreadId}/messages`) {
       await route.fulfill({
         json: {
+          has_more: false, next_cursor: null, latest_message_id: 'writing-thread-assistant-message',
+          unchanged: new URL(request.url()).searchParams.get('known_latest_message_id') === 'writing-thread-assistant-message',
           thread: {
             id: writingThreadId,
             title: '市场研究写作讨论',
@@ -232,6 +252,9 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       await route.fulfill({ json: { runs: [] } });
       return;
     }
+    if (pathname === '/api/reports/history') { await route.fulfill({json:{reports:[],next_cursor:null}});return; }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/scheduled-tasks` || pathname === `/api/claude-agent/threads/${writingThreadId}/task-links`) { await route.fulfill({json:{source:null,created:[]}});return; }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/turn-navigation`) { await route.fulfill({json:{items:[]}});return; }
     if (pathname === '/api/reports') {
       await route.fulfill({ json: { reports: [] } });
       return;
@@ -251,6 +274,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   await page.getByRole('button', { name: 'Login', exact: true }).click();
 
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/chat`);
+  expect(passwordSubmissions).toBe(1);
   const storyWorkspaceNavigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
   await expect(storyWorkspaceNavigation).toBeVisible();
   await expect(storyWorkspaceNavigation.getByRole('button')).toHaveCount(4);
@@ -343,6 +367,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   expect(panelBeforeResize).not.toBeNull();
   expect(resizeBox).not.toBeNull();
   if (panelBeforeResize && resizeBox) {
+    expect(Number(await resizeWritingChat.getAttribute('aria-valuemax'))).toBeGreaterThan(panelBeforeResize.width + 40);
     await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
     await page.mouse.down();
     await page.mouse.move(resizeBox.x - 80, resizeBox.y + resizeBox.height / 2, { steps: 5 });
@@ -370,6 +395,8 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
     page.getByRole('navigation', { name: 'Story Workspace 导航' })
       .getByRole('button', { name: 'Dream' }),
   ).toHaveAttribute('aria-current', 'page');
+  await test.info().attach('root-entry-request-audit',{body:JSON.stringify({diagnostics,unexpectedApiRequests,expectedLifecycleAborts,successfulHistoryReads}),contentType:'application/json'});
   await expect.poll(() => diagnostics).toEqual([]);
+  expect(successfulHistoryReads).toBeGreaterThan(0);
   expect(unexpectedApiRequests).toEqual([]);
 });

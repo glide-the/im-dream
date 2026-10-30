@@ -2,6 +2,7 @@
 // [Output] Isolated interface evidence for display, paging/recovery, original navigation/delete, drawer focus and read-only automatic activity.
 // [Pos] Technical UI validation only; shared Thread is navigation. Dream Project/Episode/canonical publication/Hook/DB remain outside scope.
 // [Sync] 2026-10-07: isolate source recovery from raw-history pagination so real scrolling cannot invalidate the consumed-prefix fixture.
+// [Sync] 2026-10-28: verify the display menu is open before testing layered Escape after scrolling.
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 // @ts-expect-error Node harness APIs are intentionally outside the application browser compilation.
 import { fileURLToPath } from 'node:url';
@@ -283,7 +284,15 @@ test('390px drawer manages layered focus, one list scroll, cross-day ranges and 
     const body = drawer.locator('.activity-sidebar__body'); await body.evaluate((node) => { node.scrollTop = 180; });
     const top = await body.evaluate((node) => node.scrollTop);
     await drawer.getByRole('button', { name: '刷新活动' }).click(); await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(top);
-    await drawer.getByRole('button', { name: '显示活动' }).click(); await page.keyboard.press('Escape'); await expect(drawer.getByRole('button', { name: '显示活动' })).toBeFocused();
+    await drawer.getByRole('button', { name: '显示活动' }).click();
+    await expect(drawer.getByRole('menu', { name: '显示活动' })).toBeVisible();
+    await expect(drawer.getByRole('menuitemcheckbox').first()).toBeFocused();
+    await body.hover(); await page.mouse.wheel(0, 180);
+    await expect(drawer.getByRole('menu', { name: '显示活动' })).toHaveCount(0);
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole('button', { name: '显示活动' }).click();
+    await expect(drawer.getByRole('menuitemcheckbox').first()).toBeFocused();
+    await page.keyboard.press('Escape'); await expect(drawer.getByRole('button', { name: '显示活动' })).toBeFocused();
     await drawer.getByRole('button', { name: '搜索历史对话' }).click(); const search = page.getByRole('dialog', { name: '搜索历史对话' }); await expect(search.getByRole('textbox')).toBeFocused();
     await page.keyboard.press('Escape'); await expect(drawer.getByRole('button', { name: '搜索历史对话' })).toBeFocused();
     await drawer.getByRole('button', { name: '关闭活动' }).focus(); await page.keyboard.press('Shift+Tab'); expect(await input.evaluate((node) => node === document.activeElement)).toBe(false);

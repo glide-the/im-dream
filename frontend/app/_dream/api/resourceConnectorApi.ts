@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: inject native HTTP into the original API factory; Web resolves its current fetch and preserves all public DTO/CSRF/error contracts.
 // [Sync] 2026-10-13: project server due state, worker diagnostics and refresh cadence independently of saved policy status.
 // [Sync] 2026-10-07: retain the public nullable snapshot identity; malformed versions fail closed and missing versions remain unconfirmed.
 // [Sync] 2026-10-05: share cancellable Cookie transport and preserve safe structured codes/Retry-After for Calendar reads.
@@ -738,7 +739,9 @@ function normalizeNotionSkillFileContent(raw: unknown): NotionSkillFileContent {
   };
 }
 
-export async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+export function createResourceConnectorApi(transport?:typeof globalThis.fetch,notifyChanged:typeof notifyResourceConnectorsChanged=notifyResourceConnectorsChanged) {
+  const fetch:typeof globalThis.fetch=(input,init)=>(transport??globalThis.fetch)(input,init);
+async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
 
@@ -781,12 +784,12 @@ export async function fetchJson<T>(path: string, init: RequestInit = {}): Promis
   return response.json() as Promise<T>;
 }
 
-export async function listConnectors(signal?: AbortSignal): Promise<ResourceConnector[]> {
+async function listConnectors(signal?: AbortSignal): Promise<ResourceConnector[]> {
   const response = await fetchJson<unknown>('/api/connectors', { signal });
   return normalizeConnectorListResponse(response);
 }
 
-export async function createConnector(input: CreateConnectorInput): Promise<ResourceConnector> {
+async function createConnector(input: CreateConnectorInput): Promise<ResourceConnector> {
   const response = await fetchJson<unknown>('/api/connectors', {
     method: 'POST',
     body: JSON.stringify({
@@ -801,7 +804,7 @@ export async function createConnector(input: CreateConnectorInput): Promise<Reso
   return connector;
 }
 
-export async function updateConnector(
+async function updateConnector(
   connectorId: string,
   input: UpdateConnectorInput,
 ): Promise<ResourceConnector | null> {
@@ -812,28 +815,28 @@ export async function updateConnector(
   return normalizeConnectorResponse(response);
 }
 
-export async function deleteConnector(connectorId: string): Promise<boolean> {
+async function deleteConnector(connectorId: string): Promise<boolean> {
   await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`, {
     method: 'DELETE',
   });
   return true;
 }
 
-export async function startConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
+async function startConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/login`, {
     method: 'POST',
   });
   return normalizeConnectorResponse(response);
 }
 
-export async function pollConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
+async function pollConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/poll`, {
     method: 'POST',
   });
   return normalizeConnectorResponse(response);
 }
 
-export async function listConnectorDatabases(connectorId: string): Promise<NotionResourceOption[]> {
+async function listConnectorDatabases(connectorId: string): Promise<NotionResourceOption[]> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/databases`);
   const databaseItems = (response as { databases?: unknown[] }).databases;
   const responseItems = (response as { items?: unknown[] }).items;
@@ -874,7 +877,7 @@ export async function listConnectorDatabases(connectorId: string): Promise<Notio
   });
 }
 
-export async function listConnectorPages(connectorId: string): Promise<NotionResourceOption[]> {
+async function listConnectorPages(connectorId: string): Promise<NotionResourceOption[]> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/pages`);
   const pageItems = (response as { pages?: unknown[] }).pages;
   const responseItems = (response as { items?: unknown[] }).items;
@@ -911,7 +914,7 @@ export async function listConnectorPages(connectorId: string): Promise<NotionRes
   });
 }
 
-export async function selectConnectorResources(
+async function selectConnectorResources(
   connectorId: string,
   selection: ConnectorResourceSelection,
 ): Promise<ResourceConnector | null> {
@@ -954,19 +957,19 @@ export async function selectConnectorResources(
   return normalizeConnectorResponse(response);
 }
 
-export async function refreshConnectorSources(connectorId: string): Promise<ResourceConnector | null> {
+async function refreshConnectorSources(connectorId: string): Promise<ResourceConnector | null> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/sync`, {
     method: 'POST',
   });
   return normalizeConnectorResponse(response);
 }
 
-export async function getConnector(connectorId: string): Promise<ResourceConnector | null> {
+async function getConnector(connectorId: string): Promise<ResourceConnector | null> {
   const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`);
   return normalizeConnectorResponse(response);
 }
 
-export async function updateConnectorSyncPolicy(
+async function updateConnectorSyncPolicy(
   connectorId: string,
   input: UpdateConnectorSyncPolicyInput,
 ): Promise<ResourceConnector> {
@@ -980,20 +983,20 @@ export async function updateConnectorSyncPolicy(
   return normalizeConnectorResponse(response);
 }
 
-export async function getNotionCapabilityCatalog(): Promise<NotionCapabilityCatalog> {
+async function getNotionCapabilityCatalog(): Promise<NotionCapabilityCatalog> {
   const response = await fetchJson<unknown>('/api/connectors/notion/capabilities');
   const payload = asRecord(response);
   return normalizeNotionCapabilityCatalog(payload.catalog ?? response);
 }
 
-export async function getNotionSkillDetail(skillId: string): Promise<NotionSkillDetail> {
+async function getNotionSkillDetail(skillId: string): Promise<NotionSkillDetail> {
   const response = await fetchJson<unknown>(
     `/api/connectors/notion/skills/${encodeURIComponent(skillId)}`,
   );
   return normalizeNotionSkillDetail(response);
 }
 
-export async function getNotionSkillFile(
+async function getNotionSkillFile(
   skillId: string,
   fileId: string,
   packageRevision: string,
@@ -1004,3 +1007,8 @@ export async function getNotionSkillFile(
   );
   return normalizeNotionSkillFileContent(response);
 }
+
+return {fetchJson,listConnectors,createConnector,updateConnector,deleteConnector,startConnectorAuth,pollConnectorAuth,listConnectorDatabases,listConnectorPages,selectConnectorResources,refreshConnectorSources,getConnector,updateConnectorSyncPolicy,getNotionCapabilityCatalog,getNotionSkillDetail,getNotionSkillFile,notifyResourceConnectorsChanged:notifyChanged};
+}
+export const {fetchJson,listConnectors,createConnector,updateConnector,deleteConnector,startConnectorAuth,pollConnectorAuth,listConnectorDatabases,listConnectorPages,selectConnectorResources,refreshConnectorSources,getConnector,updateConnectorSyncPolicy,getNotionCapabilityCatalog,getNotionSkillDetail,getNotionSkillFile}=createResourceConnectorApi();
+export type ResourceConnectorApi=ReturnType<typeof createResourceConnectorApi>;

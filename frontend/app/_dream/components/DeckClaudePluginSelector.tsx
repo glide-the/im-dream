@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: share the original reference-selection lifecycle with Native; Web DOM and save behavior remain.
 // [Input] claudePluginAdminApi installations + Deck refs endpoints.
 // [Output] Deck editor selector for Claude Code plugins: only ready, digest-verified,
 //          CLI-compatible installations are selectable; saves references (never paths).
@@ -6,16 +7,9 @@
 // [Sync] 2026-08-16: restore the pre-01a00576 maintenance selector without adding an orchestration editor.
 // [Sync] 2026-08-16: notify the editor after a durable plugin-ref save so the aggregate draft state refreshes.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import {
-  ClaudePluginApiError,
-  listClaudePluginInstallations,
-  listDeckClaudePluginRefs,
-  putDeckClaudePluginRefs,
-  shortDigest,
-  type ClaudePluginInstallation,
-} from '../api/claudePluginAdminApi';
+import {useTranslation} from 'react-i18next';
+import {shortDigest} from '../api/claudePluginAdminApi';
+import {useDeckClaudePluginRefs} from '../hooks/useDeckClaudePluginRefs';
 
 interface DeckClaudePluginSelectorProps {
   deckId: string;
@@ -25,74 +19,7 @@ interface DeckClaudePluginSelectorProps {
 
 export default function DeckClaudePluginSelector({ deckId, disabled, onSaved }: DeckClaudePluginSelectorProps) {
   const { t } = useTranslation();
-  const [installations, setInstallations] = useState<ClaudePluginInstallation[]>([]);
-  const [selected, setSelected] = useState<Map<string, boolean>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const readyInstallations = useMemo(
-    () => installations.filter((item) => item.status === 'ready'),
-    [installations],
-  );
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [installResult, refs] = await Promise.all([
-        listClaudePluginInstallations(),
-        listDeckClaudePluginRefs(deckId),
-      ]);
-      setInstallations(installResult.installations);
-      const next = new Map<string, boolean>();
-      refs.forEach((ref) => next.set(ref.plugin_installation_id, ref.enabled === 1));
-      setSelected(next);
-    } catch (err) {
-      setError(err instanceof ClaudePluginApiError ? `${err.code}: ${err.message}` : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [deckId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const toggle = useCallback((installationId: string) => {
-    setSaved(false);
-    setSelected((current) => {
-      const next = new Map(current);
-      if (next.get(installationId)) {
-        next.delete(installationId);
-      } else {
-        next.set(installationId, true);
-      }
-      return next;
-    });
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const refs = [...selected.entries()]
-        .filter(([, enabled]) => enabled)
-        .map(([installationId], index) => ({
-          plugin_installation_id: installationId,
-          enabled: true,
-          order_index: index,
-        }));
-      await putDeckClaudePluginRefs(deckId, refs);
-      await onSaved?.();
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof ClaudePluginApiError ? `${err.code}: ${err.message}` : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [deckId, onSaved, selected]);
+  const {readyInstallations,selected,loading,saving,error,saved,toggle,handleSave}=useDeckClaudePluginRefs(deckId,onSaved);
 
   return (
     <section aria-label={t('deck.details.pluginsLabel')} className="deck-plugin-selector">

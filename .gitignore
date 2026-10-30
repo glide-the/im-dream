@@ -18,6 +18,10 @@ backend/tests/*.pyc
 # Node
 frontend/node_modules/
 frontend/package-lock.json
+mobile/shared/build/
+mobile/ios/build/
+mobile/android/.gradle/
+mobile/android/**/build/
 
 # IDE
 .vscode/*
@@ -50,3 +54,26 @@ marketplaces/
 .codex-pet-runs
 files/
 frontend/next-env.d.ts
+
+# Downloaded iOS CPython and target Python packages
+/mobile/ios/Python/
+/mobile/ios/Node/
+/mobile/ios/Guest/
+/mobile/ios/RuntimeArtifacts/
+/mobile/ios/**/xcuserdata/
+mobile/ios/Next/
+frontend/ios/build/
+frontend/shared/build/
+frontend/ios/Pods/
+frontend/ios/Python/
+frontend/ios/Node/
+frontend/ios/Guest/
+frontend/ios/RuntimeArtifacts/
+frontend/ios/Next/
+frontend/android/.gradle/
+frontend/android/**/build/
+frontend/legacy/**/node_modules/
+frontend/ios/**/xcuserdata/
+mobile/react-native/node_modules/
+mobile/ios/Pods/
+mobile/ios/InkMemory.xcworkspace/xcuserdata/

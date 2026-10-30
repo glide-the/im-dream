@@ -6,6 +6,8 @@
 // [Sync] 2026-09-27: preserve Admin's outcome_unknown receipt for ambiguous queue submissions.
 // [Sync] 2026-09-27: reject malformed queue receipts before they can corrupt Chat render state.
 // [Sync] 2026-09-28: only queued and selected inputs belong in the composer queue controls.
+// [Sync] 2026-10-25: forward the caller's optional AbortSignal for owned queue reads.
+// [Sync] 2026-10-28: allow native transport injection for existing queue reads/actions; endpoint DTOs and default Web fetch remain unchanged.
 import { browserRequestHeaders } from '../../lib/browserSession';
 import { API_BASE } from '../../lib/apiBase';
 
@@ -93,10 +95,11 @@ async function checkedJson(response: Response): Promise<unknown> {
   return body;
 }
 
-export async function fetchThreadInputs(threadId: string): Promise<ThreadInputSnapshot> {
-  const response = await fetch(inputUrl(threadId), {
+export async function fetchThreadInputs(threadId: string, signal?: AbortSignal, transport: typeof fetch = fetch): Promise<ThreadInputSnapshot> {
+  const response = await transport(inputUrl(threadId), {
     headers: { ...browserRequestHeaders() },
     cache: 'no-store',
+    signal,
   });
   return parseSnapshot(await checkedJson(response));
 }
@@ -104,8 +107,9 @@ export async function fetchThreadInputs(threadId: string): Promise<ThreadInputSn
 export async function enqueueThreadInput(
   threadId: string, messageId: string, text: string, toolChoice: string,
   deckId: string | null | undefined, voiceId: string | null | undefined,
+  transport: typeof fetch = fetch,
 ): Promise<ThreadInputEntry> {
-  const response = await fetch(inputUrl(threadId), {
+  const response = await transport(inputUrl(threadId), {
     method: 'POST',
     headers: { ...browserRequestHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -119,9 +123,9 @@ export async function enqueueThreadInput(
 }
 
 export async function selectThreadInput(
-  threadId: string, entry: ThreadInputEntry,
+  threadId: string, entry: ThreadInputEntry, transport: typeof fetch = fetch,
 ): Promise<{ entry: ThreadInputEntry; interrupt_signalled: boolean }> {
-  const response = await fetch(
+  const response = await transport(
     `${inputUrl(threadId)}/${encodeURIComponent(entry.message_id)}/select`,
     {
       method: 'POST',
@@ -137,9 +141,9 @@ export async function selectThreadInput(
 }
 
 export async function cancelThreadInput(
-  threadId: string, entry: ThreadInputEntry,
+  threadId: string, entry: ThreadInputEntry, transport: typeof fetch = fetch,
 ): Promise<ThreadInputEntry> {
-  const response = await fetch(
+  const response = await transport(
     `${inputUrl(threadId)}/${encodeURIComponent(entry.message_id)}/cancel`,
     {
       method: 'POST',
@@ -151,9 +155,9 @@ export async function cancelThreadInput(
 }
 
 export async function moveThreadInputToSideTask(
-  threadId: string, entry: ThreadInputEntry,
+  threadId: string, entry: ThreadInputEntry, transport: typeof fetch = fetch,
 ): Promise<{ task_id: string; thread_id: string; launch_status: string; dispatch_started: boolean; error_code?: string }> {
-  const response = await fetch(
+  const response = await transport(
     `${inputUrl(threadId)}/${encodeURIComponent(entry.message_id)}/side-task`,
     {
       method: 'POST',

@@ -1,5 +1,8 @@
-// [Sync] 2026-10-29: load the Agent selector through one shared Deck/Agent catalog request.
+// [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
+// [Sync] 2026-10-27: extract the unchanged landing action translation model for native reuse; DOM layout and handlers stay intact.
+// [Sync] 2026-10-28: share original history date grouping/labels with native; retain the inline Web list and callbacks.
+// [Sync] 2026-10-27: RN host hides Dream-only entry points while preserving Chat transport, history and tools.
 // [Sync] 2026-10-14: navigate Reflections Analyze preview tags through the existing Analysis route.
 // [Sync] 2026-10-07: remove the redundant history title/subtitle block below the existing tab/search toolbar.
 // [Sync] 2026-09-27: navigate between source and created task-session Threads from Chat content.
@@ -104,7 +107,8 @@
 // [Sync] 2026-10-07: reuse the history sidebar for the priority activity bell, independent read recovery and original navigation/delete behavior.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
+import {buildDefaultLandingQuickActions} from './chatLandingActions';
+import {formatThreadDateLabel, groupChatThreadsByDate} from './chatHistoryPresentation';
 import '../../styles/markdown.css';
 import './ChatView.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -124,6 +128,7 @@ import TaskSessionSidebar from './TaskSessionSidebar';
 import ScheduledTaskDetailSidebar from './ScheduledTaskDetailSidebar';
 import ActivitySidebar from './ActivitySidebar';
 import { useActivitySidebarData } from './useActivitySidebarData';
+import {isReactNativeHost} from '../../platform/mobileHost';
 import { buildActivityRows, DEFAULT_ACTIVITY_FILTERS, type ActivityFilters, type ActivityRow } from './activitySidebarModel';
 import { useMobile } from '../../utils/mobileDetect';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
@@ -137,7 +142,6 @@ import { IconBell, IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal,
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
-import { getDateLocale } from '../../i18n';
 import { listDecksWithVoices, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
@@ -245,69 +249,9 @@ class ChatShellBoundary extends Component<ChatShellBoundaryProps, ChatShellBound
   }
 }
 
-function buildDefaultLandingQuickActions(t: TFunction): QuickActionStripItem[] {
-  return [
-    {
-      id: 'generate-image',
-      label: t('chat.quickActions.generateImage.label'),
-      prompt: t('chat.quickActions.generateImage.prompt'),
-      icon: 'image',
-      description: t('chat.quickActions.generateImage.description'),
-    },
-    {
-      id: 'write-edit',
-      label: t('chat.quickActions.writeEdit.label'),
-      prompt: t('chat.quickActions.writeEdit.prompt'),
-      icon: 'edit',
-      description: t('chat.quickActions.writeEdit.description'),
-    },
-    {
-      id: 'find-info',
-      label: t('chat.quickActions.findInfo.label'),
-      prompt: t('chat.quickActions.findInfo.prompt'),
-      icon: 'search',
-      description: t('chat.quickActions.findInfo.description'),
-    },
-  ];
-}
-
 const THREAD_SEARCH_DEBOUNCE_MS = 180;
 const THREAD_HISTORY_PAGE_SIZE = 20;
 const THREAD_HISTORY_FETCH_LIMIT = THREAD_HISTORY_PAGE_SIZE + 1;
-
-function parseThreadDate(value: string): Date | null {
-  const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function dayDiffFromToday(value: string, localDayKey?: string): number | null {
-  const date = parseThreadDate(value);
-  if (!date) return null;
-  const today = localDayKey ? new Date(`${localDayKey}T00:00:00`) : new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  return Math.floor((todayStart - dateStart) / 86400000);
-}
-
-function formatThreadDateLabel(value: string, t: TFunction, language?: string): string {
-  const diff = dayDiffFromToday(value);
-  if (diff === 0) return t('chat.dateGroup.today');
-  if (diff === 1) return t('chat.dateGroup.yesterday');
-  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.daysAgo', { count: diff });
-
-  const date = parseThreadDate(value);
-  if (!date) return '';
-  return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
-}
-
-function getThreadDateGroup(value: string, t: TFunction, localDayKey?: string): string {
-  const diff = dayDiffFromToday(value, localDayKey);
-  if (diff === 0) return t('chat.dateGroup.today');
-  if (diff === 1) return t('chat.dateGroup.yesterday');
-  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.last7Days');
-  if (diff !== null && diff < 30) return t('chat.dateGroup.last30Days');
-  return t('chat.dateGroup.earlier');
-}
 
 async function fetchThreads(params: Parameters<typeof listChatThreads>[0] = {}, options: { signal?: AbortSignal } = {}): Promise<ChatThread[]> {
   return listChatThreads(params, options);
@@ -443,7 +387,7 @@ function ChatViewContent({
   useEffect(() => {
     setInitialToolConfirmationKnown(false);
   }, [activeThreadId]);
-  const dreamRuns = useStoryWorkspaceDreamRuns();
+  const dreamRuns = useStoryWorkspaceDreamRuns(!isReactNativeHost());
   const dreamReentryRuns = useMemo(
     () => dreamRuns.data?.runs ?? [],
     [dreamRuns.data?.runs],
@@ -492,7 +436,7 @@ function ChatViewContent({
     void listDecksWithVoices()
       .then((decks) => {
         if (cancelled) return;
-        const enabledDecks = decks.filter((deck) => deck.enabled);
+        const enabledDecks = decks.filter((deck) => deck.enabled && (!isReactNativeHost() || deck.agent_type !== 'dream'));
         setAvailableDecks(enabledDecks);
         setSelectedDeckId((current) => (
           current && enabledDecks.some((deck) => deck.id === current) ? current : undefined
@@ -948,6 +892,7 @@ function ChatViewContent({
     uploadedFiles: UploadedFile[] = [],
     toolChoice: ToolChoice = 'auto',
   ) => {
+    if (isReactNativeHost() && selectedDeck?.agent_type === 'dream') return;
     if (selectedDeck?.agent_type !== 'dream') {
       await startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
       return;
@@ -1181,24 +1126,10 @@ function ChatViewContent({
   const visibleThreads = threads;
   const trimmedThreadSearchQuery = threadSearchQuery.trim();
   const showLandingQuickActions = landingQuickActions.length > 0 && !hasConversationStarted;
-  const defaultThreadGroups = useMemo(() => {
-    const groups: Array<{ label: string; threads: ChatThread[] }> = [];
-    const byLabel = new Map<string, ChatThread[]>();
-
-    threads.forEach((thread) => {
-      const label = getThreadDateGroup(thread.updated_at, t, activity.day);
-      if (!byLabel.has(label)) {
-        byLabel.set(label, []);
-        groups.push({ label, threads: byLabel.get(label) ?? [] });
-      }
-      byLabel.get(label)?.push(thread);
-    });
-
-    return groups;
-  }, [threads, t, activity.day]);
+  const defaultThreadGroups = useMemo(() => groupChatThreadsByDate(threads, t, activity.day), [threads, t, activity.day]);
 
   const priorityRows = useMemo(() => buildActivityRows({
-    now: activity.now, chats: activity.chat.data, dreams: activity.dream.data, scheduled: activity.scheduled.data,
+    now: activity.now, chats: activity.chat.data, dreams: isReactNativeHost() ? [] : activity.dream.data, scheduled: activity.scheduled.data,
     stale: { chat: Boolean(activity.chat.error), scheduled: Boolean(activity.scheduled.error), dream: Boolean(activity.dream.error) }, filters: activityFilters,
   }), [activity.now, activity.chat.data, activity.chat.error, activity.dream.data, activity.dream.error, activity.scheduled.data, activity.scheduled.error, activityFilters]);
   const activityHistoryGroups = useMemo(() => {
@@ -1534,7 +1465,7 @@ function ChatViewContent({
                           <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
                           {t('chat.tabs.history')}
                         </button>
-                        <button
+                        {!isReactNativeHost() && <button
                           type="button"
                           role="tab"
                           aria-selected={landingTab === 'dreams'}
@@ -1556,7 +1487,7 @@ function ChatViewContent({
                         >
                           <IconSparkles style={{ width: '0.85rem', height: '0.85rem' }} />
                           {t('chat.tabs.activeDreams', { count: dreamReentryRuns.length })}
-                        </button>
+                        </button>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', minWidth: 0, marginLeft: 'auto' }}>
                         {landingTab === 'history' ? (
@@ -1952,7 +1883,7 @@ function ChatViewShell(props: ChatViewProps) {
     >
       <ChatViewContent
         {...props}
-        landingTab={landingTab}
+        landingTab={isReactNativeHost() ? 'history' : landingTab}
         onLandingTabChange={handleSelectLandingTab}
       />
     </ChatShellBoundary>

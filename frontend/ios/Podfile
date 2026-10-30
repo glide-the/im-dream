@@ -1,0 +1,28 @@
+# [Input] Existing InkMemory native project and pinned RN dependencies.
+# [Output] CocoaPods workspace linking Hermes/RN alongside original Python and Node.
+# [Pos] Existing iOS project integration; no second native application.
+ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+require 'cocoapods/project'
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+# RN 0.81's default hook traverses every bundled third-party Info.plist.
+# The application's architecture flag is owned explicitly by InkMemory/Info.plist;
+# keep pinned Python/Node/Next artifacts outside the RN metadata writer.
+def NewArchitectureHelper.set_RCTNewArchEnabled_in_info_plist(_installer, _new_arch_enabled)
+  Pod::UI.puts 'Using the app-owned RCTNewArchEnabled flag; runtime artifact plists remain unchanged.'
+end
+platform :ios, '16.4'
+prepare_react_native_project!
+project 'InkMemory.xcodeproj'
+target 'InkMemory' do
+  config = use_native_modules!
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+  target 'InkMemoryTests' do
+    inherit! :search_paths
+  end
+  post_install do |installer|
+    react_native_post_install(installer, '../node_modules/react-native', :mac_catalyst_enabled => false)
+  end
+end

@@ -2,6 +2,7 @@
 /* [Output] Responsive Settings category rail, Work tabs, and single-column preference content. */
 /* [Pos] Canonical styling for the Story Workspace Settings and Work surfaces. */
 /* [Sync] 2026-08-31: align the Settings single-column boundary with the Story Workspace mobile shell. */
+/* [Sync] 2026-10-25: retain a 16px narrow-screen search field so WebKit focus keeps the page viewport. */
 
 .story-workspace-settings,
 .story-workspace-settings * {
@@ -440,6 +441,10 @@
 
   .story-workspace-settings__sidebar-header {
     padding-bottom: 12px;
+  }
+
+  .story-workspace-settings__sidebar input {
+    font-size: 16px;
   }
 
   .story-workspace-settings__nav {

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: share the original local-date label helper used by the same-day rerun chooser.
 // [Input] Strict public history report DTOs and existing ReflectionResult payloads.
 // [Output] Shared saved-report projection with independent identities and true creation time.
 // [Pos] AnalysisView and TimelinePage history presentation seam; no transport or state machine.
@@ -37,4 +38,10 @@ export function appendHistoryReports(previous: AnalysisReport[], incoming: Analy
     if (seen.has(id)) return false;
     seen.add(id); return true;
   })];
+}
+
+export function localDateKey(value: string | number | Date, locale = 'en-CA'): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(locale);
 }

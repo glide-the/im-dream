@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: optional cancellable transport for existing day/detail/history reads; Web defaults and definition actions remain unchanged.
 // [Input] Same-origin browser session and authenticated Dream scheduled-task endpoints.
 // [Output] Typed date/history/Thread relation reads and revision-checked actions for Calendar and Chat.
 // [Pos] Scheduled Chat browser transport; Admin remains the plan and trigger owner.
@@ -67,8 +68,10 @@ export class ScheduledTaskApiError extends Error {
   }
 }
 
-async function request<T>(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${API_BASE}/api/claude-agent${path}`, {
+export type ScheduledReadOptions = {signal?: AbortSignal; transport?: typeof fetch};
+
+async function request<T>(path: string, body?: Record<string, unknown>, signal?: AbortSignal, transport: typeof fetch = fetch): Promise<T> {
+  const response = await transport(`${API_BASE}/api/claude-agent${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { ...browserRequestHeaders(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -81,9 +84,9 @@ async function request<T>(path: string, body?: Record<string, unknown>, signal?:
   return response.json() as Promise<T>;
 }
 
-export function getScheduledDay(localDate: string, displayTimeZone: string, options: { signal?: AbortSignal } = {}) {
+export function getScheduledDay(localDate: string, displayTimeZone: string, options: ScheduledReadOptions = {}) {
   const search = new URLSearchParams({ local_date: localDate, display_time_zone: displayTimeZone });
-  return request<{ tasks: ScheduledTask[]; triggers: ScheduledTrigger[] }>(`/scheduled-tasks/day?${search}`, undefined, options.signal);
+  return request<{ tasks: ScheduledTask[]; triggers: ScheduledTrigger[] }>(`/scheduled-tasks/day?${search}`, undefined, options.signal, options.transport);
 }
 
 export async function getThreadScheduledTasks(threadId: string, options: { signal?: AbortSignal } = {}) {
@@ -100,14 +103,14 @@ export async function getThreadScheduledTasks(threadId: string, options: { signa
   return snapshot;
 }
 
-export function getScheduledTask(taskId: string) {
-  return request<{ task: ScheduledTask | null }>(`/scheduled-tasks/${encodeURIComponent(taskId)}`);
+export function getScheduledTask(taskId: string, options: ScheduledReadOptions = {}) {
+  return request<{ task: ScheduledTask | null }>(`/scheduled-tasks/${encodeURIComponent(taskId)}`, undefined, options.signal, options.transport);
 }
 
-export function getScheduledHistory(taskId: string, limit = 50, beforeCreatedAt?: string) {
+export function getScheduledHistory(taskId: string, limit = 50, beforeCreatedAt?: string, options: ScheduledReadOptions = {}) {
   const search = new URLSearchParams({ limit: String(limit) });
   if (beforeCreatedAt) search.set('before_created_at', beforeCreatedAt);
-  return request<{ triggers: ScheduledTrigger[] }>(`/scheduled-tasks/${encodeURIComponent(taskId)}/history?${search}`);
+  return request<{ triggers: ScheduledTrigger[] }>(`/scheduled-tasks/${encodeURIComponent(taskId)}/history?${search}`, undefined, options.signal, options.transport);
 }
 
 export type ScheduledTaskAction = 'edit' | 'pause' | 'resume' | 'delete' | 'restore' | 'run';

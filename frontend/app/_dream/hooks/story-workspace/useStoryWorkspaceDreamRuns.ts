@@ -1,6 +1,7 @@
 // [Input] Authenticated Story Workspace re-entry endpoint.
 // [Output] Durable, server-ordered Dream run collection for the canonical workbench.
 // [Pos] Dream re-entry adapter; it never reads browser persistence as run truth.
+// [Sync] 2026-10-27: permit the owning view to omit the mobile-excluded Dream collection read.
 
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -19,7 +20,7 @@ export interface StoryWorkspaceDreamRunsState {
   readonly refetch: () => void;
 }
 
-export function useStoryWorkspaceDreamRuns(): StoryWorkspaceDreamRunsState {
+export function useStoryWorkspaceDreamRuns(enabled = true): StoryWorkspaceDreamRunsState {
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState<StoryWorkspaceDreamReentryCollection | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -28,6 +29,7 @@ export function useStoryWorkspaceDreamRuns(): StoryWorkspaceDreamRunsState {
   const refetch = useCallback(() => setRefresh((value) => value + 1), []);
 
   useEffect(() => {
+    if (!enabled) { setIsLoading(false); return; }
     let active = true;
     const controller = new AbortController();
     setIsLoading(true);
@@ -45,7 +47,7 @@ export function useStoryWorkspaceDreamRuns(): StoryWorkspaceDreamRunsState {
       active = false;
       controller.abort();
     };
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   return { data, error, isLoading, refetch };
 }

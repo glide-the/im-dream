@@ -1,9 +1,11 @@
-// [Sync] 2026-10-29: serve complete Agent catalogs and reject per-Deck selector detail hydration.
+// [Sync] 2026-10-28: serve complete Agent catalogs and assert the selector creates no per-Deck GET requests.
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
 //          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
 //          common-Skill slash submission, and launch handoff.
 // [Pos] Dream/Chat Agent refactor business E2E in frontend/e2e.
+// [Sync] 2026-10-28: record known GET lifecycle cancellations and require successful replacement reads under the existing StrictMode Web shell.
+// [Sync] 2026-10-28: verify the canonical RNW Web landing retains composer/action/history order, original search, lazy New and narrow viewport; no model/persistence requests.
 // [Sync] 2026-08-14: cover initial/in-progress states and adaptive horizontal Chat scrolling.
 // [Sync] 2026-08-14: prove Community Decks visibly includes the system default projection.
 // [Sync] 2026-08-16: Dream omits deferred community/market Deck discovery.
@@ -22,7 +24,7 @@
 // [Sync] 2026-10-14: align the slash menu locator and built-in compact option with current Chat commands.
 // [Sync] 2026-10-14: serve the current Chat scheduled-task relation and turn-navigation reads in the fixture.
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Request } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 const RUN_ID = 'run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -158,7 +160,7 @@ const runs = [
   dreamRun('f', 'running', '进行中的南方手记'),
 ];
 
-test('Dream active Deck context → workbench → Chat active tab → production launch endpoint', async ({ page }) => {
+test('Dream active Deck context → workbench → Chat active tab → production launch endpoint', async ({ page }, testInfo) => {
   expect(DREAM_IMPACT_SCOPE).toEqual({
     routeAndDefaultPanel: 'changes',
     projectAndEpisodes: 'out-of-scope',
@@ -166,29 +168,49 @@ test('Dream active Deck context → workbench → Chat active tab → production
     realPersistenceModelAndBilling: 'out-of-scope',
   });
   const diagnostics: string[] = [];
-  const deckDetailReads: string[] = [];
-  page.on('request', request => {
-    if (request.method() === 'GET' && [
-      `/api/decks/${dreamDeck.id}`, `/api/decks/${actorSystemDefaultDeck.id}`,
-    ].includes(new URL(request.url()).pathname)) deckDetailReads.push(new URL(request.url()).pathname);
-  });
+  const cancelledLifecycleReads: { path: string; order: number }[] = [];
+  const successfulGetReads: { path: string; order: number }[] = [];
+  const requestOrder = new WeakMap<Request, number>();
+  let nextRequestOrder = 0;
+  const lifecycleReadPaths = new Set([
+    '/auth/session',
+    `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/inputs`,
+    '/api/claude-agent/threads/thread-dream-e2e/inputs',
+  ]);
   const unexpectedApiRequests: string[] = [];
   let launchBody: Record<string, unknown> | null = null;
   let historicalChatTurnBody: Record<string, unknown> | null = null;
   let releaseDeepLinkRead: (() => void) | null = null;
+  let createdThreadRequests = 0;
+  const deckDetailReads: string[] = [];
+  page.on('request', request => {
+    requestOrder.set(request, ++nextRequestOrder);
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'GET' && [
+      `/api/decks/${dreamDeck.id}`, `/api/decks/${actorSystemDefaultDeck.id}`,
+    ].includes(path)) deckDetailReads.push(path);
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/claude-agent/threads') createdThreadRequests++;
+  });
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
       diagnostics.push(`console: ${message.text()}`);
     }
   });
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('response', response => {
+    const url = new URL(response.url());
+    if (response.request().method() === 'GET' && response.status() === 200 && url.origin === new URL(WEB_BASE).origin) successfulGetReads.push({ path: url.pathname, order: requestOrder.get(response.request()) ?? 0 });
+  });
   page.on('requestfailed', (request) => {
     const failedUrl = new URL(request.url());
     const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
+      && request.method() === 'GET'
       && failedUrl.origin === new URL(WEB_BASE).origin
       && (['/api/story-workspace/dream-runs', '/api/sessions/events'].includes(failedUrl.pathname)
         || (failedUrl.pathname === '/api/claude-agent/threads' && failedUrl.search === '?limit=21')
-        || (failedUrl.pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/scheduled-tasks`));
+        || (failedUrl.pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/scheduled-tasks`)
+        || lifecycleReadPaths.has(failedUrl.pathname));
+    if (expectedNavigationAbort && lifecycleReadPaths.has(failedUrl.pathname)) cancelledLifecycleReads.push({ path: failedUrl.pathname, order: requestOrder.get(request) ?? 0 });
     if (!expectedNavigationAbort && !request.url().includes('react-grab.com') && !request.url().includes('fonts.')) {
       diagnostics.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
     }
@@ -505,6 +527,55 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(agentSelector).toBeVisible();
   await expect(agentSelector).toBeEnabled();
   expect(deckDetailReads).toEqual([]);
+  // Full production Next entry, original Web components and original DTO fixtures.
+  // Project/Episode/canonical/private publication/Hook/database/model/ledger remain out of scope.
+  for (const viewport of [{width:1440,height:900},{width:390,height:844}]) {
+    await page.setViewportSize(viewport);
+    const composer = page.locator('.ai-input-dock');
+    const imageAction = page.getByRole('button', {name:'生成图片',exact:true});
+    const historyTab = page.getByRole('tab', {name:'聊天历史'});
+    await expect(composer).toBeVisible();
+    await expect(imageAction).toBeVisible();
+    await expect(page.getByRole('button', {name:'撰写或编辑',exact:true})).toBeVisible();
+    await expect(page.getByRole('button', {name:'查找资料',exact:true})).toBeVisible();
+    await expect(page.getByRole('tab', {name:/^Dream（/})).toBeVisible();
+    // Resize starts the original 180ms sidebar padding transition. Measure the settled narrow layout.
+    if (viewport.width < 768) await expect.poll(() => page.locator('.story-workspace-sidebar').evaluate(element => getComputedStyle(element).paddingTop)).toBe('0px');
+    const [inputBox,actionBox,tabBox] = await Promise.all([composer.boundingBox(),imageAction.boundingBox(),historyTab.boundingBox()]);
+    expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(actionBox!.y + 1);
+    expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(tabBox!.y + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+    if (viewport.width < 768) {
+      const labels = await page.locator('.story-workspace-sidebar__nav > .story-workspace-sidebar__nav-button .story-workspace-sidebar__label').evaluateAll(elements => elements.map(element => ({label:element.textContent,bottom:element.getBoundingClientRect().bottom})));
+      await testInfo.attach('narrow-navigation-bounds',{body:JSON.stringify(labels),contentType:'application/json'});
+      const geometry = await page.locator('.story-workspace-layout__sidebar, .story-workspace-sidebar, .story-workspace-sidebar__nav, .story-workspace-sidebar__nav > .story-workspace-sidebar__nav-button').evaluateAll(elements => elements.map(element => {
+        const rect = element.getBoundingClientRect(); const css = getComputedStyle(element);
+        return {className:element.className,top:rect.top,bottom:rect.bottom,height:rect.height,boxSizing:css.boxSizing,padding:css.padding,margin:css.margin,minHeight:css.minHeight,display:css.display,flexDirection:css.flexDirection,gap:css.gap,lineHeight:css.lineHeight};
+      }));
+      await testInfo.attach('narrow-navigation-geometry',{body:JSON.stringify(geometry),contentType:'application/json'});
+      for (const label of labels) expect(label.bottom,`navigation label ${label.label} remains inside viewport`).toBeLessThanOrEqual(viewport.height + 1);
+    }
+    await page.screenshot({path:testInfo.outputPath(`original-web-chat-${viewport.width}.png`)});
+  }
+  await page.getByRole('button', {name:'搜索',exact:true}).click();
+  const searchDialog = page.getByRole('dialog', {name:'搜索历史对话'});
+  await expect(searchDialog).toBeVisible();
+  const searchRead = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === '/api/claude-agent/threads' && url.searchParams.get('query') === '历史内容';
+  });
+  await searchDialog.getByRole('textbox', {name:'搜索历史对话'}).fill('历史内容');
+  const searchRequest = new URL((await searchRead).url());
+  expect(searchRequest.searchParams.get('search_scope')).toBe('all');
+  expect(searchRequest.searchParams.get('retrieval_mode')).toBe('fuzzy');
+  await expect(searchDialog.getByRole('button', {name:historicalThread.title})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(searchDialog).toBeHidden();
+  const beforeNew = createdThreadRequests;
+  await page.getByTitle('新建对话',{exact:true}).click();
+  await expect(page.locator('.ai-input-dock')).toBeVisible();
+  expect(createdThreadRequests).toBe(beforeNew);
+  await page.setViewportSize({width:1440,height:1000});
   await page.getByRole('button', { name: historicalThread.title }).click();
   await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
   const historicalAssistantTurn = page.locator('[data-chat-assistant-turn="history-completed-turn-e2e"]');
@@ -623,6 +694,8 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await page.screenshot({ path: '../output/playwright/chat-dream-launch-workbench-open.png', fullPage: true });
 
   expect(unexpectedApiRequests).toEqual([]);
+  await testInfo.attach('lifecycle-read-cancellations', { body: JSON.stringify({ cancelled: cancelledLifecycleReads, successful: successfulGetReads.filter(read => lifecycleReadPaths.has(read.path)) }), contentType: 'application/json' });
+  for (const cancelled of cancelledLifecycleReads) expect(successfulGetReads.some(read => read.path === cancelled.path && read.order > cancelled.order), `Replacement GET ${cancelled.path}`).toBe(true);
   expect(diagnostics).toEqual([]);
 });
 

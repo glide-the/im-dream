@@ -6,6 +6,7 @@ import { browserRequestHeaders } from '../lib/browserSession';
 // [Sync] 2026-08-17: centralize Chat history transport and expose actor-scoped Deck filtering.
 // [Sync] 2026-09-01: allow product-owned Thread titles without attaching a Deck or Voice.
 // [Sync] 2026-10-07: accept optional read cancellation for the Chat activity sidebar without changing list semantics.
+// [Sync] 2026-10-28: accept an optional HTTP transport for native reuse; endpoints, Cookie/CSRF and DTOs stay unchanged.
 
 
 import { API_BASE } from '../lib/apiBase';
@@ -43,9 +44,10 @@ export async function createChatThread(
   deckId?: string,
   voiceId?: string,
   title?: string,
+  transport: typeof fetch = fetch,
 ): Promise<string | null> {
   try {
-    const response = await fetch(`${API_BASE}/api/claude-agent/threads`, {
+    const response = await transport(`${API_BASE}/api/claude-agent/threads`, {
       method: 'POST',
       headers: {
         ...authHeaders(),
@@ -67,7 +69,7 @@ export async function createChatThread(
 
 export async function listChatThreads(
   params: ChatThreadSearchParams = {},
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; transport?: typeof fetch } = {},
 ): Promise<ChatHistoryThread[]> {
   const search = new URLSearchParams();
   const query = params.query?.trim() ?? '';
@@ -81,7 +83,7 @@ export async function listChatThreads(
   if (typeof params.offset === 'number' && params.offset > 0) search.set('offset', String(params.offset));
 
   const suffix = search.size > 0 ? `?${search.toString()}` : '';
-  const response = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, {
+  const response = await (options.transport ?? fetch)(`${API_BASE}/api/claude-agent/threads${suffix}`, {
     headers: authHeaders(),
     signal: options.signal,
   });
@@ -93,8 +95,8 @@ export async function listChatThreads(
   return data.threads ?? [];
 }
 
-export async function deleteChatThread(threadId: string): Promise<void> {
-  const response = await fetch(
+export async function deleteChatThread(threadId: string, transport: typeof fetch = fetch): Promise<void> {
+  const response = await transport(
     `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`,
     { method: 'DELETE', headers: authHeaders() },
   );

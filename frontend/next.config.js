@@ -9,6 +9,7 @@
 // [Sync] 2026-09-14: bind Turbopack and tracing to this config's directory, not ancestor lockfiles.
 // [Sync] 2026-09-14: runtime API/auth Route Handlers own credentials; disable legacy unauthenticated rewrites.
 // [Sync] 2026-10-13: transpile the independent sketch-input browser workspace source.
+// [Sync] 2026-10-27: resolve shared RN components through React Native Web and explicit Web platform files.
 
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,8 +22,17 @@ const nextConfig = {
   output: standaloneOutput ? 'standalone' : undefined,
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@ink-dream/sketch-input'],
-  turbopack: { root: projectRoot },
+  transpilePackages: ['@ink-dream/sketch-input', 'react-native-web'],
+  turbopack: {
+    root: projectRoot,
+    resolveAlias: {'react-native': 'react-native-web'},
+    resolveExtensions: ['.web.tsx', '.tsx', '.web.ts', '.ts', '.web.js', '.js', '.mjs', '.json'],
+  },
+  webpack(config) {
+    config.resolve.alias = {...config.resolve.alias, 'react-native$': 'react-native-web'};
+    config.resolve.extensions = ['.web.tsx', '.web.ts', '.web.js', ...config.resolve.extensions];
+    return config;
+  },
   async headers() {
     return [
       {

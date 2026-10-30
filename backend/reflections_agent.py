@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Sync] 2026-10-23: bind scope-only Notion Read evidence per task; validate citations against actual reads.
 # [Sync] 2026-10-13: freeze additive task content, apply analysis Agent instructions and preserve separate Notion citations.
 # [Input] Frozen Admin Reflections consumers, worker-load snapshots, section RTA persistence, and Claude Agent ThreadFactory.
@@ -424,7 +425,8 @@ def _build_claude_agent_run_request(**kwargs: Any) -> Any:
 
 
 async def _run_claude_agent_turn(request: Any):
-    from agent_factory import claude_agent_thread_factory
+    from claude_agent.runtime_owner import get_thread_factory
+    claude_agent_thread_factory = get_thread_factory()
     from services.story_workspace.dream_lifecycle_observer import drain_chat_agent_turn
 
     return await drain_chat_agent_turn(

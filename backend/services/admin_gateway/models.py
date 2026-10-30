@@ -5,6 +5,7 @@
 # [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
 # [Sync] 2026-09-19: log safe upstream Gateway error codes without credentials or response bodies.
 # [Sync] 2026-09-16: replace Dream-signed subject JWTs with Admin-issued bearers.
+# [Sync] 2026-10-25: log transport exception class and elapsed time without request, response or credential content.
 
 """Strict server-only client for the Admin public Gateway model catalog."""
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import re
+import time
 from typing import Any, Mapping, Protocol
 
 import requests
@@ -279,6 +281,7 @@ class GatewayModelCatalogClient:
         self.transport = transport
 
     def fetch_catalog(self, *, timeout: float = 10) -> GatewayModelCatalog:
+        started = time.monotonic()
         try:
             response = self.transport.get(
                 f"{self.configuration.base_url}/v1/models",
@@ -290,6 +293,8 @@ class GatewayModelCatalogClient:
                 timeout=timeout,
             )
         except Exception as exc:
+            logger.warning("claude_agent_failure stage=model_catalog transport_error=%s elapsed_ms=%s",
+                           type(exc).__name__, round((time.monotonic() - started) * 1000))
             raise GatewayInferenceError("GATEWAY_UNAVAILABLE", 503) from exc
         if response.status_code != 200:
             status = int(response.status_code)

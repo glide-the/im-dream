@@ -1,15 +1,13 @@
+// [Input] Original configured Font Awesome icons and shared Deck color metadata.
+// [Output] Existing Web icon map and COLORS export with unchanged values.
+// [Pos] Web Deck visual entry; native uses the same pure color metadata and projected paths.
+// [Sync] 2026-10-29: re-export pure color metadata for native forms; DOM icons remain unchanged.
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass
 } from 'react-icons/fa';
 
-export const COLORS = {
-  'blue': { hex: 'var(--color-action-link)', label: 'Blue' },
-  'purple': { hex: 'var(--color-voice-purple)', label: 'Purple' },
-  'pink': { hex: 'var(--color-voice-pink)', label: 'Pink' },
-  'green': { hex: 'var(--color-voice-green)', label: 'Green' },
-  'yellow': { hex: 'var(--color-state-warning)', label: 'Yellow' }
-};
+export {DECK_COLORS as COLORS} from '../constants/deck.ts';
 
 export const iconMap = {
   brain: FaBrain,

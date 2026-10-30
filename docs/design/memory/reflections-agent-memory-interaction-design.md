@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-29: 原设置状态由Web/Native共享Hook所有；仅更新客户端引用，服务端规则、Tools及2026-10-15验收范围保持。 -->
 <!-- [Input] 已批准的L2/L3设计、Notion正文证据、Dream/Admin分支源码。 -->
 <!-- [Output] 实现合同、页面骨架、业务时序/状态图、Tools及验收矩阵。 -->
 <!-- [Pos] Memory现行正式稿；实现、正常采用与真实验收覆盖分别记录。 -->
@@ -43,7 +44,10 @@
 | Admin `memoryService.ts` | 两张表：memory_artifact、memory_behavior_settings；归属、lease fencing、规范 UTF-8、状态、CAS及原请求回执。Drizzle `0082_reflections_memory`发布存储capability，0085追加classification.v2；0083前向补齐既有受限DATA角色两表SELECT/INSERT/UPDATE，fresh ACL计划采用同一权限，无DELETE或其他角色扩权 |
 | [MemoryTurnProvider](../../../backend/services/memory/behavior.py) | 绑定 owner/当前消息/Thread；读取 fresh 设置生成 immutable BehaviorPolicySnapshot；返回当前任务的固定回应计划 |
 | [reflection_memory_tool.py](../../../backend/libs/claude_agent_kit/server/reflection_memory_tool.py)、现有 user MCP/broker | 三个严格业务工具；子进程只有私有 broker capability，没有 Admin token、owner或数据库凭证 |
-| [MemoryBehaviorSettings](../../../frontend/app/_dream/views/story-workspace/MemoryBehaviorSettings.tsx) | 现有 Settings 栏目；draft、保存/核实/同请求重试/冲突处理 |
+| [MemoryBehaviorSettings](../../../frontend/app/_dream/views/story-workspace/MemoryBehaviorSettings.tsx)、[Native内容](../../../frontend/app/_dream/views/story-workspace/MemoryBehaviorSettings.native.tsx) | 原Settings栏目及相同开关/回应方式；Web原DOM/CSS保留，普通Native分类入口继续接线 |
+| [useMemoryBehaviorSettings](../../../frontend/app/_dream/hooks/useMemoryBehaviorSettings.ts#L36) | 共用原draft、保存/核实/同请求重试/冲突状态；默认浏览器HTTP/sessionStorage，Native注入本机HTTP、原owner命令存储及UUID |
+
+本次客户端引用修订沿[多端设置设计](../multi-platform/react-native-web-project-structure.md#原生设置分类的共享业务状态)。本页2026-10-15真实验收保持原日期及原版本范围，Native内容、运行库资格和普通App采用分别记录。服务端MemoryTurnProvider、Tools、权限、来源及已有真实业务记录保持本次修改范围之外。
 
 源文件来自 `analysis_reports` 与实际 COMPLETED 的 `reflection_task_section`；日期来自任务选择范围及报告时间。冻结 report 原始字节摘要、规范来源摘要、完成/失败栏目、report/task ID、已有 diary/Notion/Agent 来源摘要。逐条 session IDs、evidence、confidence 原样保留。已有 Notion 逐条 evidence 仍可能只是文本中的 page ID，不能宣称新增了经过原文逐字验证的结构关联。
 

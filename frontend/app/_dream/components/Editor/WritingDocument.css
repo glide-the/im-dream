@@ -1,0 +1,6 @@
+/* [Input] Editor-only document marker and the existing Writing canvas CSS. */
+/* [Output] Fill the RN-owned content viewport without a second application navigation bar. */
+/* [Pos] Scoped DOM editor geometry; ordinary Web selectors retain their values. */
+html[data-writing-document='true'] { --story-workspace-sidebar-width: 0px; --story-workspace-writing-chat-width: 0px; }
+html[data-writing-document='true'],html[data-writing-document='true'] body { width:100%;height:100%;margin:0;overflow:hidden;background:var(--color-bg-app); }
+html[data-writing-document='true'] .story-workspace-writing-split { inset:0; }

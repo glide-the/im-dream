@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Input] Turn-owned Admin Run projection, host-bound actor/thread/run IDs, and strict tool DTOs.
 # [Output] CAS-protected Dream protocol file writes with one bounded public failure.
 # [Pos] Story Workspace stdio child; Admin owns data access and Dream owns shared filesystem writes.
@@ -82,9 +83,10 @@ def story_workspace_allowed_tool_names() -> list[str]:
     ]
 
 
-def _trusted_actor_and_thread() -> tuple[int, str]:
-    raw_actor = os.getenv(_TRUSTED_USER_ENV, "").strip()
-    thread_id = os.getenv(_TRUSTED_THREAD_ENV, "").strip()
+def _trusted_actor_and_thread(*, environment=None) -> tuple[int, str]:
+    values = os.environ if environment is None else environment
+    raw_actor = values.get(_TRUSTED_USER_ENV, "").strip()
+    thread_id = values.get(_TRUSTED_THREAD_ENV, "").strip()
     if not raw_actor.isdigit() or int(raw_actor) <= 0:
         raise PermissionError("trusted actor context is unavailable")
     if (
@@ -97,8 +99,8 @@ def _trusted_actor_and_thread() -> tuple[int, str]:
     return int(raw_actor), thread_id
 
 
-def _require_trusted_workflow_run(workflow_run_id: str) -> None:
-    trusted_run_id = os.getenv(_TRUSTED_WORKFLOW_RUN_ENV, "").strip()
+def _require_trusted_workflow_run(workflow_run_id: str, *, environment=None) -> None:
+    trusted_run_id = (os.environ if environment is None else environment).get(_TRUSTED_WORKFLOW_RUN_ENV, "").strip()
     if not trusted_run_id or workflow_run_id != trusted_run_id:
         raise PermissionError("trusted workflow run context is unavailable")
 
@@ -127,12 +129,14 @@ def _existing_thread_workspace(thread_id: str) -> Path:
 def _with_authoritative_context(
     workflow_run_id: str,
     operation: Callable[[StoryWorkspaceDreamFileWriter, WorkflowRun], _ResultT],
+    *, environment=None,
 ) -> _ResultT:
     """Read the turn-bound Admin Run projection, then execute a filesystem write."""
 
-    actor_id, thread_id = _trusted_actor_and_thread()
+    context = {} if environment is None else {"environment": environment}
+    actor_id, thread_id = _trusted_actor_and_thread(**context)
     workflow_run = SessionProjectionBrokerClient.from_env(
-        dict(os.environ)
+        dict(os.environ if environment is None else environment)
     ).current_workflow_run()
     # The backend supports both ``backend.*`` and backend-root imports.
     # Normalize the authoritative model at this boundary so a process that
@@ -169,6 +173,7 @@ def _success_json(payload: dict[str, object]) -> str:
 async def story_workspace_handle_dream_tool_async(
     name: str,
     arguments: dict[str, Any] | None,
+    *, environment=None,
 ) -> str:
     """Execute one controlled Dream write and return a compact JSON result.
 
@@ -177,17 +182,19 @@ async def story_workspace_handle_dream_tool_async(
     and no absolute path or frozen provenance reaches the Agent response.
     """
 
+    context = {} if environment is None else {"environment": environment}
+    values = os.environ if environment is None else environment
     try:
         if name == "write_dream_run":
             request = StoryWorkspaceDreamRunToolInput.model_validate(arguments or {})
-            _require_trusted_workflow_run(request.workflow_run_id)
+            _require_trusted_workflow_run(request.workflow_run_id, **context)
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_run(
                     run,
-                    thread_id=os.environ[_TRUSTED_THREAD_ENV],
+                    thread_id=values[_TRUSTED_THREAD_ENV],
                     expected_revision=request.expected_revision,
-                ),
+                ), **context,
             )
             return _success_json(
                 {
@@ -198,7 +205,7 @@ async def story_workspace_handle_dream_tool_async(
             )
         if name == "write_dream_stage":
             request = StoryWorkspaceDreamStageToolInput.model_validate(arguments or {})
-            _require_trusted_workflow_run(request.workflow_run_id)
+            _require_trusted_workflow_run(request.workflow_run_id, **context)
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_stage(
@@ -210,7 +217,7 @@ async def story_workspace_handle_dream_tool_async(
                         for item in request.items
                     ],
                     expected_revision=request.expected_revision,
-                ),
+                ), **context,
             )
             return _success_json(
                 {

@@ -1,3 +1,6 @@
+// [Sync] 2026-10-29: share original actor-scoped resource summary state; preserve Web render tree and focus behavior.
+import useConnectorSummary from '../../hooks/useConnectorSummary';
+import type {ConnectorTone} from './connectorSummaryPresentation';
 // [Sync] 2026-10-13: observe due plans and safe worker failures; authorization alone cannot establish synchronization health.
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
 // [Output] Settings resource-link index with Notion handoff, Claude MCP discovery/OAuth management,
@@ -27,7 +30,7 @@ import {
   IconSettings,
 } from '../chat/Icons';
 
-type ConnectorTone = 'neutral' | 'success' | 'warning' | 'danger';
+
 
 interface ConnectorSettingsSectionProps {
   focusNonce?: number;
@@ -50,38 +53,9 @@ interface ConnectorOptionCardProps {
   disabled?: boolean;
 }
 
-function formatLastInteraction(connector: ResourceConnector | null): string {
-  const value = connector?.lastSyncedAt ?? connector?.updatedAt ?? connector?.createdAt;
-  if (!value) return '暂无交互';
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
 
-function getResourceHealthTone(connector: ResourceConnector | null): ConnectorTone {
-  if (!connector) return 'neutral';
-  if (connector.syncPolicy?.status === 'error' || connector.syncPolicy?.workerErrorCode
-    || connector.syncPolicy?.scheduleDue || connector.status === 'syncing' || connector.auth.warning) {
-    return 'warning';
-  }
-  if (connector.status === 'authenticated' || connector.status === 'synced' || connector.auth.status === 'authenticated') {
-    return connector.syncPolicy?.scheduleDue === false ? 'success' : 'neutral';
-  }
-  if (connector.status === 'authenticating' || connector.auth.status === 'authenticating') {
-    return 'warning';
-  }
-  if (connector.status === 'expired' || connector.auth.status === 'expired' || connector.status === 'error' || connector.auth.status === 'error') {
-    return 'danger';
-  }
-  return 'neutral';
-}
 
 function toneStyles(tone: ConnectorTone) {
   switch (tone) {
@@ -217,80 +191,13 @@ export default function ConnectorSettingsSection({
   onOpenClaudeMcpDetail,
 }: ConnectorSettingsSectionProps) {
   const { user, isAuthenticated } = useAuth();
-  const actorKey = JSON.stringify([isAuthenticated, user?.id ?? null]);
-  const actorKeyRef = useRef(actorKey);
-  actorKeyRef.current = actorKey;
-  const sectionRef = useRef<HTMLElement>(null);
-  const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadConnectors = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const items = await listConnectors(signal);
-      if (!signal?.aborted && actorKeyRef.current === actorKey) setConnectors(items);
-    } catch (err) {
-      if (!signal?.aborted && actorKeyRef.current === actorKey) setError(err instanceof Error ? err.message : '资源链接读取失败');
-    } finally {
-      if (!signal?.aborted && actorKeyRef.current === actorKey) setLoading(false);
-    }
-  }, [actorKey]);
-
+  const {loading,error,loadConnectors,notionConnector,notionStatusLabel,notionStatusTone,notionLastInteraction}=useConnectorSummary({ownerId:user?.id??null,authenticated:isAuthenticated,focusNonce});
+  const sectionRef=useRef<HTMLElement>(null);
   useEffect(() => {
     if (focusNonce <= 0) return;
     sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     sectionRef.current?.focus({ preventScroll: true });
   }, [focusNonce]);
-
-  useEffect(() => {
-    const abort = new AbortController();
-    setConnectors([]);
-    if (isAuthenticated) void loadConnectors(abort.signal);
-    else setLoading(false);
-    return () => abort.abort();
-  }, [loadConnectors, focusNonce, isAuthenticated]);
-
-  const notionConnector = useMemo(
-    () => connectors.find((connector) => connector.platform === 'notion') ?? null,
-    [connectors],
-  );
-  const refreshConnectorStatus = useCallback(async (signal: AbortSignal) => {
-    try {
-      const items = await listConnectors(signal);
-      if (!signal.aborted && actorKeyRef.current === actorKey) { setConnectors(items); setError(null); }
-    } catch (err) {
-      if (!signal.aborted && actorKeyRef.current === actorKey) setError(err instanceof Error ? err.message : '资源链接读取失败');
-    }
-  }, [actorKey]);
-  useConnectorStatusRefresh(refreshConnectorStatus, notionConnector?.syncPolicy?.refreshAfterSeconds, isAuthenticated && !loading);
-  const notionStatusLabel = useMemo(
-    () => {
-      if (!notionConnector) return '未连接';
-      if (notionConnector.syncPolicy?.status === 'error' || notionConnector.syncPolicy?.workerErrorCode || notionConnector.auth.warning) {
-        return '部分可用';
-      }
-      if (notionConnector.status === 'syncing') return '同步中';
-      if (notionConnector.syncPolicy?.scheduleDue) return '等待同步';
-      if (notionConnector.status === 'authenticated' || notionConnector.status === 'synced' || notionConnector.auth.status === 'authenticated') {
-        return notionConnector.syncPolicy?.scheduleDue === false ? '健康' : '已连接';
-      }
-      if (notionConnector.status === 'authenticating' || notionConnector.auth.status === 'authenticating') {
-        return '认证中';
-      }
-      if (notionConnector.status === 'expired' || notionConnector.auth.status === 'expired') {
-        return '已过期';
-      }
-      if (notionConnector.status === 'error' || notionConnector.auth.status === 'error') {
-        return '异常';
-      }
-      return '未连接';
-    },
-    [notionConnector],
-  );
-  const notionStatusTone = getResourceHealthTone(notionConnector);
-  const notionLastInteraction = formatLastInteraction(notionConnector);
 
   return (
     <section

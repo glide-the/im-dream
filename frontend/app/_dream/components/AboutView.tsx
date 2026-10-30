@@ -1,31 +1,10 @@
+// [Sync] 2026-10-29: share static About content with Native; existing Web layout/hover behavior remains.
 // [Input] frontend/app/_dream/components/.folder.md (about-view node)
 // [Output] Static About page with project summary, team members, timeline, and repository links.
 // [Pos] about-view node
 // [Sync] 2026-06-13: add structured team member data and include glide-the as a contributor.
 
-type TeamMember = {
-  name: string;
-  role: string;
-  description: string;
-};
-
-const teamMembers: TeamMember[] = [
-  {
-    name: 'F2J',
-    role: 'Creator & Developer',
-    description: 'A solo developer exploring the intersection of AI, writing tools, and reflective thinking.'
-  },
-  {
-    name: 'Sage',
-    role: 'Creator & Designer',
-    description: 'A designer with a keen eye for aesthetics and user experience, bringing thoughtful design to the intersection of AI and reflective writing.'
-  },
-  {
-    name: 'glide-the',
-    role: 'Contributor',
-    description: "Contributes to Ink & Memory's development and product iteration."
-  }
-];
+import {teamMembers,developmentTimeline,ABOUT_REPOSITORY_URL,ABOUT_SUMMARY,ABOUT_DESCRIPTION} from './aboutPresentation';
 
 export default function AboutView() {
   return (
@@ -61,7 +40,7 @@ export default function AboutView() {
             lineHeight: 1.6,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
           }}>
-            A reflective writing companion that helps you capture thoughts and memories
+            {ABOUT_SUMMARY}
           </p>
         </div>
 
@@ -83,9 +62,7 @@ export default function AboutView() {
             marginBottom: 16,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
           }}>
-            Ink & Memory is an experimental writing tool that brings multiple "voices" to your writing process.
-            As you write, AI-powered personas inspired by Disco Elysium provide commentary, insights, and
-            alternative perspectives on your thoughts.
+            {ABOUT_DESCRIPTION[0]}
           </p>
           <p style={{
             fontSize: 16,
@@ -93,9 +70,7 @@ export default function AboutView() {
             lineHeight: 1.8,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
           }}>
-            The system analyzes your writing in real-time and generates contextual comments from different
-            archetypal voices—Logic, Empathy, Drama, Rhetoric, and more. These voices don't just respond
-            to what you write; they help you think differently about it.
+            {ABOUT_DESCRIPTION[1]}
           </p>
         </section>
 
@@ -176,32 +151,7 @@ export default function AboutView() {
             }} />
 
             {/* Timeline items */}
-            {[
-              {
-                version: 'v1.0.0',
-                date: 'Oct 2025',
-                title: 'Project Start',
-                description: 'Core writing interface with voice commentary system'
-              },
-              {
-                version: 'v1.1.0',
-                date: 'Oct 2025',
-                title: 'Voice Customization',
-                description: 'Added settings panel for customizing voice personas'
-              },
-              {
-                version: 'v1.2.0',
-                date: 'Oct 2025',
-                title: 'Energy Pool System',
-                description: 'Introduced weighted character counting and energy-based triggering'
-              },
-              {
-                version: 'v1.3.0',
-                date: 'Oct 2025',
-                title: 'Calendar & Analysis',
-                description: 'Added calendar view for memory browsing and analysis tools'
-              }
-            ].map((item, index) => (
+            {developmentTimeline.map((item, index) => (
               <div key={index} style={{
                 position: 'relative',
                 marginBottom: 32,
@@ -262,7 +212,7 @@ export default function AboutView() {
           </h2>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <a
-              href="https://github.com/shuxueshuxue/ink-and-memory"
+              href={ABOUT_REPOSITORY_URL}
               target="_blank"
               rel="noopener noreferrer"
               style={{

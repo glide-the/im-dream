@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: import protocol modules independently; resolve executable public exports on access.
 # [Input] None.
 # [Output] Re-export ClaudeAgentRunner, create_agent_runner, SimpleClaudeAgentSDKClient,
 #          session-file helpers, workspace lifecycle API, and MCP server factories to
@@ -8,38 +9,39 @@
 # [Sync] 2026-09-01: export connector-selected builtin Skill workspace refresh.
 
 """Server subpackage for ClaudeAgentKit."""
-from .agent_runner import ClaudeAgentRunner, create_agent_runner
-from .simple_cas_client import SimpleClaudeAgentSDKClient
+from importlib import import_module
 
-# MCP server factories — only available when mcp + Pawkeyland infra are installed.
-# Ink & Memory does not use these MCP servers; imports are guarded so the core
-# Runner/workspace/types surface remains importable without optional deps.
-try:
-    from .memory_mcp_server import create_memory_mcp_server
-    from .mcp_server import create_user_mcp_server
-    from .necklace_mcp_server import create_necklace_mcp_server
-except Exception:  # noqa: BLE001
-    create_memory_mcp_server = None  # type: ignore[assignment]
-    create_user_mcp_server = None  # type: ignore[assignment]
-    create_necklace_mcp_server = None  # type: ignore[assignment]
-from .session_files import (
-    SESSION_FILE_EXTENSION,
-    get_projects_root,
-    locate_session_file,
-    normalize_session_id,
-    parse_session_messages_from_jsonl,
-    read_session_messages,
-)
-from .workspace import (
-    get_workspace_root,
-    init_workspace,
-    get_or_create_workspace,
-    sync_builtin_workspace_skills,
-    resolve_safe_path,
-    is_archive,
-    extract_archive_in_skills,
-)
-from .workspace_file_sync import sync_skills_symlinks
+_EXPORT_MODULES = {
+    "ClaudeAgentRunner": ".agent_runner", "create_agent_runner": ".agent_runner",
+    "SimpleClaudeAgentSDKClient": ".simple_cas_client",
+    **dict.fromkeys(("SESSION_FILE_EXTENSION", "get_projects_root", "locate_session_file",
+                    "normalize_session_id", "parse_session_messages_from_jsonl", "read_session_messages"), ".session_files"),
+    **dict.fromkeys(("get_workspace_root", "init_workspace", "get_or_create_workspace",
+                    "sync_builtin_workspace_skills", "resolve_safe_path", "is_archive", "extract_archive_in_skills"), ".workspace"),
+    "sync_skills_symlinks": ".workspace_file_sync",
+}
+_OPTIONAL_MCP_EXPORTS = {"create_memory_mcp_server", "create_user_mcp_server", "create_necklace_mcp_server"}
+
+
+def __getattr__(name):
+    if name in _OPTIONAL_MCP_EXPORTS:
+        # Retain the existing all-or-none optional MCP export behavior.
+        try:
+            memory = import_module(".memory_mcp_server", __name__).create_memory_mcp_server
+            user = import_module(".mcp_server", __name__).create_user_mcp_server
+            necklace = import_module(".necklace_mcp_server", __name__).create_necklace_mcp_server
+        except Exception:
+            memory = user = necklace = None
+        globals().update(create_memory_mcp_server=memory, create_user_mcp_server=user,
+                         create_necklace_mcp_server=necklace)
+        return globals()[name]
+    module = _EXPORT_MODULES.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module, __name__), name)
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     "ClaudeAgentRunner",

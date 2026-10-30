@@ -1,0 +1,12 @@
+# [Input] Local Android/Gradle build, SDK, and native-tool outputs.
+# [Output] Source-only Android project status without generated artifacts.
+# [Pos] Android host ignore boundary.
+# [Sync] 2026-10-24: initialize Android host generated-output exclusions.
+
+.gradle/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+

@@ -2,6 +2,7 @@
 # [Output] Public route wiring, authority-first filesystem access, confirmation merge and safe failure assertions.
 # [Pos] Dream Artifact application test; Admin tests own relational authorization and transactions.
 # [Sync] 2026-09-16: replace retired Dream SQL fixtures with a strict Admin authority fake.
+# [Sync] 2026-10-26: recover only an authorized confirmed Run's accepted original message and preserve waiting on denied recovery.
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -15,6 +16,8 @@ from services.admin_data.story_workspace_artifact_data import (
     StoryWorkspaceArtifactAuthorityDTO,
 )
 from services.admin_data.request_auth import AdminRequestActor
+from services.admin_data.errors import AdminDataError
+from services.admin_data.story_workspace_confirmation_data import StoryWorkspaceConfirmationDispatchDTO
 from services.deck.story_workflow_application import DreamArtifactApplicationService
 from services.errors.error_registry import ApiRouteError
 from services.story_workspace.dream_file_service import (
@@ -172,6 +175,23 @@ class ArtifactDataFake:
         return SimpleNamespace(authority=self.value)
 
 
+def pending_confirmation():
+    import json
+
+    return StoryWorkspaceConfirmationDispatchDTO(
+        thread_id=THREAD_ID, actor_id=ACTOR_ID, message_id="dream_confirm_" + "b" * 64,
+        parts_json='[{"type":"text","text":"stored approved command"}]',
+        metadata_json=json.dumps({
+            "kind": "story-workspace-dream-confirmation", "actor": ACTOR_ID,
+            "story_workspace_run_id": RUN_ID, "thread_id": THREAD_ID,
+            "base_revisions": {"characters": 1, "scenes": 1, "storyboards": 1},
+            "edit_count": 0, "command_fingerprint": HASH,
+            "idempotency_key": "swc_original", "request_id": "original-submit",
+            "dispatch_status": "pending",
+        }),
+    )
+
+
 @pytest.mark.asyncio
 async def test_route_passes_authenticated_actor_oauth_and_artifact_client() -> None:
     calls = []
@@ -182,16 +202,22 @@ async def test_route_passes_authenticated_actor_oauth_and_artifact_client() -> N
             return waiting_response()
 
     data = object()
+    confirmations = object()
+    gateway_factory = Mock()
     result = await story_workspace.story_workspace_get_workflow_run_dream_files(
         RUN_ID,
         current_user={"user_id": int(ACTOR_ID), "_admin_actor": REQUEST_ACTOR},
         service=Gateway(),
         artifact_data=data,
+        confirmation_data=confirmations,
+        gateway_runtime_factory=gateway_factory,
     )
     assert result["storyWorkspaceRunId"] == RUN_ID
     assert calls == [(RUN_ID, {
         "actor": {"actor_id": ACTOR_ID},
         "artifact_data": data,
+        "confirmation_data": confirmations,
+        "gateway_runtime_factory": gateway_factory,
         "access_token": REQUEST_ACTOR.access_token,
     })]
 
@@ -210,6 +236,7 @@ async def test_authority_is_checked_before_any_workspace_probe() -> None:
                 RUN_ID,
                 actor={"actor_id": ACTOR_ID},
                 artifact_data=data,
+                confirmation_data=Mock(),
                 access_token="oauth",
             )
     assert raised.value.code == "WORKFLOW_PERMISSION_DENIED"
@@ -229,6 +256,7 @@ async def test_complete_projection_merges_admin_confirmation_fact() -> None:
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
             artifact_data=data,
+            confirmation_data=Mock(),
             access_token="oauth",
         )
     assert result.confirmation_accepted is True
@@ -249,6 +277,7 @@ async def test_missing_workspace_is_waiting_only_before_output_required() -> Non
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
             artifact_data=ArtifactDataFake(authority(status="queued")),
+            confirmation_data=Mock(),
             access_token="oauth",
         )
         assert result.run_revision == 0
@@ -257,9 +286,107 @@ async def test_missing_workspace_is_waiting_only_before_output_required() -> Non
                 RUN_ID,
                 actor={"actor_id": ACTOR_ID},
                 artifact_data=ArtifactDataFake(authority(status="completed")),
+                confirmation_data=Mock(),
                 access_token="oauth",
             )
     assert raised.value.code == "AGENT_EXECUTION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_accepted_confirmation_reopens_through_the_original_coordinator_only():
+    coordinator = Mock()
+    coordinator.schedule.return_value = False  # An existing lease can retain execution ownership.
+    gateway = DreamArtifactApplicationService(dream_confirmation_coordinator=coordinator)
+    confirmations = Mock()
+    dispatch = pending_confirmation()
+    confirmations.pending_dispatch.return_value = dispatch
+    gateway_factory = Mock()
+    with patch.object(gateway, "_read_dream_files_for_authorized_run", return_value=complete_response()):
+        result = await gateway.get_dream_files(
+            RUN_ID, actor={"actor_id": ACTOR_ID},
+            artifact_data=ArtifactDataFake(authority(status="confirmed", accepted=True)),
+            confirmation_data=confirmations, access_token="current-oauth",
+            gateway_runtime_factory=gateway_factory,
+        )
+    args, kwargs = confirmations.pending_dispatch.call_args
+    assert args[:2] == (RUN_ID, THREAD_ID)
+    assert kwargs == {"access_token": "current-oauth"}
+    recovered = coordinator.schedule.call_args.args[0]
+    assert coordinator.schedule.call_args.kwargs == {"gateway_runtime_factory": gateway_factory}
+    assert (recovered.message_id, recovered.thread_id, recovered.actor_id) == (
+        dispatch.message_id, THREAD_ID, ACTOR_ID,
+    )
+    assert result.confirmation_accepted is True
+    assert result.confirmation_dispatched is False
+    assert result.can_confirm is False
+    confirmations.submit_recovering.assert_not_called()
+
+
+def test_confirmation_gateway_factory_defers_existing_oauth_owner_until_claim():
+    owner = Mock()
+    factory = story_workspace._confirmation_gateway_runtime_factory(
+        owner=owner, current_user={"_admin_actor": REQUEST_ACTOR},
+    )
+    owner.gateway_runtime.assert_not_called()
+    workflow = object()
+    assert factory(workflow) is owner.gateway_runtime.return_value
+    args = owner.gateway_runtime.call_args.args
+    assert args[:2] == (REQUEST_ACTOR, workflow)
+    assert len(args[2]) == 32
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,accepted,dispatched", [
+    ("pending_review", False, False), ("confirmed", True, True),
+    ("completed", True, False), ("failed", True, False), ("cancelled", True, False),
+])
+async def test_unaccepted_acknowledged_or_terminal_runs_never_recover(status, accepted, dispatched):
+    coordinator = Mock()
+    confirmations = Mock()
+    gateway = DreamArtifactApplicationService(dream_confirmation_coordinator=coordinator)
+    with patch.object(gateway, "_read_dream_files_for_authorized_run", return_value=complete_response()):
+        await gateway.get_dream_files(
+            RUN_ID, actor={"actor_id": ACTOR_ID},
+            artifact_data=ArtifactDataFake(authority(status=status, accepted=accepted, dispatched=dispatched)),
+            confirmation_data=confirmations, access_token="current-oauth",
+        )
+    confirmations.pending_dispatch.assert_not_called()
+    coordinator.schedule.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["read", "claim", "absent", "unauthorized"])
+async def test_recovery_failure_keeps_saved_files_and_never_claims_success(failure):
+    coordinator = Mock()
+    confirmations = Mock()
+    confirmations.pending_dispatch.return_value = pending_confirmation()
+    gateway = DreamArtifactApplicationService(dream_confirmation_coordinator=coordinator)
+    if failure == "read":
+        confirmations.pending_dispatch.side_effect = AdminDataError("ADMIN_FORBIDDEN", 403, "read")
+    elif failure == "claim":
+        coordinator.schedule.side_effect = RuntimeError("unavailable")
+    elif failure == "absent":
+        confirmations.pending_dispatch.return_value = None
+    data = ArtifactDataFake(authority(status="confirmed", accepted=True, actor_id="8" if failure == "unauthorized" else ACTOR_ID))
+    with patch.object(gateway, "_read_dream_files_for_authorized_run", return_value=complete_response()) as reader:
+        if failure == "unauthorized":
+            with pytest.raises(ApiRouteError):
+                await gateway.get_dream_files(
+                    RUN_ID, actor={"actor_id": ACTOR_ID}, artifact_data=data,
+                    confirmation_data=confirmations, access_token="current-oauth",
+                )
+            reader.assert_not_called()
+            confirmations.pending_dispatch.assert_not_called()
+        else:
+            result = await gateway.get_dream_files(
+                RUN_ID, actor={"actor_id": ACTOR_ID}, artifact_data=data,
+                confirmation_data=confirmations, access_token="current-oauth",
+            )
+            assert result.confirmation_accepted is True
+            assert result.confirmation_dispatched is False
+            assert result.stages == complete_response().stages
+    if failure != "claim":
+        coordinator.schedule.assert_not_called()
 
 
 @pytest.mark.parametrize(

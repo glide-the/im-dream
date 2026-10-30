@@ -4,6 +4,9 @@
 # [Pos] utility node in libs/claude_agent_kit/server
 # [Sync] 2026-05-01: initial Python port from server/utils/session-files.ts
 # [Sync] 2026-09-13: separate strict current-project resume probes from history search.
+# [Sync] 2026-10-25: match the embedded iOS Node Runtime's long-project hash while retaining desktop Bun encoding and no-follow reads.
+# [Sync] 2026-10-25: relocate the same iOS container project exclusively before the unchanged Session/record probe.
+# [Sync] 2026-10-26: iOS directory descriptors start at the owned application root while retaining no-follow and record identity checks.
 # [Sync] 2026-08-03: get_projects_root honors CLAUDE_CONFIG_DIR and accepts an
 #                    optional workspace cwd — apply_claude_config_home_to_options
 #                    (sdk_env) points the SDK subprocess's config home at
@@ -23,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -37,14 +41,34 @@ SESSION_FILE_EXTENSION = ".jsonl"
 _RUNTIME_PROJECT_NAME_LIMIT = 200
 
 
-def _runtime_long_project_hash(value: str) -> str:
-    """Bun.hash(canonical cwd).toString(36), only for long project paths.
+def _node_runtime_long_project_hash(value: str) -> str:
+    """Runtime 0.1.12's Node simpleHash over JavaScript UTF-16 code units."""
+    hashed = 0
+    units = value.encode("utf-16-le")
+    for offset in range(0, len(units), 2):
+        hashed = (31 * hashed + int.from_bytes(units[offset:offset + 2], "little")) & 0xFFFFFFFF
+    if hashed >= 1 << 31:
+        hashed -= 1 << 32
+    hashed = abs(hashed)
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    encoded = ""
+    while hashed:
+        hashed, digit = divmod(hashed, 36)
+        encoded = digits[digit] + encoded
+    return encoded or "0"
 
-    Runtime's sanitizePath uses seed-zero Wyhash, not the SDK's simpleHash.
+
+def _runtime_long_project_hash(value: str) -> str:
+    """Match the target Runtime's long-project storage format.
+
+    iOS embeds the pinned Node Runtime and uses its simpleHash fallback.
+    Desktop Runtime's Bun sanitizePath uses seed-zero Wyhash.
     Source: ziglang/zig 0.14.1 lib/std/hash/wyhash.zig (Wyhash.hash/final2),
     based on the public-domain wangyi-fudan/wyhash algorithm. Kept local to
     this storage-format adapter; native Runtime regression verifies parity.
     """
+    if sys.platform == "ios":
+        return _node_runtime_long_project_hash(value)
     data = value.encode("utf-8")
     secret = (0xA0761D6478BD642F, 0xE7037ED1A0B428DB,
               0x8EBC6AF09C88C6E3, 0x589965CC75374CC3)
@@ -82,6 +106,18 @@ class ClaudeResumeStorageError(RuntimeError):
     """Safe diagnostic: storage errors never authorize a fresh fallback."""
 
 
+def _runtime_project_name(runtime_cwd: str) -> str:
+    # JavaScript's non-Unicode regex replaces UTF-16 code units individually.
+    units = runtime_cwd.encode("utf-16-le")
+    name = "".join(
+        chr(unit) if (48 <= unit <= 57 or 65 <= unit <= 90 or 97 <= unit <= 122) else "-"
+        for unit in (int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2))
+    )
+    if len(name) > _RUNTIME_PROJECT_NAME_LIMIT:
+        name = f"{name[:_RUNTIME_PROJECT_NAME_LIMIT]}-{_runtime_long_project_hash(runtime_cwd)}"
+    return name
+
+
 def locate_resumable_session(
     session_id: str,
     *,
@@ -107,15 +143,7 @@ def locate_resumable_session(
     try:
         if not Path(runtime_cwd).is_dir():
             raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CWD")
-        # JS's non-Unicode regex replaces each UTF-16 code unit, not each
-        # Python Unicode codepoint (astral characters therefore yield '--').
-        units = runtime_cwd.encode("utf-16-le")
-        project_name = "".join(
-            chr(unit) if (48 <= unit <= 57 or 65 <= unit <= 90 or 97 <= unit <= 122) else "-"
-            for unit in (int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2))
-        )
-        if len(project_name) > _RUNTIME_PROJECT_NAME_LIMIT:
-            project_name = f"{project_name[:_RUNTIME_PROJECT_NAME_LIMIT]}-{_runtime_long_project_hash(runtime_cwd)}"
+        project_name = _runtime_project_name(runtime_cwd)
         projects_root = (
             str(Path(config_home) / "projects")
             if config_home else get_projects_root(None)
@@ -124,12 +152,21 @@ def locate_resumable_session(
             raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CONFIG_HOME")
         if os.path.normpath(projects_root) != projects_root:
             raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CONFIG_HOME")
+        if sys.platform == "ios" and config_home is not None:
+            from mobile_runtime.ios_session_storage import relocate_current_runtime_project
+            relocate_current_runtime_project(projects_root, runtime_cwd, session_id)
         target = Path(projects_root) / project_name / f"{session_id}.jsonl"
         # Walk with directory descriptors: O_NOFOLLOW covers both links already
         # present and links swapped into the path between check and open.
-        fd = os.open(target.anchor, os.O_RDONLY | os.O_DIRECTORY)
+        if sys.platform == "ios":
+            from mobile_runtime.ios_session_storage import _open_directory
+            fd = _open_directory(target.parent)
+            components = ()
+        else:
+            fd = os.open(target.anchor, os.O_RDONLY | os.O_DIRECTORY)
+            components = target.parts[1:-1]
         try:
-            for component in target.parts[1:-1]:
+            for component in components:
                 next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 os.close(fd)
                 fd = next_fd

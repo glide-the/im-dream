@@ -1,3 +1,7 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
+# [Input] Original Story Workspace schemas, write handler and optional turn-owned broker environment.
+# [Output] The same controlled Dream-write MCP server for stdio and embedded SDK transports.
+# [Pos] Shared Story Workspace MCP factory; file/Run authority stays in the original handler and broker.
 """Write-only Story Workspace MCP server."""
 
 from __future__ import annotations
@@ -13,10 +17,11 @@ from .story_workspace_tool import (
 )
 
 
-def story_workspace_create_mcp_server() -> McpServer:
+def story_workspace_create_mcp_server(*, environment=None) -> McpServer:
     """Create the local controlled Dream-write MCP namespace."""
 
     server = McpServer("story_workspace")
+    context = {} if environment is None else {"environment": dict(environment)}
 
     @server.list_tools()  # type: ignore[misc]
     async def list_tools() -> list[mcp_types.Tool]:
@@ -42,7 +47,7 @@ def story_workspace_create_mcp_server() -> McpServer:
     ) -> list[mcp_types.TextContent]:
         if name not in STORY_WORKSPACE_DREAM_TOOL_SPECS:
             raise ValueError("Unknown Story Workspace tool")
-        result_text = await story_workspace_handle_dream_tool_async(name, arguments)
+        result_text = await story_workspace_handle_dream_tool_async(name, arguments, **context)
         return [mcp_types.TextContent(type="text", text=result_text)]
 
     return server

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: retain existing ownership contracts at the extracted shared state/presentation paths; Web DOM assertions remain.
 // [Input] ClaudePlugin admin source/styles/API, Story Workspace Work/Layout wiring, and Marketplace interaction design.
 // [Output] Lock both plugin managers plus the Claude global Marketplace install, fail-closed capability, focus, and responsive presentation.
 // [Pos] Source-contract regression for ClaudePlugin Marketplace add scope.
@@ -14,6 +15,8 @@ declare const process: { cwd(): string };
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const PAGE = read('app/_dream/components/claude-plugin-admin/ClaudePluginAdminPage.tsx');
+const STATE = read('app/_dream/hooks/useClaudePluginAdmin.ts');
+const PRESENTATION = read('app/_dream/components/claude-plugin-admin/claudePluginPresentation.ts');
 const STYLES = read('app/_dream/components/claude-plugin-admin/ClaudePluginAdminPage.css');
 const API = read('app/_dream/api/claudePluginAdminApi.ts');
 const SETTINGS = read('app/_dream/views/story-workspace/StoryWorkspaceSettingsPage.tsx');
@@ -51,11 +54,11 @@ test('one create menu owns install, Marketplace, and recent-operation entry poin
 test('manual install preserves the existing production call and server-owned permission', () => {
   expect(API).toContain("'/api/claude-plugins/install'");
   expect(API).toContain('can_manage_shared_plugins?: boolean');
-  expect(PAGE).toContain('installClaudePlugin({ packageSpec: trimmed })');
-  expect(PAGE).toContain('getClaudePluginOperation(trackedOperationId)');
-  expect(PAGE).toContain('Boolean(installResult.permissions?.can_manage_shared_plugins)');
-  expect(PAGE).toContain("setActiveDialog('operations')");
-  expect(PAGE).toContain('setInstallError(errorMessage(reason))');
+  expect(STATE).toContain('installClaudePlugin({ packageSpec: trimmed },transport)');
+  expect(STATE).toContain('getClaudePluginOperation(trackedOperationId,transport)');
+  expect(STATE).toContain('Boolean(installResult.permissions?.can_manage_shared_plugins)');
+  expect(STATE).toContain("setActiveDialog('operations')");
+  expect(STATE).toContain('setInstallError(reportError(reason))');
   expect(PAGE).not.toContain('forkDeck');
 });
 
@@ -63,11 +66,11 @@ test('Marketplace uses the global catalog and the existing production install op
   expect(API).toContain("'/api/claude-plugins/marketplace'");
   expect(API).toContain('marketplace_entry_id');
   expect(API).toContain("scope: 'platform-global'");
-  expect(PAGE).toContain("{ id: 'select', label: '选择插件' }");
-  expect(PAGE).toContain("{ id: 'confirm', label: '确认安装' }");
-  expect(PAGE).toContain("{ id: 'installing', label: '正在安装' }");
-  expect(PAGE).toContain("{ id: 'result', label: '可以使用' }");
-  expect(PAGE).toContain('installClaudePlugin({ marketplaceEntryId: entry.id })');
+  expect(PRESENTATION).toContain("{ id: 'select', label: '选择插件' }");
+  expect(PRESENTATION).toContain("{ id: 'confirm', label: '确认安装' }");
+  expect(PRESENTATION).toContain("{ id: 'installing', label: '正在安装' }");
+  expect(PRESENTATION).toContain("{ id: 'result', label: '可以使用' }");
+  expect(STATE).toContain('installClaudePlugin({ marketplaceEntryId: entry.id },transport)');
   expect(PAGE).toContain('批准 commit');
   expect(PAGE).toContain('固定 ref');
   expect(PAGE).toContain('revision.requested_ref');

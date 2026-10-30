@@ -3,6 +3,7 @@ import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSessio
 // [Input] Runtime API base config, shared Browser session/header owner, storage upload endpoints, and file proxy utility.
 // [Output] File upload hook that supports server/direct upload and cross-origin backend URLs.
 // [Pos] file-upload hook node in frontend/app/_dream/hooks
+// [Sync] 2026-10-28: inject only file validation/byte transfer for native reuse; storage strategy, DTOs and default browser transport remain unchanged.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin deployments.
 // [Sync] 2026-07-20: i18n — upload error messages resolve through the chat.upload namespace
 //        (en + zh) via the shared i18n instance (module-level helpers cannot call hooks).
@@ -12,24 +13,32 @@ import { toFileProxyUrl } from '../lib/toFileProxyUrl';
 import { API_BASE } from '../lib/apiBase';
 import i18n from '../i18n';
 
-interface StorageInfo {
+export interface StorageInfo {
   type: 's3' | 'vercel-blob' | 'unknown';
   supportsDirectUpload: boolean;
   isConfigured: boolean;
   error?: string;
 }
 
-interface UploadOptions {
+export interface UploadOptions {
   filename?: string;
   contentType?: string;
   onProgress?: (progress: number) => void;
 }
 
-interface UploadResult {
+export interface UploadResult {
   key: string;
   url: string;
   contentType?: string;
   size?: number;
+}
+
+export interface UploadFileSource {name:string;type:string;size:number;}
+export interface FileUploadAdapter<F extends UploadFileSource> {
+  isFile:(value:unknown)=>value is F;
+  request:typeof fetch;
+  serverUpload:(file:F,filename:string,onProgress?:UploadOptions['onProgress'])=>Promise<UploadResult|undefined>;
+  directUpload:(url:string,file:F,method:string,headers:Record<string,string>)=>Promise<Response>;
 }
 
 function getFallbackStorageInfo(): StorageInfo {
@@ -110,6 +119,10 @@ async function serverUpload(
     body: formData,
   });
 
+  return readStorageUploadResponse(response);
+}
+
+export async function readStorageUploadResponse(response:Response):Promise<UploadResult> {
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(errorBody.error || i18n.t('chat.upload.serverFailed'));
@@ -133,7 +146,12 @@ async function serverUpload(
   };
 }
 
-export function useFileUpload() {
+const browserUploadAdapter:FileUploadAdapter<File>={
+  isFile:(value:unknown):value is File=>value instanceof File,
+  request:(...args)=>fetch(...args),serverUpload,
+  directUpload:(url,file,method,headers)=>fetch(url,{method,headers,body:file}),
+};
+export function useFileUpload<F extends UploadFileSource = File>(adapter:FileUploadAdapter<F> = browserUploadAdapter as unknown as FileUploadAdapter<F>) {
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [isLoadingStorageInfo, setIsLoadingStorageInfo] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -144,7 +162,7 @@ export function useFileUpload() {
 
     async function fetchStorageInfo() {
       try {
-        const response = await fetch(`${API_BASE}/api/storage`, {
+        const response = await adapter.request(`${API_BASE}/api/storage`, {
           headers: { ...browserRequestHeaders() },
         });
         if (!response.ok) {
@@ -169,11 +187,11 @@ export function useFileUpload() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [adapter]);
 
   const upload = useCallback(
-    async (file: File, options: UploadOptions = {}) => {
-      if (!(file instanceof File)) {
+    async (file: F, options: UploadOptions = {}) => {
+      if (!adapter.isFile(file)) {
         setError(i18n.t('chat.upload.fileRequired'));
         return undefined;
       }
@@ -197,7 +215,7 @@ export function useFileUpload() {
 
       try {
         if (info.supportsDirectUpload) {
-          const uploadUrlResponse = await fetch(`${API_BASE}/api/storage/upload-url`, {
+          const uploadUrlResponse = await adapter.request(`${API_BASE}/api/storage/upload-url`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
             body: JSON.stringify({ filename, contentType }),
@@ -218,11 +236,7 @@ export function useFileUpload() {
               uploadUrlData.url
             ) {
               options.onProgress?.(25);
-              const directResponse = await fetch(uploadUrlData.url, {
-                method: uploadUrlData.method || 'PUT',
-                headers: uploadUrlData.headers || { 'Content-Type': contentType },
-                body: file,
-              });
+              const directResponse = await adapter.directUpload(uploadUrlData.url,file,uploadUrlData.method || 'PUT',uploadUrlData.headers || {'Content-Type':contentType});
               if (!directResponse.ok) {
                 throw new Error('Direct upload failed');
               }
@@ -237,7 +251,7 @@ export function useFileUpload() {
           }
         }
 
-        return await serverUpload(file, filename, options.onProgress);
+        return await adapter.serverUpload(file, filename, options.onProgress);
       } catch (uploadError) {
         const message = uploadError instanceof Error ? uploadError.message : i18n.t('chat.upload.failed');
         setError(message);
@@ -246,7 +260,7 @@ export function useFileUpload() {
         setIsUploading(false);
       }
     },
-    [isLoadingStorageInfo, storageInfo],
+    [isLoadingStorageInfo, storageInfo, adapter],
   );
 
   return {

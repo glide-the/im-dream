@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: share original receipt/configured-plugin read lifecycle; Web DOM, labels and Agent selection stay unchanged.
 // [Input] getThreadPluginLoadReceipt API plus the hydrated Deck bound to the thread.
 // [Output] Compact, stable Deck context badge for the active chat thread; clicking
 //          opens Deck metadata, bundled Agents, and plugin receipt provenance.
@@ -10,13 +11,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  getThreadPluginLoadReceipt,
-  listClaudePluginInstallations,
   shortDigest,
-  type ClaudePluginInstallation,
-  type PluginLoadReceipt,
 } from '../../api/claudePluginAdminApi';
 import type { Deck } from '../../api/voiceApi';
+import usePluginReceiptBadgeData from './usePluginReceiptBadgeData';
 import { COLORS, iconMap } from '../deckVisuals';
 
 interface PluginReceiptBadgeProps {
@@ -36,11 +34,6 @@ const sectionLabelStyle: React.CSSProperties = {
   letterSpacing: '.06em',
   textTransform: 'uppercase',
 };
-
-// @@@ Receipt polling: 3s cadence for up to ~2 minutes, long enough to cover
-// the first run's workspace packing without polling plugin-free threads forever.
-const RECEIPT_RETRY_MS = 3000;
-const MAX_RECEIPT_ATTEMPTS = 40;
 
 function CopyDigestButton({ value }: { value: string }) {
   const { t } = useTranslation();
@@ -106,51 +99,11 @@ export default function PluginReceiptBadge({
 }: PluginReceiptBadgeProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
-  const [receipt, setReceipt] = useState<PluginLoadReceipt | null>(null);
-  const [configuredPlugins, setConfiguredPlugins] = useState<ClaudePluginInstallation[] | null>(null);
+  const {receipt, configuredPlugins} = usePluginReceiptBadgeData({threadId, deck});
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // @@@ The receipt only exists after the backend has packed the plugin
-  // workspace for a run. On the FIRST conversation the badge mounts before
-  // packing finishes, so a single fetch would miss it and the badge would
-  // stay hidden until the thread is reopened — poll briefly until it appears.
-  useEffect(() => {
-    let cancelled = false;
-    let retryTimer: number | undefined;
-    let attempts = 0;
-    setReceipt(null);
-    setOpen(false);
-    if (!threadId) return undefined;
-
-    const load = () => {
-      getThreadPluginLoadReceipt(threadId)
-        .then((payload) => {
-          if (cancelled) return;
-          const packed = payload?.receipt?.plugins ?? payload?.launch_manifest?.plugins ?? [];
-          if (packed.length > 0) {
-            setReceipt(payload);
-            return;
-          }
-          attempts += 1;
-          if (attempts < MAX_RECEIPT_ATTEMPTS) {
-            retryTimer = window.setTimeout(load, RECEIPT_RETRY_MS);
-          }
-        })
-        .catch(() => {
-          if (cancelled) return;
-          attempts += 1;
-          if (attempts < MAX_RECEIPT_ATTEMPTS) {
-            retryTimer = window.setTimeout(load, RECEIPT_RETRY_MS);
-          }
-        });
-    };
-    load();
-    return () => {
-      cancelled = true;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-    };
-  }, [threadId]);
+  useEffect(() => { setOpen(false); }, [threadId]);
 
   // @@@ Click-outside / Escape closes the metadata popover.
   useEffect(() => {
@@ -181,31 +134,6 @@ export default function PluginReceiptBadge({
   const agentCount = deck
     ? (deck.voices ? agents.length : (deck.voice_count ?? 0))
     : 0;
-
-  // @@@ Config-state plugin list (design §4.3): before the first run packs the
-  // workspace there is no receipt, so show the Deck's configured Claude plugin
-  // installations instead. Fetched lazily — only while no receipt is available.
-  useEffect(() => {
-    if (!deck || hasReceiptPlugins) return undefined;
-    let cancelled = false;
-    setConfiguredPlugins(null);
-    listClaudePluginInstallations()
-      .then(({ installations }) => {
-        if (cancelled) return;
-        setConfiguredPlugins(installations.filter((installation) => (
-          installation.status === 'ready'
-          && (installation.deck_refs ?? []).some(
-            (ref) => ref.deck_id === deck.id && ref.enabled,
-          )
-        )));
-      })
-      .catch(() => {
-        if (!cancelled) setConfiguredPlugins([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [deck, hasReceiptPlugins]);
 
   // @@@ The badge is a DECK CONTEXT badge (design §3): it renders whenever a
   // Deck context exists, even before the first message / pack — the receipt

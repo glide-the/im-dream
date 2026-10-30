@@ -1,6 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
+// [Sync] 2026-10-25: cover public Admin form navigation from the registered localhost Dream client.
 // [Sync] 2026-10-11: local/public navigation, proxy evidence, callback host and fixed issuer/backchannel regression.
 // [Sync] 2026-09-18: verify public browser authority with a separate loopback server transport.
 // [Sync] 2026-09-17: verify configured Admin form actions and confidential-client transport.
@@ -85,7 +86,7 @@ test('options exposes only configured Admin browser form actions to the exact Dr
   assert.equal(calls.length, 1);
 });
 
-test('local browser selects local Admin without changing issuer, callback or server transport', async () => {
+test('local browser selects the configured Admin browser authority without changing issuer, callback or server transport', async () => {
   const { admin, calls } = fixture();
   const local = 'http://localhost:5173';
   const boundary = new BffLoginBoundary({ publicOrigin: local, internalOrigin: 'http://127.0.0.1:5173', callbackUri: local + '/auth/callback', cookieSecret: 'c'.repeat(32) });
@@ -111,8 +112,21 @@ test('local browser selects local Admin without changing issuer, callback or ser
     { host: 'localhost:5173', 'x-forwarded-host': 'localhost:5173' },
   ];
   for (const headers of deniedHeaders) assert.equal((await handlers.options(request('/auth/options', headers))).status, 403);
-  const unavailable = new AdminBffClient({ ...adminBffConfig(env), transportOrigin: adminOrigin });
-  assert.equal((await createBffHandlers(boundary, unavailable).options(request('/auth/options'))).status, 503);
+  const publicTransport: typeof fetch = async (url, init) => {
+    assert.equal(new URL(String(url)).origin, adminOrigin);
+    const headers = new Headers(init?.headers);
+    return Response.json({ request_id: headers.get('x-request-id'), data: {
+      version: '1', auth: { issuer: env.INK_ADMIN_AUTH_ISSUER, jwks_uri: env.INK_ADMIN_AUTH_ISSUER + '/jwks', algorithm: 'ES256', resource: env.INK_DREAM_API_RESOURCE,
+        clients: { browser: 'registered-browser', device: 'registered-device' }, scopes: ['openid'], delegations: [] }, schema_capabilities: [], operations: [],
+    } });
+  };
+  const publicAdmin = new AdminBffClient({ ...adminBffConfig(env), transportOrigin: adminOrigin }, publicTransport, async () => 'service.access.token');
+  const publicOptions = await createBffHandlers(boundary, publicAdmin).options(request('/auth/options'));
+  assert.equal(publicOptions.status, 200);
+  assert.deepEqual(await publicOptions.json(), {
+    password_action: adminOrigin + '/auth/dream/password',
+    google_action: adminOrigin + '/auth/dream/google',
+  });
 });
 
 test('public forwarded browser is not misclassified from Next loopback normalization', async () => {

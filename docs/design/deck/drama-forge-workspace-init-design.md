@@ -1,3 +1,7 @@
+<!-- [Input] 冻结插件制品、workspace-init profile、受管Python缓存及现有启动manifest。 -->
+<!-- [Output] 原初始化方案、缓存修复规则和插件启动依赖。 -->
+<!-- [Pos] Deck工作区初始化技术合同与原交互方案记录；页面规则由现行Deck产品文档所有。 -->
+<!-- [Sync] 2026-10-26: 明确运行时根变化后的冻结venv地址修复，保留插件冻结和初始化结果。 -->
 # DramaForge × Deck 工作区初始化 · 交互方案设计稿
 
 > 版本：v1.0 · 2026-08-03
@@ -160,6 +164,16 @@ def load_init_profile(packed_dir: Path) -> InitProfile | None      # 校验 + �
 def execute_init_profile(workspace: Path, packed_dir: Path, profile: InitProfile) -> list[dict]
 def ensure_plugin_venv(runtime_root: Path, digest: str, packed_dir: Path, spec: PythonSpec) -> Path
 ```
+
+### 受管缓存根目录变化
+
+冻结工作区沿用原插件顺序、版本、摘要、初始化步骤、surface和用户文件。`pack_workspace_plugins_with_refs_loader`从已核验的冻结制品profile调用原`ensure_plugin_venv`，按当前`INK_CLAUDE_PLUGIN_RUNTIME_ROOT`及原artifact digest取得实际venv。已声明runtime的路径列表须为绝对路径，数量须匹配原制品中的Python profile；非法声明继续拒绝。
+
+缓存根变化时，仅将原manifest的`runtime.venv_dirs`及本次pack receipt更新为上述实际路径，原`written_at`、插件元数据和初始化回执保持。路径相同则保留原manifest。初始化步骤继续执行一次，修复过程不重新创建用户已删除的目录或覆盖用户编辑。原`plugin_launcher`继续检查解释器文件，依赖准备失败或解释器缺失时终止启动。
+
+venv的原缓存receipt增加`venv_path`，记录规范化后的实际缓存地址。复用要求原requirements摘要及该地址同时匹配；旧receipt缺少地址、地址变化或依赖不匹配时，在原artifact槽锁下重建派生venv并安装原requirements。该校验覆盖已随应用数据搬移的venv，其pip入口可能继续引用旧解释器路径；重建沿用原Python执行器和依赖来源。用户工作区初始化、原插件及Session保持。
+
+该规则覆盖iOS更新安装导致应用数据容器目录变化的情况；路径由原运行时配置和已核验制品派生，修复过程不替换目录UUID、不修改会话正文或引用其他容器。实现位于[`workspace_packer.py`](../../../backend/services/claude_plugin/workspace_packer.py)，验证位于[`test_workspace_init.py`](../../../backend/tests/test_workspace_init.py)。
 
 ---
 

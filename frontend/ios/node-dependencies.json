@@ -1,0 +1,20 @@
+{
+  "node": {
+    "version": "24.21.0",
+    "mobileVersion": "24.21.0-0",
+    "url": "https://github.com/fogtape/nodejs-mobile/releases/download/v24.21.0-0/nodejs-mobile-ios-24.21.0-0.zip",
+    "sha256": "11ce3f366dc5f5f2f58a35186b257edc4fa365f2aeb1c0fe963c35728495b492",
+    "license": "MIT and bundled third-party notices",
+    "notice": {
+      "url": "https://raw.githubusercontent.com/fogtape/nodejs-mobile/v24.21.0-0/LICENSE",
+      "sha256": "c373dabed995013e091b1908996a69a1647ef19d400e6c1fd4b7fb06d8bc0f66"
+    }
+  },
+  "runtime": {
+    "version": "0.1.12",
+    "cliCompatibilityVersion": "2.1.241",
+    "url": "https://registry.npmjs.org/@glide-the/ink-claude-code-dream-darwin-arm64/-/ink-claude-code-dream-darwin-arm64-0.1.12.tgz",
+    "sha512": "e8jntAeYwzOJiNARBp+vzvUyuoWor5plQrA47cOJlctK7Ly1j/vUo6XBYJu8B9Ik4A/g5WO0N2G1BsKg+JTTMQ==",
+    "use": "Private iOS compatibility qualification; desktop binaries are excluded"
+  }
+}

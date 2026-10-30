@@ -1,6 +1,7 @@
 // [Sync] 2026-10-11: provider-executed native image operations have no local pending approval; ordinary and MCP approvals retain their existing policy.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
+// [Sync] 2026-10-28: canonical confirmation accepts an optional native HTTP transport; permission resolution and strict receipts remain shared.
 // [Input] ToolUIPart/DynamicToolUIPart from the chat message stream; Browser session and CSRF; API_BASE.
 // [Output] confirmToolCall() POST helper, resolveToolName()/isAskUserQuestionPart() classifiers,
 //          and resolvePendingToolConfirmation() — the single source of truth for whether a tool
@@ -181,8 +182,9 @@ export async function confirmToolCall(
   approved: boolean,
   reason?: string,
   answers?: Record<string, unknown>,
+  transport: typeof fetch = fetch,
 ) {
-  const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
+  const response = await transport(`${API_BASE}/api/claude-agent/tool-confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
     body: JSON.stringify({ thread_id: threadId, tool_call_id: toolCallId, approved, reason, answers }),

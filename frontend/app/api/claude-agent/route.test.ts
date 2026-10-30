@@ -9,6 +9,8 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import test from 'node:test';
+// [Sync] 2026-10-27: the Node fixture uses Node timers beside RN global types.
+import { setTimeout, clearTimeout } from 'node:timers';
 import { proxyClaudeAgentRequest } from './_proxy.ts';
 
 async function listen(server: Server): Promise<string> {
@@ -29,7 +31,7 @@ async function close(server: Server): Promise<void> {
 }
 
 async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,

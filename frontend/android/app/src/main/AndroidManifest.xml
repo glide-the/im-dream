@@ -1,0 +1,45 @@
+<!-- [Input] Android package components and least-privilege platform permissions. -->
+<!-- [Output] Launcher host, private runtime process, and internal file-sharing provider. -->
+<!-- [Pos] Android application component and permission manifest. -->
+<!-- [Sync] 2026-10-24: declare the first Android host topology. -->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:name=".MainApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:label="Ink &amp; Memory"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.InkMemory"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".runtime.DreamRuntimeService"
+            android:exported="false"
+            android:process=":dream_runtime" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
+

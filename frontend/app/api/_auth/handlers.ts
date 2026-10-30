@@ -1,6 +1,7 @@
 // [Input] Same-origin browser requests, the private login boundary and Admin DTO transport.
 // [Output] Actual PKCE login/session/logout handlers plus request-selected Admin form actions, exposing no credential or token.
 // [Pos] Server BFF product boundary shared by thin Next auth Route Handlers.
+// [Sync] 2026-10-25: send loopback Dream browser forms to the public Admin authority when its backchannel is public.
 // [Sync] 2026-10-11: select browser center from validated client access while keeping issuer and backchannel fixed.
 // [Sync] 2026-09-17: project Admin form actions while preserving recovery and server-only OAuth credentials.
 import { randomUUID } from 'node:crypto';
@@ -21,7 +22,7 @@ function browserAdminOrigin(request: Request, boundary: BffLoginBoundary, admin:
   if (!['localhost', '127.0.0.1', '[::1]'].includes(client.hostname)) return admin.origin;
   const destination = new URL(admin.transportOrigin);
   if (!['localhost', '127.0.0.1', '[::1]'].includes(destination.hostname)) {
-    throw new BffBoundaryError('BFF_ADMIN_LOCAL_UNAVAILABLE', 503);
+    return admin.origin;
   }
   destination.hostname = client.hostname;
   return destination.origin;

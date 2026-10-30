@@ -1,4 +1,7 @@
+// [Sync] 2026-10-29: wait for the original Cookie/CSRF session before submitting the MCP OAuth callback.
+// [Sync] 2026-10-29: expose the original Writing canvas as a local editor document; RN owns cross-page navigation and Web defaults retain the complete shell.
 // [Sync] 2026-10-14: pass the account timezone to analysis report history and reading.
+// [Sync] 2026-10-27: keep Device Flow outside the RN host while retaining normal Web authentication.
 // [Sync] 2026-10-07: login/import cleanup uses the explicit key list and retains browser language/theme.
 // [Sync] 2026-10-05: Calendar delegates Notion recovery to the canonical Settings Resources route without changing Chat handoff.
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
@@ -108,6 +111,7 @@ import {
 import { StoryWorkspaceSettingsPage } from './views/story-workspace';
 import { WritingWorkspaceSplitPane } from './components/story-workspace/layout';
 import type { ActiveChatVoice } from './lib/chat-schema';
+import {isReactNativeHost} from './platform/mobileHost';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
   EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS,
@@ -148,6 +152,7 @@ function submitMcpOAuthCallbackOnce(operationId: string, callbackUrl: string): P
 }
 
 function McpOAuthCallbackPage() {
+  const { isLoading, isAuthenticated } = useAuth();
   const callbackUrl = useRef(window.location.href);
   const [callbackState, setCallbackState] = useState<'submitting' | 'submitted' | 'invalid' | 'failed'>('submitting');
   const query = new URL(callbackUrl.current).searchParams;
@@ -155,8 +160,9 @@ function McpOAuthCallbackPage() {
 
   useEffect(() => {
     document.title = 'MCP authorization callback · Ink & Memory';
+    if (isLoading) return;
     const operationId = readClaudeMcpOAuthOperation();
-    if (!callbackReady || !operationId) {
+    if (!isAuthenticated || !callbackReady || !operationId) {
       setCallbackState('invalid');
       return;
     }
@@ -166,7 +172,7 @@ function McpOAuthCallbackPage() {
         window.setTimeout(() => window.close(), 600);
       })
       .catch(() => setCallbackState('failed'));
-  }, [callbackReady]);
+  }, [callbackReady, isLoading, isAuthenticated]);
 
   const title = callbackState === 'submitted'
     ? 'MCP 授权已自动提交'
@@ -238,10 +244,14 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 };
 
 // @@@ Main App Component
-export default function App() {
+export interface WritingDocumentHost {
+  active:boolean;showEnergyBar:boolean;
+  onOpenThread:(threadId:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
+}
+export default function App({writingDocument}:{writingDocument?:WritingDocumentHost}={}) {
   const isMobile = useMobile();
   const { isAuthenticated, isLoading } = useAuth();
-  const isDeviceVerificationRoute = window.location.pathname === '/oauth/device/verify';
+  const isDeviceVerificationRoute = !isReactNativeHost() && window.location.pathname === '/oauth/device/verify';
   const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
   const { i18n } = useTranslation();
   const writingBottomPadding = isMobile
@@ -268,11 +278,13 @@ export default function App() {
   }, [currentLanguage, i18n]);
 
   const [writingRouteActive, setWritingRouteActive] = useState(() => (
-    resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
+    Boolean(writingDocument) || resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
   ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
   const [chatLandingTab] = useState<'history' | 'dreams'>('history');
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
+  useEffect(()=>{if(writingDocument)setShowEnergyBar(writingDocument.showEnergyBar);},[writingDocument?.showEnergyBar]);
+
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
   // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
   //                    replaces the whole Settings viewport instead of expanding inline within the
@@ -284,7 +296,7 @@ export default function App() {
   });
 
   useLayoutEffect(() => {
-    if (!isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute) return;
+    if (writingDocument || !isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute) return;
     const currentMatch = resolveStoryWorkspacePath(window.location.pathname, window.location.search);
     if (window.location.pathname !== '/' && currentMatch) return;
     window.history.replaceState(
@@ -293,7 +305,7 @@ export default function App() {
       STORY_WORKSPACE_PATHS.chat,
     );
     setWritingRouteActive(false);
-  }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute]);
+  }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute, writingDocument]);
 
   const openNotionConnectorDetail = useCallback(() => {
     setClaudeMcpDetailServerName(null);
@@ -1004,14 +1016,14 @@ export default function App() {
       if (!target) return;
       const sequence = jumpToCellSequenceRef.current + 1;
       jumpToCellSequenceRef.current = sequence;
-      if (window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
+      if (!writingDocument && window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
         window.history.pushState(
           { inkDreamView: 'story-workspace' },
           '',
           STORY_WORKSPACE_PATHS.writing,
         );
       }
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      if(!writingDocument)window.dispatchEvent(new PopStateEvent('popstate'));
       setWritingRouteActive(true);
 
       void activateEditorJumpTarget(target).then((isReady) => {
@@ -1022,7 +1034,7 @@ export default function App() {
     };
     window.addEventListener('editor:jump-to-cell', handler);
     return () => window.removeEventListener('editor:jump-to-cell', handler);
-  }, [activateEditorJumpTarget]);
+  }, [activateEditorJumpTarget, writingDocument]);
 
   useEffect(() => {
     if (!writingRouteActive || !jumpToCellRef.current) return;
@@ -1160,14 +1172,19 @@ export default function App() {
     }
   }, [composingCells, handleTextCellKeyDown]);
 
+  useEffect(()=>{
+    if(writingDocument && !writingDocument.active){setShowCalendarPopup(false);setDropdownVisible(false);setExpandedCommentId(null);if(document.activeElement instanceof HTMLElement)document.activeElement.blur();}
+  },[writingDocument?.active]);
+
   // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
   const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
+    if(writingDocument){writingDocument.onOpenThread(threadId);return;}
     setRequestedChatThreadId(threadId);
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
     setWritingChatPanelOpen(true);
-  }, []);
+  }, [writingDocument]);
 
   // Dream owns its presentation protocol, but its source thread remains a
   // normal Chat thread. Selecting Chat reopens that thread so Chat can attach
@@ -1182,11 +1199,12 @@ export default function App() {
   }, []);
 
   const handleCalendarTaskThreadRequest = useCallback((threadId: string) => {
+    if(writingDocument){setShowCalendarPopup(false);writingDocument.onOpenThread(threadId);return;}
     handleStoryWorkspaceChatThreadRequest(threadId);
     setShowCalendarPopup(false);
     window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, [handleStoryWorkspaceChatThreadRequest]);
+  }, [handleStoryWorkspaceChatThreadRequest, writingDocument]);
 
   // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
   // The URL carries only stable selection intent; Chat reloads server-derived facts.
@@ -1206,6 +1224,7 @@ export default function App() {
   }, []);
 
   const handleCalendarArrangeTask = useCallback((input: string) => {
+    if(writingDocument){setShowCalendarPopup(false);writingDocument.onPrepareChat(input);return;}
     setRequestedChatThreadId(undefined);
     setRequestedChatDeck(undefined);
     setRequestedChatInput({ input, nonce: Date.now() });
@@ -1214,7 +1233,7 @@ export default function App() {
     setShowCalendarPopup(false);
     window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, []);
+  }, [writingDocument]);
 
   const handleOpenSettingsFromDeck = useCallback(() => {
     window.history.pushState(
@@ -1684,7 +1703,7 @@ export default function App() {
         </div>
       )}
 
-      <div style={{
+      {!writingDocument && <div style={{
         position: 'fixed',
         inset: 0,
         minWidth: 0,
@@ -1748,9 +1767,9 @@ export default function App() {
               />
             )}
         />
-      </div>
+      </div>}
 
-      {writingRouteActive && (
+      {(writingDocument || writingRouteActive) && (
         <WritingWorkspaceSplitPane
           chat={(
             <ChatView
@@ -1764,7 +1783,7 @@ export default function App() {
               requestedThreadNonce={requestedChatThreadNonce}
             />
           )}
-          chatOpen={writingChatPanelOpen && Boolean(requestedChatThreadId)}
+          chatOpen={!writingDocument && writingChatPanelOpen && Boolean(requestedChatThreadId)}
           isMobile={isMobile}
           onCloseChat={() => setWritingChatPanelOpen(false)}
         >
@@ -2406,6 +2425,7 @@ export default function App() {
           onOpenTaskThread={handleCalendarTaskThreadRequest}
           onArrangeTask={handleCalendarArrangeTask}
           onOpenSettings={() => {
+            if(writingDocument){setShowCalendarPopup(false);writingDocument.onOpenResources();return;}
             window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS['settings-resources']);
             window.dispatchEvent(new PopStateEvent('popstate'));
           }}

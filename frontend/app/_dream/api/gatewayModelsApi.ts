@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: accept native authenticated HTTP for the same catalog request and parser.
 // [Sync] 2026-10-10: independent Image model selection and endpoint-specific capability/eligibility with explicit recovery.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 // [Sync] 2026-10-10: subscription inclusion does not imply Messages callability; omit explicitly non-chat models.
@@ -124,8 +125,8 @@ export function resolveGatewayModelSelection(
   ) ? fallback : '';
 }
 
-export async function fetchGatewayModels(signal?: AbortSignal): Promise<GatewayModelCatalog> {
-  const response = await fetch(`${API_BASE}/api/gateway/models`, {
+export async function fetchGatewayModels(signal?: AbortSignal, transport: typeof fetch = fetch): Promise<GatewayModelCatalog> {
+  const response = await transport(`${API_BASE}/api/gateway/models`, {
     headers: { ...browserRequestHeaders() },
     signal,
   });

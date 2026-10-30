@@ -1,7 +1,9 @@
-// [Sync] 2026-10-29: load Deck cards and Agents with one catalog read after explicit reconciliation.
+// [Sync] 2026-10-29: use shared original related-conversation pagination; endpoints and Web orchestration remain.
+// [Sync] 2026-10-28: load Deck cards and their Agents with one catalog read after explicit reconciliation.
 // [Input] Existing Deck/Agent CRUD APIs, PDF-led home, original create defaults, and pre-refactor maintenance editor.
 // [Output] Resilient Deck home/Work manager with Deck preview, create-first editing, and related Chat cleanup.
 // [Pos] Deck manager orchestration node in frontend/app/_dream/components.
+// [Sync] 2026-10-27: filter RN-excluded Dream presentation before rendering existing Deck panels.
 // [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance scope without restoring its superseded page modes.
 // [Sync] 2026-08-16: propagate form mutation failures so content-version state refreshes only after durable writes.
 // [Sync] 2026-08-17: keep published-clean home visibility separate from Settings / Work full inventory without duplicating APIs.
@@ -26,7 +28,7 @@ import {
 } from '../api/voiceApi';
 import { updateDeckAgentType, type DeckAgentType } from '../api/deckPluginApi';
 import { deleteChatThread, listChatThreads } from '../api/chatHistoryApi';
-import { DEFAULT_DECK_CREATE_VISUAL } from '../constants/deck';
+import { DEFAULT_DECK_CREATE_VISUAL,DECK_RELATED_THREADS_PAGE_SIZE } from '../constants/deck';
 import type { ActiveChatVoice } from '../lib/chat-schema';
 import {
   storyWorkspaceDreamRunPath,
@@ -34,6 +36,7 @@ import {
 } from '../hooks/story-workspace/useStoryWorkspaceDreamLaunch';
 import DeckEditorModal from './DeckEditorModal';
 import { DeckLaunchPanel, DeckPreviewPanel, DeckSettingsPanel } from './deck/DeckManagerPanels';
+import {isReactNativeHost} from '../platform/mobileHost';
 
 interface Props {
   onUpdate?: () => void;
@@ -89,7 +92,7 @@ export default function DeckManager({
         }
       }
       const decksWithVoices = await listDecksWithVoices();
-      setDecks(decksWithVoices);
+      setDecks(decksWithVoices.filter(deck => !isReactNativeHost() || deck.agent_type !== 'dream'));
       setError(null);
       setRefreshError(null);
 
@@ -267,7 +270,7 @@ export default function DeckManager({
   }
 
   const handleLoadRelatedThreads = useCallback((deckId: string, offset: number) => (
-    listChatThreads({ deckId, limit: 20, offset })
+    listChatThreads({ deckId, limit: DECK_RELATED_THREADS_PAGE_SIZE, offset })
   ), []);
 
   const handleDeleteRelatedThread = useCallback(async (threadId: string) => {
@@ -337,6 +340,7 @@ export default function DeckManager({
 
   const tryDeckFromPreview = async (deckId: string, voice: Voice, input?: string) => {
     const deck = decks.find((candidate) => candidate.id === deckId);
+    if (isReactNativeHost() && deck?.agent_type === 'dream') return;
     const goal = input?.trim();
     if (deck?.agent_type === 'dream' && goal) {
       setPreviewLaunchError(null);

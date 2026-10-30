@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-26: 同消息执行重试的明确绑定冲突通过原receipt校验恢复，保留原绑定、当前Factory尝试及稳定Gateway幂等键。 -->
 <!-- [Sync] 2026-10-11: round29 两条正常本机图片链路、展示稳定及历史恢复实际通过；unknown usage、原路由与技术故障验证边界单列。 -->
 <!-- [Sync] 2026-10-10: 同步独立Image选择和明确调用分工；原稿逐字保留，两条源码路径接通，真实验收尚未完成。 -->
 <!-- [Input] 已评审图片设计、当前Admin Images/目录/授权合同与IM源码。 -->
@@ -86,6 +87,16 @@ Service在原文本结束回调前补齐最终文字遗漏的图片，同一个t
 `ImageGenerationProvider.close`与发布共享锁，关闭后不再发布新文件，`consume_result`也不接受迟到的Tool完成回执；等待期间的晚回包被丢弃。原Service取消先关闭Host再保存partial，已匹配完成图片保留。发布完成但CLI尚未报告成功的文件仍在工作区，不伪造Tool完成或最终图片。图像请求不改变原disconnect继续执行、ThreadFactory、lease、resume、确认或取消语义。
 
 浏览器图片访问失败沿用原读取/重试反馈；消息保存失败沿用原保存错误。两者都不自动再发Images请求。
+
+## 同消息执行重试的绑定恢复
+
+发现：同一已保存用户消息使用稳定`dream-turn-*`键，Runtime每次执行尝试生成独立`turn_id`。iOS原Dream确认恢复在模型调用前进入`ImageGenerationProvider.bind_turn`，再次提交同一绑定键时收到`OPERATION_REQUEST_CONFLICT`。正常数据库原回执的actor、Thread、Run、message、AI/Image模型和空素材均与当前任务匹配，原绑定继续保留。
+
+选定恢复复用`AdminImageTurnData.bind`和`AdminDataClient.receipt`：仅确定的`OPERATION_REQUEST_CONFLICT`、HTTP409且`outcome_unknown=false`触发一次原回执读取。读取使用当前同Thread的`server-persistence`grant和原`image_receipt_key`；返回必须为同operation/request ID的已提交严格DTO。actor、Run、Thread、turn key、message、AI/Image模型与全部素材URI/摘要逐项匹配，原回执中的首次`turn_id`保留。字段差异、回执缺失或权限拒绝沿原错误反馈；未知写入继续只按原输入和原回执恢复。
+
+本接线读取原不可变绑定，Factory当前执行尝试、Gateway幂等键、图像选择、来源校验、单次执行事实及计费保持。更换turn key、覆盖历史回执、重写Factory turn ID和新增Admin接口退出候选；实现复用现有接口、严格DTO和授权范围。该修订覆盖同一已保存消息的执行重试，用户新发送继续沿原消息及键生成规则。图片Provider HTTP请求保持原单次调用，页面、工具审批和业务状态保持原流程。
+
+源码为[绑定恢复](../../../backend/services/admin_data/image_turn_data.py#L179)、[原Provider接线](../../../backend/services/admin_gateway/images.py#L158)及[原Factory调用](../../../backend/claude_agent/service.py#L2573)。隔离回归覆盖已提交结果、Run及业务字段差异、回执身份、其他明确错误和未知写入；Simulator同消息真实续接按[移动执行记录](../../exec/mobile-app-design-review-20261024.md#gateway-owner候选的同消息执行观察)独立验收。
 
 ## 源码与验证定位
 

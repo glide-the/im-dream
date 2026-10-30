@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: allow native HTTP injection; paths, DTOs, CAS fields, error class and Web defaults remain unchanged.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated Deck content-version endpoints and CAS error payloads.
@@ -78,10 +79,10 @@ export class DeckVersionApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, transport:typeof fetch=fetch): Promise<T> {
   const csrfToken = getBrowserCsrfToken();
   if (!csrfToken) throw new Error('Not authenticated');
-  const response = await fetch(apiUrl(path), {
+  const response = await transport(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {
@@ -102,13 +103,14 @@ function root(deckId: string): string {
   return `/api/decks/${encodeURIComponent(deckId)}`;
 }
 
-export function getDeckContentVersionState(deckId: string): Promise<DeckContentVersionState> {
-  return request(`${root(deckId)}/version-state`);
+export function getDeckContentVersionState(deckId: string, transport:typeof fetch=fetch): Promise<DeckContentVersionState> {
+  return request(`${root(deckId)}/version-state`,undefined,transport);
 }
 
 export function previewDeckContentVersion(
   deckId: string,
   state: Pick<DeckContentVersionState, 'draft_revision' | 'latest_version'>,
+  transport:typeof fetch=fetch,
 ): Promise<DeckContentVersionPreview> {
   return request(`${root(deckId)}/versions/preview`, {
     method: 'POST',
@@ -116,13 +118,14 @@ export function previewDeckContentVersion(
       expected_draft_revision: state.draft_revision,
       expected_base_version: state.latest_version,
     }),
-  });
+  },transport);
 }
 
 export function commitDeckContentVersion(
   deckId: string,
   state: Pick<DeckContentVersionState, 'draft_revision' | 'latest_version'>,
   description: string,
+  transport:typeof fetch=fetch,
 ): Promise<DeckContentVersionCommit> {
   return request(`${root(deckId)}/versions`, {
     method: 'POST',
@@ -131,9 +134,9 @@ export function commitDeckContentVersion(
       expected_base_version: state.latest_version,
       description: description.trim() || null,
     }),
-  });
+  },transport);
 }
 
-export function listDeckContentVersions(deckId: string): Promise<DeckContentVersionHistory> {
-  return request(`${root(deckId)}/versions`);
+export function listDeckContentVersions(deckId: string, transport:typeof fetch=fetch): Promise<DeckContentVersionHistory> {
+  return request(`${root(deckId)}/versions`,undefined,transport);
 }

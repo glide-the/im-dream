@@ -1,0 +1,15 @@
+<!-- [Input] Android system theme attributes. -->
+<!-- [Output] Edge-to-edge compatible application theme without an action bar. -->
+<!-- [Pos] Android host visual shell theme. -->
+<!-- [Sync] 2026-10-24: add the WebView host theme. -->
+
+<resources>
+    <style name="Theme.InkMemory" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FAFAF8</item>
+        <item name="android:statusBarColor">#FAFAF8</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
+

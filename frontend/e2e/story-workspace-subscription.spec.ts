@@ -1,39 +1,12 @@
-// [Input] Vite UI plus deterministic Product BFF context/plan fixtures.
+// [Sync] 2026-10-29: use the existing Next public route and normal-session fixture; remove legacy Vite-only entry assumptions.
+// [Input] Public Next subscription route plus deterministic Product BFF context/plan fixtures.
 // [Output] Desktop/mobile tab, focus, hierarchy, and overflow evidence.
 // [Pos] Focused component regression; the separate gateway-real suite verifies the unmocked Product API.
 
 import { expect, test, type Page, type Route } from '@playwright/test';
+import {installFixtures} from './fixtures/calendarHarness';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
-const VITE_CLIENT_WITHOUT_HMR = `
-const hotContext = {
-  data: {},
-  accept() {},
-  acceptExports() {},
-  decline() {},
-  dispose() {},
-  invalidate() {},
-  off() {},
-  on() {},
-  prune() {},
-  send() {},
-};
-export function createHotContext() { return hotContext; }
-export function updateStyle(id, css) {
-  let style = document.querySelector('style[data-vite-dev-id="' + id + '"]');
-  if (!style) {
-    style = document.createElement('style');
-    style.setAttribute('data-vite-dev-id', id);
-    document.head.appendChild(style);
-  }
-  style.textContent = css;
-}
-export function removeStyle(id) {
-  document.querySelector('style[data-vite-dev-id="' + id + '"]')?.remove();
-}
-export function injectQuery(url) { return url; }
-`;
-
 test.use({ channel: 'chromium' });
 
 async function fulfill(route: Route, body: unknown, status = 200) {
@@ -82,7 +55,7 @@ function plan(input: {
 }
 
 async function installProductMocks(page: Page) {
-  await page.route(`${WEB_BASE}/api/**`, async (route) => {
+  await page.route(`${WEB_BASE}/api/story-workspace/subscription/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/me') {
       await fulfill(route, { id: 7, email: 'subscription-e2e@example.test', display_name: 'Subscription E2E' });
@@ -185,23 +158,10 @@ async function preparePage(page: Page) {
       diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
-  await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'subscription-e2e-token');
-    localStorage.setItem('migration_completed', 'true');
-  });
+  await installFixtures(page,{authEntryLifecycle:true});
   await installProductMocks(page);
-  await page.route(`${WEB_BASE}/@vite/client`, async (route) => {
-    await route.fulfill({ status: 200, contentType: 'text/javascript', body: VITE_CLIENT_WITHOUT_HMR });
-  });
-  await page.route(`${WEB_BASE}/e2e/subscription-harness`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'text/html',
-      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><script type="module" src="/@vite/client"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><main id="root"></main><script type="module" src="/e2e/fixtures/storyWorkspaceSubscriptionHarness.tsx"></script></body></html>',
-    });
-  });
-  await page.goto(`${WEB_BASE}/e2e/subscription-harness`);
-  await expect(page).toHaveURL(/\/e2e\/subscription-harness$/);
+  await page.goto(`${WEB_BASE}/story-workspace/subscription`);
+  await expect(page).toHaveURL(/\/story-workspace\/subscription$/);
   await expect(page.getByRole('heading', { name: 'Free', level: 1 })).toBeVisible();
   return diagnostics;
 }

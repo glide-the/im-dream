@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Input] Session context comes from MCP tool arguments and a private turn-local broker.
 #         The runner verifies the live Editor session; Admin verifies actor, Thread,
 #         purpose, scope, Editor Session ownership and every state replacement.
@@ -337,6 +338,7 @@ def _load_target_state(
 def handle_editor_write_tool(
     tool_name: str,
     arguments: Optional[dict[str, Any]],
+    *, client: EditorBrokerClient | None = None,
 ) -> str:
     """Dispatch to the correct write handler and return a JSON string result.
 
@@ -349,7 +351,7 @@ def handle_editor_write_tool(
     args = arguments or {}
 
     try:
-        client = _editor_client()
+        client = client if client is not None else _editor_client()
     except Exception:  # noqa: BLE001
         return json.dumps({"ok": False, "error": "editor_context_unavailable"})
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: reuse identical rule/conversation presentation in native detail; original Web DOM and read lifecycle remain.
 // [Input] A scheduled-task id, optional creation snapshot, and authenticated scheduled-task APIs.
 // [Output] Read-only right detail sidebar with task information, owned conversations, schedule, retry, and exact Thread navigation.
 // [Pos] Chat-owned scheduled-task detail surface, mutually exclusive with file/subagent/task-session sidebars.
@@ -7,14 +8,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getScheduledHistory, getScheduledTask, type ScheduledTask, type ScheduledTrigger } from '../../api/scheduledTaskApi';
-import { parseFlexibleTimestamp } from '../../utils/timezone';
 import { IconClock, IconX } from './Icons';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import './ScheduledTaskDetailSidebar.css';
 
-function timestamp(trigger: ScheduledTrigger): number {
-  return parseFlexibleTimestamp(trigger.created_at)?.getTime() ?? 0;
-}
+import {scheduledTaskConversations,scheduledTaskRuleText} from './scheduledTaskDetailPresentation';
 
 export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, onOpenThread }: {
   taskId: string;
@@ -37,19 +35,10 @@ export default function ScheduledTaskDetailSidebar({ taskId, snapshot, onClose, 
     finally { setLoading(false); }
   }, [taskId]);
   useEffect(() => { void load(); }, [load]);
-  const conversations = useMemo(() => {
-    const rows = [...triggers].filter((trigger) => Boolean(trigger.target_thread_id)
-      && trigger.target_thread_id !== task?.source_thread_id).sort((left, right) => timestamp(right) - timestamp(left));
-    return [...new Map(rows.map((trigger) => [trigger.target_thread_id!, trigger])).values()];
-  }, [task?.source_thread_id, triggers]);
+  const conversations = useMemo(() => scheduledTaskConversations(task?.source_thread_id,triggers),[task?.source_thread_id,triggers]);
   const title = task?.title ?? snapshot?.title ?? t('chat.scheduledTask.detailTitle');
   const rule = task?.rule ?? snapshot?.rule;
-  const ruleText = rule?.kind === 'once'
-    ? `${rule.local_date} · ${rule.local_time} · ${rule.time_zone}`
-    : rule?.kind === 'daily' ? `${t('calendar.scheduledDaily')} · ${rule.local_time} · ${rule.time_zone}`
-      : rule?.kind === 'interval' ? `${t('calendar.scheduledIntervalSummary', { count: rule.interval_minutes })} · ${rule.time_zone}`
-        : rule?.kind === 'hourly' ? `${t('calendar.scheduledHourlySummary', { count: rule.interval_hours, minute: rule.minute })} · ${rule.time_zone}`
-          : rule?.kind === 'weekly' ? `${t('calendar.scheduledWeeklySummary', { days: rule.weekdays.map((day) => t(`calendar.scheduledWeekday.${day}`)).join('、'), time: rule.local_time })} · ${rule.time_zone}` : '—';
+  const ruleText = scheduledTaskRuleText(rule,t);
   const status = task?.status ?? snapshot?.status;
   const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString(i18n.language) : '—';
   return <aside className="scheduled-task-detail" aria-label={t('chat.scheduledTask.detailTitle')}>

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Input] One Admin-persisted Registry115 dispatch plus current OAuth actor and Registry133 DTO clients.
 # [Output] Exact Workflow/Deck/persistence owner composition and same-Thread Agent Runtime scheduling.
 # [Pos] Dream guidance execution seam; Admin owns authorization, delegation, ORM and persistence.
@@ -164,7 +165,8 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
         metadata: dict,
     ) -> bool:
         try:
-            from agent_factory import claude_agent_thread_factory
+            from claude_agent.runtime_owner import get_thread_factory
+            claude_agent_thread_factory = get_thread_factory()
             from claude_agent.service import ClaudeAgentRunRequest
 
             context = owner.context_for(workflow_run_id=workflow_run_id)

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Input] Authenticated Admin actor/client, launch command and request-scoped Runtime port.
 # [Output] Admin-owned source/Preflight/Run/dispatch persistence plus Dream-owned Agent turn execution.
 # [Pos] Dream launch composition; contains no PostgreSQL client, SQL, ORM, DDL or database fallback.
@@ -266,7 +267,8 @@ class DreamAgentTurnDispatcher:
     def _selected_factory(self) -> Any:
         if self._factory is not None:
             return self._factory
-        from agent_factory import claude_agent_thread_factory
+        from claude_agent.runtime_owner import get_thread_factory
+        claude_agent_thread_factory = get_thread_factory()
         return claude_agent_thread_factory
 
     async def _consume(self, request: Any, values: dict[str, Any]) -> None:

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: follow shared presentation metadata; original Web layout and API checks remain.
 // [Input] Simplified subscription page, styles, Product API, and subscription hook source seams.
 // [Output] Focused hierarchy, real-data, accessibility, privacy, and responsive regressions.
 // [Pos] Source-level UI contract for the quiet Story Workspace subscription route.
@@ -7,14 +8,15 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
 const PAGE = readFileSync(new URL('../StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
+const PRESENTATION = readFileSync(new URL('../subscriptionPresentation.ts', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../StoryWorkspaceSubscriptionPage.css', import.meta.url), 'utf8');
 const API = readFileSync(new URL('../../../api/productApi.ts', import.meta.url), 'utf8');
 const HOOK = readFileSync(new URL('../../../hooks/story-workspace/useStoryWorkspaceSubscription.ts', import.meta.url), 'utf8');
 
 test('page reduces the experience to overview and three single-panel tabs', () => {
-  expect(PAGE).toContain("{ id: 'info', label: '订阅信息' }");
-  expect(PAGE).toContain("{ id: 'allowance', label: '我的额度' }");
-  expect(PAGE).toContain("{ id: 'plans', label: '可选套餐' }");
+  expect(PRESENTATION).toContain("{ id: 'info', label: '订阅信息' }");
+  expect(PRESENTATION).toContain("{ id: 'allowance', label: '我的额度' }");
+  expect(PRESENTATION).toContain("{ id: 'plans', label: '可选套餐' }");
   expect(PAGE).toContain("useState<SubscriptionTab>('info')");
   expect(PAGE).toContain("activeTab === 'info'");
   expect(PAGE).toContain("activeTab === 'allowance'");
@@ -79,7 +81,7 @@ test('loading, empty, and recoverable service states stay explicit but plain-lan
   expect(PAGE).toContain('当前没有有效订阅');
   expect(PAGE).toContain('暂时没有可选套餐');
   for (const status of [401, 402, 403, 409, 429, 502, 503]) {
-    expect(PAGE).toContain(`case ${status}:`);
+    expect(PRESENTATION).toContain(`case ${status}:`);
   }
   expect(PAGE).toContain('role="alert"');
   expect(PAGE).not.toContain('请求编号');
