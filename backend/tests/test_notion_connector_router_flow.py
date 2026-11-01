@@ -22,6 +22,7 @@
 # [Sync] 2026-09-01: expose schema v5's archive-backed diary Skill and its
 #                    canonical Read+Bash tool boundary through read-only routes.
 # [Sync] 2026-09-16: route persistence through the Admin DTO/ORM service contract.
+# [Sync] 2026-11-01: an installed CLI's execution failure returns a safe retry response and preserves connector state.
 
 from __future__ import annotations
 
@@ -754,6 +755,29 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertEqual(response.json()["detail"], "Notion connector not found.")
         self.assertNotIn(connector_id, response.text)
+
+    def test_installed_cli_execution_failure_does_not_request_installation(self):
+        created = self.client.post(
+            "/api/connectors", json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        ).json()["connector"]
+        connector_id = created["id"]
+        with patch.object(notion_auth, "start_login", new=AsyncMock(
+            side_effect=notion_auth.NotionCLIUnavailableError("private-worker-diagnostic")
+        )) as command:
+            response = self.client.post(
+                f"/api/connectors/{connector_id}/auth/login",
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("retry", response.json()["detail"].lower())
+        self.assertNotIn("install", response.text.lower())
+        self.assertNotIn("private-worker-diagnostic", response.text)
+        self.assertEqual(command.await_count, 1)
+        current = self.client.get(
+            f"/api/connectors/{connector_id}", headers={"Authorization": "Bearer test-token"}
+        ).json()["connector"]
+        self.assertEqual(current["auth_status"], created["auth_status"])
 
     def test_permission_error_response_redacts_raw_cli_text(self):
         create_response = self.client.post(

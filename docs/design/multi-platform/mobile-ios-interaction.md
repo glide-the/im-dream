@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 端侧网页链接统一系统默认浏览器，修复Notion默认Linking接收者及同步失败恢复。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-31: 公网构建11保留原Web回调及登录/失败恢复图；Google本机采用与公网前提分列。 -->
 <!-- [Sync] 2026-10-31: 普通Simulator采用精确账号回调，系统取消/密码关闭/真实Chat通过；完整Google、Notion授权与真机单列。 -->
@@ -640,3 +641,82 @@ stateDiagram-v2
 
 
 公网构建12配置补充：原`AdminProductConfig`使用`INK_ADMIN_PRODUCT_API_BASE_URL`访问公网Admin，原Product Origin保持所属Client校验。登录弹窗、上述业务图和App运行库实例保持；包内原用量200，session/模型目录的实际503沿原重试反馈。端点清单和当前制品归[发布设计](../../deploy/mobile-app-release.md#公网端侧包的既有http配置清单)，实际密码登录资格继续采用构建11回执，完整12业务另验。
+
+
+## 端侧网页链接与Notion授权恢复（2026-11-01）
+
+### 背景与问题
+
+用户在构建21点击Notion授权链接后闪退。手机崩溃记录进入React Native致命JavaScript异常处理。原Notion组件默认参数提取`Linking.openURL`方法，原方法内部使用`this._validateURL`；独立函数调用丢失接收者。关于页与回顾页存在相同默认值。原Notion页面在调用返回后注册`.catch`，同步异常越过该处理。
+
+### 目标与边界
+
+端侧网页链接统一交给本机默认浏览器。Notion验证码链接、资源说明、聊天正文、工具结果、附件、工作区、Writing、回顾与关于使用同一平台动作。原页面结构、桌面Web、用户输入、当前Thread、授权会话、轮询、凭证目录及资源权限保持原合同。账号登录与MCP授权的协议、回调及权限继续由原模块管理。
+
+比较三个局部闭包与统一平台函数后，选用`frontend/src/platform/externalLinks.native.ts::openExternalLink`；三处相同默认值与App/Writing的现有调用提供复用依据。该函数只有URL解析与系统打开职责，新增原生桥接、浏览器页面、依赖、账号配置、确认步骤及自动重试增加数均为0。
+
+### 概念与规则
+
+- `openExternalLink(url, origin?)`在async函数内保留`Linking.openURL`的方法接收者，原相对地址通过当前origin解析；错误统一返回拒绝的Promise。
+- HTTP和HTTPS链接由系统网页处理入口打开，浏览器选择来自设备设置；应用保持当前页面及业务状态。用户返回后继续原AppState/页面可见性读取。
+- Notion、关于和回顾沿原错误位置显示链接失败反馈。Notion和关于同时捕获调用方同步抛出及异步拒绝；再次点击只重试链接打开，原授权会话保持。
+- Chat、Plan、文件、工作区及Writing沿原错误反馈处理失败。应用内的页面切换、文件预览及工作区定位由原组件继续所有。
+- 每次点击发起一次系统打开。打开失败后由用户重试，自动重试与新增业务写入均为0；原认证提交禁用规则、轮询及资源保存防重复规则保持。
+- [Apple默认浏览器合同](https://developer.apple.com/documentation/xcode/preparing-your-app-to-be-the-default-browser)定义系统HTTP(S)网页处理入口；验证记录浏览器实际前台与App返回状态。查阅日期：2026-11-01。
+
+正常时序：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Page as ConnectorNotionDetailPage.native.tsx
+  participant Opener as openExternalLink
+  participant RN as Linking.openURL
+  participant OS as 系统URL处理
+  participant Browser as 本机默认浏览器
+  participant Hook as useNotionConnector
+  User->>Page: 点击打开验证页
+  Page->>Opener: 原verificationUrl
+  Opener->>RN: 保留方法接收者的调用
+  RN->>OS: 原系统URL打开请求
+  OS->>Browser: 打开网页
+  Browser-->>User: 原授权网页
+  User->>Page: 返回应用
+  Page->>Hook: 原页面可见性恢复
+  Hook-->>Page: 原连接状态与轮询结果
+```
+
+异常与恢复时序：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Page as 原Notion或关于页面
+  participant Opener as openExternalLink
+  participant RN as Linking.openURL
+  User->>Page: 点击网页链接
+  Page->>Opener: await原URL打开
+  Opener->>RN: 原系统打开请求
+  alt URL解析或同步调用失败
+    Opener-->>Page: Promise拒绝
+  else 系统打开被拒绝
+    RN-->>Page: 经原Promise返回失败
+  end
+  Page-->>User: 原位置显示链接暂时无法打开
+  Note over Page: 原授权会话、页面与当前内容保持
+  User->>Page: 再次点击同一链接
+  Page->>Opener: 原URL重试一次
+```
+
+页面与系统转换：
+
+```mermaid
+stateDiagram-v2
+  [*] --> AppVisible
+  AppVisible --> BrowserVisible: 点击网页链接且系统打开成功
+  AppVisible --> LinkFailed: 同步异常或系统打开失败
+  LinkFailed --> BrowserVisible: 用户再次点击且打开成功
+  BrowserVisible --> AppVisible: 用户返回应用
+```
+
+当前实现为局部程序修订；模拟器复现、默认浏览器实际打开与返回、同步失败恢复及七项Web回归已通过，构建22已在原iPhone安装启动。实际命令及真实授权资格分别归[本轮执行记录](../../exec/ios-notion-links-20261101.md)。技术fixture的授权页使用明确合成地址，真实Notion授权及内容读取继续沿原正常账户入口独立验收。

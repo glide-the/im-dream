@@ -11,6 +11,7 @@
 # [Sync] 2026-08-28: expose versioned snapshot-sync strategy and run scheduled synchronization outside Chat turns.
 # [Sync] 2026-08-29: expose actor-scoped capability, Skill body, and stable-ID Skill file reads without adding MCP execution or filesystem path input.
 # [Sync] 2026-08-30: expose ntn installation-required state before auth and return an actionable missing-CLI response.
+# [Sync] 2026-11-01: keep command execution failures distinct from the catalog's file installation check.
 # [Sync] 2026-09-16: bind user routes and scheduled sync to separate Admin DTO authorities.
 
 """Notion resource connector HTTP routes."""
@@ -191,7 +192,7 @@ def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, NotionCLIUnavailableError):
         return HTTPException(
             status_code=503,
-            detail="Notion CLI is not installed. Install ntn on the Dream host and retry.",
+            detail="Notion command could not run. Please retry.",
         )
     if isinstance(exc, NotionSnapshotNotReadyError):
         return HTTPException(

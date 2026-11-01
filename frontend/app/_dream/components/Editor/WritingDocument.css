@@ -1,3 +1,4 @@
+/* [Sync] 2026-11-01: the RN header owns navigation and safe areas; the DOM leaf owns editor and chooser inner scrolling. */
 /* [Input] Editor-only document marker and the existing Writing canvas CSS. */
 /* [Output] Fill the RN-owned content viewport without a second application navigation bar. */
 /* [Pos] Scoped DOM editor geometry; ordinary Web selectors retain their values. */

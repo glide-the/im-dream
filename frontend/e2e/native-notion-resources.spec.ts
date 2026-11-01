@@ -1,6 +1,7 @@
 // [Input] Production native Notion controls, shared API/state and production-shaped intercepted DTOs.
 // [Output] Native overview/Skill/file/resource/source journeys and server-confirmed selection recovery.
 // [Pos] Provider-free technical browser qualification; Project/Episode/Run/Hook and real user/provider writes are outside scope.
+// [Sync] 2026-11-01: bundled CLI absence and installed-command failure retain distinct feedback with read-only recovery.
 import {expect,test,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild} from 'vite';
 import {fileURLToPath} from 'node:url';
@@ -30,19 +31,20 @@ test.beforeAll(async()=>{
  await server.listen();const address=server.httpServer?.address();if(!address||typeof address==='string')throw Error('NATIVE_NOTION_LISTENER');base=`http://127.0.0.1:${address.port}/native-notion`;
 });
 test.afterAll(async()=>{await server?.close();});
-test.beforeEach(async({page})=>{const messages:string[]=[];errors.set(page,messages);page.on('pageerror',error=>messages.push(error.message));page.on('console',message=>{if(message.type()==='error'&&!/409 \(Conflict\)/.test(message.text()))messages.push(message.text());});await page.setViewportSize({width:390,height:844});});
+test.beforeEach(async({page})=>{const messages:string[]=[];errors.set(page,messages);page.on('pageerror',error=>messages.push(error.message));page.on('console',message=>{if(message.type()==='error'&&!/(409 \(Conflict\)|503 \(Service Unavailable\))/.test(message.text()))messages.push(message.text());});await page.setViewportSize({width:390,height:844});});
 test.afterEach(async({page})=>{expect(errors.get(page)).toEqual([]);});
 const CSRF='n'.repeat(43),rule={enabled:true,interval_minutes:15,revision:1};
 const descriptor={id:'file-search',relative_path:'references/search.md',media_type:'text/markdown',size_bytes:128};
-async function fixtures(page:Page,{busy=false}={}){
- let selected=['db-old'],removed=false,saveBusy=busy;const writes:{path:string;method:string;body:any;headers:Record<string,string>}[]=[],reads:string[]=[],unexpected:string[]=[];
+async function fixtures(page:Page,{busy=false,missing=false,authFailure=false}={}){
+ let selected=['db-old'],removed=false,saveBusy=busy,cliMissing=missing;const writes:{path:string;method:string;body:any;headers:Record<string,string>}[]=[],reads:string[]=[],unexpected:string[]=[];
  const connector=()=>({id:'notion-native',name:'Notion Resource Connector',platform:'notion',auth_status:'authenticated',created_at:'2026-09-01T00:00:00Z',updated_at:'2026-10-29T00:00:00Z',last_synced_at:'2026-10-28T00:00:00Z',sources:selected.map(id=>({id:`source-${id}`,external_id:id,resource_type:'notion_database',title:id==='db-old'?'原有成功索引':'新增范围',sync_status:'synced',page_count:2,updated_at:'2026-10-28T00:00:00Z'})),sync_policy:{schema_version:1,default:rule,desired:rule,effective:rule,status:'applied',schedule_due:false,allowed_interval_minutes:[15,60]}});
- const skill={id:'native-skill',title:'Notion 工作空间助手',description:'原读取能力',source:'builtin',availability:'available'};
+ const skill={id:'native-skill',title:'Notion 工作空间助手',description:'原读取能力',source:'builtin',availability:missing?'requires_installation':'available'};
  await page.route('**/auth/session',route=>route.fulfill({json:{user:{id:'20261029',email:'native-notion@example.invalid',display_name:'Fixture reader',avatar_url:null,role:'user',created_at:null},csrf_token:CSRF}}));
  await page.route('**/api/**',async route=>{const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();if(!path.startsWith('/api/'))return route.continue();let body:any=null;try{body=request.postDataJSON();}catch{}
   if(method==='GET')reads.push(path);else writes.push({path,method,body,headers:request.headers()});
+  if(path==='/api/connectors/notion-native/auth/login'&&authFailure)return route.fulfill({status:503,json:{detail:'Notion command could not run. Please retry.'}});
   if(path==='/api/connectors'&&method==='GET')return route.fulfill({json:{connectors:removed?[]:[connector()]}});
-  if(path==='/api/connectors/notion/capabilities')return route.fulfill({json:{catalog:{schema_version:5,package_revision:'native-package-1',cli_installation:{status:'installed',required_version:'0.15.1',install_command:'npm install -g ntn@0.15.1'},mcp_inventory:{status:'not_integrated',revision:null,read_status:'not_integrated',write_status:'not_integrated'},skills:[skill],operations:[{id:'read-hook',title:'按需读取页面正文',description:'原按需读取',kind:'read',source:'runtime_hook',entrypoint:'apply_notion_page_read_redirect',availability:'available'},{id:'workspace-index',title:'挂载工作区轻量索引',description:'原轻量索引',kind:'write',source:'workspace_materializer',entrypoint:'materialize_workspace_snapshot',availability:'available'}]}}});
+  if(path==='/api/connectors/notion/capabilities')return route.fulfill({json:{catalog:{schema_version:5,package_revision:'native-package-1',cli_installation:{status:cliMissing?'missing':'installed',required_version:'0.15.1',install_command:'npm install -g ntn@0.15.1'},mcp_inventory:{status:'not_integrated',revision:null,read_status:'not_integrated',write_status:'not_integrated'},skills:[skill],operations:[{id:'read-hook',title:'按需读取页面正文',description:'原按需读取',kind:'read',source:'runtime_hook',entrypoint:'apply_notion_page_read_redirect',availability:'available'},{id:'workspace-index',title:'挂载工作区轻量索引',description:'原轻量索引',kind:'write',source:'workspace_materializer',entrypoint:'materialize_workspace_snapshot',availability:'available'}]}}});
   if(path==='/api/connectors/notion/skills/native-skill')return route.fulfill({json:{package_revision:'native-package-1',skill:{...skill,tools:['Read'],body:'# 原 Skill\n\n不读取凭证。'},files:[descriptor]}});
   if(path==='/api/connectors/notion/skills/native-skill/files/file-search'){expect(url.searchParams.get('package_revision')).toBe('native-package-1');return route.fulfill({json:{package_revision:'native-package-1',file:{...descriptor,content:'# 原参考\n\n只读取已挂载索引。'}}});}
   if(path==='/api/connectors/notion-native/databases')return route.fulfill({json:{databases:Array.from({length:11},(_,index)=>({id:index===0?'db-old':`db-${index}`,title:index===0?'原有成功索引':`数据库 ${index}`,selected:index===0,page_count:2}))}});
@@ -52,7 +54,7 @@ async function fixtures(page:Page,{busy=false}={}){
   if(path==='/api/connectors/notion-native'&&method==='DELETE'){removed=true;return route.fulfill({json:{ok:true}});}
   unexpected.push(`${method} ${path}`);return route.fulfill({status:501,json:{detail:'unexpected fixture request'}});
  });
- return {writes,reads,unexpected,finishBusy:()=>{saveBusy=false;}};
+ return {writes,reads,unexpected,restoreCli:()=>{cliMissing=false;},finishBusy:()=>{saveBusy=false;}};
 }
 async function open(page:Page){await page.goto(base);await expect(page.getByRole('heading',{name:'Notion CLI',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Notion 工作空间助手',exact:true})).toBeVisible();}
 
@@ -71,4 +73,25 @@ test('native resource saved-scope recovery retains selection metadata and never 
  expect(f.writes).toHaveLength(1);expect(f.writes[0].headers['x-ink-csrf']).toBe(CSRF);expect(f.writes[0].headers.authorization).toBeUndefined();expect(f.writes[0].body.selected_databases).toEqual(expect.arrayContaining([expect.objectContaining({database_id:'db-1',title:'数据库 1',page_count:2})]));
  await expect(page.getByRole('checkbox',{name:'数据库 1',exact:true})).toBeChecked();await expect(page.getByRole('button',{name:'保存并首次同步',exact:true})).toBeDisabled();await page.clock.runFor(60001);expect(f.writes).toHaveLength(1);await expect(page.getByRole('button',{name:'保存并首次同步',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'← Notion',exact:true}).click();await page.getByRole('button',{name:'管理已挂载来源',exact:true}).click();await expect(page.getByText('新增范围',{exact:true})).toBeVisible();f.finishBusy();await page.getByRole('button',{name:'立即同步',exact:true}).click();await expect.poll(()=>f.writes.filter(call=>call.path.endsWith('/sync')).length).toBe(1);expect(f.unexpected).toEqual([]);
+});
+
+test('iOS bundled CLI missing state re-reads without installation instructions or business writes',async({page})=>{
+ const f=await fixtures(page,{missing:true});await open(page);
+ await expect(page.getByRole('button',{name:'暂不可用',exact:true})).toBeDisabled();
+ await expect(page.getByText('应用内的 Notion 组件未就绪。请重新读取；问题持续时请更新应用。',{exact:true})).toBeVisible();
+ await expect(page.getByText(/npm install|先安装 ntn|需安装 ntn/)).toHaveCount(0);
+ await page.getByRole('button',{name:'重新读取',exact:true}).dblclick();
+ expect(f.writes).toEqual([]);
+ f.restoreCli();await page.getByRole('button',{name:'重新读取',exact:true}).click();
+ await expect(page.getByRole('button',{name:'重新连接 Notion',exact:true})).toBeEnabled();
+ expect(f.writes).toEqual([]);expect(f.unexpected).toEqual([]);
+});
+test('installed CLI execution failure keeps reconnect available and does not repeat authorization',async({page})=>{
+ const f=await fixtures(page,{authFailure:true});await open(page);
+ await page.getByRole('button',{name:'重新连接 Notion',exact:true}).click();
+ await expect(page.getByRole('alert')).toHaveText('Notion command could not run. Please retry.');
+ await expect(page.getByRole('button',{name:'重新连接 Notion',exact:true})).toBeEnabled();
+ await expect(page.getByText(/npm install|先安装 ntn|需安装 ntn/)).toHaveCount(0);
+ expect(f.writes.filter(call=>call.path.endsWith('/auth/login'))).toHaveLength(1);
+ expect(f.unexpected).toEqual([]);
 });

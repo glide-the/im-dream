@@ -1,3 +1,7 @@
+// [Input] Original state options and active Writing surface.
+// [Output] Existing cube with mobile sizing, touch scroll and cancellable selection feedback.
+// [Pos] StateChooser visual and selection leaf.
+// [Sync] 2026-11-01: preserve desktop rotation; reserve touch for vertical scrolling and clear pending callbacks on hide.
 import React, { useState, useRef, useEffect } from 'react';
 
 interface State {
@@ -146,16 +150,50 @@ const FACE_ORIENTATIONS: Record<string, Quaternion> = {
 
 interface StateCubeProps {
   onStateSelect?: (stateId: string) => void;
+  active?: boolean;
+  mobile?: boolean;
   stateConfig: { states: Record<string, { name: string; prompt: string }> };
 }
 
-export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
+export function StateCube({ onStateSelect, stateConfig, active = true, mobile = false }: StateCubeProps) {
   const [rotation, setRotation] = useState(() => FACE_ORIENTATIONS.front);
   const [isDragging, setIsDragging] = useState(false);
   const [isSnapping, setIsSnapping] = useState(false);
   const [clickedState, setClickedState] = useState<string | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, rotation: Quaternion.identity() });
   const snapAnimationRef = useRef<number | null>(null);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({active, onStateSelect});
+  latest.current = {active, onStateSelect};
+  const [size, setSize] = useState(300);
+  const touchStart = useRef<{x: number; y: number} | null>(null);
+  const touchMoved = useRef(false);
+  useEffect(() => {
+    if (!mobile || !rootRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      // Retain the original 1200px perspective while fitting the front face.
+      if (width > 0) setSize(Math.min(300, width * 1200 / (1200 + width / 2)));
+    });
+    observer.observe(rootRef.current);
+    return () => observer.disconnect();
+  }, [mobile]);
+  useEffect(() => {
+    if (!active) {
+      if (selectionTimer.current !== null) clearTimeout(selectionTimer.current);
+      selectionTimer.current = null;
+      setClickedState(null);
+      setIsDragging(false);
+    }
+  }, [active]);
+  useEffect(() => () => {
+    if (selectionTimer.current !== null) clearTimeout(selectionTimer.current);
+    if (snapAnimationRef.current !== null) cancelAnimationFrame(snapAnimationRef.current);
+  }, []);
+  const dimension = mobile ? `${size}px` : '300px';
+  const depth = mobile ? `${size / 2}px` : '150px';
 
   // @@@ Get states from config (only first 3 for middle row)
   const configStates = Object.entries(stateConfig.states).slice(0, 3).map(([id, data]) => ({
@@ -256,6 +294,7 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
   ];
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (!latest.current.active) return;
     setIsDragging(true);
     dragStartRef.current = {
       x: e.clientX,
@@ -479,8 +518,8 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
       <div
         style={{
           position: 'absolute',
-          width: '300px',
-          height: '300px',
+          width: dimension,
+          height: dimension,
           transform,
           backfaceVisibility: 'hidden',
           background: face.unlocked
@@ -492,8 +531,8 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
           padding: '10px',
           boxSizing: 'border-box',
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gridTemplateRows: 'repeat(3, 1fr)',
+          gridTemplateColumns: mobile ? 'repeat(3, minmax(0, 1fr))' : 'repeat(3, 1fr)',
+          gridTemplateRows: mobile ? 'minmax(0, 1fr) auto minmax(0, 1fr)' : 'repeat(3, 1fr)',
           gap: '8px'
         }}
       >
@@ -502,11 +541,16 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
           return (
             <div
               key={state.id}
+              role={face.unlocked && !state.isEmpty ? 'button' : undefined}
+              tabIndex={face.unlocked && !state.isEmpty ? 0 : undefined}
+              aria-label={face.unlocked && !state.isEmpty ? state.cn : undefined}
+              onKeyDown={event => {if (event.key === 'Enter' || event.key === ' ') {event.preventDefault(); touchMoved.current = false; event.currentTarget.click();}}}
               onClick={() => {
-                if (!state.locked && !state.isEmpty && onStateSelect) {
+                if (latest.current.active && !touchMoved.current && !state.locked && !state.isEmpty && latest.current.onStateSelect && selectionTimer.current === null) {
                   setClickedState(state.id);
-                  setTimeout(() => {
-                    onStateSelect(state.id);
+                  selectionTimer.current = setTimeout(() => {
+                    selectionTimer.current = null;
+                    if (latest.current.active) latest.current.onStateSelect?.(state.id);
                     setClickedState(null);
                   }, 200);
                 }
@@ -519,6 +563,9 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
                     : 'var(--color-bg-surface)',
                 borderRadius: '4px',
                 padding: '8px',
+                minHeight: mobile && !state.isEmpty ? 44 : undefined,
+                minWidth: 0,
+                overflowWrap: 'anywhere',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -548,7 +595,7 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
               {!face.unlocked || state.isEmpty ? null : (
                 <>
                   {getStateIcon(state.id)}
-                  <div style={{ marginTop: '4px', fontWeight: 500, color: 'var(--color-text-body)' }}>
+                  <div style={{ marginTop: '4px', fontWeight: 500, color: 'var(--color-text-body)', maxWidth: '100%' }}>
                     {state.cn}
                   </div>
                 </>
@@ -584,8 +631,13 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
   };
 
   return (
-    <div
+    <div ref={rootRef} className={mobile ? 'state-cube state-cube--mobile' : 'state-cube'}
+      onPointerDownCapture={event => {touchMoved.current = false; touchStart.current = event.pointerType === 'touch' ? {x: event.clientX, y: event.clientY} : null;}}
+      onPointerMoveCapture={event => {const start = touchStart.current; if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) touchMoved.current = true;}}
+      onPointerCancelCapture={() => {touchMoved.current = true;}}
       style={{
+        width: mobile ? '100%' : undefined,
+        touchAction: mobile ? 'pan-y' : undefined,
         perspective: '1200px',
         cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: 'none',
@@ -598,8 +650,8 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
     >
       <div
         style={{
-          width: '300px',
-          height: '300px',
+          width: dimension,
+          height: dimension,
           position: 'relative',
           transformStyle: 'preserve-3d',
           transform: rotation.toRotationMatrix(),
@@ -607,22 +659,22 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
         }}
       >
         {/* Front face */}
-        {renderFace(faces[0], 'translateZ(150px)')}
+        {renderFace(faces[0], `translateZ(${depth})`)}
 
         {/* Back face */}
-        {renderFace(faces[1], 'translateZ(-150px) rotateY(180deg)')}
+        {renderFace(faces[1], `translateZ(-${depth}) rotateY(180deg)`)}
 
         {/* Left face */}
-        {renderFace(faces[2], 'rotateY(-90deg) translateZ(150px)')}
+        {renderFace(faces[2], `rotateY(-90deg) translateZ(${depth})`)}
 
         {/* Right face */}
-        {renderFace(faces[3], 'rotateY(90deg) translateZ(150px)')}
+        {renderFace(faces[3], `rotateY(90deg) translateZ(${depth})`)}
 
         {/* Top face */}
-        {renderFace(faces[4], 'rotateX(90deg) translateZ(150px)')}
+        {renderFace(faces[4], `rotateX(90deg) translateZ(${depth})`)}
 
         {/* Bottom face */}
-        {renderFace(faces[5], 'rotateX(-90deg) translateZ(150px)')}
+        {renderFace(faces[5], `rotateX(-90deg) translateZ(${depth})`)}
       </div>
     </div>
   );

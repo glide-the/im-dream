@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-01: 写作排版、心情滚动与页头入口的最小实现归writing-mobile-layout；设备与浏览器资格分项。 -->
+<!-- [Sync] 2026-11-01: MoreNavigationContent统一Web窄屏和Native卡片布局及用途指引，平台宿主和原业务保持。 -->
+<!-- [Sync] 2026-11-01: 补iPhone Notion安装提示的触发阶段、随包恢复、执行错误反馈与本轮验收入口。 -->
 <!-- [Sync] 2026-10-31: 当前构建8实际Stop恢复Send及冷12/10通过，真机已升级且ntn暂存通过；原失败与账号/CLI缺口保持分列。 -->
 <!-- [Sync] 2026-10-31: 原Stop获准后结束旧读取代次并独立恢复，补正常/异常/状态图及迟到读取验收，构建7现场保留。 -->
 <!-- [Sync] 2026-10-31: 当前Simulator及设备候选更新构建7；保留构建6真机ntn启动拒绝，原Python执行与真实Notion业务分项记录。 -->
@@ -2376,6 +2379,93 @@ stateDiagram-v2
 
 设计评审：**通过**。组件技术检查、普通App安装与完整iOS业务验收分别登记于[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30端侧更多图标布局)。
 
+### Web窄屏与端侧共享更多卡片（2026-11-01）
+
+**背景与问题。** 当前Web窄屏由`StoryWorkspaceSidebar`在原`Modal`内绘制五行列表，Native由`MoreNavigationPage.native`绘制写作横卡、时间线/回顾双卡和偏好行。前阶段仅共用`moreNavigation.ts`的名称、顺序及路径，图标卡片和用途指引存在呈现差异。
+
+**目标与边界。** Web窄屏采用当前Native的分区、卡片排列、用途文案和当前外观，桌面Web保留原导航。五项入口、原路径、主题切换、账户退出、Chat草稿、目标页实例和服务端任务继续由原模块持有。本次调整范围为共享呈现、两处调用方及原Web窄屏样式；新增依赖、业务接口、权限规则和运行库改动为0。
+
+**判断与选择。** 现状依据为[原Web菜单入口](../../../frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx)、[Native菜单宿主](../../../frontend/app/_dream/components/story-workspace/layout/MoreNavigationPage.native.tsx)及[入口定义](../../../frontend/app/_dream/components/story-workspace/layout/moreNavigation.ts)。任务聚焦两个窄屏入口的同一呈现。两份独立卡片实现需要分别维护间距与文案；提取已有RN布局可利用当前Next的RNW别名，统一卡片结构与样式。选定后一方案，保留原Modal与MoreNavigator的生命周期。
+
+**概念与规则。** [MoreNavigationContent](../../../frontend/app/_dream/components/story-workspace/layout/MoreNavigationContent.tsx)负责两组卡片、用途、当前外观和主题失败反馈。调用方传入平台字体组件、SVG图标节点、已有配色及原操作回调，三个参数分别对应字体选择、SVG节点类型和配色读取差异。Web通过原CSS token提供颜色，Native沿原`InkLabel`、`useInkColors`及`useNativeThemeMode`。主题模式与实际外观由原`theme.ts`或`theme.native.ts`提供；共享组件只持有本次主题写入的失败反馈，下一次操作先清除反馈。Web原账户区域继续位于卡片内容之后。
+
+Web标题、关闭按钮、焦点约束、背景滚动锁、关闭恢复焦点及正文纵滚由原`Modal`持有，CSS仅调整原窄屏作用域。Native页头、`ScrollView`、安全区及目标页实例继续原宿主管理。宽度达到原桌面断点后关闭窄屏菜单，桌面disclosure、原主题和设置入口保持。页面骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#更多导航与写作时间线页面骨架)。
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Host as StoryWorkspaceSidebar / MoreNavigationPage.native
+  participant Cards as MoreNavigationContent
+  participant Nav as handleNavigate / MoreNavigator.navigate
+  participant Theme as theme.ts / theme.native.ts
+  User->>Host: 点击更多
+  Host->>Cards: 原五项、当前外观、配色和原回调
+  Cards-->>User: 写作横卡、双卡、偏好及用途
+  alt 选择写作、时间线、回顾或设置
+    User->>Cards: 点按整张卡片
+    Cards->>Nav: onNavigate(destination)
+    Nav-->>User: 原目标页，原草稿和实例保留
+  else 切换主题
+    User->>Cards: 点按主题
+    Cards->>Theme: 原onToggleTheme / toggleTheme
+    Theme-->>Host: 原订阅返回当前模式与实际外观
+    Host->>Cards: 更新配色与当前外观
+    Cards-->>User: 留在更多页
+  end
+```
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Cards as MoreNavigationContent
+  participant Theme as theme.ts / theme.native.ts
+  participant Host as Modal / MoreNavigationPage.native
+  User->>Cards: 点按主题
+  Cards->>Theme: 原主题持久化
+  Theme-->>Cards: 保存异常
+  Cards-->>User: 原localSaveFailed文案，原外观保持
+  User->>Cards: 再次点按主题
+  Cards->>Theme: 清除反馈并重试原动作
+  Theme-->>Host: 原订阅更新外观
+  Host->>Cards: 更新当前外观与配色
+  Cards-->>User: 当前外观更新，失败反馈清除
+  opt 关闭更多
+    User->>Host: 原关闭操作；Web支持Escape
+    Host-->>User: 原当前页面与未发送稿；Web恢复原按钮焦点
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 更多可见
+  更多可见 --> 更多可见: 主题保存成功并更新外观
+  更多可见 --> 主题失败反馈: 原主题写入异常
+  主题失败反馈 --> 更多可见: 再次操作成功
+  主题失败反馈 --> 主题失败反馈: 再次操作失败
+  更多可见 --> 原目标页: 原四项页面导航
+  主题失败反馈 --> 原目标页: 原四项页面导航
+  更多可见 --> 原当前页: 原关闭或Web历史与视口变化
+  主题失败反馈 --> 原当前页: 原关闭或Web历史与视口变化
+```
+
+图示描述可见页面及操作反馈；实例释放继续由原宿主管理。Web共享内容随Modal内容卸载释放，Native共享内容随原菜单实例释放；目标页、会话和任务状态继续原所有权。
+
+| 验收项 | 预期结果 | 验证方式与前提 |
+| --- | --- | --- |
+| 窄屏两端 | 写作全宽，时间线/回顾同排等宽，偏好两行，五项用途和主题状态可读 | 320/390、中英、系统深浅色下运行真实组件的RNW技术fixture，比较卡片几何及截图 |
+| 短屏与键盘操作 | 正文可滚动到设置，页头关闭可达，Escape/Tab及关闭聚焦保持 | 原Modal技术旅程；Web320×460、焦点及未发送稿断言 |
+| 原业务导航 | 四项目标沿原路径，主题停留菜单，错误可重试，后台业务写入为0 | 公开回调/HTTP fixture、原Native目标实例回归；真实账户与任务退出本轮范围 |
+| 桌面Web | 原三项disclosure、主题、设置和账户区域保持 | 1280桌面回归及390→1280切换 |
+| 编译 | Web和Native类型、现有Next生产构建通过 | 已安装依赖；Next构建输出隔离，用户正常服务与`.next`保持 |
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 布局一致性 | 入口定义共用，卡片分离 | 提取当前Native内容与StyleSheet | 两端调用同一个MoreNavigationContent，20项技术回归通过 | 普通App采用按独立制品记录 |
+| 平台差异 | 字体、SVG、主题与滚动各有原所有者 | 通过组件参数传入呈现值，保留原宿主 | 新增平台服务和通用适配框架为0 | 普通App重新构建与设备观察独立登记 |
+| 业务连续性 | Web具有原账户区域，Native目标保持实例 | 保留原退出、导航和目标生命周期 | 业务接口、认证、权限及后端变更为0 | 真实账户/模型验收退出本轮范围 |
+
+设计评审：**通过**。源码实现与技术验证结果见[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-11-01-web窄屏与端侧更多共享卡片)。普通App重打包、安装和真机观察按实际执行记录。
+
 ### iOS主题与常规设置的最小适配
 
 背景与问题：原Native组件只读取系统外观，原Web提供浅色、深色和跟随系统三种模式。更多主题动作需要本地偏好，设置外观同时保留原账户配置写入。
@@ -2849,6 +2939,8 @@ stateDiagram-v2
 
 ## 原生更多入口与目标页接线
 
+2026-11-01写作移动布局补充归[专项交互设计](writing-mobile-layout.md)，包含稿纸行框、心情内容纵滚、当前WritingView页头右侧入口及既有局部文档通信边界。该调整已接入最小源码实现，原生展示消息与单次展开在既有文档边界传递；产品规则及双视口骨架归[原移动PRD](../../prd/dream-workspace/mobile-app.md#写作排版与心情入口)，[专项评审](../../exec/writing-mobile-layout-review-20261101.md)记录定位与验收前提。下文已有接线和历史资格保留各自范围。
+
 ### 背景与问题
 
 前阶段五项菜单只存在于MoreNavigationPage.native组件，普通App的More正文仍直接列出模型及退出。本阶段由App采用MoreNavigator.native，更多主页与目标内容分层。桌面Web导航继续原实现，窄屏Web沿已有单页五项菜单。
@@ -3314,6 +3406,140 @@ stateDiagram-v2
 2026-10-31在普通App62506的原嵌入式Python内，使用明确命名临时空home调用原`start_login`与`poll_login`。授权准备成功，返回HTTPS地址、验证码及正轮询间隔；无用户确认时，原poll在默认15秒预算后抛出`NotionAuthTimeoutError`，原kill/wait完成，临时home移除。该结果记录授权准备成功与未确认轮询超时，完整授权状态保持待验收；本次真实凭据、浏览器打开、用户确认、连接数据库写入、正文读取和模型调用均为0。
 
 [Notion官方认证流程](https://developers.notion.com/cli/get-started/authentication)要求在浏览器确认验证码后，于原运行端执行`ntn login poll`兑换令牌；`NOTION_HOME`和`NOTION_KEYRING=0`为原凭据存储配置。查阅日期：2026-10-31。后续沿现有Notion重新连接入口完成授权，保留当前actor、资源范围及权限；当前超时回执与4项技术检查分别登记于[最新执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-长文停止重开与release构建5)。
+
+授权链接闪退与端侧默认浏览器的现行规则见[iOS交互设计](mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)。本节安装检测与CLI执行证据保留原制品范围。
+
+### iPhone Notion安装提示与恢复（2026-11-01）
+
+#### 背景与问题
+
+原生入口为“更多 → 设置 → Work → 资源 → Notion CLI”。`useNotionConnector`读取`GET /api/connectors/notion/capabilities`；修订前`get_notion_cli_installation`调用`resolve_ntn_executable`，对服务端指定路径执行绝对路径、常规文件及可执行权限检查，未配置时使用`shutil.which("ntn")`。检测失败返回`cli_installation.status=missing`，页面据此禁用连接按钮。该检测的网络请求数为0。原生页面沿用主机安装说明，iPhone显示“先安装 ntn”及`npm install`命令。
+
+原`routers/notion.py::_http_error`将全部`NotionCLIUnavailableError`转换为“未安装”503；该异常还承载进程创建、私有端点连接及Worker协议失败。已安装的执行失败因此可能显示安装建议。本轮修订将该503统一定义为安全的命令执行失败，缺失状态继续由原能力目录提供。
+
+当前手机读回`com.inkmemory.mobile`、0.1.0/20。本轮制品核对确认固定资源及六项执行适配存在，固定包来源为`node-dependencies.json`中的npm `ntn@0.15.1`，入口为该包的`dist/ntn-linux-arm64/ntn`。该文件为ELF AArch64，沿原App内Linux ARM64解释器执行；原npm平台选择脚本和Mac可执行文件退出该入口。本轮在同一手机构建20取得原检测结果`missing`；暂存文件为常规文件、0755、10,930,616字节、固定摘要匹配，`factoryBound/runtimeBound=true`且路径与工厂绑定一致，`os.access(X_OK)=false`。故障位于文件检测阶段，CLI和网络业务尚未派发。iOS对该App私有文件的原生执行权限检查与解释器读取需求存在差异。
+
+#### 目标与边界
+
+复用现有依赖锁、准备脚本、资源阶段、Node宿主和Python进程工厂。Dream、CLI及相关端侧任务继续在iPhone内执行。修订范围为解释执行入口的文件访问检查、执行失败反馈和原生缺失状态文案；原页面结构、网页版本、认证、凭证归属、资源选择、同步、权限及请求协议保持。包管理平台、插件框架、安装页面、自动业务重试、额外确认及新业务接口增加数均为0。
+
+选用局部反馈修订：当前资源链已经具备固定二进制、摘要、暂存及工厂绑定；本轮为该绑定补充精确执行文件，原解析器按同一文件的可读权限检测。重新实现安装流程缺少对应业务需求；远程执行改变当前执行归属。资源缺失由应用制品恢复，现有“重新读取”仅刷新能力目录。
+
+#### 概念与规则
+
+| 阶段或状态 | 执行模块与条件 | 反馈和恢复 |
+| --- | --- | --- |
+| 随包资源 | `prepare-node.py`校验npm归档及二进制/许可证摘要，`bundle-node.py`校验并收集`node/notion` | 准备或构建失败由构建回执记录；用户获取修复后的应用 |
+| 启动暂存 | `host.cjs`校验包内摘要，写入私有`guest/<rootDigest>/usr/local/bin/ntn`并恢复0755 | 路径、符号链接及摘要错误关闭原启动边界；恢复保持原宿主流程 |
+| 绑定与检测 | `ios._bind_runtime`调用`prepare_notion_runtime`；原工厂绑定增加精确`executable`参数，绑定后拒绝更换入口；能力目录对该文件检查`R_OK`，普通主机及其他路径继续检查`X_OK` | iOS缺失时显示“暂不可用”和组件未就绪反馈，保留“重新读取”，加载期间禁用该按钮；主机Web沿原安装说明 |
+| 实际调用 | `auth._run_ntn_command`及`NotionOperationClient._run_endpoint`使用同一`create_notion_process`，宿主再次校验执行文件摘要与原私有cwd | Worker或进程失败返回503“Notion command could not run. Please retry.”；页面保留原连接入口，安装命令展示由能力目录决定 |
+| 上游或超时失败 | 原CLI退出结果、`NotionAuthTimeoutError`、业务操作异常分别经原认证/查询规则处理 | 原页面显示授权或请求失败；原因尚未确认时采用通用失败反馈，当前安装状态保持 |
+| 凭证或权限失败 | 原actor凭证校验与401/403分支 | 原重新连接或资源授权操作；已有范围与最近成功索引按原合同保留 |
+| 重复操作与重新进入 | `connecting`及`authenticating`禁用认证提交；重新读取仅执行GET；资源保存及同步保持原冷却和已保存范围语义 | 失败后由用户再次发起原操作；页面可见性恢复沿原Hook刷新，无自动业务写入 |
+
+正常业务时序：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Page as ConnectorNotionDetailPage.native.tsx
+  participant Hook as useNotionConnector
+  participant Router as routers/notion.py
+  participant Auth as notion/auth.py
+  participant Native as ios_notion_runtime.py
+  participant Host as runtime/host.cjs
+  participant CLI as 暂存ntn0.15.1
+  participant Notion as Notion验证页与API
+  User->>Page: 进入Notion详情
+  Page->>Hook: 读取原能力目录与连接状态
+  Hook->>Router: GET /api/connectors/notion/capabilities
+  Router->>Auth: get_notion_cli_installation
+  Auth->>Auth: 精确绑定的解释执行文件检查R_OK
+  Auth-->>Hook: installed及原能力目录
+  User->>Page: 连接或重新连接
+  Page->>Hook: handleStartAuth，connecting=true
+  Hook->>Router: POST /api/connectors/{id}/auth/login
+  Router->>Auth: start_login，原actor pending home
+  Auth->>Native: create_notion_process，login --no-browser
+  Native->>Host: 原认证connect帧，notion-cli
+  Host->>CLI: 校验摘要和cwd，原Worker执行
+  CLI->>Notion: 请求原设备授权会话
+  Notion-->>CLI: 验证地址与验证码
+  CLI-->>Page: 经原模块返回安全授权结果
+  User->>Notion: 打开验证页并确认
+  Hook->>Router: 原auth/poll
+  Router->>Auth: poll_login
+  Auth->>CLI: 经同一工厂执行login poll
+  CLI-->>Router: 原认证结果与凭证文件
+  Router-->>Page: 原连接状态
+  User->>Page: 管理资源范围
+  Page->>Router: 原databases和pages读取
+  Router->>CLI: NotionOperationClient经同一工厂查询
+  CLI->>Notion: 原HTTPS只读请求
+  Notion-->>Page: 经原权限校验返回可选资源
+```
+
+异常与恢复时序：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Page as ConnectorNotionDetailPage.native.tsx
+  participant Hook as useNotionConnector
+  participant Router as routers/notion.py
+  participant Auth as notion/auth.py
+  participant Native as ios_notion_runtime.py
+  User->>Page: 进入Notion详情
+  Hook->>Router: 原capabilities GET
+  Router->>Auth: resolve_ntn_executable
+  alt 文件检测失败
+    Auth-->>Page: 经目录返回missing
+    Page-->>User: 暂不可用，组件未就绪，重新读取
+    User->>Page: 重新读取
+    Page->>Router: 原capabilities GET，加载期间禁用重复点击
+    Router-->>Page: 最新installed或missing
+  else 文件检测通过
+    User->>Page: 发起原连接
+    Page->>Router: 原auth/login，禁用认证提交
+    Router->>Native: 经原Auth执行命令
+    alt 私有端点或Worker执行失败
+      Native-->>Router: NotionCLIUnavailableError
+      Router-->>Page: 503，安全命令失败反馈
+    else 上游请求或等待失败
+      Native-->>Router: 原CLI退出或认证超时异常
+      Router-->>Page: 原认证或请求失败反馈
+    end
+    Page-->>User: 保留原连接状态与失败信息
+    User->>Page: 再次发起原操作
+  end
+```
+
+状态转换：
+
+```mermaid
+stateDiagram-v2
+  [*] --> Reading: 进入页面
+  Reading --> Missing: 原目录返回missing
+  Reading --> Ready: 原目录返回installed
+  Missing --> Reading: 用户重新读取
+  Ready --> Authenticating: 用户连接且原提交门禁允许
+  Authenticating --> Connected: 原授权确认与poll成功
+  Authenticating --> Failed: 原执行或授权失败
+  Failed --> Authenticating: 用户重试且原提交门禁允许
+  Connected --> Reading: 原页面可见性刷新
+  Failed --> Reading: 原页面可见性刷新
+```
+
+本轮已实现精确解释执行入口检测、反馈修订与回归覆盖；构建21在同一iPhone检测installed，原Python工厂版本及帮助命令均退出0。原公开会话、配置及能力目录200，原资源读取401；当前手机有效Notion授权、资源读取及发布状态按[本轮执行记录](../../exec/ios-notion-20261101.md)分别计证。图示描述现行业务合同，真实业务完成以对应制品及回执为准。
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 安装提示触发条件 | 真机固定文件与0755均存在，X_OK返回false；原目录据此返回missing | 仅绑定的解释执行文件采用R_OK；原主机X_OK保持 | 检测与实际解释执行需求一致 | 修复后同机制品执行回执 |
+| 资源与入口 | 固定资源、暂存、Python检测与Worker使用同一文件 | 复用原实现及摘要锁 | 新增资源与执行抽象数0 | 当前真机执行回执 |
+| iPhone恢复 | 原生页面要求在主机执行npm | iOS显示组件未就绪，保留原GET重新读取 | 原七节、页面关系及Web默认说明保持 | 新包可见页面验收 |
+| 认证及权限 | 原actor凭证、网页登录和401/403已有明确所有者 | 保留原模块及调用协议 | 新认证和权限配置数0 | 有效Notion授权与原业务读取 |
+| 网络与重复操作 | 原安装检测不访问网络，执行原因可能未知 | 采用安全阶段反馈，复用原提交门禁 | 自动业务重试数0 | 真机网络失败及恢复观察 |
+| 图示与验收 | 旧证据覆盖不同平台及制品 | 新时序与状态图按实际模块命名，分列验收 | 设计可交付，发布与业务状态独立 | 本轮命令、包与手机结果 |
 
 ## 原生Chat流式投影与停止收尾
 
@@ -4134,3 +4360,85 @@ stateDiagram-v2
 ### 验收与评审
 
 技术回归须在旧reader仍未结束时通过原Hook查询确认空闲，再释放迟到reader并核对状态保持；业务POST和原Stop各一次。相邻覆盖原延迟停止回执、running收尾、未获准读取异常、消息恢复、队列与选择代次。普通App另行验证实际正文增量、Stop、原Gateway结算、Send恢复及冷重开，技术fixture退出真实业务验收依据。构建7失败、修复候选与实际采用结果归[当前执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-构建7真实ntn业务与停止恢复修复)。物理设备和完整Notion授权按原矩阵独立验收。
+
+
+## 回顾详情顶部拖动与吸附（2026-11-01）
+
+### 背景与问题
+
+用户指定`AnalysisView.tsx`内`ReflectionBlogPage`的原详情区域：移动端固定52vh，缺少可拖动的顶部手柄。Native对应阅读组件按原列表和详情flex分配高度，同样缺少调整操作。原报告选择、来源、正文、置信度和播放器已经具备，任务与持久化复用原模块。
+
+### 目标与边界
+
+在原详情顶部提供触摸拖动与松手吸附，两端共用局部高度计算。正文滚动与原关闭、上一条、下一条保持，桌面Web继续45vh。新增依赖、Modal平台、业务接口、权限、数据库和任务改动为0。产品骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#回顾详情高度与触摸阅读)。
+
+### 概念与规则
+
+选定原区域内的手柄调整方案。扩展通用弹层系统需要额外改动导航、关闭和滚动所有权，退出本次范围。`useReflectionDetailSheet`只管理当前阅读实例的高度比例、拖动起点、夹取、最近停靠点及取消恢复；报告仍由`useReflectionReport`选择。
+
+技术布局采用可用阅读区的45%、70%、90%三个停靠点，初始70%。这些比例属于局部布局常量；服务配置、账户偏好和业务限制保持原合同。拖动连续更新，松手按当前位置选择最近停靠点，取消恢复起始高度。高度随实际容器变化，操作范围限定可用阅读区；切换条目保留高度，阅读实例释放后恢复初始值，存储与网络写入为0。
+
+Web `ReflectionBlogPage`提供原阅读容器高度，顶部手柄使用Pointer Events、pointer capture和局部touch-action:none，正文保留原overflow滚动。失去捕获或pointercancel恢复起始高度，松手释放捕获；方向键逐档调整，Home/End到最小/最大，separator公开当前比例。Native `ReflectionBlogPage.native`通过原生onLayout提供可用高度，手柄使用已安装React Native内置PanResponder，终止手势恢复起始高度；adjustable提供读屏增减动作。手柄之外的ScrollView继续拥有正文滚动。
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Reader as ReflectionBlogPage / ReflectionBlogPage.native
+  participant Report as useReflectionReport
+  participant Height as useReflectionDetailSheet
+  User->>Reader: 选择原报告条目
+  Reader->>Report: 原setSelectedItemIdx
+  Report-->>Reader: 原正文、来源与播放器
+  Reader-->>User: 显示顶部手柄与当前详情
+  User->>Reader: 按住手柄并上下拖动
+  Reader->>Height: begin(position, availableHeight)
+  Reader->>Height: move(position)
+  Height-->>Reader: 边界内连续高度比例
+  User->>Reader: 松手
+  Reader->>Height: finish()
+  Height-->>Reader: 最近停靠点
+  Reader-->>User: 详情停靠，正文继续独立滚动
+```
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Reader as ReflectionBlogPage / ReflectionBlogPage.native
+  participant Height as useReflectionDetailSheet
+  User->>Reader: 从手柄开始拖动
+  Reader->>Height: begin并记录原高度
+  Reader->>Height: move
+  alt 系统取消或手势被终止
+    Reader->>Height: finish(true)
+    Height-->>Reader: 恢复拖动前比例
+    Reader-->>User: 当前条目及原正文保持
+  else 拖动超过边界
+    Height-->>Reader: 夹取至最小或最大比例
+    User->>Reader: 松手
+    Reader->>Height: finish()
+    Height-->>Reader: 边界停靠
+  end
+  User->>Reader: 在正文区域上下滑动
+  Reader-->>User: 原滚动区阅读，详情高度保持
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 未选择
+  未选择 --> 详情停靠: 原条目选择
+  详情停靠 --> 拖动中: 顶部手柄按下
+  拖动中 --> 拖动中: 移动并夹取高度
+  拖动中 --> 详情停靠: 松手吸附
+  拖动中 --> 详情停靠: 取消并恢复起始高度
+  详情停靠 --> 详情停靠: 正文滚动或原上一条/下一条
+  详情停靠 --> 详情停靠: Web键盘或Native读屏增减
+  详情停靠 --> 未选择: 原关闭或栏目切换
+```
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 手势所有权 | 正文已有独立滚动 | 手柄独占调整，正文沿原滚动 | 阅读和调整各有入口，触摸技术回归通过 | 物理iPhone触摸待验 |
+| 平台差异 | DOM与原生手势协议不同 | 共用局部高度Hook，平台沿内置事件 | 新依赖与通用弹层框架为0 | Web/Native类型和隔离生产构建通过 |
+| 业务连续性 | 原报告与播放器已具备 | 沿原选择、关闭和切换 | 新任务、接口和持久化写入为0 | Web29项、Native12项技术回归通过 |
+
+设计评审：**通过**。技术回执归[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-11-01-回顾详情顶部拖动与吸附)。浏览器触摸事件及RNW的PanResponder资格与物理iPhone触摸验收分别记录。

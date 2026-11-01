@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: project chooser presentation to the existing native page header; persistence remains in App.
 // [Sync] 2026-10-30: deliver a native historical Editor jump through the original Writing event after authenticated mounting.
 'use client';
 // [Input] Original authenticated Writing engine/canvas and native-owned display/navigation state.
@@ -8,19 +9,21 @@ import App from '../../App';
 import {AuthProvider,useAuth} from '../../contexts/AuthContext';
 import i18n from '../../i18n';
 import {initTheme,setThemeMode} from '../../utils/theme';
-import {readWritingState,type WritingDocumentEvent,type WritingDocumentState} from './WritingDocument.protocol';
+import {readWritingState,type WritingDocumentEvent,type WritingDocumentState,type WritingChooserView} from './WritingDocument.protocol';
 import '../../styles/tokens.css';
 import '../../index.css';
 import './WritingDocument.css';
 type EventPayload=WritingDocumentEvent extends infer E?E extends WritingDocumentEvent?Omit<E,'documentId'>:never:never;
 function Canvas({state,emit}:{state:WritingDocumentState;emit:(event:EventPayload)=>void}){
  const auth=useAuth();
+ const viewRevision=useRef(0);
+ const onChooserView=useCallback((view:WritingChooserView)=>emit({type:'chooser-view',revision:++viewRevision.current,...view}),[emit]);
  const deliveredJump=useRef<number|undefined>(undefined);
  useEffect(()=>{const jump=state.editorJump;if(auth.isLoading||!auth.isAuthenticated||!state.active||!jump||deliveredJump.current===jump.nonce)return;deliveredJump.current=jump.nonce;window.dispatchEvent(new CustomEvent('editor:jump-to-cell',{detail:jump.detail}));emit({type:'editor-jump-dispatched',nonce:jump.nonce});},[auth.isLoading,auth.isAuthenticated,state.active,state.editorJump,emit]);
  useEffect(()=>{if(!auth.isLoading&&!auth.isAuthenticated)emit({type:'session-expired'});},[auth.isLoading,auth.isAuthenticated,emit]);
  if(auth.isLoading)return <p role="status">{state.language==='zh'?'正在读取…':'Loading…'}</p>;
  if(!auth.isAuthenticated)return <p role="alert">{state.language==='zh'?'请重新登录。':'Please sign in again.'}</p>;
- return <App writingDocument={{active:state.active,showEnergyBar:state.showEnergyBar,onOpenThread:threadId=>emit({type:'open-thread',threadId}),onPrepareChat:input=>emit({type:'prepare-chat',input}),onOpenResources:()=>emit({type:'resources'})}}/>;
+ return <App writingDocument={{active:state.active,showEnergyBar:state.showEnergyBar,openChooserNonce:state.openChooserNonce,onChooserView,onOpenThread:threadId=>emit({type:'open-thread',threadId}),onPrepareChat:input=>emit({type:'prepare-chat',input}),onOpenResources:()=>emit({type:'resources'})}}/>;
 }
 export default function WritingDocument(){
  const id=useRef(''),revision=useRef(-1),[state,setState]=useState<WritingDocumentState|null>(null);

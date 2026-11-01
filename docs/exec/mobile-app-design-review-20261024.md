@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-01: 追加回顾详情手柄调整、共享吸附/取消恢复和桌面保持，分列触摸技术与设备资格。 -->
+<!-- [Sync] 2026-11-01: 追加Web窄屏与端侧更多共用图标卡片、用途指引、桌面保持及技术验证记录。 -->
 <!-- [Sync] 2026-11-01: 追加20同机原登录协议、真实Claude单次完成、正常Admin单次结算及剩余UI验收。 -->
 <!-- [Sync] 2026-11-01: 追加19原GET残余503、20失败池修复、USB后台原公开HTTP及分项验证。 -->
 <!-- [Sync] 2026-10-31: 记录目标编译/登录认证方案与维护指南、12文档范围、官方资料、设计评审及静态验证。 -->
@@ -7093,3 +7095,98 @@ USB后台枚举当前设备的USB数据连接；usbmuxd直连原App端口返回N
 构建、签名、安装、原登录协议、合法会话/CSRF、配置、历史API、一次真实任务最终/完成/正常持久化和正常Admin结算已取得独立回执。8项Node、24项Native源合同覆盖原期限、固定读取一次恢复、取消隔离、失败池更换及旧任务排空。原网页密码表单可见提交、登录弹窗自动关闭、历史及本轮回复在原页面显示、手机实际网络恢复触发仍待验证。用户使用电脑期间，桌面停止边界保持；手机可见检查已通过异步问题请求，禁止因此新增模型任务。
 
 最后一次后台device info processes退出1，CoreDeviceError1000/device not found；设备当前连接与进程状态保留未知。该检查发生于completed及正常结算回执之后，未派发额外业务请求。源回执b20-final-device-state.json保存。
+
+
+## 2026-11-01 Web窄屏与端侧更多共享卡片
+
+### 范围与执行依据
+
+用户授权：统一Web窄屏与当前端侧更多的图标卡片、用途指引，尽量共用组件，保留桌面Web与现有业务，直接实现并验证。
+
+Optimized Prompt:
+基于当前仓库的More入口与Native卡片，最小范围提取共享呈现，接入Web窄屏和原Native宿主。先读取合同、当前源码及工作树，保护其他Agent的Notion改动。沿用五项定义、原路由、主题/账户及页面实例；保持桌面导航。补充现行PRD骨架、交互时序、异常恢复、状态与设计评审。使用已有依赖和Chrome，由luna_test_runner执行有界类型、原导航与布局回归和隔离Next构建，主Agent处理实现、故障判断与最终复核。报告原始命令、退出码、截图、文档及未执行的平台资格；本轮新增业务接口、模型调用和设备安装为0。
+
+本轮规划执行一次提示词优化。发现结果：入口名称、顺序及路径已共用，Web五行列表与Native卡片分别维护。问题定义：两端窄屏呈现不一致。方案比较：复制Web卡片需要两份样式；提取既有RN内容可利用当前RNW配置共用结构和间距。交付选择：一个共享内容组件，原Web Modal与Native菜单宿主继续持有生命周期。
+
+### 工作项与实现范围
+
+| 工作项 | 交付物与结果 | 影响边界 |
+| --- | --- | --- |
+| 共享呈现 | MoreNavigationContent.tsx提取原Native卡片、用途、主题状态与失败反馈 | 字体、SVG和配色由原平台传入，依赖及配置新增0 |
+| Web接入 | StoryWorkspaceSidebar使用共享内容，原窄屏CSS退出旧列表样式 | 原Modal关闭/焦点/滚动、账户退出、四项原路由和桌面disclosure保持 |
+| Native接入 | MoreNavigationPage.native保留页头、ScrollView、字体/主题和导航回调 | MoreNavigator、目标页实例、运行库和服务端任务变更0 |
+| 设计与评审 | 移动PRD正文骨架、统一工程稿正常/异常/状态图与矩阵 | 评审通过，普通App采用与真机观察单独登记 |
+| 技术验证 | 现有More与Native组合用例、源合同、双平台类型和Next隔离构建 | 合成HTTP及RNW呈现；真实账户、模型、数据库和手机操作退出本轮范围 |
+
+业务影响：菜单结构和用途呈现调整；Project、Episode、canonical artifact、Run-private publication、after-turn Hook及持久化投影退出本轮范围。Chat草稿、原目标页、认证、权限、任务和账户退出沿原所有者。
+
+### 验证回执
+
+执行者为luna_test_runner，原始工件根目录为`/tmp/ink-more-shared-20261101/validation/`，最终截图归`/tmp/ink-more-shared-20261101/screenshots-r3/`。安装依赖、正常服务启停与数据库操作为0。
+
+| 命令 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `python3 .agents/skills/ink-dream-playwright-qa/scripts/preflight.py --json` | 0 | 已安装Playwright 1.62.1；5173无监听、8765原服务保持 |
+| `pnpm exec tsc --noEmit --pretty false --incremental false`（frontend） | 0 | Web类型通过，7.407秒 |
+| `pnpm run native:typecheck`（frontend） | 0 | Native类型通过，3.664秒 |
+| 本机Chrome轻量启动检查 | 0 | 现有浏览器可用，未下载浏览器 |
+| `pnpm exec eslint app/_dream/components/story-workspace/layout/MoreNavigationContent.tsx app/_dream/components/story-workspace/layout/MoreNavigationPage.native.tsx app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`（frontend） | 0 | 三个生产TSX检查通过，1.356秒 |
+| `node /Users/dmeck/project/ink-dream-memory/frontend/node_modules/next/dist/bin/next build /tmp/ink-more-shared-20261101/next-build/frontend --webpack` | 0 | 隔离Next生产构建通过，23.371秒；编译、类型及9个静态页面生成完成 |
+| `INK_MORE_EVIDENCE_DIR=/tmp/ink-more-shared-20261101/screenshots-r3 pnpm exec playwright test --config=/tmp/ink-more-shared-20261101/validation/more-r3.config.ts`（frontend） | 0 | 20/20通过，跳过0，25.984秒；8项More、3项Native组合、9项原布局合同 |
+| `node /tmp/ink-more-shared-20261101/validation/docs-check.mjs` | 0 | 新增链接64项、文档头和清单通过；3个新增Mermaid图由现有Chrome及Mermaid解析通过，新增用语检查通过 |
+| `git diff --check` | 0 | 当前工作树差异空白检查通过 |
+
+验证过程保留：首轮20项为17通过/3失败，涉及一处DOM文本读取方式和两处旧源码合同。主题失败用例改用一致的textContent比较；旧订阅断言沿现行subscriptionPresentation、handleNavigate及原Native宿主侧栏guard核对，当前HEAD已经具有这些所有者和条件。第二轮为19通过/1失败，剩余旧侧栏guard断言已按当前源码维护；业务代码保持。原始失败回执保留。
+
+隔离Next构建前两次退出1，webpack编译完成，Next类型worker报告缺少node类型。独立Web类型检查和相同暂存tsconfig的tsc退出0，原安装的node类型可解析。最终只在私有暂存tsconfig指定原安装`node_modules/@types`的绝对typeRoots，生产源码与其他编译选项保持，完整build退出0。验证期间env复制、依赖安装、仓库配置变更及原`.next`操作为0。该差异属于隔离构建harness配置，设备运行状态退出该回执范围。
+
+主Agent复核Web390中文浅色、对应Native组件与1280桌面截图，卡片结构与用途一致，桌面侧栏保留。r3最终20项通过，完整Web生产构建及双平台类型、ESLint通过；设计、源码和技术验证完成。文档检查首次将源码行号链接作为标题锚点处理，私有checker修正后退出0，仓库文档保持原链接格式。
+
+隔离build暂存、私有node_modules链接及本轮Vite缓存已清理；截图、JSON、trace和日志保留供复核。原生组件采用RNW技术fixture验证；普通App重新构建、安装、真机观察和发布未在本轮执行，真实账户与模型调用为0。
+
+
+## 2026-11-01 回顾详情顶部拖动与吸附
+
+### 范围、判断与执行依据
+
+用户在More任务收尾时追加：`AnalysisView.tsx`的`ReflectionBlogPage`详情顶部需要手柄，通过触摸上下调整显示高度并吸附。More前项已完成：20项技术回归、双平台类型、ESLint、隔离Next生产构建及最终文档检查退出0；工件和原回执保留。
+
+Optimized Prompt:
+以用户指定的回顾报告详情区为入口，最小修改加入顶部拖动手柄和松手吸附。沿用原ReflectionBlogPage、原生对应阅读组件、报告选择、正文滚动、关闭及播放器；桌面Web保持45vh。先读取当前实现和局部合同，比较原区域调整与新增通用弹层，采用内置平台事件和一份局部高度Hook。记录正常/取消/越界/滚动状态与页面骨架，用现有Chrome和provider-free原用例验证触摸上拉/下拉、最近停靠、取消恢复、正文独立滚动、原报告阅读及桌面相邻回归；生产构建隔离输出，保留正常服务、所有账户/任务及其他Agent改动。真实账户、模型、数据库和手机发布操作为0，真实设备资格按执行事实标注。
+
+本次范围变化执行一次提示词优化。发现：Web移动详情固定52vh，Native以原flex分配详情和列表；正文、来源、报告和播放器已有。定义：只增加可调整的详情可见高度。比较：通用BottomSheet库会扩展关闭和导航所有权；原区域手柄可复用两端既有事件。交付：共享useReflectionDetailSheet与两个原阅读组件，现有i18n补手柄说明。
+
+### 工作项、边界与评审
+
+| 工作项 | 实现与归属 | 状态 |
+| --- | --- | --- |
+| 本地高度 | useReflectionDetailSheet的45/70/90%比例、夹取、最近点及取消恢复 | 已实现，业务持久化0 |
+| Web窄屏 | 原详情顶部Pointer Events手柄，独立正文滚动，原关闭及播放器 | 已实现，桌面45vh保持 |
+| Native | 原生PanResponder手柄，原onLayout测量和ScrollView，读屏增减 | 已实现，平台触摸资格独立登记 |
+| 设计稿 | 移动PRD骨架、统一工程稿正常/异常/状态图、旧PRD当前规则指引 | 评审通过，原任务/API/权限变更0 |
+| 验证 | 原Web和Native Reflections用例追加触摸、吸附、取消、正文滚动及桌面高度 | 技术回执在本节补齐 |
+
+业务影响：只调整已选择报告条目的详情高度；Project、Episode、canonical artifact、Run-private publication、after-turn Hook退出本轮范围。报告、冻结来源、置信度、分析任务、保存、历史、认证和权限继续原所有者。
+
+### 验证回执
+
+由luna_test_runner执行有界技术验证，工件根为`/tmp/ink-reflection-sheet-20261101/validation/`。真实模型预算0。
+
+| 命令 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `pnpm exec tsc --noEmit --pretty false --incremental false`（frontend） | 0 | Web类型通过，7.085秒 |
+| `pnpm run native:typecheck`（frontend） | 0 | Native类型通过，3.575秒 |
+| `pnpm run native:typecheck`（最终Native无障碍值修订后） | 0 | 4.466秒，原生类型通过 |
+| `pnpm exec playwright test --config=/tmp/ink-reflection-sheet-20261101/validation/native-r2.config.ts --grep 'native saved report detail handle'`（frontend） | 0 | 原生手柄触摸拖动、吸附、取消及正文滚动1/1通过，6.168秒 |
+| `pnpm exec playwright test --config=/tmp/ink-reflection-sheet-20261101/validation/native-full.config.ts`（frontend） | 0 | 原生回顾12/12通过，18.718秒；原报告、来源、任务恢复与配置回归保持 |
+| `node /Users/dmeck/project/ink-dream-memory/frontend/node_modules/next/dist/bin/next build /tmp/ink-reflection-sheet-20261101/next-build/frontend --webpack` | 0 | 最终隔离Next生产构建通过，23.113秒，暂存typeRoots指向原安装类型目录 |
+| `E2E_WEB_BASE=http://127.0.0.1:55173 pnpm exec playwright test --config=/tmp/ink-reflection-sheet-20261101/validation/web-full.config.ts`（frontend） | 0 | Web回顾29/29通过，31.173秒；触摸、桌面45vh及原任务/报告完整技术旅程保持 |
+| `node /tmp/ink-reflection-sheet-20261101/validation/docs-check-reflection.mjs` | 0 | 文档清单、相对路径、锚点、头与新增用语检查通过，3张当前交互图解析通过 |
+
+首轮定向4项为3通过/1失败：RNW未把Native的accessibilityValue对象投影为DOM当前值。安装的RN与RNW均支持aria-valuemin/max/now，组件改用这组三项属性；保持原Native adjustable动作。PanResponder闭包采用稳定begin/move/finish引用，新增依赖告警消除。最终真实组件触摸事件、松手吸附、取消恢复和独立滚动通过，原失败回执保留。
+
+Lint结果按基线记录：四文件原始命令`pnpm exec eslint app/_dream/hooks/useReflectionDetailSheet.ts app/_dream/components/AnalysisView.tsx app/_dream/components/ReflectionBlogPage.native.tsx app/_dream/i18n.ts`退出1；AnalysisView保留13个HEAD已有的unused-vars，Native保留1个HEAD已有的no-extra-boolean-cast。最终Hook/i18n/Native的定向lint退出1且只含同一条Native基线错误，新增诊断0。上述既有清理退出本次最小修改范围，禁止将lint汇报为全量通过。
+
+文档检查新增路径、锚点、Hook清单和用语通过，3个新增Mermaid图由现有Chrome/Mermaid解析通过，git diff --check通过；原始命令及回执在本轮validation目录保留。主Agent已复核Web窄屏与Native组件截图：手柄位于详情顶部，播放器及原阅读布局保持。
+
+本轮仅启动并停止明确拥有的隔离Next55173与fixture Vite；端口已释放，构建暂存和私有依赖链接已清理，原服务、`.next`、账户和业务数据保持。设计、实现与技术回归完成；物理iPhone触摸和本轮App安装包仍待设备阶段执行。

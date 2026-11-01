@@ -25,13 +25,15 @@
  *         to aggregate/report APIs.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+// [Sync] 2026-11-01: narrow report details gain handle-only drag and snapping; desktop and report selection remain.
+import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type {ReflectionAnalysisContentOptions,ReflectionResult,ReflectionSectionConfig,ReflectionSectionKey} from '../api/voiceApi';
 import ReflectionAnalysisContentControls from './ReflectionAnalysisContentControls';
 import useReflections,{type AnalysisSessionCandidate} from '../hooks/useReflections';
 import useReflectionReport from '../hooks/useReflectionReport';
+import useReflectionDetailSheet from '../hooks/useReflectionDetailSheet';
 import {PROMPT_FILE_ORDER,PROMPT_FILE_LABELS} from './reflectionConfigPresentation';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -1389,7 +1391,7 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 }
 
 // ══════════════════════════════════════════════
-// ReflectionBlogPage — fixed-height editorial layout with bottom player
+// ReflectionBlogPage — bounded editorial layout with bottom player and resizable narrow detail
 // Keep original structure: left hero, right section list, lower detail panel, bottom player.
 // Visual work is constrained to magazine-style polish and clearer selected/playing feedback.
 // Refs: docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
@@ -1420,6 +1422,9 @@ export function ReflectionBlogPage({
 
   const {blogSections,activeSection,selectedItemIdx,setSelectedItemIdx,activeSectionObj,activeItems,selectedItem,handleSectionChange,goToPrev,goToNext,cfill}=useReflectionReport(report,initialSection);
   const sectionButtonRefs = useRef<Partial<Record<SectionKey, HTMLButtonElement | null>>>({});
+  const detailSheet = useReflectionDetailSheet();
+  const readingAreaRef = useRef<HTMLDivElement>(null);
+  const detailId = useId();
 
   useEffect(() => {
     if (!initialSection || report[initialSection].length === 0) return;
@@ -1510,7 +1515,7 @@ export function ReflectionBlogPage({
         </details>}
       </div>
       {/* ── Main content area (flex:1, no outer scroll) ── */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div ref={readingAreaRef} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
         {/* ── Left / Right split (flex:1, shrinks when detail opens) ── */}
         <div style={{
@@ -1627,17 +1632,26 @@ export function ReflectionBlogPage({
           </div>
         </div>
 
-        {/* ── Detail area: fixed height, below split ── */}
+        {/* Detail stays below the split; narrow handle resizes within the measured reading area. */}
         {selectedItem !== null && (
-          <div style={{
+          <div id={detailId} data-reflection-detail="true" style={{
             flexShrink: 0,
-            height: isMobile ? '52vh' : '45vh',
+            height: isMobile ? `${detailSheet.fraction * 100}%` : '45vh',
             overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
             borderTop: '2px solid var(--color-border-paper)',
             background: 'linear-gradient(180deg, var(--color-bg-surface) 0%, color-mix(in srgb, var(--color-bg-paper) 86%, var(--color-bg-surface)) 100%)',
           boxShadow: '0 -18px 45px color-mix(in srgb, var(--color-border-paper) 16%, transparent)',
           }}>
+            {isMobile && <div role="separator" tabIndex={0} aria-label={t('analysis.detailResize.label')} aria-orientation="horizontal" aria-controls={detailId} aria-valuemin={detailSheet.minPercent} aria-valuemax={detailSheet.maxPercent} aria-valuenow={Math.round(detailSheet.fraction * 100)} title={t('analysis.detailResize.hint')}
+              style={{flexShrink: 0, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', userSelect: 'none', cursor: 'ns-resize'}}
+              onPointerDown={event => {if (event.button !== 0) return; event.preventDefault(); detailSheet.begin(event.clientY, readingAreaRef.current?.getBoundingClientRect().height ?? 0); event.currentTarget.setPointerCapture(event.pointerId);}}
+              onPointerMove={event => detailSheet.move(event.clientY)}
+              onPointerUp={event => {detailSheet.finish(); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);}}
+              onPointerCancel={() => detailSheet.finish(true)} onLostPointerCapture={() => detailSheet.finish(true)}
+              onKeyDown={event => {const direction = event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : event.key === 'Home' ? 'min' : event.key === 'End' ? 'max' : null; if (direction) {event.preventDefault(); detailSheet.adjust(direction);}}}>
+              <div aria-hidden="true" style={{width: 36, height: 4, borderRadius: 2, background: 'var(--color-text-muted)'}}/>
+            </div>}
             {/* Detail header */}
             <div style={{ flexShrink: 0, padding: isMobile ? '0.625rem 1.25rem' : '0.875rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid color-mix(in srgb, var(--color-border-paper) 50%, transparent)' }}>
               <div style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>

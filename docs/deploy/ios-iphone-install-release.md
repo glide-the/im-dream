@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-01: 写作资源纠偏要求prepare/build/verify与实际服务根摘要一致；模拟器及物理制品资格分别登记。 -->
+<!-- [Sync] 2026-11-01: 构建22修复Notion授权链接闪退，模拟器默认浏览器与七项Web通过；同机覆盖安装及启动通过，真实授权独立验收。 -->
+<!-- [Sync] 2026-11-01: Notion构建21同机升级，精确解释执行文件可读检测及版本/帮助通过；原资源401保留授权前提。 -->
 <!-- [Sync] 2026-11-01: 系统验证后20普通启动与后台真实业务通过，原首次Security和503保留；页面与弹窗待独立验收。 -->
 <!-- [Sync] 2026-11-01: 追加构建20失败池修复、增量构建与签名安装回执，原业务验收分列。 -->
 <!-- [Sync] 2026-10-31: 构建19恢复一次头前网络丢失并收敛阶段日志；设备安装与业务结果分项登记。 -->
@@ -72,13 +75,15 @@ Personal Team 的开发 profile 通常在签发后七天到期，到期需重新
 
 - 依赖以 `frontend/pnpm-lock.yaml` 和 `frontend/ios/Podfile.lock` 为准。已有依赖和运行库可直接复用，避免一次设备启动重复安装和初始化。
 - Python、Node、Guest、字体资源需已按工程原脚本准备完成，缺少资源时按明确错误补齐。
-- 原 Next standalone 位于 `frontend/ios/Next/build-source/.next`。需要刷新 Web 资源时，顺序执行下列命令；准备目录由构建共享，避免与其他任务并行覆盖。
+- 原 Next standalone 位于 `frontend/ios/Next/build-source/.next`。Web运行源码变化后，顺序执行下列命令；准备目录由构建共享，避免与其他任务并行覆盖。
 
 ```bash
 python3 frontend/ios/scripts/prepare-next.py
 pnpm --dir frontend/ios/Next/build-source build
+python3 frontend/ios/scripts/bundle-next.py --verify-sources
 ```
 
+- `prepare-next.py`记录checkout与prepared输入摘要；`bundle-next.py`在修改应用资源前拒绝缺失或过期来源，并在包内保留`source-receipt.json`。并行构建可将`INK_IOS_NEXT_ROOT`设为`frontend/ios/`内本轮具名目录，准备、编译和Xcode资源阶段使用同一值。`bundle-next.py`的输出为`TARGET_BUILD_DIR/UNLOCALIZED_RESOURCES_FOLDER_PATH/next`；调用方使用应用资源根，服务从该`next/mobile-manifest.json`的`serverEntry`启动。验证前核对该实际根的来源摘要与本轮准备回执。写作纠偏的分项资格见[专项记录](../exec/writing-mobile-layout-review-20261101.md#安装资源纠偏与模拟器验证)。
 - Xcode 资源阶段执行 [`bundle-python.py`](../../frontend/ios/scripts/bundle-python.py) 和 [`bundle-node.py`](../../frontend/ios/scripts/bundle-node.py)，装配原后端、Next、字体和普通 env。原生 JS bundling 使用 `index.native.js`；包内资源支持脱离 Metro 启动。
 - `build-rn-ios.sh` 是完整准备入口，包含依赖安装和 `pod install`。缓存齐备时使用下方 Xcode 命令。
 - 当前脚本复制 `backend/.env` 与 `frontend/.env.local`。本机临时包按当前配置使用；对外分发前必须逐键审查，服务端凭证与高权限共享秘密留在服务端，签名材料保留在 Keychain/受控 CI。本机临时包限定本次开发设备使用。
@@ -531,3 +536,17 @@ Admin后通道复用单个App级临时URLSession，每个Task在resume前绑定�
 | 正常Admin账单 | req_4a3866fec4a640db86250788d4cf87e4，HTTP200、succeeded、settled | 窗口内仅1次；模型deepseek-v4-flash-vision-exp；输入3627、缓存读取19712、输出89、扣减23428 Token |
 
 完整旅程158.738秒，任务提交预算1、实际1，额外模型调用0。原登录页面、弹窗关闭、可见历史和真机实际网络恢复触发继续独立验收。后台HTTP及SQL只读审计的具体命令、退出码、失败和回执归[执行记录](../exec/mobile-app-design-review-20261024.md#2026-11-01-构建20原登录协议与一次真实claude任务)。
+
+
+## 2026-11-01 Notion安装检测修复构建21
+
+[构建21开发IPA](../../frontend/ios/build/InkMemory-Notion-Release-device-20261101-b21.ipa)沿原依赖、开发身份及配置签名，SHA256 `4a507ab5d66793ca1639a713e5440c38416f3391332f34bddd8de45d972ca2fb`，142,640,647字节、0600；profile至2026-11-08 01:03:45（Asia/Shanghai）。同一iPhone16覆盖安装、启动及最终apps读回21均退出0。
+
+真机原固定ntn文件为0755，原生X_OK返回false。修复后仅精确绑定的解释执行文件检查R_OK；原主机检查、包内摘要、私有端点及权限门禁保持。手机原Python工厂检测installed，版本/帮助均退出0；原公开会话/配置/能力目录/连接记录均200，资源列表401，当前手机有效Notion授权与资源读取继续待验收。正式渠道发布未执行。[设计与评审](../design/multi-platform/react-native-web-project-structure.md#iphone-notion安装提示与恢复2026-11-01)及[命令与分项证据](../exec/ios-notion-20261101.md)分别维护。
+
+
+## 2026-11-01 Notion授权链接修复构建22
+
+[构建22开发IPA](../../frontend/ios/build/InkMemory-NotionLinks-Release-device-20261101-b22.ipa)复用21原生、后端与生效配置，正常`index.native.js`重新生成Hermes。SHA256 `1bba8268b0baa142521ffb73b30fcdb0c8a66d4cc082755963d4c7f3eee6e241`，142,559,295字节、0600；签名及83个framework严格校验通过，profile期限沿前节。
+
+原Notion默认回调提取`Linking.openURL`导致接收者丢失；现行平台函数保留接收者、Promise失败合同及系统默认浏览器选择。模拟器原组件点击闪退复现、修复后Safari打开/返回及失败反馈、十九项原生页面与七项Web回归通过。原iPhone覆盖安装和启动均退出0，读回0.1.0/22。真实Notion授权网页确认、资源读取及正式渠道发布分别验收。[本轮设计与命令](../exec/ios-notion-links-20261101.md)保留全部范围及失败历史。

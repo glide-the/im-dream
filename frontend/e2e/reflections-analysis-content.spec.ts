@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: verify touch-only detail resizing, snapping/cancel, scrolling and original desktop height.
 // [Sync] 2026-10-29: reuse original public Reflections fixture and current bulk catalog DTO; assertions remain.
 // [Sync] 2026-10-23: verify persisted diary scope/read counts, legacy and Notion-only reports across locales and widths.
 // [Sync] 2026-10-23: verify on-demand copy, inline rerun controls and return position after keyboard focus.
@@ -648,4 +649,53 @@ test('timeline diary and historical picture still open beside an analysis report
   await reader.getByRole('button', { name: 'Timeline', exact: false }).click();
   await expect(page.getByText('Original diary remains visible', { exact: true })).toBeVisible();
   expect(fixture.errors).toEqual([]); expect(fixture.base.getUnexpected()).toEqual([]);
+});
+
+
+// Detail resizing changes local presentation only; report, task and persistence fixtures retain their original owners.
+test('narrow report detail handle supports touch drag, snapping, cancellation and independent content scrolling', async ({page}, testInfo) => {
+  const fixture = await installReflectionFixtures(page, {seedReport: true});
+  fixture.reports[0].report_data.echoes[0].description = 'A long saved reflection for reading. '.repeat(120);
+  await openAnalysis(page, {width: 390, height: 844});
+  await page.locator('[data-analysis-report-id="9001"]').click();
+  await page.getByRole('button', {name: /Repeated concern/}).click();
+  const handle = page.getByRole('separator', {name: 'Resize reflection details', exact: true});
+  const detail = page.locator('[data-reflection-detail]');
+  await expect(handle).toHaveAttribute('aria-valuenow', '70');
+  const initial = (await detail.boundingBox())!.height;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 1});
+  const drag = async (distance: number, cancel = false) => {
+    const box = (await handle.boundingBox())!;
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    const touch = (nextY: number) => [{x, y: nextY, id: 1}];
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: touch(y)});
+    for (let step = 1; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: touch(y + distance * step / 5)});
+    await cdp.send('Input.dispatchTouchEvent', {type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: []});
+  };
+  await drag(-220); await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  expect((await detail.boundingBox())!.height).toBeGreaterThan(initial);
+  const content = detail.locator('h2').locator('..');
+  await content.hover(); await page.mouse.wheel(0, 350);
+  await expect.poll(() => content.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  await drag(200, true); await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  await drag(250); await expect(handle).toHaveAttribute('aria-valuenow', '45');
+  expect((await detail.boundingBox())!.height).toBeLessThan(initial);
+  await handle.focus(); await handle.press('End'); await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  await handle.press('ArrowDown'); await expect(handle).toHaveAttribute('aria-valuenow', '70');
+  await expect(detail.locator('h2')).toHaveText('Repeated concern');
+  await page.screenshot({path: testInfo.outputPath('narrow-reflection-detail-handle.png')});
+  await detail.getByRole('button', {name: '×', exact: true}).click(); await expect(handle).toHaveCount(0);
+  expect(fixture.createRequests).toEqual([]); expect(fixture.startRequests).toEqual([]); expect(fixture.errors).toEqual([]);
+  await cdp.detach();
+});
+
+test('desktop report detail keeps its original fixed height and has no resize handle', async ({page}) => {
+  const fixture = await installReflectionFixtures(page, {seedReport: true});
+  await openAnalysis(page, {width: 1440, height: 900});
+  await page.locator('[data-analysis-report-id="9001"]').click(); await page.getByRole('button', {name: /Repeated concern/}).click();
+  await expect(page.getByRole('separator', {name: 'Resize reflection details'})).toHaveCount(0);
+  expect(await page.locator('[data-reflection-detail]').evaluate(node => parseFloat(getComputedStyle(node).height))).toBeCloseTo(405, 0);
+  expect(fixture.createRequests).toEqual([]); expect(fixture.startRequests).toEqual([]); expect(fixture.errors).toEqual([]);
 });

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: label the report detail drag handle and its touch/keyboard accessibility guidance.
 // [Sync] 2026-10-29: label native General feedback without changing original Web settings actions.
 // [Sync] 2026-10-29: localize the shared narrow More theme entry; existing theme actions remain.
 // [Sync] 2026-10-14: localize complete analysis history loading, errors, reading and pagination.
@@ -198,6 +199,7 @@ const resources = {
       },
       analysis: {
         title: 'Reflections',
+        detailResize: {label: 'Resize reflection details', hint: 'Drag up or down to resize. Release to snap.'},
         subtitle: 'Patterns and insights woven through your words',
         backButton: 'Back',
         backTitle: 'Back to Dashboard',
@@ -1337,6 +1339,7 @@ const resources = {
       },
       analysis: {
         title: '回顾',
+        detailResize: {label: '调整回顾详情高度', hint: '上下拖动调整高度，松手后自动吸附。'},
         subtitle: '读出文字里编织的脉络与启示',
         backButton: '返回',
         backTitle: '回到总览',

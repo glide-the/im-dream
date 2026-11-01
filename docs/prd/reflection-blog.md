@@ -1,3 +1,9 @@
+<!-- [Input] 原报告阅读、分区、播放器协议及当前窄屏手柄要求。 -->
+<!-- [Output] 桌面阅读协议和现行移动详情高度的规则指引。 -->
+<!-- [Pos] 原阅读PRD；移动端高度规则由dream-workspace/mobile-app.md维护。 -->
+<!-- [Sync] 2026-11-01: 窄屏详情高度由当前移动PRD和顶部拖动设计接管；桌面固定高度与原报告/播放器协议保持。 -->
+> 窄屏Web及原生详情高度与顶部手柄以[移动PRD](dream-workspace/mobile-app.md#回顾详情高度与触摸阅读)和[当前交互设计](../design/multi-platform/react-native-web-project-structure.md#回顾详情顶部拖动与吸附2026-11-01)为准。下文旧移动端固定详情高度保留历史范围，桌面固定分栏及报告选择、正文、播放器规则继续适用。
+
 <!-- [Sync] 2026-10-13: 统一入口、Notion 内容、分析 Agent 和报告恢复由当前 memory PRD 接管；保留原文供历史参考。 -->
 > 当前入口、分析内容及仅 Notion 重分析规则见 [现行需求](memory/reflections-analysis-content-prd.md)。本文其余既有分区协议继续适用；旧独立 Analyze、至少一条日记以及失败后重复确认规则不再作为当前要求。[变更前完整原文](reflection-blog-pre-content-20261013-history.md)。
 

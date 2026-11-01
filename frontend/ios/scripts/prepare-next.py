@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # [Input] Original Next app/config/lockfile and the already installed frontend dependency graph.
 # [Output] A credential-free, separately owned source directory for an original standalone build.
+# [Sync] 2026-11-01: isolate explicitly owned Next outputs and record original runtime-source inputs for packaging freshness checks.
 # [Pos] iOS build preparation; it never modifies the running Web checkout or installs packages.
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 
 IOS = Path(__file__).resolve().parents[1]
 REPO = IOS.parents[1]
 FRONTEND = REPO / "frontend"
-ROOT = IOS / "Next"
+ROOT = Path(os.environ.get("INK_IOS_NEXT_ROOT", str(IOS / "Next"))).absolute()
+if not ROOT.resolve().is_relative_to(IOS.resolve()) or ROOT.resolve() == IOS.resolve():
+    raise RuntimeError("The Next output root must be a named directory inside frontend/ios")
 STAGE = ROOT / "build-source"
 MARKER = ".ink-ios-next-build"
 if ROOT.is_symlink() or STAGE.is_symlink():
@@ -56,8 +60,20 @@ for source in sorted(STAGE.rglob("*")):
     if source.is_file() and not source.is_symlink() and "node_modules" not in source.parts:
         source_files.append({"path": source.relative_to(STAGE).as_posix(),
                              "sha256": hashlib.sha256(source.read_bytes()).hexdigest()})
+# Capture the owning checkout separately from the transformed build configuration.
+# Generated type declarations, folder documentation and tests are not runtime assets.
+source_inputs = []
+for item in source_files:
+    relative = Path(item["path"])
+    if (relative.suffix in {".md", ".map"} or "__tests__" in relative.parts
+            or ".test." in relative.name or ".spec." in relative.name
+            or relative.name in {".ink-ios-next-build", "next-env.d.ts"}):
+        continue
+    original = FRONTEND / relative
+    if original.is_file() and not original.is_symlink():
+        source_inputs.append({"path": relative.as_posix(), "sha256": hashlib.sha256(original.read_bytes()).hexdigest()})
 receipt = {"version": 1, "next": json.loads((FRONTEND / "node_modules/next/package.json").read_text())["version"],
            "lockSha256": hashlib.sha256((FRONTEND / "pnpm-lock.yaml").read_bytes()).hexdigest(),
-           "sourceFiles": source_files, "credentials": "excluded", "dependencyInstall": False}
+           "sourceFiles": source_files, "sourceInputs": source_inputs, "credentials": "excluded", "dependencyInstall": False}
 (ROOT / "source-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 print(f"Prepared original Next {receipt['next']} without credentials: {STAGE}")

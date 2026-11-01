@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-01: 索引端侧网页链接的系统默认浏览器规则与Notion授权闪退修复。 -->
+<!-- [Sync] 2026-11-01: 索引Web窄屏与端侧共用更多卡片、用途指引及原导航保持范围。 -->
+<!-- [Sync] 2026-11-01: 索引iPhone Notion安装提示阶段、随包资源及本轮恢复设计。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-31: 当前17共享Admin系统连接池；设备安装/进程与Simulator冷启动通过，真机3项GET503及锁屏分别记录，工作区待修复。 -->
 <!-- [Sync] 2026-10-31: 构建16缓冲/原期限修订，设备安装与普通启动、Simulator冷启动读取通过；物理前台及完整任务继续分项验收。 -->
@@ -28,9 +31,21 @@
 
 # Ink & Memory 跨平台方案
 
+写作记录打开关联对话的入口、三类关联、草稿与任务生命周期见[现行写作设计补充](writing-mobile-layout.md#写作记录与关联对话)。[专项只读诊断与评审](../../exec/writing-linked-chat-review-20261101.md)记录构建22、网络证据范围及条件化后续实施项；本轮源码与安装包保持。
+
+<!-- [Sync] 2026-11-01: 增加写作移动布局专项设计入口；设计与实现、设备验收分别记录。 -->
+
+写作排版、启动心情滚动和所属页面导航入口见[专项交互设计](writing-mobile-layout.md)；[产品规则与骨架](../../prd/dream-workspace/mobile-app.md#写作排版与心情入口)归原业务PRD，[定位与评审](../../exec/writing-mobile-layout-review-20261101.md)记录源码判断及待执行验收。该项最小实现已接入源码，技术、隔离浏览器与真机资格见专项评审记录。
+
 **React Native生成iOS、Android原生主界面；共享组件通过React Native Web接入Next；业务通过HTTP访问端侧Dream Python和Claude。**
 
 现行方案为[React Native / React Native Web统一工程设计](react-native-web-project-structure.md)，包含工程树、逐模块迁移、正常/异常时序、实例生命周期、状态转换、验收和评审。
+
+Web窄屏与端侧更多采用[共享图标卡片与用途指引](react-native-web-project-structure.md#web窄屏与端侧共享更多卡片2026-11-01)，桌面导航、原路径、主题和会话继续原所有权；技术验证与普通App采用分别登记。
+
+回顾阅读详情采用[顶部拖动与吸附](react-native-web-project-structure.md#回顾详情顶部拖动与吸附2026-11-01)，Web窄屏与Native共用局部高度，原正文滚动、报告和播放器保持；桌面Web保留原详情高度。
+
+iPhone Notion安装提示的触发条件、资源入口和失败恢复见[现行专项设计](react-native-web-project-structure.md#iphone-notion安装提示与恢复2026-11-01)，本轮命令与真机结果见[执行记录](../../exec/ios-notion-20261101.md)。
 
 登录认证和目标编译见[原所有者及交互合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，后续问题按[端侧认证维护指南](../../deploy/mobile-auth-troubleshooting.md)检查；build17真机503仍待修复，本文档整理不提升其验收资格。
 
@@ -72,3 +87,5 @@
 
 
 当前物理设备采用当前工作树重建的公网构建13，Swift/Metro/Python/Next生产构建、签名、Wi-Fi升级、版本及运行目录保留和普通启动通过；本机配置构建8及失败构建10保留。构建11普通Simulator采用已登记Web回调，原密码登录200、弹窗关闭及RN Chat历史显示通过；当前Simulator12补原Product API地址，用量200、原系统配置200，session/模型目录503及完整真实业务继续跟踪。端侧Python/Node/Next/Claude及RN页面保持。Google私有回调公网采用与完整授权继续待验收。当前[设备手册](../../deploy/ios-iphone-install-release.md#十八2026-10-31当前源码构建13与iphone安装)和[iOS交互规则](mobile-ios-interaction.md#公网密码网页登录与配置回调保留)提供回调、失败恢复及分项验收。
+
+端侧网页链接与Notion授权恢复见[iOS现行交互](mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)，[本轮执行记录](../../exec/ios-notion-links-20261101.md)区分模拟器技术、七项Web及真实授权资格。

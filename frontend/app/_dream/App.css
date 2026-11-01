@@ -1,3 +1,4 @@
+/* [Sync] 2026-11-01: scope Writing typography, header and chooser scrolling to mobile surfaces; desktop values remain. */
 /* [Input] App-level React class names and semantic theme tokens from styles/tokens.css. */
 /* [Output] Global app shell, notebook, binder, scrollbar, and modal styling. */
 /* [Pos] app-style sheet in frontend/app/_dream */
@@ -342,3 +343,39 @@
     height: 100vh;
   }
 }
+
+/* Writing owns one contained scroll area below its page header and tools. */
+.writing-page[data-mobile-layout='true'] {
+  --writing-font-size: 18px;
+  --writing-line-height: 1.6em;
+}
+.writing-page-header {display:flex;align-items:center;gap:8px;padding:8px 12px;flex:0 0 auto;min-width:0;}
+.writing-page-header > strong {flex:1;min-width:0;font-size:1.1rem;}
+.writing-page-header button,.writing-chooser-action {min-height:44px;min-width:44px;border:0;border-radius:6px;padding:8px;background:var(--color-bg-surface);color:var(--color-text-body);cursor:pointer;}
+.writing-page-header__chooser {min-width:0;max-width:45%;}
+.writing-chooser-action {display:flex;align-items:center;gap:6px;max-width:100%;}
+.writing-chooser-action > svg {flex-shrink:0;}
+.writing-chooser-action > span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.writing-chooser-action:disabled {opacity:.6;cursor:default;}
+.writing-page-header button:focus-visible,.writing-chooser-action:focus-visible {outline:2px solid var(--color-border-paper);outline-offset:2px;}
+.writing-page[data-mobile-layout='true'] .writing-mobile-tools {position:static !important;justify-content:flex-end;flex:0 0 auto;padding:4px 12px 8px;}
+.writing-page[data-mobile-layout='true'] .notebook-lines {
+  background-image:linear-gradient(to right,transparent 0,transparent 39px,var(--notebook-margin-line) 40px,var(--notebook-margin-line) 41px,transparent 41px);
+}
+.writing-page[data-mobile-layout='true'] .writing-prose {
+  display:block;box-sizing:border-box;padding:0;margin:0;
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--writing-line-height) - 1px),var(--notebook-rule-line) calc(var(--writing-line-height) - 1px),var(--notebook-rule-line) var(--writing-line-height)) !important;
+  background-attachment:local;
+}
+.writing-page[data-mobile-layout='true'] .writing-text-highlight {white-space:pre-wrap;overflow-wrap:break-word;word-wrap:break-word;box-sizing:border-box;padding:0;margin:0;}
+.writing-page[data-mobile-layout='true'] .writing-feedback {position:static !important;flex:0 0 auto;box-sizing:border-box;}
+.writing-choice-error {display:flex;align-items:center;gap:8px;width:100%;}
+.writing-choice-error button {min-height:44px;min-width:44px;background:var(--color-bg-surface);color:var(--color-text-body);border:1px solid var(--color-border-paper);border-radius:6px;}
+.state-chooser--mobile > div {flex-wrap:wrap;row-gap:6px !important;cursor:default !important;}
+.state-chooser--mobile [data-session-labels] {flex-wrap:wrap;white-space:normal !important;overflow:visible !important;flex-basis:100% !important;}
+.state-chooser-overlay--mobile {min-height:0;overflow:hidden;isolation:isolate;}
+.state-chooser-overlay--mobile .state-chooser-scroll {min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;}
+.state-chooser-overlay--mobile .state-chooser-body {min-height:100%;width:100%;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 16px;}
+.state-chooser-overlay--mobile .state-chooser-greeting {font-size:clamp(1.5rem,6vw,2.2rem) !important;margin:0 0 1.25em !important;overflow-wrap:anywhere;max-width:100%;flex-shrink:0;}
+.state-chooser-overlay--mobile .state-chooser-cube {width:100%;max-width:600px;flex-shrink:0;}
+.state-chooser-overlay--mobile .state-chooser-body > p {margin:1.5em 0 0 !important;flex-shrink:0;}

@@ -1,9 +1,10 @@
+// [Sync] 2026-11-01: optionally recompute mobile textarea geometry after committed text, font and width changes without editor writes.
 // [Input] EditorEngine text Cells, textarea events, IME state, and Agent dropdown state.
 // [Output] Manage local TextCell mirrors, composition, paste, key handling, and textarea refs without model side effects.
 // [Pos] Text Cell interaction hook in frontend/app/_dream/hooks.
 // [Sync] 2026-09-01: remove the inspiration callback so every prose edit remains model-request-free.
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import type { RefObject, Dispatch, SetStateAction } from 'react';
 import type { EditorEngine, EditorState, TextCell } from '../engine/EditorEngine';
 
@@ -13,6 +14,8 @@ export interface UseTextCellsOptions {
   dropdownVisible?: boolean;
   dropdownTriggerCellId?: string | null;
   onDropdownClose?: () => void;
+  trackLayout?: boolean;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }
 
 export interface UseTextCellsReturn {
@@ -38,6 +41,8 @@ export function useTextCells({
   dropdownVisible,
   dropdownTriggerCellId,
   onDropdownClose,
+  trackLayout = false,
+  scrollContainerRef,
 }: UseTextCellsOptions): UseTextCellsReturn {
   const [localTexts, setLocalTexts] = useState<Map<string, string>>(new Map());
   const [composingCells, setComposingCells] = useState<Set<string>>(new Set());
@@ -60,6 +65,54 @@ export function useTextCells({
       });
     }
   }, [state, composingCells]);
+
+  const resizeTextareas = useCallback(() => {
+    const container = scrollContainerRef?.current;
+    const scrollTop = container?.scrollTop ?? 0;
+    const focused = document.activeElement;
+    const anchor = focused instanceof HTMLTextAreaElement && Array.from(textareaRefs.current.values()).includes(focused) ? focused : null;
+    const before = anchor?.getBoundingClientRect().top;
+    textareaRefs.current.forEach(textarea => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    });
+    if (container) container.scrollTop = scrollTop + (anchor && before !== undefined ? anchor.getBoundingClientRect().top - before : 0);
+  }, [scrollContainerRef]);
+
+  useLayoutEffect(() => {
+    if (trackLayout) resizeTextareas();
+  }, [trackLayout, localTexts, refsReady, resizeTextareas]);
+
+  useEffect(() => {
+    if (!trackLayout) return;
+    let frame = 0, disposed = false, previous = '';
+    const schedule = () => {
+      if (disposed || frame) return;
+      frame = requestAnimationFrame(() => {frame = 0; if (!disposed) resizeTextareas();});
+    };
+    const changed = () => {
+      const first = textareaRefs.current.values().next().value as HTMLTextAreaElement | undefined;
+      const style = first ? getComputedStyle(first) : null;
+      const signature = `${first?.clientWidth}/${style?.fontSize}/${style?.lineHeight}/${style?.fontFamily}`;
+      if (signature !== previous) {previous = signature; schedule();}
+    };
+    const observer = new ResizeObserver(changed);
+    textareaRefs.current.forEach(textarea => observer.observe(textarea));
+    if (scrollContainerRef?.current) observer.observe(scrollContainerRef.current);
+    void document.fonts.ready.then(schedule);
+    document.fonts.addEventListener('loadingdone', schedule);
+    window.addEventListener('resize', changed);
+    window.visualViewport?.addEventListener('resize', changed);
+    changed();
+    return () => {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      observer.disconnect();
+      document.fonts.removeEventListener('loadingdone', schedule);
+      window.removeEventListener('resize', changed);
+      window.visualViewport?.removeEventListener('resize', changed);
+    };
+  }, [trackLayout, refsReady, state?.cells.length, scrollContainerRef, resizeTextareas]);
 
   const handleTextChange = useCallback((cellId: string, newText: string) => {
     setLocalTexts(prev => {

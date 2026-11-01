@@ -2,8 +2,11 @@
 // [Output] Native seven-section overview, resource selection, sources and read-only Skill/file pages.
 // [Pos] Settings Resources presentation; original hook/server own authorization, synchronization and revisions.
 // [Sync] 2026-10-29: reuse the existing business state and Markdown renderer; retain child scroll positions and selection drafts.
+// [Sync] 2026-11-01: iOS uses its packaged CLI; retain re-read and suppress host npm instructions for missing resources.
+// [Sync] 2026-11-01: retain the system Linking receiver for authorization links and catch synchronous open failures.
 import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {ActivityIndicator,BackHandler,Linking,Platform,Pressable,ScrollView,StyleSheet,Switch,TextInput,View} from 'react-native';
+import {ActivityIndicator,BackHandler,Platform,Pressable,ScrollView,StyleSheet,Switch,TextInput,View} from 'react-native';
+import {openExternalLink} from '../../../../src/platform/externalLinks.native';
 import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
 import type {ResourceConnectorApi} from '../../api/resourceConnectorApi';
@@ -16,7 +19,7 @@ interface Props {
   ownerId:string;active:boolean;api:ResourceConnectorApi;observation:ConnectorStatusObservation;
   onBack:()=>void;origin?:string;openLink?:(url:string)=>Promise<unknown>;
 }
-export default function ConnectorNotionDetailPage({ownerId,active,api,observation,onBack,origin,openLink=Linking.openURL}:Props){
+export default function ConnectorNotionDetailPage({ownerId,active,api,observation,onBack,origin,openLink=openExternalLink}:Props){
   const c=useInkColors(),state=useNotionConnector({ownerId,authenticated:true,active,api,observation});
   const {view,setView,connector,catalog,catalogLoading,pageError,catalogError,policyError,connecting,disconnecting,syncLoading,policySaving,
     policyEnabled,setPolicyEnabled,policyIntervalMinutes,setPolicyIntervalMinutes,resourceLoading,resourceSaving,resourceError,
@@ -32,7 +35,7 @@ export default function ConnectorNotionDetailPage({ownerId,active,api,observatio
   const back=()=>{if(view==='file')setView('skill');else if(view!=='overview')setView('overview');else onBack();};
   useEffect(()=>{if(!active)setMoreOpen(false);},[active]);
   useEffect(()=>{if(!active||Platform.OS!=='android')return;const listener=BackHandler.addEventListener('hardwareBackPress',()=>{back();return true;});return()=>listener.remove();},[active,view,onBack]);
-  function link(url:string){setLinkError(false);void openLink(url).catch(()=>setLinkError(true));}
+  async function link(url:string){setLinkError(false);try{await openLink(url);}catch{setLinkError(true);}}
   const copy=(value:string|null|undefined,error=false)=>value?<InkLabel selectable accessibilityRole={error?'alert':undefined} style={error?{color:c['color-state-error']}:text}>{value}</InkLabel>:null;
   const button=(label:string,onPress:()=>void,disabled=false)=> <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.button,{borderColor:c['color-border-paper'],opacity:disabled?0.5:1}]}><InkLabel style={text}>{label}</InkLabel></Pressable>;
   const section=(title:string,body:ReactNode)=><View style={[s.section,{borderTopColor:c['color-border-paper']}]}><InkLabel accessibilityRole="header" style={[text,s.sectionTitle]}>{title}</InkLabel>{body}</View>;
@@ -50,11 +53,11 @@ export default function ConnectorNotionDetailPage({ownerId,active,api,observatio
     <View style={s.header}>{button(view==='overview'?'← 资源':view==='file'?'← Skill':'← Notion',back)}<InkLabel accessibilityRole="header" style={[text,s.title]}>{title}</InkLabel></View>
     {linkError?<View style={s.notice}>{copy('链接暂时无法打开，请重试。',true)}</View>:null}
     {scene('overview',<>
-      <View style={s.row}>{copy(detailStatus.label)}{button(connecting?'连接中':cliMissing?'先安装 ntn':authActionLabel,()=>void handleStartAuth(),catalogLoading||cliMissing||connecting||connectorAuthStatus==='authenticating')}
+      <View style={s.row}>{copy(detailStatus.label)}{button(connecting?'连接中':cliMissing?(Platform.OS==='ios'?'暂不可用':'先安装 ntn'):authActionLabel,()=>void handleStartAuth(),catalogLoading||cliMissing||connecting||connectorAuthStatus==='authenticating')}
         {button('更多 Notion 操作',()=>setMoreOpen(value=>!value))}</View>
       {moreOpen?<View>{button(disconnecting?'关闭中':'关闭连接',()=>void handleDisconnect(),!connectorId||disconnecting)}</View>:null}
       {connector?.auth.status==='authenticating'?<View style={s.gap}>{copy('验证码')}{copy(connector.auth.verificationCode||'等待生成')}{copy(connector.auth.message||'在 Notion 中完成确认后，本页会自动刷新。')}{connector.auth.verificationUrl?button('打开验证页',()=>link(connector.auth.verificationUrl!)):null}</View>:null}
-      {cliMissing&&cliInstallation?<View style={s.gap}>{copy('连接前需要安装 Notion CLI')}{copy(`在 Dream 服务所在机器运行 ${cliInstallation.installCommand}，安装完成后重新读取。`)}{button('重新读取',()=>void reloadCatalog())}</View>:null}
+      {cliMissing&&cliInstallation?<View style={s.gap}>{Platform.OS==='ios'?copy('应用内的 Notion 组件未就绪。请重新读取；问题持续时请更新应用。'): <>{copy('连接前需要安装 Notion CLI')}{copy(`在 Dream 服务所在机器运行 ${cliInstallation.installCommand}，安装完成后重新读取。`)}</>}{button('重新读取',()=>void reloadCatalog(),catalogLoading)}</View>:null}
       {copy(pageError,true)}
       {section('权限',<>
         <View style={s.row}><InkLabel style={text}>自动同步</InkLabel><Switch accessibilityLabel="自动同步" value={policyEnabled} disabled={!syncPolicy||policySaving} onValueChange={setPolicyEnabled}/></View>
@@ -62,14 +65,14 @@ export default function ConnectorNotionDetailPage({ownerId,active,api,observatio
         <View accessibilityRole="radiogroup" accessibilityLabel="Notion 自动同步频率" style={s.row}>{syncPolicy?.allowedIntervalMinutes.map(minutes=><Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={formatSyncInterval(minutes)} accessibilityState={{checked:policyIntervalMinutes===minutes,disabled:!policyEnabled||policySaving}} aria-checked={policyIntervalMinutes===minutes} disabled={!policyEnabled||policySaving} onPress={()=>setPolicyIntervalMinutes(minutes)} style={[s.button,{borderColor:c['color-border-paper'],backgroundColor:policyIntervalMinutes===minutes?c['color-bg-hover']:'transparent'}]}><InkLabel style={text}>{formatSyncInterval(minutes)}</InkLabel></Pressable>)}</View>
         {button(policySaving?'保存中':'保存策略',()=>void handleSaveSyncPolicy(),!syncPolicy||policyIntervalMinutes===null||policySaving)}{copy(policyStatus)}{copy(policyError,true)}
       </>)}
-      {section('Skills',catalogLoading?<ActivityIndicator color={c['color-text-primary']}/>:catalogError?copy(`${catalogError}；连接和索引不受影响。`,true):catalog?.skills.length?<View style={s.gap}>{catalog.skills.map(skill=><View key={skill.id}>{button(skill.title,()=>void handleOpenSkill(skill.id))}<InkLabel style={secondary}>{`内置 · ${availabilityLabel(skill.availability)}`}</InkLabel></View>)}</View>:copy('当前服务器没有可查看的 Notion Skill。'))}
-      {(['read','write'] as const).map(kind=><View key={kind}>{section(kind==='read'?'读取操作':'写入操作',catalogLoading?<ActivityIndicator color={c['color-text-primary']}/>:catalogError?copy('能力说明暂时无法读取；资源管理仍可继续。',true):<View style={s.gap}>{(kind==='read'?readOperations:writeOperations).map(operation=><View key={operation.id} style={s.gap}>{copy(operation.title)}<InkLabel style={secondary}>{operation.description}</InkLabel><InkLabel style={secondary}>{`${operationSourceLabel(operation.source)} · ${availabilityLabel(operation.availability)}`}</InkLabel></View>)}</View>)}</View>)}
+      {section('Skills',catalogLoading?<ActivityIndicator color={c['color-text-primary']}/>:catalogError?copy(`${catalogError}；连接和索引不受影响。`,true):catalog?.skills.length?<View style={s.gap}>{catalog.skills.map(skill=><View key={skill.id}>{button(skill.title,()=>void handleOpenSkill(skill.id))}<InkLabel style={secondary}>{`内置 · ${availabilityLabel(skill.availability,Platform.OS==='ios')}`}</InkLabel></View>)}</View>:copy('当前服务器没有可查看的 Notion Skill。'))}
+      {(['read','write'] as const).map(kind=><View key={kind}>{section(kind==='read'?'读取操作':'写入操作',catalogLoading?<ActivityIndicator color={c['color-text-primary']}/>:catalogError?copy('能力说明暂时无法读取；资源管理仍可继续。',true):<View style={s.gap}>{(kind==='read'?readOperations:writeOperations).map(operation=><View key={operation.id} style={s.gap}>{copy(operation.title)}<InkLabel style={secondary}>{operation.description}</InkLabel><InkLabel style={secondary}>{`${operationSourceLabel(operation.source)} · ${availabilityLabel(operation.availability,Platform.OS==='ios')}`}</InkLabel></View>)}</View>)}</View>)}
       {section('资源范围',button('管理资源范围',handleOpenResources))}
       {section('已挂载来源',button('管理已挂载来源',()=>setView('sources')))}
       {section('信息',<>{copy(`连接时间 ${formatConnectionDate(connector)}`)}<View style={s.row}>{[['网站',NOTION_WEBSITE],['隐私政策',NOTION_PRIVACY],['服务条款',NOTION_TERMS]].map(([label,url])=><View key={label}>{button(label,()=>link(url))}</View>)}</View></>)}
     </>)}
     {scene('skill',skillLoading?<ActivityIndicator color={c['color-text-primary']}/>:skillError?copy(skillError,true):skillDetail?<>
-      {copy(skillDetail.skill.description)}<InkLabel style={secondary}>{`内置 · ${availabilityLabel(skillDetail.skill.availability)}`}</InkLabel>
+      {copy(skillDetail.skill.description)}<InkLabel style={secondary}>{`内置 · ${availabilityLabel(skillDetail.skill.availability,Platform.OS==='ios')}`}</InkLabel>
       {section('Skill 说明',markdown(skillDetail.skill.body))}{section('包含的文件',skillDetail.files.length?<View style={s.gap}>{skillDetail.files.map(file=><View key={file.id}>{button(file.relativePath,()=>void handleOpenSkillFile(file))}<InkLabel style={secondary}>{`${file.mediaType} · ${formatFileSize(file.sizeBytes)}`}</InkLabel></View>)}</View>:copy('当前 Skill 没有可公开查看的相关文件。'))}
     </>:null)}
     {scene('file',skillFileLoading?<ActivityIndicator color={c['color-text-primary']}/>:skillFileError?copy(skillFileError,true):skillFileContent?<>{copy(skillFileContent.file.relativePath)}{markdown(skillFileContent.file.content)}</>:null)}

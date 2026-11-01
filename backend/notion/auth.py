@@ -6,6 +6,7 @@
 # [Sync] 2026-08-28: normalize imports during the final agentdata credential audit.
 # [Sync] 2026-08-30: expose the pinned ntn installation prerequisite before connector authentication.
 # [Sync] 2026-10-30: bind a concrete process factory at the iOS composition root; ordinary subprocess argv/env/timeout remain unchanged.
+# [Sync] 2026-11-01: resolve the exact interpreter-owned file by readability; native subprocess entries retain X_OK checks.
 
 """Notion authentication helpers backed by the server-owned ``ntn`` CLI."""
 from __future__ import annotations
@@ -51,14 +52,17 @@ _PARENT_ENV_ALLOWLIST = (
 )
 
 _process_factory = None
+_process_executable = None
 
 
-def bind_notion_process_factory(factory):
+def bind_notion_process_factory(factory, *, executable: str | Path | None = None):
     """Bind the application-owned executable adapter once, independently of deployment names."""
-    global _process_factory
-    if _process_factory is not None and _process_factory is not factory:
+    global _process_factory, _process_executable
+    resolved = Path(executable).resolve(strict=True) if executable is not None else None
+    if _process_factory is not None and (_process_factory is not factory or _process_executable != resolved):
         raise NotionConfigError("Notion command execution is already bound.")
     _process_factory = factory
+    _process_executable = resolved
 
 
 async def create_notion_process(*args, **kwargs):
@@ -118,9 +122,15 @@ def resolve_ntn_executable() -> str:
     configured = os.environ.get("INK_NOTION_CLI_PATH", "").strip()
     if configured:
         candidate = Path(configured).expanduser()
-        if not candidate.is_absolute() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+        if not candidate.is_absolute() or not candidate.is_file():
             raise NotionCLIUnavailableError("Notion service is temporarily unavailable.")
-        return str(candidate.resolve(strict=True))
+        resolved = candidate.resolve(strict=True)
+        # The bound interpreter reads this exact digest-verified ELF as data.
+        # iOS denies native execution of files in the writable App container.
+        access = os.R_OK if _process_factory is not None and resolved == _process_executable else os.X_OK
+        if not os.access(resolved, access):
+            raise NotionCLIUnavailableError("Notion service is temporarily unavailable.")
+        return str(resolved)
     discovered = shutil.which("ntn")
     if not discovered:
         raise NotionCLIUnavailableError("Notion service is temporarily unavailable.")

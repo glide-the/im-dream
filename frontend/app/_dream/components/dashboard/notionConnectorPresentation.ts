@@ -1,6 +1,7 @@
 // [Input] Original Notion status labels, catalog/source selection and pagination constants.
 // [Output] Pure formatting and source selection metadata shared by Web/native.
 // [Pos] No network, authorization or synchronization owner is added.
+// [Sync] 2026-11-01: present an unavailable bundled CLI without a desktop installation instruction.
 // [Sync] 2026-10-29: extract original state for Web/native reuse; HTTP, business payloads and permissions keep their owners.
 import {ResourceConnectorApiError,type ResourceConnector,type ConnectorSource,type ConnectorAuthStatus,type ConnectorStatus,type ConnectorResourceSelection,type NotionCapabilityAvailability,type NotionResourceOption,type NotionCapabilityCatalog,type NotionSkillDetail,type NotionSkillFileDescriptor,type NotionSkillFileContent,type ResourceConnectorApi} from '../../api/resourceConnectorApi';
 export type DetailView = 'overview' | 'skill' | 'file' | 'resources' | 'sources';
@@ -89,10 +90,10 @@ export function formatStatusLabel(
   }
 }
 
-export function availabilityLabel(availability: NotionCapabilityAvailability): string {
+export function availabilityLabel(availability: NotionCapabilityAvailability, bundledCli = false): string {
   switch (availability) {
     case 'available': return '可用';
-    case 'requires_installation': return '需安装 ntn';
+    case 'requires_installation': return bundledCli ? '暂不可用' : '需安装 ntn';
     case 'requires_connection': return '连接后可用';
     case 'requires_scope': return '选择资源后可用';
     default: return '不可用';

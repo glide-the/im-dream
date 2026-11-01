@@ -1,14 +1,16 @@
 // [Input] Original About content and explicit repository link action.
 // [Output] Native project/team/timeline/links page with the original serif headings and system body font.
 // [Pos] Settings About destination; no backend or model lifecycle changes.
+// [Sync] 2026-11-01: route links through the shared system-browser action and recover synchronous failures.
 import {useState} from 'react';
-import {Linking,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {openExternalLink} from '../../../src/platform/externalLinks.native';
 import {useTranslation} from 'react-i18next';
 import Svg,{Path} from 'react-native-svg';
 import InkLabel from '../../../src/components/InkLabel.native';
 import useInkColors from '../../../src/components/useInkColors.native';
 import {teamMembers,developmentTimeline,ABOUT_REPOSITORY_URL,ABOUT_SUMMARY,ABOUT_DESCRIPTION} from './aboutPresentation';
-export default function AboutView({onBack,openLink=Linking.openURL}:{onBack:()=>void;openLink?:(url:string)=>Promise<unknown>}) {
+export default function AboutView({onBack,openLink=openExternalLink}:{onBack:()=>void;openLink?:(url:string)=>Promise<unknown>}) {
   const {t,i18n}=useTranslation(),c=useInkColors(),[error,setError]=useState(false),text={color:c['color-text-primary']},secondary={color:c['color-text-secondary']};
   const heading=(label:string)=><Text accessibilityRole="header" style={[styles.heading,text]}>{label}</Text>;
   return <View style={[styles.fill,{backgroundColor:c['color-bg-app']}]}>
@@ -18,7 +20,7 @@ export default function AboutView({onBack,openLink=Linking.openURL}:{onBack:()=>
       <View style={styles.section}>{heading('About the Project')}{ABOUT_DESCRIPTION.map(paragraph=><Text key={paragraph} style={[styles.body,secondary]}>{paragraph}</Text>)}</View>
       <View style={styles.section}>{heading('The Team')}{teamMembers.map(member=><View key={member.name} style={[styles.card,{backgroundColor:c['color-bg-paper'],borderColor:c['color-border-paper']}]}><Text style={[styles.member,text]}>{member.name}</Text><Text style={[styles.role,secondary]}>{member.role}</Text><Text style={[styles.body,secondary]}>{member.description}</Text></View>)}</View>
       <View style={styles.section}>{heading('Development Timeline')}<View style={[styles.timeline,{borderLeftColor:c['color-border-paper']}]}>{developmentTimeline.map(item=><View key={item.version} style={styles.release}><View style={[styles.dot,{backgroundColor:c['color-text-primary'],borderColor:c['color-bg-app']}]}/><Text style={[styles.date,secondary]}>{item.date} • {item.version}</Text><Text style={[styles.member,text]}>{item.title}</Text><Text style={[styles.body,secondary]}>{item.description}</Text></View>)}</View></View>
-      <View style={styles.section}>{heading('Links')}<Pressable accessibilityRole="link" accessibilityLabel="GitHub Repository" onPress={()=>{setError(false);void openLink(ABOUT_REPOSITORY_URL).catch(()=>setError(true));}} style={[styles.link,{backgroundColor:c['color-bg-paper'],borderColor:c['color-border-paper']}]}>
+      <View style={styles.section}>{heading('Links')}<Pressable accessibilityRole="link" accessibilityLabel="GitHub Repository" onPress={async()=>{setError(false);try{await openLink(ABOUT_REPOSITORY_URL);}catch{setError(true);}}} style={[styles.link,{backgroundColor:c['color-bg-paper'],borderColor:c['color-border-paper']}]}>
         <Svg height={18} width={18} viewBox="0 0 16 16" fill={c['color-text-primary']}><Path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></Svg><Text style={[styles.body,text]}>GitHub Repository</Text>
       </Pressable>{error?<Text accessibilityRole="alert" style={[styles.body,{color:c['color-state-error']}]}>{i18n.language.startsWith('zh')?'链接暂时无法打开。':'The link could not be opened. Please retry.'}</Text>:null}</View>
     </ScrollView>

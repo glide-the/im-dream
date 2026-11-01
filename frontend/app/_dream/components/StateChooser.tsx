@@ -1,8 +1,11 @@
 // [Input] State config, selected emotional state, session timestamp, and user_session labels.
 // [Output] Render the emotional state chooser and compact writing-session metadata line.
 // [Pos] state-chooser component in frontend/app/_dream/components
+// [Sync] 2026-11-01: mobile page navigation, contained touch scrolling and cancellation of pending selection on hide.
 // [Sync] 2026-06-01: show current user_session.labels beside the collapsed state indicator.
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import type { WritingChooserView } from './Editor/WritingDocument.protocol';
 import { useTranslation } from 'react-i18next';
 import { StateCube } from './StateCube';
 import type { SessionLabels, StateConfig } from '../api/voiceApi';
@@ -16,6 +19,12 @@ interface Props {
   createdAt?: string;  // ISO timestamp recorded when the session was created
   sessionLabels?: SessionLabels;
   onChoose: (stateId: string) => void;
+  mobile?: boolean;
+  active?: boolean;
+  navigationTarget?: HTMLElement | null;
+  overlayTarget?: HTMLElement | null;
+  openNonce?: number;
+  onViewChange?: (view: WritingChooserView) => void;
 }
 
 export default function StateChooser({
@@ -24,12 +33,16 @@ export default function StateChooser({
   selectedStateLoading = false,
   createdAt,
   sessionLabels = [],
-  onChoose
+  onChoose, mobile = false, active = true, navigationTarget, overlayTarget, openNonce, onViewChange
 }: Props) {
   const { i18n } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldAnimate, setShouldAnimate] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const selectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({active, onChoose, onViewChange});
+  latest.current = {active, onChoose, onViewChange};
+  const deliveredOpen = useRef(0);
   const indicatorRef = useRef<HTMLDivElement>(null);
   const visibleSessionLabels = useMemo(() => {
     return sessionLabels
@@ -38,20 +51,46 @@ export default function StateChooser({
   }, [sessionLabels]);
   const sessionLabelsTitle = visibleSessionLabels.join(', ');
 
-  // @@@ Collapse when selectedState is set externally (skip while loading)
   useEffect(() => {
-    if (selectedStateLoading) return;
-    if (selectedState) {
+    if (!active) {
+      if (selectionTimer.current !== null) clearTimeout(selectionTimer.current);
+      selectionTimer.current = null;
       setIsExpanded(false);
-      // Trigger highlight animation
-      setShouldAnimate(true);
-      setTimeout(() => setShouldAnimate(false), 600);
-    } else {
-      setIsExpanded(true);
+      setIsFadingOut(false);
+      return;
     }
-  }, [selectedState, selectedStateLoading]);
+    if (selectedStateLoading) return;
+    setIsExpanded(!selectedState);
+    if (selectedState) {
+      setShouldAnimate(true);
+      const timer = setTimeout(() => setShouldAnimate(false), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedState, selectedStateLoading, active]);
+
+  useEffect(() => () => {
+    if (selectionTimer.current !== null) clearTimeout(selectionTimer.current);
+  }, []);
+
+  const open = () => {
+    if (!latest.current.active || selectedStateLoading || selectionTimer.current !== null) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setIsExpanded(true);
+  };
+  useEffect(() => {
+    if (!active || selectedStateLoading || !openNonce || openNonce <= deliveredOpen.current) return;
+    deliveredOpen.current = openNonce;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setIsExpanded(true);
+  }, [openNonce, active, selectedStateLoading]);
 
   const selectedStateData = selectedState ? stateConfig.states[selectedState] : null;
+
+  const expanded = active && !selectedStateLoading && (!selectedStateData || isExpanded);
+  const name = selectedStateData?.name ?? '';
+  useEffect(() => {
+    latest.current.onViewChange?.({loading: selectedStateLoading, selectedStateId: selectedState, name, expanded});
+  }, [selectedStateLoading, selectedState, name, expanded]);
 
   // @@@ Use createdAt if provided, otherwise use today
   const timestamp = createdAt ? parseFlexibleTimestamp(createdAt) : null;
@@ -66,15 +105,15 @@ export default function StateChooser({
   });
 
   const handleStateSelect = (stateId: string) => {
-    // Trigger fade-out animation
+    if (!latest.current.active || selectionTimer.current !== null) return;
     setIsFadingOut(true);
-
-    // Wait for animation, then collapse and notify parent
-    setTimeout(() => {
+    selectionTimer.current = setTimeout(() => {
+      selectionTimer.current = null;
+      if (!latest.current.active) return;
       setIsExpanded(false);
       setIsFadingOut(false);
-      onChoose(stateId);
-    }, 800); // Match animation duration
+      latest.current.onChoose(stateId);
+    }, 800);
   };
 
   // @@@ Mini icon generator for collapsed state (24px version)
@@ -118,9 +157,74 @@ export default function StateChooser({
     }
   };
 
-  if (selectedStateLoading) {
+  if (selectedStateLoading && !mobile) {
     return <div style={{ height: '32px' }} />;
   }
+
+  const overlay = (
+    <div className={mobile ? "state-chooser-overlay state-chooser-overlay--mobile" : "state-chooser-overlay"} role="dialog" aria-label={stateConfig.greeting || "Choose your emotion"} style={{
+          position: mobile ? 'absolute' : 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'var(--color-bg-paper)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: mobile ? undefined : 'center',
+          alignItems: mobile ? 'stretch' : 'center',
+          zIndex: 9999,
+          opacity: isFadingOut ? 0 : 1,
+          transition: 'opacity 0.8s ease-out',
+          pointerEvents: mobile ? 'auto' : isFadingOut ? 'none' : 'auto'
+        }}>
+          <div className="state-chooser-scroll" style={mobile ? undefined : {display: 'contents'}}><div className="state-chooser-body" style={mobile ? undefined : {display: 'contents'}}>
+          {/* Header text */}
+          <h1 className="state-chooser-greeting" style={{
+            fontSize: 48,
+            fontWeight: 300,
+            color: 'var(--color-text-body)',
+            marginBottom: 60,
+            textAlign: 'center',
+            letterSpacing: '0.05em',
+            opacity: isFadingOut ? 0 : 1,
+            transform: isFadingOut ? 'translateY(-20px)' : 'translateY(0)',
+            transition: 'all 0.8s ease-out'
+          }}>
+            {stateConfig.greeting || "What's your emotion today?"}
+          </h1>
+
+          {/* 3D Cube */}
+          <div className="state-chooser-cube" style={{
+            opacity: isFadingOut ? 0 : 1,
+            transform: isFadingOut ? 'scale(0.9)' : 'scale(1)',
+            transition: 'all 0.8s ease-out'
+          }}>
+            <StateCube
+              mobile={mobile}
+              active={active && !isFadingOut}
+              stateConfig={stateConfig}
+              onStateSelect={handleStateSelect}
+            />
+          </div>
+
+          {/* Helper text */}
+          <p style={{
+            marginTop: 40,
+            fontSize: 14,
+            color: 'var(--color-text-muted)',
+            textAlign: 'center',
+            opacity: isFadingOut ? 0 : 1,
+            transition: 'opacity 0.8s ease-out'
+          }}>
+            {i18n.language.startsWith('zh') ? '选择心情，开始写作' : 'Click a state to begin writing'}
+          </p>
+        </div></div>
+        </div>
+  );
+  const actionLabel = selectedStateLoading
+    ? (i18n.language.startsWith('zh') ? '正在读取…' : 'Loading…')
+    : name || (i18n.language.startsWith('zh') ? '选择心情' : 'Choose emotion');
 
   return (
     <>
@@ -142,21 +246,21 @@ export default function StateChooser({
         }
       `}</style>
 
-      <div style={{
+      <div className={mobile ? 'state-chooser state-chooser--mobile' : 'state-chooser'} style={{
         padding: '0',
         fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif"
       }}>
         {/* Compact view when state is selected */}
-        {selectedStateData && !isExpanded ? (
+        {mobile || (selectedStateData && !isExpanded) ? (
           <div style={{
             display: 'flex',
             alignItems: 'center',
             gap: 16,
-            cursor: 'pointer',
+            cursor: mobile ? 'default' : 'pointer',
             minWidth: 0,
             width: '100%'
           }}
-          onClick={() => setIsExpanded(true)}
+          onClick={mobile ? undefined : open}
           >
             {/* Date */}
             <div style={{
@@ -169,7 +273,7 @@ export default function StateChooser({
             </div>
 
             {/* Mini icon + state name */}
-            <div
+            {!mobile && <div
               ref={indicatorRef}
               style={{
                 display: 'flex',
@@ -201,13 +305,14 @@ export default function StateChooser({
               fontWeight: 500,
               color: 'var(--color-text-body)'
             }}>
-              {selectedStateData.name}
+              {selectedStateData?.name}
             </span>
-          </div>
+          </div>}
 
           {visibleSessionLabels.length > 0 && (
             <div
               title={sessionLabelsTitle}
+              data-session-labels
               aria-label={`Session labels: ${sessionLabelsTitle}`}
               style={{
                 display: 'flex',
@@ -245,64 +350,16 @@ export default function StateChooser({
           )}
         </div>
       ) : (
-        /* Expanded view - full-screen white overlay */
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'var(--color-bg-paper)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999,
-          opacity: isFadingOut ? 0 : 1,
-          transition: 'opacity 0.8s ease-out',
-          pointerEvents: isFadingOut ? 'none' : 'auto'
-        }}>
-          {/* Header text */}
-          <h1 style={{
-            fontSize: 48,
-            fontWeight: 300,
-            color: 'var(--color-text-body)',
-            marginBottom: 60,
-            textAlign: 'center',
-            letterSpacing: '0.05em',
-            opacity: isFadingOut ? 0 : 1,
-            transform: isFadingOut ? 'translateY(-20px)' : 'translateY(0)',
-            transition: 'all 0.8s ease-out'
-          }}>
-            {stateConfig.greeting || "What's your emotion today?"}
-          </h1>
-
-          {/* 3D Cube */}
-          <div style={{
-            opacity: isFadingOut ? 0 : 1,
-            transform: isFadingOut ? 'scale(0.9)' : 'scale(1)',
-            transition: 'all 0.8s ease-out'
-          }}>
-            <StateCube
-              stateConfig={stateConfig}
-              onStateSelect={handleStateSelect}
-            />
-          </div>
-
-          {/* Helper text */}
-          <p style={{
-            marginTop: 40,
-            fontSize: 14,
-            color: 'var(--color-text-muted)',
-            textAlign: 'center',
-            opacity: isFadingOut ? 0 : 1,
-            transition: 'opacity 0.8s ease-out'
-          }}>
-            Click a state to begin writing
-          </p>
-        </div>
+        /* Existing desktop overlay */
+        mobile ? null : overlay
       )}
       </div>
+      {mobile && active && expanded && overlayTarget ? createPortal(overlay, overlayTarget) : null}
+      {mobile && navigationTarget ? createPortal(
+        <button type="button" className="writing-chooser-action" disabled={selectedStateLoading || !active}
+          aria-label={actionLabel} aria-haspopup="dialog" aria-expanded={expanded} onClick={open}>
+          {selectedState && getMiniStateIcon(selectedState)}<span>{actionLabel}</span>
+        </button>, navigationTarget) : null}
     </>
   );
 }

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: verify native detail PanResponder snapping/cancel, independent scroll and task preservation.
 // [Input] Production Native Reflections page/API/storage adapter and original shared public DTO fixtures.
 // [Output] Provider-free UI/SSE/idempotency/config/source/history/recovery and lifecycle evidence.
 // [Pos] Explicit RNW/platform fixture; normal accounts, backend, database, CLI and models remain outside this lane.
@@ -91,4 +92,40 @@ test('native failed start reports the original error without a grace-timer resub
  await page.route(`**/api/reflections/tasks/${TASK_ID}/start`,route=>route.fulfill({status:503,json:{detail:{error_code:'START_UNAVAILABLE'}}}));
  await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Failed to start reflections task (503)');await expect(page.getByRole('button',{name:'Generate New Analysis',exact:true})).toBeEnabled();
  await page.clock.runFor(1500);expect((await stateCalls(page)).filter(call=>call.path.endsWith('/start'))).toHaveLength(1);expect(f.createRequests).toHaveLength(1);expect(f.errors).toEqual([]);
+});
+
+
+test('native saved report detail handle drags and snaps without taking over content scrolling or creating tasks', async ({page}, testInfo) => {
+  const fixture = await installReflectionFixtures(page, {seedReport: true});
+  fixture.reports[0].report_data.echoes[0].description = 'A long saved reflection for native reading. '.repeat(120);
+  await open(page); await page.getByRole('button', {name: /Open analysis created/}).first().click();
+  await page.getByRole('tab', {name: 'Recurring Themes', exact: true}).click();
+  await page.getByRole('button', {name: 'Repeated concern', exact: true}).click();
+  const handle = page.getByLabel('Resize reflection details', {exact: true});
+  const detail = page.getByTestId('reflection-detail');
+  await expect(handle).toHaveAttribute('aria-valuenow', '70');
+  const initial = (await detail.boundingBox())!.height;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 1});
+  const drag = async (distance: number, cancel = false) => {
+    const box = (await handle.boundingBox())!;
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    const touch = (nextY: number) => [{x, y: nextY, id: 1}];
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: touch(y)});
+    for (let step = 1; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: touch(y + distance * step / 5)});
+    await cdp.send('Input.dispatchTouchEvent', {type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: []});
+  };
+  await drag(-140); await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  expect((await detail.boundingBox())!.height).toBeGreaterThan(initial);
+  const content = detail.getByLabel('Repeated concern', {exact: true});
+  await content.hover(); await page.mouse.wheel(0, 350);
+  await expect.poll(() => content.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  await drag(140, true); await expect(handle).toHaveAttribute('aria-valuenow', '90');
+  await drag(200); await expect(handle).toHaveAttribute('aria-valuenow', '45');
+  expect((await detail.boundingBox())!.height).toBeLessThan(initial);
+  await page.screenshot({path: testInfo.outputPath('native-reflection-detail-handle.png')});
+  await detail.getByRole('button', {name: 'Close', exact: true}).click(); await expect(handle).toHaveCount(0);
+  expect(fixture.createRequests).toEqual([]); expect(fixture.startRequests).toEqual([]); expect(fixture.errors).toEqual([]);
+  await cdp.detach();
 });

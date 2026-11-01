@@ -1,3 +1,4 @@
+/* [Sync] 2026-11-01: narrow More delegates cards to the shared RN/RNW content; keep Modal scrolling and desktop geometry. */
 /* [Sync] 2026-10-29: narrow More uses one full-page five-entry menu; retain desktop sidebar geometry. */
 /* [Input] Ink & Memory UI v2 semantic tokens and the shared right-panel resize contract. */
 /* [Output] Responsive Story Workspace layout with a persistent navigation rail and resizable Writing Chat. */
@@ -1190,6 +1191,11 @@
     overflow: auto;
   }
 
+  .story-workspace-narrow-more-page .modal-title {
+    font-size: 30px;
+    font-weight: 400;
+  }
+
   .story-workspace-narrow-more-page .modal-close {
     width: 2.75rem;
     height: 2.75rem;
@@ -1200,31 +1206,12 @@
     flex-direction: column;
   }
 
-  .story-workspace-narrow-more-page__items button {
-    display: grid;
-    grid-template-columns: 1.25rem minmax(0, 1fr) 1rem;
-    align-items: center;
-    gap: 1rem;
-    min-height: 3.5rem;
-    padding: 1rem 0;
-    color: var(--color-text-primary);
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--color-border-paper);
-    font: inherit;
-    font-size: 1rem;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .story-workspace-narrow-more-page__items button:focus-visible,
+  .story-workspace-narrow-more-page__items [role='button']:focus-visible,
   .story-workspace-narrow-more-page__account button:focus-visible {
     outline: 2px solid var(--color-border-focus);
     outline-offset: 2px;
   }
 
-  .story-workspace-narrow-more-page__items button svg { width: 1.1rem; height: 1.1rem; }
-  .story-workspace-narrow-more-page__items button:hover { background: var(--color-bg-hover); }
   .story-workspace-narrow-more-page__account { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: auto; }
   .story-workspace-narrow-more-page__account span { flex: 1; overflow-wrap: anywhere; }
   .story-workspace-narrow-more-page__account button { min-height: 2.75rem; padding: 0.5rem 1rem; color: inherit; border: 1px solid var(--color-border-paper); border-radius: 0.75rem; background: transparent; font: inherit; cursor: pointer; }

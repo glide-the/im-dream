@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: forward the Writing page return to the existing narrow More menu without route or business changes.
 // [Sync] 2026-10-15: render memory behavior through the existing Settings shell.
 // [Sync] 2026-10-27: accept typed RN navigation and exclude mobile Dream workbench presentation through the existing router.
 // [Input] Browser location/history, Story Workspace layout/sidebar, and route page skeletons.
@@ -246,6 +247,8 @@ function renderStoryWorkspaceRoute(
 }
 
 export interface StoryWorkspaceRouterProps {
+  mobileMoreNonce?:number;
+  onMobileMoreOpenChange?:(open:boolean)=>void;
   decksContent: ReactNode;
   workspaceContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
   /** Reopen the actor-scoped Dream source thread before rendering canonical Chat. */
@@ -255,6 +258,7 @@ export interface StoryWorkspaceRouterProps {
 }
 
 export function StoryWorkspaceRouter({
+  mobileMoreNonce, onMobileMoreOpenChange,
   decksContent,
   workspaceContent = {},
   onChatThreadRequest,
@@ -446,6 +450,8 @@ export function StoryWorkspaceRouter({
       showSidebar={!isSettingsRoute && !isReactNativeHost()}
       sidebar={(
         <StoryWorkspaceSidebar
+          mobileMoreNonce={mobileMoreNonce}
+          onMobileMoreOpenChange={onMobileMoreOpenChange}
           collapsed={sidebarCollapsed}
           currentPath={currentPath}
           onNavigate={handleNavigate}

@@ -1,6 +1,7 @@
 # [Input] Original Notion argv/env and the application-owned Node endpoint and pinned executable.
 # [Output] Original communicate/wait/kill contract through the existing authenticated command Worker.
 # [Pos] iOS Notion process adapter; actor credentials, OAuth, queries and synchronization retain their original owners.
+# [Sync] 2026-11-01: bind the exact digest-verified interpreted entry for readable-file installation detection on iPhone.
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,7 @@ def prepare_notion_runtime(endpoint_path):
     _endpoint_path, _executable = canonical, executable
     os.environ["INK_NOTION_CLI_PATH"] = str(executable)
     os.environ["PATH"] = str(executable.parent) + os.pathsep + os.environ.get("PATH", "")
-    bind_notion_process_factory(_create_process)
+    bind_notion_process_factory(_create_process, executable=executable)
 
 
 async def _create_process(*argv, env, stdout, stderr):

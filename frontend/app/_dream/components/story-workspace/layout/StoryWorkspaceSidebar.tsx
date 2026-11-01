@@ -1,3 +1,5 @@
+// [Sync] 2026-11-01: let the Writing page reuse the existing narrow More menu and report its open state.
+// [Sync] 2026-11-01: narrow More shares native cards and guidance; existing Modal, desktop and route owners remain.
 // [Sync] 2026-10-29: narrow More opens one full-page five-item menu; desktop disclosure and routes remain.
 // [Sync] 2026-09-14: failed logout retains the real session and shows safe feedback in the user menu.
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
@@ -13,6 +15,7 @@
 // [Sync] 2026-09-18: render the same navigation as a thumb-reachable bottom bar and More sheet on mobile.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {Text} from 'react-native';
 import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
@@ -30,9 +33,28 @@ import {
   FaUserCircle,
 } from 'react-icons/fa';
 import { useAuth } from '../../../contexts/AuthContext';
-import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
+import { getTheme, getThemeMode, onThemeChange, toggleTheme } from '../../../utils/theme';
 import Modal from '../../chat/Modal';
+import {IconClock, IconEdit, IconChevronRight} from '../../chat/Icons';
+import MoreNavigationContent, {type MoreLabelProps, type MoreNavigationItem} from './MoreNavigationContent';
 import {MORE_NAVIGATION_ITEMS} from './moreNavigation';
+
+const moreColors = {
+  'color-bg-app': 'var(--color-bg-app)', 'color-bg-paper': 'var(--color-bg-paper)',
+  'color-bg-hover': 'var(--color-bg-hover)', 'color-border-paper': 'var(--color-border-paper)',
+  'color-text-primary': 'var(--color-text-primary)', 'color-text-secondary': 'var(--color-text-secondary)',
+  'color-state-error': 'var(--color-state-error)',
+};
+function MoreWebLabel({style, ...props}: MoreLabelProps) {
+  return <Text {...props} style={[{fontFamily: 'inherit'}, style]}/>;
+}
+function MoreWebIcon({id, color}: {id: MoreNavigationItem['id']; color: string}) {
+  if (id === 'writing') return <IconEdit style={{width: 26, height: 26, color}}/>;
+  if (id === 'timeline') return <IconClock style={{width: 26, height: 26, color}}/>;
+  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {id === 'analysis' ? <><path d="M4 4v16h16"/><path d="m7 14 4-4 4 3 5-7"/></> : id === 'theme' ? <><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill={color} stroke="none"/></> : <><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></>}
+  </svg>;
+}
 
 const storyWorkspaceMainNavPaths = {
   writing: '/story-workspace/writing',
@@ -44,6 +66,8 @@ const storyWorkspaceMainNavPaths = {
 } as const;
 
 export interface StoryWorkspaceSidebarProps {
+  mobileMoreNonce?:number;
+  onMobileMoreOpenChange?:(open:boolean)=>void;
   collapsed: boolean;
   currentPath: string;
   onNavigate: (path: string) => void;
@@ -51,6 +75,7 @@ export interface StoryWorkspaceSidebarProps {
 }
 
 export function StoryWorkspaceSidebar({
+  mobileMoreNonce, onMobileMoreOpenChange,
   collapsed,
   currentPath,
   onNavigate,
@@ -59,8 +84,11 @@ export function StoryWorkspaceSidebar({
   const { user, logout, authError } = useAuth();
   const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
+  const [themeMode, setThemeMode] = useState(getThemeMode);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMoreOpen,setMobileMoreOpen]=useState(false);
+  useEffect(()=>{if(mobileMoreNonce){setShowUserMenu(false);setMobileMoreOpen(true);}},[mobileMoreNonce]);
+  useEffect(()=>{onMobileMoreOpenChange?.(mobileMoreOpen);},[mobileMoreOpen,onMobileMoreOpenChange]);
   const [showMoreNavigation, setShowMoreNavigation] = useState(() => (
     currentPath === storyWorkspaceMainNavPaths.writing
     || currentPath === storyWorkspaceMainNavPaths.timeline
@@ -70,8 +98,9 @@ export function StoryWorkspaceSidebar({
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
   const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
   useEffect(() => {
-    return onThemeChange((resolved) => {
+    return onThemeChange((resolved, mode) => {
       setIsDark(resolved === 'dark');
+      setThemeMode(mode);
     });
   }, []);
 
@@ -648,12 +677,10 @@ export function StoryWorkspaceSidebar({
       </footer>
       <Modal open={mobileMoreOpen} title={t('nav.more')} closeLabel={t('chat.history.close')} onClose={()=>setMobileMoreOpen(false)} surfaceClassName="story-workspace-narrow-more-page">
         <nav id="story-workspace-narrow-more-items" aria-label={t('nav.more')} className="story-workspace-narrow-more-page__items">
-          {MORE_NAVIGATION_ITEMS.map(item=>{
-            const Icon=item.id==='writing'?FaPenNib:item.id==='timeline'?FaStream:item.id==='analysis'?FaChartLine:item.id==='theme'?(isDark?FaSun:FaMoon):FaCog;
-            return <button key={item.id} type="button" onClick={()=>item.id==='theme'?handleToggleTheme():handleNavigate(item.path)}>
-              <Icon aria-hidden="true"/><span>{t(item.labelKey)}</span><FaChevronRight aria-hidden="true"/>
-            </button>;
-          })}
+          <MoreNavigationContent colors={moreColors} Label={MoreWebLabel} renderIcon={(id,color)=><MoreWebIcon id={id} color={color}/>} chevron={<IconChevronRight style={{width:18,height:18,color:'var(--color-text-muted)'}}/>} appearance={t(`settings.workspace.theme.options.${themeMode}`)+(themeMode==='system'?` · ${t(`settings.workspace.theme.options.${isDark?'dark':'light'}`)}`:'')} nextAppearance={t(`settings.workspace.theme.options.${isDark?'light':'dark'}`)} onToggleTheme={handleToggleTheme} onNavigate={destination=>{
+            const item=MORE_NAVIGATION_ITEMS.find(item=>item.id===destination);
+            if(item && 'path' in item)handleNavigate(item.path);
+          }}/>
         </nav>
         <div className="story-workspace-narrow-more-page__account">
           <span>{displayName}</span><button type="button" onClick={()=>void logout()}>Logout</button>

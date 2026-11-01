@@ -1,23 +1,37 @@
+// [Sync] 2026-11-01: handle-only drag shares bounded detail height and snap stops with narrow Web; content scrolling stays independent.
 // [Input] Original saved report, frozen sources, account timezone and shared report selection.
 // [Output] Native report reading with section/result navigation, original source counts and save recovery.
 // [Pos] Presentation reused by native Reflections and Timeline; it neither creates nor resumes a task.
 // [Sync] 2026-10-29: keep original content, sources and confidence; only the Notion link list is bounded as in Web.
-import {useState} from 'react';
-import {Linking,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+// [Sync] 2026-11-01: open report links through the shared system-browser action with the original error feedback.
+import {useMemo,useRef,useState} from 'react';
+import {PanResponder,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {openExternalLink} from '../../../src/platform/externalLinks.native';
 import {useTranslation} from 'react-i18next';
 import useInkColors from '../../../src/components/useInkColors.native';
 import {getDateLocale} from '../i18n';
 import type {ReflectionSectionKey} from '../api/reflectionsApi';
 import type {AnalysisReport} from './reflectionHistory';
 import useReflectionReport from '../hooks/useReflectionReport';
+import useReflectionDetailSheet from '../hooks/useReflectionDetailSheet';
 export interface NativeReflectionBlogProps {report:AnalysisReport;timezone:string;initialSection?:ReflectionSectionKey|null;onBack:()=>void;backLabel?:string;saveError?:string;saving?:boolean;onRetrySave?:()=>void;openLink?:(url:string)=>Promise<unknown>}
-export default function ReflectionBlogPage({report,timezone,initialSection,onBack,backLabel,saveError,saving,onRetrySave,openLink=Linking.openURL}:NativeReflectionBlogProps) {
+export default function ReflectionBlogPage({report,timezone,initialSection,onBack,backLabel,saveError,saving,onRetrySave,openLink=openExternalLink}:NativeReflectionBlogProps) {
   const {t,i18n}=useTranslation(),c=useInkColors(),dateLocale=getDateLocale(i18n.language),zh=dateLocale.startsWith('zh');
   const r=useReflectionReport(report,initialSection),[sourcesOpen,setSourcesOpen]=useState(false),[linkError,setLinkError]=useState(false);
   const date=new Date(report.timestamp),fullDate=date.toLocaleDateString(dateLocale,{weekday:'long',year:'numeric',month:'long',day:'numeric',timeZone:timezone});
   const text={color:c['color-text-primary']},muted={color:c['color-text-muted']};
   const button={...s.button,borderColor:c['color-border-paper']};
   const selected=r.selectedItem;
+  const sheet=useReflectionDetailSheet(),readingHeight=useRef(0);
+  const {begin,move,finish}=sheet;
+  const pan=useMemo(()=>PanResponder.create({
+    onStartShouldSetPanResponder:()=>true,
+    onPanResponderGrant:event=>begin(event.nativeEvent.pageY,readingHeight.current),
+    onPanResponderMove:(_event,gesture)=>move(gesture.moveY),
+    onPanResponderRelease:()=>finish(),
+    onPanResponderTerminate:()=>finish(true),
+    onPanResponderTerminationRequest:()=>true,
+  }),[begin,move,finish]);
   const open=async(url:string)=>{setLinkError(false);try{if(!url.startsWith('https://'))throw Error('REFLECTION_LINK_INVALID');await openLink(url);}catch{setLinkError(true);}};
   return <View style={[s.fill,{backgroundColor:c['color-bg-app']}]} accessibilityLabel={t('analysis.history.report')}>
     <View style={s.header}><Pressable accessibilityRole="button" style={button} onPress={onBack}><Text style={text}>← {backLabel??t('analysis.pastReflections')}</Text></Pressable></View>
@@ -34,12 +48,16 @@ export default function ReflectionBlogPage({report,timezone,initialSection,onBac
     <View style={[s.cover,{borderColor:c['color-border-paper']}]}><View style={[s.date,{backgroundColor:c['color-text-primary']}]}><Text style={{color:c['color-bg-paper'],letterSpacing:3}}>{date.toLocaleDateString('en',{month:'short',timeZone:timezone}).toUpperCase()}</Text><Text style={{color:c['color-bg-paper'],fontFamily:serif,fontSize:36}}>{date.toLocaleDateString('en',{day:'numeric',timeZone:timezone})}</Text><Text style={{color:c['color-bg-paper']}}>{date.toLocaleDateString('en',{year:'numeric',timeZone:timezone})}</Text></View>
       <View style={{flex:1,gap:8}}><Text style={[s.heading,text]}>{fullDate}</Text><Text style={muted}>{t('analysis.statsLabels.daysCount',{count:report.stats.days||0})} · {t('analysis.statsLabels.entriesCount',{count:report.stats.entries||0})} · {t('analysis.statsLabels.wordsCount',{value:(report.stats.words||0).toLocaleString()})}</Text></View></View>
     <View accessibilityRole="tablist" style={s.tabs}>{r.blogSections.map(section=><Pressable key={section.key} accessibilityRole="tab" accessibilityLabel={t(`analysis.papers.${section.key}.title`)} accessibilityState={{selected:r.activeSection===section.key}} onPress={()=>r.handleSectionChange(section.key)} style={[s.tab,{borderBottomColor:r.activeSection===section.key?c['color-text-primary']:'transparent'}]}><Text style={text}>{section.icon} {t(`analysis.papers.${section.key}.title`)} ({section.items.length})</Text></Pressable>)}</View>
-    <ScrollView style={[s.fill,selected?{flex:0.45}:null]} contentContainerStyle={s.list}>
+    <View style={s.fill} onLayout={event=>{readingHeight.current=event.nativeEvent.layout.height;}}>
+    <ScrollView style={[s.fill,selected?{flex:1-sheet.fraction}:null]} contentContainerStyle={s.list}>
       {r.activeItems.map((item,index)=><Pressable key={index} accessibilityRole="button" accessibilityLabel={item.title} accessibilityState={{selected:r.selectedItemIdx===index}} onPress={()=>r.setSelectedItemIdx(r.selectedItemIdx===index?null:index)} style={[s.result,{borderColor:c['color-border-paper'],backgroundColor:r.selectedItemIdx===index?c['color-bg-hover']:c['color-bg-paper']}]}>
         <Text style={muted}>{String(index+1).padStart(2,'0')}</Text><Text style={[s.heading,text,{flex:1}]}>{item.title}</Text><Text style={muted}>›</Text>
       </Pressable>)}
     </ScrollView>
-    {selected?<View style={[s.fill,{borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:c['color-border-paper']}]}>
+    {selected?<View testID="reflection-detail" style={[s.fill,{flex:sheet.fraction,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:c['color-border-paper']}]}>
+      <View {...pan.panHandlers} accessible accessibilityRole="adjustable" accessibilityLabel={t('analysis.detailResize.label')} accessibilityHint={t('analysis.detailResize.hint')} aria-valuemin={sheet.minPercent} aria-valuemax={sheet.maxPercent} aria-valuenow={Math.round(sheet.fraction*100)} accessibilityActions={[{name:'increment'},{name:'decrement'}]} onAccessibilityAction={event=>sheet.adjust(event.nativeEvent.actionName==='increment'?'up':'down')} style={{minHeight:44,alignItems:'center',justifyContent:'center'}}>
+        <View style={{width:36,height:4,borderRadius:2,backgroundColor:c['color-text-muted']}}/>
+      </View>
       <View style={s.header}><Text style={[muted,{flex:1}]}>{t(`analysis.papers.${r.activeSection}.title`)} · {r.selectedItemIdx!+1} / {r.activeItems.length}</Text><Pressable accessibilityRole="button" accessibilityLabel={t('chat.history.close')} style={button} onPress={()=>r.setSelectedItemIdx(null)}><Text style={text}>×</Text></Pressable></View>
       <ScrollView contentContainerStyle={s.list} accessibilityLabel={selected.title}><Text style={[s.heading,text]}>{selected.title}</Text><Text selectable style={[s.body,{color:c['color-text-body']}]}>{r.activeSectionObj?.kind==='trait'?selected.evidence:selected.description}</Text>
         {r.activeSectionObj?.kind==='trait'?<><View accessibilityLabel={`Confidence ${selected.confidence}`} style={s.row}>{[1,2,3,4,5].map(index=><View key={index} style={{height:3,flex:1,backgroundColor:index<=r.cfill(selected.confidence)?c['color-text-muted']:c['color-border-paper'],opacity:index<=r.cfill(selected.confidence)?0.8:0.4}}/>)}</View><Text selectable style={muted}>{selected.evidence}</Text></>:<Text style={muted}>Confidence · {selected.confidence}</Text>}
@@ -47,6 +65,7 @@ export default function ReflectionBlogPage({report,timezone,initialSection,onBac
       </ScrollView>
       <View style={[s.player,{backgroundColor:c['color-bg-paper'],borderTopColor:c['color-border-paper']}]}><Text numberOfLines={1} style={[text,{flex:1,fontFamily:serif}]}>{selected.title}</Text><Pressable accessibilityRole="button" accessibilityLabel={zh?'上一条':'Previous result'} disabled={r.selectedItemIdx===0} onPress={r.goToPrev} style={[button,{opacity:r.selectedItemIdx===0?0.4:1}]}><Text style={text}>◀</Text></Pressable><Text style={muted}>{r.selectedItemIdx!+1}/{r.activeItems.length}</Text><Pressable accessibilityRole="button" accessibilityLabel={zh?'下一条':'Next result'} disabled={r.selectedItemIdx===r.activeItems.length-1} onPress={r.goToNext} style={[button,{opacity:r.selectedItemIdx===r.activeItems.length-1?0.4:1}]}><Text style={text}>▶</Text></Pressable></View>
     </View>:null}
+    </View>
   </View>;
 }
 const serif=Platform.OS==='ios'?'Georgia':'serif';

@@ -2,6 +2,7 @@
 # [Input] The isolated original Next standalone build, public assets and Xcode resource directory.
 # [Output] A relocatable Next server tree with original web assets and a hashed source receipt.
 # [Pos] Credential-free Next source/resources; bundle-node.py owns the separate ordinary runtime env.
+# [Sync] 2026-11-01: verify checkout/prepared source freshness before copying resources; support independently owned Next roots.
 # [Sync] 2026-10-25: relocate traced dependency links into the application tree; reject all other external symlinks.
 from __future__ import annotations
 
@@ -10,11 +11,42 @@ import json
 import os
 from pathlib import Path
 import shutil
+import argparse
 
 IOS = Path(__file__).resolve().parents[1]
 REPO = IOS.parents[1]
-BUILD = IOS / "Next/build-source"
+ROOT = Path(os.environ.get("INK_IOS_NEXT_ROOT", str(IOS / "Next"))).absolute()
+if not ROOT.resolve().is_relative_to(IOS.resolve()) or ROOT.resolve() == IOS.resolve() or ROOT.is_symlink():
+    raise RuntimeError("The Next output root must be an ordinary named directory inside frontend/ios")
+BUILD = ROOT / "build-source"
 SOURCE = BUILD / ".next/standalone"
+parser = argparse.ArgumentParser(description="Verify and bundle the prepared original Next resources")
+parser.add_argument("--verify-sources", action="store_true", help="Check source provenance without changing application resources")
+args = parser.parse_args()
+receipt_path = ROOT / "source-receipt.json"
+receipt = json.loads(receipt_path.read_text())
+inputs = receipt.get("sourceInputs")
+if not isinstance(inputs, list) or not inputs:
+    raise RuntimeError("IOS_NEXT_SOURCE_RECEIPT_MISSING: prepare and rebuild the current Next sources")
+prepared = {item["path"]: item["sha256"] for item in receipt["sourceFiles"]}
+mismatches = []
+for item in inputs:
+    relative = Path(item["path"])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError("IOS_NEXT_SOURCE_PATH_INVALID")
+    current = REPO / "frontend" / relative
+    staged = BUILD / relative
+    if relative.as_posix() != "next.config.js" and item["sha256"] != prepared.get(relative.as_posix()):
+        mismatches.append(relative.as_posix() + " (checkout/prepared receipt differs)")
+    if not current.is_file() or hashlib.sha256(current.read_bytes()).hexdigest() != item["sha256"]:
+        mismatches.append(relative.as_posix() + " (checkout changed)")
+    if relative.name != "tsconfig.json" and (not staged.is_file() or hashlib.sha256(staged.read_bytes()).hexdigest() != prepared.get(relative.as_posix())):
+        mismatches.append(relative.as_posix() + " (prepared source changed)")
+if mismatches:
+    raise RuntimeError("IOS_NEXT_SOURCES_STALE: prepare and rebuild before packaging: " + "; ".join(mismatches[:10]))
+if args.verify_sources:
+    print(f"Verified current Next runtime inputs: {len(inputs)}")
+    raise SystemExit(0)
 APP = Path(os.environ["TARGET_BUILD_DIR"]) / os.environ["UNLOCALIZED_RESOURCES_FOLDER_PATH"]
 DESTINATION = APP / "next"
 entry = BUILD.relative_to(REPO) / "server.js"
@@ -80,14 +112,14 @@ for source in DESTINATION.rglob("*"):
 server_root = DESTINATION / entry.parent
 shutil.copytree(BUILD / "public", server_root / "public", dirs_exist_ok=True)
 shutil.copytree(BUILD / ".next/static", server_root / ".next/static", dirs_exist_ok=True)
-receipt = json.loads((IOS / "Next/source-receipt.json").read_text())
+shutil.copy2(receipt_path, DESTINATION / "source-receipt.json")
 files = []
 for source in sorted(DESTINATION.rglob("*")):
     if source.is_file() and not source.is_symlink():
         files.append({"path": source.relative_to(DESTINATION).as_posix(),
                       "sha256": hashlib.sha256(source.read_bytes()).hexdigest()})
 manifest = {"version": 1, "nextVersion": receipt["next"], "serverEntry": entry.as_posix(),
-            "sourceLockSha256": receipt["lockSha256"], "credentials": "excluded",
+            "sourceLockSha256": receipt["lockSha256"], "sourceReceiptSha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(), "credentials": "excluded",
             "relocatedSymlinks": [{"path": path.as_posix(), "target": target.as_posix()} for path, target in links],
             "restoredRootDependencyLinks": dependency_links,
             "excludedDesktopNativeModules": excluded, "files": files}

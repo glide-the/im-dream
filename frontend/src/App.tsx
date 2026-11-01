@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: hand all Chat, Plan, file and workspace external links to the shared native system-browser action.
 // [Sync] 2026-10-31: hidden Chat scenes and covering panels release local editor focus while retaining their composer.
 // [Sync] 2026-10-31: await scoped MCP document closure before Thread/new Chat/side view changes; SessionGate owns account departure.
 // [Sync] 2026-10-30: adopt original task activity sections and source-thread navigation without replacing Chat/runtime owners.
@@ -24,7 +25,8 @@
 // [Sync] 2026-10-28: replace the fixed-auto prototype transport with canonical native Chat lifecycle and server configuration.
 // [Sync] 2026-10-28: SwiftUI supplies the iOS keyboard viewport; disable duplicate RN keyboard avoidance.
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {KeyboardAvoidingView, Keyboard, Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {KeyboardAvoidingView, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {openExternalLink} from './platform/externalLinks.native';
 import {isToolUIPart} from 'ai';
 import {useTranslation} from 'react-i18next';
 import type {ToolChoice} from '../app/_dream/lib/chat-schema';
@@ -143,7 +145,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     <View style={[styles.header,section==='more'?styles.hidden:undefined]}>{section!=='chat'?<InkLabel style={[styles.title,{color:foreground}]}>Ink &amp; Memory</InkLabel>:null}<View style={styles.fill}/>
       {onClose?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputQueue.closeSideChat')} onPress={()=>void closeBusiness()} style={styles.action}><InkLabel style={{color:foreground}}>{t('chat.history.close')}</InkLabel></Pressable>:section==='chat'?<ChatTopActions creating={session.posting&&!thread} activityOpen={activityOpen} workspaceEnabled={configLoaded&&config.workspace_enabled!==false} workspaceOpen={fileSidebarOpen}
       contextBadge={selectedVoice && (!thread || boundContext.threadId===thread)?<ChatAgentBadge voice={selectedVoice}/>:undefined}
-      planAction={thread?<PlanButton key={thread} threadId={thread} origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onOpenLink={url=>void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'))} activity={taskActivity} active={section==='chat'&&sideChat===null} onNavigateThread={id=>void selectThread(id)} onOpenScheduledTask={snapshot=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail({taskId:snapshot.id,snapshot});}} onSessionExpired={()=>void refreshSession()}/>:undefined}
+      planAction={thread?<PlanButton key={thread} threadId={thread} origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onOpenLink={url=>void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'))} activity={taskActivity} active={section==='chat'&&sideChat===null} onNavigateThread={id=>void selectThread(id)} onOpenScheduledTask={snapshot=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail({taskId:snapshot.id,snapshot});}} onSessionExpired={()=>void refreshSession()}/>:undefined}
       pluginReceipt={<PluginReceiptBadge threadId={thread??null} deck={!thread || boundContext.threadId===thread?selectedDeck:undefined} activeVoiceId={selectedVoice?.id} activeVoiceName={selectedVoice?.name} onSessionExpired={()=>void refreshSession()}
         onSelectAgent={thread?voiceId=>{if(!selectedDeck?.voices?.some(voice=>voice.enabled && voice.id===voiceId))return;setBoundContext(current=>current.threadId===thread?{...current,voiceId}:current);}:undefined}/>}
         onNewChat={newChat} onToggleActivity={toggleActivity} onToggleWorkspace={toggleWorkspace} onShare={()=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail(null);setWorkspaceUri(null);setSketchOpen(false);share.current?.open();}}/>:null}</View>
@@ -155,11 +157,11 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       conversation={<ChatMessageList messages={messages} threadId={thread ?? ''} isLoading={session.running || session.posting} initialLoading={session.recovering}
         sourceThread={taskActivity.data.links?.source} onNavigateThread={id=>void selectThread(id)}
         origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onAddImageMaterial={addWorkspaceImage} historicalMessageIds={session.historicalMessageIds} historyHasMore={session.hasMore} historyLoading={session.loadingOlder}
-        onLoadOlder={()=>void session.loadOlder()} onOpenLink={url=>{void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'));}}
+        onLoadOlder={()=>void session.loadOlder()} onOpenLink={url=>{void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'));}}
         renderOtherPart={(part,message,_index,presentation)=>isToolUIPart(part)?<ToolMessagePart documentOwner={toolDocumentOwner} part={part} origin={origin} threadId={thread??''} isLoading={session.running||session.posting} isLast={message.id===messages.at(-1)?.id} presentation={presentation}
           toolChoice={config.im_full_access_enabled?'auto':toolChoice} settledToolCallIds={session.settled} runtimePendingToolCallIds={session.runtimePending} active={section==='chat'&&sideChat===null}
           sendUserMessage={value=>{setToolChoice('auto');return session.sendUserMessage(value,thread??null);}} addToolResult={value=>session.addToolResult(value,thread??null)} onConfirmationSettled={id=>session.settleToolCall(id,thread??null)} onSessionExpired={()=>void refreshSession()}
-          onEditorJump={detail=>{setEditorJump({nonce:++editorJumpNonce.current,detail});openSection('more');}}/>:part.type==='file'?<FileMessagePart part={part} origin={origin} isUserMessage={message.role==='user'} resources={messageFiles} onOpenLink={url=>void Linking.openURL(url).catch(()=>setError('链接暂时无法打开。'))}/>:null} />}
+          onEditorJump={detail=>{setEditorJump({nonce:++editorJumpNonce.current,detail});openSection('more');}}/>:part.type==='file'?<FileMessagePart part={part} origin={origin} isUserMessage={message.role==='user'} resources={messageFiles} onOpenLink={url=>void openExternalLink(url).catch(()=>setError('链接暂时无法打开。'))}/>:null} />}
       composer={<View style={styles.shrink}>
       {session.queue.some(isThreadInputQueueCard)?<ScrollView accessibilityLabel={t('chat.inputQueue.region')} style={styles.queue} contentContainerStyle={{gap:4.8}} keyboardShouldPersistTaps="handled">
         {session.queue.filter(isThreadInputQueueCard).map(entry=><ThreadInputQueueCard key={entry.message_id} entry={entry} localOwner={session.localOwner} onGuide={session.guide} onCancel={session.cancelInput} onEdit={session.editInput} onSideChat={openSideChat}/>)}
@@ -203,7 +205,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     <ChatShareSurface ref={share} origin={origin} threadId={thread} title={session.thread?.title??history.threads.find(row=>row.id===thread)?.title??t('chat.history.fallbackTitle')} availability={workspaceAvailability} resources={fileResources} onSessionExpired={()=>void refreshSession()}
       snapshot={()=>({messages,pendingConfirmation:session.confirmation??null,toolChoice})}/>
     <ChatHistorySearch history={history} activeThreadId={thread} onSelect={id=>void selectThread(id)}/>
-    {workspaceUri?<WorkspaceFilePreview key={thread??'no-thread'} uri={workspaceUri} threadId={thread??undefined} availability={workspaceAvailability} resources={fileResources} onClose={()=>setWorkspaceUri(null)} onOpenWorkspace={openWorkspace} onOpenLink={url=>{void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'));}} onAddImageMaterial={addWorkspaceImage}/>:null}
+    {workspaceUri?<WorkspaceFilePreview key={thread??'no-thread'} uri={workspaceUri} threadId={thread??undefined} availability={workspaceAvailability} resources={fileResources} onClose={()=>setWorkspaceUri(null)} onOpenWorkspace={openWorkspace} onOpenLink={url=>{void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'));}} onAddImageMaterial={addWorkspaceImage}/>:null}
     {origin && section==='chat'?<SketchInputSurface key={composerKey} origin={origin} open={sketchOpen} disabled={uncertain} onClose={()=>setSketchOpen(false)} onAdd={file=>composer.current?.addFile(file) ?? Promise.resolve(false)} />:null}
     <Modal visible={sideChat!==null} animationType="slide" presentationStyle="pageSheet" onRequestClose={()=>void closeSideChat()} supportedOrientations={['portrait','landscape']}>
       {sideChat?<ScreenFrame><Business key={sideChat.threadId} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} onClose={()=>void closeSideChat()}/></ScreenFrame>:null}

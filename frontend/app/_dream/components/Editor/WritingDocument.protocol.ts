@@ -1,11 +1,32 @@
-// [Sync] 2026-10-30: accept the original session/cell jump intent as an optional native navigation state.
-// [Input] Native display state and the original editor's cross-page navigation intents.
+// [Input] Native display state, original editor navigation intents and Writing chooser presentation.
 // [Output] Fixed local document URL and validated identity/revision messages.
 // [Pos] Writing document boundary; HTTP, permissions, editor persistence and Agent tasks retain their original owners.
+// [Sync] 2026-11-01: add display-only chooser snapshots and a single-use open intent inside the existing boundary.
 import {parseEditorJumpToCellDetail,type EditorJumpToCellDetail} from '../chat/editorWriteTools';
 export const WRITING_DOCUMENT_PATH='/native/writing';
-export interface WritingDocumentState {type:'state';documentId:string;revision:number;active:boolean;theme:'light'|'dark'|'system';language:'en'|'zh';showEnergyBar:boolean;editorJump?:{nonce:number;detail:EditorJumpToCellDetail}}
-export type WritingDocumentEvent={type:'ready'|'session-expired'|'resources';documentId:string}|{type:'open-thread';documentId:string;threadId:string}|{type:'prepare-chat';documentId:string;input:string}|{type:'editor-jump-dispatched';documentId:string;nonce:number};
+export interface WritingChooserView {loading:boolean;selectedStateId:string|null;name:string;expanded:boolean}
+export interface WritingDocumentState {type:'state';documentId:string;revision:number;active:boolean;theme:'light'|'dark'|'system';language:'en'|'zh';showEnergyBar:boolean;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};openChooserNonce?:number}
+export type WritingDocumentEvent=
+ | {type:'ready'|'session-expired'|'resources';documentId:string}
+ | {type:'open-thread';documentId:string;threadId:string}
+ | {type:'prepare-chat';documentId:string;input:string}
+ | {type:'editor-jump-dispatched';documentId:string;nonce:number}
+ | ({type:'chooser-view';documentId:string;revision:number}&WritingChooserView);
 export function writingDocumentUrl(origin:string):string {const match=/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::([0-9]+))?\/?$/.exec(origin);if(!match||(match[2]&&(Number(match[2])<1||Number(match[2])>65535)))throw Error('WRITING_ORIGIN_INVALID');return origin.replace(/\/$/,'')+WRITING_DOCUMENT_PATH;}
-export function readWritingState(raw:unknown):WritingDocumentState|null {if(!raw||typeof raw!=='object')return null;const r=raw as Record<string,unknown>;return r.type==='state'&&typeof r.documentId==='string'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>=0&&typeof r.active==='boolean'&&['light','dark','system'].includes(String(r.theme))&&['en','zh'].includes(String(r.language))&&typeof r.showEnergyBar==='boolean'&&(r.editorJump===undefined||(typeof r.editorJump==='object'&&r.editorJump!==null&&'nonce' in r.editorJump&&Number.isSafeInteger(r.editorJump.nonce)&&'detail' in r.editorJump&&parseEditorJumpToCellDetail(r.editorJump.detail)!==null))?r as unknown as WritingDocumentState:null;}
-export function readWritingEvent(raw:string):WritingDocumentEvent|null {let r:Record<string,unknown>;try{r=JSON.parse(raw);}catch{return null;}if(!r||typeof r.documentId!=='string')return null;if(['ready','session-expired','resources'].includes(String(r.type)))return r as WritingDocumentEvent;if(r.type==='editor-jump-dispatched'&&Number.isSafeInteger(r.nonce))return r as WritingDocumentEvent;if(r.type==='open-thread'&&typeof r.threadId==='string'&&r.threadId.length>0)return r as WritingDocumentEvent;if(r.type==='prepare-chat'&&typeof r.input==='string')return r as WritingDocumentEvent;return null;}
+export function readWritingState(raw:unknown):WritingDocumentState|null {
+ if(!raw||typeof raw!=='object')return null;
+ const r=raw as Record<string,unknown>;
+ return r.type==='state'&&typeof r.documentId==='string'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>=0&&typeof r.active==='boolean'&&['light','dark','system'].includes(String(r.theme))&&['en','zh'].includes(String(r.language))&&typeof r.showEnergyBar==='boolean'
+  &&(r.openChooserNonce===undefined||(Number.isSafeInteger(r.openChooserNonce)&&Number(r.openChooserNonce)>0))
+  &&(r.editorJump===undefined||(typeof r.editorJump==='object'&&r.editorJump!==null&&'nonce' in r.editorJump&&Number.isSafeInteger(r.editorJump.nonce)&&'detail' in r.editorJump&&parseEditorJumpToCellDetail(r.editorJump.detail)!==null))?r as unknown as WritingDocumentState:null;
+}
+export function readWritingEvent(raw:string):WritingDocumentEvent|null {
+ let r:Record<string,unknown>;try{r=JSON.parse(raw);}catch{return null;}
+ if(!r||typeof r.documentId!=='string')return null;
+ if(['ready','session-expired','resources'].includes(String(r.type)))return r as WritingDocumentEvent;
+ if(r.type==='chooser-view'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>0&&typeof r.loading==='boolean'&&(r.selectedStateId===null||typeof r.selectedStateId==='string')&&typeof r.name==='string'&&typeof r.expanded==='boolean')return r as WritingDocumentEvent;
+ if(r.type==='editor-jump-dispatched'&&Number.isSafeInteger(r.nonce))return r as WritingDocumentEvent;
+ if(r.type==='open-thread'&&typeof r.threadId==='string'&&r.threadId.length>0)return r as WritingDocumentEvent;
+ if(r.type==='prepare-chat'&&typeof r.input==='string')return r as WritingDocumentEvent;
+ return null;
+}
