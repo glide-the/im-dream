@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: qualify packaged ntn via original Python and Bash, same-App HTTP and a bounded credential-free HTTPS rejection.
 // [Sync] 2026-10-25: qualify configured original login actions without changing user authentication.
 // [Input] App-bundled iOS CPython, native pydantic-core and the shared Dream router.
 // [Output] Execution evidence from the actual native interpreter and ASGI application.
@@ -190,6 +191,154 @@ final class EmbeddedDreamBackendTests: XCTestCase {
         completed = returned && backgroundUptime != nil && exit.status == 0 && text == "lifecycle-startlifecycle-end"
     }
 
+    func testPackagedNotionCLIThroughOriginalBackend() throws {
+        _ = try execute(timeout: 120) { EmbeddedDreamBackend.shared.start(completion: $0) }
+        try runPython("""
+        import asyncio, os, shutil, tempfile
+        from pathlib import Path
+        from notion.auth import _run_ntn_command, get_notion_cli_installation
+        root = Path(os.environ['AGENT_CWD']).parent / 'notion-runtime'
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        home = Path(tempfile.mkdtemp(prefix='ntn-qualification-', dir=root))
+        try:
+            assert get_notion_cli_installation().status == 'installed'
+            async def qualify_ntn():
+                code, text, error = await _run_ntn_command('--version', notion_home=home, timeout_seconds=30)
+                assert code == 0 and '0.15.1' in text, ('ntn version', code)
+                code, text, error = await _run_ntn_command('--help', notion_home=home, timeout_seconds=30)
+                assert code == 0 and 'Usage:' in text and 'ntn' in text, ('ntn help', code)
+            asyncio.run(qualify_ntn())
+            print('IOS_NOTION_CLI_PROOF version=0.15.1 packaged=true originalBackend=true applicationPid=' + str(os.getpid()) + ' accountCredentialsUsed=false apiCalls=0 modelCalls=0')
+        finally:
+            shutil.rmtree(home)
+        """)
+    }
+
+    func testPackagedNotionAPIViaOriginalBash() throws {
+        _ = try execute(timeout: 120) { EmbeddedDreamBackend.shared.start(completion: $0) }
+        var error: NSError?
+        let endpoint = try XCTUnwrap(IMDreamNodeStart(try XCTUnwrap(Bundle.main.resourcePath), &error))
+        let runtime = URL(fileURLWithPath: endpoint).deletingLastPathComponent()
+        let workspace = runtime.appendingPathComponent("ntn-network-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let encodedPath = try JSONSerialization.data(withJSONObject: [workspace.path], options: [.fragmentsAllowed])
+        let pythonPath = "json.loads(" + String(reflecting: String(decoding: encodedPath, as: UTF8.self)) + ")[0]"
+        // The synthetic upstream and token exist only in this app-hosted test.
+        // No normal account, connector home or production environment is changed.
+        try runPython("""
+        import json, threading
+        from pathlib import Path
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        _ntn_test_root = Path(\(pythonPath))
+        _ntn_test_requests = []
+        class _NtnTestHandler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
+                assert self.headers.get('Authorization') == 'Bearer ink-ntn-network-fixture-invalid'
+                assert self.headers.get('Notion-Version') == '2025-09-03'
+                _ntn_test_requests.append({'path': self.path, 'query': body.get('query')})
+                denied = body.get('query') == 'denied'
+                data = json.dumps({'object': 'error', 'status': 403, 'code': 'restricted_resource', 'message': 'HTTP 403 forbidden fixture'} if denied else {'object': 'list', 'results': [], 'has_more': False, 'next_cursor': None}).encode()
+                self.send_response(403 if denied else 200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+        _ntn_test_server = ThreadingHTTPServer(('127.0.0.1', 0), _NtnTestHandler)
+        _ntn_test_server.daemon_threads = True
+        _ntn_test_server.timeout = 10
+        _ntn_test_thread = threading.Thread(target=_ntn_test_server.serve_forever, daemon=True)
+        _ntn_test_thread.start()
+        (_ntn_test_root / 'port').write_text(str(_ntn_test_server.server_port))
+        """)
+        defer {
+            try? runPython("_ntn_test_server.shutdown(); _ntn_test_server.server_close(); _ntn_test_thread.join(timeout=5)")
+            try? FileManager.default.removeItem(at: workspace)
+        }
+        let port = try String(contentsOf: workspace.appendingPathComponent("port"), encoding: .utf8)
+        for query in ["success", "denied"] {
+            let result = try runNotionBash(workspace: workspace, name: query,
+                arguments: ["api", "v1/search", "--notion-version", "2025-09-03", "--data", "{\"query\":\"\(query)\",\"page_size\":1}"],
+                baseURL: "http://127.0.0.1:" + port)
+            if query == "success" {
+                XCTAssertEqual(result.status, 0, "Packaged ntn HTTP success failed")
+                let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [String: Any])
+                XCTAssertEqual(parsed["has_more"] as? Bool, false)
+                XCTAssertEqual((parsed["results"] as? [Any])?.count, 0)
+            } else {
+                XCTAssertNotEqual(result.status, 0)
+                XCTAssertTrue(result.output.lowercased().contains("403") || result.output.lowercased().contains("forbidden"))
+            }
+            print("IOS_NOTION_NETWORK_PHASE phase=\(query) status=\(result.status) bytes=\(result.output.utf8.count) applicationPid=\(getpid())")
+        }
+        try runPython("""
+        assert _ntn_test_requests == [{'path': '/v1/search', 'query': 'success'}, {'path': '/v1/search', 'query': 'denied'}], _ntn_test_requests
+        print('IOS_NOTION_NETWORK_PROOF sameApplication=true originalBash=true pinnedCLI=true fixtureRequests=2 accountCredentialsUsed=false modelCalls=0')
+        """)
+    }
+
+    func testPackagedNotionHTTPSRejectsSyntheticCredential() throws {
+        guard ProcessInfo.processInfo.environment["INK_DREAM_TEST_NTN_HTTPS_REJECTION"] == "1" else {
+            throw XCTSkip("One external credential-free Notion rejection was not selected.")
+        }
+        _ = try execute(timeout: 120) { EmbeddedDreamBackend.shared.start(completion: $0) }
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("ntn-https-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let result = try runNotionBash(workspace: workspace, name: "https-rejection",
+            arguments: ["api", "v1/users/me", "--notion-version", "2025-09-03"],
+            baseURL: "https://api.notion.com")
+        XCTAssertNotEqual(result.status, 0)
+        let text = result.output.lowercased()
+        let rejected = text.contains("401") || text.contains("unauthorized") || text.contains("api token is invalid")
+        // This output belongs exclusively to the fixed synthetic token and public endpoint.
+        XCTAssertTrue(rejected, "Notion HTTPS auth rejection was not observed; synthetic-request diagnostic: " + String(result.output.prefix(2048)))
+        guard rejected else { return }
+        print("IOS_NOTION_HTTPS_PROOF cliInvocations=1 expectedAuthRejection=true applicationPid=\(getpid()) accountCredentialsUsed=false modelCalls=0")
+    }
+
+    private func runNotionBash(workspace: URL, name: String, arguments: [String], baseURL: String) throws -> (status: Int32, output: String) {
+        let outputPath = workspace.appendingPathComponent(name + ".output")
+        let output = open(outputPath.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        XCTAssertGreaterThanOrEqual(output, 0)
+        guard output >= 0 else { throw POSIXError(.EIO) }
+        var descriptors: [Int32] = [open("/dev/null", O_RDONLY), dup(output), dup(output)]
+        close(output)
+        func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let command = (["ntn"] + arguments).map(quote).joined(separator: " ")
+        let argvValues = ["/bin/bash", "--noprofile", "--norc", "-c", command]
+        let argv = argvValues.joined(separator: "\0") + "\0"
+        let env = ["PATH=/usr/local/bin:/usr/bin:/bin", "NOTION_HOME=" + workspace.path,
+            "NOTION_KEYRING=0", "NOTION_API_TOKEN=ink-ntn-network-fixture-invalid",
+            "NOTION_API_BASE_URL=" + baseURL, "NOTION_API_DOCS_BASE_URL=" + baseURL].joined(separator: "\0") + "\0"
+        let exit = PackagedCommandExit()
+        let context = Unmanaged.passRetained(exit).toOpaque()
+        var pid: Int32 = 0
+        var generation: UInt32 = 0
+        let started = argv.withCString { argvPointer in
+            env.withCString { envPointer in
+                IMDreamGuestSpawn(argvValues[0], Int32(argvValues.count), argvPointer, argv.utf8.count + 1,
+                    envPointer, env.utf8.count + 1, workspace.path, &descriptors,
+                    { context, status in
+                        let value = Unmanaged<PackagedCommandExit>.fromOpaque(context!).takeRetainedValue()
+                        value.status = status
+                        value.finished.signal()
+                    }, context, &pid, &generation)
+            }
+        }
+        XCTAssertEqual(started, 0, "Packaged ntn Bash startup failed")
+        guard started == 0 else { throw POSIXError(.ENOEXEC) }
+        guard exit.finished.wait(timeout: .now() + 30) == .success else {
+            _ = IMDreamGuestKillGroup(pid, 9, generation)
+            _ = exit.finished.wait(timeout: .now() + 5)
+            XCTFail("Packaged ntn network command timed out")
+            throw POSIXError(.ETIMEDOUT)
+        }
+        return (exit.status, try String(contentsOf: outputPath, encoding: .utf8))
+    }
+
     func testPackagedCommandStartupAndSharedFiles() throws {
         _ = try execute(timeout: 120) { EmbeddedDreamBackend.shared.start(completion: $0) }
         var error: NSError?
@@ -213,7 +362,9 @@ final class EmbeddedDreamBackendTests: XCTestCase {
             ["/bin/bash", "--version"],
             ["/bin/bash", "--noprofile", "--norc", "-c", "printf native-shared > command-written.txt; cat command-written.txt; printf native-ok; pwd -P"],
             ["/bin/bash", "-c", "-l", "shopt -u extglob 2>/dev/null || true && printf login-ok && pwd -P > \"$TMPDIR/cwd\""],
-            ["/usr/bin/python3", "-c", "import sys, ssl, venv, ensurepip; assert sys.version_info >= (3, 11); print('plugin-python-ok')"]
+            ["/usr/bin/python3", "-c", "import sys, ssl, venv, ensurepip; assert sys.version_info >= (3, 11); print('plugin-python-ok')"],
+            [root.appendingPathComponent("usr/local/bin/ntn").path, "--version"],
+            [root.appendingPathComponent("usr/local/bin/ntn").path, "--help"]
         ].enumerated() {
             let outputPath = workspace.appendingPathComponent("output-\(index)")
             let output = open(outputPath.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
@@ -238,7 +389,7 @@ final class EmbeddedDreamBackendTests: XCTestCase {
                 }
             }
             XCTAssertEqual(started, 0, "command phase \(index)")
-            if exit.finished.wait(timeout: .now() + (index == 3 ? 30 : 8)) != .success {
+            if exit.finished.wait(timeout: .now() + (index >= 3 ? 30 : 8)) != .success {
                 _ = IMDreamGuestKillGroup(pid, 9, generation)
                 XCTFail("Packaged command phase \(index) timed out")
                 return
@@ -250,6 +401,8 @@ final class EmbeddedDreamBackendTests: XCTestCase {
             if index == 1 { XCTAssertTrue(text.contains("native-sharednative-ok"), text) }
             if index == 2 { XCTAssertTrue(text.contains("login-ok"), text) }
             if index == 3 { XCTAssertTrue(text.contains("plugin-python-ok"), text) }
+            if index == 4 { XCTAssertTrue(text.contains("0.15.1"), text) }
+            if index == 5 { XCTAssertTrue(text.contains("Usage:") && text.contains("ntn"), text) }
         }
         XCTAssertEqual(try String(contentsOf: workspace.appendingPathComponent("command-written.txt"), encoding: .utf8), "native-shared")
         XCTAssertEqual(try String(contentsOf: temporary.appendingPathComponent("cwd"), encoding: .utf8).trimmingCharacters(in: .newlines), workspace.path)

@@ -1,3 +1,24 @@
+<!-- [Sync] 2026-11-01: 系统验证后20普通启动与后台真实业务通过，原首次Security和503保留；页面与弹窗待独立验收。 -->
+<!-- [Sync] 2026-11-01: 追加构建20失败池修复、增量构建与签名安装回执，原业务验收分列。 -->
+<!-- [Sync] 2026-10-31: 构建19恢复一次头前网络丢失并收敛阶段日志；设备安装与业务结果分项登记。 -->
+<!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
+<!-- [Sync] 2026-10-31: 当前17共享Admin系统连接池；设备安装/进程与Simulator冷启动通过，真机3项GET503及锁屏分别记录，工作区待修复。 -->
+<!-- [Sync] 2026-10-31: 构建16缓冲/原期限修订，设备安装与普通启动、Simulator冷启动读取通过；物理前台及完整任务继续分项验收。 -->
+<!-- [Sync] 2026-10-31: 当前iPhone构建15共享系统Admin HTTP，原会话200；锁屏与Simulator、完整任务分别验收。 -->
+<!-- [Sync] 2026-10-31: 当前源码全量生产构建13、签名/无线升级及普通启动通过，原数据与描述文件实际有效期分别记录。 -->
+<!-- [Sync] 2026-10-31: 公网12补原Product API地址，实际无线安装、数据保留与用量200分列，模型及会话网络范围保留。 -->
+<!-- [Sync] 2026-10-31: 构建11保留原Web回调，实际无线升级和Simulator登录关闭通过，设备Locked与业务网络失败分列。 -->
+<!-- [Sync] 2026-10-31: 登记公网Admin构建10、实际invalid_redirect及同Client回调兼容发布，安装与账号验收分列。 -->
+<!-- [Sync] 2026-10-31: 重新核对构建8九项ntn资源及11项路径/解析器检查，分列表内真机执行、Notion业务及实际Admin来源条件。 -->
+<!-- [Sync] 2026-10-31: 当前构建8采用独立Stop恢复，Simulator真实停止/冷恢复通过；真机无线升级与ntn暂存通过，账号网络及CLI资格分列。 -->
+<!-- [Sync] 2026-10-31: 当前构建7沿原签名装配、Simulator原Python执行ntn通过；构建6真机启动失败及构建7设备连接缺口分别保留。 -->
+<!-- [Sync] 2026-10-31: 补Simulator构建6的RN焦点修复、离线字节码/adhoc签名/覆盖安装与正常业务；原Release设备IPA保持构建5。 -->
+<!-- [Sync] 2026-10-31: 补Release保留Metro输入、当前源码离线复现及IPA Hermes逐字节追溯，保留初次验证脚本失败与临时缓存清理。 -->
+<!-- [Sync] 2026-10-31: 补当前产品安装包、Simulator制品和Release IPA的ntn九资源核对及产品App原Python直接执行，真实Notion业务分列。 -->
+<!-- [Sync] 2026-10-31: 增加产品标识Simulator 0.1.0/5首次安装、原登录和自身Bash/Stop/冷恢复，旧验证标识及设备条件分列。 -->
+<!-- [Sync] 2026-10-31: 更新真机3到5无线覆盖、运行目录保留及Locked拒绝启动；增加真实Bash及冷重开证据入口。 -->
+<!-- [Sync] 2026-10-31: 新增当前账号/宿主Release构建5及Wi-Fi设备状态，分列Simulator长文/Stop/重开和Notion授权前提。 -->
+<!-- [Sync] 2026-10-31: 当前源码Release全量构建与开发签名0.1.0/4通过；设备原构建3、原env和真实业务资格保持。 -->
 <!-- [Input] 当前 frontend React Native 工程、端侧运行库、Xcode 与已登记 iPhone。 -->
 <!-- [Output] iPhone 开发安装、临时包检查、TestFlight 与 App Store 发布操作。 -->
 <!-- [Pos] iOS 实机操作手册；架构与历史资格归 mobile-app-release.md 和跨端设计。 -->
@@ -6,7 +27,13 @@
 
 # iPhone 打包、安装与发布操作手册
 
+现行状态优先见第二十一节；下方旧小节保留对应阶段的制品与回执。
+
+认证职责和状态见[目标编译与认证合同](../design/multi-platform/mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，后续问题按[端侧认证排障指南](mobile-auth-troubleshooting.md)逐层取证。本手册保留每次制品和实际验证原文；本轮文档整理未复测设备/API。
+
 ## 适用范围
+
+最新制品及执行状态采用[构建8与停止恢复](#十四2026-10-31构建8与停止恢复)，各日期记录保留原阶段范围。
 
 当前工程入口为 [`frontend/ios/InkMemory.xcworkspace`](../../frontend/ios/InkMemory.xcworkspace)，Scheme 为 `InkMemory`。React Native 主界面从 [`index.native.js`](../../frontend/index.native.js)装配；Swift 加载包内 `main.jsbundle`，原 Python 后端与 Node/Next 运行库一起进入安装包。正常网页登录和保留的 DOM 文档继续使用现有适配。
 
@@ -183,3 +210,324 @@ Apple 操作参考，查阅日期 2026-10-30：[登记设备分发](https://deve
 修复回执：`sign-r2-receipt.json`、`install-r2.json`、`device-console-r2.log`、`process-list-r2-running.json`、`process-list-r2-final.json`、`runtime-directories-r2.json` 和 `ipa-r2-receipt.json`，均位于本轮回执目录。文档本地引用及清单检查、范围内 `git diff --check` 退出 0；本手册新增 Mermaid 图数量为 0。
 
 当前状态：**打包文档与修复 IPA 已完成；真机安装及普通进程启动检查通过；可视页面、完整端侧业务与正式发布未验收**。
+
+
+## 六、2026-10-31 Release开发包
+
+本阶段[Release开发IPA构建5](../../frontend/ios/build/InkMemory-Release-device-20261031-b5.ipa)：`com.inkmemory.mobile`、0.1.0/5，142,022,903字节、0600；SHA256 `e7948d126a825ae952a1caeb8778ef36c74f938f28246e479b82f4c951407efa`。当前App target复用前阶段锁定Release依赖，重编当前Swift、账号回调与宿主资源，xcodebuild退出0、43.27秒。83个framework及主应用的既有开发签名严格校验通过。Next BUILD_ID `VGOr-pi9sPcnIYSQAoWSj`；固定ntn0.15.1/MIT及原Python/Node/Next随包。
+
+当前iPhone16/iOS18.0.1为localNetwork、paired、tunnel connected、Developer Mode enabled，现已从构建3通过Wi-Fi覆盖升级到构建5，安装退出0、27.63秒。升级前后运行目录1,948条路径集合相同、普通文件元数据无变化；10个符号链接元数据的可用性有差异。启动命令返回1，系统以Locked拒绝启动，未尝试解锁。原env的localhost3000需要转换为可达同一正常Admin的有效HTTPS传输配置；既有公网地址当前未匹配本机新BUILD_ID静态文件，登录前提未确认。保持原Client、来源校验和业务权限；本机Simulator继续直接访问正常3000。profile到期仍为2026-11-01 00:48:40 Asia/Shanghai，正式SDK/渠道前提沿第四节。[构建5与真实业务证据](../exec/mobile-app-design-review-20261024.md#2026-10-31-长文停止重开与release构建5)集中维护。
+
+### 前阶段构建4记录
+
+[当前Release开发IPA](../../frontend/ios/build/InkMemory-Release-device-20261031-b4.ipa)：`com.inkmemory.mobile`，0.1.0/4，141,989,805字节，0600；SHA256 `4473faceb2c6a9c0bb3142dcc635ce82db9e3e3947cfaf797d8cae14ec0496c2`。现有workspace与锁定依赖完成新建DerivedData的Release设备构建，2 jobs、278.5秒、退出0。无需修订现行Pods链接配置；未安装依赖。
+
+普通生产`index.native.js`、Next BUILD_ID `5qMhJuDJak0IFMh36ESGg`、当前Dream Python/Node及固定ntn0.15.1/MIT随包。83个framework和主应用复用现有开发身份及profile签名，逐项严格校验通过。该包采用Release主程序，无根目录Debug dylib；前节Debug补签历史保留原范围。
+
+当前iPhone16/iOS18.0.1为wired、paired、connected，Developer Mode enabled。原安装构建3保留，本轮未安装4；当前包普通env使用本机Admin3000。物理设备访问Mac服务需可达的原HTTPS入口，具体规则沿第二节，来源校验及源env保持。当前普通Simulator继续原loopback与正常账户业务，Release真实启动/登录/任务及升级验收独立执行。
+
+开发profile于2026-11-01 00:48:40 Asia/Shanghai到期，安装前重核有效期。该包限定现有开发设备；当前SDK18.5与[Apple SDK26上传要求](https://developer.apple.com/news/?id=ueeok6yw)分列，查阅2026-10-31。当前开发签名IPA、真实设备验收、正式Archive、TestFlight和商店状态分别登记。完整命令见[本轮执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-release设备包构建资格)。
+<!-- [Sync] 2026-10-31: 分列普通Simulator账号回调采用、ntn摘要和本地Notion授权缺口，原Release IPA保持。 -->
+
+
+## 七、2026-10-31普通Simulator账号回调采用
+
+普通`com.inkmemory.loginntn`已采用当前BFF、Native账号会话及原env目标映射；Next BUILD_ID `VGOr-pi9sPcnIYSQAoWSj`。原Client的两个App URI已沿正常Admin目录发布并读回；原Web地址、PKCE及权限保持。`bundle-node.py`映射包内既有redirect键，`host.cjs`向Next保留该配置。原密码表单实际完成App回调并关闭弹窗，系统授权进入原Admin与取消返回通过；既有Thread真实Chat完成且正常Gateway settled，冷启动保留同一消息和账户。
+
+该普通包为Simulator调试宿主与优化Hermes，前节真机Release IPA保留原阶段摘要。ntn/MIT继续匹配固定锁，当前包4项端侧XCTest重跑通过；普通资源范围读取返回原授权缺失反馈，本应用授权文件数为0，原连接配置及7项范围保持。真实Notion授权、读取、同步、Agent与真机独立验收。[命令、退出码、失败及安装资源证据](../exec/mobile-app-design-review-20261024.md#2026-10-31-普通包账号回调采用与notion授权核对)集中维护，当前全目标保持进行中。
+
+最新普通Simulator的两次长文请求分别完成与Stop取消，正常Gateway均settled；进程重开后11用户/10助手、最后cancelled与running=false保持，原对话恢复Send。当前ntn原授权准备成功，用户确认前poll触发原超时；本应用真实授权、资源读取与同步仍待验收。上述结果与开发Release构建5的资源/签名检查分别计入对应范围。
+
+当前普通Simulator完成一次真实Bash业务和最终回复，原消息process返回1个Bash、output-available及实际输出标记；两条正常Gateway均completed/settled。普通App冷启动后12用户/11助手、同一工具过程/最终回复保持。具体命令和发布前提见[无线升级与业务记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-无线升级构建5与真实bash业务)。
+
+## 八、2026-10-31产品Simulator首次安装与业务
+
+该阶段Simulator使用[产品应用包](../../frontend/ios/build/InkMemory-Simulator-20261031-b5.app)，标识`com.inkmemory.mobile`、版本0.1.0、构建5，iPhone16 Plus/iOS18.6 arm64。原workspace编译通过，原index.native.js生产Metro/Hermes通过；Next的717项源文件与锁保持一致，原Client及已登记`com.inkmemory.mobile.auth:/auth/callback`采用。包内私有配置通过原打包阶段生成，源env修改0；当前包限本机开发验证，外部分发条件继续按前节执行。
+
+主Agent以`codesign --force --sign -`执行Simulator本地签名，严格校验通过。普通产品副本排除具名XCTest插件及7个测试框架，原编译缓存和前阶段验证制品保留；83项运行框架保留，85个Mach-O文件动态库依赖检查通过。此签名方式对应Simulator，本手册的iPhone开发签名与登记设备分发仍使用各自证书/profile。
+
+首次安装命令`xcrun simctl install 120A4231-E08B-422F-A45E-08BDB72937D7 frontend/ios/build/InkMemory-Simulator-20261031-b5.app`退出0、6.89秒；13项实际安装资源与制品一致。启动使用同设备的`simctl launch --console ... com.inkmemory.mobile`，当前App自身拥有5173，正常Mac Admin/Gateway3000与PG54329保持。前阶段验证App已停止，其数据inode和23/98字节文件保留；跨应用Cookie、凭据和运行目录复制0。
+
+产品实测：原网页登录弹窗左上关闭/重开、密码成功关闭及主页；原账号正常首页创建自身Thread，首轮Bash completed、第二轮流式正文经原Stop cancelled，3条正常Gateway记录均settled。产品冷启动保留账户、自身2用户/2助手、Bash过程和已停止正文；原生Decks和五项More导航实际到达。具体源摘要、命令与范围归[产品执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-产品标识simulator首次安装与真实业务)。物理Release、完整Google/Notion/MCP业务及正式发行继续分列。
+
+## 九、2026-10-31产品包ntn专项验证
+
+当前实际安装的产品Simulator App、[Simulator制品](../../frontend/ios/build/InkMemory-Simulator-20261031-b5.app)及[Release IPA](../../frontend/ios/build/InkMemory-Release-device-20261031-b5.ipa)均核对为`com.inkmemory.mobile`、0.1.0/5。固定ntn0.15.1、MIT、manifest、三个Node执行适配和三个Python Notion模块共9资源逐字节一致；六个执行适配文件匹配当前源码。IPA摘要保持`e7948d126a825ae952a1caeb8778ef36c74f938f28246e479b82f4c951407efa`。
+
+ntn为10,930,616字节的ELF AArch64，沿既有App内Linux ARM64命令解释器执行。锁定SHA256为`faee5c2227abea0ea401bd27689a9d150d32402d4240f349619710fd621824fc`；MIT为1,074字节，摘要匹配锁文件。App私有guest目录内的实际执行文件匹配该摘要，常规文件、无符号链接、权限0755。
+
+当前产品App25378内原`notion.auth._run_ntn_command`直接执行`--version`与`--help`，两项退出0，版本0.15.1及Usage匹配；标准输出11与1,584字节、标准错误均0。驱动退出0、7.043秒，App未重启，临时home和观察文件已清理。本轮网络、凭据读取、模型调用、重建及安装均0。命令、原始日志及范围归[专项执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-产品包ntn专项验证)。
+
+当前结论：Simulator产品包内CLI解析和执行通过，Release IPA资源核对通过。真机ntn执行、有效Notion授权、资源读取、同步及Agent使用继续分别验收；既有HTTP/HTTPS四项技术回执保持原测试宿主范围，真实Notion业务状态保持待验收。
+
+## 十、2026-10-31Release前端来源追溯
+
+当前构建5的原Xcode产品目录保留Metro JS中间文件。以当前源码、原`index.native.js`、iOS、`dev=false`、`minify=false`和原本地config命令重新打包，取得8,591,594字节JS，SHA256 `2c3547721b202e327e0339f3cf055b29504145be8ea01bd70b920397e46e5d63`，与原中间文件逐字节相同。原Hermes参数编译该中间文件，输出5,727,468字节，SHA256 `14ec457bd5063291d7f7293f7b1e0c9f329b9eb91e7b21f73feb23a0943709e7`，与当前IPA成员一致。
+
+该证据覆盖当前源码→Release Metro输入→Hermes→IPA成员。IPA本体保持第六节路径、字节及摘要；原生重编译、签名、安装和App重启均0。首次验证脚本缺少cwd与本地config参数，触发隐式npx临时下载并失败；修正为显式frontend目录及已有本地工具后离线通过，本轮具名npx目录已按创建时间、版本和无活跃引用核定后清理，共享npm内容缓存保留。原始失败、命令与剩余资格归[来源与运行实例记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-release前端来源与运行实例核对)。
+
+同一当前源码按产品Simulator的`minify=true`参数离线打包，取得3,745,775字节JS、SHA256 `37148b65ddd0edd16133223d6f225ce302c640d2edeb904a052fd340a0e0461c`，与已验收产品Simulator的保留输入逐字节一致。该对照补齐两类制品的当前源码来源；各平台执行资格继续分别记录。
+
+App实例及原HTTP执行位置归[现行运行库架构](../design/multi-platform/mobile-runtime-architecture.md#2026-10-31-ios现行实例与启动合同)。来源校验属于制品技术验证；真机完整业务、第三方授权、发行账号及SDK要求继续按原矩阵执行。
+
+
+## 十二、2026-10-31 Simulator构建6与输入焦点修复
+
+该阶段[Simulator构建6](../../frontend/ios/build/InkMemory-Simulator-20261031-b6.app)为`com.inkmemory.mobile`、0.1.0/6，已覆盖安装到原iPhone16Plus/iOS18.6 Simulator。它由留存构建5通过APFS clone装配，仅更新当前源码Metro/Hermes、Info构建号和adhoc主签名；原生重编译与Next资源重建均0。原生库、Python/Node/Next/Claude、固定ntn及回调地址保持原构建资源。设备Release IPA仍为前述构建5，输入焦点修复尚待装配进入设备制品。
+
+当前HBC为5,673,355字节，SHA256 `aa9c8477f4dd895cd6541fddfd0b92f23c83fe6c919764c868bd1e682911aefb`。离线Metro、原Hermes、adhoc签名、deep/strict校验、simctl覆盖安装及安装后摘要/签名检查均退出0。覆盖安装后data路径UUID变化，data inode183813951保持，正常Cookie与自身Thread恢复。原构建5 App和Release IPA保留。
+
+实际软件键盘输入→切换Decks/More收起键盘→返回保留长草稿→用户点击再次显示键盘通过。原正常账户新增一次公开短Chat，助手completed、Gateway completed/settled，最终8用户/6助手、原取消与完成结果保持。所有正常记录保留，未提交的具名布局草稿已清空；当前键盘关闭、空输入、Full access保持。完整命令、故障截图、技术与业务范围归[执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-软件键盘与持久输入焦点修复)。
+
+当前物理iPhone通过localNetwork连接回执退出0；设备包采用、有效HTTPS Admin连接、真机业务、Notion授权和正式渠道条件继续分别验收。Simulator焦点与业务回执保持其平台范围。
+
+## 十三、2026-10-31构建7与ntn启动修复
+
+当前[设备开发IPA构建7](../../frontend/ios/build/InkMemory-Release-device-20261031-b7.ipa)为`com.inkmemory.mobile`、0.1.0/7，142,521,540字节、0600，SHA256 `47808cc8c6ff1d0af61fa0e55386b1a596a0a17af7b8413b4b71ec64df394203`。当前[Simulator构建7](../../frontend/ios/build/InkMemory-Simulator-20261031-b7.app)已经覆盖安装；原构建5和6制品保留。当前状态采用本节，下方各日期章节保留对应阶段原文。
+
+构建6设备IPA已通过原开发签名和83项framework校验，并经Wi-Fi覆盖安装退出0、29.503秒；安装前后运行目录1,948项元数据相同。普通launch返回PID7778，随后完整进程清单确认退出。控制台重开退出1、1.582秒，实际记录`IOS_NOTION_CLI_PATH_INVALID`和Node退出1。该次失败归Node启动校验；前阶段Locked记录保留原范围。
+
+[host.cjs](../../frontend/ios/runtime/host.cjs#L32)先规范化Native endpoint父目录，再拼接固定guest目录。Notion子目录及目标文件的符号链接拒绝、摘要和执行权限检查保持。原宿主启动片段的路径fixture先复现退出1，修复后5项通过；既有resolver6项及Node语法均退出0。构建7仅更新宿主、构建号和主签名，沿构建6的HBC；无原生、Metro或Next重编译。
+
+设备App与IPA逐项匹配7,648对象，Simulator与前版匹配7,512对象；变化限Info、host和根签名，83项framework、原profile、entitlements及两项env字节保持。IPA全归档16,575项已分类校验，未知条目0。构建7深度严格签名验证和ZIP CRC均通过，摘要已追加原`SHA256SUMS`。
+
+构建7 Simulator通过原`notion.auth._run_ntn_command`运行包内`--version`和`--help`，两项退出0，输出11及1,584字节、stderr0；固定ntn0.15.1为10,930,616字节，实际暂存文件摘要匹配、普通文件、0755。临时空home和观察文件已清理。普通入口恢复原账户及自身Thread的8用户/6助手、最后completed26字符与原正常Gateway结算。本轮模型调用和Notion API请求0，完整Notion授权/读取/同步继续待验收。
+
+构建7设备候选尚未安装：准备安装前CoreDevice报告设备不可达，后续清单为paired、tunnel unavailable、Developer Mode enabled。设备保留构建6；构建7真机修复效果和完整业务待连接恢复后执行。原profile到期时间为2026-11-01 00:48:40 Asia/Shanghai；当前SDK18.5，App Store上传仍须满足[Apple SDK要求](https://developer.apple.com/news/?id=ueeok6yw)及原渠道前提，查阅日期2026-10-31。代码/制品检查、Simulator执行、真机执行及正式发行分别登记。精确命令与失败记录归[本阶段回执](../exec/mobile-app-design-review-20261024.md#2026-10-31-真机ntn启动路径修复与构建7)。
+
+## 十四、2026-10-31构建8与停止恢复
+
+当前[设备开发IPA8](../../frontend/ios/build/InkMemory-Release-device-20261031-b8.ipa)为`com.inkmemory.mobile`、0.1.0/8，142,521,558字节、0600，SHA256 `c63e17649cd5894aa7cc2d045e3880d6b73f64114245c6025043017dbd07baec`；当前[Simulator构建8](../../frontend/ios/build/InkMemory-Simulator-20261031-b8.app)已经覆盖安装。HBC为5,673,334字节，SHA256 `d85fb52f1552686475c3d3268a92a657c031f76e0a3071704825e74f3114c6c0`。原5/6/7制品保留；各日期章节采用各自阶段范围。
+
+构建8仅更新Native Stop读取所有权、当前Metro/Hermes、构建号及主签名。原运行库、Next、ntn/MIT、2项env、profile及83个framework保持；全对象/归档、源码source map、可执行模式与符号链接审计通过。原生及Next重编译0，既有开发身份/entitlements继续使用，原profile到期与正式SDK/账号前提保持。
+
+产品Simulator通过正常Claude/Bash查询包内ntn0.15.1，原process为output-available；首个泛称Notion CLI请求误用notion的结果保留。构建7真实Stop后服务端cancelled/idle、页面仍Stop，原Hook新增延迟取消reader回归先RED；构建8改为回执获准后结束旧读取代次并独立查询原状态。新增用例及完整31项会话回归、双TS类型、Metro/Hermes/签名均退出0。
+
+构建8真实正文输出期间原Stop，页面恢复空输入/禁用Send，原messages/status为cancelled、7,985字符、running=false，正常Gateway cancelled/settled。普通冷重开期间无调试器，原历史入口恢复12用户/10助手、ntn工具结果及两条停止正文；8条保护消息按ID/状态/长度保持。阶段共4次UI提交、6条唯一正常Gateway记录均settled；原账户/模型/权限保持，Notion API和凭证正文读取0，观察文件清理。
+
+设备无线连接恢复后，构建8由6覆盖升级，退出0、29.043秒；首次启动前1,949项运行目录元数据相同。普通console启动PID7839，Next在314ms就绪，ntn实际暂存为10,930,616字节普通文件、0755，设备复制出的代码字节匹配固定SHA256 `faee5c2227abea0ea401bd27689a9d150d32402d4240f349619710fd621824fc`。原路径拒绝未复现。端点文件仅检查0600及存在性，正文读取0。
+
+该真机记录覆盖安装、Node/Next启动和ntn暂存字节。当前包访问手机localhost3000的Admin service-token请求为ECONNREFUSED；完整Python/CLI执行、正常账号及Chat业务继续待验收。物理CLI资格驱动未取得可用调试上下文，目标曾显示platform=host/state=connected，随后为no such process，初版驱动的PYTHON_NOT_READY标签退出解释器状态判断；该诊断阶段原console出现signal9，后续CoreDevice清单显示同包PID7848。未下发新的App重开命令，物理CLI执行计数0；继续使用实际进程/设备回执判断，禁止通过该驱动结果判定Python兼容失败。
+
+[本阶段执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-构建7真实ntn业务与停止恢复修复)提供命令、失败现场、制品及剩余前提。真机需要符合原来源/TLS规则的同一本机Admin入口；完整Notion授权、Google完整授权与正式发布继续分列。
+
+### 构建8的ntn验证范围复核
+
+2026-10-31重新读取上述Simulator制品及设备IPA：两个包内各9项Notion资源逐字节匹配，manifest与`node-dependencies.json`的`notionCli`锁一致；`ntn`为ELF64 AArch64、10,930,616字节、0755常规文件，MIT许可证及摘要匹配。三个Node执行文件与三个Python Notion适配文件匹配当前源码，制品保持构建8。
+
+| 验证对象 | 已取得证据 | 当前范围 |
+| --- | --- | --- |
+| App与IPA资源 | 两包9项一致；ntn、manifest、MIT匹配固定锁 | 打包资源验证通过 |
+| 路径与解析器 | 原staging脚本5项、resolver脚本6项退出0 | 文件路径和DNS配置技术验证通过，脚本执行CLI及网络请求0 |
+| Simulator产品App | 前述原Python版本/帮助退出0；正常Claude/Bash得到ntn0.15.1与原process结果 | 包内命令执行通过，复用原阶段业务回执 |
+| 物理iPhone | 构建8安装、Node/Next启动及实际ntn暂存摘要/0755 | 真机CLI执行待验收；本轮调试目标保持connected，未达到stopped，执行派发0 |
+| Notion账户与业务 | 当前App有效授权、资源读取及同步缺少完整回执 | 真实Notion业务待验收，沿原设置入口和授权流程补齐 |
+
+现有`https://work.suoxya.com`登录页BUILD_ID及路由专用JS字节与当前Mac Admin一致。匿名`/api/auth/get-session`在该别名返回403/`AUTH_BROWSER_ORIGIN_DENIED`，原登记`http://localhost:3000`返回200/null。真机完整登录仍依赖可达且符合原来源规则的同一本机Admin入口；本轮Admin、issuer、Client、来源校验及源env变更0。调试后旧App进程消失，恢复普通启动PID7872，Next在314ms就绪；该进程访问手机localhost3000仍返回`ECONNREFUSED`。精确命令及未完成覆盖归[本轮复核](../exec/mobile-app-design-review-20261024.md#2026-10-31-构建8ntn打包复核与真机执行缺口)。
+
+
+## 十五、2026-10-31公网Admin构建10与账号回调
+
+阶段记录：本节保留构建10的故障和未采用候选；当前修正版采用第十六节。
+
+用户指定公网Admin为`https://ink-admin.suoxya.com`。该阶段物理iPhone16已安装`com.inkmemory.mobile`、0.1.0/10；设备查询确认安装路径归属该构建。原构建8与其本机服务配置保留，`work.suoxya.com`候选已撤回，源env及本机Admin配置保持。
+
+| 制品或配置 | 当前值与范围 |
+| --- | --- |
+| 设备IPA | `frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b10.ipa`，142,521,456字节 |
+| IPA SHA-256 | `2fc56c2704914f53c14a94f1dcf69ef73df5291f3282b83b1dc3329fc0e60095` |
+| 包内Admin transport / Gateway | 原env键均指向`https://ink-admin.suoxya.com`；原Admin base、issuer与resource保持 |
+| App账号回调 | `com.inkmemory.mobile.auth:/auth/callback`；既有Client ID及S256保持 |
+| Hermes | `d85fb52f1552686475c3d3268a92a657c031f76e0a3071704825e74f3114c6c0`，沿构建8 |
+| Team / profile | `45KY254AF7`，设备包含在原开发profile中；到期时间2026-11-01 00:48:40（Asia/Shanghai） |
+| 运行位置 | RN、Python、Node、Next、Claude与ntn归App；公网Admin提供原认证、持久化与Gateway |
+
+公网Nginx记录13:28:10、13:29:16两次手机授权请求使用现有`ink-dream-browser-local`及该App回调，随后`/api/auth/error`明确返回`invalid_redirect` / `invalid redirect uri`。用户观察到后台登录页。该故障发生于OAuth回调校验；Dream产品账号继续使用原网页登录，管理账户与管理登录保持独立。公网旧`BrowserSessionService.exchange`还只接受原主Web回调，完整修复需同步原service精确回调集合与同Client目录。
+
+修复沿Admin已有`config.ts`、`BrowserSessionService`、`oauthClientCatalog`及`auth:provision-dream-oauth --browser-redirects`发布入口。当前service主Web回调保留，新增精确App URI；对应公开Client使用既有`native`登记类型，`requirePKCE=true`、原scope、grant、密钥与资源绑定保持。未登记URI继续拒绝；数据库schema、账户、角色和权限修改0。25项定向认证技术合同通过；真实账号、Google与设备业务按后续回执分别验收。
+
+该阶段候选完成Webpack编译，在TypeScript阶段随实例重启中断。后续r2/r3在禁用swap条件下发生OOM，完整构建资格缺失；候选、Client目录apply及服务切换均未采用。原服务14:08恢复200，数据目录保持。密码登录修复收敛为包内恢复已登记Web回调，采用第十六节。精确命令、失败及最终结果归[本次执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-公网admin构建10登录回调修复)。
+
+
+## 十六、2026-10-31公网Admin构建11与原网页登录恢复
+
+阶段记录：当前设备制品采用第十七节构建12；本节密码登录回执保留原构建范围。
+
+当前[设备开发IPA11](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b11.ipa)为`com.inkmemory.mobile`、0.1.0/11，142,521,598字节，SHA256 `5acdb5f3391fdb9d5705a3279a5c8a25ae925bb8b344a02f7c8a842360d54c7f`。Wi-Fi覆盖安装退出0、27.358秒；设备查询确认构建11，首次启动前运行目录元数据与升级前一致。普通launch退出1，iOS返回Locked；物理设备页面、登录及完整CLI业务待解锁后验收。
+
+构建10将原密码登录回调自动改成公网未登记的App URI，触发`invalid_redirect`。构建11仅恢复原已登记`http://localhost:5173/auth/callback`，Admin transport及Gateway继续`https://ink-admin.suoxya.com`。公开Client、S256、scope、Cookie、CSRF、权限、账户及端侧执行归属保持。包内6,311项核对：变化限回调env、Info构建号、可执行签名及CodeResources；缺失、额外、意外字节和模式差异均0，profile与Hermes保持。Google系统授权需要的私有回调兼容按原设计独立发布和验收，公网采用状态仍待完成。
+
+生产打包脚本`bundle-node.py`删除按bundle identifier自动替换账号回调的步骤，沿普通源env复制账号配置。实际生产资源脚本退出0，前端env逐字节一致、0600，原MCP回调映射和sandbox关闭配置保持，源env修改0。首次验证缺少前置Python阶段创建的`app/`目录而退出1，补齐harness前提后通过；原失败保留。
+
+普通产品Simulator覆盖构建11，数据inode183813951保持。原可见密码表单完成公网授权、exchange200、resolve200；App内原`/auth/session`200、账户匹配和CSRF存在。网络5xx/超时期间原会话检查失败，点击原Try again后登录弹窗关闭，进入RN Chat并显示公网历史。后续既有Thread读取出现503及会话重试反馈，真实模型完成资格需独立回执。原生、Next和前端页面重编译0；Python/Node/Next/Claude继续在App进程运行，Mac业务服务0。
+
+原开发profile到期时间2026-11-01 00:48:40（Asia/Shanghai）保持；本轮证书续期、账号变更和商店提交0。签名、安装、Simulator密码登录、完整真实业务与正式发行分别登记。[交互规则](../design/multi-platform/mobile-ios-interaction.md#公网密码网页登录与配置回调保留)与[精确执行回执](../exec/mobile-app-design-review-20261024.md#2026-10-31-公网构建11恢复原网页登录)为当前依据。
+
+
+## 十七、2026-10-31公网Admin构建12与Product API配置
+
+阶段记录：当前物理设备采用第十九节构建15，本节保留构建12的验收范围。
+
+当前[公网设备IPA12](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b12.ipa)为`com.inkmemory.mobile`、0.1.0/12，142,521,586字节，SHA256 `9f0cab764a6ebf6b78edbaa938ee55c933c83a08320edf19e05b9cdc9db6a4e8`。设备Wi-Fi升级退出0、26.088秒，apps读回构建12，首次启动前运行目录元数据与升级前一致。普通产品Simulator覆盖12，data inode183813951保持；原11/10/8制品保留。
+
+实际包审计发现构建11的`INK_ADMIN_PRODUCT_API_BASE_URL`仍为`http://127.0.0.1:3000`，原Product客户端会访问设备自身。构建12在包内backend普通env副本中修正该现有键为`https://ink-admin.suoxya.com`。原Product Origin、账号Web回调、Client/S256、scope、权限、Gateway及其他配置保持，源env和业务程序修改0。6,311项归档比较仅backend env、Info构建号及根签名变化；缺失/额外/意外/模式差异0，CRC与deep/strict签名校验通过；原生、Next、Hermes重编译0。
+
+构建12通过同App原用量GET返回200，检查时间范围内新增Gateway记录为空。原系统配置200、原模型与Full access/Workspace保持。该阶段session503/`BFF_ADMIN_UNAVAILABLE`及模型目录503/`GATEWAY_UNAVAILABLE`实际保留，原工作区重试继续执行；完整真实Chat完成资格尚未取得。构建11原密码表单、账户匹配、CSRF及自动关闭的资格保持对应平台/制品范围，当前原回调沿用。物理设备实际页面及完整业务、Google/Notion授权和正式发行分别验收。
+
+既有profile到期2026-11-01 00:48:40（Asia/Shanghai）保持。发布配置须逐个核对[既有HTTP配置清单](mobile-app-release.md#公网端侧包的既有http配置清单)，网络和任务恢复沿原规则。[执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-公网构建12-product-api配置)提供具体命令及失败/恢复状态。
+
+
+构建12设备运行补充：原`devicectl device process launch`本次退出0、Locked=false，无调试器及强制终止。该回执覆盖普通启动；屏幕、账号及实际CLI业务保持独立。普通Simulator原工作区重试后进入RN Chat主页，旧会话和本次输入所在历史保留，原读取恢复规则继续采用。
+
+
+构建12追加业务结果：原模型目录重读200且可调用，原会话加载恢复；第二次原UI查询结束后出现会话状态待核对。后续status200/idle，messages超时、inputs/usage503，版本工具结果及完整结算未取得。实际输入/历史保留，完整公网Claude业务保持未完成；已安装和普通启动的资格保持。
+
+
+## 十八、2026-10-31当前源码构建13与iPhone安装
+
+当前[公网设备IPA13](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b13.ipa)为`com.inkmemory.mobile`、0.1.0/13，142,606,645字节，SHA256 `ecf2e478318d2c6011282ccc48ed505cbf7654d44062de9dd537a5ba5093a0c7`。本阶段从当前工作树重新执行独立Next生产构建及Xcode Release构建，Swift宿主、Metro/Hermes、Python业务源码和Next资源进入新制品；底层锁定Python/Node/Guest运行资源继续复用。既有未提交源码参与本轮构建，本轮新增程序改动0。
+
+`prepare-next.py`、独立`pnpm build`及全新DerivedData中的`xcodebuild ... CURRENT_PROJECT_VERSION=13 build`均退出0；原生构建406.079秒，入口`index.native.js`，安装依赖0。Next BUILD_ID为`7d9jH8rpXR1wr5dGZXg_x`，HBC SHA256为`c079fd4ec4f1fa8f6dbd6daeb01ecd26f25a6fea6dd15817a01a72eb52f0bf52`。包内328份Python源码和3份Node执行适配匹配当前源码，ntn固定0.15.1摘要匹配锁。签名deep/strict及归档CRC通过，归档16,575项。构建前3,161份文件的摘要核对到文档更新前全部保持。
+
+公网制品沿普通env副本配置：Admin Data transport、Product API和Gateway指向`https://ink-admin.suoxya.com`；原`http://localhost:5173/auth/callback`保留。公开Client、原权限、来源校验及其他配置保持。源env、Admin和数据库修改0。
+
+物理iPhone16经Wi-Fi由12覆盖安装13，安装退出0、21.743秒，apps读回0.1.0/13；首次启动前运行目录元数据逐项相同。普通console启动成功，进程8106与已安装路径匹配，内置Next在308ms就绪；无调试器及强制重开。该回执覆盖源码构建、签名、设备安装和启动，完整登录、Claude/Google/Notion业务及商店发行继续独立验收，本轮未发起模型业务验收。
+
+Xcode已使用`-allowProvisioningUpdates -allowProvisioningDeviceRegistration`，实际沿用原Team45KY254AF7及描述文件8a404027-cd3f-4e0a-8b8c-e0aad62dee83，有效期仍至2026-11-01 00:48:40（Asia/Shanghai）。本轮描述文件有效期未延长。精确命令、退出码与设备回执归[本阶段执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-当前源码重建13与手机升级)。
+
+
+## 十九、2026-10-31工作区读取与系统HTTP适配
+
+阶段记录：当前设备与Simulator采用第二十节构建16，本节保留15的原始成功与失败。
+
+当前物理设备为[开发IPA15](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b15.ipa)，`com.inkmemory.mobile`、0.1.0/15，142,623,150字节，SHA256 `6e2431f3c2197764c5e371ee40452dce6008803eae884b0023b42defd03752bd`。构建13全新DerivedData作为增量基础，Swift/Objective-C/C++重新编译，Node/Python资源重新装配；Next BUILD_ID与Hermes摘要沿第十八节。329份Python源码与4份Node平台文件逐项匹配，依赖安装0；deep/strict签名和CRC退出0。
+
+原构建13普通启动后，工作区会话读取发生`UND_ERR_CONNECT_TIMEOUT`。构建14诊断继续记录会话503、历史504；原密码表单协议经公网Admin完成原PKCE交换、resolve/profile200及登录弹窗自动关闭，真机RN主界面到达“新建对话”。该项为公开网页登录协议及原Native Cookie交接验证；可见表单键入验收继续独立记录。账号、Client/S256、权限、BFF Cookie/CSRF与Admin程序保持原所有者。
+
+构建15采用[系统HTTP适配](../design/multi-platform/mobile-runtime-architecture.md#2026-10-31-admin-json-http平台兼容)：复用现有NativeHTTPResponse，通过私有C ABI向Next和同步HTTPX提供Admin JSON后通道。原本机ASGI/SSE、Runtime/Gateway流及Web业务保持原路径。新增业务页面、业务HTTP路由、数据库变更、配置键和第三方依赖均0。
+
+| 验证项 | 实际结果 | 范围 |
+| --- | --- | --- |
+| 原HTTPX/DTO合同 | 7通过，退出0 | 有界响应、原错误与写入未知结果；Provider-free |
+| Node fetch适配 | 6通过，退出0 | 正文/头/取消及其他来源、Gateway/SSE、非manual透传 |
+| Native源合同 | 原类/函数切片编译与7项执行退出0 | macOS Foundation隔离URLProtocol；字节、上限、Cookie、重定向、取消及UTF-8，iOS目标单独验证 |
+| iPhone目标构建 | `xcodebuild ... CURRENT_PROJECT_VERSION=15 build`退出0 | 实际Swift/C++/CPython绑定进入设备App |
+| 无线覆盖安装 | `devicectl device install app`退出0，22.604秒 | 14→15，安装前后原运行目录元数据相同 |
+| 普通启动 | 无调试器启动，内置Next Ready282ms | 原产品App，未配置Mac业务中继 |
+| 原账号会话 | App内`GET /auth/session`200，账号匹配、CSRF存在 | 实际iPhone构建15；本次读取50.682秒 |
+| 物理后续读取 | 当前`passcodeRequired=true`，配置/历史回执尚未取得 | 待解锁后普通前台复核；期间缺项保持待验收 |
+| Simulator | 普通产品12→15覆盖安装退出0，原数据inode保持；原重试后配置与20项历史恢复 | 无调试器真实账号读取；冷启动追加记录见下方 |
+
+现有profile仍至2026-11-01 00:48:40（Asia/Shanghai），Team与UUID沿第十八节；本轮有效期未延长。Google公开回调登记、真实Claude/Notion业务和TestFlight/App Store继续分别验收。物理锁屏、Simulator、真实账号读取与模型任务拥有独立资格，当前结果覆盖安装、原会话读取与已执行的技术检查。
+
+具体命令及安全回执归[本轮执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-ios-admin系统http兼容与工作区读取)。公开网络的超时和首屏耗时继续记录，服务就绪、登录恢复及完整工作区可用分别判定。
+
+
+### 同源Simulator工作区恢复
+
+普通iPhone16 Plus / iOS18.6 Simulator完成12→15覆盖升级，`xcodebuild ... -sdk iphonesimulator ... CURRENT_PROJECT_VERSION=15 CODE_SIGNING_ALLOWED=NO build`、adhoc签名deep/strict、`simctl install`均退出0。安装后原数据目录inode183813951保持。设备与Simulator的Metro输入逐字节一致；Simulator采用同一设备Hermes制品与Next BUILD_ID，原独立编译HBC摘要及打包前置断言失败保留在私有证据。编译HBC的摘要差异未作为业务源码差异；本次复用同一份共享RN字节码。
+
+无调试器的原页面“重试读取”和历史“重新加载”完成配置恢复：附件、快捷操作可用，原权限显示“完全访问”，20项既有历史可见。此项覆盖当前真实账号的公开读取与原页面失败恢复；模拟数据、影子账号、Mac业务服务和模型调用均0。
+
+随后普通进程终止/重开，原账号自动进入RN主页，内置Next Ready433ms，配置自动恢复。“新建对话”、附件与“完全访问”可见，冷启动历史出现原加载失败反馈。端侧Python、Next与控制监听均归同一App进程。
+
+同步LLDB观察阶段三项本机请求均为URLSession -1001；该阶段拥有调试器干预，原始回执保留，HTTP200声明0。detach后本机匿名会话请求44ms返回401，用于监听就绪检查；真实账号读取资格由原普通UI恢复回执提供。初次脚本模块名包含连字符，LLDB导入拒绝；改为合法模块名后执行及detach成功。普通重开阶段无调试器附加，手机当前密码锁定状态与模拟器资格分别记录。
+
+
+## 二十、2026-10-31 HTTP读取恢复与构建16
+
+阶段记录：当前设备和Simulator采用第二十一节构建17；本节保留16的原始资格。
+
+当前[开发IPA16](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b16.ipa)为`com.inkmemory.mobile`、0.1.0/16，142,625,298字节，SHA256 `51313a662921d40409472b4513cee41a295492a7382b4839ce4d80e8ec21f8e2`。原密码网页登录、Client/S256、Cookie/CSRF、权限、Web页面与业务接口保持。源env、Admin、数据库Schema及第三方依赖修改0。
+
+构建15普通冷启动自动恢复账号与配置，历史读取最终显示原失败反馈。后续修订限定原HTTP传输：UTF-8/字节消费者排空缓冲时立即恢复此前挂起的任务；Admin绑定按原请求期限设置独立墙钟定时器，完成/取消后撤销并释放本次定时器引用。具体网络失败与缓冲状态的因果关系继续按实际回执判断。当前Swift函数原样提取后，在macOS Foundation隔离URLProtocol中编译、执行9项合同退出0，覆盖无回调超时与延迟拉取后实际URLSessionTask恢复；iOS运行资格另按下表判定。
+
+| 验证项 | 实际结果 | 范围 |
+| --- | --- | --- |
+| iPhone/Simulator Release16 | 两次最终源码`xcodebuild`均退出0 | 同一Swift源摘要；RN源变化0，复用已核对的同源Hermes |
+| 签名与制品 | 设备deep/strict、ZIP CRC及Simulator adhoc/strict均退出0 | 329份Python、4份Node摘要匹配，原Next BUILD_ID保持 |
+| 物理覆盖安装 | 15→16退出0，21.345秒 | apps读回16，原runtime元数据保持 |
+| 物理普通启动 | `devicectl device process launch`退出0，PID8291，lockState为passcodeRequired=false | 无强制终止；前台工作区验收继续单列 |
+| 普通Simulator冷启动 | 无调试器，原账号、配置与20项真实历史自动恢复，原重试点击0 | 附件及快捷操作可用，权限“完全访问”；观察在启动后60.711秒内完成，Next Ready474ms |
+| 物理原接口读取 | 94号取得原session503 / BFF_ADMIN_UNAVAILABLE、配置200且形状有效、历史504 / ADMIN_TIMEOUT | 会话与历史读取失败；完整前台工作区继续待复核 |
+
+设备与Simulator共享HBC摘要`c079fd4ec4f1fa8f6dbd6daeb01ecd26f25a6fea6dd15817a01a72eb52f0bf52`；本轮没有重新编译React页面。物理手机后续进入其他前台应用，检查工具已退出；本轮未继续切换用户手机页面。原账号会话在15阶段的200保留原制品资格，16的完整前台读取保持待验收。普通Simulator使用原产品标识、原数据与正常公网Admin，隔离账号、模型调用与Mac业务服务均0。
+
+开发profile保持8a404027-cd3f-4e0a-8b8c-e0aad62dee83，有效期至2026-11-01 00:48:40（Asia/Shanghai），本轮未延长。完整Claude/Google/Notion业务及商店发行继续独立验收。原15失败、同步调试观察超时及16首次观察脚本API缺口均在执行记录保留，技术合同、普通UI读取和物理发布资格分别登记。
+
+
+构建16物理读取追加：原GET会话503（51.852秒）、配置200（62.606秒）、历史504（39.500秒）。95号确认原App PID8291继续存在，未把后台状态单独归因为网络失败。共享连接复用修订与后续实际版本回执按执行记录继续登记。
+
+
+## 二十一、2026-10-31 Admin连接复用与构建17
+
+阶段记录：当前物理设备已安装第二十三节构建20，启动待系统验证；本节保留17原始503及安装回执。
+
+当前[设备开发IPA17](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b17.ipa)为`com.inkmemory.mobile`、0.1.0/17，142,625,581字节，SHA256 `0b0f83226a76f429ee7b9bc19e6064fc2ab2cafbcbf69f2d3bf15e57f0eb0bc7`。设备已Wi-Fi覆盖安装16→17，退出0、21.169秒，apps读回17，原runtime目录元数据保持。普通launch退出0、PID8315；此项覆盖App进程启动。
+
+Admin后通道复用单个App级临时URLSession，每个Task在resume前绑定当前NativeHTTPResponse，完成/取消只处理当前Task。Cookie与系统凭据存储关闭，原请求期限、字节上限、TLS及重定向校验保持。前端原本机HTTP继续各自Session；原网页登录、Client、权限、Web页面、ASGI/SSE、Gateway与CLI业务保持。新增业务页面、业务路由、依赖和源env修改0。
+
+| 验证项 | 结果 | 资格 |
+| --- | --- | --- |
+| `96-native-transport-check.py` | swiftc及10项实际执行退出0 | macOS Foundation源合同，覆盖共享Session取消隔离和连续请求；外网与模型0 |
+| 设备/Simulator Release17 | 最终xcodebuild均退出0，59.473秒/54.562秒 | 同一Swift源SHA256 7d9b02bfad05189a45959d090a0c276e95fff6097979786d075ba2e90a688c62，RN源变化0 |
+| 归档、签名、资源 | 设备deep/strict、CRC及Simulator adhoc/strict退出0 | 329份Python及4份Node匹配，同一Hermes及Next BUILD_ID |
+| 普通Simulator冷启动 | 账号、配置、20项真实历史自动恢复；原重试点击0 | 无调试器；附件可用、完全访问，Next Ready461ms，观察在42.612秒内完成 |
+| 物理原GET会话 | 503 / BFF_ADMIN_UNAVAILABLE，30.304秒 | 账号与CSRF成功资格未取得 |
+| 物理原GET配置 | 503 / BFF_ADMIN_UNAVAILABLE，30.044秒 | 本次配置未加载；16的200保留原构建范围 |
+| 物理原GET历史 | 503 / BFF_ADMIN_UNAVAILABLE，8.932秒 | 本次历史未加载 |
+| 物理系统HTTPS对照 | 公开JWKS GET200，7.118秒 | 当前手机系统URLSession可达；后通道及业务成功保持独立 |
+| 最新物理状态 | `device info lockState`退出0，passcodeRequired=true | 当前锁屏，完整普通前台工作区待解锁后复核 |
+
+真机17工作区实现验收未通过。共享连接属于已实现的平台传输修订，剩余业务失败继续定位；初始打开与短暂界面观察仍显示加载，后续5项只读观察在调度后detach完成，期间锁屏与后台状态影响单独记录。系统HTTPS200、服务器收到部分200、Simulator成功均保持各自范围。
+
+只读服务器检查按ink-memory-aliyun-ops规范执行，确认原Admin服务active、用户ink-admin；相关CFNetwork请求存在200。服务器代码/配置、服务启停、数据库直连/Schema和Docker操作0。日志只保留固定接口分类、状态、字节数与CFNetwork版本，账号、Cookie、授权码、密钥和业务正文输出0。具体后通道公开GET对照的符号查找/表达式执行未取得成功回执，列为harness缺口。
+
+后续优先取得手机解锁并保持Dream前台时的普通冷启动console、原会话/配置/历史与原重试回执，核对Next实际传输选择及每个超时阶段；异常条件继续fail closed。当前开发profile仍于2026-11-01 00:48:40（Asia/Shanghai）到期，续期未取得。完整Claude、Google/Notion业务及TestFlight/App Store保持独立，本阶段模型调用0。
+
+
+## 二十二、2026-10-31 iPhone头前网络失败与构建19
+
+当前[设备开发IPA19](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b19.ipa)为com.inkmemory.mobile、0.1.0/19，142,637,026字节，SHA256 `b1842ec714990ab00a5aef90bcb13d5e13d64b4c5a06cfa0e809f35442fca8bb`。18→19覆盖安装退出0，51.832秒；apps读回19，原runtime元数据保持。无调试器console冷启动Next Ready282ms。原profile 8a404027-cd3f-4e0a-8b8c-e0aad62dee83仍至2026-11-01 00:48:40（Asia/Shanghai）。
+
+17本轮受控读取为503/503/200；18定向日志确认active前台会话解析在响应头前返回NSURLErrorDomain/-1005，0字节、系统连接复用，Native至Next约2毫秒。另一请求耗尽原30秒期限。具体物理链路原因保持未知。19在现有Native适配内，仅为固定认证读取增加一次头前-1005恢复，沿原期限、取消与大小限制；服务token、授权交换、撤销和业务写入保持原规则。
+
+技术验证：Node6项、实际Swift源合同18项及iPhone Release19均退出0；原依赖、Next BUILD_ID `7d9jH8rpXR1wr5dGZXg_x`和HBC `c079fd4ec4f1fa8f6dbd6daeb01ecd26f25a6fea6dd15817a01a72eb52f0bf52`复用。原329份Python与4份Node资源匹配，签名deep/strict与ZIP CRC通过。普通成功阶段日志已收敛，失败或恢复才输出当前请求暂存阶段。原网页登录、Client/S256、Cookie/CSRF、角色与App内Python/Claude路径保持；新增依赖、业务接口、配置键、Schema与服务端改动0。
+
+19原账户、配置、历史及真实任务状态按[本轮执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-iphone-503定向采证与修复)继续登记。18首次无线安装失败、17/18实际503与Native fixture前置失败均保留原回执。18、19技术与安装资格独立于完整真机业务和正式发行。
+
+构建19原公开读取追加：GET /auth/session 200（4.924秒），原账号匹配、CSRF存在；GET /api/system-config 200（5.370秒），原workspace/full access均true；GET历史200（3.054秒、限1项）。当前模型deepseek-v4-flash-vision-exp，模型目录200（6.348秒）。单次真实任务预算1；原网页登录弹窗、真实历史可见和模型最终/持久化继续分别取证。
+
+
+## 二十三、2026-11-01 失败连接池与构建20
+
+19后续冷启动/auth/options 200、7.591秒，随后同一PID该GET 503、30.070秒。对应service-token已命中Native，active、reused=1、响应头缺失、正文0；密码提交0、任务提交0。20退役连接丢失或原期限超时的当前Admin Session，后续请求获取新Session，旧在途Task按原期限结束。普通取消、固定只读一次恢复、授权交换和写入单次派发保持。
+
+| 项目 | 实际回执 | 资格 |
+| --- | --- | --- |
+| Node / Native源合同 | 8项 / 24项，退出0，Swift编译0/运行0 | Provider-free技术验证 |
+| xcodebuild | build20-command.json精确argv，退出0、40.051秒 | 同工程增量Release20，依赖安装0 |
+| 制品 | 142639943字节，SHA256 bae15d1fc2b2f2d6cb6013f152b4d260728e4a1e5100723318165fc1b675c2fe | deep/strict签名和ZIP CRC通过，329份Python/4份Node匹配，Next/HBC沿19 |
+| 描述文件 | c1464290-29a4-48e7-85d8-09710eca2c40，有效至2026-11-08 01:03:45上海时间 | 原Team与证书，证书在profile中，application identifier/entitlements匹配 |
+| 覆盖安装 | devicectl install退出0、20.554秒，已安装0.1.0/20 | 2042项路径无增删，普通文件元数据一致；10项既有符号链接的目标metadata变为空，完整列表比较脚本退出1 |
+| 普通启动 | 退出1，FBSOpenApplicationErrorDomain/Security | 本地签名/证书/profile核对通过；手机开发者信任或系统验证为当前前提 |
+| 账户/真实任务 | 新制品未启动 | 20独立验收待完成；19历史200资格保留 |
+
+原安装比较脚本失败保留，追加99-install20-reviewed-receipt.json说明实际差异。新profile续签后的系统拒绝与HTTP503分别登记；手机系统信任/验证由持有人完成。用户桌面、镜像和键鼠保持停止。后续启动与业务回执继续追加[执行记录](../exec/mobile-app-design-review-20261024.md)。
+
+
+### 系统验证后追加：同一构建20真实业务
+
+设备持有人完成iOS系统验证，普通启动获准；受控冷启动Next Ready277ms、App PID9053。仍为上述IPA20、同一Bundle和原数据。原Security拒绝保留历史回执。20首次后台preflight 200/6.793秒，后续journey前置GET503/9.332秒；该次密码/模型提交0。受控冷启动后该GET200/2.424秒，后续两次暖读取200/2.908秒和2.320秒。
+
+| 业务步骤 | 实际结果 | 范围 |
+| --- | --- | --- |
+| 原密码登录协议 | 单次POST303，原PKCE authorize/callback导航完成，最终200 | 同一App内公开HTTP；原网页可见弹窗资格单列 |
+| 原GET /auth/session | 200、5.384秒 | 指定现有账户匹配，合法CSRF存在 |
+| 原GET /api/system-config | 200、4.054秒 | workspace/full access均true |
+| 原GET模型目录/历史 | 200、6.663秒 / 200、8.962秒 | 当前模型可调用、5项真实历史；历史页面显示待验收 |
+| 原POST /api/claude-agent | 单次发送，HTTP200、9023字节流 | 原App内Python→SDK/CLI，最终短回复匹配 |
+| 原messages/status | 200 / 200 | 新用户消息及completed助手持久化，running=false、idle |
+| 正常Admin账单 | req_4a3866fec4a640db86250788d4cf87e4，HTTP200、succeeded、settled | 窗口内仅1次；模型deepseek-v4-flash-vision-exp；输入3627、缓存读取19712、输出89、扣减23428 Token |
+
+完整旅程158.738秒，任务提交预算1、实际1，额外模型调用0。原登录页面、弹窗关闭、可见历史和真机实际网络恢复触发继续独立验收。后台HTTP及SQL只读审计的具体命令、退出码、失败和回执归[执行记录](../exec/mobile-app-design-review-20261024.md#2026-11-01-构建20原登录协议与一次真实claude任务)。

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share the original image error projection with Native; DOM presentation remains.
 // [Sync] 2026-10-11: show only actionable image error messages; execution state is independent of approval settlement.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-10-10: label the internal image tool by generate/edit intent, retaining ordinary tool states.
@@ -35,18 +36,10 @@ import McpAppHostPanel from './mcp-apps/McpAppHostPanel';
 import type { SendMcpAppUserMessage } from './mcp-apps/ImMcpAppHostAdapter';
 import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 import type { ChatUserMessage } from './chatUserMessageIngress';
+import {imageFailureMessage} from './toolPartPresentation';
 
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
-function imageFailureMessage(value: unknown): string {
-  if (typeof value === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && 'message' in parsed && typeof parsed.message === 'string' ? parsed.message : '';
-    } catch { return value; }
-  }
-  return value && typeof value === 'object' && 'message' in value && typeof value.message === 'string' ? value.message : '';
-}
 
 function IconTool() {
   return (

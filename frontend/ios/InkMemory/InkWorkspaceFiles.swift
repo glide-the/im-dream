@@ -1,6 +1,8 @@
-// [Input] Existing Thread-owned Workspace GET requests, URLSession bytes and the native picked-file lease store.
+// [Input] Existing Workspace/storage-file GET requests, URLSession bytes and the native picked-file lease store.
 // [Output] Streamed private binary resources, MIME metadata and temporary export copies without JS byte conversion.
 // [Pos] iOS Workspace resource adapter; backend ownership, mode, paths and credentials retain their current owners.
+// [Sync] 2026-10-30: reject decoded dot segments/backslashes before storage-file requests; retain original server key/owner validation.
+// [Sync] 2026-10-30: reuse the private reader for message attachments through the same-origin storage-file route; Workspace defaults remain.
 import Foundation
 
 enum NativeWorkspaceFileError: Error { case invalidRequest, invalidText, http(Int) }
@@ -8,8 +10,17 @@ enum NativeWorkspaceFileRequest {
     static func make(origin: URL, options: NSDictionary) throws -> URLRequest {
         var request = try NativeUploadRequest.local(origin: origin, options: options)
         guard request.httpMethod == "GET", request.httpBody == nil, let url = request.url,
-              ["/api/workspace/files/content", "/api/workspace/files/download"].contains(url.path),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw NativeWorkspaceFileError.invalidRequest }
+        if options["source"] as? String == "message" {
+            guard url.path.hasPrefix("/api/storage/file/"), url.path.count > "/api/storage/file/".count,
+                  components.query == nil, components.fragment == nil,
+                  !url.path.components(separatedBy: "/").contains(where: { $0 == "." || $0 == ".." }),
+                  !url.path.contains("\\") else { throw NativeWorkspaceFileError.invalidRequest }
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            return request
+        }
+        guard options["source"] == nil,
+              ["/api/workspace/files/content", "/api/workspace/files/download"].contains(url.path) else { throw NativeWorkspaceFileError.invalidRequest }
         let query = components.queryItems ?? []
         guard query.filter({ $0.name == "sessionId" && !($0.value ?? "").isEmpty }).count == 1,
               query.filter({ $0.name == "path" && !($0.value ?? "").isEmpty }).count == 1,

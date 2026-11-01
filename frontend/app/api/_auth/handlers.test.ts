@@ -1,6 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
+// [Sync] 2026-10-31: keep one public Client/S256 and original exchange/session contracts for a configured App callback with local HTTP receiving.
 // [Sync] 2026-10-25: cover public Admin form navigation from the registered localhost Dream client.
 // [Sync] 2026-10-11: local/public navigation, proxy evidence, callback host and fixed issuer/backchannel regression.
 // [Sync] 2026-09-18: verify public browser authority with a separate loopback server transport.
@@ -51,6 +52,70 @@ function fixture() {
   const admin = new AdminBffClient(adminBffConfig(env), transport, async () => 'service.access.token');
   return { boundary, calls, outputs, admin, handlers: createBffHandlers(boundary, admin) };
 }
+
+test('App callback keeps the original Client, PKCE transaction, unknown-exchange recovery and local session', async () => {
+  const { admin, calls, outputs } = fixture();
+  const origin = 'http://localhost:5173';
+  const registered = 'com.inkmemory.example.auth:/auth/callback';
+  const boundary = new BffLoginBoundary({ publicOrigin: origin, callbackUri: registered, cookieSecret: 'c'.repeat(32) });
+  const handlers = createBffHandlers(boundary, admin);
+  const start = await handlers.start(new Request(origin + '/auth/start?return_to=%2Fchat'));
+  assert.equal(start.status, 303);
+  const authorization = new URL(start.headers.get('location')!);
+  const cookie = start.headers.get('set-cookie')!.split(';')[0];
+  const transaction = boundary.readTransaction(new Request(boundary.callbackRequestUri, { headers: { cookie } }));
+  assert.equal(authorization.searchParams.get('client_id'), 'registered-browser');
+  assert.equal(authorization.searchParams.get('redirect_uri'), registered);
+  assert.equal(authorization.searchParams.get('code_challenge'), boundary.codeChallenge(transaction));
+  assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(authorization.searchParams.get('state'), transaction.state);
+  assert.equal(authorization.searchParams.get('nonce'), transaction.nonce);
+  assert.equal(cookie.includes(transaction.code_verifier), false);
+  const request = new Request(boundary.callbackRequestUri + '?' + new URLSearchParams({ code: 'original-code', state: transaction.state, iss: env.INK_ADMIN_AUTH_ISSUER }), { headers: { cookie } });
+  calls.length = 0;
+  outputs['/browser-sessions/exchange'] = new Error('synthetic unknown exchange');
+  const failed = await handlers.callback(request);
+  assert.equal(failed.status, 503);
+  assert.equal(failed.headers.get('set-cookie'), null);
+  outputs['/browser-sessions/exchange'] = { handle: browserHandle, expires_at: new Date(Date.now() + 3_600_000).toISOString() };
+  const success = await handlers.callback(request);
+  assert.equal(success.status, 303);
+  assert.equal(success.headers.get('location'), '/chat');
+  assert.deepEqual(calls[0].body, calls[1].body);
+  assert.equal(calls[1].body?.redirect_uri, registered);
+  assert.equal(calls[1].body?.transaction_id, transaction.transaction_id);
+  assert.equal(calls[1].body?.code_verifier, transaction.code_verifier);
+  const handle = success.headers.getSetCookie().find(value => value.startsWith(boundary.handleCookieName + '='))!.split(';')[0];
+  const session = await handlers.session(new Request(origin + '/auth/session', { headers: { cookie: handle } }));
+  assert.equal(session.status, 200);
+  const projection = await session.json();
+  assert.equal(projection.user.id, '9223372036854775807');
+  assert.equal(projection.csrf_token, boundary.csrfToken(browserHandle));
+  assert.equal(JSON.stringify(projection).includes('server.only.token'), false);
+});
+
+test('App callbacks reject missing or unrelated transactions, duplicate query and a different local receiving path before exchange', async () => {
+  const { admin, calls } = fixture();
+  const origin = 'http://localhost:5173';
+  const boundary = new BffLoginBoundary({ publicOrigin: origin, callbackUri: 'com.inkmemory.example.auth:/auth/callback', cookieSecret: 'c'.repeat(32) });
+  const handlers = createBffHandlers(boundary, admin);
+  const transaction = boundary.createTransaction('/');
+  const cookie = boundary.transactionCookie(transaction).split(';')[0];
+  const query = new URLSearchParams({ code: 'original-code', state: transaction.state, iss: env.INK_ADMIN_AUTH_ISSUER });
+  for (const [path, headers, params] of [
+    ['/auth/callback', {}, query.toString()],
+    ['/auth/callback', { cookie: boundary.transactionCookie(boundary.createTransaction('/')).split(';')[0] }, query.toString()],
+    ['/wrong', { cookie }, query.toString()],
+    ['/auth/callback', { cookie }, query + '&code=duplicate'],
+    ['/auth/callback', { cookie }, query + '&state=duplicate'],
+    ['/auth/callback', { cookie }, query + '&iss=duplicate'],
+  ] as const) {
+    const response = await handlers.callback(new Request(origin + path + '?' + params, { headers }));
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('set-cookie'), null);
+    assert.equal(calls.length, 0);
+  }
+});
 
 test('start discovers exact registered client and creates encrypted original PKCE transaction', async () => {
   const { boundary, calls, handlers } = fixture();

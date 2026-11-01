@@ -1,0 +1,11 @@
+/* [Input] Fixed tool-result document attribute and original theme variables. */
+/* [Output] Natural document height for the native message scroll owner. */
+/* [Pos] Local tool document only; ordinary Web layout remains unchanged. */
+html[data-tool-result-document],
+html[data-tool-result-document] body {
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-bg-app);
+}

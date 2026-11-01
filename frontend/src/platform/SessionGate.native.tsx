@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: release current Native documents before account loss/change/logout; original Cookie/CSRF/login semantics remain.
 // [Sync] 2026-10-30: wait for login-sheet dismissal before showing the native home; coalesce login taps and treat closing as cancellation.
 // [Sync] 2026-10-29: pass the validated public user to account-scoped native navigation; authentication and session refresh retain their owners.
 // [Input] Application-owned backend readiness and normal Web login completion.
@@ -11,8 +12,9 @@ import useInkColors from '../components/useInkColors.native';
 import {isBrowserSessionCurrent,loadBrowserSession,revokeBrowserSession,type BrowserSession,type BrowserUser} from '../../app/_dream/lib/browserSession';
 import {BackendRuntimeManager} from '../runtime/BackendRuntimeManager';
 import {clientFetch} from './transport';
-export default function SessionGate({children}: {children: (logout: () => Promise<void>,refresh:()=>Promise<void>,user:BrowserUser) => ReactNode}) {
+export default function SessionGate({children,beforeRelease}: {beforeRelease?:()=>Promise<void>;children: (logout: () => Promise<void>,refresh:()=>Promise<void>,user:BrowserUser) => ReactNode}) {
   const [session, setSession] = useState<BrowserSession | null>(null);
+  const currentSession=useRef(session),release=useRef(beforeRelease);currentSession.current=session;release.current=beforeRelease;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [loggingIn,setLoggingIn]=useState(false);
@@ -24,7 +26,10 @@ export default function SessionGate({children}: {children: (logout: () => Promis
     if(inFlight.current)return inFlight.current;
     const operation=(async()=>{
       if(mounted.current){setLoading(true);setError('');}
-      try {await BackendRuntimeManager.ensureStarted();const next=await loadBrowserSession(clientFetch);if(mounted.current && !loginPending.current && isBrowserSessionCurrent(next))setSession(next);}
+      try {await BackendRuntimeManager.ensureStarted();const next=await loadBrowserSession(clientFetch);if(mounted.current && !loginPending.current && isBrowserSessionCurrent(next)){
+        if(currentSession.current&&currentSession.current.user.id!==next?.user.id)await release.current?.().catch(()=>undefined);
+        if(mounted.current&&!loginPending.current&&isBrowserSessionCurrent(next))setSession(next);
+      }}
       catch {if(mounted.current)setError('工作区暂时无法打开，请重试。');}
       finally {if(mounted.current)setLoading(false);}
     })();
@@ -44,7 +49,7 @@ export default function SessionGate({children}: {children: (logout: () => Promis
     }
     finally {loginPending.current=false;if(mounted.current)setLoggingIn(false);}
   }
-  async function logout() { await revokeBrowserSession(clientFetch); setSession(null); }
+  async function logout() { await release.current?.().catch(()=>undefined); await revokeBrowserSession(clientFetch); setSession(null); }
   if (session) return children(logout,refresh,session.user);
   return <View style={{flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20}}>
     <Text style={{fontSize: 24, color:foreground}}>Ink &amp; Memory</Text>

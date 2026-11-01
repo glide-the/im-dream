@@ -1,6 +1,7 @@
 // [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
+// [Sync] 2026-10-31: distinguish an exact configured private account redirect from its App-local HTTP receiver; original PKCE/Cookie checks remain.
 // [Sync] 2026-10-11: validate browser navigation evidence before selecting an Admin center; preserve callback origin binding.
 // [Sync] 2026-10-11: derive per-request origin/cookies/callback; Admin verifies the same client's published callback before login.
 // [Sync] 2026-09-18: recover the configured public origin from exact proxy headers even when a tunnel rewrites the transport host.
@@ -109,6 +110,7 @@ export class BffLoginBoundary {
   readonly publicOrigin: string;
   readonly internalOrigin: string | null;
   readonly callbackUri: string;
+  readonly callbackRequestUri: string;
   readonly transactionCookieName: string;
   readonly handleCookieName: string;
   readonly #key: Buffer;
@@ -125,8 +127,14 @@ export class BffLoginBoundary {
     }
     try {
       const callback = new URL(config.callbackUri);
-      if (callback.origin !== this.publicOrigin || callback.username || callback.password || callback.search || callback.hash || callback.href !== config.callbackUri) throw new Error();
+      const local = new URL(this.publicOrigin);
+      const privateAccountCallback = local.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(local.hostname)
+        && /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+\.auth:$/.test(callback.protocol)
+        && config.callbackUri === callback.protocol + '/auth/callback';
+      if ((!privateAccountCallback && callback.origin !== this.publicOrigin)
+        || callback.username || callback.password || callback.search || callback.hash || callback.href !== config.callbackUri) throw new Error();
       this.callbackUri = config.callbackUri;
+      this.callbackRequestUri = privateAccountCallback ? new URL(callback.pathname, this.publicOrigin).href : this.callbackUri;
     } catch { throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503); }
     if (Buffer.byteLength(config.cookieSecret) < 32 || hasControlCharacter(config.cookieSecret)) {
       throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
@@ -162,7 +170,7 @@ export class BffLoginBoundary {
     const callback = new URL(configured.callbackUri);
     return new BffLoginBoundary({
       publicOrigin: origin, internalOrigin: configured.internalOrigin ?? undefined,
-      callbackUri: new URL(callback.pathname, origin).href,
+      callbackUri: callback.protocol === 'http:' || callback.protocol === 'https:' ? new URL(callback.pathname, origin).href : configured.callbackUri,
       cookieSecret: environment.INK_DREAM_BFF_COOKIE_SECRET ?? '',
       transactionLifetimeSeconds: Number(environment.INK_DREAM_BFF_LOGIN_TTL_SECONDS ?? '600'),
     });
@@ -214,7 +222,7 @@ export class BffLoginBoundary {
   validateCallback(request: Request, expectedIssuer: string): LoginTransaction {
     const transaction = this.readTransaction(request);
     const url = new URL(request.url); const query = url.searchParams;
-    if (this.#requestOrigin(request) + url.pathname !== this.callbackUri || query.getAll('state').length !== 1 || query.getAll('iss').length !== 1 || query.getAll('code').length !== 1
+    if (this.#requestOrigin(request) + url.pathname !== this.callbackRequestUri || query.getAll('state').length !== 1 || query.getAll('iss').length !== 1 || query.getAll('code').length !== 1
       || !constantEqual(query.get('state') ?? '', transaction.state) || query.get('iss') !== expectedIssuer || !query.get('code') || query.has('error')) {
       throw new BffBoundaryError('BFF_OAUTH_CALLBACK_INVALID', 400);
     }

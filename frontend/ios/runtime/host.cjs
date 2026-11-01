@@ -1,6 +1,9 @@
+// [Sync] 2026-10-31: pass the bundled Admin HTTP adapter only to the original Next worker.
+// [Sync] 2026-10-31: canonicalize the native endpoint parent before guest staging; retain descendant symlink/digest checks.
 // [Input] Native-owned endpoint path, fixed Runtime/Next resources, workspace root and private connections.
 // [Output] One authenticated application-process socket, persistent original Next and per-session Runtime workers.
 // [Pos] iOS Node embedding bootstrap; no model loop, tool router or remote execution.
+// [Sync] 2026-10-31: preserve the existing configured BFF account redirect when starting the original Next worker.
 // [Sync] 2026-10-25: load the fixed worker source as an ESM data URL and leave foreign process descriptors outside Worker unmanaged-FD cleanup.
 // [Sync] 2026-10-25: retain the original Workspace Mode-off default at the fixed bundled backend directory.
 // [Sync] 2026-10-25: require Next worker listening ownership before qualifying the configured Web origin.
@@ -10,9 +13,12 @@
 // [Sync] 2026-10-26: accept explicit Worker termination and report the existing exit packet after cleanup completes.
 // [Sync] 2026-10-26: permit plugin-management cwd only inside the application's managed plugin root.
 // [Sync] 2026-10-26: execute managed plugin Python commands through the same authenticated Worker and guest binding.
+// [Sync] 2026-10-30: execute pinned Notion CLI only from its packaged path and the original private Notion credential home.
+// [Sync] 2026-10-30: project current system DNS servers into the private guest resolver file at startup and command connection.
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
+const { Resolver } = require('node:dns');
 const crypto = require('node:crypto');
 const { Worker } = require('node:worker_threads');
 const { pathToFileURL } = require('node:url');
@@ -23,7 +29,8 @@ const resourcesRoot = fs.realpathSync(path.dirname(__dirname));
 const dataRoot = fs.realpathSync(applicationDataRoot);
 const guestManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'guest/manifest.json'), 'utf8'));
 if (!/^[a-f0-9]{64}$/.test(guestManifest.rootDigest)) throw new Error('IOS_GUEST_MANIFEST_INVALID');
-const guestRoot = path.join(path.dirname(endpointFile), 'guest', guestManifest.rootDigest);
+// Native container ancestors can have platform aliases; guest descendants keep their strict path checks.
+const guestRoot = path.join(fs.realpathSync(path.dirname(endpointFile)), 'guest', guestManifest.rootDigest);
 if (!fs.existsSync(path.join(guestRoot, '.ready'))) {
   fs.mkdirSync(path.dirname(guestRoot), {recursive: true, mode: 0o700});
   fs.cpSync(path.join(resourcesRoot, 'guest/rootfs'), guestRoot, {recursive: true});
@@ -42,6 +49,40 @@ if (!fs.existsSync(path.join(guestRoot, '.ready'))) {
   fs.writeFileSync(path.join(guestRoot, '.ready'), guestManifest.rootDigest, {mode: 0o600});
 }
 const commandRuntime = Object.freeze({root: guestRoot, data: dataRoot, resources: resourcesRoot});
+function refreshGuestResolver() {
+  const servers = new Resolver().getServers().filter(address => net.isIP(address));
+  const directory = path.join(fs.realpathSync(guestRoot), 'etc');
+  const target = path.join(directory, 'resolv.conf');
+  if (fs.realpathSync(directory) !== directory || fs.lstatSync(target, {throwIfNoEntry: false})?.isSymbolicLink())
+    throw new Error('IOS_GUEST_RESOLVER_PATH_INVALID');
+  // No external resolver is substituted when the system has no DNS servers.
+  // An empty file prevents a later command from reusing a previous network's servers.
+  const text = servers.map(address => `nameserver ${address}\n`).join('');
+  if (fs.existsSync(target) && fs.readFileSync(target, 'utf8') === text) return;
+  const temporary = target + '.preparing-' + crypto.randomBytes(8).toString('hex');
+  try {
+    fs.writeFileSync(temporary, text, {mode: 0o600, flag: 'wx'});
+    fs.renameSync(temporary, target);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+}
+refreshGuestResolver();
+// Installation strips executable bits from plain bundle resources. Stage the
+// verified bytes beside the existing guest commands, then restore their mode.
+const notionManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'node/notion/manifest.json'), 'utf8'));
+const notionSource = fs.readFileSync(path.join(resourcesRoot, 'node/notion/ntn'));
+if (crypto.createHash('sha256').update(notionSource).digest('hex') !== notionManifest.binarySha256)
+  throw new Error('IOS_NOTION_CLI_DIGEST_MISMATCH');
+const notionExecutable = path.join(guestRoot, 'usr/local/bin/ntn');
+fs.mkdirSync(path.dirname(notionExecutable), {recursive: true, mode: 0o700});
+if (fs.realpathSync(path.dirname(notionExecutable)) !== path.dirname(notionExecutable) || fs.lstatSync(notionExecutable, {throwIfNoEntry: false})?.isSymbolicLink())
+  throw new Error('IOS_NOTION_CLI_PATH_INVALID');
+if (!fs.existsSync(notionExecutable) || crypto.createHash('sha256').update(fs.readFileSync(notionExecutable)).digest('hex') !== notionManifest.binarySha256) {
+  const temporary = notionExecutable + '.preparing-' + crypto.randomBytes(8).toString('hex');
+  fs.writeFileSync(temporary, notionSource, {mode: 0o700, flag: 'wx'}); fs.renameSync(temporary, notionExecutable);
+}
+fs.chmodSync(notionExecutable, 0o755);
 const root = fs.realpathSync(workspaceRoot);
 const defaultDirectory = fs.realpathSync(path.join(__dirname, '..', 'app'));
 const nextRoot = fs.realpathSync(path.join(__dirname, '..', 'next'));
@@ -55,6 +96,7 @@ if (fs.existsSync(environmentFile)) process.loadEnvFile(environmentFile);
 const workerURL = new URL('data:text/javascript;charset=utf-8,' + encodeURIComponent(
   fs.readFileSync(path.join(__dirname, 'worker.mjs'), 'utf8')));
 const processBoundaryURL = pathToFileURL(path.join(__dirname, 'ios-process-boundary.mjs')).href;
+const adminHTTPURL = pathToFileURL(path.join(__dirname, 'ios-admin-http.mjs')).href;
 const token = crypto.randomBytes(32).toString('hex');
 const withinRoot = value => typeof value === 'string' && (value === root || value.startsWith(root + path.sep));
 const hostConfig = JSON.parse(fs.readFileSync(path.join(__dirname, 'host-config.json'), 'utf8'));
@@ -82,11 +124,11 @@ function startWeb(backendOrigin) {
   if (!webWorker) {
     boundBackendOrigin = backend.origin;
     webWorker = new Worker(workerURL, {
-      workerData: { application: 'next', cwd: path.dirname(nextEntry), serverEntry: nextEntry, argv: [], webPort: Number(webOrigin.port), processBoundaryURL },
+      workerData: { application: 'next', cwd: path.dirname(nextEntry), serverEntry: nextEntry, argv: [], webPort: Number(webOrigin.port), processBoundaryURL, adminHTTPURL },
       env: { ...applicationEnvironment, HOME: process.env.HOME || path.dirname(endpointFile), TMPDIR: process.env.TMPDIR || path.dirname(endpointFile),
         NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', HOSTNAME: webOrigin.hostname, PORT: webOrigin.port,
         INK_BACKEND_INTERNAL_URL: backend.origin, INK_DREAM_PUBLIC_ORIGIN: webOrigin.origin,
-        INK_DREAM_BFF_REDIRECT_URI: webOrigin.origin + '/auth/callback' },
+        INK_DREAM_BFF_REDIRECT_URI: applicationEnvironment.INK_DREAM_BFF_REDIRECT_URI ?? webOrigin.origin + '/auth/callback' },
       stdout: true, stderr: true, trackUnmanagedFds: false,
     });
     webWorker.stdout.on('data', data => process.stdout.write(data));
@@ -139,9 +181,13 @@ const server = net.createServer(socket => {
         let canonicalDirectory = false;
         const pluginRoot = path.join(path.dirname(root), 'claude-plugin-runtime');
         const pluginPython = message.purpose === 'plugin-python';
+        const notionCLI = message.purpose === 'notion-cli';
+        const notionRoot = path.join(path.dirname(root), 'notion-runtime');
+        const notionDirectory = notionCLI && typeof message.cwd === 'string' &&
+          message.cwd.startsWith(notionRoot + path.sep);
         const pluginDirectory = ['plugin-management', 'plugin-python'].includes(message.purpose) && typeof message.cwd === 'string'
           && (message.cwd === pluginRoot || message.cwd.startsWith(pluginRoot + path.sep));
-        try { canonicalDirectory = (withinRoot(message.cwd) || message.cwd === defaultDirectory || pluginDirectory) && fs.realpathSync(message.cwd) === message.cwd && fs.statSync(message.cwd).isDirectory(); }
+        try { canonicalDirectory = (withinRoot(message.cwd) || message.cwd === defaultDirectory || pluginDirectory || notionDirectory) && fs.realpathSync(message.cwd) === message.cwd && fs.statSync(message.cwd).isDirectory(); }
         catch { /* Invalid session paths do not terminate the application event loop. */ }
         if (message.type !== 'connect' || !canonicalDirectory ||
             !Array.isArray(message.argv) || message.argv.some(v => typeof v !== 'string') ||
@@ -160,9 +206,18 @@ const server = net.createServer(socket => {
         if (pluginPython && !pythonExecutable) {
           fail('IOS_PLUGIN_PYTHON_EXECUTABLE_INVALID'); return;
         }
+        if (notionCLI && (!notionDirectory || message.argv[0] !== notionExecutable ||
+            message.env.NOTION_HOME !== message.cwd || message.env.NOTION_KEYRING !== '0' ||
+            Object.hasOwn(message.env, 'NOTION_API_TOKEN') || Object.hasOwn(message.env, 'HOME'))) {
+          fail('IOS_NOTION_CLI_EXECUTABLE_INVALID'); return;
+        }
+        if (notionCLI && crypto.createHash('sha256').update(fs.readFileSync(notionExecutable)).digest('hex') !== notionManifest.binarySha256) {
+          fail('IOS_NOTION_CLI_DIGEST_MISMATCH'); return;
+        }
         try {
+          refreshGuestResolver();
           worker = new Worker(workerURL, {
-            workerData: { application: pluginPython ? 'plugin-python' : undefined,
+            workerData: { application: notionCLI ? 'notion-cli' : pluginPython ? 'plugin-python' : undefined,
               cwd: message.cwd, argv: message.argv, runtimeEntry, processBoundaryURL, commandRuntime },
             // Original Runtime uses os.tmpdir() for unsandboxed cwd tracking.
             // Reuse the same server-bound thread temp root without changing its ownership.

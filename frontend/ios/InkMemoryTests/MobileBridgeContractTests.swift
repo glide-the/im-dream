@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: qualify the original session DTO/origin before completing an account-login sheet.
 // [Input] iOS generation-aware bridge inventory, capability projection, and packaged resource policy.
 // [Output] Provider-free proof of protocol, Web document/resource isolation, and fail-closed runtime gates.
 // [Pos] iOS native unit tests; no Python, Claude, service, or model process is started.

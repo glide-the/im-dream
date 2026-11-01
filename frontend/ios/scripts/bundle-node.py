@@ -1,13 +1,16 @@
+# [Sync] 2026-10-31: include the private native Admin HTTP adapter and its exact resource digest.
 #!/usr/bin/env python3
 # [Input] Prepared original Runtime resources and Xcode target build settings.
 # [Output] App-local Node, original Runtime and original Next standalone resources with provenance receipts.
 # [Pos] iOS resource build phase; normal application configuration stays outside React assets.
+# [Sync] 2026-10-31: preserve the configured BFF account redirect; bundle identity never replaces the normal Web login callback.
 # [Sync] 2026-10-29: project the existing public MCP callback env key to this native target URI; source env/client credentials remain unchanged.
 # [Sync] 2026-10-25: keep generated RuntimeArtifacts separate from tracked runtime sources.
 # [Sync] 2026-10-25: copy the explicit loopback host configuration and package the isolated original Next build.
 # [Sync] 2026-10-25: retain the original frontend/.env.local and backend/.env configuration owners in the app.
 # [Sync] 2026-10-25: bundle the pinned command root and the existing sandbox-disabled deployment value.
 # [Sync] 2026-10-26: retain the verified offline plugin wheelhouse with the packaged command resources.
+# [Sync] 2026-10-30: require the locked Notion CLI binary and notice before copying application resources.
 import hashlib
 import json
 import os
@@ -20,15 +23,22 @@ ios = Path(__file__).resolve().parents[1]
 source = ios / "RuntimeArtifacts/generated"
 if not (source / "runtime-adaptation.json").is_file():
     raise RuntimeError("Run python3 frontend/ios/scripts/prepare-node.py before building")
+notion = json.loads((ios / "node-dependencies.json").read_text())["notionCli"]
+if json.loads((source / "notion/manifest.json").read_text()) != notion:
+    raise RuntimeError("Prepared Notion CLI manifest differs from the dependency lock")
+for name, expected in (("ntn", notion["binarySha256"]), ("LICENSE.md", notion["licenseSha256"])):
+    if hashlib.sha256((source / "notion" / name).read_bytes()).hexdigest() != expected:
+        raise RuntimeError("Prepared Notion CLI resource digest mismatch")
 destination = Path(os.environ["TARGET_BUILD_DIR"]) / os.environ["UNLOCALIZED_RESOURCES_FOLDER_PATH"] / "node"
 shutil.rmtree(destination, ignore_errors=True)
 shutil.copytree(source, destination)
-for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs"):
+for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs", "ios-admin-http.mjs"):
     shutil.copy2(ios / "runtime" / name, destination / name)
 receipt_path = destination / "runtime-adaptation.json"
 receipt = json.loads(receipt_path.read_text())
 receipt["platformFiles"] = {name: hashlib.sha256((destination / name).read_bytes()).hexdigest()
-    for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs")}
+    for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs", "ios-admin-http.mjs")}
+receipt["notionCli"] = notion
 receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
 shutil.copy2(ios / "host-config.json", destination / "host-config.json")
 print("Bundled original Runtime JavaScript and iOS application-process host.")
@@ -81,9 +91,12 @@ environment.write_text(body + "INK_AGENT_SANDBOX_ENABLED=" + value + "\n")
 environment.chmod(0o600)
 identifier = os.environ.get("PRODUCT_BUNDLE_IDENTIFIER", "")
 if not re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+", identifier):
-    raise RuntimeError("A native bundle identifier is required for the MCP callback")
+    raise RuntimeError("A native bundle identifier is required for application callbacks")
 callback = identifier + ".mcp:/oauth/callback"
 body = environment.read_text()
 body = re.sub(r"(?m)^\s*(?:export\s+)?INK_CLAUDE_MCP_OAUTH_REDIRECT_URI\s*=.*(?:\n|$)", "", body)
 environment.write_text(body + "INK_CLAUDE_MCP_OAUTH_REDIRECT_URI=" + callback + "\n")
 environment.chmod(0o600)
+
+# Preserve the original frontend account redirect copied above. The OAuth server
+# must publish a configured App URI before a target can adopt that URI.

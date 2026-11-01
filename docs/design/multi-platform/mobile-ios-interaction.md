@@ -1,3 +1,10 @@
+<!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
+<!-- [Sync] 2026-10-31: 公网构建11保留原Web回调及登录/失败恢复图；Google本机采用与公网前提分列。 -->
+<!-- [Sync] 2026-10-31: 普通Simulator采用精确账号回调，系统取消/密码关闭/真实Chat通过；完整Google、Notion授权与真机单列。 -->
+<!-- [Sync] 2026-10-31: Native账号会话/原Cookie观察暂停与复制形成源码候选，16项iOS技术通过，系统授权/登记/普通包采用分列。 -->
+<!-- [Sync] 2026-10-31: BFF原账号回调地址兼容形成源码候选，58项技术及Web类型通过，Native/登记/包采用继续实施。 -->
+<!-- [Sync] 2026-10-31: Google正常账户授权补精确回调/Cookie交易连续性方案、原Client复用及未实现前提；原图保留。 -->
+<!-- [Sync] 2026-10-31: 区分已实现的App级运行库协调、当前Release设备开发包及历史RN接入提案。 -->
 <!-- [Sync] 2026-10-27: RN框架目标保持，按原生与网页区域减少迁移范围。 -->
 <!-- [Sync] 2026-10-26: recovery of an already completed confirmation reuses its saved reply and retries workspace synchronization without repeating generation. -->
 <!-- [Sync] 2026-10-26: 已保存Dream确认在当前用户重开同Run时经原消息claim恢复，保留等待与实际ACK反馈。 -->
@@ -22,6 +29,8 @@
 
 # Ink & Memory iOS交互设计
 
+现行登录认证、目标编译与配置职责见[运行库认证合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，操作指南见[认证排障](../../deploy/mobile-auth-troubleshooting.md)。iOS已有登录文档、系统授权和Cookie适配源码；公网Google精确回调与完整业务资格待验收。下方旧日期阶段保留其原始状态，本轮设备/账号复测0。
+
 ## 现行iOS工程与交互
 
 实际入口`frontend/ios/InkMemory/InkMemoryApp.swift`加载Metro生成的`main.jsbundle`和RN应用`InkMemory`。`InkReactNative.swift`导出运行库启动、HTTP响应增量读取、取消读取和原网页登录；整页业务WebView视图注册已退役。原Python/Node/Next/Claude装配继续复用原生脚本。
@@ -29,6 +38,8 @@
 当前SwiftUI入口使用`.ignoresSafeArea(.container)`延伸容器背景并保留系统键盘避让，向RN提供调整后的可见区域。RN页面在iOS关闭额外的`KeyboardAvoidingView`调整，内部滚动使用该区域，系统安全区组件处理状态栏和Home Indicator。`MarkdownInputEditor.native`局部文档不持有App级键盘布局。Agent弹层根据键盘顶部及触发器锚点选择展开方向，关闭后保留当前Agent和草稿。该合同需用系统软件键盘验证输入、Send/Stop和弹层均可操作。
 
 共享界面与状态、正常/异常时序及生命周期见[统一工程设计](react-native-web-project-structure.md)。运行中切后台遵循iOS挂起约束，回前台通过原history/status恢复。签名与发行继续使用现有Team配置，账号与发行资格单独核验。
+
+2026-10-31源码现状：[BackendRuntimeManager](../../../frontend/src/runtime/BackendRuntimeManager.ts#L8)已由[SessionGate](../../../frontend/src/platform/SessionGate.native.tsx#L28)调用，复用[InkRuntime.ensureStarted](../../../frontend/ios/InkMemory/InkReactNative.swift#L51)和原EmbeddedDreamBackend singleton；成功Promise在页面重建期间保留，启动失败允许原重试。当前Release设备全量构建与已有开发签名IPA完成，普通Simulator、Release真机业务和商店资格按[当前发布稿](../../deploy/mobile-app-release.md#2026-10-31当前release设备包)分别验收。
 
 ## 原平台实现与历史交互记录
 
@@ -40,7 +51,7 @@ RN作为App入口，现有Swift/Objective-C/C++用于平台适配与运行库。
 
 目标采用RN原生主界面，正常网页登录保留受限WKWebView。[RN交互稿](mobile-react-native-interaction.md)定义HTTP业务、范围与时序，[运行时架构](mobile-runtime-architecture.md#实例所有权与生命周期)定义实例生命周期。以下旧图示和回执保留WebView实现归属。
 
-App组合根持有BackendRuntimeManager（建议、未实现），复用`EmbeddedDreamBackend.shared`、CPython、Node和Next；Scene、页面与RN Root重建只更新订阅。WKWebView Cookie接入原生HTTP存储时保持原来源、HttpOnly与CSRF，Cookie值保留原生层。Google系统浏览器回调独立验收。
+历史提案（2026-10-27）：App组合根持有BackendRuntimeManager（建议、未实现），复用`EmbeddedDreamBackend.shared`、CPython、Node和Next；Scene、页面与RN Root重建只更新订阅。WKWebView Cookie接入原生HTTP存储时保持原来源、HttpOnly与CSRF，Cookie值保留原生层。Google系统浏览器回调独立验收。
 
 安全区沿原主题，键盘和返回遵循iOS操作。后台保留实例并服从系统调度；进程重开后按原HTTP读取历史与Session。工作台创建、初始生成和审核确认退出端侧菜单、页面和适配清单。
 
@@ -353,3 +364,279 @@ sequenceDiagram
     B-->>R: 原Cookie与目标页面
   end
 ```
+
+
+## Google正常账户授权的回调兼容
+
+范围说明：本节已发布登记、密码App回调与系统会话取消回执来自前阶段本机Admin。2026-10-31公网构建10未取得公网登记采用；当前构建11保留已登记Web回调，采用下节“公网密码网页登录与配置回调保留”。本节Google方案、图示及本机资格保留，公网完整Google授权继续待验收。
+
+### 背景与问题
+
+修订前代码事实：`AuthEntry`仍以原POST表单调用`/auth/dream/google`；Admin负责Google OAuth与原账户会话。Dream `/auth/start`使用已有Browser Client ID与S256，公开客户端`tokenEndpointAuthMethod=none`；`/auth/callback`继续读取加密交易Cookie并调用原browser-sessions/exchange。BFF旧构造器要求与publicOrigin同源，Admin配置要求HTTP(S)同源，exchange要求等于该service单一redirectUri。修订前普通安装包的ASWebAuthenticationSession绑定MCP资源operation，仅登记MCP scheme；本次实现新增独立账号会话与账号scheme。
+
+2026-10-31修订前技术探针调用上述原函数，9项通过：HTTP回调及原交易接受，缺失/另一交易Cookie、Native配置及MCP替代回调均拒绝；真实账户、网络和数据库调用0。该结果说明已有Client ID与PKCE能力可复用，账户回调地址与交易Cookie承接构成实际兼容缺口。当前NativeLoginSessionProbe从WK数据存储复制当前来源Cookie，再检查原session；系统会话适配需要保持这段次序。
+
+BFF当前实现已区分`callbackUri`与`callbackRequestUri`：前者保留配置的OAuth注册地址，原authorize/exchange继续使用该值；后者为当前loopback来源的原`/auth/callback` HTTP入口。私有配置限定规范反向域名`.auth:/auth/callback`、HTTP精确loopback来源，无authority/query/hash或路径变体；原Web配置按既有同源规则处理。`fromRequest`在loopback来源选择时保留原私有注册URI，交易Cookie按各来源分别加密。原state/issuer/code/期限、请求来源、CSRF和未知exchange恢复保持。五文件58项技术合同及Web类型通过。
+
+Native当前实现由`InkRuntime.presentLogin`创建`NativeAccountLogin`，原`MobileHostViewController.accountNavigation`仅在登录实例内转交导航，原表单、输入与DOM保留。`NativeLoginSessionProbe.pause`推进代次、取消旧读取，`copyWebCookies`和`copyNativeCookies`分别按当前来源复制平台Cookie，`resume`沿原session验证。候选Info.plist登记独立`.auth`与原`.mcp`；本机同Client目录已发布并读回，前阶段BFF env目标映射源码曾采用；本机构建普通Simulator已采用；系统授权启动/取消及原密码登录通过，完整Google账户与真机继续实施。固定源码增量编译和独立QA包16项XCTest通过，其中5项账号合同包含真实WK→原Native适配器→同App HTTP 303/Set-Cookie→原session验证器。测试上游为具名合成fixture，系统Google页面及真实账户验收单列。
+
+前阶段本机Admin已采用兼容源码并在本机正常服务发布同Client精确回调：保留原Web地址、S256及用户权限，增加两个目标App地址与SDK所需native元数据。8文件53项合同、类型/lint及29项跨仓库探针通过，独立构建通过；原PostgreSQL数据目录保持，原发布入口apply verified=true，后续真实read-only事务dry-run为0差异，数据库/端口/主体匹配。普通Simulator包已采用，原密码App回调登录、系统授权启动/取消及一项真实Chat通过；完整Google账户与真机分列验收。实现与评审依据见[Admin同Client回调兼容](../../exec/mobile-app-design-review-20261024.md#2026-10-31-admin同client回调兼容)。
+
+
+普通包采用复验：原host曾在启动Next时把配置的账号URI覆盖为HTTP地址；`host.cjs`修订为保留既有env值，缺失时沿原HTTP派生。原`startWeb`的16项环境/绑定合同及原Resolver6项通过。实际App `/auth/start`返回303、目标账号URI与S256，原密码表单完成exchange200及自动关闭；系统会话进入原Admin页面并取消返回。旧默认代理下的Mac loopback探针502归harness记录，直连探针与实际App分别取证。[采用与业务回执](../../exec/mobile-app-design-review-20261024.md#2026-10-31-普通包账号回调采用与notion授权核对)。
+
+官方依据，查阅2026-10-31：Google的[OAuth Policies](https://developers.google.com/identity/protocols/oauth2/policies)禁止开发者控制的嵌入式user-agent承载Google授权，[WKWebView错误说明](https://developers.google.com/identity/protocols/oauth2/native-app#disallowed_useragent)列出对应拒绝。Apple提供[ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/)与[customScheme callback](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/callback/customscheme(_:))；[RFC8252](https://www.rfc-editor.org/rfc/rfc8252)定义外部user-agent、原生私有URI与PKCE。Google→Admin继续使用Admin的Google回调；Admin→Dream的App回调按当前Admin客户端注册管理，Google客户端注册与Dream客户端登记分别所有。
+
+### 目标与边界
+
+完整Google账户链路继续按实际目标验收：复用同一App Client ID、原S256交易及原BFF接口，用现有AuthenticationServices完成Google账户授权并回到原登录弹窗。BFF、Native与本机Admin同Client登记已由前阶段普通Simulator采用。公网构建11保留原Web回调；公网Google私有回调采用继续待验收。Web原POST、密码登录、Cookie/CSRF、角色、scope与业务接口保持；正常Admin原env只增加所属service的精确URI集合，原数据库保持；覆盖安装沿同一App ID保留数据容器inode及会话。MCP资源回调继续由原operation所有。
+
+| 方案 | 判断依据 | 处理 |
+| --- | --- | --- |
+| Google继续进入原WKWebView | Google官方user-agent规则拒绝该承载 | 排除，保留原Web普通浏览器流程 |
+| 直接打开系统浏览器并依赖原WK Cookie观察 | 原BFF缺少交易Cookie即拒绝，现有观察者只读取WK存储 | 排除单步替换；禁止读取系统浏览器Cookie或绕过state |
+| 原BFF准备PKCE，系统会话执行原Admin授权，精确App回调交回原BFF | 原client/接口/状态与权限可复用，差异集中在回调URI和Native Cookie次序 | 选定最小适配；Admin代码与登记已采用，普通Simulator已采用，完整Google账户及真机继续实施 |
+
+### 概念与规则
+
+- 三段回调各自绑定：Google→Admin沿原`/api/auth/callback/google`；Admin→Dream采用源码Info.plist的`$(PRODUCT_BUNDLE_IDENTIFIER).auth:/auth/callback`；MCP沿现有`.mcp:/oauth/callback`。同Client账号回调登记已发布并读回，普通Simulator包已采用，真机继续验收。
+- Native源码在原presentLogin内保留WK实例，接收主frame显式Google POST，暂停Cookie观察，读取原`/auth/options`核对提交目标。通过平台HTTP读取原`/auth/start`，以manual redirect保留原加密交易Cookie，取得原Admin authorize URL；App Client、resource、scope、state、nonce和S256值沿原响应。当前页面return_to保留查询参数编码并移除原auth_error。
+- 系统会话打开原Admin authorize，用户在原Admin登录页面选择Google。该最小方案沿已有账户页面完成授权，直接跳Google的一键入口优化独立评估；自动提交中转页、Google专用客户端/SDK与第二套PKCE流程排除。已有Admin会话需按现有provider支持的`prompt=login`保留明确重新登录意图，其协议行为需技术验证。
+- Native接收回调时校验当前登录operation、目标scheme、host、path与query单值，再通过同一平台Cookie存储请求原本机`/auth/callback`。BFF当前实现已区分已登记的OAuth redirect URI与本机接收地址，原state/issuer/code/TTL、请求来源、S256及exchange输入匹配全部保持。
+- 原BFF成功响应的Cookie按原属性进入平台存储，限定本次BFF来源同步至WK，等待原交易Cookie删除及新Cookie写入后恢复原NativeLoginSessionProbe，并重读原登录文档。Probe确认原session与CSRF后，沿finishLogin关闭登录弹窗，再由SessionGate重读并进入主页。系统Google/Admin Cookie保持在系统会话中。
+- 原密码表单沿现有POST。配置为App账号URI时，WK收到精确回调后创建当前操作，复制原WK交易Cookie，沿同一BFF callback验证；原HTTP回调配置继续原导航。原BFF加密交易Cookie执行state、issuer、期限与PKCE校验。
+- 取消只结束当前系统会话并恢复原登录页输入。未知exchange结果保留同一交易及回调，用户重试沿原幂等exchange；过期或明确失效按原错误进入新登录。旧operation回调拒绝，成功/取消/关闭仅结算一次。
+- 配置继续使用普通env及现有公开Client ID。打包脚本按原env复制BFF redirect URI，应用标识变化保持该账号值；私有App URI需先由所属Admin登记，再显式配置并验收；Admin源码在原service增加可选`redirectUris`，默认保持原主Web回调。新增URI只进入所属Client，exchange只接受当前已认证service的精确集合。带私有账号URI的原Client沿已安装SDK使用`applicationType=native`，原grant/scope/PKCE与subject规则保持。原发布脚本仅在新增规范账号URI且其他字段全部匹配时允许web→native，保持原行锁、事务、读回和幂等；未知URI、通配、回调缩小及权限漂移继续拒绝。
+
+| 实例 | 创建与保留 | 结束与恢复 |
+| --- | --- | --- |
+| 原登录WK/导航弹窗 | presentLogin创建，系统授权期间保留输入 | 成功dismiss后结算；取消系统授权返回原实例 |
+| 账号系统会话 | 仅显式Google操作创建一份，绑定原登录实例与operation | 成功/取消/关闭清理；MCP会话继续互斥 |
+| 原BFF交易Cookie | 原start生成，限定当前BFF来源、state/nonce/verifier/期限 | 原callback成功清理；未知exchange保留原交易 |
+| 原Cookie观察者 | 原登录期间监听WK，原session验证确认账户 | 系统授权及本机callback期间暂停并推进代次；旧异步复制/读取拒绝，Cookie同步后恢复 |
+| BackendRuntimeManager/业务任务 | 继续App级原所有权 | 登录弹窗与系统会话结束保持原运行库及任务生命周期 |
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant H as NativeAccountLogin（Simulator已采用，真机待验）
+  participant W as 原登录WK与NativeLoginSessionProbe
+  participant B as 原BFF（Simulator已采用，真机待验）
+  participant S as 账号ASWebAuthenticationSession（启动/取消通过）
+  participant A as 原Admin OAuth与Google入口
+  participant G as Google
+  U->>W: 点击原Google入口
+  W->>H: 精确表单目标匹配，保留原页面
+  H->>W: pause推进代次，copyWebCookies
+  H->>B: 原GET /auth/options，核对Google提交目标
+  H->>B: 原GET /auth/start，manual redirect
+  B-->>H: 原交易Cookie与authorize URL
+  H->>S: 原Admin authorize及明确登录意图
+  S->>A: 原公开Client、S256与scope
+  U->>A: 在系统页面选择Google
+  A->>G: 原Google授权
+  G-->>A: 原Google callback
+  A-->>S: 原账户授权后精确App callback
+  S-->>H: code、state、iss
+  H->>H: 校验当前operation及精确URI
+  H->>B: 原GET /auth/callback，原交易Cookie
+  B->>A: 原browser-sessions/exchange
+  A-->>B: 原handle及有效期
+  B-->>H: 原Cookie与相对返回位置
+  H->>W: copyNativeCookies完成后resume并重读原文档
+  W->>B: 原GET /auth/session
+  B-->>W: 原user与csrf_token
+  W-->>H: 原登录完成
+  H-->>U: dismiss原弹窗后进入主页
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant H as NativeAccountLogin（Simulator已采用，真机待验）
+  participant W as 原登录WK与NativeLoginSessionProbe
+  participant S as 账号系统会话（启动/取消通过）
+  participant B as 原BFF（Simulator已采用，真机待验）
+  U->>S: 取消授权
+  S-->>H: 当前operation取消
+  H->>W: 恢复观察，保留输入
+  opt 用户再次选择Google
+    U->>H: 原入口重试
+    H->>S: 新的明确授权操作
+    S-->>H: 回调结果
+    alt 旧operation或URI不匹配
+      H->>H: 拒绝回调，保持当前登录实例
+    else 当前精确回调
+      H->>B: 原callback与交易Cookie
+      alt Cookie、state、issuer或期限不匹配
+        B-->>H: 原错误，exchange调用0
+        H-->>W: 原Google失败反馈及重试入口
+      else exchange响应未知
+        B-->>H: 原失败，保留原交易
+        U->>H: 显式重试
+        H->>B: 同回调、同Cookie与交易
+        B-->>H: 原幂等exchange恢复结果
+      end
+    end
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> LoginVisible: 原presentLogin
+  LoginVisible --> Preparing: 明确Google操作
+  Preparing --> Authorizing: 原交易与目标校验成功
+  Preparing --> LoginVisible: 原准备失败反馈
+  Authorizing --> Returning: 当前精确回调
+  Authorizing --> LoginVisible: 系统取消，恢复输入
+  Returning --> SessionCheck: 原callback成功及Cookie同步
+  Returning --> RetryCallback: 原exchange结果未知
+  RetryCallback --> Returning: 用户重试同一未过期交易
+  RetryCallback --> LoginVisible: 期限结束或原明确错误
+  SessionCheck --> Completed: 原user与CSRF校验通过
+  SessionCheck --> LoginVisible: 原会话失败反馈
+  Completed --> [*]: dismiss后结算
+  LoginVisible --> [*]: 原左上关闭
+  Authorizing --> [*]: 原关闭取消当前operation
+  Preparing --> [*]: 原关闭取消请求与旧回调
+  Returning --> [*]: 原关闭停止当前登录观察
+  RetryCallback --> [*]: 原关闭清理当前操作
+  SessionCheck --> [*]: 原关闭拒绝迟到结果
+```
+
+### 实施与验收
+
+| 工作项 | 最小归属 | 验收条件 |
+| --- | --- | --- |
+| 原BFF回调地址兼容 | login-boundary及原handlers合同；已采用实现与58项技术通过 | 原Web默认值/拒绝规则保持；精确Native地址与本机接收路径区分；缺失/跨交易Cookie、state/issuer、重复query、过期均拒绝；未知exchange同交易恢复；普通Simulator采用通过，真机待验 |
+| 同Client精确回调登记 | Admin现有config、oauthClientCatalog、BrowserSessionService；代码/登记已采用并读回 | 保留原Web callback与同Client ID；新地址仅来自服务端配置；无新账户/role/scope/grant/schema；应用类型通过SDK URI规则 |
+| Native系统授权与Cookie次序 | 原InkRuntime/登录Host与Probe、InkAccountLogin、目标Info.plist；源码编译与16项技术通过；普通Simulator启动/取消及密码登录通过 | 精确表单拦截、operation绑定、取消/迟到回调、暂停/同步/恢复、关闭一次及主屏登录成功；真实系统页面/普通密码业务回归独立验收 |
+| 普通env与制品采用 | 原bundle-node与工程目标配置 | 源env保留，目标App账号scheme与包内既有redirect URI匹配；MCP地址保持，服务凭证范围沿原发布审核 |
+| 技术与真实验收 | 原Node/Swift/浏览器harness与正常入口 | 合成provider验证原生产入口；实际系统会话另验；真实Google账户操作、授权同意、重开及Web回归分别取证 |
+
+源码证据：[原表单](../../../frontend/app/_dream/components/Auth/AuthEntry.tsx#L73)、[原start/callback](../../../frontend/app/api/_auth/handlers.ts#L54)、[私有注册地址及HTTP接收地址](../../../frontend/app/api/_auth/login-boundary.ts#L128)、[账号适配](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L86)、[Probe暂停与Cookie次序](../../../frontend/ios/InkMemory/InkReactNative.swift#L452)、[原账号弹窗](../../../frontend/ios/InkMemory/InkReactNative.swift#L355)。Admin源码证据：`/Users/dmeck/project/ink-admin-memory/app/lib/auth/config.ts:48`、`oauthClientCatalog.ts:395`、`browserSessionService.ts:54`；运行采用、目录apply与read-only读回归[同Client实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-admin同client回调兼容)。
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 同一账号业务 | 已有公开Client和S256可复用 | 保持原Admin主体/权限与BFF接口 | 原handlers原Client/S256及exchange/session技术合同通过 | 完整Google账户与真机 |
+| 系统授权 | WK入口和MCP系统会话分别所有 | 账号操作独立绑定，复用系统框架 | 账号源码和目标编译通过，原MCP保持 | 完整Google账户及真机 |
+| 回调边界 | BFF地址源码兼容，Admin同Client集合已发布 | 保留精确注册地址与独立HTTP接收校验 | Web/API/Apps及Native合同通过，目录apply后0差异读回 | 真机与原Web相邻回归 |
+| Cookie连续性 | 原异步WK复制会覆盖新Native Cookie | 暂停/代次、原callback成功同步后恢复 | 独立存储竞态及真实WK/同App HTTP303处理通过 | 真实Google Cookie与普通账号业务 |
+| 复杂度 | 另建令牌移交、登录中转页或专用客户端会扩大范围 | 原start/callback/session及同Client所有权 | 新业务API、表、插件框架与发布平台排除 | 其余目标及发行资格 |
+
+方案评审：待满足明确前提后通过。历史9项探针、Dream25项与Admin19项合同保留原审计状态；BFF五文件58项技术/Web类型与Native源码、16项目标技术通过。Admin同Client代码、配置与登记已采用并读回。BFF env映射与host转交已由普通Simulator采用；原密码登录及八项短文Chat真实完成，系统会话启动/取消通过。完整Google账户、Notion本地授权、真机及发行继续验收，Release制品保留原阶段摘要。历史证据归[认证兼容审计](../../exec/mobile-app-design-review-20261024.md#2026-10-31-google账户回调兼容审计)，当前代码归[BFF实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-bff端侧账户回调源码兼容)及[Native实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-native账号会话与cookie交接)。
+
+
+## 公网密码网页登录与配置回调保留
+
+### 背景与问题
+
+公网构建10将原密码网页登录的HTTP回调自动替换为未登记的私有URI，Admin返回`invalid_redirect`，原OAuth错误导航进入Admin页面。构建11恢复既有`http://localhost:5173/auth/callback`，同一公开Client及原PKCE交易继续使用。该故障范围为打包配置；账户、角色、scope、管理端页面及业务接口保持原所有权。
+
+### 目标与边界
+
+App沿原可见网页登录，成功关闭登录弹窗后回到RN主页；失败沿原错误和重试入口恢复。Python/Node/Next/Claude实例继续由App运行库所有，登录页结束保持业务实例。Google系统会话及私有URI方案沿上节保留，公网完整授权需独立采用和验证。当前普通Simulator完成密码授权、session200及弹窗关闭；物理设备构建11安装完成、普通启动被Locked拒绝，完整设备业务待验收。
+
+发现依据为实际打包脚本和公网授权请求；问题收敛为自动回调替换。方案比较结果：保留已登记env回调可恢复现有密码业务，所需源码修改限原资源脚本；公网新增私有回调依赖Admin兼容制品与登记发布；重写登录页面或权限规则缺少需求。当前交付采用第一项，Google采用保留独立工作项。
+
+### 概念与规则
+
+- `bundle-node.py`沿原`frontend/.env.local`复制BFF配置，账号`INK_DREAM_BFF_REDIRECT_URI`保持原值。`host.cjs/startWeb`继续保留已配置值，缺失值沿原HTTP派生。MCP回调继续由原operation和独立env键所有。
+- `AuthEntry`原密码表单提交Admin `/auth/dream/password`，原`/auth/start`生成state、nonce、verifier和加密交易Cookie；Admin authorize返回精确已登记URI；`createBffHandlers`继续原callback校验及browser-session exchange。scheme登记能力保持可用，当前密码流程采用HTTP导航。
+- `NativeLoginSessionProbe`从当前来源WK数据存储复制Cookie，经原`/auth/session`确认用户及CSRF；`finishLogin`先关闭导航弹窗，再结算登录结果，`SessionGate.native`重读会话后显示原RN页面。未知或失效会话保持原失败反馈。
+- 网络5xx、超时或会话读取失败时，原Try again重读原会话/options；交换已完成的账号保留Cookie，客户端重试读取。已提交密码的重发须由用户新登录操作触发。未知exchange仍执行原幂等恢复合同。
+- 左上关闭仅结束当前登录弹窗和所属观察任务，原App运行库继续；关闭后可重开。系统Google取消返回所属原登录实例。进程结束沿系统回收，重开沿原Cookie与session验证恢复。
+
+| 实例/状态 | 创建与有效期 | 结束与恢复 |
+| --- | --- | --- |
+| 登录导航及WK | 用户点击原登录入口创建，账号操作期间保留 | 原session确认后dismiss；左上关闭清理本实例 |
+| BFF交易Cookie | 原start创建，绑定当前来源、PKCE、state与期限 | 原callback成功删除；失效沿原重新登录 |
+| NativeLoginSessionProbe | 绑定当前登录WK与来源 | 成功/关闭停止；读取错误由原入口重试 |
+| RN SessionGate | 原App根视图持有 | 登录返回后重读；原会话失效显示原登录入口 |
+| App运行库与Agent任务 | BackendRuntimeManager原App级所有权 | 登录弹窗成功/关闭保持运行；进程回收和任务恢复按原持久化合同 |
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant W as AuthEntry与登录WK
+  participant B as createBffHandlers
+  participant A as 原Admin OAuth
+  participant P as NativeLoginSessionProbe
+  participant H as InkRuntime.finishLogin
+  participant R as SessionGate.native与RN Chat
+  U->>W: 在原表单输入账号并登录
+  W->>A: POST /auth/dream/password
+  A-->>W: 303返回原登录目标
+  W->>B: GET /auth/start
+  B-->>W: 原交易Cookie及authorize导航
+  W->>A: GET /api/auth/oauth2/authorize，原Client与S256
+  A-->>W: 302已登记的HTTP Web回调
+  W->>B: GET /auth/callback，原交易Cookie
+  B->>B: 校验state、issuer、期限与PKCE
+  B->>A: 原browser-sessions/exchange
+  A-->>B: 200原handle
+  B-->>W: 原会话Cookie及返回位置
+  P->>P: 复制当前来源WK Cookie
+  P->>B: GET /auth/session
+  B->>A: 原browser-sessions/resolve
+  A-->>B: 200当前账户
+  B-->>P: 用户及CSRF
+  P->>H: authenticated=true
+  H-->>R: dismiss完成后结算
+  R->>B: 原会话读取
+  R-->>U: 原RN Chat及账户历史
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant W as 原登录弹窗
+  participant B as 原BFF
+  participant A as 原Admin
+  participant P as NativeLoginSessionProbe
+  participant R as 原App运行库
+  W->>B: 原callback或session请求
+  alt 回调未登记
+    W->>A: 原authorize导航
+    A-->>W: 原invalid_redirect错误导航
+    U->>W: 原重新登录入口
+  else 交易失效
+    B->>B: 原callback交易校验
+    B-->>W: 原交易错误反馈
+    U->>W: 原重新登录入口
+  else exchange已完成且session读取遇5xx或超时
+    A-->>B: 原会话读取不可用
+    B-->>W: 原加载失败与Try again
+    U->>W: 点击Try again
+    W->>B: 重读原session/options
+    P->>B: 原Cookie及GET /auth/session
+    B-->>P: 恢复后200用户及CSRF
+    P-->>W: 原finishLogin关闭
+  else 用户关闭弹窗
+    U->>W: 左上关闭
+    W->>P: stop并结束所属观察
+    W-->>R: 保持App运行库与原任务
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 登录入口
+  登录入口 --> 原网页登录: presentLogin
+  原网页登录 --> 交易处理中: 原密码POST及auth/start
+  交易处理中 --> 会话核对: 原callback成功
+  交易处理中 --> 原登录失败: 回调或交易校验失败
+  原登录失败 --> 原网页登录: 原重新登录
+  会话核对 --> 读取失败: 原session超时或5xx
+  读取失败 --> 会话核对: 原Try again
+  会话核对 --> 已关闭: session用户与CSRF有效
+  原网页登录 --> 已关闭: 左上关闭
+  读取失败 --> 已关闭: 左上关闭
+  已关闭 --> RN主页: authenticated且dismiss完成
+  已关闭 --> 登录入口: 用户取消
+```
+
+当前验收与剩余依赖见[公网构建11执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-公网构建11恢复原网页登录)。桌面/窄屏骨架继续复用[移动PRD](../../prd/dream-workspace/mobile-app.md)，主页面、菜单、权限与接口变更0。
+
+
+公网构建12配置补充：原`AdminProductConfig`使用`INK_ADMIN_PRODUCT_API_BASE_URL`访问公网Admin，原Product Origin保持所属Client校验。登录弹窗、上述业务图和App运行库实例保持；包内原用量200，session/模型目录的实际503沿原重试反馈。端点清单和当前制品归[发布设计](../../deploy/mobile-app-release.md#公网端侧包的既有http配置清单)，实际密码登录资格继续采用构建11回执，完整12业务另验。

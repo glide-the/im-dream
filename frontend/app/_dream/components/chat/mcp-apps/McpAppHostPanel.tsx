@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: let the local Native document await original session teardown before its WebView is removed.
 'use client';
 
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
@@ -32,6 +33,8 @@ import {
 import { sameSavedMcpAppToolCall, type SavedMcpAppToolCall } from './result';
 import {
   cleanupFailedMcpAppsConnection,
+  MCP_APPS_DOCUMENT_CLOSE_EVENT,
+  type McpAppsDocumentCloseDetail,
   closeMcpAppsClientSession,
 } from './session-cleanup';
 
@@ -255,8 +258,16 @@ export default function McpAppHostPanel({
         });
       }
     };
+    const closeDocument = (event: Event) => {
+      const detail = (event as CustomEvent<McpAppsDocumentCloseDetail>).detail;
+      if (typeof detail?.waitUntil !== 'function') return;
+      active = false;
+      detail.waitUntil(teardownCurrentConnection());
+    };
+    window.addEventListener(MCP_APPS_DOCUMENT_CLOSE_EVENT, closeDocument);
     void connect();
     return () => {
+      window.removeEventListener(MCP_APPS_DOCUMENT_CLOSE_EVENT, closeDocument);
       active = false;
       const closing = currentConnection;
       setConnection((current) => current?.client === closing?.client ? null : current);

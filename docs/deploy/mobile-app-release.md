@@ -1,3 +1,23 @@
+<!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
+<!-- [Sync] 2026-10-31: 公网制品当前12，原Product API端点补齐与HTTP配置清单保持现有env归属。 -->
+<!-- [Sync] 2026-10-31: 公网设备构建11恢复已登记Web回调，安装、登录关闭、设备运行与正式发行分列。 -->
+<!-- [Sync] 2026-10-31: 增加公网Admin构建10与精确回调修复入口，账号和正式分发资格保持独立。 -->
+<!-- [Sync] 2026-10-31: 当前开发候选更新构建8，区分Simulator真实Stop恢复、真机安装/暂存及未完成账号/CLI业务。 -->
+<!-- [Sync] 2026-10-31: 同步构建7开发候选、Simulator ntn执行、构建6真机失败及当前无线连接前提，正式发布保持未完成。 -->
+<!-- [Sync] 2026-10-31: 增加产品标识Simulator 0.1.0/5制品、首次安装和原登录/Bash/Stop/冷恢复，设备IPA及旧验证数据保留。 -->
+<!-- [Sync] 2026-10-31: 当前普通包增加真实Markdown/Mermaid、系统取消和冷重开证据，ntn旧构建记录与最新追溯分列。 -->
+<!-- [Sync] 2026-10-31: 将普通包Bash计数和进程标为对应阶段；当前文件业务沿执行稿追踪，Release制品保持。 -->
+<!-- [Sync] 2026-10-31: 构建5已无线升级到真机，系统Locked拒绝启动；普通Simulator当前Bash与恢复资格单列。 -->
+<!-- [Sync] 2026-10-31: 更新当前普通账号候选、正常长文/Stop/重开与开发Release构建5，旧制品保留。 -->
+<!-- [Sync] 2026-10-31: Google正常账号需精确App callback与原交易Cookie连续性兼容，已有Client/S256及当前开发制品保持。 -->
+<!-- [Sync] 2026-10-31: 当前普通包恢复为App88929，MCP释放取得实际Hermes/WebKit协议资格；设备Release IPA保持。 -->
+<!-- [Sync] 2026-10-31: 新增当前源码Release设备包0.1.0/4及开发签名IPA；普通Simulator、实际设备业务与商店分项登记。 -->
+<!-- [Sync] 2026-10-31: 当前普通包采用MCP文档释放生产资源；技术、公开历史读取及实际窗口复验分列。 -->
+<!-- [Sync] 2026-10-31: 当前ntn安装包四项执行复验通过，Release资源、设备执行与真实Notion业务分列。 -->
+<!-- [Sync] 2026-10-31: 登记任务信息最终普通包、生产Hermes/Next与原env恢复；ntn及真实业务/签名/商店资格分列。 -->
+<!-- [Sync] 2026-10-30: 当前候选采用原Service图片标记顺序修复，ntn/Native/Hermes/Next保持；安装、真实单图与发布范围分列。 -->
+<!-- [Sync] 2026-10-30: 补Mermaid普通候选、Next/Hermes与签名后启动程序摘要，旧工具候选保留阶段范围。 -->
+<!-- [Sync] 2026-10-30: 补当前普通Simulator制品、ntn/宿主摘要与当前SDK上传前提，正式分发保持未完成。 -->
 <!-- [Sync] 2026-10-29: 登记资源内容与安全响应头源码候选；当前普通App制品保持，完整设置采用继续实施。 -->
 <!-- [Sync] 2026-10-29: 回顾源码Next构建与原运行候选分列，普通App更多/回顾采用继续实施。 -->
 <!-- [Sync] 2026-10-29: Work插件源码的Next构建与当前普通候选分列，原生页面采用/真实安装继续验收。 -->
@@ -37,6 +57,8 @@
 
 # Ink & Memory 移动打包与发布
 
+现行登录认证与目标编译职责归[运行库合同](../design/multi-platform/mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，后续配置/回调/503问题归[认证排障指南](mobile-auth-troubleshooting.md)。当前制品与实际失败优先见[设备手册第二十一节](ios-iphone-install-release.md#二十一2026-10-31-admin连接复用与构建17)，下方日期段落保留各阶段回执。
+
 <!-- [Sync] 2026-10-30: iPhone 实机操作采用现行 frontend/ios 工程，临时包回执归操作手册。 -->
 当前 iPhone 的打包、签名、安装与 TestFlight/App Store 操作见[实机操作手册](ios-iphone-install-release.md)。本稿保留跨端发布设计及各阶段历史回执。
 
@@ -45,6 +67,83 @@
 统一源码与依赖归`frontend/`；RN主界面、RNW及平台文件的现行合同见[统一工程设计](../design/multi-platform/react-native-web-project-structure.md)。主构建入口为`pnpm --dir frontend native:bundle:ios`及`frontend/ios/scripts/build-rn-ios.sh`，iOS归`frontend/ios/InkMemory.xcworkspace`，Android归`frontend/android/`的RN Gradle构建。根mobile工程与旧HTML资源构建退出发布链。
 
 签名、证书、隐私、账户、渠道及原后端运行库约束继续有效。以下旧WebView制品、命令与回执归历史范围，新RN界面按登录、真实任务、停止、恢复、附件、升级与Web回归分别验收；当前完整发行资格保持未通过。
+
+### 2026-10-30Mermaid候选
+
+本阶段普通候选为`/tmp/ink-ios-mermaid-20261030/candidate/InkMemory.app`，`com.inkmemory.loginntn`，`index.native.js`。原生Debug Simulator实现沿前阶段同一dylib，原Node宿主、固定ntn和许可证摘要保持；生产Next BUILD_ID为`d3_RdcEFK9BkKbFY0Bx1K`，优化Hermes SHA256为`67e1734375da767ad86c0280ba447f6cf94e7cab1b771412ac509f814e778b47`。ad hoc资源重新签名后，启动程序SHA256为`4804a3f77ea286f543610439cb794011769209322f8aa1b4907d367237d22d90`；实际安装六项资源与候选一致，原env字节保持。
+
+实际Hermes/WebKit图表资格使用明确技术入口，结束后恢复普通包、正常登录和原对话历史，未新增模型调用。包内图表/源码/缩放、系统复制及PNG导出/取消释放通过；真实业务、真机、升级和商店前提沿原矩阵。完整回执见[本阶段执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-30mermaid图表适配与目标资格)。以下工具候选记录保留该阶段原时间和制品范围。
+
+### 2026-10-31当前普通Simulator候选
+
+当前采用[产品Simulator .app](../../frontend/ios/build/InkMemory-Simulator-20261031-b5.app)：`com.inkmemory.mobile`、0.1.0/5，原workspace Debug arm64编译退出0、28.92秒，`CURRENT_PROJECT_VERSION=5`由本轮构建参数提供。717项Next源摘要及锁与当前仓库一致；优化前JS与前阶段摘要相同，优化Hermes为5,672,961字节、SHA256 `923104eaaa991f4b29572d207be47b54dcf63c8eb999d18409d18b58657806ad`。当前Native实现、Next BUILD_ID、host及固定ntn/MIT沿下方原摘要；普通产品候选移除自有副本中的测试插件和7个测试框架，85个Mach-O文件的动态库依赖检查通过，83运行框架保留；`codesign --sign -`本地签名和严格校验均0。开发证书和私钥操作0。
+
+产品首次安装退出0、6.89秒，13项实际安装资源与制品一致；原验证App数据inode和23/98字节文件保留。产品通过原密码登录关闭弹窗、左上关闭/重开，以及自身正常Thread的Bash、流式正文、Stop和冷启动恢复；3条正常Gateway记录保留。源env保持，目标仅采用已登记产品回调，原Client/权限不变。具体命令、实际进程与计数归[产品安装业务记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-产品标识simulator首次安装与真实业务)。以下`com.inkmemory.loginntn`段落保留前阶段验证标识、源实现和数据资格。
+
+当前普通包为`/tmp/ink-ios-account-callback-implementation-20261031/adoption/ordinary/InkMemory.app`，同一`com.inkmemory.loginntn`；Next BUILD_ID `VGOr-pi9sPcnIYSQAoWSj`，优化Hermes SHA256 `02785f77ddc270971ad7c1621e5b982dc377e05a0eb036ab244e3721ebe5d247`，Native dylib SHA256 `e7a7dfb6209acea7cebb776a06dbcca2a53317f8fbe7e20f1d940f45a05bf3bc`，host SHA256 `9fecf34fa9642e8c0dbe9d8de40dc8ba3417453ff9241a9119f3dda15df5a1a5`。实际安装摘要已核对；原Client精确回调、密码登录关闭及系统授权启动/取消通过。Bash阶段重开App77299拥有5173，正常Admin46563/PG46507保持3000/54329；该阶段原账户、12/11历史、最后completed、running=false及Bash两条正常结算保持。此前dated候选记录继续提供历史范围。
+
+同一普通包后续通过原账号1次UI请求及1次Write生成98字节Markdown，正常Gateway两条completed/settled。原生文档与真实Mermaid预览/源码/全屏返回、PNG及Markdown系统导出取消、临时副本释放和冷启动重开通过；源码、构建、签名及安装操作新增0。[当前Markdown业务记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-markdown与mermaid真实业务及恢复)维护具体进程、计数及回执，Release构建5与正式发布前提保持。
+
+#### 前阶段普通候选记录
+
+当前候选为`/tmp/ink-ios-mcp-webkit-20261031/candidate-dispose/InkMemory.app`，`com.inkmemory.loginntn`，普通`index.native.js`。Next BUILD_ID为`5qMhJuDJak0IFMh36ESGg`，优化Hermes SHA256为`24917c1b0690b50f4d883513e811e5e4da8b8ebff7bdf5a03761b307b8811c31`；签名后启动程序SHA256为`60edca09783c9488d40deaffdc8086baaccbb21401d9c47a5d9d063ca7e0827d`。原生Debug Simulator实现、Dream Python、Node宿主、固定ntn0.15.1和MIT资源与前阶段字节匹配；原Next env保持。更新范围为原MCP文档生命周期的生产JS/Next，Native运行库未重编译。
+
+普通候选ad hoc签名校验、安装和7资源摘要核对通过。当前恢复为App88929、console35138，持有5173；公开会话/历史/status均200、原8用户/7助手、最后completed及running=false保持，原五类任务全空回执沿前阶段。释放修订的21项技术、生产文档3项及实际Hermes/WebKit关闭/Thread替换/重开与隐藏保留通过；标准DELETE2且会话归零。当前窗口读取持续超时，触控、原关闭按钮及普通账户MCP业务待验收。新增模型、Notion与普通业务提交0。
+
+本阶段证据归`/tmp/ink-ios-mcp-webkit-20261031/21-candidate-receipt.json`、`23-ordinary-install.json`、`25-public-recheck.json`、`26-installed-proof.json`与[本阶段执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-mcp-app实际webkit资格)。真实Notion授权/读取/同步、真实MCP工具业务、物理iPhone、升级、Release归档、TestFlight及商店发布保持待验收。下方任务信息候选及日期节保留阶段原文。
+
+最新端侧协议及普通恢复证据见[本轮记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-mcp关闭修订端侧集成资格)，现有普通包与Release IPA摘要保持。
+
+### 2026-10-31当前ntn打包验证
+
+以下段落保留前阶段构建4与App97202的回执。最新普通安装包、原测试宿主与Release构建5共10项ntn调用资源及Native宿主追溯已核对，原4项执行测试按匹配资源复用；当前授权文件数0。最新状态归[ntn制品与执行追溯](../exec/mobile-app-design-review-20261024.md#2026-10-31-ntn制品与执行证据追溯)，真实Notion业务待有效授权后验收。
+
+当前候选、Simulator实际安装包及下节Release IPA各10项Notion运行资源与锁定值或源码一致，ntn0.15.1/MIT与npm固定归档匹配。当前候选App实际执行4项XCTest，退出0、4通过、0跳过，覆盖原Python版本/帮助、Bash HTTP成功/403和公网HTTPS无效令牌拒绝。Python29项/28 subtests、Resolver6项和宿主语法均退出0。测试后恢复普通App97202，原会话/历史/status均200，8用户/7助手及最后completed保持；Admin59853:3000、PostgreSQL59828:54329保持。
+
+本节资格限定Simulator包内执行与Release资源核对；Release设备执行、真实Notion授权/读取/选择保存/同步、Agent业务及发布保持待验收。当前IPA SHA256保持`4473faceb2c6a9c0bb3142dcc635ce82db9e3e3947cfaf797d8cae14ec0496c2`。详细回执归[ntn执行复验](../exec/mobile-app-design-review-20261024.md#2026-10-31-ntn当前安装包执行复验)。
+
+### 2026-10-31当前Release设备包
+
+最新[开发签名IPA构建5](../../frontend/ios/build/InkMemory-Release-device-20261031-b5.ipa)：`com.inkmemory.mobile`、0.1.0/5，142,022,903字节，0600，SHA256 `e7948d126a825ae952a1caeb8778ef36c74f938f28246e479b82f4c951407efa`。沿原App target重编当前Swift/BFF/宿主，复用前阶段同一Pod锁的Release依赖产物；2 jobs、43.27秒、xcodebuild退出0。该命令覆盖当前App构建，前阶段全workspace构建回执保留。包内Next BUILD_ID `VGOr-pi9sPcnIYSQAoWSj`，Release Hermes摘要沿下方原记录；当前host/worker/Dream源与固定ntn/MIT均核对。
+
+83个framework与主应用使用既有开发身份签名，169条签名/复制/校验命令均退出0；未新建账号、证书或导出私钥。profile到期仍为2026-11-01 00:48:40 Asia/Shanghai。前阶段iPhone16/iOS18.0.1通过Wi-Fi配对、Developer Mode启用，构建5无线覆盖安装退出0、27.63秒；升级前后1,948条运行路径保留、普通文件元数据一致，当次启动被Locked拒绝。本轮独立启动命令超时，随后只读查询确认当前构建5进程存在，前台界面、完整后端/认证/业务待验收。普通env的localhost3000指向手机自身；前阶段公开HTTPS入口对本机Admin BUILD_ID静态文件返回404，本机相同文件200且摘要匹配，同一正常Admin可达HTTPS仍属发布前提；原来源与权限规则保持。
+
+本次包内ntn授权准备与确认前超时属于Simulator技术观察；真实Notion授权/读取/同步、设备安装/升级/业务、正式Archive、TestFlight及App Store分别待验收。[当前执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-长文停止重开与release构建5)维护命令、失败、制品核对与剩余条件。
+
+前阶段无线安装、目录元数据、Locked拒绝与验证标识Bash/冷重开归[对应记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-无线升级构建5与真实bash业务)。当前真机产品进程存在的只读证据归产品Simulator阶段附录，前台与业务保持待验收；Simulator业务和正式发行分别登记。
+
+#### 前阶段构建4保留记录
+
+[开发签名Release IPA](../../frontend/ios/build/InkMemory-Release-device-20261031-b4.ipa)为`com.inkmemory.mobile`、版本0.1.0、构建4，141,989,805字节，文件权限0600；SHA256 `4473faceb2c6a9c0bb3142dcc635ce82db9e3e3947cfaf797d8cae14ec0496c2`。当前workspace从独立DerivedData完成Release/iphoneos全量构建，xcodebuild退出0、278.5秒；原Pods链接通过，生产源码修改0。arm64主程序、83个framework、生产Next/Hermes及固定ntn/MIT已核对；签名与逐项严格校验均退出0。
+
+包内Next BUILD_ID为`5qMhJuDJak0IFMh36ESGg`，Release Hermes SHA256 `14ec457bd5063291d7f7293f7b1e0c9f329b9eb91e7b21f73feb23a0943709e7`。既有开发profile覆盖已连接iPhone，到期为2026-11-01 00:48:40 Asia/Shanghai；私钥保留Keychain。原env继续本机Admin3000，真机使用前需满足原HTTPS连接规则。设备原构建3及普通Simulator保持，本轮构建4安装/升级、启动和业务待验收。
+
+Xcode16.4、SDK18.5继续用于当前开发构建；2026-10-31复核的[Apple上传要求](https://developer.apple.com/news/?id=ueeok6yw)要求iOS26 SDK或更高版本。当前开发签名IPA与App Store可上传归档、TestFlight、商店发布分别登记。命令/摘要和现行前提归[Release构建记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-release设备包构建资格)及[实机手册](ios-iphone-install-release.md#六2026-10-31-release开发包)。
+
+### 2026-10-31任务信息阶段候选
+
+当前候选为`/tmp/ink-ios-task-navigation-20261030/candidate-env-preserved/InkMemory.app`，`com.inkmemory.loginntn`，普通`index.native.js`；Next BUILD_ID为`aovpMpBRGAwROFeDX4Zrq`，优化Hermes SHA256为`885028a712a5b53cc28f887d84d461150c712d496319bb095c1b30555e1e65bf`。原生Debug Simulator实现、Dream Python、Node宿主、固定ntn与MIT资源沿前阶段同一字节；本轮更新原Native任务入口的生产Hermes和Next资源。签名、安装与当前7资源匹配通过，正式Release归档与商店发布保持待验收。
+
+自有资源组装首次漏保留原Next env，已保留失败制品并修正组装次序；最终包的frontend env与前一普通包字节匹配，凭证正文退出日志。普通App进程44568拥有5173，正常账户匹配、原历史8条用户/7条助手及最终图片回复恢复，无登录提示、Loading或Stop。原任务五类GET均200且当前Thread全空，新增模型与Notion业务提交0。真实任务创建/完成、真实Notion授权/范围/读取/同步、真机、升级、TestFlight和商店资格分别继续验收。
+
+当前包、初次失败及修复回执归`/tmp/ink-ios-task-navigation-20261030/19-environment-adoption-receipt.json`、`21-final-runtime-proof.json`与[本轮实施记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-当前ntn复核与native任务信息)。下方日期节保留前阶段原始制品和SDK依据。
+
+### 2026-10-30当前Simulator候选与发布前提
+
+当前普通安装候选归`/tmp/ink-ios-attachment-business-20261030/candidate-image-order/InkMemory.app`，标识`com.inkmemory.loginntn`，显示名`Ink & Memory`；Debug Simulator原生宿主、Metro `dev=false/minify=true`及优化Hermes，Next BUILD_ID为`d3_RdcEFK9BkKbFY0Bx1K`。本阶段仅采用共享Dream Python素材标记顺序修复，原Native、Node、ntn与前端资源保持；ad hoc签名与实际安装摘要均已核对。`com.inkmemory.mobile`真机临时包的签名与安装回执继续由[实机操作手册](ios-iphone-install-release.md)单独所有。
+
+| 当前安装资源 | SHA256 |
+| --- | --- |
+| `main.jsbundle` | `67e1734375da767ad86c0280ba447f6cf94e7cab1b771412ac509f814e778b47` |
+| `app/claude_agent/service.py` | `0beee60c2149ea82881149daf56713852fa12e39411fc206b2b1ce1a40f3789d` |
+| `node/host.cjs` | `9e38ae9651ed682537f872deb5c35892706ec65e0b30dcefc1c4462990fe724b` |
+| `node/notion/ntn`，0.15.1，10,930,616字节 | `faee5c2227abea0ea401bd27689a9d150d32402d4240f349619710fd621824fc` |
+| `node/notion/LICENSE.md`，MIT | `ed189d279fa3b5f8e1f139ca583f73693eac31df9619a6a59dd73030c65e19af` |
+| `InkMemory.debug.dylib`，当前Native实现 | `ed1ae30a171c67a704719f1603cc19f71859a7c2eea88529bf44d25833cfe43a` |
+
+表内六项与当前实际安装内容一致，资源回执归`/tmp/ink-ios-attachment-business-20261030/15-install-receipt.json`；启动程序签名后SHA256为`2c7ad1bedf85968e56aa65f676911ff6a19aebc251f3867b84a9d94c0d760dc7`。当前真实图片理解completed/settled、原文件SHA、Native预览/导出取消及冷启动恢复通过；ntn原4项包内测试与当前字节复核通过。首轮素材拒绝、测试fixture失败和安装检查脚本的路径断言失败均保留，修订后逐项取得回执。真实Notion业务、MCP App及其余文件业务、物理设备、升级和正式分发按原矩阵继续验收，详细范围归[当前执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-30ntn当前包复核与普通附件业务)。
+
+查阅2026-10-30：[Apple当前SDK要求](https://developer.apple.com/news/?id=ueeok6yw)规定自2026-04-28起，上传App Store Connect的iOS应用使用iOS26 SDK或更高版本。本机`xcodebuild -version`退出0，Xcode16.4/16F6；`xcrun --sdk iphoneos --show-sdk-version`退出0，18.5。商店上传需满足新SDK、设备归档和签名验证条件。最低运行系统配置、已测Simulator版本和上传SDK分别登记；当前制品退出App Store可上传结论。工具链升级与完整归档留待具备相应构建条件后执行。
 
 ### 当前本机Admin连接
 
@@ -326,3 +425,48 @@ iOS Xcode已移除重复静态资源phase，独立入口统一为包内原Next�
 当前共享资源状态和原Web呈现已通过credential-free生产构建，BUILD_ID为`n3VcZiPBtUhAapkj7eRso`；MCP/Notion/更多/写作文档21项技术回归通过。Native Notion、MCP列表及详情为源码候选；普通App的完整Settings/Resources接线和系统授权所有者继续实施。
 
 HTTP候选通过原URLSession只投影Content-Type和Retry-After，JS恢复原错误等待合同。Cookie及凭证响应头留在原生。Swift语法检查通过，URLProtocol目标测试、新Xcode构建及普通候选安装待执行；候选来源与真实业务验证分项记录。当前安装的`com.inkmemory.uiparity`沿前阶段制品，用户主包保持。资源候选结果退出已采用、真实资源授权已完成与渠道已发布的声明。
+
+Google账号发布资格继续待验收：[兼容设计](../design/multi-platform/mobile-ios-interaction.md#google正常账户授权的回调兼容)已核对当前BFF/Admin同源回调限制。沿已有公开Client与S256增量登记精确App callback，保留原Web地址；Native账号系统会话、Cookie次序及目标回跳尚未实现。当前Admin、源env、普通Simulator和开发IPA保持，真实授权同意与完整Google业务单列。
+
+## 2026-10-31构建7发布状态
+
+当前设备候选为[开发IPA构建7](../../frontend/ios/build/InkMemory-Release-device-20261031-b7.ipa)，Simulator产品构建7已覆盖安装。设备构建6已无线升级，普通启动后Node因`IOS_NOTION_CLI_PATH_INVALID`退出；构建7规范Native父目录路径，保留子路径、摘要、权限及原认证检查。两平台制品、签名与归档技术审计通过；Simulator原Python的ntn版本和帮助命令退出0，原会话与8/6历史保留。设备连接当前不可用，构建7物理执行与完整Notion业务待验收；本轮模型和Notion API调用0。
+
+当前制品、摘要、失败及profile到期条件见[实机手册最新节](ios-iphone-install-release.md#十三2026-10-31构建7与ntn启动修复)；逐项命令见[执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-真机ntn启动路径修复与构建7)。原构建5/6及各日期回执保留。
+
+## 2026-10-31构建8当前制品
+
+当前设备开发IPA与产品Simulator均为0.1.0/8，原5/6/7保留。构建8以当前Metro/Hermes修订Native Stop读取代次，原生/Next/运行库及既有开发签名材料保持。31项会话与双类型技术门禁通过；真实Stop恢复Send，原结果、ntn工具过程及12/10历史经普通冷重开保持。真机由6无线覆盖8并保留原1,949项运行目录元数据，Node/Next启动与ntn暂存/摘要/0755通过。手机localhost3000 Admin连接拒绝，物理完整Python/CLI、账户与业务资格继续待验收，原SDK及渠道条件保持。[实机手册最新节](ios-iphone-install-release.md#十四2026-10-31构建8与停止恢复)集中维护制品摘要和当前依赖。
+
+
+### 2026-10-31公网Admin构建10
+
+历史阶段；当前修正版采用下节构建11。
+
+物理iPhone当前产品构建为0.1.0/10，原env的Admin transport与Gateway采用用户指定`https://ink-admin.suoxya.com`；原Client、issuer、scope及App回调保持。制品摘要、开发profile到期时间与实际登录`invalid_redirect`修复归[设备手册](ios-iphone-install-release.md#十五2026-10-31公网admin构建10与账号回调)。本机配置及原构建8保留。公网同Client回调兼容候选、原服务和分项验收归[执行记录](../exec/mobile-app-design-review-20261024.md#2026-10-31-公网admin构建10登录回调修复)。当前商店发布资格保持未完成。
+
+
+### 2026-10-31公网Admin构建11
+
+当前[公网设备IPA11](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261031-b11.ipa)已Wi-Fi覆盖安装，设备读回0.1.0/11，运行目录元数据保持；普通启动遇iOS Locked。恢复原env中已登记Web回调，公网Admin/Gateway及原Client、PKCE、权限保持。生产资源脚本保留原账号env，原MCP目标映射保持。Simulator正常密码登录200及自动关闭进入RN Chat通过，公网Thread读取503和完整模型业务分列。Google私有回调公网采用、真机业务、Notion及正式渠道继续待验收。[当前设备手册](ios-iphone-install-release.md#十六2026-10-31公网admin构建11与原网页登录恢复)记录完整摘要、模式审计与签名到期前提。
+
+
+### 公网端侧包的既有HTTP配置清单
+
+本机Web、端侧包与Admin继续使用现有env键。公网端侧制品检查包内实际消费者和目标地址，禁止仅按账号登录成功声明完整业务采用。Mac的localhost3000归Mac服务或既有relay；iPhone localhost归该iPhone进程。
+
+| 既有配置 | 消费模块 | 公网端侧目标与校验 |
+| --- | --- | --- |
+| `INK_ADMIN_DREAM_BASE_URL` / `INK_ADMIN_DREAM_TRANSPORT_BASE_URL` | Python Admin Data、Next Admin BFF | 原Admin canonical身份及指定公网transport，保留issuer/resource及原身份校验 |
+| `INK_ADMIN_PRODUCT_API_BASE_URL` | `AdminProductConfig`、原产品用量等接口 | 指定公网Admin；端侧无Admin3000服务，包内遗留loopback3000拒绝完整配置验收 |
+| `INK_ADMIN_PRODUCT_ORIGIN` | 原Product客户端Origin头 | 保留所属Client登记的原来源及服务器校验，独立于transport地址 |
+| `INK_GATEWAY_BASE_URL` | 原Gateway runtime/catalog | 指定公网Admin/Gateway，原模型/权限/结算保持 |
+| `INK_DREAM_BFF_REDIRECT_URI` | 原BFF authorize/exchange | 当前已登记Web回调，打包脚本保留env；私有URI采用需要所属Admin登记 |
+| `INK_BACKEND_INTERNAL_URL` / `BACKEND_URL` | 原Next→Python代理 | App内部原本地Dream服务，运行库按实际绑定配置；保持本地执行 |
+
+2026-10-31构建11资源核对发现`INK_ADMIN_PRODUCT_API_BASE_URL=http://127.0.0.1:3000`，原用量读取503。修正版仅在公网制品的普通backend env副本中设置该现有键，源env、本机Web、业务程序和权限保持；后续安装与实际接口结果归设备手册及执行记录。
+
+
+阶段说明：以下构建12保留原Product API配置回执，现行17与其业务资格分别登记。
+
+当前公网制品采用[构建12](ios-iphone-install-release.md#十七2026-10-31公网admin构建12与product-api配置)：手机已无线升级、版本读回与数据保留通过，Simulator原用量200。原密码回调沿构建11，完整模型业务、真机运行及第三方授权继续分别验收。

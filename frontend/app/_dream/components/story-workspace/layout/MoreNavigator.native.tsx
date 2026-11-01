@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: reuse the Writing destination for original session/cell jump intents from historical editor tool results.
 // [Input] Authenticated public owner, App-owned origin/catalog and existing Settings/Chat callbacks.
 // [Output] One native five-item More page and persistent Writing/Timeline/Reflections/Settings destinations.
 // [Pos] Navigation composition only; normal login, permissions, task execution and backend lifecycle remain App/server owned.
@@ -16,9 +17,10 @@ import AnalysisView from '../../AnalysisView.native';
 import CollectionsView from '../../CollectionsView.native';
 import WritingView from '../../WritingView.native';
 import MoreNavigationPage from './MoreNavigationPage.native';
+import type {EditorJumpToCellDetail} from '../../chat/editorWriteTools';
 import type {MoreNavigationDestination} from './moreNavigation';
-interface Props {ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
-export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources}:Props){
+interface Props {onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
+export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),callbacks=useRef({onSessionExpired,onClose});callbacks.current={onSessionExpired,onClose};
  const [page,setPage]=useState<MoreNavigationDestination|'menu'>('menu'),[visited,setVisited]=useState<Set<MoreNavigationDestination>>(()=>new Set());
  const [timezone,setTimezone]=useState(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch{return 'UTC';}}),[timezoneError,setTimezoneError]=useState(false),[prefsRevision,setPrefsRevision]=useState(0);
@@ -32,12 +34,13 @@ export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,on
  const navigate=(destination:MoreNavigationDestination)=>{Keyboard.dismiss();setVisited(previous=>new Set(previous).add(destination));if(destination==='settings')onSettingsOpen();setPage(destination);};
  useEffect(()=>{if(!active||page==='settings'||Platform.OS!=='android')return;const listener=BackHandler.addEventListener('hardwareBackPress',()=>{if(page==='menu')callbacks.current.onClose();else root();return true;});return()=>listener.remove();},[active,page]);
  const voices=useMemo<Record<string,VoiceConfig>>(()=>Object.fromEntries(decks.flatMap(deck=>(deck.voices??[]).map(voice=>[voice.name,{name:voice.name,systemPrompt:voice.system_prompt,enabled:voice.enabled,icon:voice.icon,color:voice.color}]))),[decks]);
+ useEffect(()=>{if(editorJump){setVisited(previous=>new Set(previous).add('writing'));setPage('writing');}},[editorJump?.nonce]);
  const show=(destination:MoreNavigationDestination)=>active&&page===destination;
  const scene=(destination:MoreNavigationDestination,content:ReactNode)=>visited.has(destination)?<View key={destination} style={[s.fill,page!==destination?s.hidden:undefined]} accessibilityElementsHidden={!show(destination)} importantForAccessibility={show(destination)?'auto':'no-hide-descendants'}>{content}</View>:null;
  return <View style={s.fill}>
   <View style={[s.fill,page!=='menu'?s.hidden:undefined]} accessibilityElementsHidden={page!=='menu'||!active} importantForAccessibility={page==='menu'&&active?'auto':'no-hide-descendants'}><MoreNavigationPage onNavigate={navigate} onToggleTheme={()=>{toggleTheme();}} onClose={onClose}/></View>
   {timezoneError&&['timeline','analysis'].includes(page)?<View style={s.notice}><InkLabel accessibilityRole="alert" style={{color:c['color-state-error']}}>{i18n.language.startsWith('zh')?'无法读取时区设置。':'Timezone settings could not be loaded.'}</InkLabel><Pressable accessibilityRole="button" onPress={()=>setPrefsRevision(value=>value+1)} style={s.retry}><InkLabel style={{color:c['color-text-primary']}}>{t('analysis.history.retry')}</InkLabel></Pressable></View>:null}
-  {scene('writing',origin?<WritingView origin={origin} active={show('writing')} onBack={root} onOpenThread={onOpenThread} onPrepareChat={onPrepareChat} onOpenResources={()=>{navigate('settings');onResources();}} onSessionExpired={onSessionExpired}/>:<ActivityIndicator color={c['color-text-primary']}/>)}
+  {scene('writing',origin?<WritingView onEditorJumpDispatched={onEditorJumpDispatched} editorJump={editorJump} origin={origin} active={show('writing')} onBack={root} onOpenThread={onOpenThread} onPrepareChat={onPrepareChat} onOpenResources={()=>{navigate('settings');onResources();}} onSessionExpired={onSessionExpired}/>:<ActivityIndicator color={c['color-text-primary']}/>)}
   {scene('timeline',<CollectionsView timezone={timezone} authenticated api={resource.api} voiceConfigs={voices} active={show('timeline')} onBack={root}/>)}
   {scene('analysis',<AnalysisView timezone={timezone} authenticated api={resource.api} storage={resource.storage} active={show('analysis')} onBack={root} onTimeline={()=>navigate('timeline')}/>)}
   {scene('settings',renderSettings(root,show('settings')))}

@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: expose the existing turn/message identity for Native row keys; merge behavior remains.
 // [Input] Current hydrated/live UIMessage window, live-presented turn identities, plus latest or older persisted page.
 // [Output] Pure ID-stable reset/merge/prepend operations that retain a verified live process for folded diagnostics and promoted App results.
 // [Pos] Shared pagination reducer seam used by ChatPanel and provider-free tests.
@@ -26,7 +27,7 @@ export function restoreChatScrollAnchor(anchor: ChatScrollAnchor | null): void {
   anchor.scroller.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
 }
 
-function messageMergeKey(message: UIMessage): string {
+export function messageMergeKey(message: UIMessage): string {
   const metadata = message.metadata && typeof message.metadata === 'object'
     ? message.metadata as Record<string, unknown>
     : null;

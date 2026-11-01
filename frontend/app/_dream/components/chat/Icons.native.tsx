@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: preserve original IconList geometry for the task activity toolbar.
 // [Sync] 2026-10-28: retain original download/maximize SVG geometry for native Workspace references.
 // [Sync] 2026-10-28: retain original copy/check, history disclosure and scroll-to-bottom SVG geometry.
 // [Input] Geometry copied exactly from the corresponding Icons.tsx exports.
@@ -40,3 +41,5 @@ export const IconTrash = createIcon(<><Path d="M3 6h18" /><Path d="M8 6V4h8v2" /
 
 export const IconDownload = createIcon(<><Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><Polyline points="7 10 12 15 17 10" /><Line x1="12" y1="15" x2="12" y2="3" /></>);
 export const IconMaximize = createIcon(<><Polyline points="15 3 21 3 21 9" /><Polyline points="9 21 3 21 3 15" /><Line x1="21" y1="3" x2="14" y2="10" /><Line x1="3" y1="21" x2="10" y2="14" /></>);
+
+export const IconList = createIcon(<><Circle cx="4.5" cy="6" r="1"/><Circle cx="4.5" cy="12" r="1"/><Circle cx="4.5" cy="18" r="1"/><Path d="M9 6h11"/><Path d="M9 12h11"/><Path d="M9 18h11"/></>);

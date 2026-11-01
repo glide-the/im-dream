@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: deliver a native historical Editor jump through the original Writing event after authenticated mounting.
 'use client';
 // [Input] Original authenticated Writing engine/canvas and native-owned display/navigation state.
 // [Output] The same editor, autosave, Calendar and Writing suggestions inside one local document.
@@ -14,6 +15,8 @@ import './WritingDocument.css';
 type EventPayload=WritingDocumentEvent extends infer E?E extends WritingDocumentEvent?Omit<E,'documentId'>:never:never;
 function Canvas({state,emit}:{state:WritingDocumentState;emit:(event:EventPayload)=>void}){
  const auth=useAuth();
+ const deliveredJump=useRef<number|undefined>(undefined);
+ useEffect(()=>{const jump=state.editorJump;if(auth.isLoading||!auth.isAuthenticated||!state.active||!jump||deliveredJump.current===jump.nonce)return;deliveredJump.current=jump.nonce;window.dispatchEvent(new CustomEvent('editor:jump-to-cell',{detail:jump.detail}));emit({type:'editor-jump-dispatched',nonce:jump.nonce});},[auth.isLoading,auth.isAuthenticated,state.active,state.editorJump,emit]);
  useEffect(()=>{if(!auth.isLoading&&!auth.isAuthenticated)emit({type:'session-expired'});},[auth.isLoading,auth.isAuthenticated,emit]);
  if(auth.isLoading)return <p role="status">{state.language==='zh'?'正在读取…':'Loading…'}</p>;
  if(!auth.isAuthenticated)return <p role="alert">{state.language==='zh'?'请重新登录。':'Please sign in again.'}</p>;

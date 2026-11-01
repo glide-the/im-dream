@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: await document departure on logout/session loss while retaining original public authentication semantics.
 // [Input] Production SessionGate, original public session DTO and explicit HTTP/native completion boundaries.
 // [Output] Home appears after login dismissal; foreground, cancellation and retry preserve the original session contract.
 // [Pos] Provider-free technical fixture; actual UIKit sheet and normal-account login require target acceptance.
@@ -9,8 +10,9 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const entry=String.raw`
 import React from 'react';import {createRoot} from 'react-dom/client';
 import SessionGate from '/src/platform/SessionGate.native.tsx';
+const documents=window.__releaseDocuments={calls:0,hold:false,pending:[]};async function releaseDocuments(){documents.calls++;if(documents.hold)await new Promise(resolve=>documents.pending.push(resolve));}
 function Home({logout,refresh,user}){return <div><h1>Native home</h1><span>{user.display_name}</span><button onClick={()=>void refresh()}>Refresh session</button><button onClick={()=>void logout().catch(()=>{})}>Logout</button></div>;}
-createRoot(document.querySelector('#root')).render(<div style={{height:'100dvh',display:'flex',flexDirection:'column'}}><SessionGate>{(logout,refresh,user)=><Home {...{logout,refresh,user}}/>}</SessionGate></div>);
+createRoot(document.querySelector('#root')).render(<div style={{height:'100dvh',display:'flex',flexDirection:'column'}}><SessionGate beforeRelease={releaseDocuments}>{(logout,refresh,user)=><Home {...{logout,refresh,user}}/>}</SessionGate></div>);
 `;
 let server:Awaited<ReturnType<typeof createServer>>,base:string;
 type Facts={authenticated:boolean;reads:number;failed:boolean;logoutFails:boolean;logoutCalls:number;errors:string[];httpStatuses:{path:string;status:number}[];httpDiagnostics:{path:string;status:number}[]};
@@ -43,4 +45,20 @@ test('a failed login presentation can be retried through the same public session
 test('session-read recovery and failed logout retain the original account ownership',async({page})=>{
  const f=facts.get(page)!;f.failed=true;await page.goto(base);await expect(page.getByRole('alert')).toHaveText('工作区暂时无法打开，请重试。');f.failed=false;f.authenticated=true;await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();
  f.logoutFails=true;await page.getByRole('button',{name:'Logout',exact:true}).click();await expect.poll(()=>f.logoutCalls).toBe(1);await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();f.logoutFails=false;await page.getByRole('button',{name:'Logout',exact:true}).click();await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
+});
+
+
+test('logout waits for current document closure before the original revoke request',async({page})=>{
+ const f=facts.get(page)!;f.authenticated=true;await page.goto(base);await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();
+ await page.evaluate(()=>(window as any).__releaseDocuments.hold=true);await page.getByRole('button',{name:'Logout',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__releaseDocuments.calls)).toBe(1);expect(f.logoutCalls).toBe(0);await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();
+ await page.evaluate(()=>{for(const release of (window as any).__releaseDocuments.pending.splice(0))release();});
+ await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();expect(f.logoutCalls).toBe(1);
+});
+test('session loss closes existing documents before removing the current account view',async({page})=>{
+ const f=facts.get(page)!;f.authenticated=true;await page.goto(base);await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();
+ await page.evaluate(()=>(window as any).__releaseDocuments.hold=true);f.authenticated=false;await page.getByRole('button',{name:'Refresh session',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__releaseDocuments.calls)).toBe(1);await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();
+ await page.evaluate(()=>{for(const release of (window as any).__releaseDocuments.pending.splice(0))release();});
+ await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();expect(f.logoutCalls).toBe(0);
 });

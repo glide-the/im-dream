@@ -1,5 +1,5 @@
 // [Input] Production native message renderer/Markdown and public process DTOs with explicit transport/clipboard fixtures.
-// [Output] Technical GFM, bottom-follow, user scroll, process validation/retry/cancellation and copy receipts.
+// [Output] Technical GFM, bottom-follow, user scroll, shared process prefetch/validation/retry/cancellation and copy receipts.
 // [Pos] Provider-free browser harness; Native/RNW presentation is real, backend/account/model/clipboard writes are fixtures.
 import {test,expect,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild} from 'vite';
@@ -69,8 +69,8 @@ test('new output follows the bottom while an older reading position is retained 
  await page.getByRole('button',{name:'Scroll to bottom',exact:true}).click();await expect.poll(()=>bottom(page)).toBeLessThan(2);await expect(page.getByRole('button',{name:'Scroll to bottom',exact:true})).toBeHidden();
  await page.setViewportSize({width:390,height:480});await expect.poll(()=>bottom(page)).toBeLessThan(2);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
-test('historical process remains lazy, validates the canonical final and preserves the original pagination read action',async({page})=>{
- await page.getByRole('button',{name:'History summary',exact:true}).click();await expect(page.getByText('Final authoritative reply.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).__messagesFixture.reads)).toHaveLength(0);
+test('shared historical prefetch validates the canonical final and preserves collapsed presentation and pagination',async({page})=>{
+ await page.getByRole('button',{name:'History summary',exact:true}).click();await expect(page.getByText('Final authoritative reply.',{exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).__messagesFixture.reads.length)).toBe(1);await expect(page.getByText('Canonical stored reasoning.',{exact:true})).toHaveCount(0);
  const disclosure=page.getByRole('button',{name:/Expand|View.*process|展开/i});await disclosure.click();await expect(page.getByText('Canonical stored reasoning.',{exact:true}).last()).toBeVisible();
  const reads=await page.evaluate(()=>(window as any).__messagesFixture.reads.map(({path,method,headers}:any)=>({path,method,headers})));expect(reads).toHaveLength(1);expect(reads[0].path).toBe('/api/claude-agent/threads/fixture-thread/messages/history-summary/process');expect(reads[0].method).toBe('GET');expect(reads[0].headers['x-ink-csrf']).toHaveLength(43);
  await page.getByRole('button',{name:/Collapse/i}).click();await page.getByRole('button',{name:/Expand/i}).click();expect(await page.evaluate(()=>(window as any).__messagesFixture.reads.length)).toBe(1);

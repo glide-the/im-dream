@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share original normalized readonly snapshots with Native; Web keeps keyed-store concurrent deduplication.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] GET /api/claude-agent/threads/{thread_id}/subagents payloads.
@@ -305,22 +306,10 @@ export function useThreadSubagents(threadId: string | null | undefined): ThreadS
   );
 }
 
-/** Refresh a thread snapshot. Concurrent callers share one request. */
-export function hydrateThreadSubagents(threadId: string): Promise<void> {
-  if (!threadId) return Promise.resolve();
-  const existing = inFlightByThreadId.get(threadId);
-  if (existing) return existing;
-
-  const previous = getThreadSubagents(threadId);
-  if (!previous.exists && !previous.loading) {
-    setThreadSubagents(threadId, { ...previous, loading: true, error: null });
-  }
-
-  const request = (async () => {
-    try {
-      const response = await fetch(
+export async function readThreadSubagents(threadId: string, options: {transport?: typeof fetch; signal?: AbortSignal} = {}): Promise<ThreadSubagentState> {
+      const response = await (options.transport ?? fetch)(
         apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/subagents`),
-        { headers: { ...browserRequestHeaders() } },
+        { headers: { ...browserRequestHeaders() }, ...(options.signal ? {signal: options.signal} : {}) },
       );
       if (!response.ok) throw new Error(`Subagent tasks unavailable (${response.status})`);
       const payload = (await response.json()) as ThreadSubagentApiResponse;
@@ -340,14 +329,30 @@ export function hydrateThreadSubagents(threadId: string): Promise<void> {
             ended: tasks.filter((task) => task.status === 'failed' || task.status === 'cancelled').length,
             total: tasks.length,
           };
-      setThreadSubagents(threadId, {
+      return {
         exists: payload.exists === true && tasks.length > 0,
         tasks,
         counts,
         updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
         loading: false,
         error: null,
-      });
+      };
+}
+
+/** Refresh a thread snapshot. Concurrent callers share one request. */
+export function hydrateThreadSubagents(threadId: string): Promise<void> {
+  if (!threadId) return Promise.resolve();
+  const existing = inFlightByThreadId.get(threadId);
+  if (existing) return existing;
+
+  const previous = getThreadSubagents(threadId);
+  if (!previous.exists && !previous.loading) {
+    setThreadSubagents(threadId, { ...previous, loading: true, error: null });
+  }
+
+  const request = (async () => {
+    try {
+      setThreadSubagents(threadId, await readThreadSubagents(threadId));
     } catch (error) {
       const current = getThreadSubagents(threadId);
       setThreadSubagents(threadId, {

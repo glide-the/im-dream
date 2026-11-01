@@ -1,3 +1,4 @@
+# [Sync] 2026-10-30: place the bound image-material marker immediately before the original ordered image/reference pairs, preserving leading context.
 # [Sync] 2026-10-28: align resume documentation with the existing local-transcript guard; runtime behavior unchanged.
 # [Sync] 2026-10-26: an exact committed Dream confirmation retries its original artifact Hook before any model or message write.
 # [Sync] 2026-10-23: project Reflections task-scoped Notion metadata and host Read callback through the existing Runtime hook.
@@ -2599,7 +2600,11 @@ class ClaudeAgentService:
             options.gateway_idempotency_key, options.gateway_image_turn_key = key, key
             options.image_tool_authorizer = provider.authorize_tool
             blocks = options.user_message if isinstance(options.user_message, list) else [{"type": "text", "text": options.user_message}]
-            options.user_message = [{"type": "text", "text": image_material_header(key, request.message_id)}, *blocks]
+            # Gateway consumes ordered image/reference pairs after this marker.
+            # Keep the ContextBuilder's leading instructions outside those pairs.
+            image_index = next((index for index, block in enumerate(blocks) if block.get("type") == "image"), 0)
+            options.user_message = [*blocks[:image_index],
+                {"type": "text", "text": image_material_header(key, request.message_id)}, *blocks[image_index:]]
 
         # Emit session metadata header
         await queue.put(

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-30: Service按原ContextBuilder实际块序，将当前素材标记放在首个图片/引用配对前，保留前置说明和Gateway严格校验。 -->
 <!-- [Sync] 2026-10-12: round33 normal Admin visible gate closed for seven real requests; prior failures and unknown cancellation usage remain; final review and Git delivery are separate. -->
 <!-- [Sync] 2026-10-12: round30 官方报告用量修订、六项真实图片结算与重开、独立复核修订和精确发布回执；历史及未验收范围保留。 -->
 <!-- [Input] 专项PRD、实际CLI报文、Admin精确合同与现有模型/消息/文件模块。 -->
@@ -109,6 +110,8 @@ Gateway在选择前只提供selector，在显式工具选择后只允许原image
 
 服务端将本turn、已保存用户message、AI/Image alias、当前素材URI与原文件SHA绑定到同一精确合同。current-material marker要求唯一直接user frame中的完整独立text block；CLI合并恢复前缀不授权本轮素材，marker之后才按原绑定数量检查image/label pairs。历史、Read、嵌套tool_result或拼接文本不能成为本轮编辑素材。原文件SHA与CLI resize后的视觉字节SHA分别保存，不要求相等。编辑必须显式引用本消息已添加素材的子集；历史图片先点“添加到当前消息”，走原上传入口后才可以编辑。
 
+`ClaudeAgentContextBuilder.build_user_message`先输出Reflections说明，再输出有序图片及引用配对和其余上下文。`ClaudeAgentService._execute_session_inner`在第一个图片块前插入当前素材标记，形成“前置说明、当前标记、image/reference配对、其余文本”的内容序列；无图片时沿原首位标记。说明、文件字节、引用、用户文本保持原值和相对顺序。Gateway继续按精确当前标记、绑定数量及URI检查紧邻配对，校验失败保持原拒绝结果。该顺序同时用于Web和原生客户端的共享Dream执行路径。
+
 Host在保存native决定前检查选中AI模型的当前对应能力/资格。不支持时MCP返回可操作错误，让主对话给出恢复说明；不会先保存不可执行决定而使每次续传都失败。Gateway执行时再次校验，准备/资格变化不能绕过原失败边界。缺capability时不注册新的图片执行路径，普通文字仍走原入口。缺dream schema USAGE时权限检测返回未就绪，而非让整个模型目录报42501。
 
 GIF保留既有视觉理解。独立Images编辑只接受原PNG/JPEG/WebP；当前wire素材仍为GIF时主对话编辑也要求用户另加这些格式，不自动转码或改工具。CLI已把素材转换为支持的视觉格式时记录实际wire摘要并按该格式执行。
@@ -150,6 +153,7 @@ sequenceDiagram
     F->>S: 原Chat DTO与当前附件
     S->>D: 经原Admin具名操作保存message及bind模型/素材
     S->>C: 原Messages上下文、私有selector
+    Note over S,C: 前置说明、当前素材标记、图片及引用配对、其余文本
     C->>G: 原Messages请求，图片仅声明selector
     G->>P: 所选AI模型理解本轮需求与素材
     P-->>G: 实际selector调用与完整参数
@@ -767,7 +771,11 @@ sequenceDiagram
 
 尚未真实制造的自然上游坏结果、文件访问故障、连接中断和图片Provider执行中取消仍只由隔离技术合同验证。发送后尚未实际running时第一次Stop仅断开连接、Agent随后仍执行；确认running后的同一turn停止成功。该竞态未扩大为本专项Runner/SSE/取消重构，不能称所有取消时点均通过。新标准usage结算不表示完整上游图片USD已知；旧三条缺缓存分项、reported合计163709和预留861420保持，未估算补结。
 
+历史证据归档状态（2026-10-30）：下列四个临时路径当前缺失，原记录文本保留于此。该阶段业务结论沿历史范围保留，本轮验收使用本轮现存日志与回执。
+
+```markdown
 证据：[正常业务关联回执](/tmp/im-image-model-split-20261010/validation-round30/runtime12-final-business-correlations.json)、[最终重开哈希](/tmp/im-image-model-split-20261010/validation-round30/real-runtime12-final-reopen-hashes.json)、[实际Admin流水](/tmp/im-image-model-split-20261010/validation-round30/admin-runtime12-visible-token-ledger.json)、[正常服务精确采用](/tmp/im-image-model-split-20261010/validation-round30/compact-consumer-normal-backend-adoption.json)。文档/图示检查及最后Git交付状态由执行记录单列，不用业务成功替代必需交付。
+```
 
 
 ## round31 启动阶段停止与图片执行中取消（已评审、已实现与正常采用；round33补齐后台复核）

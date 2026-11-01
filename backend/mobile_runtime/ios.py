@@ -1,3 +1,5 @@
+# [Sync] 2026-10-31: bind configured Admin JSON HTTP to the existing native URLSession transport.
+# [Sync] 2026-10-30: bind the pinned Notion CLI process adapter beside existing plugin/runtime owners.
 # [Input] Bundled CPython, pinned dependencies, production business routers and shared transport policy.
 # [Output] One in-process ASGI application, native pull transport and application-owned HTTP for original Next.
 # [Pos] iOS backend composition; data authority and Claude execution require qualified owners.
@@ -90,11 +92,18 @@ async def _bind_runtime(endpoint):
         os.environ["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"] = str(root.parent / "claude-plugin-runtime")
         from .ios_plugin_runtime import prepare_plugin_runtime
         prepare_plugin_runtime(endpoint)
+        from .ios_notion_runtime import prepare_notion_runtime
+        prepare_notion_runtime(endpoint)
         if _admin_request_owner is None:
             from services.admin_data import AdminDataConfig
             from services.admin_data.request_auth import create_production_admin_request_auth
             from claude_mcp.service import configure_default_claude_mcp_service
-            owner = create_production_admin_request_auth(AdminDataConfig.from_env())
+            admin_config = AdminDataConfig.from_env()
+            if sys.platform == "ios":
+                from _dream_native import admin_http
+                from .ios_admin_http import install_admin_http
+                install_admin_http(admin_config, admin_http)
+            owner = create_production_admin_request_auth(admin_config)
             try:
                 configure_default_claude_mcp_service(owner.client)
             except BaseException:

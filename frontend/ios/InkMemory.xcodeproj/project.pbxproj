@@ -1,4 +1,8 @@
 // !$*UTF8*$!
+// [Input] Locked iOS target resources and explicit Native source/test membership.
+// [Output] App and XCTest targets with shared runtime and account/MCP adapter ownership.
+// [Pos] InkMemory Xcode project definition.
+// [Sync] 2026-10-31: include the account system-session adapter and isolated Cookie/callback contracts.
 {
 	archiveVersion = 1;
 	classes = {
@@ -37,6 +41,8 @@
 		F10000000000000000000005 /* NativeFileUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* NativeFileUploadTests.swift */; };
 		F10000000000000000000006 /* InkWorkspaceFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* InkWorkspaceFiles.swift */; };
 		F10000000000000000000007 /* NativeWorkspaceFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* NativeWorkspaceFileTests.swift */; };
+		F10000000000000000000008 /* InkAccountLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000008 /* InkAccountLogin.swift */; };
+		F10000000000000000000009 /* NativeAccountLoginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* NativeAccountLoginTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +107,8 @@
 		F20000000000000000000005 /* NativeFileUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFileUploadTests.swift; sourceTree = "<group>"; };
 		F20000000000000000000006 /* InkWorkspaceFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkWorkspaceFiles.swift; sourceTree = "<group>"; };
 		F20000000000000000000007 /* NativeWorkspaceFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorkspaceFileTests.swift; sourceTree = "<group>"; };
+		F20000000000000000000008 /* InkAccountLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkAccountLogin.swift; sourceTree = "<group>"; };
+		F20000000000000000000009 /* NativeAccountLoginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAccountLoginTests.swift; sourceTree = "<group>"; };
 		FD961F623BA9B7A49A8DF68E /* Pods-InkMemory.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-InkMemory.release.xcconfig"; path = "Target Support Files/Pods-InkMemory/Pods-InkMemory.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -153,6 +161,7 @@
 			children = (
 				F20000000000000000000003 /* InkRuntimeModule.m */,
 				F20000000000000000000001 /* InkReactNative.swift */,
+				F20000000000000000000008 /* InkAccountLogin.swift */,
 				F20000000000000000000004 /* InkFileUploads.swift */,
 				F20000000000000000000006 /* InkWorkspaceFiles.swift */,
 				F20000000000000000000002 /* InkReactNativeBridge.m */,
@@ -180,6 +189,7 @@
 				A20000000000000000000008 /* MobileBridgeContractTests.swift */,
 				F20000000000000000000005 /* NativeFileUploadTests.swift */,
 				F20000000000000000000007 /* NativeWorkspaceFileTests.swift */,
+				F20000000000000000000009 /* NativeAccountLoginTests.swift */,
 				C20000000000000000000004 /* EmbeddedDreamBackendTests.swift */,
 				C20000000000000000000006 /* PhysicalBusinessJourneyTests.swift */,
 			);
@@ -429,6 +439,7 @@
 			files = (
 				F10000000000000000000003 /* InkRuntimeModule.m in Sources */,
 				F10000000000000000000001 /* InkReactNative.swift in Sources */,
+				F10000000000000000000008 /* InkAccountLogin.swift in Sources */,
 				F10000000000000000000004 /* InkFileUploads.swift in Sources */,
 				F10000000000000000000006 /* InkWorkspaceFiles.swift in Sources */,
 				F10000000000000000000002 /* InkReactNativeBridge.m in Sources */,
@@ -454,6 +465,7 @@
 				A10000000000000000000007 /* MobileBridgeContractTests.swift in Sources */,
 				F10000000000000000000005 /* NativeFileUploadTests.swift in Sources */,
 				F10000000000000000000007 /* NativeWorkspaceFileTests.swift in Sources */,
+				F10000000000000000000009 /* NativeAccountLoginTests.swift in Sources */,
 				C10000000000000000000005 /* EmbeddedDreamBackendTests.swift in Sources */,
 				C10000000000000000000007 /* PhysicalBusinessJourneyTests.swift in Sources */,
 			);

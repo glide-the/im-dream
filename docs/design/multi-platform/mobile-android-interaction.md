@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-27: RN框架目标保持，按原生与网页区域减少迁移范围。 -->
 <!-- [Input] 当前Dream网页业务、Kotlin/WebView工程及移动平台约束。 -->
 <!-- [Output] Android容器、正常网页登录、交互和验证边界。 -->
@@ -7,6 +8,8 @@
 <!-- [Sync] 2026-10-27: 增加RN目标、App级后端生命周期和HTTP业务；工作台创建退出端侧范围。 -->
 
 # Ink & Memory Android交互设计
+
+当前RN入口和InkRuntime模块已存在，ensureStarted主动拒绝CAPABILITY_UNAVAILABLE；登录、HTTP/Cookie桥接及端侧运行时资格待补齐。共享认证职责见[运行库合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，后续按[认证排障指南](../../deploy/mobile-auth-troubleshooting.md)核对；下方原图和阶段记录保留原范围。
 
 ## 现行Android工程与交互
 

@@ -1,3 +1,34 @@
+<!-- [Sync] 2026-10-31: 当前构建8实际Stop恢复Send及冷12/10通过，真机已升级且ntn暂存通过；原失败与账号/CLI缺口保持分列。 -->
+<!-- [Sync] 2026-10-31: 原Stop获准后结束旧读取代次并独立恢复，补正常/异常/状态图及迟到读取验收，构建7现场保留。 -->
+<!-- [Sync] 2026-10-31: 当前Simulator及设备候选更新构建7；保留构建6真机ntn启动拒绝，原Python执行与真实Notion业务分项记录。 -->
+<!-- [Sync] 2026-10-31: 持久输入文档补栏目/面板失焦，保持草稿与文档实例；软件键盘故障、原组件回归与采用资格分列。 -->
+<!-- [Sync] 2026-10-31: 无调试器冷启动及真实生成中退出复验自动恢复通过，原输入保存一次、7/5与正常取消结算保持；前阶段加载失败保留待定位。 -->
+<!-- [Sync] 2026-10-31: 运行中退出专项保留输入和原结果，重试读取后短追问真实完成；首次自动加载失败及诊断恢复单列，user-only尾部技术回归通过。 -->
+<!-- [Sync] 2026-10-31: 当前产品App原文本回合跨系统Home后台与同进程返回后completed，保留旧取消正文，复用原AppState和查询恢复。 -->
+<!-- [Sync] 2026-10-31: VSCode调试沿Admin现用登记localhost来源；补Web匿名入口双视口及端侧共存/切换恢复，原认证保持。 -->
+<!-- [Sync] 2026-10-31: 当前产品App原Python直接执行固定ntn版本及帮助均退出0，临时空目录清理，真实Notion授权和设备执行分列。 -->
+<!-- [Sync] 2026-10-31: 当前Simulator采用产品标识com.inkmemory.mobile/0.1.0/5，首次安装、正常登录、Bash/流式Stop和自身对话冷恢复通过；旧验证数据保留。 -->
+<!-- [Sync] 2026-10-31: 普通账户Markdown写入、原生文档与真实Mermaid、双导出取消及冷重开通过，完整第三方和设备资格分列。 -->
+<!-- [Sync] 2026-10-31: 补ntn当前安装、原App执行回执与真实授权的验收分层，制品追溯归执行稿。 -->
+<!-- [Sync] 2026-10-31: 登记原Write文本、HTTP内容/下载、消息链接与Files导出取消及冷重开；动态计数归执行稿，Markdown预览独立。 -->
+<!-- [Sync] 2026-10-31: 当前状态表改为实际已接线范围；登记Wi-Fi升级、Locked、普通Bash与12/11重开，保留各业务缺口。 -->
+<!-- [Sync] 2026-10-31: 更新当前账号采用、长文增量/Stop/重开、Release构建5及原ntn授权准备/确认前超时。 -->
+<!-- [Sync] 2026-10-31: 同步普通包账号采用与Node env修订、当前ntn执行资格及本应用授权缺失事实。 -->
+<!-- [Sync] 2026-10-31: 原账号弹窗接Native系统会话与Cookie暂停/复制源码，16项目标技术通过；普通包、系统授权与登记分列。 -->
+<!-- [Sync] 2026-10-31: BFF账号回调地址兼容源码与58项技术通过；Native系统会话/回调登记/包采用继续分列。 -->
+<!-- [Sync] 2026-10-31: 当前普通包重跑ntn四项端侧执行，Release IPA资源核对与真实Notion业务分别登记。 -->
+<!-- [Sync] 2026-10-31: 正常Google账户授权按原Client/S256与精确回调兼容单列，MCP回调保持独立。 -->
+<!-- [Sync] 2026-10-31: 实际Hermes/WebKit原关闭/Thread替换/重开及隐藏技术资格通过；触控/真实业务和普通包恢复分列。 -->
+<!-- [Sync] 2026-10-31: 当前源码Release设备构建、现有开发签名与IPA完成，普通Simulator和设备/商店验收分列。 -->
+<!-- [Sync] 2026-10-31: MCP文档离开按原Host关闭握手；源码/生产文档技术通过，实际修订后WebKit窗口资格待验收。 -->
+<!-- [Sync] 2026-10-31: 当前普通Simulator采用原任务五分区与来源导航；记录实际Hermes及原账户GET恢复，ntn真实业务单列。 -->
+<!-- [Sync] 2026-10-30: 补当前安装ntn摘要复核、普通图片业务及共享Service素材标记顺序修复；真实Notion授权保持待验。 -->
+<!-- [Sync] 2026-10-30: Mermaid补原组件局部文档、复制/PNG平台操作及实例生命周期与三类业务图；当前采用资格单独记录。 -->
+<!-- [Sync] 2026-10-30: 当前工具候选新增真实完成/取消及冷启动恢复回执，ntn技术资格与真实Notion业务分列；历史阶段保留原文。 -->
+<!-- [Sync] 2026-10-30: 原生工具与附件接线、MCP App持久局部文档及Writing定位；当前源码候选与安装分项登记。 -->
+<!-- [Sync] 2026-10-30: 补充ntn安装包网络资格、guest系统DNS文件与生命周期，保留真实Notion授权缺口。 -->
+<!-- [Sync] 2026-10-30: Native按HTTP块合并原SSE事件，停止回执区分主动关闭与网络失败，运行收尾保持Stopping；真实业务与修订验证分项。 -->
+<!-- [Sync] 2026-10-30: 登录弹窗完成后关闭与取消生命周期、固定ntn打包/暂存/原进程合同及目标验证分项。 -->
 <!-- [Sync] 2026-10-30: More原生图标和用途布局沿五项同层导航；主题状态使用原偏好，无新增查询。 -->
 <!-- [Sync] 2026-10-29: 追加原生资源页面复用及HTTP等待协议候选，区分组件、Web门禁、目标构建及普通App采用。 -->
 <!-- [Sync] 2026-10-29: 原回顾API/状态共享，Native主页/报告/配置与具体存储/流适配已形成源码候选；普通App采用独立验收。 -->
@@ -41,6 +72,33 @@
 
 # React Native / React Native Web 统一工程设计
 
+### 当前候选与验收范围
+
+2026-10-31，当前产品Simulator及设备开发候选为`com.inkmemory.mobile`、0.1.0/8。构建8沿用当前Native账号回调、RN Chat/Decks/More及局部持久文档，修订原Stop获准后的读取代次及独立恢复。Simulator实际Stop后恢复Send，普通冷重开保留原账户12用户/10助手、ntn0.15.1工具过程及停止正文；8条原消息按ID/状态/长度保持。新HBC为`d85fb52f1552686475c3d3268a92a657c031f76e0a3071704825e74f3114c6c0`，原生/Next及运行库保持构建7。真机已从6无线升级8，Node/Next及ntn实际暂存通过，原路径拒绝未复现；手机localhost3000 Admin连接拒绝，完整后端/CLI、认证及业务仍待验收。[当前执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-构建7真实ntn业务与停止恢复修复)区分各版本、技术、Simulator业务和真机范围。
+
+最新[无调试器冷启动与运行中退出复验](../../exec/mobile-app-design-review-20261024.md#2026-10-31-无调试器冷启动与运行中退出复验)：同一产品包正常冷启动后自动显示原完成结果；随后一次原UI公开文本请求在实际增量/Stop期间退出，普通重开后原历史自动显示已保存输入、Full access与Send，Loading和Stop隐藏。启动及首次历史加载期间调试器与JS注入均0，原配置Retry操作0。公开GET确认7用户/5助手、新输入精确保存1次、not_found/running=false，唯一新增Gateway取消并settled；重开仅展示持久化消息，本次增量未形成助手记录。原408字符完成结果、14,651字符取消结果与15,675字符完成结果保持。当前两种冷启动样本通过，前阶段持续加载失败的根因仍待定位；本轮生产代码、权限、依赖及制品修改0。
+
+前阶段[运行中退出与后续业务专项](../../exec/mobile-app-design-review-20261024.md#2026-10-31-运行中进程退出与后续正常业务)：原Send在输出/Stop期间退出App，原接口保留新增输入，Runtime为not_found/running=false，Gateway取消并settled。首次重开原生页面持续加载，自动恢复资格未通过；诊断恢复原产品进程后，历史重新显示，原配置Retry恢复Full access，短追问真实completed并settled，最终6用户/5助手。两条输入各保存1次，原取消14,651字符与已完成15,675字符保持。原恢复Hook的user-only尾部与相邻场景合计4项技术回归通过；Native读取/启动稳定性继续定位，当前结果覆盖持久化、原重试及后续业务，首次自动加载稳定性保持待复验。
+
+| 对象 | 当前实现与执行归属 | 验收结果及剩余依赖 |
+| --- | --- | --- |
+| RN主界面与Web | `frontend/src/App.tsx`组合Native Chat/Decks/More；`App.web.tsx`装配原DreamRoot；Writing/MCP/图表保留局部DOM文档 | 普通Simulator采用。More五项同层；Reflections按账户创建并释放既有资源实例。普通Deck保留；移动Dream工作台入口排除。各功能真实业务范围沿原矩阵 |
+| Dream、Claude与ntn | Python、Node、Next及命令解释器归同一App；Mac提供原Admin/Gateway3000与原PostgreSQL | 当前包原启动/Python/Bash技术及真实Chat通过；业务执行无Mac Python/Claude依赖。物理iPhone与系统工具完整业务继续验收 |
+| 正常账号 | 原Client/S256、正常网页表单、原Cookie/CSRF及权限；产品精确账号URI已沿原登记采用 | 当前产品密码登录成功关闭弹窗，左上关闭/重开及冷启动会话保持通过。前阶段系统Google启动/取消证据保留；完整Google账户与真机待验收 |
+| 当前Chat样本 | 产品App通过原首页创建自身正常Thread，模型`deepseek-v4-flash-vision-exp`保持；前阶段正常记录与验证数据保留 | 原Bash completed、Stop cancelled及三条结算沿前阶段；新增两条文本completed及两条Gateway settled，其中第二条完成运行中前后台旅程。图片、Write及图表资格独立保留 |
+| 流式、停止与恢复 | 原SSE/parser/reducer、原Stop和history/status；客户端reader与服务端任务分别管理 | 原Stop及冷恢复通过；当前App在输出中进入后台，系统状态2，约44.8秒后同进程返回状态0，原Thread最终4/4、completed、running=false，旧cancelled正文保持。物理挂起和网络变化单列 |
+| Notion CLI | 固定ntn0.15.1与MIT，原Python及App内Node/guest执行 | 产品Simulator通过原Python版本/帮助和正常Claude/Bash的实际ntn版本查询；构建8冷重开保留原process结果。真机8实际暂存摘要/0755通过；物理命令、有效授权/读取/同步和Agent内容业务待验收 |
+| 任务、附件与工具文档 | 原五分区GET/parser、来源导航、系统文件和原MCP Host/编辑器/图表；原模块所有业务状态 | 同一实现的前阶段验证App已通过文本/Markdown Write、HTTP、真实图表、系统取消和重开；当前产品实测登录、Chat/Bash/Stop/恢复及原生导航。图片、文件、图表和MCP证据分别归对应制品 |
+| 分发 | 产品Simulator8已覆盖，设备开发IPA8通过签名与全归档审计，原5/6/7保留 | 真机6→8升级及1,949项运行元数据保持，Node/Next与ntn暂存通过；完整Python/CLI、账号/Chat、有效HTTPS Admin及正式渠道资格待验收 |
+
+以上结果覆盖当前明确样本、包内技术与制品检查。完整业务及已发布状态按未完成项继续追踪；本稿历史章节中的“未接线”“未采用”按章节日期解释，当前源码归属与调用位置见最新执行记录。
+
+前后台当前资格复用`useNativeChatThread.native.ts`的原AppState监听和HTTP查询恢复：后台结束本地reader，前台读取同一Thread。普通产品App25378实际系统通知、可见输出/Stop、系统Home及精确产品卡片返回、原history/status与两条正常结算共同取证；本轮无自动重发、工具执行或生产代码变更。[运行中前后台执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-产品chat运行中前后台与完成恢复)保留首轮未取得切换资格的原因及预算修订；物理系统挂起另行验收。
+
+前阶段验证App还通过原More入口实际到达模型设置、写作局部原文档、时间线及回顾首页；未发起写作/回顾任务或保存设置。[当前页面与真实Bash资格](../../exec/mobile-app-design-review-20261024.md#2026-10-31-无线升级构建5与真实bash业务)逐项限定范围，完整第三方业务继续独立验收。
+
+工作区文件验收沿原`files/`权限及HTTP接口；23字节文本和98字节Markdown保留在正常Thread。`.txt`沿通用系统导出；Markdown由原生文档呈现标题和正文，Mermaid区域复用既有局部DOM。图表全屏返回时原文档源码页保留；进程重开后，从原历史重新打开文档并渲染图表。[文本执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-工作区文本文件真实业务与恢复)和[Markdown图表执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-markdown与mermaid真实业务及恢复)提供原process、正常结算、字节匹配、系统取消与临时副本释放证据。
+
 ### 当前本机 Admin 连接
 
 2026-10-29，用户指定当前测试连接本机Admin 3000。`frontend/.env.local`、`backend/.env`使用现有`INK_ADMIN_DREAM_TRANSPORT_BASE_URL=http://localhost:3000`，Backend的`INK_GATEWAY_BASE_URL`使用同一地址。`INK_ADMIN_DREAM_BASE_URL`、`INK_ADMIN_AUTH_ISSUER`及resource沿用本机Admin声明的公开认证身份；Token、JWKS和数据请求经现有transport字段连接本机。App Client ID、PKCE、Cookie、CSRF和权限合同保持。
@@ -49,12 +107,14 @@
 
 | 实例 | 当前连接与执行归属 | 验证范围 |
 | --- | --- | --- |
-| Mac Admin / Gateway | 普通`pnpm run start:embedded`在3000提供现用服务，PostgreSQL使用现有数据目录 | IPv4/IPv6登录页200；当前Admin Build ID `4OycC5xU-7KIhK1F4pZDu` |
-| Mac Web / Python | 普通env保留本机Admin/Gateway配置；当前独立验收窗口未运行Mac Next及8765 Backend | 5173当前归Simulator App；本机调试Next启动前需释放同一端口 |
-| Simulator候选 | 同一普通env装入既有候选；App拥有Next、Python和Node，Admin运行在Mac | 正常登录会话保留；1轮真实Chat完成及重开恢复；目录返回11个模式、22个Agent |
+| Mac Admin / Gateway | 普通`pnpm run start:embedded`在3000提供现用服务，PostgreSQL使用现有数据目录 | IPv4/IPv6登录页200；当前Admin Build ID `y1gIPKAuV5tcB_Tlj79nW` |
+| Mac Web / Python | 普通env保留本机Admin/Gateway配置；原VSCode调试使用现用登记的localhost:5173；8765 Backend按原入口独立启动 | 桌面/窄屏匿名入口、options200及原登录按钮可用通过。Web与当前Simulator按先后运行；本轮Mac Python保持停止，完整Web业务独立验收 |
+| Simulator候选 | 同一普通env装入既有候选；App拥有Next、Python和Node，Admin运行在Mac | 正常登录会话保留；当前长文完成、Stop及冷启动恢复；目录既有11个模式、22个Agent |
 | 物理iPhone | `localhost:3000`指向手机自身 | 需要可达同一本机Admin的有效HTTPS连接及原授权来源配置，当前Simulator连接回执单独登记 |
 
 当前配置装配沿用`frontend/ios/scripts/bundle-node.py`的两个env归属。首次本机配置采用仅重新装配既有Simulator制品的env、签名及安装；后续普通Native候选沿当前源码独立构建，技术验证与真实业务分别登记。前一轮真实Chat使用原Write or edit入口，1次提交产生3次模型请求，全部completed/settled；该轮2次预算超出后停止新增模型调用。后续两个限定样本使用原Tiptap与硬件键盘，100字符及167字符输入均由持久化原文精确核对；分别取得正文增量至完整列表、进行中Stop保存cancelled及进程重开回执，新增模型请求各1次。软件键盘真实任务、完整主页面和物理设备继续独立验收。原公网执行记录保留原时间和范围。详见[本机Admin连接执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-29本机admin-3000连接)及其后续真实Chat、版本采用和原生输入/停止记录。
+
+2026-10-31原Web入口补核：原调试`frontendHost=127.0.0.1`触发Admin的`DREAM_ORIGIN_DENIED`；相同Mac Next按`localhost:5173`请求返回原表单地址200。当前[VSCode配置](../../../.vscode/settings.json#L9)仅修正共享host，原任务和Chrome URL继续复用该配置，env、Client ID、PKCE和Admin登记保持。Mac IPv4与App IPv6同时监听时，实际产品原公开查询及冷启动恢复通过；原Web登录按现用登记的localhost来源先后运行，桌面与窄屏匿名入口通过。验证结束已恢复同一产品App、账户和自身Thread；未启动Mac8765或新增模型调用。[来源及执行归属记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-web调试来源修正与端侧执行归属)限定本轮资格。
 
 原生Stop使用`useNativeChatThread.native.ts:152`及原`threadStop.ts`，本轮生产源码保持。第二个样本通过原Stop进入Stopping，终态恢复Send；正常Thread messages保存`turnStatus=cancelled`，Gateway保存`cancelled/settled`。原进程返回首页时曾缺少最新记录，正常历史API已返回该记录；进程重开后原入口恢复。`native-chat-history.spec.ts`补充关闭/重新启用读取的回归，9项通过；实际Hermes与原生传输中的该刷新差异继续定位。当前输入/取消/重开结果退出完整页面等价及正式发布依据。
 
@@ -1599,15 +1659,17 @@ stateDiagram-v2
 
 | 项目 | 当前状态 | 验收条件 |
 | --- | --- | --- |
-| 根mobile工程退役 | 已迁移至frontend；旧源码归legacy | 活跃脚本无旧工程路径；依赖锁唯一 |
-| RN/RNW入口与Web别名 | 已接线 | Web生产构建、Metro、平台解析分别通过 |
-| iOS HTTP和网页登录 | 已接线，待新界面验收 | 登录/取消/退出/失效、Cookie/CSRF、UTF-8流及释放通过 |
-| 原生启动配置与目录重试 | 38项前轮技术回归通过；Simulator普通入口读取配置、目录、历史及原session重试已观察 | 新hook错误按钮与401故障为注入fixture；响应头前取消取得普通App活动操作回执，真机及当前制品独立真实Chat待验收 |
-| RN Chat发送/历史/停止/恢复 | 开发中 | 真实账户一次提交完成、原Stop回执、重开恢复可复核 |
-| 工具权限、附件、Deck上下文、编辑器/MCP局部文档 | 待迁移 | 与原业务逐项等价，禁止静默关闭权限 |
-| Android RN构建 | 已改入口，工具链与运行库未验收 | APK/AAB与设备端Python/Claude独立验收；当前能力fail closed |
-| iOS签名/真机/升级 | 新架构待验收 | build/install/launch/升级数据保留分别记录 |
-| 正式发布 | 未执行 | 渠道账号、发行签名、隐私与商店审核前提满足 |
+| 根mobile工程与发布入口 | 活跃工程统一frontend，旧源码归legacy | 当前结构检查无旧根mobile构建入口，依赖锁唯一 |
+| RN/RNW入口与Web别名 | 已接线，Web原DreamRoot保持 | 当前Next/Metro及平台解析技术证据沿各阶段；Web业务保持原合同 |
+| iOS HTTP与正常网页登录 | 当前产品包采用原BFF及账号适配，密码登录/左上关闭/重开和冷启动会话保持通过；系统授权启动/取消沿前阶段回执 | 完整Google账户授权、会话失效及真机分别验收 |
+| App运行库与启动读取 | Native单例管理Python/Node/Next/Claude，原配置及目录重试已接线 | 产品Simulator及原公开业务通过；设备构建8已越过原Node路径错误，Next及ntn暂存通过；完整后端与认证/业务待Admin连通及有效执行回执 |
+| RN Chat发送/历史/流式/停止/恢复 | 当前产品自身Thread通过原Bash、正文增量、Stop和冷恢复，正常历史/工具过程及三条结算保持；Write和文件资格沿前阶段制品 | 其余任务、网络故障与设备资格按下表逐项执行 |
+| 原生业务页面与局部文档 | Decks/More/设置/写作/时间线/回顾源码已采用；工具、附件、编辑器/MCP及图表按具体文档复用 | 前阶段验证App的页面、图片/文本/Markdown/图表及局部WebKit资格各自保留；当前产品实测主导航与Chat/Bash/Stop/恢复；完整MCP/Notion和其他页面业务继续验收 |
+| Android RN构建 | 已改入口，工具链与运行库未验收 | Android独立目标与渠道验收继续分列，当前阶段交付iOS |
+| iOS构建/签名/安装/升级 | Release0.1.0/8签名与全归档审计通过；设备6→8已Wi-Fi覆盖，安装前后1,949项运行目录元数据保持 | 真机前台/账号/业务及完整升级数据恢复；原HTTPS和渠道前提保持 |
+| 正式发布 | 未执行 | 原渠道账号、发行签名、SDK、隐私及审核前提满足 |
+
+本表更新当前源码与实际资格，以下日期回执保留原阶段范围。具体命令、失败与边界归[最新执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-无线升级构建5与真实bash业务)。
 
 ### 双平台验收计划
 
@@ -3018,3 +3080,1057 @@ stateDiagram-v2
 本阶段评审为“待满足明确前提后通过”：共享状态及Web门禁、原生内容技术资格成立；完整Settings分类/资源导航、平台所有者和系统授权、Xcode目标验证及普通候选采用继续实施。新增发布管理页、通用插件框架、离线数据库和后台常驻服务为0。
 
 源码依据：[MCP API工厂](../../../frontend/app/_dream/api/claudeMcpApi.ts#L208)、[资源连接器API工厂](../../../frontend/app/_dream/api/resourceConnectorApi.ts#L742)、[原MCP会话等待](../../../frontend/app/_dream/App.tsx#L154)、[Notion原生内容](../../../frontend/app/_dream/components/dashboard/ConnectorNotionDetailPage.native.tsx#L19)、[MCP原生列表](../../../frontend/app/_dream/components/claude-mcp/ClaudeMcpResourceSection.native.tsx#L14)、[MCP原生详情](../../../frontend/app/_dream/components/claude-mcp/ClaudeMcpServerDetailPage.native.tsx#L16)、[安全响应头投影](../../../frontend/ios/InkMemory/InkReactNative.swift#L426)。
+
+
+## 原生正常网页登录弹窗
+
+### 背景与问题
+
+用户报告登录成功后弹窗残留，主页需要在RN主界面打开。代码检查发现原presentLogin直接呈现MobileHostViewController，缺少关闭按钮；NativeLoginSessionProbe原检查由Cookie变化或authenticated消息触发，导航结束未完整触发检查。SessionGate前台刷新可早于弹窗结束采用会话。修订统一成功、关闭及交互取消的呈现生命周期。
+
+### 目标与边界
+
+复用原AuthEntry、Admin网页登录与Next `/auth/callback`、`/auth/session`，原Cookie、CSRF、账户和权限保持。MobileHostViewController打开既有`/auth/sign-in`路径，UINavigationController提供登录标题和左上关闭。登录窗口退出后由SessionGate读取完整原public session DTO并显示RN主页；业务页面在RN主界面显示。新认证接口、令牌保管、Device Flow、数据库及确认弹窗均为0。
+
+### 概念与规则
+
+| 对象 | 创建与保留 | 结束与结果 |
+| --- | --- | --- |
+| SessionGate登录操作 | 显式点击登录；同一时刻一份Promise | 弹窗关闭后refresh原session；pending期间合并登录操作并延后前台主页采用 |
+| UINavigationController与MobileHostViewController | 每次登录创建；保留原WKWebsiteDataStore与表单 | 左上关闭、下拉取消或成功均经finishLogin；停止旧观察，dismiss完成后结算Promise |
+| NativeLoginSessionProbe | 当前弹窗创建一份；Cookie变化、网页状态和导航完成触发检查 | 仅原同origin `/auth/session` 200与user/CSRF候选字段满足时结束；完整DTO继续由browserSession校验 |
+| 成功与取消 | loginFinishing排除重复回调 | 成功resolve；取消LOGIN_CANCELLED，原生入口清理等待态并允许重新打开 |
+| 端侧后端与原会话 | App级运行库保持 | 关闭弹窗不退出账号、不重启服务、不取消服务端任务 |
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Gate as SessionGate.native
+  participant Runtime as InkRuntime.presentLogin
+  participant Sheet as UINavigationController与MobileHostViewController
+  participant Web as 原AuthEntry与Admin网页登录
+  participant Probe as NativeLoginSessionProbe
+  participant BFF as Next /auth/session
+  User->>Gate: 点击登录
+  Gate->>Runtime: presentLogin，保留原生入口
+  Runtime->>Sheet: 显示原表单和左上关闭
+  User->>Web: 原正常网页登录
+  Web-->>Sheet: 原回调与Cookie
+  Sheet->>Probe: Cookie变化或导航完成或网页认证状态
+  Probe->>BFF: 原平台Cookie读取session
+  BFF-->>Probe: 200及公开user/CSRF字段
+  Probe->>Runtime: 当前弹窗认证完成
+  Runtime->>Sheet: 停止观察并dismiss
+  Sheet-->>Runtime: dismissal completion
+  Runtime-->>Gate: resolve presentLogin
+  Gate->>BFF: loadBrowserSession完整DTO校验
+  BFF-->>Gate: 当前有效session
+  Gate-->>User: RN主界面主页
+```
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Gate as SessionGate.native
+  participant Runtime as InkRuntime.finishLogin
+  participant Sheet as 登录弹窗
+  participant Probe as NativeLoginSessionProbe
+  participant BFF as Next /auth/session
+  alt 关闭或下拉取消
+    User->>Sheet: 左上关闭或下拉
+    Sheet->>Runtime: authenticated=false
+    Runtime->>Probe: stop，移除Cookie观察并取消当前读取
+    Runtime->>Sheet: dismiss或确认已关闭
+    Sheet-->>Runtime: 关闭完成
+    Runtime-->>Gate: LOGIN_CANCELLED
+    Gate-->>User: 原生登录入口，可再次登录
+  else 原会话检查失败
+    Probe->>BFF: 原session读取
+    BFF-->>Probe: 401或读取失败
+    Probe-->>Sheet: 保留当前表单
+    User->>Sheet: 原登录重试或关闭
+  end
+  opt 弹窗可见时回到前台
+    Gate->>Gate: loginPending保持；主页等待关闭后采用
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 原生登录入口
+  原生登录入口 --> 登录弹窗: 点击登录
+  登录弹窗 --> 登录弹窗: 原表单失败或前后台切换
+  登录弹窗 --> 关闭处理中: 有效session或显式关闭
+  关闭处理中 --> 会话核实: 成功且dismiss完成
+  关闭处理中 --> 原生登录入口: 取消且关闭完成
+  会话核实 --> RN主页: 原完整DTO通过
+  会话核实 --> 原生重试入口: 读取失败
+  原生重试入口 --> 会话核实: 重试
+  原生重试入口 --> 登录弹窗: 重新登录
+```
+
+Apple的[Cookie观察合同](https://developer.apple.com/documentation/webkit/wkhttpcookiestoreobserver)说明Cookie变化通知及观察注册/移除。当前平台适配增加导航完成触发的原session核实；Cookie观察与网页状态共同使用。查阅日期：2026-10-30。源码技术回归、原生目标验证和真实正常网页登录按[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30登录弹窗与notion-cli端侧验证)分别登记。
+
+## Notion CLI端侧打包与执行
+
+背景与问题：前阶段资源页面fixture覆盖Notion界面，安装包缺少固定ntn，原Notion Python模块仍直接创建子进程。目标与边界：沿原Notion CLI 0.15.1、凭证目录、登录/查询/同步和权限，补应用资源与进程兼容；原网页和业务接口保持。
+
+| 模块 | 当前职责 | 平台适配 |
+| --- | --- | --- |
+| node-dependencies.json与prepare-node.py | 固定官方npm ntn0.15.1完整性及Linux ARM64二进制/许可证SHA | 只提取该二进制、manifest和MIT原文；Mac二进制与npm平台wrapper退出App资源 |
+| bundle-node.py | 校验固定资源后打包 | 保留原Runtime/Next/env所有权；记录ntn制品摘要 |
+| runtime/host.cjs | 原私有认证端点与命令Worker | 安装后原资源可执行位被清除；校验字节并暂存到既有guest命令目录，恢复0755；每次Notion调用校验摘要 |
+| notion/auth.py与operations.py | 原argv、NOTION_HOME/KEYRING、超时、解析和取消 | 进程创建默认原asyncio；iOS组合根绑定create_notion_process，无部署环境分支 |
+| ios_notion_runtime.py | 原communicate/kill/wait接口 | 同进程私有端点与notion-cli purpose；cwd限原Notion根，执行文件固定暂存制品；取消请求终止并等待原Worker退出 |
+| 原Notion凭证与同步模块 | actor凭证、选择范围、索引和同步 | 原路径与权限保持；版本/帮助资格测试使用明确临时空目录 |
+
+```mermaid
+sequenceDiagram
+  participant Owner as 原Notion认证或NotionOperations
+  participant Factory as create_notion_process
+  participant Native as ios_notion_runtime
+  participant Host as runtime/host.cjs
+  participant Worker as worker.mjs
+  participant CLI as 暂存ntn0.15.1
+  Owner->>Factory: 原argv与build_notion_env
+  Factory->>Native: iOS组合根已绑定工厂
+  Native->>Host: 原私有connect帧，notion-cli与当前NOTION_HOME
+  Host->>Host: 检查固定文件摘要与原私有cwd
+  Host->>Worker: 同应用进程Worker
+  Worker->>CLI: 既有guest命令执行
+  CLI-->>Native: stdout或stderr与exit
+  Native-->>Owner: 原communicate结果与returncode
+  opt 原请求取消或超时
+    Owner->>Native: kill并wait
+    Native->>Host: 原terminate帧
+    Host->>Worker: terminate并等待退出
+    Worker-->>Native: 原exit回执
+  end
+```
+
+[官方npm固定版本元数据](https://registry.npmjs.org/ntn/0.15.1)及包内LICENSE.md提供版本、完整性和MIT分发条件。该版本支持darwin/linux/win32，包内平台wrapper按process.platform选择；iOS采用原已有Linux ARM64解释执行路径。查阅日期：2026-10-30。版本/帮助执行、原后端进程适配、真实Notion授权、目录读取及同步分项验收，页面fixture退出CLI执行成功依据。
+
+源码依据：[原登录呈现与关闭](../../../frontend/ios/InkMemory/InkReactNative.swift#L353)、[原登录入口](../../../frontend/ios/InkMemory/MobileHostViewController.swift#L400)、[固定CLI准备](../../../frontend/ios/scripts/prepare-node.py#L34)、[原Notion进程入口](../../../backend/notion/auth.py#L64)、[iOS组合适配](../../../backend/mobile_runtime/ios_notion_runtime.py#L21)、[Worker固定执行检查](../../../frontend/ios/runtime/host.cjs#L204)、[原后端目标执行用例](../../../frontend/ios/InkMemoryTests/EmbeddedDreamBackendTests.swift#L194)。
+
+### 命令DNS配置与网络验证
+
+背景与问题：2026-10-30包内CLI与本地HTTP检查通过，外部HTTPS调用连续返回通用请求失败。当前guest根缺少`etc/resolv.conf`；补入系统DNS后，同一固定CLI取得预期认证拒绝。该结果定位DNS配置缺口，完整Notion授权与同步继续独立验收。
+
+目标与边界：复用原`runtime/host.cjs`和`node:dns.Resolver`，向App私有guest根投影当前默认DNS服务器。原Bash、Notion认证、Cookie/CSRF、actor凭证、资源范围、同步及权限保持；新增业务接口、依赖、数据库与网络代理为0。
+
+概念与规则：
+
+- `refreshGuestResolver`归Node宿主所有，启动及原命令连接时读取系统默认服务器；原生数据根允许系统路径别名，`etc`目录与目标文件拒绝符号链接。文件通过独占临时文件与rename写入，权限`0600`。
+- IPv4和IPv6地址通过`net.isIP`校验；DNS文件无公网地址常量。配置相同保留文件，系统服务器为空时清空前一网络的配置。自定义DNS端口无法表达于当前musl文件，该配置与VPN、IPv6网络切换列入真机验证依赖。
+- DNS文件随App私有命令根保留；每次原命令连接刷新。当前命令Worker、CLI和取消等待继续由原执行实例管理，DNS刷新不终止任务、不重复发起业务、不增加后台常驻实例。
+- XCTest的HTTP服务、合成令牌及API地址仅归明确命名的临时技术目录；原Notion进程工厂继续拒绝`NOTION_API_TOKEN`和`HOME`覆盖。公网检查仅使用固定无效令牌调用原CLI的只读接口，退出真实账户授权与数据读取验收范围。
+
+```mermaid
+sequenceDiagram
+  participant Caller as notion/auth.py或operations.py
+  participant Host as runtime/host.cjs
+  participant Resolver as node:dns.Resolver
+  participant File as guest/etc/resolv.conf
+  participant Worker as worker.mjs
+  participant CLI as 包内ntn0.15.1
+  participant API as Notion API
+  Caller->>Host: 原私有connect帧与Notion argv
+  Host->>Resolver: new Resolver().getServers()
+  Resolver-->>Host: 当前默认DNS服务器
+  Host->>File: 校验路径与地址，原子刷新0600文件
+  Host->>Worker: 创建原命令实例
+  Worker->>CLI: 原guest执行与环境
+  CLI->>File: 域名解析配置
+  CLI->>API: 原HTTPS业务请求
+  API-->>CLI: JSON结果或业务错误
+  CLI-->>Caller: 原stdout、stderr与exit
+```
+
+```mermaid
+sequenceDiagram
+  participant Caller as 原Notion调用方
+  participant Host as runtime/host.cjs
+  participant File as guest/etc/resolv.conf
+  participant CLI as 包内ntn0.15.1
+  Host->>Host: 命令连接读取系统DNS
+  alt 系统DNS为空
+    Host->>File: 清空前一网络配置
+    Host->>CLI: 沿原命令执行
+    CLI-->>Caller: 原解析错误或超时
+    Caller-->>Caller: 原失败反馈，等待用户重试
+  else 目录或目标为符号链接
+    Host-->>Caller: 原私有错误帧，命令未创建
+  end
+  opt 网络恢复后用户重试
+    Caller->>Host: 原业务调用
+    Host->>File: 读取当前系统配置并刷新
+    Host->>CLI: 新原命令实例
+    CLI-->>Caller: 原结果
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 待生成: Node宿主启动
+  待生成 --> 已配置: 当前系统DNS包含有效地址
+  待生成 --> 空配置: 当前系统DNS为空
+  已配置 --> 已配置: 原命令连接刷新当前地址
+  已配置 --> 空配置: 原命令连接发现系统DNS为空
+  空配置 --> 已配置: 后续连接取得当前系统地址
+  已配置 --> 路径错误: 目录或目标校验失败
+  空配置 --> 路径错误: 目录或目标校验失败
+  路径错误 --> [*]: 当前请求失败，保留原业务失败反馈
+```
+
+验证分层：资源摘要与许可证检查覆盖准备目录、候选及实际安装包；原Python版本/帮助覆盖Notion工厂；原Bash与同App HTTP覆盖CLI参数、JSON与403错误；无效令牌公网HTTPS覆盖DNS、TLS与认证拒绝。六项无网络合同覆盖地址、刷新、文件权限、离线清空、输入过滤及符号链接拒绝。真实授权、资源读取、选择保存、同步、Agent使用、Wi-Fi切换及物理iPhone继续独立验收，逐次回执归[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30ntn安装包与网络补验)。
+
+源码依据：[系统DNS刷新](../../../frontend/ios/runtime/host.cjs#L48)、[原Bash网络资格](../../../frontend/ios/InkMemoryTests/EmbeddedDreamBackendTests.swift#L217)、[HTTPS负向资格](../../../frontend/ios/InkMemoryTests/EmbeddedDreamBackendTests.swift#L281)、[无网络Resolver合同](../../../frontend/ios/scripts/check-guest-resolver.mjs#L1)。
+
+官方依据：[Node Resolver与getServers](https://nodejs.org/docs/latest-v24.x/api/dns.html#dnsgetservers)定义默认服务器来源与地址格式；[Notion身份接口](https://developers.notion.com/reference/get-self)及[状态码](https://developers.notion.com/reference/status-codes)定义HTTPS只读入口与无效令牌的认证拒绝。查阅日期：2026-10-30。固定CLI来源、完整包SHA512及MIT许可沿本节原锁定记录。
+
+### 2026-10-31当前ntn制品复验
+
+当前普通Simulator候选、实际安装包及Release开发IPA各10项资源核对通过：ntn、MIT、manifest、Node宿主/Worker/进程适配与Dream Python Notion装配及原调用模块。ntn0.15.1为10,930,616字节，SHA256 `faee5c2227abea0ea401bd27689a9d150d32402d4240f349619710fd621824fc`；npm元数据、固定归档SHA512及两项归档成员一致。
+
+当前候选的测试bundle与前阶段测试bundle摘要存在差异，本轮直接选择当前候选执行4项XCTest，4通过、0失败、0跳过：同App命令与共享文件、原Python版本/帮助、原Bash HTTP成功/403、公网HTTPS无效令牌认证拒绝。目标为iPhone16 Plus/iOS18.6 arm64 Simulator，执行PID97046；Mac承担测试调度，Dream Python、Node、Bash与ntn均在App内执行。原Python29项和28 subtests、Resolver6项及宿主语法通过。生产源码、业务接口、权限及依赖新增0。
+
+验收状态：**当前Simulator包的资源与执行验证完成；Release IPA的资源核对完成；Release设备执行、真实Notion授权/资源读取/同步及Agent使用待验收。** 合成HTTP与公网认证拒绝归端侧技术验证。普通入口已恢复，原正常账户、8用户/7助手历史、最后completed及running=false通过原公开GET复核；本轮真实Notion内容及模型调用0。具体命令、退出码与制品归[当前包复验记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-ntn当前安装包执行复验)。
+
+### 当前普通包的Notion授权前提
+
+当前交付状态按以下层次记录；每次制品调整以实际安装包、测试宿主和目标IPA的资源摘要建立追溯关系。最新核对归[ntn制品与执行证据追溯](../../exec/mobile-app-design-review-20261024.md#2026-10-31-ntn制品与执行证据追溯)。
+
+| 验收层次 | 已有证据 | 验收范围与剩余条件 |
+| --- | --- | --- |
+| 制品内容 | 固定ntn0.15.1、MIT与manifest随包，准备和打包阶段校验摘要 | Simulator实际安装和Release构建5分别核对；IPA资源结果归对应制品 |
+| App内执行 | 同App命令/共享文件、原Python版本/帮助、原Bash HTTP成功/403、公网HTTPS无效凭据拒绝共4项XCTest通过，0失败/跳过 | 原始日志证明Python、Node、Bash与ntn归App进程；当前资源一致时复用回执 |
+| Notion授权 | 原授权准备取得HTTPS地址与验证码；未确认时原poll超时；当前应用授权文件数0 | 通过原连接入口取得当前actor的有效授权；原正常网页登录与资源权限保持 |
+| 真实Notion业务 | 资源范围入口返回授权缺失/过期反馈 | 授权后验收资源读取、选择保存、同步、Agent调用与重开；物理iPhone执行单列 |
+
+后续账号回调包已覆盖安装到同一普通App，ntn与MIT摘要继续匹配固定锁。宿主env修订后的实际当前包再次执行上述4项XCTest，4通过、0失败/跳过；实际App60704、iPhone16 Plus/iOS18.6 arm64，技术资格包含1次公网无效凭据拒绝，真实Notion凭据与正文使用0。通过普通App“设置→Work→资源链接→Notion→资源范围”真实读取时，原接口返回授权缺失/过期反馈；应用私有`Library/Application Support/InkMemory/runtime/notion-runtime`存在，授权文件数为0，检查仅读取文件元数据。Admin保留原连接记录及7项范围，本次资源选择、授权状态、策略与同步写入均为0。实际读取在原凭据边界关闭，当前结果归真实授权前提核对；完整授权、资源读取、同步及Agent使用继续验收。重新连接沿原Notion CLI业务，不从Mac复制凭据、不增加远程执行或新认证协议。[本轮采用与核对](../../exec/mobile-app-design-review-20261024.md#2026-10-31-普通包账号回调采用与notion授权核对)。
+
+### 授权准备的当前包执行范围
+
+2026-10-31在普通App62506的原嵌入式Python内，使用明确命名临时空home调用原`start_login`与`poll_login`。授权准备成功，返回HTTPS地址、验证码及正轮询间隔；无用户确认时，原poll在默认15秒预算后抛出`NotionAuthTimeoutError`，原kill/wait完成，临时home移除。该结果记录授权准备成功与未确认轮询超时，完整授权状态保持待验收；本次真实凭据、浏览器打开、用户确认、连接数据库写入、正文读取和模型调用均为0。
+
+[Notion官方认证流程](https://developers.notion.com/cli/get-started/authentication)要求在浏览器确认验证码后，于原运行端执行`ntn login poll`兑换令牌；`NOTION_HOME`和`NOTION_KEYRING=0`为原凭据存储配置。查阅日期：2026-10-31。后续沿现有Notion重新连接入口完成授权，保留当前actor、资源范围及权限；当前超时回执与4项技术检查分别登记于[最新执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-长文停止重开与release构建5)。
+
+## 原生Chat流式投影与停止收尾
+
+### 背景与问题
+
+普通Simulator复验取得六句正文增量与完成，以及长文持久化。长文在Debug JavaScript下存在界面消费延迟；原生Hook逐事件提交状态，原共享SSE工具已具备相邻增量合并。运行中Stop已由原消息与正常Gateway记录确认取消。原生读取在停止回执允许关闭后抛出取消异常，原通用catch短暂采用unknown反馈；停止回执仍为running时，原finally立即清除stopping。 该节正文及图示保留2026-10-30阶段范围；2026-10-31现行恢复所有权采用[停止回执后的独立读取恢复](#停止回执后的独立读取恢复)。
+
+### 目标与边界
+
+复用原公开提交、SSE parser/reducer、submission ticket、Stop回执和history/status恢复。修订限Native状态投影与读取生命周期，原Web、Admin、权限、存储和计费保持。新增依赖、业务接口、配置项及持久表为0。历史章节和图示保留原阶段范围，本节保留原阶段停止收尾行为；现行增量及目标验收归后文独立恢复节，原阶段验收归[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30真实chat复验与原生停止收尾)。
+
+### 概念与规则
+
+| 对象 | 创建与保留 | 释放与状态 |
+| --- | --- | --- |
+| App运行库与正常会话 | Python/Node/Next归App；原网页登录建立Cookie | 栏目切换保持运行库；进程重开重新装配，原消息与本机Claude记录分别由原所有者恢复 |
+| `useNativeChatThread.native` | 当前Thread、epoch与selectionEpoch按原规则持有 | 新建/选择/卸载结束旧读取；状态查询和GET stream保持原Thread，无重复业务POST |
+| HTTP数据块的事件投影 | 原parser解析；`coalesceClaudeAgentSseEvents`合并相邻同part文字或过程增量 | 原事件顺序、工具/确认/错误/finish边界保持；每块提交一份投影，finish后继续原查询 |
+| 当前`OpenResponse` | 一份实际读取对象 | 原Stop回执满足既有`claudeThreadStopPending`及`chatStopMayAbortLocalReaders`后，记录该读取的主动关闭并cancel |
+| 主动关闭记录 | 以当前response对象存入WeakSet | 对应consume关闭异常进入原恢复；finally删除记录。其余读取异常继续unknown及重试 |
+| 停止收尾 | Stop处理中设置stopping；回执running=true时保留 | 已有consume负责关闭后的恢复，缺少reader时调度原恢复；原status为空闲后清stopping并恢复Send |
+| 持久消息与用量 | 原后台服务与正常PostgreSQL所有 | completed/cancelled与Gateway settlement依据原公开接口；界面缓冲、CLI文本和端口退出任务终态依据 |
+
+正常流程：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant App as src/App.tsx
+  participant Session as useNativeChatThread.native
+  participant HTTP as transport.native与InkRuntime
+  participant API as 端侧Next与Dream原接口
+  participant Projection as 原SSE parser/coalescer/reducer
+  User->>App: 原富文本输入并点击Send
+  App->>Session: send与原提交DTO
+  Session->>API: POST /api/claude-agent
+  API-->>HTTP: 原HTTP数据块与SSE
+  HTTP-->>Session: chunks
+  Session->>Projection: 解析并合并相邻同part增量
+  Projection-->>Session: 保持控制事件顺序的投影
+  Session-->>App: 逐步显示原消息
+  API-->>Session: 规范finish
+  Session->>API: 原messages与status查询
+  API-->>App: 原保存结果与空闲状态
+  App-->>User: 完整正文与Send
+```
+
+异常与停止恢复：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Session as useNativeChatThread.native
+  participant Stop as requestClaudeSubmittedThreadStop
+  participant Reader as 当前OpenResponse
+  participant API as 原Dream公开接口
+  User->>Session: 点击原Stop
+  Session-->>User: Stopping
+  Session->>Stop: 保留当前提交归属
+  Stop->>API: POST原Thread stop
+  alt 原回执允许关闭读取
+    API-->>Stop: 当前Thread匹配回执
+    Stop-->>Session: stopRequested与running
+    Session->>Reader: 记录当前response并cancel
+    Reader-->>Session: 当前读取取消异常
+    Session->>API: 原messages/status恢复
+    opt 回执或查询仍为running
+      Session-->>User: 保持Stopping
+      Session->>API: 原GET stream与后续状态查询
+    end
+    API-->>Session: 原status为空闲
+    Session-->>User: 保存的取消结果与Send
+  else 停止回执或状态无法核实
+    Stop-->>Session: 原错误
+    Session-->>User: 原结果待核对与重试
+    Session->>API: 原查询恢复
+  end
+  opt 普通读取断网且缺少主动关闭记录
+    Reader-->>Session: 原传输错误
+    Session-->>User: 原unknown反馈
+    User->>Session: 重试读取
+    Session->>API: 原查询，业务POST保持一次
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> Running: 原Send
+  Running --> Recovering: finish或读取结束
+  Running --> StopRequest: 原Stop
+  StopRequest --> StopSettling: 回执受理且running为true
+  StopRequest --> Recovering: 回执允许关闭且running为false
+  StopRequest --> Unknown: 回执无法核实
+  StopSettling --> StopSettling: 原查询仍运行，保持Stopping
+  StopSettling --> Ready: 原status空闲
+  StopSettling --> Unknown: 恢复查询失败
+  Recovering --> Running: 原任务仍运行且无停止收尾
+  Recovering --> StopSettling: 原任务仍运行且保持停止收尾
+  Recovering --> Ready: 原status空闲
+  Recovering --> Unknown: 查询失败
+  Unknown --> Recovering: 原重试或前台恢复
+```
+
+源码依据：[Native消费](../../../frontend/app/_dream/components/chat/useNativeChatThread.native.ts#L62)、[原相邻事件合并](../../../frontend/app/_dream/lib/claude-agent-sse-utils.ts#L43)、[Native停止](../../../frontend/app/_dream/components/chat/useNativeChatThread.native.ts#L159)、[原Stop归属](../../../frontend/app/_dream/components/chat/threadStop.ts#L151)、[普通消息与用量读取验证](../../../frontend/ios/InkMemoryTests/PhysicalBusinessJourneyTests.swift#L39)。真实完成、真实取消、修订后的技术回归、当前候选采用及完整iOS范围分别登记。
+
+## 原生工具结果、附件与持久MCP App文档
+
+### 背景与问题
+
+当前Native消息列表的工具与文件分支仅提供摘要。原Web已具备终端/Write/图片结果、专用编辑器确认、MCP App Host及历史过程读取。原MCP App含iframe、AppBridge与CSP/能力校验，需在局部DOM文档中继续执行。原生消息行采用临时消息ID时，规范history替换ID会重建交互表单。
+
+### 目标与边界
+
+普通结果和文件原生化，MCP App与编辑器专用DOM复用原组件，沿HTTP访问同App Dream。比较结论：全量改写Host需要复制第三方协议及权限逻辑；整页WebView扩大DOM范围；选用具体工具局部文档，原Chat、导航、输入、Stop和后台生命周期由RN持有。新增业务HTTP、数据库表、原生模块、运行时框架及Admin改动均为0。原Web页面DOM/CSS与第三方包保持，纯解析函数和原历史GET提取复用。
+
+### 概念与规则
+
+| 模块 | 当前源码职责 | 保留能力 |
+| --- | --- | --- |
+| `ToolMessagePart.native` | 原生终端、Write预览、图片状态/失败、子任务摘要、复制和过程详情 | 原状态/输出/摘要解析；原预览折叠阈值 |
+| `FileMessagePart.native` | 原文件元信息、私有图片预览、显式系统导出 | 原URL与大小格式、同App认证、原文件读权限 |
+| `useHistoricalChatProcess` | Web/Native原GET过程详情、turn/final文本匹配、四项并发、取消及手动重试 | 原`fetchClaudeThreadMessageProcess`、HTTP DTO及错误反馈 |
+| `ChatMessageList.native` | 原turn/message合并键持有行，已校验App槽位独立于过程折叠，最后展示最终正文 | 原历史投影、过程开关及消息顺序；普通工具过程留在原过程区域 |
+| `ToolResultSurface.native` | 固定本机工具文档、当前Thread/toolCall/document身份、revision与请求ack | 原Native Cookie存储、平台WebView、原主题语言 |
+| `ToolResultDocument` | 原AuthProvider与ToolMessagePart，MCP App或特殊编辑器确认/完成卡 | 原Host、AppBridge、工具权限、HTTP及MCP DELETE清理 |
+| 原`InkWorkspaceFiles` | `source=message`接受无query/hash的`/api/storage/file/<key>` GET | 同App URL校验、客户端凭据移除、私有句柄、取消/释放/系统导出；原Workspace路径规则保持 |
+| 原`WritingView`与`MoreNavigator` | 原`editor:jump-to-cell`目标按nonce送到Writing，文档挂载后分发并回执 | 原写作会话、单元校验、自动保存和关联Chat |
+
+实例生命周期：
+
+| 实例 | 创建/保留 | 结束与恢复 |
+| --- | --- | --- |
+| 原App运行库 | App启动装配同一Python/Node/Next/Claude | 栏目切换保留；进程重开沿原持久化恢复 |
+| 历史GET | 选中Thread的摘要具有processAvailable，最多四个在途 | Thread切换/卸载abort；迟到回包校验归属；失败只显式重试 |
+| 原生消息行 | `${threadId}:${messageMergeKey(message)}` | 原turn保持时临时ID替换保留行；Thread切换释放 |
+| MCP App局部文档 | 已保存且通过原`parseSavedMcpAppToolCall`校验的结果，按toolCallId持有 | 折叠/DTO克隆/显示偏好保留；Thread或账户释放时卸载并由原Host清理；进程结束后按原保存结果重建 |
+| 原AppBridge请求 | 原Host按原权限校验 | 成功/错误回原App；卸载沿原关闭；DOM原始消息无法直接调用Native通用操作 |
+| `ui/message`回执 | 原完整用户text parts，绑定当前document/Thread/toolCall与requestId | Native原提交返回后ack；失败回原App错误；旧页面或非当前Chat意图拒绝 |
+| 附件私有句柄 | 图片原存储GET自动读取；通用文件在显式下载时读取 | Thread/来源变化、后台或卸载取消并释放；迟到句柄立即释放；前台重读 |
+| 编辑定位意图 | 已有完成结果解析出原会话/单元，App生成单次nonce | 原Writing挂载后分发；匹配documentId/nonce消费；回执只表示已分发，实际定位由原编辑器执行 |
+
+Native消息的当前选择周期保留已经通过原SSE观察的turn集合，交给原`mergeRecoveredLatestPage`保留过程；新建/选择对话清空集合。重新打开的精简历史通过原过程GET恢复MCP App。已完成和历史未完成的编辑工具采用原完成卡，运行中原专用确认继续原HTTP，旧回调无法改写其他Thread。
+
+局部协议限定`/native/tool-result`。主文档URL精确匹配；子帧仅允许原空文档及同源MCP sandbox路由。Native验证平台给出的frame URL，DOM仅接收Native注入的`source=null` MessageEvent；原opaque App iframe继续通过原AppBridge处理。document/Thread/toolCall绑定和递增revision共同校验，工具结果回调限定原编辑工具和工具名，跳转目标再次与当前结果解析值匹配。第三方MCP请求不经Native新增转发。
+
+正常流程：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant List as ChatMessageList.native
+  participant Read as useHistoricalChatProcess
+  participant API as 原Dream接口
+  participant Leaf as ToolResultSurface.native
+  participant Doc as ToolResultDocument
+  participant Host as 原McpAppHostPanel与AppBridge
+  participant Chat as useNativeChatThread.native
+  User->>List: 打开已有Chat
+  List->>Read: 原历史摘要
+  Read->>API: GET原messages过程详情
+  API-->>Read: 原turn与最终正文匹配的完整parts
+  Read-->>List: 原保存工具结果
+  List->>Leaf: 稳定toolCallId与当前Thread
+  Leaf->>Doc: 匹配documentId与revision的state
+  Doc->>Host: 原已校验MCP App结果
+  Host-->>User: 原交互表单
+  User->>List: 展开或收起过程
+  List-->>Host: 保留同一App文档实例
+  User->>Host: 原ui/message操作
+  Host->>Doc: 原用户text parts
+  Doc->>Leaf: 绑定requestId的user-message
+  Leaf->>Chat: 原完整消息与Thread归属
+  Chat->>API: POST /api/claude-agent
+  API-->>Chat: 原SSE及任务结果
+  Chat-->>Leaf: 原提交返回
+  Leaf-->>Doc: 当前绑定的result ack
+  Doc-->>Host: 原成功或失败回执
+```
+
+异常与恢复：
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant List as ChatMessageList.native
+  participant Read as useHistoricalChatProcess
+  participant Leaf as ToolResultSurface.native
+  participant Doc as ToolResultDocument
+  participant Files as 原私有文件owner
+  participant API as 同App原公开接口
+  User->>List: 打开历史或消息图片
+  List->>Read: 查询原过程
+  List->>Files: 原附件路径GET
+  alt 过程读取失败
+    Read-->>List: 原失败与重试
+    User->>List: 显式重试过程
+    List->>Read: 重读同一消息
+  else 文档进程结束
+    Doc-->>Leaf: 原WebView失败回执
+    Leaf-->>User: 重试当前结果
+    User->>Leaf: 重载
+    Leaf->>Doc: 新documentId，原保存结果
+  else 会话失效
+    API-->>Files: 401
+    Files-->>List: 原登录恢复
+    Doc-->>Leaf: session-expired
+    Leaf-->>User: 原登录入口
+  end
+  opt Thread切换或列表卸载
+    List->>Read: 结束旧读取
+    List->>Files: 取消与释放私有句柄
+    Files-->>Files: 迟到句柄立即释放
+  end
+  opt App后台
+    List->>Files: 取消与释放消息附件句柄
+    Files-->>Files: 前台按原路径重新读取
+  end
+  opt 旧文档或App子帧消息
+    Doc-->>Leaf: 旧绑定或非主文档URL
+    Leaf-->>Leaf: 校验失败，当前业务保持
+  end
+  opt 用户下载
+    User->>Files: 显式导出当前文件
+    Files-->>User: 系统保存或取消
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 历史摘要
+  历史摘要 --> 读取过程: 原processAvailable
+  读取过程 --> 已保存结果: turn与最终正文匹配
+  读取过程 --> 读取失败: 原查询失败
+  读取失败 --> 读取过程: 显式重试
+  已保存结果 --> 文档待就绪: 原MCP结果校验通过
+  文档待就绪 --> 原App交互: 当前主文档ready与state
+  原App交互 --> 原App交互: 过程折叠或DTO更新保留实例
+  原App交互 --> 等待消息回执: 当前Chat原ui/message
+  等待消息回执 --> 原App交互: 当前requestId成功或失败
+  原App交互 --> 文档失败: 原WebView进程结束
+  文档失败 --> 文档待就绪: 用户重试
+  原App交互 --> 已释放: Thread或账户释放
+  等待消息回执 --> 已释放: Thread或账户释放
+  已释放 --> [*]
+```
+
+验收范围：Web原工具/文件DOM、原历史过程、MCP Host协议与权限回归先通过；随后验证Native消息稳定实例、多part提交、工具内容/复制、附件私有读取/取消/导出、编辑器定位与失败恢复，再构建并采用完整iOS候选。Chrome边界fixture、实际WebKit、安装包和真实账户/模型验收分别登记。当前源码及逐次失败见[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30-原生工具结果接线)。
+
+官方依据：[MCP Apps概览](https://modelcontextprotocol.io/extensions/apps/overview)定义Host内sandbox iframe与AppBridge交互；本方案复用现有包和Host。查阅日期：2026-10-30。平台frame URL取自已安装`react-native-webview`的`RNCWebViewImpl.m`原实现；第三方源码修改为0。
+
+
+本节源码入口：[Native工具卡](../../../frontend/app/_dream/components/chat/ToolMessagePart.native.tsx#L18)、[持久局部宿主](../../../frontend/app/_dream/components/chat/ToolResultSurface.native.tsx#L22)、[原DOM文档](../../../frontend/app/_dream/components/chat/ToolResultDocument.tsx#L31)、[原历史读取](../../../frontend/app/_dream/components/chat/useHistoricalChatProcess.ts#L9)、[附件句柄](../../../frontend/src/platform/workspaceFiles.native.ts#L53)、[Swift文件请求](../../../frontend/ios/InkMemory/InkWorkspaceFiles.swift#L9)。原完成卡对缺少`output.ok`沿既有兼容规则；迁移验证分别核对无实时批准与明确失败结果，真实编辑结果独立验收。
+
+
+2026-10-30本节采用状态：Web/Native类型、三处Web JSX根节点对比、新规格与相邻回归、实际生产Next、Swift缓存编译及优化Hermes均取得通过回执。完整候选已由主Agent组装、签名校验并安装到iOS18.6 Simulator；最终11项XCTest包含当前包内Dream启动、原Python ntn与原Bash HTTP，以及八项私有文件合同。新增Swift拒绝原存储路径中的解码点段和反斜杠，原Workspace与服务端资源权限保持。普通App重开恢复原账户与既有完成/取消消息。
+
+实际MCP App在WebKit中的完整交互、系统文件完整业务、真实编辑定位、真实Notion授权/读取/同步和物理iPhone继续分项验收。Chrome、URLProtocol及包内合成HTTP回执均按技术资格记录；当前阶段新增真实模型调用为0。候选采用及摘要归[本节执行回执](../../exec/mobile-app-design-review-20261024.md#2026-10-30-原生工具结果接线)。
+
+
+## Mermaid图表的平台适配
+
+### 背景、判断与范围
+
+原`ChatMarkdown.tsx`对精确`language-mermaid`调用`MermaidBlock.tsx`，包含strict渲染、串行render队列、流式语法失败源码、复制、Modal缩放及PNG。Native此前将全部代码呈现为文本。选择原DOM图表组件与具体平台操作适配；原生重写解析器和整条消息网页化退出范围。普通Native文字、GFM、代码与原Web页面结构保持，图表叶子延迟加载。
+
+当前源码候选：`ChatMarkdown.native.tsx`解开Mermaid围栏的pre后加载`MermaidBlock.native.tsx`；固定`/native/mermaid`由`MermaidDocument.tsx`复用原`MermaidBlock.tsx`。原组件只增加可选clipboard writer、PNG保存及controlled preview；Web缺省继续浏览器复制、下载与原Modal。新依赖、业务HTTP、服务及表均0。
+
+Web技术复验发现原PNG载入Blob SVG后画布导出抛出SecurityError。具体修订和目标采用结果归执行记录；图表内容、strict校验、标签布局与PNG比例继续由原模块所有。
+
+### 接口、实例与状态
+
+`MermaidDocument.protocol.ts`限定原App loopback来源、documentId、单调revision及具体copy/png/preview/height消息。Native按精确来源、当前实例与版本校验；复制内容与当前完整围栏源码匹配，PNG经原`importSketch`校验为私有文件后调用`exportFile`。旧版本、重复requestId与已卸载实例退出系统操作。源更新或文档卸载拒绝待处理Promise；迟到文件在finally释放。
+
+| 实例 | 创建与有效范围 | 更新和释放 |
+| --- | --- | --- |
+| App后端管理 | 原BackendRuntimeManager与Native singleton | 图表复用既有origin；图表关闭保持App后端和任务 |
+| Native图表/inline文档 | 当前消息中出现精确Mermaid围栏 | source/theme/language递增revision，保留WebView；消息卸载清理回调；加载失败显式reload |
+| Mermaid模块与render队列 | 每个图表文档首次需要时加载原包 | 原300ms调度及序号规则处理流式输入，旧序号结果不采用 |
+| 全屏预览 | 用户点击原放大操作后创建Native Modal及图表文档 | 原DOM Modal负责缩放；关闭只卸载预览文档，inline消息及草稿保持 |
+| PNG文件句柄 | 用户导出后由原importSketch创建 | 版本有效时进入原系统导出；成功、取消、失败及迟到均releaseFiles |
+| 复制反馈timer | 原useCopy写入成功后创建 | 维持原反馈时长；组件卸载clearTimeout，写入失败恢复未复制状态 |
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant N as ChatMarkdown.native / MermaidBlock.native
+    participant D as MermaidDocument
+    participant M as MermaidBlock.tsx
+    participant I as InkRuntime
+    U->>N: 阅读含Mermaid的消息
+    N->>D: 固定/native/mermaid
+    D-->>N: ready(documentId)
+    N->>D: state(documentId, revision, chart)
+    D->>M: strict解析与原SVG渲染
+    M-->>U: 预览或源码、原工具栏
+    U->>M: 复制完整Markdown
+    M->>D: copyText
+    D->>N: copy(documentId, revision, requestId, text)
+    N->>I: copyText(当前完整围栏)
+    I-->>N: 写入完成
+    N-->>D: result(accepted)
+    D-->>M: 原复制反馈
+    U->>M: 导出PNG
+    M->>D: savePNG(原画布结果)
+    D->>N: png(实例、版本、requestId、base64)
+    N->>I: importSketch → exportFile
+    I-->>U: 系统文件导出界面
+    I-->>N: 成功或取消
+    N->>I: releaseFiles
+    N-->>D: result
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant N as MermaidBlock.native
+    participant D as MermaidDocument
+    participant M as MermaidBlock.tsx
+    participant I as InkRuntime
+    N->>D: state(revision, 未完整chart)
+    D->>M: 原render调度
+    M-->>U: 渲染失败反馈与源码
+    N->>D: state(更高revision, 完整chart)
+    D->>M: 原render重试
+    M-->>U: 可用预览
+    U->>M: 导出PNG
+    D->>N: png(当前revision)
+    N->>I: importSketch
+    U->>N: 离开消息或内容更新
+    N->>N: 卸载或递增revision
+    I-->>N: 迟到文件句柄
+    N->>I: releaseFiles，跳过exportFile
+    Note over N,I: 原对话、任务、权限与历史保持
+    U->>N: 重开图表，遇到文档加载失败
+    N-->>U: 原重试入口
+    U->>N: 重试
+    N->>D: reload，重新绑定新documentId
+    N->>D: 发送当前state
+```
+
+### 呈现状态转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> Diagram: Mermaid围栏挂载
+    state Diagram {
+        state Render {
+            [*] --> Loading
+            Loading --> Preview: SVG就绪且用户选择预览
+            Loading --> SourceFallback: 原render失败
+            Loading --> SourceSelected: SVG就绪且用户选择源码
+            Preview --> SourceSelected: 用户选择源码
+            SourceSelected --> Preview: 用户选择预览且SVG可用
+            Preview --> Loading: chart更新
+            SourceFallback --> Loading: chart更新
+            SourceSelected --> SourceSelected: chart更新，保留源码选择
+            Loading --> Failed: 文档加载失败
+            Preview --> Failed: 文档进程终止
+            SourceSelected --> Failed: 文档进程终止
+            SourceFallback --> Failed: 文档进程终止
+            Failed --> Loading: 用户重试
+        }
+        --
+        state Viewer {
+            [*] --> Inline
+            Inline --> Expanded: 用户放大，创建预览文档
+            Expanded --> Inline: 关闭预览文档
+        }
+    }
+    Diagram --> [*]: 消息卸载并关闭预览
+```
+
+验收分项：原Web SVG/源码/复制/放大缩放/PNG下载；Native精确围栏、文档保留、来源/实例/版本/重复操作拒绝、迟到PNG释放；实际Hermes/WebKit渲染和原系统操作；普通包采用及Web相邻回归。真实账户图表业务、物理iPhone、Android和正式发布分别登记，技术fixture退出真实业务结论。
+
+
+2026-10-30采用结果：原Web默认图表、源码、剪贴板、缩放和PNG下载已通过；Native精确围栏、文档版本、旧回调拒绝和迟到PNG释放已通过。实际iOS18.6 Simulator的Hermes/WebKit呈现、66字符系统复制、110%缩放、原PNG系统导出与取消释放、无效源码及后续sequence恢复已通过。上述目标验证使用明确技术入口，账户、模型、Notion及业务提交0；普通新候选已切回`index.native.js`并显示原历史，真实图表模型业务与真机分列。
+
+| 当前代码事实 | 证据 |
+| --- | --- |
+| 精确Mermaid围栏延迟加载，普通代码保持Native | [ChatMarkdown.native.tsx](../../../frontend/app/_dream/components/chat/ChatMarkdown.native.tsx#L91) |
+| 原PNG使用同一SVG内容的数据URI，保持原标签布局和比例 | [MermaidBlock.tsx](../../../frontend/app/_dream/components/chat/MermaidBlock.tsx#L102) |
+| Native按来源、documentId、revision校验事件 | [MermaidBlock.native.tsx](../../../frontend/app/_dream/components/chat/MermaidBlock.native.tsx#L25) |
+| 原本机URL边界、具体事件及严格schema | [MermaidDocument.protocol.ts](../../../frontend/app/_dream/components/chat/MermaidDocument.protocol.ts#L4) |
+| 绑定状态、拒绝旧版本与原组件呈现 | [MermaidDocument.tsx](../../../frontend/app/_dream/components/chat/MermaidDocument.tsx#L15) |
+
+最终本阶段评审：待满足明确前提后通过。图表具体适配沿原业务、现有clipboard/file资源和局部文档；新业务接口、依赖、通用桥接、服务及表均0。完整目标中的真实MCP/文件业务、真实Notion、物理iPhone及正式发布分别继续，阶段证据归[Mermaid实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30mermaid图表适配与目标资格)。
+
+## RN任务与进度及来源导航
+
+### 背景与问题
+
+Web的`PlanPanel.tsx`按[任务与进度PRD](../../prd/chat/task-activity.md)提供定时任务、独立任务会话、子智能体、计划和待办五个分区。本轮接入前的RN工具栏缺少该入口，消息列表缺少原来源标记。`TaskSessionNavigation`的助手回复清单保留于Web代码；现行PRD将任务清单归任务与进度面板。本轮Native沿现行分区归属，Web布局保持；来源标记继续在首条用户消息上方，分页未抵达首条消息时放在列表顶部。
+
+### 目标与边界
+
+复用原查询、DTO、文案、状态和已创建任务关系。独立任务点击沿原Thread选择，子智能体进入原只读任务内容；计划、待办和定时任务各自保留状态。普通Chat、输入稿、后台执行与停止所有者保持。新增业务写接口、任务创建/停止、权限或数据库结构为0。文件与MCP文档、Dream工作台和发布渠道继续沿已有范围。
+
+本节Native模块及共享无store读取函数已写入源码并采用至当前普通包。实际Hermes五分区、导航、只读详情和系统前后台属于合成技术资格；普通账户读取及原历史恢复另列，真实任务创建与完成验收待执行。
+
+### 概念与规则
+
+- 入口在当前Thread存在任一分区内容或查询失败时显示；空结果不创建占位卡片。错误与空结果分别呈现，保留同Thread最后成功快照，重试只执行原GET。
+- 当前账户的`Business`拥有一个读取实例，Thread切换清空前一Thread投影；栏目隐藏、App进入后台及卸载取消请求与刷新计时，迟到结果退出提交。原任务继续由Dream执行。前台与轮次结束沿原刷新入口读取，刷新节奏复用Web已有定义。
+- 面板复用原五分区，标题、业务状态、创建时间与导航可见，内部session/call/process标识退出产品信息。`idle`仅表示已结束，`completed`只采用服务端状态。单项状态失败保留标题并显示状态待核对。
+- 面板、只读子智能体详情和独立任务Chat分别持有视图状态；打开任务先关闭面板。关闭面板取消独立任务详情读取，工具栏观察者沿当前Chat可见性继续工作；面板操作保留原Chat实例与草稿，任务导航沿既有Thread选择规则。子智能体工具输入/输出沿原只读投影展示，redacted、truncated和legacy标记沿原定义。
+- 共享Web读取函数默认继续使用fetch及原parser/store；Native显式注入原clientFetch和AbortSignal，不建立第二套业务协议或后端控制通道。
+
+| 实例 | 创建及更新 | 结束与恢复 |
+| --- | --- | --- |
+| 当前任务观察者 | 当前账户和Thread可见时读取原五分区；单一周期刷新、轮次结束与显式重试 | 隐藏/后台取消请求及计时；前台重读；Thread/账户变化销毁旧投影 |
+| 任务与进度面板 | 显式点击原入口打开；定时任务与独立任务可折叠，待办沿原三项/展开规则 | 外部点击、关闭和Android返回收起，原Chat保持 |
+| 来源标记 | 原task-links.source与首条可见用户消息定位 | 选择来源Thread后由原Chat读取新内容，无任务写入 |
+| 子智能体详情 | 选定原taskId的只读消息/工具/结果 | 返回任务列表或关闭；任务终态继续由服务端确定 |
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant App as Business
+  participant Read as useNativeTaskActivity
+  participant API as 原Dream公开GET
+  participant Panel as PlanPanel.native
+  participant Chat as useNativeChatThread.native
+  U->>App: 打开已有Chat
+  App->>Read: 当前Thread、可见性与轮次状态
+  Read->>API: task-links、scheduled-tasks、subagents、plan、todos
+  API-->>Read: 当前账户过滤的原DTO
+  Read-->>Panel: 原分区快照与入口可见性
+  U->>Panel: 查看任务与进度
+  Panel-->>U: 五个独立分区与原状态
+  U->>Panel: 打开已创建任务
+  Panel->>App: 原目标Thread，关闭面板
+  App->>Chat: openThread，原messages/status恢复
+  Chat-->>U: 原任务对话；来源标记返回来源
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant Read as useNativeTaskActivity
+  participant API as 原Dream公开GET
+  participant Panel as PlanPanel.native
+  U->>Read: 打开Thread或重试
+  Read->>API: 原只读查询
+  alt 当前查询失败
+    API-->>Read: HTTP错误或原解析错误
+    Read-->>Panel: 保留同Thread快照及失败分区
+    Panel-->>U: 原重试入口与状态待核对
+  else 后台、隐藏或Thread变化
+    U->>Read: 生命周期或导航变化
+    Read->>API: AbortSignal取消读取
+    API-->>Read: 迟到响应
+    Read->>Read: 代次与Thread匹配检查，丢弃旧响应
+  end
+  U->>Read: 返回前台或显式重试
+  Read->>API: 当前Thread原GET，无业务POST
+  API-->>Panel: 当前快照恢复
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 隐藏
+  隐藏 --> 读取中: 当前Thread前台可见
+  读取中 --> 可用: 当前代次读取成功
+  读取中 --> 读取失败: 原HTTP或解析失败
+  可用 --> 读取中: 原刷新周期或轮次结束
+  读取失败 --> 读取中: 显式重试或前台恢复
+  可用 --> 隐藏: 栏目隐藏或后台
+  读取中 --> 隐藏: 取消请求及计时
+  读取失败 --> 隐藏: 栏目隐藏或后台
+  隐藏 --> [*]: Thread或账户所有者销毁
+```
+
+验收：Web原Plan/Todo/Subagent/Task导航与解析默认调用保持；Native覆盖五项分别存在、全空、独立失败、原状态、来源标记分页位置、目标Thread匹配、前后台取消/恢复、迟到响应、同账户及账户切换隔离、当前Chat草稿保留、窄屏/键盘/返回。技术fixture与普通账户读取、真实任务业务分别记录，当前新增模型预算0。
+
+### 当前源码与采用评审
+
+| 当前代码事实 | 证据 |
+| --- | --- |
+| 五分区观察者、可见性/Thread取消、分项成功保留 | [useNativeTaskActivity.native.ts](../../../frontend/app/_dream/components/chat/useNativeTaskActivity.native.ts#L17) |
+| 原面板五分区、原任务状态与只读详情 | [PlanPanel.native.tsx](../../../frontend/app/_dream/components/chat/PlanPanel.native.tsx#L23) |
+| 工具结果配对、服务端脱敏及截断反馈 | [SubagentMessageTimeline.native.tsx](../../../frontend/app/_dream/components/chat/SubagentMessageTimeline.native.tsx#L21) |
+| 原来源返回 | [TaskSessionNavigation.native.tsx](../../../frontend/app/_dream/components/chat/TaskSessionNavigation.native.tsx#L10) |
+| 首条用户文字与分页边界定位 | [ChatMessageList.native.tsx](../../../frontend/app/_dream/components/chat/ChatMessageList.native.tsx#L104) |
+| 原计划REST及迟到缺省模式读取 | [useThreadPlan.ts](../../../frontend/app/_dream/hooks/useThreadPlan.ts#L156) |
+| 原Business观察者与既有导航组合 | [App.tsx](../../../frontend/src/App.tsx#L108) |
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 当前业务 | 原查询和任务导航可复用 | 提取原parser读取，Native仅注入HTTP/取消 | 无新业务API、任务状态机、权限或schema | 真实任务创建与完成样本 |
+| Web兼容 | 原PlanPanel布局及助手回复清单承载现有Web行为 | 保持布局与默认store/fetch；修正一处过期测试名称 | 原Web11项和生产构建通过 | 后续业务变更按范围回归 |
+| 读取生命周期 | Native需要系统前后台及栏目隐藏处理 | 一个账户实例观察者，逐项提交，取消旧代次 | 合成技术10项与实际AppState切换通过 | 物理iPhone及Android |
+| 原生交互 | 现有面板需要五分区、只读子智能体及来源返回 | 原状态、文案、图标几何、Markdown和既有选择回调 | 实际Hermes滚动、详情、分页标记与重试通过 | 真实任务内容与VoiceOver全程 |
+| 最小改动 | 原工具栏已有planAction，后端接口齐全 | 复用槽位及原独立任务/定时详情入口 | 业务服务、依赖、离线库、推送和发布平台新增0 | 原服务及权限条件 |
+| 资源组装 | 本轮自有脚本替换Next资源时漏保留原env | 保留失败制品，按旧manifest定位复制原env并核对字节 | 最终普通包正常登录会话与8/7历史恢复 | 正式构建/签名/分发资格 |
+| ntn疑问 | 当前安装包需要可追溯证据 | 原4项执行资格与当前最终7资源复核；原页面观察 | 固定ntn/许可证/宿主保持，未读取凭证正文 | 真实Notion授权、在线读取/同步 |
+
+最终评审：待满足明确前提后通过。本轮源码、Web/Native技术资格与普通Simulator包采用已完成；原账户、原8条用户/7条助手历史和停止状态保持。当前Thread的原五类GET均200、全空且入口隐藏；合成任务界面验证退出真实任务业务验收结论。当前候选、命令、失败及恢复归[实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-当前ntn复核与native任务信息)，真实Notion、物理iPhone、Android及正式发布按原矩阵继续验收。
+
+## MCP App文档释放握手
+
+### 背景与问题
+
+实际Hermes/WebKit已验证原表单、Host/SDK、多段消息、DTO更新、history ID恢复、过程折叠及栏目隐藏保留。切换Thread时Native直接销毁WKWebView，React effect缺少清理机会；技术服务记录标准DELETE为0、原会话仍存在。2026-10-30章节保留原阶段图示，本节定义修订后的离开次序。
+
+### 目标与边界
+
+界面离开前等待原MCP Host关闭过程，随后沿原导航或认证状态卸载WebView。选择具体文档释放握手，复用原teardown；新增运行框架、WebView池、通用桥接、Native模块、业务HTTP、权限分类和数据库结构为0。原Agent任务、Stop、用户消息及Cookie/CSRF保持。
+
+当前普通候选已采用修订。Web、Native、fixture类型检查及21项技术规格、Next生产构建与生产文档3项Chrome检查通过。新增实际Hermes/WKWebView有界平台集成证明原关闭12ms/11ms、标准DELETE2、会话归零、Thread替换/重开和隐藏保留；原表单触控沿前阶段独立回执，当前窗口控制持续超时。普通恢复后原账户/历史/status均200，8用户/7助手、最后completed、running=false。新增模型及Notion业务提交0。
+
+### 概念与规则
+
+- 每个`Business`界面持有独立文档归属，主Chat和侧聊分别释放。账户退出、丢失或变化沿`SessionGate.beforeRelease`释放现有文档。栏目隐藏与前后台保留实例。
+- `closeToolResultDocuments`收集目标界面已挂载文档。Native发送特定dispose，按documentId、threadId、toolCallId、requestId匹配disposed。
+- `ToolResultDocument`沿原source=null边界接受Native请求，收集原Host teardown Promise，卸载Host观察者，关闭过程返回后回执。关闭期间拒绝新ui/message，已提交的原请求及服务端任务保持。
+- disposed表示原关闭过程已返回；远端会话删除另由MCP/API结果证明。网络失败沿原有界清理，Native等待沿现有manifest默认值，文档失败或超时结束导航等待。进程被系统终止后的连接回收继续由原服务端负责。
+- 原Host工具权限、外链限制、第三方包、MCP DELETE与Client.close保持。
+
+| 实例 | 创建/保留 | 结束/恢复 |
+| --- | --- | --- |
+| Native文档登记 | 原Surface挂载，绑定当前Business界面 | 匹配回执或已有等待上限后按原导航卸载 |
+| 原MCP连接 | 原Host按原policy建立 | 原teardown幂等关闭，DELETE与本地close保持 |
+| 局部DOM文档 | 原documentId持有表单 | dispose停止交互并关闭Host；原重载恢复保存结果 |
+| Native账户视图 | SessionGate原公开会话读取 | beforeRelease后按原会话/注销结果提交状态 |
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant B as Business
+  participant N as ToolResultSurface.native
+  participant D as ToolResultDocument
+  participant H as McpAppHostPanel
+  participant M as 原MCP服务
+  U->>B: 选择另一Thread
+  B->>N: closeToolResultDocuments(当前界面)
+  N->>D: dispose(原绑定, requestId)
+  D->>D: 校验绑定，拒绝新消息
+  D->>H: 收集原teardown Promise并卸载观察者
+  H->>M: 原标准DELETE
+  M-->>H: 原关闭响应
+  H->>H: 原Client.close
+  H-->>D: 清理过程返回
+  D-->>N: disposed(相同绑定和requestId)
+  N-->>B: 文档释放等待结束
+  B->>B: 原openThread，卸载旧WebView
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant G as SessionGate.native
+  participant N as ToolResultSurface.native
+  participant D as ToolResultDocument
+  participant H as McpAppHostPanel
+  U->>G: 退出账户或会话读取确认失效
+  G->>N: beforeRelease
+  N->>D: 原绑定dispose
+  alt 原关闭可完成
+    D->>H: 原有界teardown
+    H-->>D: 关闭过程返回
+    D-->>N: 匹配disposed
+  else 跨实例或旧request回执
+    D-->>N: 错误绑定disposed
+    N->>N: 拒绝旧回执，保持等待
+  else 文档失效或等待结束
+    N->>N: 原等待上限结束，保留原重载反馈
+  end
+  N-->>G: 文档释放等待结束
+  G->>G: 原logout或当前会话状态提交
+  Note over G,H: 原任务执行、认证和权限所有者保持
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Loading: 局部文档挂载
+  Loading --> Ready: 原ready与state
+  Ready --> Ready: DTO更新或栏目隐藏恢复
+  Ready --> Closing: 界面离开发送dispose
+  Closing --> Closed: 匹配disposed
+  Closing --> RetryAvailable: 文档失败或原等待上限
+  Ready --> RetryAvailable: 原文档加载失败
+  RetryAvailable --> Loading: 原重载入口
+  Closed --> [*]: 原导航卸载
+  RetryAvailable --> [*]: 原导航继续卸载
+```
+
+验收分列：原文档等待SDK DELETE、Native等待匹配回执、主/侧聊归属、正常登录及账户丢失回归；随后核对生产Next/Hermes、实际WebKit Thread离开、原关闭/重开、失败重载和普通包恢复。真实MCP授权与工具业务、物理iPhone及商店发布保持独立。
+
+
+源码定位：[协议校验](../../../frontend/app/_dream/components/chat/ToolResultDocument.protocol.ts#L39)、[原Host关闭收集](../../../frontend/app/_dream/components/chat/mcp-apps/session-cleanup.ts#L100)、[Host清理登记](../../../frontend/app/_dream/components/chat/mcp-apps/McpAppHostPanel.tsx#L261)、[文档关闭回执](../../../frontend/app/_dream/components/chat/ToolResultDocument.tsx#L46)、[Native归属与等待](../../../frontend/app/_dream/components/chat/ToolResultSurface.native.tsx#L17)、[原界面导航](../../../frontend/src/App.tsx#L125)、[原账户离开](../../../frontend/src/platform/SessionGate.native.tsx#L15)。
+
+| 评审项 | 发现 | 处理方式 | 修订结果 | 剩余依赖 |
+| --- | --- | --- | --- | --- |
+| 原交互保留 | 原WebKit表单与草稿在DTO/history/隐藏及Home返回保持 | 沿用原Host、SDK和表单 | 实际Hermes/WebKit技术回执通过 | 普通账户MCP授权及工具业务 |
+| 界面离开 | 直接销毁WKWebView遗留合成MCP会话 | 特定文档握手等待原teardown | 21项源码技术、生产文档3项与实际Hermes/WebKit关闭/Thread替换/重开通过 | 原关闭按钮触控、侧聊/账户实际切换 |
+| 主侧聊与账户 | 释放范围需要匹配界面和账户 | Business实例归属，原SessionGate注入beforeRelease | 原认证/CSRF与导航接口保持，跨绑定回执拒绝 | 实际多界面与账户切换资格 |
+| 维护成本 | 现有适配器、Host清理及manifest足够 | 无新生产文件、第三方依赖、业务API、权限分类或数据结构 | 修订限于原文档生命周期 | Android与物理iPhone |
+| 制品与普通业务 | 技术入口结束后需恢复正常应用 | 普通index.native.js、原env和运行资源字节核对 | 原会话200、8/7历史、最后completed、running=false；ntn/许可证保持 | 当前窗口呈现、完整真实业务及分发 |
+
+最终评审：待满足明确前提后通过。方案、源码修订、技术回归、生产资源构建和普通安装已完成；修订后iOS窗口操作、真实MCP/Notion业务、设备及商店资格分项待验收。命令、制品与失败证据归[本阶段实施记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-mcp-app实际webkit资格)。
+
+实际平台证据：[端侧集成记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-mcp关闭修订端侧集成资格)。单次启动参数与限定计数只存在于[具名e2e入口](../../../frontend/e2e/native/mcp-webkit-parity.tsx#L28)及技术服务，普通入口及生产状态机保持；平台协议、普通画面和真实MCP/Notion业务分别验收。
+
+
+### 正常Google账户授权的当前缺口
+
+Admin同Client回调兼容源码已完成：原service增加可选精确`redirectUris`，私有账号URI仅进入所属Client，原exchange按当前service集合校验。原发布入口允许必要的web→native元数据与新增规范账号URI一起扩展，保留原Client、Web地址、PKCE、grant、scope和主体。8文件53项合同/类型/lint、Dream/Admin29项无网络探针及正常PG只读目录0差异核对通过。后续独立构建与正常服务代码采用已完成，原数据目录保持；同Client两个精确App URI已沿原发布脚本apply并读回0差异，原Web地址及权限保持。BFF env映射及host转交已由普通Simulator采用；真实密码登录、系统会话启动/取消与一项真实Chat通过，完整Google账户及真机单列。[本次源码与只读回执](../../exec/mobile-app-design-review-20261024.md#2026-10-31-admin同client回调兼容)。
+
+原Web表单和公开Client/S256保持。修订前9项原函数探针及Dream25项/Admin19项合同保留原审计状态。当前BFF源码已区分注册`callbackUri`与App内HTTP `callbackRequestUri`，仅接受精确loopback来源下配置的规范账号私有URI；Web同源配置、原交易Cookie、state/issuer/期限/CSRF及原exchange恢复保持。五文件58项技术合同和Web类型通过。
+
+当前Native源码在原登录弹窗创建`NativeAccountLogin`，保留原表单及输入，沿原options/start/callback完成系统会话与原密码回调承接。原Probe增加暂停/代次、双向Cookie复制与原session确认，Info.plist增加独立账号scheme。固定源码编译及独立QA包16项XCTest通过，含真实WK导航、同App HTTP303/Set-Cookie与原session验证器；同Client登记、BFF env映射及host转交已由普通Simulator采用。原密码表单→账号URI→原BFF exchange→session→关闭通过，系统会话进入原Admin页面并取消返回；原账户与既有Thread完成一项真实Chat，9用户/8助手、正常Gateway settled。覆盖安装的数据容器inode保持，路径UUID变更如实记录，冷启动恢复另验；Release IPA保留原阶段资源。正常Admin/PG沿原supervisor必要重启，数据目录保持。MCP回调继续原资源operation。[iOS方案与当前源码状态](mobile-ios-interaction.md#google正常账户授权的回调兼容)、[BFF实施回执](../../exec/mobile-app-design-review-20261024.md#2026-10-31-bff端侧账户回调源码兼容)及[Native实施回执](../../exec/mobile-app-design-review-20261024.md#2026-10-31-native账号会话与cookie交接)分别定义剩余依赖与验证范围。
+
+
+## 持久输入文档与软件键盘焦点
+
+### 背景与问题
+
+当前产品Simulator构建5的软件键盘实测：输入和Send在键盘上方可见，屏幕点按可输入；长草稿采用原编辑器内部滚动。切换Decks与More后，隐藏Chat局部WebView仍保留输入焦点和系统键盘。当前Business调用RN `Keyboard.dismiss()`，局部WebKit编辑器的焦点继续由其DOM元素持有。故障截图、原组件回归与安装采用归移动执行记录。
+
+### 目标与边界
+
+栏目及覆盖面板关闭Chat编辑键盘，保留原草稿、附件、文档、Thread和正在执行的任务。返回Chat后展示原草稿，用户点击输入区重新聚焦。改动限既有Business、AIInputDock.native与MarkdownInputEditor.native；原DOM编辑器、协议、HTTP、Send/Stop、认证与Web页面保持。新增生产文件、业务接口与依赖均0。
+
+### 概念与规则
+
+Business按Chat栏目及活动、文件、任务详情、侧聊、草图和文件预览的覆盖状态计算输入文档active。AIInputDock透传同一值；MarkdownInputEditor在active=false且ready=true时，通过已有WebView引用调用该文档`.markdown-input-editor__content`元素的blur。原blur事件继续按documentId校验后更新输入卡焦点显示。原value、revision和eventCount继续承担草稿与迟到回包处理。active恢复true只更新可见性，不发起focus。
+
+| 实例或条件 | 行为与所有者 | 保持内容 |
+| --- | --- | --- |
+| Business栏目/面板 | 计算当前输入可见性 | 正常账户、Thread、任务与运行库 |
+| AIInputDock | 透传active，接收原blur反馈 | 草稿、附件及输入控制 |
+| MarkdownInputEditor ready且隐藏 | WebView注入固定局部blur调用 | 同一WebView与documentId |
+| 文档尚未ready时隐藏 | 保留隐藏状态，ready后执行blur | 原身份/回包校验及草稿恢复 |
+| 返回Chat | 保持失焦，等待用户点击 | 草稿与编辑文档 |
+| 文档读取失败 | 沿原反馈与重载，ready后采用当前active | 既有错误恢复及value所有权 |
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant B as App.Business
+    participant C as AIInputDock.native
+    participant E as MarkdownInputEditor.native
+    participant D as MarkdownInputDocument
+    U->>D: 点击并编辑草稿
+    D-->>E: change(documentId,eventCount,value)
+    E->>C: onChange(value)
+    U->>B: 切换Decks或More
+    B->>C: active=false
+    C->>E: active=false
+    E->>D: WebView.injectJavaScript 局部编辑器blur
+    D-->>E: blur(documentId)
+    E->>C: onBlur
+    Note over B,D: 文档、草稿、附件和Thread保持
+    U->>B: 返回Chat
+    B->>C: active=true
+    C->>E: active=true
+    Note over E,D: 保持失焦
+    U->>D: 点击输入区
+    D-->>E: focus(documentId)
+    E->>C: onFocus
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant B as App.Business
+    participant E as MarkdownInputEditor.native
+    participant D as MarkdownInputDocument
+    Note over E,D: 原文档加载或重载尚未ready
+    U->>B: 切换栏目或打开覆盖面板
+    B->>E: 经AIInputDock传入active=false
+    Note over E: ready=false，等待原文档
+    D-->>E: ready(documentId)
+    E->>E: 原URL校验，登记当前documentId和ready
+    E->>D: 原state(value,revision,eventCount)
+    E->>D: 固定局部blur调用
+    D-->>E: blur(documentId)，存在焦点时发送
+    U->>B: 返回Chat
+    B->>E: active=true
+    Note over E,D: 原草稿保留，等待用户点击
+```
+
+### 焦点状态转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading
+    Loading --> VisibleIdle: ready且active
+    Loading --> HiddenRetained: ready且隐藏
+    VisibleIdle --> Editing: 用户点击
+    Editing --> VisibleIdle: 用户关闭键盘
+    Editing --> HiddenRetained: active=false，blur
+    VisibleIdle --> HiddenRetained: active=false
+    HiddenRetained --> VisibleIdle: active=true
+    VisibleIdle --> Loading: 原文档重载
+    Editing --> Loading: 原文档重载
+    HiddenRetained --> Loading: 原文档重载
+    Loading --> Unavailable: 原读取或进程失败
+    Unavailable --> Loading: 原重试
+```
+
+### 验收与评审
+
+修复前实际屏幕输入、长草稿和隐藏键盘故障均已取证。当前源码通过Web/Native类型及13项技术回归，其中新case直接使用原Native编辑器和DOM文档，验证失焦、同一documentId/挂载、草稿保持、返回后等待点击及submit=0；平台传输采用明确iframe边界。构建6已实际覆盖安装：软件键盘输入后切换Decks/More收起键盘，返回保留长草稿并保持失焦，点击输入区再次显示键盘；原会话保持并新增真实Chat完成/settled。技术与普通App回执各自计数，构建与数据迁移见[本阶段执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-软件键盘与持久输入焦点修复)。
+
+焦点修复评审通过：现有active与WebView引用承载平台差异，键盘服务、编辑器重建、业务状态和新协议新增0。实际App已验证软件键盘输入→Decks/More收起→Chat返回草稿→用户点击重新显示键盘；原Thread、权限保持，本轮具名草稿清理。活动/文件等覆盖面板条件已接线，其各自平台旅程及物理设备单列。完整iOS交付及正式发布继续按原矩阵验收。
+
+## 停止回执后的独立读取恢复
+
+### 背景与问题
+
+2026-10-31构建7真实业务中，原Stop已将服务端任务取消，原messages/status为cancelled、running=false和idle，正常Gateway记录settled；原生页面继续显示Stop。原`stop`通过当前connection存在推断consume会结束并恢复，取消读取迟到时缺少独立恢复机会。已有技术fixture在cancel时立即结束异步读取，覆盖范围缺少该时间关系。
+
+### 目标与边界
+
+原停止操作完成后，页面根据原messages/status恢复已生成正文、空闲输入与Send。修订限`useNativeChatThread.native`的读取代次和原恢复调度；后端任务、原Stop DTO、submission ticket、权限、队列、正常网页登录和Web均沿现有合同。新增接口、依赖、配置、页面和服务0。
+
+### 概念与规则
+
+| 对象 | 所有权与处理条件 | 状态与释放 |
+| --- | --- | --- |
+| 原Stop请求与ticket | `requestClaudeSubmittedThreadStop`校验原Thread和完整回执；原stopPending判断保持 | 获准停止或原权威空闲允许结束本地读取；未知结果保留原保护 |
+| 当前读取epoch | 原Hook持有单调epoch，selectionEpoch保留原选择归属 | 回执允许关闭时先递增epoch，再`closeReader(true)`；旧数据与迟到退出失去当前投影资格 |
+| 原恢复调度 | `stop`的finally沿当前recoveryVersion调用原schedule | 独立读取原messages/status，恢复调度由停止回执及当前读取代次决定 |
+| 页面收尾 | 回执running=true保持Stopping；原查询running=true继续原stream与后续恢复 | 原查询空闲后posting/running/stopping清除，恢复Send；查询失败沿unknown与原重试 |
+| 迟到旧reader | 原consume继续原取消与finally清理 | 旧epoch退出状态提交和恢复范围；不重新发送业务消息 |
+| 持久结果 | 原Thread及正常数据库保存completed/cancelled结果 | 页面重开读取原历史；工具过程按原process接口恢复 |
+
+本方案复用已有epoch、closeReader和schedule。App进程、Python/Node/Next/Claude、会话、原SSE parser/reducer及HTTP协议保持原实例归属。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant App as src/App.tsx
+  participant Session as useNativeChatThread.native
+  participant Stop as requestClaudeSubmittedThreadStop
+  participant API as 原Next与Dream公开接口
+  participant Reader as 当前OpenResponse
+  User->>App: 原输入Send
+  App->>Session: send与原DTO
+  Session->>API: POST /api/claude-agent
+  API-->>Session: SSE正文增量
+  Session-->>User: 当前正文与Stop
+  User->>Session: stop
+  Session->>Stop: 原Thread停止请求
+  Stop->>API: POST /api/claude-agent/threads/{thread_id}/stop
+  API-->>Stop: 原Thread匹配的停止回执
+  Stop-->>Session: stopRequested与running
+  Session->>Session: 原条件允许后递增epoch
+  Session->>Reader: closeReader(true)
+  Session->>Session: schedule(id,recoveryVersion)
+  Session->>API: 原messages/status查询
+  API-->>Session: 已保存结果与running=false
+  Session-->>User: 正文保留、空闲输入与Send
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Session as useNativeChatThread.native
+  participant Reader as 旧OpenResponse
+  participant API as 原Dream公开接口
+  User->>Session: 原Stop
+  Session->>API: POST /api/claude-agent/threads/{thread_id}/stop
+  alt 回执允许结束读取
+    API-->>Session: 当前Thread回执
+    Session->>Session: 结束旧读取代次并调度原恢复
+    Session->>Reader: cancel，旧读取可迟到退出
+    Session->>API: 原messages/status查询
+    alt 原任务继续收尾
+      API-->>Session: running=true
+      Session-->>User: Stopping
+      Session->>API: 原GET stream及后续恢复
+    else 原任务空闲
+      API-->>Session: running=false与保存结果
+      Session-->>User: 保存结果与Send
+    end
+    Reader-->>Session: 迟到取消异常或退出
+    Session->>Session: 旧epoch退出当前状态更新
+  else 回执无法核实
+    API-->>Session: 原错误或无效回执
+    Session-->>User: 原结果待核对反馈
+    Session->>API: 原查询恢复
+  end
+```
+
+### 页面状态转换
+
+```mermaid
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> Running: 原Send
+  Running --> StopRequest: 原Stop
+  StopRequest --> StopSettling: 原回执受理且任务收尾
+  StopRequest --> Recovering: 原回执允许关闭且任务空闲
+  StopRequest --> Unknown: 回执无法核实
+  StopSettling --> StopSettling: 原查询仍running，保持Stopping
+  StopSettling --> Ready: 原查询空闲，恢复Send
+  Recovering --> Ready: 原查询空闲，保留保存结果
+  Recovering --> StopSettling: 原查询仍运行
+  Recovering --> Unknown: 原查询失败
+  Unknown --> Recovering: 原重试或前台读取
+```
+
+### 验收与评审
+
+技术回归须在旧reader仍未结束时通过原Hook查询确认空闲，再释放迟到reader并核对状态保持；业务POST和原Stop各一次。相邻覆盖原延迟停止回执、running收尾、未获准读取异常、消息恢复、队列与选择代次。普通App另行验证实际正文增量、Stop、原Gateway结算、Send恢复及冷重开，技术fixture退出真实业务验收依据。构建7失败、修复候选与实际采用结果归[当前执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-31-构建7真实ntn业务与停止恢复修复)。物理设备和完整Notion授权按原矩阵独立验收。

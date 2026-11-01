@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: current-Thread scheduled reads accept the existing optional Native HTTP transport.
 // [Sync] 2026-10-28: optional cancellable transport for existing day/detail/history reads; Web defaults and definition actions remain unchanged.
 // [Input] Same-origin browser session and authenticated Dream scheduled-task endpoints.
 // [Output] Typed date/history/Thread relation reads and revision-checked actions for Calendar and Chat.
@@ -89,9 +90,9 @@ export function getScheduledDay(localDate: string, displayTimeZone: string, opti
   return request<{ tasks: ScheduledTask[]; triggers: ScheduledTrigger[] }>(`/scheduled-tasks/day?${search}`, undefined, options.signal, options.transport);
 }
 
-export async function getThreadScheduledTasks(threadId: string, options: { signal?: AbortSignal } = {}) {
+export async function getThreadScheduledTasks(threadId: string, options: ScheduledReadOptions = {}) {
   const snapshot = await request<ScheduledTaskThreadSnapshot>(
-    `/threads/${encodeURIComponent(threadId)}/scheduled-tasks`, undefined, options.signal,
+    `/threads/${encodeURIComponent(threadId)}/scheduled-tasks`, undefined, options.signal, options.transport,
   );
   if (!snapshot || !Array.isArray(snapshot.created)
     || snapshot.created.some((task) => !task || task.source_thread_id !== threadId)

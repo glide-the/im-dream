@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: release the retained local editor's focus when its owning scene is hidden; keep its document and draft.
 // [Sync] 2026-10-29: expose the local editor to WebKit inspection in an RN debug build for native document failures.
 // [Input] Caller-owned Markdown draft and the App-owned local Next origin.
 // [Sync] 2026-10-29: synchronize the native preference into the existing document theme field without reloading its draft.
@@ -15,11 +16,11 @@ import {composerDocumentUrl,readComposerEvent,type ComposerDocumentState} from '
 import type {ComposerSkillKey} from './useComposerSkills';
 
 export interface NativeMarkdownInputEditorProps {
-  origin:string;value:string;placeholder:string;ariaLabel:string;disabled?:boolean;theme?:'light'|'dark'|'system';
+  origin:string;value:string;placeholder:string;ariaLabel:string;disabled?:boolean;theme?:'light'|'dark'|'system';active?:boolean;
   onChange:(value:string)=>void;onSubmit?:()=>void;onFocus?:()=>void;onBlur?:()=>void;
   skillMenuOpen?:boolean;onSkillKey?:(key:ComposerSkillKey)=>void;
 }
-export default function MarkdownInputEditor({origin,value,placeholder,ariaLabel,disabled=false,theme:requestedTheme,onChange,onSubmit,onFocus,onBlur,skillMenuOpen=false,onSkillKey}:NativeMarkdownInputEditorProps) {
+export default function MarkdownInputEditor({origin,value,placeholder,ariaLabel,disabled=false,theme:requestedTheme,active=true,onChange,onSubmit,onFocus,onBlur,skillMenuOpen=false,onSkillKey}:NativeMarkdownInputEditorProps) {
   const {t}=useTranslation();
   const preferredTheme=useNativeThemeMode(),theme=requestedTheme??preferredTheme,colors=useInkColors(theme);
   const view=useRef<WebView<object>>(null);
@@ -37,6 +38,7 @@ export default function MarkdownInputEditor({origin,value,placeholder,ariaLabel,
   }
   useEffect(()=>{try {setUrl(composerDocumentUrl(origin));setError(false);} catch {setUrl('');setError(true);}},[origin]);
   useEffect(()=>{sync();},[value,placeholder,ariaLabel,disabled,theme,skillMenuOpen,ready]);
+  useEffect(()=>{if(!active && ready)view.current?.injectJavaScript("document.querySelector('.markdown-input-editor__content')?.blur();true;");},[active,ready]);
   function receive(event:WebViewMessageEvent) {
     if(event.nativeEvent.url !== url)return;
     const message=readComposerEvent(event.nativeEvent.data);if(!message)return;

@@ -1,17 +1,19 @@
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
+// [Sync] 2026-10-30: exact Mermaid fences use the original DOM renderer; ordinary code and native Markdown retain their existing presentation.
 // [Sync] 2026-10-28: render original Workspace image/reference capabilities through native private-file leases and the bound Thread.
 // [Sync] 2026-10-28: align each native Markdown table column to its widest measured cell; original Web table/CSS remain unchanged.
 // [Input] Original Markdown/GFM text, current theme and caller-owned link/file navigation.
 // [Output] Native text, lists, tables and code using the existing react-markdown/remark-gfm parser.
 // [Pos] Markdown presentation adapter; original Web ChatMarkdown/CSS and third-party source remain unchanged.
-import {Children,createContext,isValidElement,useCallback,useContext,useMemo,useRef,useState,type ReactNode} from 'react';
-import {Image,ScrollView,StyleSheet,Text,View,useWindowDimensions,type TextProps,type TextStyle} from 'react-native';
+import {Children,createContext,isValidElement,lazy,Suspense,useCallback,useContext,useMemo,useRef,useState,type ReactNode} from 'react';
+import {ActivityIndicator,Image,ScrollView,StyleSheet,Text,View,useWindowDimensions,type TextProps,type TextStyle} from 'react-native';
 import Markdown,{defaultUrlTransform,type Components,type ExtraProps} from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
 import {isWorkspaceUri,resolveWorkspaceDocumentReference,WORKSPACE_URI_PREFIX} from './workspaceUri';
 import WorkspaceImage from './WorkspaceImage.native';
+const MermaidBlock=lazy(()=>import('./MermaidBlock.native'));
 import type {WorkspaceAvailability,WorkspaceResources} from '../../../../src/platform/workspaceFiles.native';
 import type {NativePickedFile} from '../../../../src/platform/fileUpload.native';
 const plugins=[remarkGfm];
@@ -86,8 +88,8 @@ export default function ChatMarkdown({text,fontSize=15.2,lineHeight=26.6,color,o
       input:({checked})=><Text accessibilityLabel={checked?'Checked':'Unchecked'}>{checked?'☑ ':'☐ '}</Text>,
       blockquote:({children})=><View style={[styles.quote,{borderLeftColor:colors['color-state-warning'],backgroundColor:colors['color-bg-surface']}]}>{flow(children,body)}</View>,
       hr:()=> <View style={{height:1,backgroundColor:colors['color-border-paper'],marginVertical:fontSize*0.9}} />,
-      code:({children})=><Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,color:colors['color-text-primary'],backgroundColor:colors['color-code-inline-bg']}}>{plain(children)}</Text>,
-      pre:({children})=><ScrollView horizontal style={[styles.code,{backgroundColor:colors['color-code-bg']}]} contentContainerStyle={{padding:fontSize}}><Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,lineHeight,color:colors['color-code-text']}}>{plain(children)}</Text></ScrollView>,
+      code:({children,className})=>className==='language-mermaid'?<Suspense fallback={<ActivityIndicator/>}><MermaidBlock chart={plain(children)} origin={origin}/></Suspense>:<Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,color:colors['color-text-primary'],backgroundColor:colors['color-code-inline-bg']}}>{plain(children)}</Text>,
+      pre:({children})=>{const child=Children.toArray(children)[0];return isValidElement<{className?:string}>(child)&&child.props.className==='language-mermaid'?<>{children}</>:<ScrollView horizontal style={[styles.code,{backgroundColor:colors['color-code-bg']}]} contentContainerStyle={{padding:fontSize}}><Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,lineHeight,color:colors['color-code-text']}}>{plain(children)}</Text></ScrollView>;},
       a:({href,children})=>{const workspace=isWorkspaceUri(href),enabled=Boolean(href&&!href.startsWith('#')&&(workspace?canOpenWorkspace:canOpenLink));return <RichText accessibilityRole="link" aria-disabled={!enabled} accessibilityState={{disabled:!enabled}} onPress={enabled&&href?()=>{(workspace?callbacks.current.onOpenWorkspace:callbacks.current.onOpenLink)?.(href);}:undefined} style={{color:colors['color-action-link'],textDecorationLine:'underline'}}>{children}</RichText>;},
       img:({src,alt})=>{if(typeof src==='string'&&src.startsWith(WORKSPACE_URI_PREFIX))return <WorkspaceImage uri={src} alt={alt} threadId={workspaceSessionId} availability={workspaceAvailability} resources={workspaceResources} onAddImageMaterial={canAddImageMaterial?file=>callbacks.current.onAddImageMaterial!(file):undefined}/>;let uri:string|undefined;if(typeof src==='string'&&src.length>0){try{uri=new URL(src,origin).href;}catch{}}return uri?<MarkdownImage key={uri} uri={uri} alt={alt}/>:<RichText>{alt ?? ''}</RichText>;},
       table:MarkdownTable,thead:block,tbody:block,tr:MarkdownTableRow,

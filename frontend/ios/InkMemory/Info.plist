@@ -3,6 +3,7 @@
 <!-- [Input] iOS bundle identity and supported interface orientations. -->
 <!-- [Output] Native application metadata consumed by Xcode and iOS. -->
 <!-- [Pos] InkMemory iOS target property-list contract. -->
+<!-- [Sync] 2026-10-31: register the distinct target account callback for system authorization and original BFF handoff. -->
 <!-- [Sync] 2026-10-29: register the target-specific MCP resource callback; normal account login retains its existing Web callback. -->
 <!-- [Sync] 2026-10-27: register the existing Excalifont and Xiaolai assets for equivalent native typography. -->
 <!-- [Sync] 2026-10-27: own the RN architecture flag and attachment camera purpose in application metadata. -->
@@ -32,8 +33,16 @@
   <true/>
   <key>InkMcpOAuthCallbackURI</key>
   <string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp:/oauth/callback</string>
+  <key>InkAccountOAuthCallbackURI</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER).auth:/auth/callback</string>
   <key>CFBundleURLTypes</key>
   <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$(PRODUCT_BUNDLE_IDENTIFIER).auth</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>$(PRODUCT_BUNDLE_IDENTIFIER).auth</string></array>
+    </dict>
     <dict>
       <key>CFBundleURLName</key>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp</string>

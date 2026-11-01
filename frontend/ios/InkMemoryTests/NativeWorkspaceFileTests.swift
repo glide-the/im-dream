@@ -1,6 +1,7 @@
 // [Input] Production binary Workspace reader/request policy, private lease store and export-copy adapter.
 // [Output] Binary integrity, MIME/filename, cancellation, status isolation and lease cleanup with synthetic URLProtocol only.
 // [Pos] Native technical tests; no real account, backend, credential, model or user files.
+// [Sync] 2026-10-30: qualify message storage-file routing without widening Workspace requests, methods or credential headers.
 import XCTest
 @testable import InkMemory
 
@@ -38,6 +39,17 @@ final class NativeWorkspaceFileTests: XCTestCase {
         let valid=try request();XCTAssertEqual(valid.httpMethod,"GET");XCTAssertNil(valid.httpBody);XCTAssertEqual(valid.value(forHTTPHeaderField:"x-ink-csrf"),String(repeating:"a",count:43));XCTAssertNil(valid.value(forHTTPHeaderField:"Authorization"));XCTAssertNil(valid.value(forHTTPHeaderField:"Cookie"))
         for path in ["https://example.invalid/api/workspace/files/content?sessionId=x&path=files/a", "/api/claude-agent?sessionId=x&path=files/a", "/api/workspace/files/content?sessionId=x&sessionId=y&path=files/a"] { XCTAssertThrowsError(try NativeWorkspaceFileRequest.make(origin:origin,options:["path":path])) }
         XCTAssertThrowsError(try NativeWorkspaceFileRequest.make(origin:origin,options:["path":"/api/workspace/files/content?sessionId=x&path=files/a","method":"POST"]))
+    }
+    func testMessageAttachmentUsesOnlyTheOriginalStorageFileRoute() throws {
+        let path = "/api/storage/file/ZmlsZXMvYXR0YWNobWVudA=="
+        let valid = try NativeWorkspaceFileRequest.make(origin: origin, options: ["source":"message", "path":path, "method":"GET", "headers":["Authorization":"Bearer forbidden", "Cookie":"forbidden"]])
+        XCTAssertEqual(valid.url?.path, path)
+        XCTAssertNil(valid.value(forHTTPHeaderField: "Authorization")); XCTAssertNil(valid.value(forHTTPHeaderField: "Cookie"))
+        for invalid in [path+"?token=forbidden", path+"#fragment", "/api/storage/file/", "/api/workspace/files/content?sessionId=x&path=files/a", "https://example.invalid"+path, "/api/storage/file/../../claude-agent", "/api/storage/file/%2e%2e/claude-agent", "/api/storage/file/%2E", "/api/storage/file/key\\..\\claude-agent"] {
+            XCTAssertThrowsError(try NativeWorkspaceFileRequest.make(origin: origin, options: ["source":"message", "path":invalid, "method":"GET"]), invalid)
+        }
+        XCTAssertThrowsError(try NativeWorkspaceFileRequest.make(origin: origin, options: ["source":"message", "path":path, "method":"POST"]))
+        XCTAssertThrowsError(try NativeWorkspaceFileRequest.make(origin: origin, options: ["path":path, "method":"GET"]))
     }
     func testBinaryZipBytesNeverRequireUtf8AndFilenameIsPreserved() throws {
         let done=expectation(description:"binary complete"),store=try NativePickedFileStore(),expected=WorkspaceFixtureProtocol.bytes

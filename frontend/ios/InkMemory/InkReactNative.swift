@@ -1,4 +1,9 @@
+// [Sync] 2026-10-31: pool Admin URLSession connections with per-task delegates, drained-buffer resume and original request deadlines.
+// [Sync] 2026-10-31: observe only explicitly correlated Admin request phases, numeric network errors and timing; exclude HTTP content.
+// [Sync] 2026-10-31: recover one pre-header connection loss for fixed read-only authentication calls within the original deadline.
+// [Sync] 2026-11-01: retire failed Admin pools for later requests while draining existing tasks; preserve caller timeout classification.
 // [Sync] 2026-10-30: settle account login after dismissing its navigation sheet; close cancels, navigation completion rechecks the original session.
+// [Sync] 2026-10-31: retain the login document during operation-bound system account authorization; pause Cookie observation through BFF handoff.
 // [Sync] 2026-10-29: bind MCP resource authorization to its operation and exact packaged callback through ASWebAuthenticationSession.
 // [Sync] 2026-10-29: project only Content-Type/Retry-After response metadata; Cookie/credential response headers stay native.
 // [Sync] 2026-10-29: expose Foundation UUID for the original idempotent Settings request ID.
@@ -14,6 +19,7 @@
 // [Sync] 2026-10-28: accept the local sketch PNG through existing opaque-file ownership and cleanup.
 import React
 import UIKit
+import Darwin
 import WebKit
 import OSLog
 import AuthenticationServices
@@ -28,6 +34,7 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
     private var loginFinishing = false
     private var loginReject: RCTPromiseRejectBlock?
     private var loginProbe: NativeLoginSessionProbe?
+    private var accountLogin: NativeAccountLogin?
     private var fileStore: NativePickedFileStore?
     private var filePicker: NativeFilePicker?
     private var observing = false
@@ -364,8 +371,9 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
             navigation.setViewControllers([controller], animated: false)
             let language = UserDefaults.standard.string(forKey: "ink-language") ?? Locale.preferredLanguages.first ?? "en"
             controller.title = language.hasPrefix("zh") ? "登录" : "Login"
-            let close = UIBarButtonItem(title: language.hasPrefix("zh") ? "关闭" : "Close", style: .plain, target: nil, action: nil)
-            close.primaryAction = UIAction { [weak self, weak navigation] _ in
+            let closeTitle = language.hasPrefix("zh") ? "关闭" : "Close"
+            let close = UIBarButtonItem(title: closeTitle, style: .plain, target: nil, action: nil)
+            close.primaryAction = UIAction(title: closeTitle) { [weak self, weak navigation] _ in
                 guard let self, let navigation, self.login === navigation else { return }
                 self.finishLogin(authenticated: false)
             }
@@ -386,6 +394,13 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
                 self.finishLogin(authenticated: true)
             }
             self.loginProbe = probe
+            let callback = (Bundle.main.object(forInfoDictionaryKey: "InkAccountOAuthCallbackURI") as? String).flatMap(NativeAccountCallback.configuration)
+            let schemes = (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? [])
+                .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+            let account = NativeAccountLogin(origin: origin, callback: callback.flatMap { schemes.contains($0.scheme ?? "") ? $0 : nil },
+                navigation: navigation, probe: probe, chinese: language.hasPrefix("zh")) { [weak controller] in controller?.reloadAccountDocument() }
+            self.accountLogin = account
+            controller.accountNavigation = { [weak account] action, page in account?.handles(action, page: page) ?? false }
             controller.hostStateDidChange = { state in
                 if state["authenticated"] as? Bool == true || state["loading"] as? Bool == false { probe.check() }
             }
@@ -397,6 +412,8 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
         guard let navigation = login, !loginFinishing else { return }
         loginFinishing = true
         loginProbe?.stop(); loginProbe = nil
+        accountLogin?.cancel(); accountLogin = nil
+        (navigation.viewControllers.first as? MobileHostViewController)?.accountNavigation = nil
         (navigation.viewControllers.first as? MobileHostViewController)?.hostStateDidChange = nil
         (navigation.viewControllers.first as? MobileHostViewController)?.appearanceDidChange = nil
         navigation.viewControllers.first?.navigationItem.leftBarButtonItem?.isEnabled = false
@@ -413,38 +430,72 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
         guard presentationController.presentedViewController === login else { return }
         finishLogin(authenticated: false, alreadyDismissed: true)
     }
-    deinit { mcpAuthorization?.cancel(); requests.values.forEach { $0.cancel() } }
+    deinit { accountLogin?.cancel(); mcpAuthorization?.cancel(); requests.values.forEach { $0.cancel() } }
 }
 
 // Cookie changes complete the original callback independently of a heavy business page render.
 // Only the existing BFF session endpoint can confirm authentication.
 final class NativeLoginSessionProbe: NSObject, WKHTTPCookieStoreObserver {
     private let origin: URL
-    private let store = WKWebsiteDataStore.default().httpCookieStore
+    private let store: WKHTTPCookieStore
+    private let session: URLSession
+    private let cookieStorage: HTTPCookieStorage
     private let completed: () -> Void
     private var stopped = false
+    private var paused = false
+    private var generation = UUID()
     private var checking = false
     private var changed = false
     private var task: URLSessionDataTask?
-    init(origin: URL, completed: @escaping () -> Void) {
-        self.origin = origin; self.completed = completed
+    init(origin: URL, store: WKHTTPCookieStore = WKWebsiteDataStore.default().httpCookieStore,
+         session: URLSession = .shared, cookieStorage: HTTPCookieStorage = .shared, completed: @escaping () -> Void) {
+        self.origin = origin; self.store = store; self.session = session; self.cookieStorage = cookieStorage; self.completed = completed
         super.init(); store.add(self)
     }
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { check() }
+    private func matches(_ cookie: HTTPCookie) -> Bool { cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == origin.host }
+    func pause() { guard !stopped else { return }; paused = true; generation = UUID(); checking = false; changed = false; task?.cancel(); task = nil }
+    func resume() { guard !stopped else { return }; paused = false; check() }
+    func copyWebCookies(_ completed: @escaping () -> Void) {
+        let expected = generation
+        store.getAllCookies { [weak self] cookies in
+            DispatchQueue.main.async {
+                guard let self, !self.stopped, self.generation == expected else { return }
+                for cookie in self.cookieStorage.cookies ?? [] where self.matches(cookie) { self.cookieStorage.deleteCookie(cookie) }
+                for cookie in cookies where self.matches(cookie) { self.cookieStorage.setCookie(cookie) }
+                completed()
+            }
+        }
+    }
+    func copyNativeCookies(_ completed: @escaping () -> Void) {
+        let expected = generation
+        let incoming = (cookieStorage.cookies ?? []).filter(matches)
+        store.getAllCookies { [weak self] cookies in
+            DispatchQueue.main.async {
+                guard let self, !self.stopped, self.generation == expected else { return }
+                let removed = DispatchGroup()
+                for cookie in cookies where self.matches(cookie) { removed.enter(); self.store.delete(cookie) { removed.leave() } }
+                removed.notify(queue: .main) {
+                    guard !self.stopped, self.generation == expected else { return }
+                    let copied = DispatchGroup()
+                    for cookie in incoming { copied.enter(); self.store.setCookie(cookie) { copied.leave() } }
+                    copied.notify(queue: .main) { if !self.stopped && self.generation == expected { completed() } }
+                }
+            }
+        }
+    }
     func check() {
-        guard !stopped else { return }
+        guard !stopped, !paused else { return }
         if checking { changed = true; return }
         checking = true
-        store.getAllCookies { [weak self] cookies in
-            guard let self, !self.stopped else { return }
-            let matches: (HTTPCookie) -> Bool = { $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == self.origin.host }
-            for cookie in HTTPCookieStorage.shared.cookies ?? [] where matches(cookie) { HTTPCookieStorage.shared.deleteCookie(cookie) }
-            for cookie in cookies where matches(cookie) { HTTPCookieStorage.shared.setCookie(cookie) }
+        let expected = generation
+        copyWebCookies { [weak self] in
+            guard let self, !self.stopped, !self.paused, self.generation == expected else { return }
             var request = URLRequest(url: URL(string: "/auth/session", relativeTo: self.origin)!.absoluteURL)
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            self.task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            self.task = self.session.dataTask(with: request) { data, response, _ in
                 DispatchQueue.main.async {
-                    guard !self.stopped else { return }
+                    guard !self.stopped, !self.paused, self.generation == expected else { return }
                     self.checking = false
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                     Logger(subsystem: "com.inkmemory.mobile", category: "ReactNativeRuntime").info("Web login session status=\(status, privacy: .public)")
@@ -464,7 +515,7 @@ final class NativeLoginSessionProbe: NSObject, WKHTTPCookieStoreObserver {
               let csrf = value["csrf_token"] as? String, csrf.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return false }
         return true
     }
-    func stop() { guard !stopped else { return }; stopped = true; task?.cancel(); task = nil; store.remove(self) }
+    func stop() { guard !stopped else { return }; stopped = true; generation = UUID(); task?.cancel(); task = nil; store.remove(self) }
 }
 
 // Transports bytes; the original DTO, SSE reducer and Stop implementation own business semantics.
@@ -495,6 +546,8 @@ final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
     private var headReject: RCTPromiseRejectBlock?
     private var reader: RCTPromiseResolveBlock?
     private var readerReject: RCTPromiseRejectBlock?
+    private var byteReader: ((Data, Bool) -> Void)?
+    private var byteReject: RCTPromiseRejectBlock?
     private var buffer = Data()
     private var finished = false
     private var failure: Error?
@@ -506,25 +559,46 @@ final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
     private let progress: ((Int64, Int64) -> Void)?
     private var close: (() -> Void)?
     private let configuration: URLSessionConfiguration
-    init(request: URLRequest, uploadFile: URL? = nil, cookies: Bool = true, configuration: URLSessionConfiguration = .default, progress: ((Int64, Int64) -> Void)? = nil, close: (() -> Void)? = nil, resolve: @escaping (Int) -> Void, reject: @escaping RCTPromiseRejectBlock) {
+    private let sharedSession: URLSession?
+    private let observe: ((String, [String: Int]) -> Void)?
+    init(request: URLRequest, uploadFile: URL? = nil, cookies: Bool = true, configuration: URLSessionConfiguration = .default, sharedSession: URLSession? = nil, progress: ((Int64, Int64) -> Void)? = nil, close: (() -> Void)? = nil, observe: ((String, [String: Int]) -> Void)? = nil, resolve: @escaping (Int) -> Void, reject: @escaping RCTPromiseRejectBlock) {
         self.request = request; self.head = resolve; self.headReject = reject
         self.uploadFile = uploadFile; self.cookies = cookies; self.configuration = configuration; self.progress = progress; self.close = close
+        self.sharedSession = sharedSession
+        self.observe = observe
     }
     func start() {
         configuration.httpCookieStorage = cookies ? .shared : nil; configuration.httpShouldSetCookies = cookies
         if !cookies { configuration.urlCredentialStorage = nil }
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
+        session = sharedSession ?? URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
         if let uploadFile { task = session?.uploadTask(with: request, fromFile: uploadFile) }
         else { task = session?.dataTask(with: request) }
+        if sharedSession != nil { task?.delegate = self }
         task?.resume()
+        observe?("network-start", [:])
     }
     func read(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        guard reader == nil else { reject("HTTP_CONCURRENT_READ", "连接正在读取。", nil); return }
+        guard reader == nil, byteReader == nil else { reject("HTTP_CONCURRENT_READ", "连接正在读取。", nil); return }
         reader = resolve; readerReject = reject; flush()
-        if suspended && reader != nil { suspended = false; task?.resume() }
+        if suspended && (reader != nil || buffer.isEmpty) && !finished { suspended = false; task?.resume() }
+    }
+    func readBytes(resolve: @escaping (Data, Bool) -> Void, reject: @escaping RCTPromiseRejectBlock) {
+        guard reader == nil, byteReader == nil else { reject("HTTP_CONCURRENT_READ", "连接正在读取。", nil); return }
+        byteReader = resolve; byteReject = reject; flush()
+        if suspended && (byteReader != nil || buffer.isEmpty) && !finished { suspended = false; task?.resume() }
     }
     private func flush() {
+        if let receive = byteReader {
+            if let failure {
+                let reject = byteReject; byteReader = nil; byteReject = nil
+                reject?("HTTP_FAILED", "连接已中断。", failure)
+            } else if !buffer.isEmpty || finished {
+                let bytes = buffer; buffer.removeAll(keepingCapacity: true)
+                byteReader = nil; byteReject = nil; receive(bytes, finished)
+            }
+            return
+        }
         guard let reader else { return }
         if let failure { readerReject?("HTTP_FAILED", "连接已中断。", failure); clearReader(); return }
         // Keep a split UTF-8 scalar between data callbacks.
@@ -540,7 +614,7 @@ final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
     }
     private func clearReader() { reader = nil; readerReject = nil }
     private func closeResources() { let cleanup = close; close = nil; cleanup?() }
-    func cancel() { task?.cancel(); session?.invalidateAndCancel(); failure = URLError(.cancelled); closeResources(); flush() }
+    func cancel() { task?.cancel(); if sharedSession == nil { session?.invalidateAndCancel() }; failure = URLError(.cancelled); closeResources(); flush() }
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) { progress?(totalBytesSent, totalBytesExpectedToSend) }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let response = response as? HTTPURLResponse else { completionHandler(.cancel); return }
@@ -548,16 +622,197 @@ final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
             if let value = response.value(forHTTPHeaderField: name) { readableHeaders[name.lowercased()] = value }
         }
         head?(response.statusCode); head = nil; headReject = nil; completionHandler(.allow)
+        observe?("headers", ["status": response.statusCode])
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         buffer.append(data); flush()
-        if reader == nil && !buffer.isEmpty && !suspended { suspended = true; dataTask.suspend() }
+        if reader == nil && byteReader == nil && !buffer.isEmpty && !suspended { suspended = true; dataTask.suspend() }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        observe?("network-complete", ["errorCode": (error as NSError?)?.code ?? 0, "receivedBytes": Int(task.countOfBytesReceived)])
         finished = true; failure = error
         closeResources()
         if let reject = headReject { reject("HTTP_FAILED", "连接未建立。", error); headReject = nil; head = nil }
-        flush(); session.finishTasksAndInvalidate()
+        flush(); if sharedSession == nil { session.finishTasksAndInvalidate() }
     }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        guard observe != nil else { return }
+        for transaction in metrics.transactionMetrics {
+            var fields: [String: Int] = ["reused": transaction.isReusedConnection ? 1 : 0]
+            for (name, start, end) in [("dnsMs", transaction.domainLookupStartDate, transaction.domainLookupEndDate),
+                                       ("connectMs", transaction.connectStartDate, transaction.connectEndDate),
+                                       ("tlsMs", transaction.secureConnectionStartDate, transaction.secureConnectionEndDate),
+                                       ("responseMs", transaction.responseStartDate, transaction.responseEndDate)] {
+                if let start, let end { fields[name] = Int(end.timeIntervalSince(start) * 1000) }
+            }
+            observe?("network-metrics", fields)
+        }
+    }
+}
+
+final class NativeAdminConnectionPool {
+    private let configuration: URLSessionConfiguration
+    private var current: URLSession?
+    init(configuration: URLSessionConfiguration = .ephemeral) { self.configuration = configuration }
+    func acquire() -> URLSession {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if let current { return current }
+        configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: configuration, delegate: nil, delegateQueue: .main)
+        current = session; return session
+    }
+    func retire(_ session: URLSession) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard current === session else { return }
+        current = nil
+        // Existing transfers keep their original outcome and deadline.
+        session.finishTasksAndInvalidate()
+    }
+}
+private let adminHTTPConnections = NativeAdminConnectionPool()
+
+// Original Admin clients retain DTO/auth/recovery ownership. Only HTTP bytes use
+// the existing iOS transport; browser cookies and credentials stay separate.
+func performNativeAdminHTTP(_ payload: String, cancelled: @escaping () -> Bool,
+                            configuration: URLSessionConfiguration = .ephemeral, sharedSession: URLSession? = nil,
+                            sessionProvider: (() -> URLSession)? = nil, sessionFailed: ((URLSession) -> Void)? = nil,
+                            timedOut: @escaping () -> Bool = { false }) -> String {
+    func encoded(_ value: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value) else { return "{\"ok\":false,\"error\":\"transport\"}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+    if cancelled() { return encoded(["ok": false, "error": timedOut() ? "timeout" : "cancelled"]) }
+    guard !Thread.isMainThread,
+          let value = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+          let rawURL = value["url"] as? String, let url = URL(string: rawURL),
+          url.host != nil, url.user == nil, url.password == nil, url.fragment == nil,
+          url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(url.host ?? "")),
+          let method = value["method"] as? String, method.range(of: "^[A-Z]+$", options: .regularExpression) != nil,
+          let headers = value["headers"] as? [String: String],
+          let timeout = value["timeoutSeconds"] as? Double, timeout.isFinite, timeout > 0,
+          let maximum = value["maxResponseBytes"] as? Int, maximum > 0, maximum < Int.max else {
+        return encoded(["ok": false, "error": "configuration"])
+    }
+    var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = timeout
+    let traceId = (value["traceId"] as? String).flatMap { UUID(uuidString: $0)?.uuidString }
+    let started = ProcessInfo.processInfo.systemUptime
+    let observationLock = NSLock()
+    var observations: [String] = [], emitObservations = false
+    func observe(_ phase: String, _ fields: [String: Int] = [:]) {
+        guard let traceId else { return }
+        var record: [String: Any] = fields
+        record["traceId"] = traceId.lowercased(); record["phase"] = phase
+        record["timestampMs"] = Int(Date().timeIntervalSince1970 * 1000)
+        record["elapsedMs"] = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+        if Thread.isMainThread { record["applicationState"] = UIApplication.shared.applicationState.rawValue }
+        if let data = try? JSONSerialization.data(withJSONObject: record), let line = String(data: data, encoding: .utf8) {
+            observationLock.lock(); defer { observationLock.unlock() }
+            observations.append("IOS_ADMIN_HTTP " + line + "\n")
+            if ["network-error", "deadline", "read-recovery"].contains(phase) { emitObservations = true }
+            if emitObservations { fputs(observations.joined(), stderr); observations.removeAll(keepingCapacity: true) }
+        }
+    }
+    observe("native-enter")
+    for (name, text) in headers {
+        guard name.range(of: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", options: .regularExpression) != nil,
+              !text.contains("\r"), !text.contains("\n"), name.lowercased() != "cookie" else {
+            return encoded(["ok": false, "error": "configuration"])
+        }
+        request.setValue(text, forHTTPHeaderField: name)
+    }
+    if let rawBody = value["bodyBase64"] as? String {
+        guard let body = Data(base64Encoded: rawBody) else { return encoded(["ok": false, "error": "configuration"]) }
+        request.httpBody = body
+    }
+    let ready = DispatchSemaphore(value: 0)
+    var output = "", response: NativeHTTPResponse?, completed = false
+    var requestCancellation: (() -> Void)?
+    DispatchQueue.main.async {
+        observe("main-start")
+        if cancelled() { output = encoded(["ok": false, "error": timedOut() ? "timeout" : "cancelled"]); ready.signal(); return }
+        var bytes = Data(), status = 0, recoveries = 0
+        var activeSession: URLSession?
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let readOnly = (method == "GET" && ["/api/auth/jwks", "/api/internal/dream/v1/capabilities"].contains(url.path))
+            || (method == "POST" && ["/api/internal/dream/v1/browser-sessions/resolve", "/api/internal/dream/v1/operations/user-profile.current"].contains(url.path))
+        var expiration: DispatchWorkItem?
+        func finish(_ result: [String: Any]) {
+            guard !completed else { return }; completed = true; output = encoded(result)
+            if result["error"] as? String == "timeout", let activeSession { sessionFailed?(activeSession) }
+            observe("native-result", ["status": status, "bytes": bytes.count, "failed": result["ok"] as? Bool == true ? 0 : 1])
+            expiration?.cancel(); expiration = nil
+            requestCancellation = nil
+            response?.cancel(); response = nil; ready.signal()
+        }
+        func reject(_ unusedCode: String?, _ unusedMessage: String?, _ error: Error?) {
+            let code = (error as NSError?)?.code
+            observe("network-error", ["errorCode": code ?? 0])
+            if (error as NSError?)?.domain == NSURLErrorDomain && code == NSURLErrorNetworkConnectionLost,
+               let activeSession { sessionFailed?(activeSession) }
+            if !completed && readOnly && recoveries == 0 && status == 0 && bytes.isEmpty
+                && (error as NSError?)?.domain == NSURLErrorDomain && code == NSURLErrorNetworkConnectionLost
+                && !cancelled() && ProcessInfo.processInfo.systemUptime < deadline {
+                recoveries += 1
+                observe("read-recovery", ["attempt": recoveries + 1])
+                // The failed task has completed. Acquire a fresh pool within
+                // the original timer; writes and unknown outcomes never replay.
+                startRequest()
+                return
+            }
+            finish(["ok": false, "error": code == NSURLErrorTimedOut ? "timeout" : code == NSURLErrorCancelled ? "cancelled" : "transport"])
+        }
+        func pull() {
+            guard !completed else { return }
+            response?.readBytes(resolve: { data, done in
+                // Keep one overflow byte for the original client's size check.
+                bytes.append(data.prefix(maximum + 1 - bytes.count))
+                if bytes.count > maximum || done {
+                    finish(["ok": true, "status": status, "headers": response?.readableHeaders ?? [:], "bodyBase64": bytes.base64EncodedString(), "recoveryCount": recoveries])
+                } else { DispatchQueue.main.async { pull() } }
+            }, reject: reject)
+        }
+        func startRequest() {
+            guard !completed else { return }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard !cancelled(), remaining > 0 else {
+                finish(["ok": false, "error": cancelled() && !timedOut() ? "cancelled" : "timeout"]); return
+            }
+            var attempt = request; attempt.timeoutInterval = remaining
+            activeSession = sessionProvider?() ?? sharedSession
+            response = NativeHTTPResponse(request: attempt, cookies: false, configuration: configuration, sharedSession: activeSession, observe: observe,
+                resolve: { code in status = code; DispatchQueue.main.async { pull() } }, reject: reject)
+            response?.start()
+        }
+        configuration.timeoutIntervalForRequest = timeout; configuration.timeoutIntervalForResource = timeout
+        requestCancellation = {
+            if timedOut() { finish(["ok": false, "error": "timeout"]) }
+            else { response?.cancel() }
+        }
+        expiration = DispatchWorkItem { observe("deadline"); finish(["ok": false, "error": "timeout"]) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: expiration!)
+        startRequest()
+    }
+    var cancellationQueued = false
+    while ready.wait(timeout: .now() + 0.05) == .timedOut {
+        if !cancellationQueued && cancelled() {
+            cancellationQueued = true
+            DispatchQueue.main.async { requestCancellation?() }
+        }
+    }
+    observe("native-return")
+    return output
+}
+
+typealias DreamHTTPCancelled = @convention(c) (UnsafeMutableRawPointer?) -> Int32
+@_cdecl("IMDreamHTTPPerform")
+func IMDreamHTTPPerform(_ payload: UnsafePointer<CChar>?, _ cancelled: DreamHTTPCancelled?,
+                        _ context: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<CChar>? {
+    guard let payload else { return nil }
+    let result = performNativeAdminHTTP(String(cString: payload), cancelled: { cancelled.map { $0(context) != 0 } ?? false },
+        sessionProvider: { adminHTTPConnections.acquire() }, sessionFailed: { adminHTTPConnections.retire($0) },
+        timedOut: { cancelled.map { $0(context) == 2 } ?? false })
+    return strdup(result)
 }

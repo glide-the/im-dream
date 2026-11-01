@@ -1,3 +1,5 @@
+// [Sync] 2026-10-30: run the pinned Notion CLI through the existing guest binding; Next command denial and Agent ownership remain.
+// [Sync] 2026-10-31: use the existing native HTTP transport for original Admin JSON backchannels.
 // [Input] App-owned Runtime entry and one session's SDK arguments/environment.
 // [Output] Original Runtime JSONL/control or original Next standalone HTTP in one application worker.
 // [Pos] Node worker entry; isolates module state without launching an OS process.
@@ -103,6 +105,8 @@ subscribe('undici:request:error', ({ request, error }) => {
 });
 
 if (workerData.application === 'next') {
+  const { installIOSAdminHTTP } = await import(workerData.adminHTTPURL);
+  installIOSAdminHTTP();
   const listen = net.Server.prototype.listen;
   net.Server.prototype.listen = function (...args) {
     this.once('listening', () => {
@@ -172,7 +176,7 @@ if (workerData.commandRuntime) {
     })();
   };
 }
-if (workerData.application === 'plugin-python') {
+if (workerData.application === 'plugin-python' || workerData.application === 'notion-cli') {
   const { spawn } = await import('node:child_process');
   const command = spawn(workerData.argv[0], workerData.argv.slice(1), {cwd, env: process.env, stdio: 'pipe'});
   command.stdin.end();

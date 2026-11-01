@@ -16,5 +16,15 @@
     "url": "https://registry.npmjs.org/@glide-the/ink-claude-code-dream-darwin-arm64/-/ink-claude-code-dream-darwin-arm64-0.1.12.tgz",
     "sha512": "e8jntAeYwzOJiNARBp+vzvUyuoWor5plQrA47cOJlctK7Ly1j/vUo6XBYJu8B9Ik4A/g5WO0N2G1BsKg+JTTMQ==",
     "use": "Private iOS compatibility qualification; desktop binaries are excluded"
+  },
+  "notionCli": {
+    "version": "0.15.1",
+    "url": "https://registry.npmjs.org/ntn/-/ntn-0.15.1.tgz",
+    "sha512": "G/+jjIIJFG0GNfJ4PfQNfPosn6mi29SJLaJ6lWgCRX/yfHs4bgL3Ze8ojvPPzSnn842OaftdPb8MjxyNezjQ6Q==",
+    "binaryMember": "package/dist/ntn-linux-arm64/ntn",
+    "binarySha256": "faee5c2227abea0ea401bd27689a9d150d32402d4240f349619710fd621824fc",
+    "license": "MIT",
+    "licenseSha256": "ed189d279fa3b5f8e1f139ca583f73693eac31df9619a6a59dd73030c65e19af",
+    "execution": "existing application-process Linux ARM64 interpreter; no macOS binary"
   }
 }

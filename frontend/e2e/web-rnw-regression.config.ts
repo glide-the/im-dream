@@ -1,3 +1,6 @@
+// [Sync] 2026-10-31: qualify retained Native composer focus release against its original DOM document.
+// [Sync] 2026-10-31: register actual App production-document baseline for MCP WebKit qualification.
+// [Sync] 2026-10-30: qualify original task navigation/activity and shared readonly snapshots before Native adoption.
 // [Sync] 2026-10-30: qualify native login completion/cancellation before the home session is adopted.
 // [Sync] 2026-10-29: register native resource content and original operation/CAS/selection recovery qualification.
 // [Sync] 2026-10-29: register native More/Timeline composition and original Writing document technical qualification.
@@ -62,13 +65,26 @@ export default defineConfig({
     'app/_dream/components/chat/__tests__/ScheduledTaskActivity.browser.test.ts',
     'app/_dream/components/chat/__tests__/ActivitySidebarModel.test.ts',
     'e2e/composer-draft.spec.ts',
+    'e2e/native-composer-focus.spec.ts',
     'e2e/composer-document.spec.ts',
     'e2e/sketch-document.spec.ts',
     'e2e/file-upload-adapter.spec.ts',
     'e2e/web-shared-context.spec.ts',
+    'e2e/task-activity-reads.spec.ts',
+    'e2e/native-task-activity.spec.ts',
+    'app/_dream/components/chat/__tests__/TaskSessionLinks.test.ts',
+    'app/_dream/components/chat/__tests__/TaskActivityPopover.browser.test.ts',
+    'app/_dream/components/chat/__tests__/ScheduledTaskActivity.browser.test.ts',
+    'app/_dream/components/chat/__tests__/TaskSessionNavigation.browser.test.ts',
+    'app/_dream/hooks/__tests__/useThreadSubagents.test.ts',
     'e2e/native-chat-session.spec.ts',
     'e2e/native-chat-history.spec.ts',
     'e2e/native-messages.spec.ts',
+    'e2e/mermaid-document.spec.ts',
+    'e2e/native-mermaid.spec.ts',
+    'e2e/tool-result-document.spec.ts',
+    'e2e/mcp-webkit-document.spec.ts',
+    'e2e/native-tool-results.spec.ts',
     'e2e/native-sdk-web-apis.spec.ts',
     'e2e/sketch-input.spec.ts',
     'e2e/native-session-gate.spec.ts',

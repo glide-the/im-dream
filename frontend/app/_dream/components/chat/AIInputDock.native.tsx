@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: forward owning-scene visibility to the retained editor for local keyboard dismissal.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Sync] 2026-10-28: apply the original attachment-size policy to explicit Workspace material copies as well as picker/sketch input.
 // [Input] Original send/Stop/context callbacks, effective permissions and the App-owned local origin.
@@ -31,8 +32,9 @@ export interface NativeAIInputDockProps {
   disabled?:boolean;loading?:boolean;onStop?:()=>void|Promise<void>;stopPending?:boolean;loadingLabel?:string;
   defaultToolChoice?:ToolChoice;workspaceSessionId?:string;prefill?:string;prefillNonce?:number;placeholder?:string;
   deckId?:string;threadId?:string;workspaceEnabled?:boolean;contextUsage?:ContextUsageSnapshot;
+  active?:boolean;
 }
-function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder='Ask Ink & Memory…',deckId,threadId,workspaceEnabled,contextUsage}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
+function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder='Ask Ink & Memory…',deckId,threadId,workspaceEnabled,contextUsage,active=true}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
   const {t}=useTranslation();const colors=useInkColors();
   const narrow=useWindowDimensions().width<=767;
   const uploads=useFileAttachments(workspaceSessionId);
@@ -57,7 +59,7 @@ function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contex
       </Pressable>
     </View>)}</View> : null}
     <View style={styles.hints}>{shouldShowUploadHint(draft.query,focused)?<InkLabel style={{fontSize:11.68,color:colors['color-text-muted']}}>{t('chat.inputDock.uploadHint')}</InkLabel>:null}<InkLabel style={{fontSize:11.68,color:colors['color-text-muted']}}>{t('chat.inputDock.sendShortcut')}</InkLabel></View>
-    <MarkdownInputEditor origin={origin} value={draft.query} onChange={draft.setQuery} onSubmit={()=>{if(!skills.keyDown('Enter'))draft.handleSend();}} skillMenuOpen={skills.matches.length>0} onSkillKey={key=>{if(!skills.keyDown(key) && key==='Enter')draft.handleSend();}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} disabled={disabled} placeholder={placeholder} ariaLabel={t('chat.inputDock.inputAria')} />
+    <MarkdownInputEditor active={active} origin={origin} value={draft.query} onChange={draft.setQuery} onSubmit={()=>{if(!skills.keyDown('Enter'))draft.handleSend();}} skillMenuOpen={skills.matches.length>0} onSkillKey={key=>{if(!skills.keyDown(key) && key==='Enter')draft.handleSend();}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} disabled={disabled} placeholder={placeholder} ariaLabel={t('chat.inputDock.inputAria')} />
     <ComposerSkillMenu commands={skills.matches} activeIndex={skills.activeIndex} onSelect={skills.select} contextUsage={contextUsage} />
     <AIInputDockControls draft={draft} disabled={disabled} loading={loading} onStop={onStop} stopPending={stopPending} loadingLabel={loadingLabel} fullAccessEnabled={fullAccessEnabled} contextControl={contextControl}
       onChooseFiles={()=>{setNotice(null);void uploads.chooseFiles(draft.setUploadedFiles);}} onOpenSketch={onOpenSketch} />

@@ -1,9 +1,11 @@
+// [Sync] 2026-10-31: share bounded, cancellable URLSession Admin HTTP with embedded Node and CPython; original business/authentication remain upstream.
 // [Input] Signed CPython framework, bundled standard library, dependencies and Dream sources.
 // [Output] In-process execution of mobile_runtime.ios, with the GIL released between calls.
 // [Pos] Minimal CPython embedding adapter; no subprocess, socket server or remote fallback.
 // [Sync] 2026-10-25: initialize isolated CPython and invoke the real FastAPI backend entry.
 // [Sync] 2026-10-25: expose target memory observations through a fixed CPython native module.
 #import "DreamPython.h"
+#include "DreamHTTP.h"
 #include <Python/Python.h>
 #include <TargetConditionals.h>
 #include <os/proc.h>
@@ -31,8 +33,22 @@ static PyObject *IMAvailableMemory(PyObject *self, PyObject *args) {
     return PyLong_FromUnsignedLongLong(bytes);
 }
 
+static PyObject *IMAdminHTTP(PyObject *self, PyObject *args) {
+    const char *payload;
+    if (!PyArg_ParseTuple(args, "s", &payload)) return NULL;
+    char *response;
+    Py_BEGIN_ALLOW_THREADS
+    response = IMDreamHTTPPerform(payload, NULL, NULL);
+    Py_END_ALLOW_THREADS
+    if (!response) return PyErr_NoMemory();
+    PyObject *result = PyUnicode_FromString(response);
+    free(response);
+    return result;
+}
+
 static PyMethodDef IMNativeMethods[] = {
     {"available_memory", IMAvailableMemory, METH_NOARGS, "Read actual target memory headroom."},
+    {"admin_http", IMAdminHTTP, METH_VARARGS, "Perform one bounded Admin HTTP request through iOS."},
     {NULL, NULL, 0, NULL},
 };
 static struct PyModuleDef IMNativeModule = {PyModuleDef_HEAD_INIT, "_dream_native", NULL, -1, IMNativeMethods};

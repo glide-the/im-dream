@@ -1,3 +1,5 @@
+// [Sync] 2026-10-30: explicit current candidate ID and complete prompt/status baselines qualify bounded existing-thread acceptance without extra model calls.
+// [Sync] 2026-10-30: read an explicitly identified manually submitted Chat and normal usage through authenticated public GETs; output metadata only.
 // [Sync] 2026-10-28: add read-only native URLSession acceptance for an existing normal-login session and selected callable model; no browser mutation, credential output or model calls.
 // [Input] The packaged WKWebView; real business acceptance additionally requires explicit credentials and expected reply.
 // [Output] Separate provider-free local page proof and credential-gated normal Web login/Chat acceptance.
@@ -35,9 +37,90 @@ import XCTest
 
 @MainActor
 final class PhysicalBusinessJourneyTests: XCTestCase {
+    func testNativeManualChatPersistenceAndUsageRead() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let appID = environment["INK_DREAM_TEST_APP_ID"],
+              let email = environment["INK_DREAM_TEST_EMAIL"],
+              let threadID = environment["INK_DREAM_TEST_MANUAL_THREAD_ID"],
+              let firstPrompt = environment["INK_DREAM_TEST_FIRST_PROMPT"],
+              let secondPrompt = environment["INK_DREAM_TEST_SECOND_PROMPT"],
+              let since = environment["INK_DREAM_TEST_USAGE_SINCE"] else {
+            throw XCTSkip("Explicit manual-journey identities and non-secret expectations are required.")
+        }
+        XCTAssertEqual(Bundle.main.bundleIdentifier, appID)
+        let threadUUID = try XCTUnwrap(UUID(uuidString: threadID))
+        let pathID = threadUUID.uuidString.lowercased()
+        let facts: [String: Any] = try await withCheckedThrowingContinuation { continuation in
+            EmbeddedDreamBackend.shared.start { continuation.resume(with: $0) }
+        }
+        let origin = try XCTUnwrap((facts["localWebOrigin"] as? String).flatMap(URL.init(string:)))
+        func read(_ path: String, headers: [String: String] = [:]) async throws -> [String: Any] {
+            var request = try NativeUploadRequest.local(origin: origin, options: ["path": path, "method": "GET", "headers": headers] as NSDictionary)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else { throw NSError(domain: "InkMemory.ManualJourneyRead", code: status) }
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        let session = try await read("/auth/session")
+        let matched = (session["user"] as? [String: Any])?["email"] as? String == email
+        XCTAssertTrue(matched, "The normal product account must match")
+        guard matched else { return }
+        let csrf = try XCTUnwrap(session["csrf_token"] as? String)
+        let headers = ["x-ink-csrf": csrf]
+        let history = try await read("/api/claude-agent/threads/\(pathID)/messages?limit=20", headers: headers)
+        let status = try await read("/api/claude-agent/threads/\(pathID)/status", headers: headers)
+        let usage = try await read("/api/story-workspace/usage?period=current_subscription_period&sort=occurredAt&order=desc&page=1&pageSize=20", headers: headers)
+        let messages = try XCTUnwrap(history["messages"] as? [[String: Any]])
+        func text(_ message: [String: Any]) -> String {
+            (message["parts"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
+        }
+        let users = messages.filter { $0["role"] as? String == "user" }
+        let assistants = messages.filter { $0["role"] as? String == "assistant" }
+        let stopPrompt = environment["INK_DREAM_TEST_STOP_PROMPT"]
+        let legacyPrompts = [firstPrompt, secondPrompt] + (stopPrompt.map { [$0] } ?? [])
+        func expectationArray(_ key: String) throws -> [String]? {
+            guard let raw = environment[key] else { return nil }
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String])
+        }
+        let expectedPrompts = try expectationArray("INK_DREAM_TEST_EXPECTED_PROMPTS_JSON") ?? legacyPrompts
+        let expectedStatuses = try expectationArray("INK_DREAM_TEST_EXPECTED_STATUSES_JSON")
+        let expectedRequests = environment["INK_DREAM_TEST_EXPECTED_REQUESTS"].flatMap(Int.init) ?? expectedPrompts.count
+        XCTAssertEqual(users.map(text), expectedPrompts, "Manual submissions must persist exactly once and in order")
+        XCTAssertEqual(assistants.count, expectedPrompts.count)
+        if let expectedStatuses {
+            XCTAssertEqual(expectedStatuses.count, expectedPrompts.count)
+            XCTAssertEqual(assistants.map { ($0["metadata"] as? [String: Any])?["turnStatus"] as? String ?? "" }, expectedStatuses)
+        }
+        XCTAssertEqual((assistants.first?["metadata"] as? [String: Any])?["turnStatus"] as? String, "completed")
+        if stopPrompt != nil {
+            XCTAssertEqual((assistants.last?["metadata"] as? [String: Any])?["turnStatus"] as? String, "cancelled")
+        }
+        let items = (usage["data"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
+        let relevant = items.filter { ($0["occurredAt"] as? String ?? "") >= since }
+        XCTAssertEqual(relevant.count, expectedRequests, "Model calls must match the explicit manual-journey limit")
+        if stopPrompt != nil || expectedStatuses?.last == "cancelled" {
+            let cancelled = relevant.filter { $0["outcome"] as? String == "cancelled" && $0["settlementState"] as? String == "settled" }
+            XCTAssertEqual(cancelled.count, 1, "The additional in-progress cancellation must settle normally")
+        }
+        let messageFacts: [[String: Any]] = messages.map { message in
+            let metadata = message["metadata"] as? [String: Any] ?? [:]
+            return ["id": message["id"] ?? NSNull(), "role": message["role"] ?? NSNull(), "textChars": text(message).count,
+                    "turnStatus": metadata["turnStatus"] ?? NSNull(), "chatModel": metadata["chatModel"] ?? NSNull()]
+        }
+        let usageKeys = ["gatewayRequestId", "modelAlias", "outcome", "settlementState", "inputTokens", "outputTokens", "occurredAt", "errorCategory"]
+        let usageFacts = relevant.map { item in Dictionary(uniqueKeysWithValues: usageKeys.map { ($0, item[$0] ?? NSNull()) }) }
+        let proof: [String: Any] = ["accountMatched": true, "threadId": pathID, "running": status["running"] ?? NSNull(),
+                                   "lifecycle": status["lifecycle"] ?? NSNull(), "turnCount": status["turn_count"] ?? NSNull(),
+                                   "messages": messageFacts, "usage": usageFacts, "modelCallsFromTest": 0,
+                                   "originalPublicGETs": true, "applicationPid": ProcessInfo.processInfo.processIdentifier]
+        let encoded = try JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys])
+        print("IOS_RN_MANUAL_PERSISTENCE_PROOF \(String(decoding: encoded, as: UTF8.self))")
+    }
+
     // Read-only acceptance after the human-operated original login; no session injection or model call.
     func testNativeSessionAndSelectedModelRead() async throws {
-        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.inkmemory.uiparity")
+        XCTAssertEqual(Bundle.main.bundleIdentifier, ProcessInfo.processInfo.environment["INK_DREAM_TEST_APP_ID"] ?? "com.inkmemory.uiparity")
         guard let email = ProcessInfo.processInfo.environment["INK_DREAM_TEST_EMAIL"], !email.isEmpty else {
             throw XCTSkip("The expected product account is required.")
         }

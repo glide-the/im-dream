@@ -5,6 +5,7 @@
 #                    public path output, and obsolete `ntn auth status` usage.
 # [Sync] 2026-08-28: normalize imports during the final agentdata credential audit.
 # [Sync] 2026-08-30: expose the pinned ntn installation prerequisite before connector authentication.
+# [Sync] 2026-10-30: bind a concrete process factory at the iOS composition root; ordinary subprocess argv/env/timeout remain unchanged.
 
 """Notion authentication helpers backed by the server-owned ``ntn`` CLI."""
 from __future__ import annotations
@@ -48,6 +49,20 @@ _PARENT_ENV_ALLOWLIST = (
     "http_proxy",
     "no_proxy",
 )
+
+_process_factory = None
+
+
+def bind_notion_process_factory(factory):
+    """Bind the application-owned executable adapter once, independently of deployment names."""
+    global _process_factory
+    if _process_factory is not None and _process_factory is not factory:
+        raise NotionConfigError("Notion command execution is already bound.")
+    _process_factory = factory
+
+
+async def create_notion_process(*args, **kwargs):
+    return await (_process_factory or asyncio.create_subprocess_exec)(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -160,7 +175,7 @@ async def _run_ntn_command(
 ) -> tuple[int, str, str]:
     executable = resolve_ntn_executable()
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_notion_process(
             executable,
             *args,
             env=build_notion_env(notion_home),
@@ -177,6 +192,11 @@ async def _run_ntn_command(
         with contextlib.suppress(Exception):
             await proc.wait()
         raise NotionAuthTimeoutError("Notion authorization timed out. Please retry.") from exc
+    except asyncio.CancelledError:
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        raise
 
     return proc.returncode or 0, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 

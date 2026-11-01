@@ -1,9 +1,11 @@
+# [Sync] 2026-10-31: include the private native Admin HTTP adapter and its exact resource digest.
 #!/usr/bin/env python3
 # [Input] Hash-pinned Node Mobile and the existing published Runtime JavaScript archive.
 # [Output] Local target libraries and same-source Node-compatible Runtime resources.
 # [Pos] Build preparation only; no Agent, account, service or model is executed.
 # [Sync] 2026-10-25: separate generated RuntimeArtifacts from tracked runtime sources on case-insensitive volumes.
 # [Sync] 2026-10-25: retain original SandboxManager; the existing deployment setting disables the command sandbox.
+# [Sync] 2026-10-30: package only the pinned official Linux ARM64 ntn executable and its MIT notice for the existing command interpreter.
 import base64
 import hashlib
 import json
@@ -28,6 +30,26 @@ def download(record, destination):
              else base64.b64encode(hashlib.sha512(data).digest()).decode() == record["sha512"])
     if not valid:
         raise RuntimeError("Dependency digest mismatch: " + destination.name)
+
+
+def prepare_notion_cli(runtime, generated):
+    record = LOCK["notionCli"]
+    archive = runtime / f"ntn-{record['version']}.tgz"
+    download(record, archive)
+    destination = generated / "notion"
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as bundle:
+        for source, name, expected in ((record["binaryMember"], "ntn", record["binarySha256"]),
+                                       ("package/LICENSE.md", "LICENSE.md", record["licenseSha256"])):
+            member = bundle.getmember(source)
+            if not member.isfile():
+                raise RuntimeError("Notion CLI resource must be a regular file")
+            data = bundle.extractfile(member).read()
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise RuntimeError("Notion CLI resource digest mismatch")
+            target = destination / name
+            target.write_bytes(data); target.chmod(0o755 if name == "ntn" else 0o644)
+    (destination / "manifest.json").write_text(json.dumps(record, indent=2) + "\n")
 
 
 def prepare():
@@ -67,7 +89,7 @@ def prepare():
     if sum(item["nodeRequireAdapter"] for item in receipt) != 1:
         raise RuntimeError("The pinned Runtime must contain exactly one Bun require adapter")
     (core / "package.json").write_text('{"type":"module"}\n')
-    for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs"):
+    for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs", "ios-admin-http.mjs"):
         shutil.copy2(IOS / "runtime" / name, generated / name)
     licenses = generated / "licenses"
     licenses.mkdir()
@@ -78,6 +100,7 @@ def prepare():
         if original.is_file():
             name = "-".join(original.relative_to(runtime / "package").parts)
             shutil.copy2(original, licenses / name)
+    prepare_notion_cli(runtime, generated)
     (generated / "runtime-adaptation.json").write_text(json.dumps({"runtime": LOCK["runtime"], "files": receipt}, indent=2) + "\n")
     print(f"Prepared Node {LOCK['node']['version']} and {len(receipt)} original Runtime JavaScript files; desktop binaries excluded.")
 

@@ -1,3 +1,5 @@
+// [Sync] 2026-10-31: share bounded, cancellable URLSession Admin HTTP with embedded Node and CPython; original business/authentication remain upstream.
+// [Sync] 2026-11-01: distinguish caller timeouts from cancellation at the private Admin HTTP boundary.
 // [Input] Original Node ChildProcess requests and App-owned guest command execution.
 // [Output] Original Node pipes, startup errors and asynchronous guest exit metadata.
 // [Pos] iOS original Node process compatibility; command sandbox configuration stays upstream.
@@ -20,6 +22,7 @@
 #include <vector>
 #include <utility>
 #include "DreamGuestProcess.h"
+#include "DreamHTTP.h"
 namespace {
 using namespace v8;
 struct NodeProcess {
@@ -314,11 +317,77 @@ void Reference(const FunctionCallbackInfo<Value>& a) {
     auto h=reinterpret_cast<uv_handle_t *>(&Handle(a)->notification);
     if(a[1]->BooleanValue(a.GetIsolate()))uv_ref(h); else uv_unref(h);
 }
+struct AdminHTTPJob {
+    uv_work_t request;
+    Isolate *isolate;
+    Global<Context> context;
+    Global<Function> callback;
+    node::AsyncResource *resource;
+    node::AsyncCleanupHookHandle cleanup;
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> timedOut{false};
+    bool closing=false;
+    void (*cleanupDone)(void *)=nullptr;
+    void *cleanupContext=nullptr;
+    std::string input,output;
+};
+int32_t AdminHTTPCancelled(void *context) {
+    auto p=static_cast<AdminHTTPJob *>(context);
+    return p->cancelled.load()?(p->timedOut.load()?2:1):0;
+}
+void PerformAdminHTTP(uv_work_t *request) {
+    auto p=static_cast<AdminHTTPJob *>(request->data);
+    if(p->cancelled.load()) { p->output="{\"ok\":false,\"error\":\"cancelled\"}"; return; }
+    char *result=IMDreamHTTPPerform(p->input.c_str(),AdminHTTPCancelled,p);
+    p->output=result?result:"{\"ok\":false,\"error\":\"transport\"}";
+    free(result);
+}
+void CleanupAdminHTTP(void *context,void (*done)(void *),void *doneContext) {
+    auto p=static_cast<AdminHTTPJob *>(context);
+    p->closing=true; p->cancelled.store(true); p->cleanupDone=done; p->cleanupContext=doneContext;
+    uv_cancel(reinterpret_cast<uv_req_t *>(&p->request));
+}
+void AdminHTTPDone(uv_work_t *request,int status) {
+    auto p=static_cast<AdminHTTPJob *>(request->data);
+    if(!p->closing) {
+        auto i=p->isolate; HandleScope scope(i); auto c=p->context.Get(i); Context::Scope context_scope(c);
+        Local<Value> values[]={Key(i,status==UV_ECANCELED?"{\"ok\":false,\"error\":\"cancelled\"}":p->output.c_str())};
+        auto result=p->resource->MakeCallback(p->callback.Get(i),1,values); (void)result;
+    }
+    auto done=p->cleanupDone; auto doneContext=p->cleanupContext;
+    if(p->cleanup)node::RemoveEnvironmentCleanupHook(std::move(p->cleanup));
+    delete p->resource; p->callback.Reset(); p->context.Reset(); delete p;
+    if(done)done(doneContext);
+}
+void StartAdminHTTP(const FunctionCallbackInfo<Value>& a) {
+    auto i=a.GetIsolate(); auto c=i->GetCurrentContext();
+    if(a.Length()!=2||!a[0]->IsString()||!a[1]->IsFunction()) {
+        i->ThrowException(Exception::TypeError(Key(i,"IOS_ADMIN_HTTP_ARGUMENTS_INVALID"))); return;
+    }
+    auto p=new AdminHTTPJob; p->isolate=i; p->context.Reset(i,c); p->callback.Reset(i,a[1].As<Function>());
+    p->resource=new node::AsyncResource(i,Object::New(i),"ink:adminHTTP");
+    p->input=Text(i,a[0]); p->request.data=p;
+    int error=uv_queue_work(node::GetCurrentEventLoop(i),&p->request,PerformAdminHTTP,AdminHTTPDone);
+    if(error) {
+        delete p->resource; p->callback.Reset(); p->context.Reset(); delete p;
+        i->ThrowException(Exception::Error(Key(i,"IOS_ADMIN_HTTP_QUEUE_FAILED"))); return;
+    }
+    p->cleanup=node::AddEnvironmentCleanupHook(i,CleanupAdminHTTP,p);
+    a.GetReturnValue().Set(External::New(i,p));
+}
+void CancelAdminHTTP(const FunctionCallbackInfo<Value>& a) {
+    if(a.Length()>=1&&a[0]->IsExternal()) {
+        auto p=static_cast<AdminHTTPJob *>(a[0].As<External>()->Value());
+        if(a.Length()>1&&a[1]->IsTrue())p->timedOut.store(true);
+        p->cancelled.store(true);
+    }
+}
 void Initialize(Local<Object> exports,Local<Value>,Local<Context> context) {
     NODE_SET_METHOD(exports,"hostPID",HostPID); NODE_SET_METHOD(exports,"initialize",InitializeGuest);
     NODE_SET_METHOD(exports,"spawn",Spawn); NODE_SET_METHOD(exports,"close",Close);
     NODE_SET_METHOD(exports,"kill",Kill); NODE_SET_METHOD(exports,"reference",Reference);
     NODE_SET_METHOD(exports,"spawnSync",SpawnSync); NODE_SET_METHOD(exports,"signal",Signal);
+    NODE_SET_METHOD(exports,"adminHTTP",StartAdminHTTP); NODE_SET_METHOD(exports,"cancelAdminHTTP",CancelAdminHTTP);
     Set(context,exports,"version",Integer::New(context->GetIsolate(),1));
 }
 NODE_MODULE_LINKED(ink_dream_process,Initialize)

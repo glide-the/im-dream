@@ -1,3 +1,5 @@
+// [Sync] 2026-10-30: the native login presentation opens the existing sign-in route; the RN root owns the authenticated home.
+// [Sync] 2026-10-31: route only the retained login document's explicit account navigation through its operation owner.
 // [Input] Original Web resources/theme tokens, v1 bridge requests and iOS lifecycle/network notifications.
 // [Output] One WKWebView, native page appearance, origin/generation checks and original startup/status replies.
 // [Pos] Minimal iOS container; embedded Python starts before the existing React entry.
@@ -27,6 +29,7 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
     var appearanceDidChange: ((UIColor, UIUserInterfaceStyle) -> Void)?
     var reactNativeHost = false
     var hostStateDidChange: (([String: Any]) -> Void)?
+    var accountNavigation: ((WKNavigationAction, URL?) -> Bool)?
     private var pendingNavigation: String?
     private var webFailed = false
     private var lastBusinessPath = "/story-workspace/chat"
@@ -234,7 +237,10 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
         hostStateDidChange?(["background": background, "mode": mode])
     }
 
+    func reloadAccountDocument() { webView?.reload() }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if accountNavigation?(action, webView.url) == true { decisionHandler(.cancel); return }
         if action.shouldPerformDownload, let target = action.request.url,
            isBusinessDownloadURL(target) {
             decisionHandler(.download)
@@ -396,7 +402,7 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
             showStartupFailure(CocoaError(.coderInvalidValue), title: "Dream 启动失败")
             return
         }
-        let entry = reactNativeHost ? URL(string: lastBusinessPath, relativeTo: url)?.absoluteURL ?? url : url
+        let entry = reactNativeHost ? URL(string: "/auth/sign-in", relativeTo: url)?.absoluteURL ?? url : url
         webView.load(URLRequest(url: entry))
     }
 

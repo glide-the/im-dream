@@ -1,3 +1,7 @@
+// [Sync] 2026-10-31: hidden Chat scenes and covering panels release local editor focus while retaining their composer.
+// [Sync] 2026-10-31: await scoped MCP document closure before Thread/new Chat/side view changes; SessionGate owns account departure.
+// [Sync] 2026-10-30: adopt original task activity sections and source-thread navigation without replacing Chat/runtime owners.
+// [Sync] 2026-10-30: adopt original tool/file results and persistent MCP App/editor leaves; preserve message DTOs and route editor jumps to Writing.
 // [Sync] 2026-10-29: adopt complete native Settings/Work resources and the Writing Calendar resources intent; retain the App-owned runtime and Chat.
 // [Sync] 2026-10-29: adopt the one-page five-item More navigator; keep Chat mounted and isolate normal account instances.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
@@ -36,7 +40,7 @@ import useNativeActivitySidebarData from '../app/_dream/components/chat/useNativ
 import ScheduledTaskDetailSidebar from '../app/_dream/components/chat/ScheduledTaskDetailSidebar.native';
 import ChatHistorySearch from '../app/_dream/components/chat/ChatHistorySearch.native';
 import WorkspaceFilePreview from '../app/_dream/components/chat/WorkspaceFilePreview.native';
-import {createWorkspaceResources} from './platform/workspaceFiles.native';
+import {createWorkspaceResources,createMessageFileResources} from './platform/workspaceFiles.native';
 import {releaseNativeFiles,type NativePickedFile} from './platform/fileUpload.native';
 import ChatTopActions from '../app/_dream/components/chat/ChatTopActions.native';
 import PluginReceiptBadge,{ChatAgentBadge} from '../app/_dream/components/chat/PluginReceiptBadge.native';
@@ -56,13 +60,17 @@ import StoryWorkspaceSettingsPage,{type NativeSettingsNavigation} from '../app/_
 import MoreNavigator from '../app/_dream/components/story-workspace/layout/MoreNavigator.native';
 import useInkColors from './components/useInkColors.native';
 import SketchInputSurface from '../app/_dream/components/chat/SketchInputSurface.native';
-import {resolveToolName} from '../app/_dream/components/chat/toolConfirmation';
-import {summarizeToolInvocation} from '../app/_dream/components/chat/toolInputSummary';
+import ToolMessagePart from '../app/_dream/components/chat/ToolMessagePart.native';
+import FileMessagePart from '../app/_dream/components/chat/FileMessagePart.native';
+import PlanButton from '../app/_dream/components/chat/PlanPanel.native';
+import {closeToolResultDocuments} from '../app/_dream/components/chat/ToolResultSurface.native';
+import useNativeTaskActivity from '../app/_dream/components/chat/useNativeTaskActivity.native';
+import type {EditorJumpToCellDetail} from '../app/_dream/components/chat/editorWriteTools';
 import SessionGate from './platform/SessionGate';
 import ScreenFrame from './components/ScreenFrame';
 import {clientFetch} from './platform/transport';
 
-function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice}: {ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string}) {
+function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner}: {documentOwner?:object;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string}) {
   const {t}=useTranslation();
   const composer=useRef<NativeAIInputDockHandle>(null),share=useRef<NativeChatShareHandle>(null);
   const [fileSidebarOpen,setFileSidebarOpen]=useState(false);
@@ -72,12 +80,16 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const config:Partial<NativeChatConfig>=setup.config ?? {};
   const [contextReadError,setContextReadError]=useState('');
   const [error, setError] = useState(initialNotice ?? '');
+  const toolDocumentOwner=useMemo(()=>documentOwner??{},[documentOwner]);
   const [workspaceUri,setWorkspaceUri]=useState<string|null>(null);
   const refreshOwner=useRef(refreshSession);refreshOwner.current=refreshSession;
   const fileResources=useMemo(()=>createWorkspaceResources(undefined,()=>void refreshOwner.current()),[]);
+  const messageFiles=useMemo(()=>createMessageFileResources(undefined,()=>void refreshOwner.current()),[]);
+  const editorJumpNonce=useRef(0);
+  const [editorJump,setEditorJump]=useState<{nonce:number;detail:EditorJumpToCellDetail}>();
   const [activityOpen,setActivityOpen]=useState(false),[activityFilters,setActivityFilters]=useState(nativeActivityFilters),[scheduledDetail,setScheduledDetail]=useState<{taskId:string;snapshot?:ScheduledTaskMarkerSnapshot|null}|null>(null);
   const activity=useNativeActivitySidebarData(activityOpen,{onSessionExpired:()=>void refreshSession()});
-  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string}|null>(null);
+  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string;documentOwner:object}|null>(null);
   const [section, setSection] = useState<'chat' | 'decks' | 'more'>('chat');
   const [moreVisited,setMoreVisited]=useState(false),[moreNonce,setMoreNonce]=useState(0),moreSource=useRef<'chat'|'decks'>('chat');
   const [settingsNavigation,setSettingsNavigation]=useState<NativeSettingsNavigation>({nonce:0,target:'menu'});
@@ -97,6 +109,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const canStop=chatMainTurnCanStop(session.posting?'submitted':'ready',session.running,false) || stopping;
   const colors=useInkColors();
   const foreground=colors['color-text-primary'];
+  const taskActivity=useNativeTaskActivity(thread,{active:section==='chat'&&sideChat===null,running:session.running||session.posting,onSessionExpired:()=>void refreshSession()});
   const visibleThread=useRef(thread);visibleThread.current=thread;
   useEffect(()=>{if(initialThreadId)void session.openThread(initialThreadId);},[initialThreadId]);
   useEffect(()=>{
@@ -110,24 +123,27 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     setBoundDeck(undefined);let active=true;void getDeck(record.deck_id,clientFetch).then(deck=>{if(active)setBoundDeck(deck);}).catch(()=>{if(active)setContextReadError('Agent上下文暂时无法读取，请重试读取对话。');});
     return()=>{active=false;};
   },[session.thread?.id,session.thread?.deck_id,setup.revision]);
-  const selectThread=(id:string)=>{setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSketchOpen(false);setComposerKey(value=>value+1);return session.openThread(id);};
-  const deleteThread=(id:string)=>{void history.remove(id).then(removed=>{if(!removed)return;activity.removeChat(id);if(id===session.threadId){session.newChat();setComposerKey(value=>value+1);setSketchOpen(false);}});};
+  const selectThread=async(id:string)=>{await closeToolResultDocuments(toolDocumentOwner);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSketchOpen(false);setComposerKey(value=>value+1);return session.openThread(id);};
+  const deleteThread=(id:string)=>{void history.remove(id).then(async removed=>{if(!removed)return;activity.removeChat(id);if(id===session.threadId){await closeToolResultDocuments(toolDocumentOwner);if(id!==session.threadId)return;session.newChat();setComposerKey(value=>value+1);setSketchOpen(false);}});};
   const workspaceAvailability=!configLoaded?'loading':config.workspace_enabled===false?'disabled':'enabled';
   const openWorkspace=(uri:string)=>{setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setWorkspaceUri(uri);};
   const addWorkspaceImage=async(file:NativePickedFile)=>{if(!composer.current||visibleThread.current!==thread){releaseNativeFiles([file.id]);return false;}return composer.current.addFile(file);};
-  const newChat=()=>{session.newChat();setBoundContext({});setBoundDeck(undefined);setDeckPrefill(undefined);setError('');setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setComposerKey(value=>value+1);};
+  const newChat=async()=>{await closeToolResultDocuments(toolDocumentOwner);session.newChat();setBoundContext({});setBoundDeck(undefined);setDeckPrefill(undefined);setError('');setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setComposerKey(value=>value+1);};
   const openSection=(value:'chat'|'decks'|'more')=>{if(value==='more'){if(section!=='more')moreSource.current=section;setMoreVisited(true);setMoreNonce(n=>n+1);}Keyboard.dismiss();setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSection(value);};
-  const tryDeck=(deck:Deck,voice:Voice,input?:string)=>{if(deck.agent_type==='dream')return;newChat();setSelection({deckId:deck.id,agentId:voice.id});setDeckPrefill({text:input ?? '',nonce:composerKey+1});openSection('chat');};
+  const tryDeck=async(deck:Deck,voice:Voice,input?:string)=>{if(deck.agent_type==='dream')return;await newChat();setSelection({deckId:deck.id,agentId:voice.id});setDeckPrefill({text:input ?? '',nonce:composerKey+1});openSection('chat');};
   const toggleActivity=()=>{Keyboard.dismiss();setFileSidebarOpen(false);setWorkspaceUri(null);setScheduledDetail(null);setSketchOpen(false);setActivityOpen(value=>!value);};
   const toggleWorkspace=()=>{Keyboard.dismiss();setActivityOpen(false);setWorkspaceUri(null);setScheduledDetail(null);setSketchOpen(false);setFileSidebarOpen(value=>!value);};
   useEffect(()=>{if(configLoaded&&config.workspace_enabled===false)setFileSidebarOpen(false);},[configLoaded,config.workspace_enabled]);
   const retryReads=()=>{setError('');setup.retry();if(session.error)void session.retry();else if(!setup.error&&!contextReadError)void history.reload();};
   const stop=()=>session.stop();
-  const openSideChat=async(entry:ThreadInputEntry)=>{const task=await session.sideTask(entry);if(task&&visibleThread.current===entry.thread_id)setSideChat({threadId:task.thread_id,notice:task.error_code?t('chat.inputQueue.sideChatLaunchFailed'):undefined});};
+  const openSideChat=async(entry:ThreadInputEntry)=>{const task=await session.sideTask(entry);if(task&&visibleThread.current===entry.thread_id)setSideChat({threadId:task.thread_id,documentOwner:{},notice:task.error_code?t('chat.inputQueue.sideChatLaunchFailed'):undefined});};
+  const closeSideChat=async()=>{const current=sideChat;if(current)await closeToolResultDocuments(current.documentOwner);setSideChat(value=>value===current?null:value);};
+  const closeBusiness=async()=>{await closeToolResultDocuments(toolDocumentOwner);onClose?.();};
   return <SafeAreaView style={styles.fill}><KeyboardAvoidingView style={styles.fill} accessibilityElementsHidden={activityOpen||fileSidebarOpen||scheduledDetail!==null} importantForAccessibility={activityOpen||fileSidebarOpen||scheduledDetail!==null?'no-hide-descendants':'auto'} enabled={Boolean(onClose) || Platform.OS !== 'ios'} behavior={onClose&&Platform.OS==='ios'?'padding':undefined}>
     <View style={[styles.header,section==='more'?styles.hidden:undefined]}>{section!=='chat'?<InkLabel style={[styles.title,{color:foreground}]}>Ink &amp; Memory</InkLabel>:null}<View style={styles.fill}/>
-      {onClose?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputQueue.closeSideChat')} onPress={onClose} style={styles.action}><InkLabel style={{color:foreground}}>{t('chat.history.close')}</InkLabel></Pressable>:section==='chat'?<ChatTopActions creating={session.posting&&!thread} activityOpen={activityOpen} workspaceEnabled={configLoaded&&config.workspace_enabled!==false} workspaceOpen={fileSidebarOpen}
+      {onClose?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputQueue.closeSideChat')} onPress={()=>void closeBusiness()} style={styles.action}><InkLabel style={{color:foreground}}>{t('chat.history.close')}</InkLabel></Pressable>:section==='chat'?<ChatTopActions creating={session.posting&&!thread} activityOpen={activityOpen} workspaceEnabled={configLoaded&&config.workspace_enabled!==false} workspaceOpen={fileSidebarOpen}
       contextBadge={selectedVoice && (!thread || boundContext.threadId===thread)?<ChatAgentBadge voice={selectedVoice}/>:undefined}
+      planAction={thread?<PlanButton key={thread} threadId={thread} origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onOpenLink={url=>void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'))} activity={taskActivity} active={section==='chat'&&sideChat===null} onNavigateThread={id=>void selectThread(id)} onOpenScheduledTask={snapshot=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail({taskId:snapshot.id,snapshot});}} onSessionExpired={()=>void refreshSession()}/>:undefined}
       pluginReceipt={<PluginReceiptBadge threadId={thread??null} deck={!thread || boundContext.threadId===thread?selectedDeck:undefined} activeVoiceId={selectedVoice?.id} activeVoiceName={selectedVoice?.name} onSessionExpired={()=>void refreshSession()}
         onSelectAgent={thread?voiceId=>{if(!selectedDeck?.voices?.some(voice=>voice.enabled && voice.id===voiceId))return;setBoundContext(current=>current.threadId===thread?{...current,voiceId}:current);}:undefined}/>}
         onNewChat={newChat} onToggleActivity={toggleActivity} onToggleWorkspace={toggleWorkspace} onShare={()=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail(null);setWorkspaceUri(null);setSketchOpen(false);share.current?.open();}}/>:null}</View>
@@ -137,9 +153,13 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       onDeleteThread={deleteThread}
       onQuickAction={item=>{void session.send(item.prompt,[],'auto').catch(()=>setError(t('chat.history.createFailed')));}}
       conversation={<ChatMessageList messages={messages} threadId={thread ?? ''} isLoading={session.running || session.posting} initialLoading={session.recovering}
+        sourceThread={taskActivity.data.links?.source} onNavigateThread={id=>void selectThread(id)}
         origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onAddImageMaterial={addWorkspaceImage} historicalMessageIds={session.historicalMessageIds} historyHasMore={session.hasMore} historyLoading={session.loadingOlder}
         onLoadOlder={()=>void session.loadOlder()} onOpenLink={url=>{void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'));}}
-        renderOtherPart={part=><Text style={{color:foreground,fontSize:16}}>{isToolUIPart(part)?summarizeToolInvocation(resolveToolName(part),'input' in part?part.input:undefined)||resolveToolName(part):part.type==='file'?part.filename||part.mediaType:''}</Text>} />}
+        renderOtherPart={(part,message,_index,presentation)=>isToolUIPart(part)?<ToolMessagePart documentOwner={toolDocumentOwner} part={part} origin={origin} threadId={thread??''} isLoading={session.running||session.posting} isLast={message.id===messages.at(-1)?.id} presentation={presentation}
+          toolChoice={config.im_full_access_enabled?'auto':toolChoice} settledToolCallIds={session.settled} runtimePendingToolCallIds={session.runtimePending} active={section==='chat'&&sideChat===null}
+          sendUserMessage={value=>{setToolChoice('auto');return session.sendUserMessage(value,thread??null);}} addToolResult={value=>session.addToolResult(value,thread??null)} onConfirmationSettled={id=>session.settleToolCall(id,thread??null)} onSessionExpired={()=>void refreshSession()}
+          onEditorJump={detail=>{setEditorJump({nonce:++editorJumpNonce.current,detail});openSection('more');}}/>:part.type==='file'?<FileMessagePart part={part} origin={origin} isUserMessage={message.role==='user'} resources={messageFiles} onOpenLink={url=>void Linking.openURL(url).catch(()=>setError('链接暂时无法打开。'))}/>:null} />}
       composer={<View style={styles.shrink}>
       {session.queue.some(isThreadInputQueueCard)?<ScrollView accessibilityLabel={t('chat.inputQueue.region')} style={styles.queue} contentContainerStyle={{gap:4.8}} keyboardShouldPersistTaps="handled">
         {session.queue.filter(isThreadInputQueueCard).map(entry=><ThreadInputQueueCard key={entry.message_id} entry={entry} localOwner={session.localOwner} onGuide={session.guide} onCancel={session.cancelInput} onEdit={session.editInput} onSideChat={openSideChat}/>)}
@@ -153,6 +173,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       {session.confirmation ? <ToolConfirmationDock key={session.confirmation.partKey} confirmation={session.confirmation} onConfirm={session.confirm} /> : null}
       {origin ? <View style={styles.shrink}>
         <AIInputDock key={composerKey} ref={composer} origin={origin} disabled={uncertain} loading={running}
+          active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
           onSendMessage={(text,files,choice)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}
           onStop={thread && canStop?stop:undefined} stopPending={stopping} loadingLabel={t(session.recovering?'chat.historyTurn.loading':'chat.inputDock.generating')} onOpenSketch={()=>setSketchOpen(true)}
@@ -167,8 +188,8 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
         onTryDeck={tryDeck} />
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
-      {moreVisited?<MoreNavigator ownerId={ownerId} origin={origin} decks={decks} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
-        onOpenThread={id=>setSideChat({threadId:id})} onPrepareChat={input=>{newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
+      {moreVisited?<MoreNavigator ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
+        onOpenThread={id=>setSideChat({threadId:id,documentOwner:{}})} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
         renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
@@ -184,12 +205,12 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     <ChatHistorySearch history={history} activeThreadId={thread} onSelect={id=>void selectThread(id)}/>
     {workspaceUri?<WorkspaceFilePreview key={thread??'no-thread'} uri={workspaceUri} threadId={thread??undefined} availability={workspaceAvailability} resources={fileResources} onClose={()=>setWorkspaceUri(null)} onOpenWorkspace={openWorkspace} onOpenLink={url=>{void Linking.openURL(new URL(url,origin).href).catch(()=>setError('链接暂时无法打开。'));}} onAddImageMaterial={addWorkspaceImage}/>:null}
     {origin && section==='chat'?<SketchInputSurface key={composerKey} origin={origin} open={sketchOpen} disabled={uncertain} onClose={()=>setSketchOpen(false)} onAdd={file=>composer.current?.addFile(file) ?? Promise.resolve(false)} />:null}
-    <Modal visible={sideChat!==null} animationType="slide" presentationStyle="pageSheet" onRequestClose={()=>setSideChat(null)} supportedOrientations={['portrait','landscape']}>
-      {sideChat?<ScreenFrame><Business key={sideChat.threadId} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} onClose={()=>setSideChat(null)}/></ScreenFrame>:null}
+    <Modal visible={sideChat!==null} animationType="slide" presentationStyle="pageSheet" onRequestClose={()=>void closeSideChat()} supportedOrientations={['portrait','landscape']}>
+      {sideChat?<ScreenFrame><Business key={sideChat.threadId} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} onClose={()=>void closeSideChat()}/></ScreenFrame>:null}
     </Modal>
   </SafeAreaView>;
 }
-export default function App() { return <ScreenFrame><SessionGate>{(logout,refreshSession,user) => <Business key={user.id} ownerId={user.id} logout={logout} refreshSession={refreshSession} />}</SessionGate></ScreenFrame>; }
+export default function App() { return <ScreenFrame><SessionGate beforeRelease={()=>closeToolResultDocuments()}>{(logout,refreshSession,user) => <Business key={user.id} ownerId={user.id} logout={logout} refreshSession={refreshSession} />}</SessionGate></ScreenFrame>; }
 const styles = StyleSheet.create({
   hidden:{display:'none'},
   overlay:{...StyleSheet.absoluteFillObject,zIndex:10},toolbarAction:{width:44,height:44,alignItems:'center',justifyContent:'center'},newAction:{minHeight:44,flexDirection:'row',alignItems:'center',gap:5.6,paddingHorizontal:8.8},shrink:{flexShrink:1,minHeight:0},fill:{flex:1},queue:{maxHeight:192,flexShrink:1},queueNotice:{padding:8,gap:4,borderWidth:StyleSheet.hairlineWidth,borderRadius:12},header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:12},title:{fontSize:22},action:{padding:16,minHeight:48},message:{padding:16,gap:8},error:{padding:12},composer:{flexDirection:'row',alignItems:'flex-end',padding:10,borderTopWidth:StyleSheet.hairlineWidth,borderColor:'#9c8e7c'},input:{flex:1,minHeight:48,maxHeight:180,padding:12,fontSize:16},tabs:{flexDirection:'row',justifyContent:'space-around'}});

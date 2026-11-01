@@ -28,3 +28,18 @@ test('Writing display changes validate document identity and revision while reta
  await page.evaluate(()=>{const f=(window as any).__writingDocument;f.send({revision:0,theme:'light'});});await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
  await page.evaluate(()=>(window as any).__writingDocument.send({theme:'light',showEnergyBar:true}));await expect(page.locator('html')).toHaveAttribute('data-theme','light');await expect(page.getByText('Energy:',{exact:true})).toBeVisible();await expect(editor).toHaveValue('Keep this original writing.');expect(f.errors).toEqual([]);expect(f.createRequests).toEqual([]);
 });
+
+test('the original Writing document dispatches a matched native note jump once after the canvas is mounted',async({page})=>{
+ const {f,saves}=await open(page),editor=page.getByPlaceholder('Start writing...', {exact:true});await editor.fill('Keep the current note and its identity.');
+ await expect.poll(()=>saves.some(save=>save.editor_state?.cells?.some((cell:any)=>cell.content==='Keep the current note and its identity.'))).toBe(true);
+ const saved=saves.findLast(save=>save.editor_state?.cells?.some((cell:any)=>cell.content==='Keep the current note and its identity.'));
+ const cell=saved!.editor_state.cells.find((cell:any)=>cell.content==='Keep the current note and its identity.');
+ await page.evaluate(()=>{(window as any).__writingJumps=[];window.addEventListener('editor:jump-to-cell',event=>(window as any).__writingJumps.push((event as CustomEvent).detail));});
+ const detail={cellId:cell.id,editorSessionId:saved!.session_id};
+ await page.evaluate(detail=>(window as any).__writingDocument.send({editorJump:{nonce:1,detail}}),detail);
+ await expect.poll(()=>page.evaluate(()=>(window as any).__writingDocument.events.filter((event:any)=>event.type==='editor-jump-dispatched').length)).toBe(1);
+ expect(await page.evaluate(()=>(window as any).__writingJumps)).toEqual([detail]);
+ await page.evaluate(detail=>(window as any).__writingDocument.send({editorJump:{nonce:1,detail}}),detail);
+ await expect(editor).toHaveValue('Keep the current note and its identity.');
+ expect(await page.evaluate(()=>(window as any).__writingDocument.events.filter((event:any)=>event.type==='editor-jump-dispatched').length)).toBe(1);expect(f.errors).toEqual([]);expect(f.createRequests).toEqual([]);
+});

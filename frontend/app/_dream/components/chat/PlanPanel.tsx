@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share existing presentation defaults with Native without changing the Web panel lifecycle or layout.
 // [Input] useThreadPlan store（planMode / exists / content / truncated / updatedAt）、
 //         useThreadTodos store（source / exists / todos / truncated / updatedAt）与
 //         hydrateThreadPlan / hydrateThreadTodos 全量拉取。
@@ -38,14 +39,13 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { IconChevronDown, IconChevronUp, IconList, IconPlanTasks } from './Icons';
 import ChatMarkdown from './ChatMarkdown';
 import { hydrateThreadPlan, useThreadPlan, type ThreadPlanMode, type ThreadPlanState } from '../../hooks/useThreadPlan';
 import { useThreadTodos, type ThreadTodoItem, type ThreadTodoState, type ThreadTodoStatus } from '../../hooks/useThreadTodos';
-import { getDateLocale } from '../../i18n';
 import TaskActivityContent from './TaskActivityContent';
 import { fetchTaskSessionLinks } from './taskSessionLinks';
+import { TASK_ACTIVITY_REFRESH_INTERVAL_MS, TASK_TODO_VISIBLE_COUNT, formatTaskRelativeTime } from './taskActivityPresentation';
 import { hydrateThreadSubagents, useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { getThreadScheduledTasks, type ScheduledTaskThreadSnapshot } from '../../api/scheduledTaskApi';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
@@ -64,7 +64,7 @@ const PLAN_MODE_BADGE: Record<Exclude<ThreadPlanMode, 'none'>, { labelKey: strin
   exited: { labelKey: 'chat.planPanel.exited', color: '#52c77e' },
 };
 
-const ACTIVITY_REFRESH_INTERVAL_MS = 8000;
+const ACTIVITY_REFRESH_INTERVAL_MS = TASK_ACTIVITY_REFRESH_INTERVAL_MS;
 
 /** 弹层双卡片（计划 / 待办）共享的卡片样式：圆角纸面 + 细边 + 柔和投影。 */
 const POPOVER_CARD_STYLE: CSSProperties = {
@@ -79,20 +79,6 @@ const POPOVER_CARD_STYLE: CSSProperties = {
 };
 
 /** Relative timestamp label consistent with ChatView 的历史时间分组风格（i18n-aware）。 */
-function formatRelativeTime(value: string, t: TFunction, language?: string): string {
-  const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
-  if (Number.isNaN(date.getTime())) return '';
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 0) return t('chat.planPanel.justNow');
-  const minutes = Math.floor(diffMs / 60000);
-  if (minutes < 1) return t('chat.planPanel.justNow');
-  if (minutes < 60) return t('chat.planPanel.minutesAgo', { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t('chat.planPanel.hoursAgo', { count: hours });
-  const days = Math.floor(hours / 24);
-  if (days < 7) return t('chat.planPanel.daysAgo', { count: days });
-  return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
-}
 
 function PlanModeBadge({ planMode }: { planMode: ThreadPlanMode }) {
   const { t } = useTranslation();
@@ -248,7 +234,7 @@ function TodoListItem({ todo }: { todo: ThreadTodoItem }) {
 }
 
 /** 默认可见条数；超出部分折叠为「展开 N 个」。 */
-const TODO_VISIBLE_COUNT = 3;
+const TODO_VISIBLE_COUNT = TASK_TODO_VISIBLE_COUNT;
 
 /** 弹层「待办」分区：exists:false 时显示「暂无待办」占位。 */
 function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
@@ -440,7 +426,7 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
     setOpen(!open);
   };
 
-  const updatedLabel = plan.updatedAt ? formatRelativeTime(plan.updatedAt, t, i18n.language) : '';
+  const updatedLabel = plan.updatedAt ? formatTaskRelativeTime(plan.updatedAt, t, i18n.language) : '';
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
@@ -561,7 +547,7 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
               <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.planPanel.todosTitle')}</span>
               {todos.updatedAt ? (
                 <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                  {formatRelativeTime(todos.updatedAt, t, i18n.language)}
+                  {formatTaskRelativeTime(todos.updatedAt, t, i18n.language)}
                 </span>
               ) : null}
             </div>
