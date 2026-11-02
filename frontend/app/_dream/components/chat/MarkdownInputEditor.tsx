@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: skip effects for a destroyed Tiptap instance during placeholder-driven recreation and initial native prefill.
 // [Input] User-authored rich text, Markdown value, and composer keyboard/focus callbacks.
 // [Output] Accessible Tiptap composer that round-trips user input to Markdown and exposes optional autocomplete semantics.
 // [Pos] markdown-input-editor component node in frontend/app/_dream/components/chat
@@ -82,7 +83,7 @@ export default function MarkdownInputEditor({
 
   useEffect(() => {
     valueRef.current = value;
-    if (!editor || editor.getMarkdown() === value) {
+    if (!editor || editor.isDestroyed || editor.getMarkdown() === value) {
       return;
     }
     editor.commands.setContent(value, {
@@ -92,11 +93,11 @@ export default function MarkdownInputEditor({
   }, [editor, value]);
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled);
   }, [disabled, editor]);
 
   useEffect(() => {
-    if (!editor) {
+    if (!editor || editor.isDestroyed) {
       return;
     }
     editor.setOptions({

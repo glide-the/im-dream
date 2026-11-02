@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-31: Native沿同一五分区、来源标记和原会话导航，正文包含窄屏骨架。 -->
 <!-- [Input] Current Dream Thread, owner-filtered task links, subagent projection, plan store and todo store. -->
 <!-- [Output] Product rules for a conditional task-activity icon and separated Todo-style cards. -->
 <!-- [Pos] Chat PRD; task creation/runtime ownership remains in docs/prd/claude-agent/task-session.md. -->
@@ -81,3 +82,35 @@ Chat 工具栏 [新建] [活动铃铛] [任务与进度]
 - 验收覆盖任务导航、子智能体侧栏、计划/待办内容、刷新、重开、接口失败、桌面、390px、Escape、外部点击、控制台错误和请求失败。
 
 不在本次范围内：改变任务创建/停止协议、改变 `wait_threads` 完成回传、增加新数据库表、替换子智能体详情侧栏、修改 Deck 元信息产品行为。
+
+## iOS与React Native适配
+
+移动应用沿同一任务与进度入口呈现五个分区，使用原任务关系、原服务端状态及来源返回。Thread切换清除旧任务信息，后台暂停任务信息刷新；关闭面板保留当前对话与输入稿，任务执行继续由原业务管理；恢复前台重新加载。选择其他任务沿原对话切换规则。源码、安装包采用与验证分别归[跨平台正式设计](../../design/multi-platform/react-native-web-project-structure.md#rn任务与进度及来源导航)。
+
+桌面参照：
+
+```text
+Chat工具栏 [新建] [活动] [任务与进度]
+消息流：来源标记 → 首条用户消息
+            ┌ 任务与进度（独立滚动） ┐
+            │ 定时 / 独立任务 → Chat │
+            │ 子智能体 → 只读详情    │
+            │ 计划 / 待办            │
+            └────────────────────────┘
+输入框保留原稿
+```
+
+iOS窄屏骨架：
+
+```text
+安全区与原配色
+Chat工具栏 [新建] [活动] [任务与进度]
+消息流：来源标记 / 原消息（独立滚动）
+输入卡与发送/停止（键盘上方）
+底部 Chat / Decks / More
+点击任务入口 → 视口内面板
+  定时任务 / 独立任务 / 子智能体 / 计划 / 待办
+  正文独立滚动，关闭入口固定可见
+点击独立任务 → 关闭面板 → 原目标Chat
+点击子智能体 → 原只读内容 → 返回任务列表
+```

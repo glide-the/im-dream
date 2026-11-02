@@ -1,4 +1,6 @@
+// [Sync] 2026-11-01: forward the Writing page return to the existing narrow More menu without route or business changes.
 // [Sync] 2026-10-15: render memory behavior through the existing Settings shell.
+// [Sync] 2026-10-27: accept typed RN navigation and exclude mobile Dream workbench presentation through the existing router.
 // [Input] Browser location/history, Story Workspace layout/sidebar, and route page skeletons.
 // [Output] Resolve canonical Story Workspace paths and render every authenticated surface inside its shared layout.
 // [Pos] Story Workspace state-router adapter for the existing App architecture.
@@ -73,6 +75,7 @@ import {
 } from './storyWorkspacePath';
 import { storyWorkspaceDreamWorkflowContext } from './storyWorkspaceDreamContext';
 import { storyWorkspaceDreamChatThread } from './storyWorkspaceChatBridge';
+import {isReactNativeHost, mobileHostPath, reportMobileHostRoute} from '../platform/mobileHost';
 
 export {
   resolveStoryWorkspacePath,
@@ -244,6 +247,8 @@ function renderStoryWorkspaceRoute(
 }
 
 export interface StoryWorkspaceRouterProps {
+  mobileMoreNonce?:number;
+  onMobileMoreOpenChange?:(open:boolean)=>void;
   decksContent: ReactNode;
   workspaceContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
   /** Reopen the actor-scoped Dream source thread before rendering canonical Chat. */
@@ -253,6 +258,7 @@ export interface StoryWorkspaceRouterProps {
 }
 
 export function StoryWorkspaceRouter({
+  mobileMoreNonce, onMobileMoreOpenChange,
   decksContent,
   workspaceContent = {},
   onChatThreadRequest,
@@ -260,7 +266,10 @@ export function StoryWorkspaceRouter({
   renderSettings,
 }: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
-    () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
+    () => {
+      const target = new URL(mobileHostPath(window.location.pathname + window.location.search), window.location.origin);
+      return resolveStoryWorkspacePath(target.pathname, target.search) ?? DEFAULT_MATCH;
+    },
   );
   const [reviewSelection, setReviewSelection] = useState<StoryWorkspaceReviewSelection | null>(null);
   const [reviewSource, setReviewSource] = useState<StoryWorkspaceOutputReceipt | null>(null);
@@ -311,6 +320,10 @@ export function StoryWorkspaceRouter({
   }, []);
 
   const syncFromLocation = useCallback(() => {
+    const permitted = mobileHostPath(window.location.pathname + window.location.search);
+    if (permitted !== window.location.pathname + window.location.search) {
+      window.history.replaceState(storyWorkspaceHistoryState(), '', permitted);
+    }
     const match = resolveStoryWorkspacePath(window.location.pathname, window.location.search);
     if (!match) return;
 
@@ -360,7 +373,7 @@ export function StoryWorkspaceRouter({
     notice?: string,
     requestedChatThreadId?: string,
   ) => {
-    const { pathname, search } = splitStoryWorkspaceHref(path);
+    const { pathname, search } = splitStoryWorkspaceHref(mobileHostPath(path));
     const navigation = storyWorkspaceNavigationTarget(pathname, search);
     if (!navigation) return;
 
@@ -386,6 +399,17 @@ export function StoryWorkspaceRouter({
     onRouteChange?.(navigation.match.route);
     setRouteNotice(notice ?? null);
   }, [activeMatch, onChatThreadRequest, onRouteChange, runDeepLink.run]);
+
+  useEffect(() => {
+    if (!isReactNativeHost()) return;
+    reportMobileHostRoute(true);
+    const navigate = (event: Event) => {
+      const path = (event as CustomEvent<{path?: unknown}>).detail?.path;
+      if (typeof path === 'string' && path.startsWith('/story-workspace/')) handleNavigate(path);
+    };
+    window.addEventListener('ink:host-navigate', navigate);
+    return () => window.removeEventListener('ink:host-navigate', navigate);
+  }, [activeMatch, handleNavigate]);
 
   const handleOpenChatThread = useCallback((threadId: string) => {
     handleNavigate(STORY_WORKSPACE_PATHS.chat, undefined, threadId);
@@ -423,9 +447,11 @@ export function StoryWorkspaceRouter({
       reviewPanelOpen={reviewPanelOpen}
       onReviewPanelOpenChange={setReviewPanelOpen}
       reviewPanelTitle="Agent 产出审阅"
-      showSidebar={!isSettingsRoute}
+      showSidebar={!isSettingsRoute && !isReactNativeHost()}
       sidebar={(
         <StoryWorkspaceSidebar
+          mobileMoreNonce={mobileMoreNonce}
+          onMobileMoreOpenChange={onMobileMoreOpenChange}
           collapsed={sidebarCollapsed}
           currentPath={currentPath}
           onNavigate={handleNavigate}

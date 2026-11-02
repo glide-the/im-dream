@@ -5,6 +5,8 @@
 // [Sync] 2026-09-06: invalidate leases when per-connection App settings revision changes.
 
 import { randomUUID } from 'node:crypto';
+// [Sync] 2026-10-27: server timer ownership remains explicit beside RN global types.
+import { setTimeout, clearTimeout } from 'node:timers';
 
 import {
   type ConnectionLease,
@@ -24,7 +26,7 @@ type Entry = {
   manifestRevision: number;
   references: number;
   invalid: boolean;
-  expiryTimer: ReturnType<typeof setTimeout> | null;
+  expiryTimer: NodeJS.Timeout | null;
 };
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -245,7 +247,7 @@ export class PersistentConnectorManager {
         entry.expiryTimer = null;
         if (delay < remaining) schedule();
         else void this.invalidateKey(key);
-      }, delay);
+      }, delay) as unknown as NodeJS.Timeout;
       entry.expiryTimer.unref?.();
     };
     schedule();

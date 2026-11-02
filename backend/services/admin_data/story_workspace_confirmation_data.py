@@ -1,6 +1,8 @@
 # [Sync] 2026-09-17: reuse the validated immutable Admin capability snapshot instead of repeating discovery per domain call.
 # [Input] Admin Registry120/121 contracts, OAuth bearer or service-only claim identity.
-# [Output] Strict confirmation DTO consumers plus a claim-bound Admin turn owner.
+# [Output] Strict confirmation DTO consumers, owner-scoped pending reads and a claim-bound Admin turn owner.
+# [Sync] 2026-10-26: recover an accepted confirmation from the current OAuth Thread history before exact claim-turn.
+# [Sync] 2026-10-26: retain the claim-bound persistence owner alongside the current user's existing gateway runtime lifecycle.
 # [Pos] Dream data port; PostgreSQL, ORM, lifecycle, permissions and durable claims stay in Admin.
 # [Sync] 2026-09-16: bind confirmation Runtime to a Registry121 server-persistence grant.
 """Typed Registry120 consumer for Story Workspace confirmation persistence."""
@@ -15,7 +17,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .chat_models import ChatStrictDTO
+from .chat_data import AdminChatData
+from .chat_models import ChatStrictDTO, ThreadIdInputDTO
 from .client import AdminDataClient, DomainOperation
 from .errors import AdminDataError, invalid_response
 from .models import (
@@ -41,6 +44,7 @@ from .delegation import (
 )
 from .session_projection_broker import SessionProjectionBrokerSettings
 from .turn_persistence import AdminTurnPersistence
+from .gateway_runtime import AdminGatewayRuntime
 
 RunId = Annotated[str, Field(pattern=r"^run_[0-9a-f]{32}$")]
 MessageId = Annotated[str, Field(pattern=r"^dream_confirm_[0-9a-f]{64}$")]
@@ -247,7 +251,8 @@ def _expected_identity(actor_id: str, command_json: str):
 
 def _validate_dispatch(dispatch: StoryWorkspaceConfirmationDispatchDTO, request_id: str,
                        *, expected_actor: str | None = None,
-                       expected_command_json: str | None = None):
+                       expected_command_json: str | None = None,
+                       write: bool = True):
     try:
         metadata = StoryWorkspaceConfirmationMetadataDTO.model_validate_json(dispatch.metadata_json)
         parts = json.loads(dispatch.parts_json)
@@ -275,7 +280,7 @@ def _validate_dispatch(dispatch: StoryWorkspaceConfirmationDispatchDTO, request_
         ):
             raise ValueError("Confirmation identity mismatch")
     except (TypeError, ValueError):
-        raise invalid_response(request_id, write=True) from None
+        raise invalid_response(request_id, write=write) from None
     return metadata
 
 
@@ -356,6 +361,48 @@ class AdminStoryWorkspaceConfirmationData:
         if result.workflow_run_id != input_dto.workflow_run_id:
             raise invalid_response(request_id)
         return result
+
+    def pending_dispatch(
+        self, workflow_run_id: str, thread_id: str, request_id: str, *, access_token: str,
+    ) -> StoryWorkspaceConfirmationDispatchDTO | None:
+        """Read the original accepted command through the current user's Chat API.
+
+        The caller first checks Run authority and its accepted/undispatched fact.
+        This read grants no execution lease; the coordinator still claims this
+        exact persisted message through the original Admin worker operation.
+        """
+        StoryWorkspaceConfirmationFactInputDTO(workflow_run_id=workflow_run_id)
+        result = AdminChatData(self._client).list_messages(
+            ThreadIdInputDTO(thread_id=thread_id), request_id, access_token=access_token,
+        )
+        matches = []
+        for message in result.messages:
+            metadata = message.metadata
+            if not isinstance(metadata, dict) or metadata.get("story_workspace_run_id") != workflow_run_id:
+                continue
+            if metadata.get("kind") != "story-workspace-dream-confirmation":
+                continue
+            if message.role != "user" or message.metadata_decode_error:
+                raise invalid_response(request_id)
+            try:
+                dispatch = StoryWorkspaceConfirmationDispatchDTO(
+                    thread_id=thread_id, actor_id=self._canonical_user_id,
+                    message_id=message.id, parts_json=_canonical(message.parts),
+                    metadata_json=_canonical(metadata),
+                )
+                parsed = _validate_dispatch(
+                    dispatch, request_id, expected_actor=self._canonical_user_id, write=False,
+                )
+            except (TypeError, ValueError):
+                raise invalid_response(request_id) from None
+            if parsed.story_workspace_run_id != workflow_run_id:
+                raise invalid_response(request_id)
+            matches.append((dispatch, parsed))
+        if len(matches) > 1:
+            raise invalid_response(request_id)
+        if not matches or matches[0][1].dispatch_status == "dispatched":
+            return None
+        return matches[0][0]
 
 
 class AdminStoryWorkspaceConfirmationWorkerData:
@@ -497,3 +544,11 @@ class AdminStoryWorkspaceConfirmationTurnOwner:
     persistence: AdminTurnPersistence
     workflow: AdminWorkflowResolution
     deck: AdminDeckChatContextResolution
+    gateway: AdminGatewayRuntime | None = None
+
+    def close(self) -> None:
+        try:
+            if self.gateway is not None:
+                self.gateway.close()
+        finally:
+            self.persistence.close()

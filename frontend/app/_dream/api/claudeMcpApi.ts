@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: inject native HTTP into the original API factory; Web resolves its current fetch and preserves all public DTO/CSRF/error contracts.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated database-managed `/api/claude-mcp` CRUD, discovery, inventory, and OAuth operation contracts.
@@ -204,6 +205,8 @@ export class ClaudeMcpApiError extends Error {
   }
 }
 
+export function createClaudeMcpApi(transport?:typeof globalThis.fetch) {
+  const fetch:typeof globalThis.fetch=(input,init)=>(transport??globalThis.fetch)(input,init);
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const csrfToken = getBrowserCsrfToken();
@@ -234,23 +237,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-export function getClaudeMcpCapability(): Promise<ClaudeMcpCapability> {
+function getClaudeMcpCapability(): Promise<ClaudeMcpCapability> {
   return request('/api/claude-mcp/capability');
 }
 
-export async function listClaudeMcpServers(): Promise<ClaudeMcpServer[]> {
+async function listClaudeMcpServers(): Promise<ClaudeMcpServer[]> {
   const payload = await request<{ servers: ClaudeMcpServer[] }>('/api/claude-mcp/servers');
   return payload.servers;
 }
 
-export async function getClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+async function getClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
   const payload = await request<{ server: ClaudeMcpServer }>(
     `/api/claude-mcp/servers/${encodeURIComponent(serverName)}`,
   );
   return payload.server;
 }
 
-export async function getClaudeMcpAppSettings(
+async function getClaudeMcpAppSettings(
   serverIdentifier: string,
   workspaceId: string | null = null,
 ): Promise<ClaudeMcpAppSettings> {
@@ -261,7 +264,7 @@ export async function getClaudeMcpAppSettings(
   return payload.appSettings;
 }
 
-export async function updateClaudeMcpAppSettings(
+async function updateClaudeMcpAppSettings(
   server: ClaudeMcpServer,
   settings: ClaudeMcpAppSettings,
   desired: {
@@ -293,7 +296,7 @@ export async function updateClaudeMcpAppSettings(
   return payload.appSettings;
 }
 
-export async function getClaudeMcpAppEffectiveStatus(
+async function getClaudeMcpAppEffectiveStatus(
   serverIdentifier: string,
   workspaceId: string | null = null,
 ): Promise<ClaudeMcpAppEffectiveStatus> {
@@ -318,7 +321,7 @@ export async function getClaudeMcpAppEffectiveStatus(
   return response.json() as Promise<ClaudeMcpAppEffectiveStatus>;
 }
 
-export async function getClaudeMcpServerInventory(
+async function getClaudeMcpServerInventory(
   serverIdentifier: string,
 ): Promise<ClaudeMcpServerInventory> {
   const payload = await request<{ discovery: ManagedDiscoveryResult }>(
@@ -353,7 +356,7 @@ export async function getClaudeMcpServerInventory(
   };
 }
 
-export async function configureClaudeMcpServer(
+async function configureClaudeMcpServer(
   name: string,
   url: string | null,
   options: {
@@ -375,7 +378,7 @@ export async function configureClaudeMcpServer(
   return payload.server;
 }
 
-export async function updateClaudeMcpServer(
+async function updateClaudeMcpServer(
   server: ClaudeMcpServer,
   changes: {
     displayName: string;
@@ -410,7 +413,7 @@ export async function updateClaudeMcpServer(
   return payload.server;
 }
 
-export async function removeClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+async function removeClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
   const server = await getClaudeMcpServer(serverName);
   const revision = server.revision;
   const payload = await request<{ server: ClaudeMcpServer }>(
@@ -420,7 +423,7 @@ export async function removeClaudeMcpServer(serverName: string): Promise<ClaudeM
   return payload.server;
 }
 
-export async function startClaudeMcpAuth(serverName: string): Promise<ClaudeMcpOperation> {
+async function startClaudeMcpAuth(serverName: string): Promise<ClaudeMcpOperation> {
   const payload = await request<{ operation: ClaudeMcpOperation }>(
     `/api/claude-mcp/servers/${encodeURIComponent(serverName)}/auth-operations`,
     { method: 'POST', body: '{}' },
@@ -428,14 +431,14 @@ export async function startClaudeMcpAuth(serverName: string): Promise<ClaudeMcpO
   return payload.operation;
 }
 
-export async function getClaudeMcpOperation(operationId: string): Promise<ClaudeMcpOperation> {
+async function getClaudeMcpOperation(operationId: string): Promise<ClaudeMcpOperation> {
   const payload = await request<{ operation: ClaudeMcpOperation }>(
     `/api/claude-mcp/auth-operations/${encodeURIComponent(operationId)}`,
   );
   return payload.operation;
 }
 
-export async function submitClaudeMcpRedirect(
+async function submitClaudeMcpRedirect(
   operationId: string,
   redirectUrl: string,
 ): Promise<ClaudeMcpOperation> {
@@ -446,7 +449,7 @@ export async function submitClaudeMcpRedirect(
   return payload.operation;
 }
 
-export async function cancelClaudeMcpAuth(operationId: string): Promise<ClaudeMcpOperation> {
+async function cancelClaudeMcpAuth(operationId: string): Promise<ClaudeMcpOperation> {
   const payload = await request<{ operation: ClaudeMcpOperation }>(
     `/api/claude-mcp/auth-operations/${encodeURIComponent(operationId)}/cancel`,
     { method: 'POST', body: '{}' },
@@ -454,10 +457,15 @@ export async function cancelClaudeMcpAuth(operationId: string): Promise<ClaudeMc
   return payload.operation;
 }
 
-export async function logoutClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+async function logoutClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
   const payload = await request<{ server: ClaudeMcpServer }>(
     `/api/claude-mcp/servers/${encodeURIComponent(serverName)}/credential`,
     { method: 'DELETE' },
   );
   return payload.server;
 }
+
+return {getClaudeMcpCapability,listClaudeMcpServers,getClaudeMcpServer,getClaudeMcpAppSettings,updateClaudeMcpAppSettings,getClaudeMcpAppEffectiveStatus,getClaudeMcpServerInventory,configureClaudeMcpServer,updateClaudeMcpServer,removeClaudeMcpServer,startClaudeMcpAuth,getClaudeMcpOperation,submitClaudeMcpRedirect,cancelClaudeMcpAuth,logoutClaudeMcpServer};
+}
+export const {getClaudeMcpCapability,listClaudeMcpServers,getClaudeMcpServer,getClaudeMcpAppSettings,updateClaudeMcpAppSettings,getClaudeMcpAppEffectiveStatus,getClaudeMcpServerInventory,configureClaudeMcpServer,updateClaudeMcpServer,removeClaudeMcpServer,startClaudeMcpAuth,getClaudeMcpOperation,submitClaudeMcpRedirect,cancelClaudeMcpAuth,logoutClaudeMcpServer}=createClaudeMcpApi();
+export type ClaudeMcpApi=ReturnType<typeof createClaudeMcpApi>;

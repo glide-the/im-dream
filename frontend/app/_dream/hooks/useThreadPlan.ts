@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share the original REST projection with Native observers without writing the Web store.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] plan-mode-changed / plan-updated SSE 事件（经 claude-agent-transport convertEvent 转发）
@@ -152,44 +153,21 @@ export function applyPlanEvent(threadId: string, event: ThreadPlanEvent): void {
  * when an SSE snapshot arrived truncated (§5.4 truncated → §5.5 拉全量).
  * Fetch failures leave the current state untouched.
  */
+export async function readThreadPlan(threadId: string, options: {transport?: typeof fetch; signal?: AbortSignal} = {}, previousMode: () => ThreadPlanMode = () => 'none'): Promise<ThreadPlanState> {
+    const res = await (options.transport ?? fetch)(
+      apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/plan`),
+      { headers: { ...browserRequestHeaders() }, ...(options.signal ? {signal: options.signal} : {}) },
+    );
+    if (!res.ok) throw new Error(`Plan unavailable (${res.status})`);
+    const data = (await res.json()) as ThreadPlanApiResponse;
+    if (!data.exists) return {...EMPTY_THREAD_PLAN, planMode: data.plan_mode ?? 'none'};
+    return {planMode: data.plan_mode ?? previousMode(), exists: true,
+      slug: data.slug ?? null, fileName: data.file_name ?? null, content: data.content ?? null,
+      contentBytes: data.content_bytes ?? 0, truncated: data.truncated === true, updatedAt: data.updated_at ?? null};
+}
+
 export async function hydrateThreadPlan(threadId: string): Promise<void> {
   if (!threadId) return;
-  try {
-    const res = await fetch(
-      apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/plan`),
-      { headers: { ...browserRequestHeaders() } },
-    );
-    if (!res.ok) return;
-    const data = (await res.json()) as ThreadPlanApiResponse;
-    const prev = getThreadPlan(threadId);
-
-    if (!data.exists) {
-      // §5.5: exists:false 时 slug/file_name/content/updated_at 为 null，
-      // plan_mode 仍返回内存态或 "none"。
-      setThreadPlan(threadId, {
-        planMode: data.plan_mode ?? 'none',
-        exists: false,
-        slug: null,
-        fileName: null,
-        content: null,
-        contentBytes: 0,
-        truncated: false,
-        updatedAt: null,
-      });
-      return;
-    }
-
-    setThreadPlan(threadId, {
-      planMode: data.plan_mode ?? prev.planMode,
-      exists: true,
-      slug: data.slug ?? null,
-      fileName: data.file_name ?? null,
-      content: data.content ?? null,
-      contentBytes: data.content_bytes ?? 0,
-      truncated: data.truncated === true,
-      updatedAt: data.updated_at ?? null,
-    });
-  } catch {
-    // Network/parse failure: keep existing state, panel simply stays stale.
-  }
+  try {setThreadPlan(threadId, await readThreadPlan(threadId, {}, () => getThreadPlan(threadId).planMode));}
+  catch { /* Network/parse failure retains the original store. */ }
 }

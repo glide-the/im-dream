@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-29: 前端任务客户端/状态已共享给Native，更新现行源码归属；业务、后端与权限合同保持。 -->
 <!-- [Sync] 2026-10-23: v2 创建冻结 Notion 范围，栏目通过原 Read hook 按需读取并登记实际证据。 -->
 <!-- [Input] backend/routers/reflections.py、backend/reflections_agent.py、Claude Agent ThreadFactory/Service、Admin section persistence 与前端 voiceApi.ts。 -->
 <!-- [Output] Reflections 任务启动、Agent 执行、转录解析、结果持久化、事件发布及恢复时序。 -->
@@ -350,7 +351,7 @@ stateDiagram-v2
 - [统一流消费](../../../backend/services/story_workspace/dream_lifecycle_observer.py)：drain 与轮次完成判断。
 - [ThreadFactory](../../../backend/claude_agent/thread_factory.py)与 [Service](../../../backend/claude_agent/service.py)：Agent 生命周期、消息持久化和内部流。
 - [栏目 persistence](../../../backend/services/admin_data/reflection_section_persistence.py)：authority、消息、Gateway 与资源清理。
-- [前端任务客户端](../../../frontend/app/_dream/api/voiceApi.ts#L828)与 [AnalysisView](../../../frontend/app/_dream/components/AnalysisView.tsx#L842)：订阅、启动、恢复及报告打开。
+- [前端任务客户端](../../../frontend/app/_dream/api/reflectionsApi.ts#L498)与 [回顾状态](../../../frontend/app/_dream/hooks/useReflections.ts#L87)：订阅、启动、恢复及报告打开。
 
 ## Notion 按需读取衔接
 

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-30: isolated Admin client advertises absent memory capability; original broker starts after provider binding at Factory admission.
 # [Sync] 2026-10-10: verify Gateway identity survives the original tool event and message history.
 # [Sync] 2026-10-10: separate saved AI/Image ownership; native result publication and explicit Images execution share exact turn identity, with real acceptance pending.
 # [Input] Public Chat/model/workspace routers, real Factory/Service/broker, and injected Admin/SDK/provider boundaries.
@@ -126,8 +127,7 @@ class Persistence(AdminAgentTurnPersistence):
         self.fixture, self.config = fixture, config
         self.image_data = ImageDataFixture()
         self.broker = SessionProjectionBroker(SimpleNamespace(), settings=SessionProjectionBrokerSettings(timeout_seconds=3, max_bytes=65536))
-        self.broker.start()
-    def start(self): pass
+    def start(self): self.broker.start()
     def image_turn_data(self, **_): return self.image_data
     def close(self): self.broker.close()
     def system_config(self, **_): return self.config
@@ -139,6 +139,8 @@ class Persistence(AdminAgentTurnPersistence):
     def bind_image_generation_provider(self, provider):
         self.fixture.current_image_provider=provider
         self.broker.bind_image_generation_provider(provider)
+    def bind_memory_provider(self, provider):
+        self.broker.bind_memory_provider(provider)
     def thread(self, *, thread_id, **_): return self.fixture.threads.get(thread_id)
     def notion_connector_store(self, **_): raise RuntimeError("No connector in this isolated fixture")
     def persist_user(self, **kwargs): return self._save("user", kwargs)
@@ -171,7 +173,9 @@ class GatewayRuntime(AdminGatewayRuntime):
 
 class Owner(AdminRequestAuth):
     def __init__(self, fixture, config):
-        self.client, self.fixture, self.config = object(), fixture, config
+        self.client = SimpleNamespace(capabilities_snapshot=lambda request_id: None,
+            supports=lambda operations, requirements: False)
+        self.fixture, self.config = fixture, config
     @property
     def session_broker_settings(self): return SimpleNamespace(timeout_seconds=3)
     def workflow_context(self, actor, thread_id, _): return AdminWorkflowResolution(actor.canonical_user_id, thread_id, None)

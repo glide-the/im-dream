@@ -1,0 +1,111 @@
+{
+  "protocolVersion": "1.0",
+  "requestIdPattern": "^[A-Za-z0-9_-]{1,96}$",
+  "pageGenerationPattern": "^[A-Za-z0-9_-]{1,96}$",
+  "methods": [
+    {
+      "name": "app.getInfo",
+      "owner": "native",
+      "purpose": "Read public application identity and bridge version."
+    },
+    {
+      "name": "runtime.getCapabilities",
+      "owner": "native",
+      "purpose": "Read platform-qualified Python, Claude, local transport, and file integration states."
+    },
+    {
+      "name": "runtime.request",
+      "owner": "python",
+      "purpose": "Open an allowlisted HTTP-shaped request with a client request identifier against the qualified in-process Dream ASGI adapter and return response metadata plus an opaque stream identifier."
+    },
+    {
+      "name": "runtime.response.read",
+      "owner": "python",
+      "purpose": "Read the next bounded response chunk from an opaque local runtime stream with pull-based backpressure."
+    },
+    {
+      "name": "runtime.cancel",
+      "owner": "python",
+      "purpose": "Cancel one active local runtime request by request identifier."
+    },
+    {
+      "name": "lifecycle.getState",
+      "owner": "native",
+      "purpose": "Read the current foreground and network state."
+    },
+    {
+      "name": "file.pick",
+      "owner": "native",
+      "purpose": "Copy user-selected documents into the application container and return opaque handles."
+    },
+    {
+      "name": "file.save",
+      "owner": "native",
+      "purpose": "Export one opaque application file handle through the platform document UI."
+    },
+    {
+      "name": "share.open",
+      "owner": "native",
+      "purpose": "Open the platform share surface for one opaque application file handle."
+    },
+    {
+      "name": "external.open",
+      "owner": "native",
+      "purpose": "Open an allowlisted HTTPS URL in a system-owned browser surface."
+    }
+  ],
+  "events": [
+    {
+      "name": "lifecycle.changed",
+      "owner": "native",
+      "purpose": "Report foreground, inactive, and background transitions."
+    },
+    {
+      "name": "network.changed",
+      "owner": "native",
+      "purpose": "Report platform network reachability changes without claiming Internet service health."
+    },
+    {
+      "name": "runtime.changed",
+      "owner": "native",
+      "purpose": "Report a qualified local runtime capability transition."
+    }
+  ],
+  "errorCodes": [
+    "BAD_REQUEST",
+    "CANCELLED",
+    "CAPABILITY_UNAVAILABLE",
+    "FORBIDDEN",
+    "INTERNAL_ERROR",
+    "NOT_FOUND",
+    "PROTOCOL_MISMATCH"
+  ],
+  "transportPolicy": {
+    "maximumInlineRequestBytes": 1048576,
+    "allowedMethods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+    "forbiddenHeaderNames": [
+      "authorization",
+      "connection",
+      "content-length",
+      "cookie",
+      "forwarded",
+      "host",
+      "proxy-authorization",
+      "transfer-encoding",
+      "x-actor-id",
+      "x-canonical-user-id",
+      "x-user-id",
+      "x-ink-dream-service-authorization",
+      "x-ink-service-token",
+      "x-service-token"
+    ],
+    "forbiddenHeaderPrefixes": ["x-forwarded-"]
+  },
+  "envelopeRules": {
+    "request": "Every request contains version, id, pageGeneration, method, and object params.",
+    "response": "Every response echoes id and pageGeneration; a new page ignores responses from an older generation.",
+    "event": "Every event contains pageGeneration and a monotonic decimal sequence string.",
+    "stream": "runtime.request accepts clientRequestId and returns status, headers, requestId, and streamId; runtime.response.read returns at most one 65536-byte base64 chunk and done; runtime.cancel accepts the client request identifier before the response head and the runtime request/stream identifiers after the response head."
+  }
+}
+

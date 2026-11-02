@@ -1,25 +1,12 @@
 // [Input] Landing quick-action items and shared chat icons.
 // [Output] Render the single pill-style quick-action strip shown directly below the Chat composer.
 // [Pos] chat-quick-action-strip component node in frontend/app/_dream/components/chat
+// [Sync] 2026-10-27: share the existing props contract with the native counterpart; retain Web DOM and styles.
 // [Sync] 2026-07-07: replace the older grid-style quick action cards with a single pill strip under the Chat input.
 import { useMemo, useState } from 'react';
 import { IconEdit, IconImage, IconSearch } from './Icons';
-
-export type QuickActionStripIcon = 'image' | 'edit' | 'search';
-
-export interface QuickActionStripItem {
-  id: string;
-  label: string;
-  prompt: string;
-  icon: QuickActionStripIcon;
-  description?: string;
-}
-
-interface QuickActionStripProps {
-  items: QuickActionStripItem[];
-  onSelect: (item: QuickActionStripItem) => void;
-  className?: string;
-}
+import type {QuickActionStripIcon, QuickActionStripItem, QuickActionStripProps} from './QuickActionStrip.types';
+export type {QuickActionStripIcon, QuickActionStripItem} from './QuickActionStrip.types';
 
 function ActionIcon({ icon }: { icon: QuickActionStripIcon }) {
   const iconStyle = { width: '1rem', height: '1rem', flexShrink: 0 };

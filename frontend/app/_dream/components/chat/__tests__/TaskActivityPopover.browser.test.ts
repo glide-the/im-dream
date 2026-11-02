@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: match the existing metadata accessibility name after the published 思维模式 terminology update.
 // [Input] Production TaskActivityContent, local Chrome and owner-scoped task/subagent fixtures.
 // [Output] Visual and interaction evidence for the independent Todo-style activity popover, task navigation and failures.
 // [Pos] Isolated browser acceptance for the Chat shell activity entry; Environment info remains unchanged.
@@ -150,10 +151,10 @@ test('current-Thread activity popover separates tasks, subagents and plans witho
     await server.listen();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`http://127.0.0.1:${port}/task-activity`);
-    const environmentTrigger = page.getByRole('button', { name: 'Deck 元信息' });
+    const environmentTrigger = page.getByRole('button', { name: '思维模式信息' });
     await expect(environmentTrigger).toHaveCount(1);
     await environmentTrigger.click();
-    const environmentCard = page.getByRole('dialog', { name: 'Deck 元信息' });
+    const environmentCard = page.getByRole('dialog', { name: '思维模式信息' });
     await expect(page.getByRole('dialog')).toHaveCount(1);
     await expect(environmentCard).toContainText('复核 Deck');
     await expect(environmentCard).not.toContainText('已创建的任务');

@@ -4,6 +4,7 @@
 # [Sync] 2026-09-28: bind the Thread Tool host provider before the current turn broker starts and refresh its request authorization at confirmation time.
 # [Sync] 2026-09-26: queue claim/list/settle reuse the bound Thread persistence grant.
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
+# [Sync] 2026-10-26: recover only an exact completed confirmation reply through the original scoped Chat read.
 # [Output] Atomic turn/auto-repair persistence, delegated Notion DTO store, and provider-bound Session/current-Run broker.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
@@ -29,6 +30,7 @@ from typing import Callable
 from uuid import uuid4
 
 from models.workflow_run import WorkflowRun
+from chat_message_projection import validate_chat_history_final_projection
 
 from .agent_turn_persistence import AdminAgentTurnPersistence
 from .chat_data import AdminChatData, PERSIST_MESSAGE, UPDATE_SESSION
@@ -303,6 +305,43 @@ class AdminTurnPersistence(
                 self._request_id_factory(),
                 access_token=grant.token,
             ).entry
+
+    def completed_dream_confirmation_text(self, *, actor_id: str, thread_id: str, message_id: str) -> str | None:
+        """Read an immutable reply without replaying its model or message write."""
+        context = self._resolution.context_for(actor_id=actor_id, thread_id=thread_id)
+        if context is None or not message_id:
+            raise configuration_invalid()
+        expected = {"run_id": context.workflow_run_id, "thread_id": thread_id,
+                    "actor_id": str(actor_id), "message_id": message_id,
+                    "kind": "story-workspace-dream-confirmation"}
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            request_id = self._request_id_factory()
+            result = self._chat.list_messages(ThreadIdInputDTO(thread_id=thread_id), request_id, access_token=grant.token)
+            completed = []
+            for message in result.messages:
+                metadata = message.metadata or {}
+                source = metadata.get("story_workspace_dream_source")
+                if not isinstance(source, dict) or source.get("message_id") != message_id:
+                    continue
+                if message.role != "assistant" or message.metadata_decode_error or source != expected:
+                    raise invalid_response(request_id)
+                if metadata.get("is_partial") is True or metadata.get("turnStatus") != "completed":
+                    continue
+                index = metadata.get("finalPartIndex")
+                try:
+                    if type(index) is not int or not 0 <= index < len(message.parts):
+                        raise ValueError("Invalid final part")
+                    text = message.parts[index].get("text")
+                    validate_chat_history_final_projection(role=message.role, parts=message.parts,
+                        metadata=metadata, history_final_text=text, history_process_available=index > 0,
+                        history_projection_version=1)
+                except (ValueError, AttributeError, TypeError):
+                    raise invalid_response(request_id) from None
+                completed.append(text)
+            if len(completed) > 1:
+                raise invalid_response(request_id)
+            return completed[0] if completed else None
 
     def thread(self, *, actor_id: str, thread_id: str) -> ChatThreadDTO | None:
         with self._write_lock:

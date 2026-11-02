@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share original pure tool projections with Native; original DOM render tree and event handlers remain.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-10-10: show explicit stale/conflicting model selection recovery before Agent execution.
@@ -74,17 +75,17 @@ import { isCompactionCompletionText, readContextCompactions } from '../../lib/co
 import { CreatedTaskSessionList, TaskSessionSourceMarker } from './TaskSessionNavigation';
 import type { TaskSessionLink, TaskSessionLinksSnapshot } from './taskSessionLinks';
 import ToolMessagePart from './ToolMessagePart';
-import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
-import { isEditorWriteTool, parseEditorWriteResult } from './editorWriteTools';
+import { EditorWriteCompletedCard } from './EditorWriteApprovalUI';
+import { isEditorWriteTool } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
-import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation, imageToolAction } from './toolInputSummary';
+import { resolveToolInputSummary, summarizeToolInvocation, imageToolAction } from './toolInputSummary';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
 import { readClaudeAgentErrorCode, readClaudeAgentErrorText } from '../../lib/claude-agent-transport';
 import type { ChatMetadata } from '../../lib/chat-schema';
 import AssistantTurnGroup from './AssistantTurnGroup';
 import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
-import { fetchClaudeThreadMessageProcess } from './threadSessionHydration';
+import {useHistoricalChatProcess} from './useHistoricalChatProcess';
 import type { ChatUserMessage } from './chatUserMessageIngress';
 import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 import { isNavigableUserMessage } from './chatTurnNavigationModel';
@@ -92,6 +93,8 @@ import ScheduledTaskMarkerList from './ScheduledTaskMarker';
 import { decodeScheduledTaskMarker, type ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
 import { parseReflectionAnalysisPreview } from './reflectionAnalysisPreview';
 import type { StoryWorkspaceAnalysisSection } from '../../router/storyWorkspacePath';
+
+import {getToolStatus,getToolOutputText,getEditorWriteOutput,parseTerminalOutput,isBuiltInWriteTool,readToolInput,resolveWriteInput,WRITE_PREVIEW_COLLAPSE_CHAR_LIMIT,WRITE_PREVIEW_COLLAPSE_LINE_LIMIT} from './toolPartPresentation';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -128,64 +131,14 @@ interface ChatMessageListProps {
   onOpenScheduledTask?: (task: ScheduledTaskMarkerSnapshot) => void;
 }
 
-type ToolStatus = 'executing' | 'completed' | 'error';
-type HistoricalProcessDetailState =
-  | { readonly status: 'loading' }
-  | { readonly status: 'loaded'; readonly message: UIMessage }
-  | { readonly status: 'error'; readonly error: Error };
 
 const TOOL_COMPLETED_STATES = new Set(['output-available', 'output-error']);
 const REASONING_PREVIEW_LENGTH = 80;
-const WRITE_PREVIEW_COLLAPSE_CHAR_LIMIT = 1800;
-const WRITE_PREVIEW_COLLAPSE_LINE_LIMIT = 24;
 const WRITE_PREVIEW_COLLAPSED_MAX_HEIGHT = `${WRITE_PREVIEW_COLLAPSE_LINE_LIMIT * 1.65}em`;
 const WRITE_PREVIEW_DEFAULT_MAX_HEIGHT = '24rem';
 const WRITE_PREVIEW_EXPANDED_MAX_HEIGHT = '36rem';
 const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>();
 
-function getToolStatus(part: ToolUIPart | DynamicToolUIPart, isLoading: boolean): ToolStatus {
-  if (part.state === 'output-error') return 'error';
-  if (TOOL_COMPLETED_STATES.has(part.state ?? '')) return 'completed';
-  return isLoading ? 'executing' : 'completed';
-}
-
-function getToolOutputText(part: ToolUIPart | DynamicToolUIPart): string | null {
-  if ('output' in part && part.output != null) return typeof part.output === 'string' ? part.output : JSON.stringify(part.output, null, 2);
-  if ('error' in part && part.error != null) return typeof part.error === 'string' ? part.error : JSON.stringify(part.error, null, 2);
-  if ('errorText' in part && typeof part.errorText === 'string') return part.errorText;
-  return null;
-}
-
-function getEditorWriteOutput(part: ToolUIPart | DynamicToolUIPart, isError: boolean): EditorWriteOutput {
-  if ('output' in part) {
-    const parsed = parseEditorWriteResult(part.output);
-    if (parsed) return parsed;
-  }
-  if (isError) {
-    const errorText = getToolOutputText(part) ?? '';
-    const parsed = parseEditorWriteResult(errorText);
-    if (parsed) return parsed;
-    return { ok: false, error: errorText || 'editor_write_failed' };
-  }
-  return {};
-}
-
-function parseTerminalOutput(raw: string): { command: string | null; output: string; exitCode: string | null } {
-  const lines = raw.split('\n');
-  let command: string | null = null;
-  let exitCode: string | null = null;
-  const outputLines: string[] = [];
-
-  lines.forEach((line) => {
-    const commandMatch = line.match(/^\$\s+(.+)/);
-    const exitMatch = line.match(/^Exit code:\s*(\d+)/i);
-    if (commandMatch && !command) command = commandMatch[1];
-    else if (exitMatch) exitCode = exitMatch[1];
-    else outputLines.push(line);
-  });
-
-  return { command, output: outputLines.join('\n').trim(), exitCode };
-}
 
 function IconCopy() {
   return (
@@ -196,28 +149,6 @@ function IconCopy() {
   );
 }
 
-const BUILTIN_WRITE_TOOL_NAMES = new Set(['write']);
-
-function isBuiltInWriteTool(toolName: string): boolean {
-  return BUILTIN_WRITE_TOOL_NAMES.has(toolName.toLowerCase());
-}
-
-function readToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
-  return 'input' in part ? part.input : undefined;
-}
-
-function resolveWriteInput(input: unknown): { filePath: string; content: string; partialJson: string } {
-  const partial = parsePartialInputJson(input);
-  const value =
-    input && typeof input === 'object' && !Array.isArray(input)
-      ? { ...partial, ...(input as Record<string, unknown>) }
-      : partial;
-  return {
-    filePath: typeof value.file_path === 'string' ? value.file_path : '',
-    content: typeof value.content === 'string' ? value.content : '',
-    partialJson: typeof value._partialInputJson === 'string' ? value._partialInputJson : '',
-  };
-}
 
 function WriteToolTerminalCard({
   part,
@@ -310,10 +241,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-  const [historicalProcessDetails, setHistoricalProcessDetails] = useState<
-    Record<string, HistoricalProcessDetailState>
-  >({});
-  const historicalProcessControllers = useRef<Map<string, AbortController>>(new Map());
+  const {details:historicalProcessDetails,load:loadHistoricalProcess}=useHistoricalChatProcess(threadId,messages,historicalMessageIds);
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
@@ -343,82 +271,6 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   const hasCurrentCompaction = latestMessage?.role === 'assistant' && isLoading
     && readContextCompactions(latestMessage.metadata)
       .some((row) => row.state === 'running' || row.state === 'unconfirmed');
-
-  useEffect(() => {
-    const controllers = historicalProcessControllers.current;
-    setHistoricalProcessDetails({});
-    return () => {
-      controllers.forEach((controller) => controller.abort());
-      controllers.clear();
-    };
-  }, [threadId]);
-
-  const loadHistoricalProcess = useCallback(async (
-    summaryMessage: UIMessage,
-  ) => {
-    const key = `${threadId}:${summaryMessage.id}`;
-    if (historicalProcessControllers.current.has(key)
-      || historicalProcessDetails[key]?.status === 'loaded') return;
-    const summaryProjection = projectHistoricalAssistantTurn(summaryMessage);
-    if (!summaryProjection?.deferredProcess) return;
-    const controller = new AbortController();
-    historicalProcessControllers.current.set(key, controller);
-    setHistoricalProcessDetails((current) => ({
-      ...current,
-      [key]: { status: 'loading' },
-    }));
-    try {
-      const detail = await fetchClaudeThreadMessageProcess(
-        threadId,
-        summaryMessage.id,
-        controller.signal,
-      );
-      const detailProjection = projectHistoricalAssistantTurn(detail);
-      const summaryFinal = summaryMessage.parts[summaryProjection.finalPartIndex];
-      const detailFinal = detailProjection
-        ? detail.parts[detailProjection.finalPartIndex]
-        : undefined;
-      if (!detailProjection
-        || detailProjection.deferredProcess
-        || !detailProjection.processAvailable
-        || detailProjection.turnKey !== summaryProjection.turnKey
-        || summaryFinal?.type !== 'text'
-        || detailFinal?.type !== 'text'
-        || detailFinal.text !== summaryFinal.text) {
-        throw new Error('Historical process detail does not match its final message.');
-      }
-      setHistoricalProcessDetails((current) => ({
-        ...current,
-        [key]: { status: 'loaded', message: detail },
-      }));
-    } catch (reason) {
-      if (controller.signal.aborted) return;
-      const detailError = reason instanceof Error
-        ? reason
-        : new Error('Historical process detail could not be loaded.');
-      setHistoricalProcessDetails((current) => ({
-        ...current,
-        [key]: { status: 'error', error: detailError },
-      }));
-    } finally {
-      if (historicalProcessControllers.current.get(key) === controller) {
-        historicalProcessControllers.current.delete(key);
-      }
-    }
-  }, [historicalProcessDetails, threadId]);
-
-  useEffect(() => {
-    let remaining = 4;
-    for (const message of messages) {
-      if (remaining === 0) break;
-      if (!historicalMessageIds.has(message.id)) continue;
-      const projection = projectHistoricalAssistantTurn(message);
-      const key = `${threadId}:${message.id}`;
-      if (!projection?.deferredProcess || historicalProcessDetails[key]) continue;
-      remaining -= 1;
-      void loadHistoricalProcess(message);
-    }
-  }, [historicalMessageIds, historicalProcessDetails, loadHistoricalProcess, messages, threadId]);
 
   const handleCopy = async (id: string, text: string) => {
     try {

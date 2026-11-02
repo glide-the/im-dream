@@ -1,24 +1,29 @@
 # [Input] Registry121 capability, claim-turn response and claim-bound idg grant.
 # [Output] Strict Pydantic grant recovery plus Workflow/Deck/AdminTurnPersistence composition.
 # [Pos] Provider-free Dream consumer contract; no PostgreSQL, Runtime or shared-file fixture.
+# [Sync] 2026-10-26: validate OAuth pending-message recovery against exact actor/Thread/Run, durable command hashes and terminal ACK.
 # [Sync] 2026-09-17: prove confirmation claim uses service OAuth before claim-bound delegation.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+from unittest.mock import Mock
 
 import httpx
 import pytest
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.deck_chat_context_data import RESOLVE_DECK_CHAT_CONTEXT
+from services.admin_data.chat_data import LIST_MESSAGES
+from services.admin_data.chat_models import ChatMessageDTO, MessageListResultDTO
 from services.admin_data.delegation import RuntimeHttpConfig
 from services.admin_data.session_projection_broker import SessionProjectionBrokerSettings
 from services.admin_data.story_workspace_confirmation_data import (
     CLAIM_STORY_WORKSPACE_CONFIRMATION_TURN,
     CONFIRMATION_TURN_SCHEMA_REQUIREMENT,
     AdminStoryWorkspaceConfirmationWorkerData,
+    AdminStoryWorkspaceConfirmationData,
     StoryWorkspaceConfirmationClaimInputDTO,
 )
 from services.admin_data.turn_persistence import AdminTurnPersistence
@@ -235,3 +240,85 @@ def test_claim_turn_fails_closed_without_exact_schema_capability() -> None:
         "capabilities"
     ]
 # [Sync] 2026-09-17: verify confirmation owner composition reuses one validated capability snapshot.
+
+
+def pending_message():
+    value = dispatch_value()
+    metadata = json.loads(value["metadata_json"])
+    return ChatMessageDTO(
+        id=value["message_id"], role="user", parts=json.loads(value["parts_json"]),
+        metadata=metadata, metadata_decode_error=False, created_at=None,
+        history_final_text=None, history_process_available=False, history_projection_version=None,
+    )
+
+
+def confirmation_reader(messages):
+    client = Mock()
+    client.execute.return_value = MessageListResultDTO(messages=messages)
+    return AdminStoryWorkspaceConfirmationData(client, canonical_user_id=ACTOR), client
+
+
+def test_pending_read_uses_original_oauth_chat_operation_and_stored_command():
+    message = pending_message()
+    consumer, client = confirmation_reader([message])
+    result = consumer.pending_dispatch(RUN, THREAD, "read-pending", access_token="user-oauth")
+    operation, input_dto, request_id = client.execute.call_args.args
+    assert operation is LIST_MESSAGES
+    assert input_dto.thread_id == THREAD
+    assert request_id == "read-pending"
+    assert client.execute.call_args.kwargs == {"access_token": "user-oauth"}
+    assert result.message_id == message.id
+    assert result.thread_id == THREAD
+    assert result.actor_id == ACTOR
+    assert json.loads(result.parts_json) == message.parts
+    assert json.loads(result.metadata_json) == message.metadata
+    assert client.execute.call_count == 1
+
+
+@pytest.mark.parametrize("change", ["actor", "thread", "parts", "message", "role", "decode", "claim"])
+def test_pending_read_rejects_mismatched_or_malformed_confirmation(change):
+    value = pending_message().model_dump()
+    if change == "actor":
+        value["metadata"]["actor"] = "43"
+    elif change == "thread":
+        value["metadata"]["thread_id"] = "another-thread"
+    elif change == "parts":
+        value["parts"][0]["text"] = "{}"
+    elif change == "message":
+        value["id"] = MESSAGE
+    elif change == "role":
+        value["role"] = "assistant"
+    elif change == "decode":
+        value["metadata_decode_error"] = True
+    elif change == "claim":
+        value["metadata"].pop("dispatch_claim_id")
+    consumer, _ = confirmation_reader([ChatMessageDTO.model_validate(value)])
+    with pytest.raises(AdminDataError) as raised:
+        consumer.pending_dispatch(RUN, THREAD, "read-pending", access_token="user-oauth")
+    assert raised.value.outcome_unknown is False
+
+
+def test_pending_read_rejects_ambiguous_commands_and_keeps_other_runs_scoped():
+    message = pending_message()
+    consumer, _ = confirmation_reader([message, message])
+    with pytest.raises(AdminDataError):
+        consumer.pending_dispatch(RUN, THREAD, "read-pending", access_token="user-oauth")
+    consumer, _ = confirmation_reader([message])
+    assert consumer.pending_dispatch("run_" + "d" * 32, THREAD, "read-other", access_token="user-oauth") is None
+
+
+def test_pending_read_never_replays_an_acknowledged_confirmation():
+    message = pending_message()
+    message.metadata.update(dispatch_status="dispatched", dispatch_ack_claim_sha256="sha256:" + "d" * 64)
+    message.metadata.pop("dispatch_claim_id")
+    message.metadata.pop("dispatch_claim_lease_until")
+    consumer, _ = confirmation_reader([message])
+    assert consumer.pending_dispatch(RUN, THREAD, "read-pending", access_token="user-oauth") is None
+
+
+def test_pending_read_preserves_admin_denial_without_service_fallback():
+    consumer, client = confirmation_reader([])
+    client.execute.side_effect = AdminDataError("ADMIN_FORBIDDEN", 403, "read-pending")
+    with pytest.raises(AdminDataError, match="ADMIN_FORBIDDEN"):
+        consumer.pending_dispatch(RUN, THREAD, "read-pending", access_token="user-oauth")
+    assert client.execute.call_count == 1

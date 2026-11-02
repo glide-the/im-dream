@@ -1,6 +1,7 @@
 # [Input] Immutable Deck plugin metadata plus shared artifact-store and workspace boundaries.
 # [Output] Verified packed plugins, launch manifest, repair receipt and Dream protocol surfaces.
 # [Pos] Dream filesystem executor; fresh-workspace metadata arrives through the Admin DTO loader.
+# [Sync] 2026-10-26: refresh frozen manifest runtime cache paths from verified artifact profiles after the configured runtime root moves.
 # [Sync] 2026-09-16: retire the legacy database handle and keep only Registry106 loader input.
 """Pack Deck-referenced plugin artifacts into an agent workspace.
 
@@ -310,9 +311,12 @@ def pack_workspace_plugins_with_refs_loader(
         # keyed by digest and may be rebuilt when missing.
         plugins = existing_manifest.get("plugins") or []
         repaired: list[dict[str, Any]] = []
+        repaired_venv_dirs: list[str] = []
         for entry in plugins:
             repaired_entry = _ensure_packed_entry(workspace, entry, allow_repair=True)
-            _ensure_frozen_runtime(workspace, entry)
+            venv_dir = _ensure_frozen_runtime(workspace, entry)
+            if venv_dir is not None:
+                repaired_venv_dirs.append(str(venv_dir))
             repaired.append(repaired_entry)
         # Frozen surfaces: validate only, never rebuild — a materialized
         # protocol directory is an init result, not a derived cache
@@ -349,6 +353,19 @@ def pack_workspace_plugins_with_refs_loader(
                 workspace / str(drama_entry.get("relative_path") or ""),
                 allow_install=False,
             )
+        frozen_runtime = existing_manifest.get("runtime")
+        if frozen_runtime is not None:
+            if (not isinstance(frozen_runtime, dict)
+                or not isinstance(frozen_runtime.get("venv_dirs"), list)
+                or len(frozen_runtime["venv_dirs"]) != len(repaired_venv_dirs)
+                or any(not isinstance(path, str) or not Path(path).is_absolute()
+                       for path in frozen_runtime["venv_dirs"])):
+                raise WorkspacePackError(
+                    "CLAUDE_PLUGIN_MANIFEST_INVALID", "frozen runtime paths do not match the pinned plugin profiles",
+                )
+            if frozen_runtime["venv_dirs"] != repaired_venv_dirs:
+                existing_manifest["runtime"] = {**frozen_runtime, "venv_dirs": repaired_venv_dirs}
+                _write_json(workspace / LAUNCH_MANIFEST_RELATIVE_PATH, existing_manifest)
         receipt.update(
             {
                 "packed_at": existing_manifest.get("written_at"),
@@ -496,7 +513,7 @@ def pack_workspace_plugins_with_refs_loader(
     return receipt
 
 
-def _ensure_frozen_runtime(workspace: Path, entry: dict[str, Any]) -> None:
+def _ensure_frozen_runtime(workspace: Path, entry: dict[str, Any]) -> Path | None:
     """Rebuild the managed venv of a frozen workspace entry when missing.
 
     Never re-runs init steps and never swaps plugin versions — the venv is a
@@ -511,7 +528,7 @@ def _ensure_frozen_runtime(workspace: Path, entry: dict[str, Any]) -> None:
         profile = workspace_init.load_init_profile(packed_dir)
         if profile is None or profile.python is None:
             return
-        workspace_init.ensure_plugin_venv(
+        return workspace_init.ensure_plugin_venv(
             runtime.get_runtime_root(), digest, packed_dir, profile.python
         )
     except workspace_init.WorkspaceInitError as exc:

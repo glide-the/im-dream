@@ -11,6 +11,7 @@
 [Sync] 2026-08-25: preserve SDK-discovered authorization metadata inside the encrypted token document for restart-safe refresh routing.
 [Sync] 2026-09-16: prove replacement OAuth keeps an unreadable old envelope until the new token is ready, then atomically overwrites it.
 [Sync] 2026-09-17: expose only the exact revision committed by each SDK TokenStorage instance.
+[Sync] 2026-10-29: validate configured native callback bases without changing Web callback or SDK protocol ownership.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+import pytest
 from mcp.shared.auth import OAuthToken
 from mcp.shared.auth import OAuthClientMetadata
 from mcp.shared.auth import OAuthClientInformationFull
@@ -30,7 +32,7 @@ from claude_mcp.oauth import (
     ManagedMcpOAuthCoordinator,
 )
 from claude_mcp.repository import McpCredentialRecord, McpServerRecord
-from claude_mcp.contracts import McpAuthKind, McpTransport
+from claude_mcp.contracts import ClaudeMcpError, McpAuthKind, McpTransport
 
 
 class _Repository:
@@ -297,3 +299,42 @@ def test_oauth_operation_projects_server_key_and_keeps_uuid_internal() -> None:
         await coordinator.cancel("7", operation.id)
 
     asyncio.run(scenario())
+
+
+def _native_callback_coordinator(redirect_uri: str = "com.inkmemory.mobile.mcp:/oauth/callback") -> ManagedMcpOAuthCoordinator:
+    return ManagedMcpOAuthCoordinator(
+        _Repository(), McpCredentialCipher(key=b"k" * 32, key_version=1), None,
+        client_metadata=OAuthClientMetadata(redirect_uris=[redirect_uri], client_name="Native fixture"),
+        auth_timeout_seconds=10, readiness_timeout_seconds=1, max_redirect_url_length=8192,
+    )
+
+
+def test_configured_native_callback_retains_sdk_code_and_state() -> None:
+    coordinator = _native_callback_coordinator()
+    assert coordinator._parse_callback("com.inkmemory.mobile.mcp:/oauth/callback?code=fixture-code&state=fixture-state") == ("fixture-code", "fixture-state")
+    # Existing Web clients retain their original callback acceptance.
+    assert coordinator._parse_callback("https://dream.example.test/oauth/callback?code=web&state=state") == ("web", "state")
+    assert coordinator._parse_callback("http://localhost:5173/oauth/callback?code=loopback&state=state") == ("loopback", "state")
+
+
+@pytest.mark.parametrize("url", [
+    "com.other.app:/oauth/callback?code=fixture&state=state",
+    "com.inkmemory.mobile.mcp:/other?code=fixture&state=state",
+    "com.inkmemory.mobile.mcp://different/oauth/callback?code=fixture&state=state",
+    "com.inkmemory.mobile.mcp:/oauth/callback?code=one&code=two&state=state",
+    "com.inkmemory.mobile.mcp:/oauth/callback?code=fixture&state=one&state=two",
+    "com.inkmemory.mobile.mcp:/oauth/callback?code=fixture&state=state#fragment",
+    "javascript:/oauth/callback?code=fixture&state=state",
+    "file:/oauth/callback?code=fixture&state=state",
+    "http://remote.example.test/oauth/callback?code=fixture&state=state",
+])
+def test_native_callback_rejects_unconfigured_bases_and_ambiguous_values(url: str) -> None:
+    with pytest.raises(ClaudeMcpError):
+        _native_callback_coordinator()._parse_callback(url)
+
+
+def test_web_only_configuration_does_not_enable_native_callbacks() -> None:
+    with pytest.raises(ClaudeMcpError):
+        _native_callback_coordinator("https://dream.example.test/oauth/callback")._parse_callback(
+            "com.inkmemory.mobile.mcp:/oauth/callback?code=fixture&state=state"
+        )

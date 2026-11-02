@@ -11,6 +11,7 @@
 [Sync] 2026-08-25: persist SDK-discovered authorization metadata inside the encrypted token document so reconstructed providers refresh through the discovered token endpoint.
 [Sync] 2026-09-16: replacement authorization ignores the old envelope until a new token exchange atomically overwrites it.
 [Sync] 2026-09-17: carry only this SDK storage's committed credential revision across discovery persistence.
+[Sync] 2026-10-29: accept an exact configured reverse-domain native callback URI while keeping SDK PKCE/state and existing Web callbacks.
 """
 
 from __future__ import annotations
@@ -468,9 +469,22 @@ class ManagedMcpOAuthCoordinator:
             )
         parsed = urlsplit(redirect_url)
         loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        web_callback = parsed.scheme in ({"https"} | ({"http"} if loopback else set())) and bool(parsed.hostname)
+        # Native schemes are authorized only by this server-owned SDK client metadata.
+        # Match the complete URI base; query code/state still go through the SDK.
+        native_callback = False
+        if parsed.scheme not in {"http", "https"} and "." in parsed.scheme and parsed.path.startswith("/"):
+            for uri in self.client_metadata.redirect_uris:
+                configured = urlsplit(str(uri))
+                if (
+                    not configured.query and not configured.fragment
+                    and (parsed.scheme, parsed.netloc, parsed.path)
+                    == (configured.scheme, configured.netloc, configured.path)
+                ):
+                    native_callback = True
+                    break
         if (
-            parsed.scheme not in ({"https"} | ({"http"} if loopback else set()))
-            or not parsed.hostname
+            not (web_callback or native_callback)
             or parsed.username
             or parsed.password
             or parsed.fragment

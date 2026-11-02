@@ -1,0 +1,9 @@
+/* [Input] Original editor CSS, typography and theme tokens. */
+/* [Output] A transparent, editor-sized document scoped to the native composer route. */
+/* [Pos] Local DOM adaptation; original Web page selectors remain unchanged. */
+/* [Sync] 2026-10-28: constrain only the native document's editor to its actual viewport; long drafts scroll inside the original editor. */
+@font-face {font-family:'Excalifont';src:url('/Excalifont-Regular.woff2') format('woff2');font-weight:normal;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0100-017F,U+0180-024F,U+1E00-1EFF,U+2000-206F,U+20A0-20CF,U+2100-214F;}
+@font-face {font-family:'Xiaolai';src:url('/Xiaolai-Regular.woff2') format('woff2');font-weight:normal;font-style:normal;font-display:swap;unicode-range:U+4E00-9FFF,U+3400-4DBF,U+20000-2A6DF,U+F900-FAFF,U+3000-303F;}
+html[data-native-composer='true'],html[data-native-composer='true'] body {background:transparent;min-height:0;margin:0;}
+.native-composer-document {min-width:0;}
+html[data-native-composer='true'] .markdown-input-editor__content {max-height:min(20rem,100dvh);}

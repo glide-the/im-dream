@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: guard the optional DOMException constructor for the native HTTP adapter.
 // [Input] Strict Product API client and the current subscription page plans/commands.
 // [Output] One authoritative Token-only page state with lightweight context/plan loading and command orchestration.
 // [Pos] Story Workspace subscription application hook; it never derives server facts locally.
@@ -70,7 +71,7 @@ function normalizeError(cause: unknown): ProductApiError {
 }
 
 function isAbortError(cause: unknown): boolean {
-  return cause instanceof DOMException && cause.name === 'AbortError';
+  return typeof DOMException !== 'undefined' && cause instanceof DOMException && cause.name === 'AbortError';
 }
 
 export function buildProductCommandPreview(

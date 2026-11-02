@@ -1,4 +1,9 @@
+// [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
+// [Sync] 2026-11-01: mobile Writing uses one-row prose, explicit keyboard focus, shared line geometry and the original chooser/persistence.
+// [Sync] 2026-10-29: wait for the original Cookie/CSRF session before submitting the MCP OAuth callback.
+// [Sync] 2026-10-29: expose the original Writing canvas as a local editor document; RN owns cross-page navigation and Web defaults retain the complete shell.
 // [Sync] 2026-10-14: pass the account timezone to analysis report history and reading.
+// [Sync] 2026-10-27: keep Device Flow outside the RN host while retaining normal Web authentication.
 // [Sync] 2026-10-07: login/import cleanup uses the explicit key list and retains browser language/theme.
 // [Sync] 2026-10-05: Calendar delegates Notion recovery to the canonical Settings Resources route without changing Chat handoff.
 // [Sync] 2026-09-14: local import cleanup no longer preserves retired OAuth storage; BFF Cookie owns authentication.
@@ -71,6 +76,7 @@ import AnalysisView from './components/AnalysisView';
 import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
+import type { WritingChooserView, WritingContextRequest, WritingContextResult } from './components/Editor/WritingDocument.protocol';
 import type { VoiceConfig } from './api/voiceApi';
 import { getVoices, getStateConfig } from './utils/voiceStorage';
 import { getDefaultVoices, chatWithVoiceSSE, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
@@ -83,7 +89,7 @@ import RegisterForm from './components/Auth/RegisterForm';
 import DeviceVerificationPage from './components/Auth/DeviceVerificationPage';
 import { LOCAL_IMPORT_CLEANUP_KEYS, STORAGE_KEYS } from './constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from './utils/timezone';
-import { useSessionLifecycle } from './hooks/useSessionLifecycle';
+import { getEditorStatePersistenceSignature, useSessionLifecycle } from './hooks/useSessionLifecycle';
 import { useWritingSuggestions } from './hooks/useWritingSuggestions';
 import {
   WritingSuggestionCell,
@@ -108,6 +114,7 @@ import {
 import { StoryWorkspaceSettingsPage } from './views/story-workspace';
 import { WritingWorkspaceSplitPane } from './components/story-workspace/layout';
 import type { ActiveChatVoice } from './lib/chat-schema';
+import {isReactNativeHost} from './platform/mobileHost';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
   EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS,
@@ -148,6 +155,7 @@ function submitMcpOAuthCallbackOnce(operationId: string, callbackUrl: string): P
 }
 
 function McpOAuthCallbackPage() {
+  const { isLoading, isAuthenticated } = useAuth();
   const callbackUrl = useRef(window.location.href);
   const [callbackState, setCallbackState] = useState<'submitting' | 'submitted' | 'invalid' | 'failed'>('submitting');
   const query = new URL(callbackUrl.current).searchParams;
@@ -155,8 +163,9 @@ function McpOAuthCallbackPage() {
 
   useEffect(() => {
     document.title = 'MCP authorization callback · Ink & Memory';
+    if (isLoading) return;
     const operationId = readClaudeMcpOAuthOperation();
-    if (!callbackReady || !operationId) {
+    if (!isAuthenticated || !callbackReady || !operationId) {
       setCallbackState('invalid');
       return;
     }
@@ -166,7 +175,7 @@ function McpOAuthCallbackPage() {
         window.setTimeout(() => window.close(), 600);
       })
       .catch(() => setCallbackState('failed'));
-  }, [callbackReady]);
+  }, [callbackReady, isLoading, isAuthenticated]);
 
   const title = callbackState === 'submitted'
     ? 'MCP 授权已自动提交'
@@ -238,10 +247,27 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 };
 
 // @@@ Main App Component
-export default function App() {
+export interface WritingDocumentHost {
+  active:boolean;showEnergyBar:boolean;openChooserNonce?:number;onChooserView?:(view:WritingChooserView)=>void;
+  contextRequest?:WritingContextRequest;onContextResult?:(result:WritingContextResult)=>void;
+  onOpenThread:(threadId:string,editorSessionId?:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
+}
+export default function App({writingDocument}:{writingDocument?:WritingDocumentHost}={}) {
   const isMobile = useMobile();
+  const mobileWriting = Boolean(writingDocument) || isMobile;
+  const [chooserNavigation, setChooserNavigation] = useState<HTMLDivElement | null>(null);
+  const [chooserSurface, setChooserSurface] = useState<HTMLDivElement | null>(null);
+  const [chooserExpanded, setChooserExpanded] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileMoreNonce, setMobileMoreNonce] = useState(0);
+  const writingHost = useRef(writingDocument);
+  writingHost.current = writingDocument;
+  const handleChooserView = useCallback((view:WritingChooserView) => {
+    setChooserExpanded(view.expanded);
+    writingHost.current?.onChooserView?.(view);
+  }, []);
   const { isAuthenticated, isLoading } = useAuth();
-  const isDeviceVerificationRoute = window.location.pathname === '/oauth/device/verify';
+  const isDeviceVerificationRoute = !isReactNativeHost() && window.location.pathname === '/oauth/device/verify';
   const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
   const { i18n } = useTranslation();
   const writingBottomPadding = isMobile
@@ -268,11 +294,13 @@ export default function App() {
   }, [currentLanguage, i18n]);
 
   const [writingRouteActive, setWritingRouteActive] = useState(() => (
-    resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
+    Boolean(writingDocument) || resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
   ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
   const [chatLandingTab] = useState<'history' | 'dreams'>('history');
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
+  useEffect(()=>{if(writingDocument)setShowEnergyBar(writingDocument.showEnergyBar);},[writingDocument?.showEnergyBar]);
+
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
   // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
   //                    replaces the whole Settings viewport instead of expanding inline within the
@@ -284,7 +312,7 @@ export default function App() {
   });
 
   useLayoutEffect(() => {
-    if (!isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute) return;
+    if (writingDocument || !isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute) return;
     const currentMatch = resolveStoryWorkspacePath(window.location.pathname, window.location.search);
     if (window.location.pathname !== '/' && currentMatch) return;
     window.history.replaceState(
@@ -293,7 +321,7 @@ export default function App() {
       STORY_WORKSPACE_PATHS.chat,
     );
     setWritingRouteActive(false);
-  }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute]);
+  }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute, writingDocument]);
 
   const openNotionConnectorDetail = useCallback(() => {
     setClaudeMcpDetailServerName(null);
@@ -382,6 +410,28 @@ export default function App() {
     setStateConfig
   });
 
+  useEffect(() => {
+    const request = writingHost.current?.contextRequest;
+    if (!request) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const current = engineRef.current?.getState();
+        if (!isAuthenticated || current?.id !== request.sessionId) throw new Error('Writing Session unavailable');
+        const snapshot = JSON.parse(JSON.stringify(current)) as EditorState;
+        await ensureSessionPersistedForAgent(request.sessionId);
+        const live = engineRef.current?.getState();
+        if (live?.id !== request.sessionId || getEditorStatePersistenceSignature(live) !== getEditorStatePersistenceSignature(snapshot)) {
+          throw new Error('Writing Session changed during preparation');
+        }
+        if (!cancelled) writingHost.current?.onContextResult?.({...request,type:'chat-context',editorState:snapshot as unknown as Record<string,unknown>});
+      } catch {
+        if (!cancelled) writingHost.current?.onContextResult?.({...request,type:'chat-context-error',code:engineRef.current?.getState().id===request.sessionId?'save-failed':'session-changed'});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [writingDocument?.contextRequest?.requestId, engineRef, ensureSessionPersistedForAgent, isAuthenticated]);
+
   // @@@ Chat widget state
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ x: 0, y: 0 });
@@ -442,6 +492,8 @@ export default function App() {
     state,
     dropdownVisible,
     dropdownTriggerCellId,
+    trackLayout: mobileWriting,
+    scrollContainerRef,
     onDropdownClose: () => {
       setDropdownVisible(false);
       setDropdownTriggerCellId(null);
@@ -723,9 +775,9 @@ export default function App() {
     checkMigration();
   }, [isAuthenticated, isLoading]);
 
-  // @@@ Keep focus on the lone blank text cell (after resets / clears)
+  // Desktop retains blank-cell autofocus; mobile focuses only after an explicit editor action.
   useEffect(() => {
-    if (!state) return;
+    if (mobileWriting || !state) return;
 
     const textCells = state.cells.filter(c => c.type === 'text') as TextCell[];
     if (textCells.length !== 1) return;
@@ -750,7 +802,7 @@ export default function App() {
 
     const timer = window.setTimeout(focusEditor, 0);
     return () => window.clearTimeout(timer);
-  }, [state, refsReady]);
+  }, [state, refsReady, mobileWriting]);
 
   const handleConfirmStartFresh = useCallback(() => {
     setShowWarning(false);
@@ -865,7 +917,24 @@ export default function App() {
     }
   }, [startDetachedBlankSession]);
 
+  const choiceSequence = useRef(0);
+  const [choiceSaveError, setChoiceSaveError] = useState<{sessionId:string;stateId:string;sequence:number} | null>(null);
+  const [choiceRetryPending, setChoiceRetryPending] = useState(false);
+  const saveChosenPreference = useCallback(async (stateId:string, sessionId:string, sequence:number) => {
+    const current = () => choiceSequence.current === sequence && engineRef.current?.getState().id === sessionId && engineRef.current?.getState().selectedState === stateId;
+    try {
+      const { savePreferences } = await import('./api/voiceApi');
+      await savePreferences({ selected_state: stateId });
+      if (current()) setChoiceSaveError(null);
+    } catch (error) {
+      console.error('Failed to save state to database:', error);
+      if (current()) setChoiceSaveError({sessionId,stateId,sequence});
+    }
+  }, [engineRef]);
+
     const handleStateChoose = useCallback(async (stateId: string) => {
+      const sequence = ++choiceSequence.current;
+      setChoiceSaveError(null);
       const todayKey = getTodayKeyInTimezone(userTimezone);
 
       if (engineRef.current) {
@@ -891,18 +960,12 @@ export default function App() {
 
       // @@@ KEEP: Also save to global preferences for daily reset check
       if (isAuthenticated) {
-        try {
-          const { savePreferences } = await import('./api/voiceApi');
-          await savePreferences({ selected_state: stateId });
-          // Database updated_at will be used for daily reset check
-        } catch (error) {
-          console.error('Failed to save state to database:', error);
-        }
+        await saveChosenPreference(stateId, engineRef.current?.getState().id ?? '', sequence);
       } else {
         localStorage.setItem(STORAGE_KEYS.SELECTED_STATE, stateId);
         localStorage.setItem('selected-state-date', todayKey);
       }
-    }, [isAuthenticated, startDetachedBlankSession, userTimezone]);
+    }, [isAuthenticated, startDetachedBlankSession, userTimezone, saveChosenPreference]);
 
   // @@@ Insert @ character at the end of last text cell
   const handleInsertAgent = useCallback(() => {
@@ -1004,14 +1067,14 @@ export default function App() {
       if (!target) return;
       const sequence = jumpToCellSequenceRef.current + 1;
       jumpToCellSequenceRef.current = sequence;
-      if (window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
+      if (!writingDocument && window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
         window.history.pushState(
           { inkDreamView: 'story-workspace' },
           '',
           STORY_WORKSPACE_PATHS.writing,
         );
       }
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      if(!writingDocument)window.dispatchEvent(new PopStateEvent('popstate'));
       setWritingRouteActive(true);
 
       void activateEditorJumpTarget(target).then((isReady) => {
@@ -1022,7 +1085,7 @@ export default function App() {
     };
     window.addEventListener('editor:jump-to-cell', handler);
     return () => window.removeEventListener('editor:jump-to-cell', handler);
-  }, [activateEditorJumpTarget]);
+  }, [activateEditorJumpTarget, writingDocument]);
 
   useEffect(() => {
     if (!writingRouteActive || !jumpToCellRef.current) return;
@@ -1160,14 +1223,19 @@ export default function App() {
     }
   }, [composingCells, handleTextCellKeyDown]);
 
+  useEffect(()=>{
+    if(writingDocument && !writingDocument.active){setShowCalendarPopup(false);setDropdownVisible(false);setExpandedCommentId(null);if(document.activeElement instanceof HTMLElement)document.activeElement.blur();}
+  },[writingDocument?.active]);
+
   // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
   const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
+    if(writingDocument){writingDocument.onOpenThread(threadId,engineRef.current?.getState().id);return;}
     setRequestedChatThreadId(threadId);
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
     setWritingChatPanelOpen(true);
-  }, []);
+  }, [writingDocument, engineRef]);
 
   // Dream owns its presentation protocol, but its source thread remains a
   // normal Chat thread. Selecting Chat reopens that thread so Chat can attach
@@ -1182,11 +1250,12 @@ export default function App() {
   }, []);
 
   const handleCalendarTaskThreadRequest = useCallback((threadId: string) => {
+    if(writingDocument){setShowCalendarPopup(false);writingDocument.onOpenThread(threadId);return;}
     handleStoryWorkspaceChatThreadRequest(threadId);
     setShowCalendarPopup(false);
     window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, [handleStoryWorkspaceChatThreadRequest]);
+  }, [handleStoryWorkspaceChatThreadRequest, writingDocument]);
 
   // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
   // The URL carries only stable selection intent; Chat reloads server-derived facts.
@@ -1206,6 +1275,7 @@ export default function App() {
   }, []);
 
   const handleCalendarArrangeTask = useCallback((input: string) => {
+    if(writingDocument){setShowCalendarPopup(false);writingDocument.onPrepareChat(input);return;}
     setRequestedChatThreadId(undefined);
     setRequestedChatDeck(undefined);
     setRequestedChatInput({ input, nonce: Date.now() });
@@ -1214,7 +1284,7 @@ export default function App() {
     setShowCalendarPopup(false);
     window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS.chat);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, []);
+  }, [writingDocument]);
 
   const handleOpenSettingsFromDeck = useCallback(() => {
     window.history.pushState(
@@ -1268,6 +1338,7 @@ export default function App() {
     }
 
     const cursorPos = textarea.selectionStart;
+    const sourceSessionId = engineRef.current.getState().id;
 
     // Snapshot widget IDs before insertion to identify the newly added widget
     const beforeWidgetIds = new Set(
@@ -1290,6 +1361,8 @@ export default function App() {
     void (async () => {
       try {
         const threadId = await ensureVoiceThread(voiceName, voiceConfig.thread_id);
+        const liveState = engineRef.current?.getState();
+        if (liveState?.id !== sourceSessionId || !liveState.cells.some(cell => cell.id === newWidget?.id && cell.type === 'widget' && cell.widgetType === 'chat')) return;
         if (newWidget && engineRef.current) {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
@@ -1684,7 +1757,7 @@ export default function App() {
         </div>
       )}
 
-      <div style={{
+      {!writingDocument && <div style={{
         position: 'fixed',
         inset: 0,
         minWidth: 0,
@@ -1692,6 +1765,8 @@ export default function App() {
         overflow: 'hidden',
       }}>
         <StoryWorkspaceRouter
+            mobileMoreNonce={mobileMoreNonce}
+            onMobileMoreOpenChange={setMobileMoreOpen}
             decksContent={storyWorkspaceDeckManager}
             onChatThreadRequest={handleStoryWorkspaceChatThreadRequest}
             onRouteChange={handleStoryWorkspaceRouteChange}
@@ -1748,38 +1823,43 @@ export default function App() {
               />
             )}
         />
-      </div>
+      </div>}
 
-      {writingRouteActive && (
+      {(writingDocument || writingRouteActive) && (
         <WritingWorkspaceSplitPane
           chat={(
             <ChatView
               activeVoice={activeChatVoice}
               editorState={state ? (state as unknown as Record<string, unknown>) : null}
               ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
-              isMobile={isMobile}
+              isMobile={mobileWriting}
               landingTab="history"
               onEditorWriteConfirmed={handleEditorWriteConfirmed}
               requestedThreadId={requestedChatThreadId}
               requestedThreadNonce={requestedChatThreadNonce}
             />
           )}
-          chatOpen={writingChatPanelOpen && Boolean(requestedChatThreadId)}
-          isMobile={isMobile}
+          chatOpen={!writingDocument && writingChatPanelOpen && Boolean(requestedChatThreadId)}
+          isMobile={mobileWriting}
           onCloseChat={() => setWritingChatPanelOpen(false)}
         >
-        <div style={{
+        <div className="writing-page" data-mobile-layout={mobileWriting ? 'true' : undefined} style={{
           display: 'flex',
+          flexDirection: mobileWriting ? 'column' : undefined,
           width: '100%',
           height: '100%',
           minWidth: 0,
           minHeight: 0,
-          paddingBottom: writingBottomPadding,
+          paddingBottom: mobileWriting ? 0 : writingBottomPadding,
           fontFamily: 'var(--font-family-ui)',
           boxSizing: 'border-box'
         }}>
+          {mobileWriting && !writingDocument ? <header className="writing-page-header">
+            <button type="button" onClick={() => {setMobileMoreOpen(true);setMobileMoreNonce(value => value + 1);}}>{`← ${i18n.t('nav.more')}`}</button>
+            <strong>{i18n.t('nav.writing')}</strong><div ref={setChooserNavigation} className="writing-page-header__chooser" />
+          </header> : null}
           {/* New Session "+" button - top left (desktop only) */}
-          {!isMobile && (
+          {!mobileWriting && (
             <button
               onClick={handleNewSessionClick}
               title="New Session"
@@ -1817,7 +1897,7 @@ export default function App() {
           )}
 
           {/* Left toolbar - floating on top (desktop only) */}
-          {!isMobile && (
+          {!mobileWriting && (
             <div style={{
               position: 'fixed',
               left: 'calc(var(--story-workspace-sidebar-width, 240px) + 12px)',
@@ -1837,8 +1917,8 @@ export default function App() {
           )}
 
           {/* @@@ Mobile floating toolbar - top right corner */}
-          {isMobile && (
-            <div style={{
+          {mobileWriting && (
+            <div className="writing-mobile-tools" inert={chooserExpanded ? true : undefined} style={{
               position: 'fixed',
               top: 'calc(10px + env(safe-area-inset-top, 0px))',
               right: '10px',
@@ -1933,12 +2013,14 @@ export default function App() {
           )}
 
           <div
+            className="writing-editor-viewport"
             style={{
               flex: 1,
+              minHeight: 0,
               position: 'relative',
               overflow: 'hidden',
               // @@@ Disable horizontal scrolling on mobile
-              ...(isMobile ? { overflowX: 'hidden', touchAction: 'pan-y' } : {})
+              ...(mobileWriting ? { overflowX: 'hidden', touchAction: 'pan-y' } : {})
             }}
           >
             <div style={{
@@ -1948,7 +2030,9 @@ export default function App() {
               width: '100%',
               margin: '0 auto'
             }}>
+              <div ref={setChooserSurface} className="writing-scroll-region" style={mobileWriting ? {flex:1,minHeight:0,position:'relative',display:'flex'} : {display:'contents'}}>
               <div
+                inert={mobileWriting && chooserExpanded ? true : undefined}
                 ref={scrollContainerRef}  // @@@ Track scroll container for position preservation
                 className="notebook-lines"
                 onScroll={(e) => {
@@ -1958,12 +2042,13 @@ export default function App() {
                 }}
                 style={{
                   flex: 1,
+                  minHeight: 0,
                   position: 'relative',
                   overflow: 'auto',
                   padding: '20px',
-                  paddingLeft: isMobile ? '20px' : '80px',  // @@@ Extra left padding for floating toolbar
-                  paddingBottom: isMobile
-                    ? 'calc(80px + env(safe-area-inset-bottom, 0px))'
+                  paddingLeft: mobileWriting ? '20px' : '80px',  // @@@ Extra left padding for floating toolbar
+                  paddingBottom: mobileWriting
+                    ? '20px'
                     : '80px',  // Extra space for smooth scrolling to bottom
                   backgroundColor: 'var(--color-bg-paper)'  // @@@ Cream paper background for notebook lines
                 }}>
@@ -1973,10 +2058,16 @@ export default function App() {
                 }}>
                   {/* State chooser widget - always shown, collapses when state selected */}
                   <div style={{
-                    height: '32px',  // @@@ Fixed height to match one line interval
-                    marginBottom: '10.8px'  // @@@ 1/3 line interval (32.4px / 3)
+                    height: mobileWriting ? 'auto' : '32px',  // Desktop retains the original metadata slot.
+                    marginBottom: mobileWriting ? 0 : '10.8px'  // Desktop notebook alignment.
                   }}>
                     <StateChooser
+                      mobile={mobileWriting}
+                      active={writingDocument ? writingDocument.active : writingRouteActive && !mobileMoreOpen}
+                      navigationTarget={chooserNavigation}
+                      overlayTarget={chooserSurface}
+                      openNonce={writingDocument?.openChooserNonce}
+                      onViewChange={handleChooserView}
                       stateConfig={stateConfig}
                       selectedState={state?.selectedState ?? selectedState}
                       selectedStateLoading={selectedStateLoading}
@@ -2007,17 +2098,17 @@ export default function App() {
                       return (
                         <div key={cell.id} style={{
                           position: 'relative',
-                          marginTop: idx === 0 ? '0.4px' : 0  // @@@ Align first line with 2nd notebook line
+                          marginTop: !mobileWriting && idx === 0 ? '0.4px' : 0  // @@@ Align first line with 2nd notebook line
                         }}>
                           {/* Highlight layer for this cell */}
-                          <div style={{
+                          <div className="writing-text-highlight" style={{
                             position: 'absolute',
                             top: 0,
                             left: 0,
                             right: 0,
                             pointerEvents: 'none',
-                            fontSize: '18px',
-                            lineHeight: '1.8',
+                            fontSize: mobileWriting ? 'var(--writing-font-size)' : '18px',
+                            lineHeight: mobileWriting ? 'var(--writing-line-height)' : '1.8',
                             color: 'transparent',
                             fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                             zIndex: 0
@@ -2027,6 +2118,8 @@ export default function App() {
 
                           {/* Textarea for this cell */}
                           <textarea
+                            className="writing-prose"
+                            rows={mobileWriting ? 1 : undefined}
                             ref={createTextareaRef(cell.id)}
                             value={content}
                             onChange={(e) => handleTextChange(cell.id, e.target.value)}
@@ -2043,8 +2136,8 @@ export default function App() {
                               border: 'none',
                               outline: 'none',
                               resize: 'none',
-                              fontSize: '18px',
-                              lineHeight: '1.8',
+                              fontSize: mobileWriting ? 'var(--writing-font-size)' : '18px',
+                              lineHeight: mobileWriting ? 'var(--writing-line-height)' : '1.8',
                               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                               background: 'transparent',
                               color: 'var(--color-text-body)',
@@ -2056,7 +2149,7 @@ export default function App() {
                               overflowWrap: 'break-word',
                               wordWrap: 'break-word',
                               whiteSpace: 'pre-wrap',
-                              minHeight: '32px',
+                              minHeight: mobileWriting ? 'var(--writing-line-height)' : '32px',
                               height: 'auto'
                             }}
                           />
@@ -2082,6 +2175,7 @@ export default function App() {
                       return (
                         <ChatWidgetUI
                           key={cell.id}
+                          isMobile={mobileWriting}
                           data={cell.data as ChatWidgetData}
                           onSendMessage={(msg) => handleChatSend(cell.id, msg)}
                           onOpenChat={(cell.data as ChatWidgetData).threadId ? (threadId) => {
@@ -2108,7 +2202,7 @@ export default function App() {
                 </div>
 
                 {/* Comments layer (absolute positioned) - hide on mobile */}
-                {!isMobile && (() => {
+                {!mobileWriting && (() => {
                   // @@@ Calculate global max line width across all groups for alignment
                   const globalMaxLineWidth = Math.max(
                     0,
@@ -2191,7 +2285,7 @@ export default function App() {
                 })()}
 
                 {/* @@@ Mobile comment popup - show when cursor is in highlighted area */}
-                {isMobile && mobileActiveComment && (
+                {mobileWriting && mobileActiveComment && (
                   <div style={{
                     position: 'fixed',
                     bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
@@ -2233,22 +2327,30 @@ export default function App() {
                 )}
               </div>
 
+              </div>
               {/* Debug stats bar at bottom */}
-              <div style={{
+              <div className="writing-feedback" style={{
                 position: 'fixed',
                 bottom: 0,
                 left: 'var(--story-workspace-sidebar-width, 240px)',
                 right: 'var(--story-workspace-writing-chat-width, 0px)',
-                padding: isMobile ? '8px 12px' : '10px 20px',
+                padding: mobileWriting ? '8px 12px' : '10px 20px',
                 borderTop: '1px solid var(--color-border-neutral)',
-                fontSize: isMobile ? '11px' : '12px',
+                fontSize: mobileWriting ? '11px' : '12px',
                 color: 'var(--color-text-secondary)',
                 display: 'flex',
-                gap: isMobile ? '12px' : '20px',
-                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                gap: mobileWriting ? '12px' : '20px',
+                flexWrap: mobileWriting ? 'wrap' : 'nowrap',
                 backgroundColor: 'var(--color-bg-paper)',
                 zIndex: 50
               }}>
+                {mobileWriting && choiceSaveError && choiceSaveError.sessionId === state.id && choiceSaveError.stateId === (state.selectedState ?? selectedState) ? <span role="alert" className="writing-choice-error">
+                  {currentLanguage === 'zh' ? '心情保存失败，请重试。' : 'Emotion could not be saved. Please retry.'}
+                  <button type="button" disabled={choiceRetryPending} onClick={async () => {
+                    setChoiceRetryPending(true);
+                    try {await saveChosenPreference(choiceSaveError.stateId, choiceSaveError.sessionId, choiceSaveError.sequence);} finally {setChoiceRetryPending(false);}
+                  }}>{i18n.t('chat.activity.retry')}</button>
+                </span> : null}
                 <span>Weight: {lastEntry?.weight || 0}</span>
                 <span>Applied: {appliedComments.length}</span>
                 <span>Groups: {commentGroups.size}</span>
@@ -2265,7 +2367,7 @@ export default function App() {
                       }}
                     >
                       <span style={{
-                        width: isMobile ? '84px' : '120px',
+                        width: mobileWriting ? '84px' : '120px',
                         height: '8px',
                         borderRadius: '999px',
                         background: 'rgba(102, 102, 102, 0.2)',
@@ -2406,6 +2508,7 @@ export default function App() {
           onOpenTaskThread={handleCalendarTaskThreadRequest}
           onArrangeTask={handleCalendarArrangeTask}
           onOpenSettings={() => {
+            if(writingDocument){setShowCalendarPopup(false);writingDocument.onOpenResources();return;}
             window.history.pushState({ inkDreamView: 'story-workspace' }, '', STORY_WORKSPACE_PATHS['settings-resources']);
             window.dispatchEvent(new PopStateEvent('popstate'));
           }}

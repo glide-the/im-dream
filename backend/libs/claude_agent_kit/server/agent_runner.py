@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: composition may bind the exact in-process Runtime entry; default CLI resolution and Agent semantics remain unchanged.
 # [Sync] 2026-10-23: forward the bound Notion reader into the existing page Read hook.
 # [Sync] 2026-10-15: allow the three exact user memory Tools.
 # [Sync] 2026-10-12: explicitly close the owned SDK query iterator when a callback is cancelled.
@@ -3117,10 +3118,11 @@ class ClaudeAgentRunner:
     Maps to TypeScript ``ClaudeAgentRunner`` in agent-runner.ts.
     """
 
-    def __init__(self, sdk_client: Optional[IClaudeAgentSDKClient] = None) -> None:
+    def __init__(self, sdk_client: Optional[IClaudeAgentSDKClient] = None, *, cli_path: str | None = None) -> None:
         self._sdk_client: IClaudeAgentSDKClient = (
             sdk_client or SimpleClaudeAgentSDKClient()
         )
+        self._cli_path = cli_path
 
     async def interrupt(self) -> None:
         interrupt = getattr(self._sdk_client, "interrupt", None)
@@ -3900,6 +3902,7 @@ class ClaudeAgentRunner:
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(
+            cli_path=self._cli_path,
             max_turns=max_turns,
             max_buffer_size=resolve_claude_agent_max_buffer_size(),
             allowed_tools=effective_allowed_tools,

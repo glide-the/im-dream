@@ -3,6 +3,7 @@
 [Input] Admin's closed six-field candidate plus the existing shared-artifact and CLI verifiers.
 [Output] Return the four-field immutable evidence accepted by Admin Deck writes, or fail closed.
 [Pos] Deck-default application service in backend/services/deck.
+[Sync] 2026-10-25: load the executable plugin verifier only when a Deck mutation needs artifact evidence.
 [Sync] 2026-08-14: centralize drama-forge resolution and default-Deck repair.
 [Sync] 2026-08-15: default reconciliation now provisions a missing default for
                    legacy actors while preserving existing Decks and refs.
@@ -12,13 +13,11 @@
 from __future__ import annotations
 
 try:
-    from services.claude_plugin.install_service import PluginInstallService
     from services.admin_data.deck_default_data import (
         DefaultPluginEvidenceDTO,
         DefaultPluginInstallationDTO,
     )
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.services.claude_plugin.install_service import PluginInstallService
     from backend.services.admin_data.deck_default_data import (
         DefaultPluginEvidenceDTO,
         DefaultPluginInstallationDTO,
@@ -29,6 +28,18 @@ class DefaultDeckPluginUnavailable(RuntimeError):
     """The configured Deck plugin has no verified ready installation."""
 
 
+def __getattr__(name):
+    if name != "PluginInstallService":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    # Preserve the existing class export for callers while deferring its imports.
+    try:
+        from services.claude_plugin.install_service import PluginInstallService
+    except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+        from backend.services.claude_plugin.install_service import PluginInstallService
+    globals()[name] = PluginInstallService
+    return PluginInstallService
+
+
 def resolve_default_deck_plugin_ref(
     installation: DefaultPluginInstallationDTO | None,
 ) -> DefaultPluginEvidenceDTO:
@@ -36,6 +47,10 @@ def resolve_default_deck_plugin_ref(
 
     if installation is None:
         raise DefaultDeckPluginUnavailable()
+    try:
+        from services.claude_plugin.install_service import PluginInstallService
+    except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+        from backend.services.claude_plugin.install_service import PluginInstallService
     record = installation.model_dump()
     if not PluginInstallService.verify_installation_artifact(record):
         raise DefaultDeckPluginUnavailable()

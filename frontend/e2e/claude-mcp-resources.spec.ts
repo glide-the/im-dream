@@ -21,9 +21,18 @@
 // [Sync] 2026-09-06: verify the caller-scoped MCP dialog uses grouped wide fields, a scroll-contained short viewport, and an always-visible action footer.
 // [Sync] 2026-09-13: use backend serverInfo fixtures; verify Server name/version and successful null metadata through the full Resources journey.
 
+// [Sync] 2026-10-29: use the current public Cookie/CSRF session contract and require it on MCP mutations.
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
+const CSRF = 'm'.repeat(43);
+
+test.beforeEach(async ({ context }) => {
+  await context.route('**/auth/session', route => route.fulfill({ json: {
+    user: { id: '20261029', email: 'claude-mcp@example.test', display_name: 'Claude MCP User',
+      avatar_url: null, role: 'user', created_at: '2026-08-19T00:00:00Z' }, csrf_token: CSRF,
+  } }));
+});
 
 test.use({ channel: 'chrome' });
 
@@ -99,7 +108,7 @@ test('Resources automatically recovers after a transient capability verification
       await route.fulfill({ json: { first_login_completed: true, timezone: 'Asia/Shanghai' } });
       return;
     }
-    if (request.method() === 'GET' && path === '/api/decks') {
+    if (request.method() === 'GET' && (path === '/api/decks' || path === '/api/decks/catalog')) {
       await route.fulfill({ json: { decks: [] } });
       return;
     }
@@ -110,7 +119,6 @@ test('Resources automatically recovers after a transient capability verification
     await route.fulfill({ status: 404, json: { detail: 'unexpected request' } });
   });
   await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'mcp-recovery-technical-token');
     localStorage.setItem('migration_completed', 'true');
   });
 
@@ -135,6 +143,8 @@ test('MCP OAuth callback submits automatically and keeps secrets out of page con
     }
     if (route.request().method() === 'POST'
       && path === '/api/claude-mcp/auth-operations/operation-auto/redirect') {
+      expect(route.request().headers()['x-ink-csrf']).toBe(CSRF);
+      expect(route.request().headers().authorization).toBeUndefined();
       submittedRedirect = (route.request().postDataJSON() as { redirect_url: string }).redirect_url;
       await route.fulfill({
         json: {
@@ -162,7 +172,6 @@ test('MCP OAuth callback submits automatically and keeps secrets out of page con
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('auth_token', 'callback-technical-token');
     localStorage.setItem('ink-memory:claude-mcp:pending-oauth-operation', 'operation-auto');
   });
 
@@ -178,7 +187,6 @@ test('MCP OAuth callback submits automatically and keeps secrets out of page con
 });
 
 test('Resources completes the provider-free Claude MCP login and logout journey', async ({ page }) => {
-  const token = 'claude-mcp-resources-technical-token';
   const serverName = 'e2e-user-server';
   const serverUrl = 'http://mcp.example.test/api';
   const mcpRequests: Array<{ method: string; path: string; headers: Record<string, string> }> = [];
@@ -650,7 +658,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       await route.fulfill({ json: { first_login_completed: true, timezone: 'Asia/Shanghai' } });
       return;
     }
-    if (method === 'GET' && path === '/api/decks') {
+    if (method === 'GET' && (path === '/api/decks' || path === '/api/decks/catalog')) {
       await route.fulfill({ json: { decks: [] } });
       return;
     }
@@ -677,10 +685,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     };
   }
 
-  await page.addInitScript((authToken) => {
-    localStorage.setItem('auth_token', authToken);
+  await page.addInitScript(() => {
     localStorage.setItem('migration_completed', 'true');
-  }, token);
+  });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
 
@@ -822,7 +829,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   const mcpHeaders = mcpRequests.map((request) => request.headers);
   expect(mcpHeaders.length).toBeGreaterThanOrEqual(6);
-  expect(mcpHeaders.every((headers) => headers.authorization === `Bearer ${token}`)).toBe(true);
+  expect(mcpHeaders.every((headers) => headers.authorization === undefined)).toBe(true);
+  expect(mcpHeaders.every((headers) => headers['x-ink-csrf'] === CSRF)).toBe(true);
   const discoveryRequests = mcpRequests.filter((request) => (
     request.method === 'POST'
     && request.path === `/api/claude-mcp/servers/${serverName}/discoveries`

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Input] Admin-authorized Story Workspace Artifact authority DTOs, Dream stage files, and live shared-thread status.
 # [Output] Ordered re-entry rows with canonical titles and Dream's two-state initial/in-progress projection.
 # [Pos] Pure Story Workspace Dream re-entry projector; Admin owns every relational query and permission join.
@@ -208,7 +209,8 @@ class StoryWorkspaceDreamReentryService:
     @staticmethod
     def _default_live_turn_lookup(thread_id: str) -> bool:
         try:
-            from agent_factory import claude_agent_thread_factory
+            from claude_agent.runtime_owner import get_thread_factory
+            claude_agent_thread_factory = get_thread_factory()
 
             snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
             return bool(snapshot and snapshot.get("lifecycle") == "running")

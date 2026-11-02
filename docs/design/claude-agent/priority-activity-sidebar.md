@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-10-28: Web优先复验与活动菜单滚动事件最小修订；技术、正常页面读取与发布状态分别记录。 -->
 <!-- [Input] User bell/layout/filter screenshots, current Chat PRD, ChatView history, scheduledTaskApi and Story Workspace Dream reentry contracts. -->
 <!-- [Output] Formal activity sidebar interaction, current-source rules, normal/failure sequences, page/source state diagrams and implementation traceability. -->
 <!-- [Pos] Current Chat activity interaction design; product rules and full page skeletons belong to docs/prd/chat/priority-activity.md. -->
@@ -63,7 +64,7 @@ Dream 保留原返回集合边界及 recent 项服务器限量。来源内按 ID
 - 显示菜单只有“优先级部分”“定时任务”“Chat”“Dream”，默认全部勾选；偏好在当前 `ChatView` 生命周期内保留，不写数据库。勾选立即重算，不执行任务、不重建 Thread。Chat 的独立删除按钮继续由用户主动触发，阻止事件冒泡以免同时导航；这不改变只读活动加载边界。
 - 关闭优先级时仅隐藏活动内容，标题和菜单仍在；关闭单来源仅影响优先级。全部来源关闭显示“选择要显示的活动类型”；所有选中来源读取成功且为空才显示“暂无需要关注的活动”。读取失败不能成为成功空的证据。
 - 固定标题包含活动、历史搜索、刷新、关闭。优先级标题、活动、来源反馈、日期组和分页共用唯一 body 滚动容器；不增加内嵌第二滚动区。
-- 四项菜单使用浮层避开 body 裁剪，靠近底部时向上展开，边界限制在可用视口内。菜单更改勾选后可保持打开，外部点击或 Escape 关闭。
+- 四项菜单使用浮层避开 body 裁剪，靠近底部时向上展开，边界限制在可用视口内。菜单更改勾选后可保持打开，外部点击或 Escape 关闭。列表在菜单打开后发生位移时关闭菜单；浏览器滚动按钮入视口产生的延迟事件保持菜单打开。技术实现记录打开时的列表滚动位置，后续滚动事件按实际位置变化处理。
 - 打开活动关闭文件、子智能体、任务会话和任务详情；任一原侧栏入口打开时关闭活动。关闭活动不会自动恢复前一个侧栏。桌面普通侧栏不阻断主 Chat；窄屏覆盖抽屉隔离背景点击、滚动和键盘焦点，关闭后恢复原位置。
 
 ### 来源恢复、请求与权限

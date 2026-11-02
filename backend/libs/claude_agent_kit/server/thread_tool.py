@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Input] Model-provided Dream Thread prompt/query/id and the current MCP request identity.
 # [Output] Strict Thread and scheduled-task Tool calls through the private turn broker.
 # [Pos] User MCP Thread adapter; actor, source Thread and Claude session handles stay in the Dream host.
@@ -279,6 +280,7 @@ def handle_thread_tool(
     name: str,
     arguments: dict[str, Any] | None,
     tool_call_id: str,
+    *, environment=None,
 ) -> str:
     if name not in THREAD_TOOL_SPECS:
         raise ValueError("Unknown Thread Tool")
@@ -286,7 +288,7 @@ def handle_thread_tool(
     if not _valid_arguments(name, values):
         return json.dumps({"ok": False, "error_code": "THREAD_TOOL_INPUT_INVALID"})
     try:
-        client = SessionProjectionBrokerClient.from_env(dict(os.environ))
+        client = SessionProjectionBrokerClient.from_env(dict(os.environ if environment is None else environment))
         wait_targets = None
         if name == "wait_threads":
             wait_targets = [

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-30: reuse the composition-root-bound Notion process factory with original argv, env, deadline and cancellation.
 # [Sync] 2026-10-06: preserve raw page times and add explicit-version metadata-only reads.
 # [Sync] 2026-10-13: body reads reuse explicit API/error ownership and reject incomplete or mismatched Markdown.
 # [Sync] 2026-10-13: complete self-unknown link leaves through official block details without following their URLs or referenced entities.
@@ -34,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .auth import build_notion_env, resolve_ntn_executable
+from .auth import build_notion_env, create_notion_process, resolve_ntn_executable
 from .errors import (
     NotionAuthRequiredError,
     NotionCLIUnavailableError,
@@ -458,7 +459,7 @@ class NotionOperationClient:
             args.extend(["--data", json.dumps(payload, ensure_ascii=False)])
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_notion_process(
                 *args,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,

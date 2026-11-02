@@ -1,3 +1,7 @@
+// [Sync] 2026-11-01: explain failed Writing context preparation while retaining the unsent Chat input.
+// [Sync] 2026-11-01: label the report detail drag handle and its touch/keyboard accessibility guidance.
+// [Sync] 2026-10-29: label native General feedback without changing original Web settings actions.
+// [Sync] 2026-10-29: localize the shared narrow More theme entry; existing theme actions remain.
 // [Sync] 2026-10-14: localize complete analysis history loading, errors, reading and pagination.
 // [Sync] 2026-10-14: localize the Reflections Analyze preview tag and its three section labels.
 // [Sync] 2026-10-13: local image import and charcoal editing tools use the existing bilingual Chat namespace.
@@ -30,6 +34,7 @@
 // [Input] User locale and product-facing translation keys.
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
 // [Pos] Frontend i18next resource registry.
+// [Sync] 2026-10-27: native windows without browser storage retain the original English fallback; Web language keys and copy remain unchanged.
 // [Sync] 2026-09-13: add explicit file-download and report-preview close labels.
 // [Sync] 2026-09-02: add lazy historical process loading and failure copy.
 // [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
@@ -67,6 +72,7 @@ import { initReactI18next } from 'react-i18next';
 
 const LANGUAGE_STORAGE_KEY = 'ink-language';
 
+// [Sync] 2026-10-30: native More adds purpose guidance and a theme status derived from the existing local preference.
 const resources = {
   en: {
     translation: {
@@ -79,8 +85,22 @@ const resources = {
         dream: 'Dream',
         chat: 'Chat',
         more: 'More',
+        theme: 'Theme',
         friends: 'Friends',
         settings: 'Settings'
+      },
+      morePage: {
+        intro: 'Write today. Look back when you need to.',
+        journal: 'Your journal',
+        preferences: 'App preferences',
+        currentTheme: 'Current: {{appearance}}',
+        themeAction: 'Current: {{appearance}}. Tap to switch to {{next}}.',
+        guidance: {
+          writing: 'Capture thoughts and everyday moments',
+          timeline: 'Browse entries and past reports',
+          analysis: 'Review patterns across your entries',
+          settings: 'Manage your account, models and resources'
+        }
       },
       writingSuggestion: {
         goDeeper: 'Go deeper',
@@ -135,6 +155,7 @@ const resources = {
             model: 'AI models',
             about: 'About'
           },
+          preferences: { back: 'Back', saveUnconfirmed: 'Appearance is applied on this device. The account save could not be confirmed.', localSaveFailed: 'Display preference could not be saved. Please try again.' },
           general: {
             description: 'Adjust the interface language and workspace display preferences.'
           },
@@ -179,6 +200,7 @@ const resources = {
       },
       analysis: {
         title: 'Reflections',
+        detailResize: {label: 'Resize reflection details', hint: 'Drag up or down to resize. Release to snap.'},
         subtitle: 'Patterns and insights woven through your words',
         backButton: 'Back',
         backTitle: 'Back to Dashboard',
@@ -948,6 +970,7 @@ const resources = {
             state_unknown: 'Reply status needs checking'
           }
         },
+        writingContextUnavailable: 'This note could not be prepared. Return to Writing and try again. Your input is kept.',
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
           consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
@@ -1203,8 +1226,22 @@ const resources = {
         dream: 'Dream',
         chat: '对话',
         more: '更多',
+        theme: '主题',
         friends: '好友',
         settings: '设置'
+      },
+      morePage: {
+        intro: '记录此刻，也回看走过的日子。',
+        journal: '记录与回顾',
+        preferences: '应用偏好',
+        currentTheme: '当前：{{appearance}}',
+        themeAction: '当前：{{appearance}}。点按切换为{{next}}。',
+        guidance: {
+          writing: '记下想法与日常点滴',
+          timeline: '浏览日记与历史报告',
+          analysis: '回看一段时间的变化',
+          settings: '管理账户、模型与资源'
+        }
       },
       writingSuggestion: {
         goDeeper: '深入一下',
@@ -1259,6 +1296,7 @@ const resources = {
             model: 'AI 模型',
             about: '关于'
           },
+          preferences: { back: '返回', saveUnconfirmed: '当前设备已应用外观，账户保存结果待确认。', localSaveFailed: '显示偏好保存失败，请重试。' },
           general: {
             description: '调整界面语言和工作区显示偏好。'
           },
@@ -1303,6 +1341,7 @@ const resources = {
       },
       analysis: {
         title: '回顾',
+        detailResize: {label: '调整回顾详情高度', hint: '上下拖动调整高度，松手后自动吸附。'},
         subtitle: '读出文字里编织的脉络与启示',
         backButton: '返回',
         backTitle: '回到总览',
@@ -2070,6 +2109,7 @@ const resources = {
             state_unknown: '回复状态待核对'
           }
         },
+        writingContextUnavailable: '当前笔记暂时无法用于对话。请返回写作后重试，输入内容已保留。',
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
           consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',
@@ -2320,7 +2360,11 @@ function getInitialLanguage(): string {
   if (typeof window === 'undefined') {
     return fallback;
   }
-  return localStorage.getItem(LANGUAGE_STORAGE_KEY) || fallback;
+  try {
+    return typeof localStorage === 'undefined' ? fallback : localStorage.getItem(LANGUAGE_STORAGE_KEY) || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 i18n
@@ -2337,6 +2381,7 @@ i18n
 if (typeof window !== 'undefined') {
   i18n.on('languageChanged', (lng) => {
     try {
+      if (typeof localStorage === 'undefined') return;
       localStorage.setItem(LANGUAGE_STORAGE_KEY, lng);
     } catch (error) {
       console.warn('Failed to persist language preference:', error);

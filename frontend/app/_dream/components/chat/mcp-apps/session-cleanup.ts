@@ -1,3 +1,4 @@
+// [Sync] 2026-10-31: expose one document-scoped close event; original MCP termination and timeout behavior remain.
 // [Input] One Browser MCP Client, its stateful Streamable HTTP transport, endpoint, scoped headers, and server timeout.
 // [Output] Bounded fresh-signal DELETE, unconditional local close, and stale-lifecycle error suppression.
 // [Pos] Browser session cleanup primitive; it never creates authority or logs endpoint/header/session material.
@@ -92,4 +93,16 @@ export async function cleanupFailedMcpAppsConnection(input: Readonly<{
   if (!input.isActive()) return;
   await input.cleanup();
   if (input.isActive()) input.report();
+}
+
+
+// The standalone tool document closes its existing Hosts before Native removes WebKit.
+export const MCP_APPS_DOCUMENT_CLOSE_EVENT = 'ink:mcp-apps-document-close';
+export type McpAppsDocumentCloseDetail = Readonly<{waitUntil: (operation: Promise<void>) => void}>;
+export async function closeMcpAppsDocumentSessions(): Promise<void> {
+  const operations: Promise<void>[] = [];
+  window.dispatchEvent(new CustomEvent<McpAppsDocumentCloseDetail>(MCP_APPS_DOCUMENT_CLOSE_EVENT, {
+    detail: {waitUntil: operation => { operations.push(operation); }},
+  }));
+  await Promise.allSettled(operations);
 }

@@ -2,6 +2,7 @@
 # [Output] Provider-free proof for validation, Admin handoff and same-Thread delivery recovery.
 # [Pos] Deterministic confirmation contract/application/coordinator test stage; no database fixture.
 # [Sync] 2026-09-16: replace legacy SQLite/SQL tests with Admin DTO boundary coverage.
+# [Sync] 2026-10-26: carry the existing current-user gateway owner after exact claim, preserve scope denial and close both owners.
 """Focused tests for the Admin-owned Dream confirmation state machine."""
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import pytest
 from claude_agent.service import ClaudeAgentRunRequest
 from models.workflow_run import RunStatus, WorkflowRun
 from services.admin_data.story_workspace_confirmation_data import (
+    AdminStoryWorkspaceConfirmationTurnOwner,
     StoryWorkspaceConfirmationAckOutputDTO,
     StoryWorkspaceConfirmationClaimOutputDTO,
     StoryWorkspaceConfirmationDispatchDTO,
@@ -223,7 +225,7 @@ class RecordingWorker:
         self.claims = []
         self.leases = []
         self.acks = []
-        self.owner = SimpleNamespace(
+        self.owner = AdminStoryWorkspaceConfirmationTurnOwner(
             persistence=RecordingPersistence(),
             workflow=object(),
             deck=object(),
@@ -292,6 +294,55 @@ async def test_coordinator_claims_exact_message_and_acks_after_runtime_completio
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "denied", "unclaimed"])
+async def test_gateway_owner_is_created_only_after_exact_claim_and_scope_denial_stops_runtime(outcome):
+    raw = claimed_dispatch()
+    worker = RecordingWorker(raw)
+    gateway = RecordingPersistence()
+    factory = Mock(return_value=gateway)
+    delivered = []
+    if outcome == "unclaimed":
+        worker.claim_turn = Mock(return_value=None)
+    elif outcome == "denied":
+        from services.admin_data.errors import AdminDataError
+        factory.side_effect = AdminDataError("INSUFFICIENT_SCOPE", 403, REQUEST_ID)
+
+    def dispatcher_factory():
+        async def dispatch(thread_id, actor_id, message_id, parts, metadata, owner):
+            delivered.append(owner)
+            assert owner.persistence is worker.owner.persistence
+            assert owner.gateway is gateway
+            owner.close()
+            return True
+        return dispatch
+
+    coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+        worker, dispatcher_factory=dispatcher_factory, lease_renew_interval_s=60,
+        claim_id_factory=lambda: CLAIM_ID, request_id_factory=lambda: REQUEST_ID,
+    )
+    coordinator.schedule(StoryWorkspaceDreamConfirmationDispatch.from_admin(raw), gateway_runtime_factory=factory)
+    await coordinator.wait_for_idle()
+    if outcome == "unclaimed":
+        factory.assert_not_called()
+    else:
+        factory.assert_called_once_with(worker.owner.workflow)
+    assert len(delivered) == (1 if outcome == "completed" else 0)
+    assert len(worker.acks) == (1 if outcome == "completed" else 0)
+    assert worker.owner.persistence.closed == (0 if outcome == "unclaimed" else 1)
+    assert gateway.closed == (1 if outcome == "completed" else 0)
+
+
+def test_confirmation_gateway_close_failure_still_closes_original_persistence():
+    persistence = RecordingPersistence()
+    gateway = Mock()
+    gateway.close.side_effect = RuntimeError("fixture close failure")
+    owner = AdminStoryWorkspaceConfirmationTurnOwner(persistence, object(), object(), gateway)
+    with pytest.raises(RuntimeError, match="fixture close failure"):
+        owner.close()
+    assert persistence.closed == 1
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_marks_admin_persisted_user_turn_without_rewriting_it() -> None:
     created = []
 
@@ -308,10 +359,12 @@ async def test_dispatcher_marks_admin_persisted_user_turn_without_rewriting_it()
     )
     parsed = StoryWorkspaceDreamConfirmationDispatch.from_admin(claimed_dispatch())
     persistence = RecordingPersistence()
-    owner = SimpleNamespace(
+    gateway = RecordingPersistence()
+    owner = AdminStoryWorkspaceConfirmationTurnOwner(
         persistence=persistence,
         workflow=object(),
         deck=object(),
+        gateway=gateway,
     )
     with patch.object(confirmation_module, "drain_chat_agent_turn", drain):
         assert await dispatcher(
@@ -323,6 +376,9 @@ async def test_dispatcher_marks_admin_persisted_user_turn_without_rewriting_it()
     assert created[0]["admin_turn_persistence"] is persistence
     assert created[0]["admin_workflow_resolution"] is owner.workflow
     assert created[0]["admin_deck_chat_context"] is owner.deck
+    assert created[0]["admin_gateway_runtime"] is gateway
+    assert gateway.started == 1
+    assert gateway.closed == 1
     assert persistence.started == 1
     assert persistence.closed == 1
 

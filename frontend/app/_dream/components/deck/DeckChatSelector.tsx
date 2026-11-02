@@ -9,33 +9,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Deck, Voice } from '../../api/voiceApi';
 import { COLORS, iconMap } from '../deckVisuals';
-
-export interface DeckAgentSelection {
-  deckId: string;
-  agentId: string;
-}
-
-interface DeckChatSelectorProps {
-  decks: Deck[];
-  selectedAgentId?: string;
-  onChange?: (selection: DeckAgentSelection | undefined) => void;
-  loading?: boolean;
-  error?: string | null;
-  allowNone?: boolean;
-  variant?: 'compact' | 'dream';
-  noneLabel?: string;
-  triggerLabel?: string;
-  unavailableSelectionLabel?: string;
-}
+// [Sync] 2026-10-28: share enabled-Agent grouping and localized prefix search; preserve the Web popup and selection callbacks.
+import {agentLabel as originalAgentLabel,deckLabel as originalDeckLabel,enabledAgentsOf,groupDeckAgents,type AgentGroup,type DeckAgentSelection,type DeckChatSelectorProps} from './deckAgentSelection';
+export type {DeckAgentSelection} from './deckAgentSelection';
 
 interface AgentOption extends DeckAgentSelection {
   deck: Deck;
   agent: Voice;
-}
-
-interface AgentGroup {
-  deck: Deck;
-  agents: Voice[];
 }
 
 interface PopupLayout {
@@ -50,10 +30,6 @@ const VIEWPORT_MARGIN = 8;
 const POPUP_WIDTH = 300;
 const POPUP_CHROME = 52;
 
-function enabledAgentsOf(deck: Deck): Voice[] {
-  return (deck.voices || []).filter((agent) => agent.enabled);
-}
-
 export default function DeckChatSelector({
   decks,
   selectedAgentId,
@@ -66,12 +42,8 @@ export default function DeckChatSelector({
 }: DeckChatSelectorProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
-  const deckLabel = useCallback((deck: Deck) => (
-    (language === 'zh' ? deck.name_zh : deck.name_en) || deck.name
-  ), [language]);
-  const agentLabel = useCallback((agent: Voice) => (
-    (language === 'zh' ? agent.name_zh : agent.name_en) || agent.name
-  ), [language]);
+  const deckLabel = useCallback((deck: Deck) => originalDeckLabel(deck,language), [language]);
+  const agentLabel = useCallback((agent: Voice) => originalAgentLabel(agent,language), [language]);
 
   const selected = useMemo(() => decks
     .flatMap((deck) => enabledAgentsOf(deck).map((agent) => ({ deck, agent })))
@@ -87,21 +59,7 @@ export default function DeckChatSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
-  const groups = useMemo<AgentGroup[]>(() => {
-    const q = query.trim().toLowerCase();
-    return decks.flatMap((deck) => {
-      const agents = enabledAgentsOf(deck);
-      if (!q) return agents.length ? [{ deck, agents }] : [];
-      const deckNames = [deckLabel(deck), deck.name].map((name) => name.toLowerCase());
-      const deckMatches = deckNames.some((name) => name.startsWith(q));
-      const matchingAgents = deckMatches ? agents : agents.filter((agent) => (
-        [agentLabel(agent), agent.name]
-          .map((name) => name.toLowerCase())
-          .some((name) => name.startsWith(q))
-      ));
-      return matchingAgents.length ? [{ deck, agents: matchingAgents }] : [];
-    });
-  }, [agentLabel, deckLabel, decks, query]);
+  const groups = useMemo<AgentGroup[]>(() => groupDeckAgents(decks,query,language), [decks,query,language]);
 
   const options = useMemo<(AgentOption | undefined)[]>(() => [
     ...(allowNone ? [undefined] : []),

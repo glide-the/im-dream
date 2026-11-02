@@ -4,6 +4,7 @@
 # [Sync] 2026-09-16: authorize injected managed-MCP loaders with the current persistence grant in tests.
 # [Sync] 2026-09-16: verify the Notion adapter receives the exact actor, Thread, Run and current grant.
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
+# [Sync] 2026-10-26: verify exact committed confirmation reads reject source drift and malformed final projections.
 # [Output] Entity scope, recent Session reads, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
 # [Sync] 2026-09-15: validate Thread/SDK Session scope, native init callbacks and one cross-operation unknown barrier.
@@ -31,6 +32,7 @@ import pytest
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.chat_data import GET_THREAD, PERSIST_MESSAGE, UPDATE_SESSION
+from services.admin_data.chat_models import MessageListResultDTO
 from services.admin_data.delegation import RuntimeGrant
 from services.admin_data.delegation_keeper import RuntimeGrantKeeper
 from services.admin_data.session_data import (
@@ -600,6 +602,40 @@ def _dream_context():
         deck_runtime_snapshot_id="snapshot-1",
         runtime_plugin_lock_id="rpl_" + "d" * 32,
     )
+
+
+@pytest.mark.parametrize("case", ["completed", "other-message", "partial", "other-actor", "other-thread", "other-run", "other-kind", "invalid-final", "decode-error", "duplicate"])
+def test_completed_confirmation_read_preserves_exact_source_and_final_projection(case):
+    context = _dream_context()
+    value, _, _ = holder(workflow_context=context)
+    source = {"run_id": context.workflow_run_id, "thread_id": "thread-1", "actor_id": "42",
+              "message_id": "confirmation-original", "kind": "story-workspace-dream-confirmation"}
+    metadata = {"turnId": "original-turn", "turnStatus": "completed", "finalPartIndex": 0,
+                "story_workspace_dream_source": source}
+    message = {"id": "assistant-original", "role": "assistant", "parts": [{"type": "text", "text": "Original reply"}],
+               "metadata": metadata, "metadata_decode_error": False, "created_at": None,
+               "history_final_text": None, "history_process_available": False, "history_projection_version": None}
+    if case == "other-message": source["message_id"] = "different-message"
+    elif case == "partial": metadata["is_partial"] = True
+    elif case.startswith("other-"):
+        source[{"other-actor": "actor_id", "other-thread": "thread_id", "other-run": "run_id", "other-kind": "kind"}[case]] = "different"
+    elif case == "invalid-final": metadata["finalPartIndex"] = True
+    elif case == "decode-error": message["metadata_decode_error"] = True
+    result = MessageListResultDTO.model_validate({"messages": [message, message] if case == "duplicate" else [message]})
+    value._chat.list_messages = Mock(return_value=result)
+    try:
+        if case in {"completed", "other-message", "partial"}:
+            text = value.completed_dream_confirmation_text(actor_id="42", thread_id="thread-1", message_id="confirmation-original")
+            assert text == ("Original reply" if case == "completed" else None)
+        else:
+            with pytest.raises(AdminDataError):
+                value.completed_dream_confirmation_text(actor_id="42", thread_id="thread-1", message_id="confirmation-original")
+        assert value._chat.list_messages.call_args.kwargs == {"access_token": TOKEN}
+        with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+            value.completed_dream_confirmation_text(actor_id="other", thread_id="thread-1", message_id="confirmation-original")
+        value._chat.list_messages.assert_called_once()
+    finally:
+        value.close()
 
 
 def _repair_identity(context):

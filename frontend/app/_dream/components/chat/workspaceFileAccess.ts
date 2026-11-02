@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: share the existing status-to-failure mapping with Native file leases; Web fetch and authentication remain unchanged.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Strictly parsed Workspace URI, current Chat Thread identity, bearer auth state, and optional abort signal.
@@ -39,7 +40,7 @@ function contentUrl(threadId: string, path: string, download = false): string {
   return apiUrl(`/api/workspace/files/${download ? 'download' : 'content'}?${query.toString()}`);
 }
 
-function failureFromStatus(status: number): WorkspaceFileRequestFailure {
+export function failureFromStatus(status: number): WorkspaceFileRequestFailure {
   if (status === 400) return 'invalid';
   if (status === 401 || status === 403) return 'access';
   if (status === 404) return 'missing';

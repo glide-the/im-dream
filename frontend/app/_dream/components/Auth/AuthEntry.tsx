@@ -2,6 +2,7 @@
 // [Output] Restored Dream email/password/register/Google card using top-level Admin form navigation.
 // [Pos] Dream product login interaction; Admin remains the only credential validator and Session authority.
 // [Sync] 2026-09-18: submit authentication as first-party top-level navigation so state and Session cookies survive browser third-party-cookie blocking.
+// [Sync] 2026-10-25: let users reload failed session/options reads through the original page without resubmitting credentials.
 import { useEffect, useState } from 'react';
 import { FaGoogle } from 'react-icons/fa';
 import { z } from 'zod';
@@ -34,6 +35,7 @@ const labelStyle = { display: 'block', marginBottom: '16px', fontSize: '14px', f
 export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitch: () => void }) {
   const { authError } = useAuth();
   const [options, setOptions] = useState<z.infer<typeof optionsDto> | null>(null);
+  const [optionsFailed, setOptionsFailed] = useState(false);
   const [entryError, setEntryError] = useState<string | null>(() => returnedError());
   const returnTo = currentReturnLocation();
 
@@ -51,7 +53,12 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
         if (!parsed.success) throw new Error('AUTH_OPTIONS_INVALID');
         setOptions(parsed.data);
       })
-      .catch(() => { if (!abort.signal.aborted) setEntryError('Login is temporarily unavailable. Please try again.'); });
+      .catch(() => {
+        if (!abort.signal.aborted) {
+          setOptionsFailed(true);
+          setEntryError('Login is temporarily unavailable. Please try again.');
+        }
+      });
     return () => abort.abort();
   }, []);
 
@@ -59,7 +66,10 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
 
   return <div style={{ width: '100%', maxWidth: '400px', margin: '0 auto', padding: '32px', backgroundColor: 'var(--color-bg-paper)', border: '2px solid var(--color-border-paper)', borderRadius: '12px', boxShadow: '0 4px 12px var(--color-shadow-soft)', fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif" }}>
     <h2 style={{ margin: '0 0 24px', fontSize: '24px', fontWeight: 600, color: 'var(--color-text-body)', textAlign: 'center' }}>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-    {error && <div role="alert" style={{ padding: '12px', marginBottom: '16px', backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)', borderRadius: '6px', fontSize: '14px', color: 'var(--color-state-danger)' }}>{error}</div>}
+    {error && <div role="alert" style={{ padding: '12px', marginBottom: '16px', backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)', borderRadius: '6px', fontSize: '14px', color: 'var(--color-state-danger)' }}>
+      {error}
+      {(authError || optionsFailed) && <button type="button" onClick={() => window.location.reload()} style={{ display: 'block', marginTop: '8px', padding: '8px 0', border: 'none', background: 'none', color: 'var(--color-action-link)', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px', fontFamily: 'inherit' }}>Try again</button>}
+    </div>}
     <form action={options?.google_action} method="post">
       <input name="return_to" type="hidden" value={returnTo} />
       <button type="submit" disabled={!options} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '11px', border: '1px solid var(--color-border-paper)', borderRadius: '6px', backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)', fontSize: '15px', fontWeight: 600, cursor: options ? 'pointer' : 'not-allowed', fontFamily: 'inherit', marginBottom: '18px' }}><FaGoogle aria-hidden="true" />Continue with Google</button>

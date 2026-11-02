@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: own the source-only Vite fixture separately from the production Next Web gate.
 // [Sync] 2026-10-13: model the server's explicit not-due observation in the healthy overview fixture.
 // [Sync] 2026-10-07: supply the real public session DTO to the authenticated Settings fixture; original full overview/child journey remains.
 // [Input] Running Vite frontend plus production-shaped intercepted Notion connector, capability, Skill, and safe-file DTOs.
@@ -14,8 +15,30 @@
 //                    the production-shaped capability catalog fixture.
 
 import { expect, test } from '@playwright/test';
+import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
 
-const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
+// The source-only Notion fixture owns its Vite listener; the public Next server stays independent.
+let WEB_BASE: string;
+let sourceServer: Awaited<ReturnType<typeof createServer>>;
+test.beforeAll(async () => {
+  sourceServer = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
+    cacheDir: '/tmp/ink-native-settings-resources-20261029/vite-notion-overview', logLevel: 'silent',
+    plugins: [react(), { name: 'notion-overview-fixture', configureServer(vite) {
+      vite.middlewares.use(async (request, response, next) => {
+        if (request.url?.split('?')[0] !== '/notion-connector-settings-harness') return next();
+        response.setHeader('Content-Type', 'text/html');
+        response.end(await vite.transformIndexHtml('/notion-connector-settings-harness',
+          '<!doctype html><html lang="zh-CN"><head><link rel="icon" href="data:,"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/notionConnectorSettingsHarness.tsx"></script></body></html>'));
+      });
+    } }], server: { host: '127.0.0.1', port: 0, strictPort: true } });
+  await sourceServer.listen();
+  const address = sourceServer.httpServer?.address();
+  if (!address || typeof address === 'string') throw Error('NOTION_FIXTURE_LISTENER');
+  WEB_BASE = `http://127.0.0.1:${address.port}`;
+});
+test.afterAll(async () => { await sourceServer?.close(); });
 
 test.use({ channel: 'chrome', locale: 'zh-CN', viewport: { width: 1180, height: 820 } });
 
@@ -84,12 +107,6 @@ test('Notion Settings exposes the seven-section overview and focused child views
     },
   };
 
-  await page.route(`${WEB_BASE}/notion-connector-settings-harness`, async (route) => {
-    await route.fulfill({
-      contentType: 'text/html',
-      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/notionConnectorSettingsHarness.tsx"></script></body></html>',
-    });
-  });
   await page.route('**/auth/session', (route) => route.fulfill({ json: {
     user: { id: '20260929', email: 'notion-settings@example.test', display_name: 'Notion Settings QA',
       avatar_url: null, role: 'user', created_at: '2026-09-01T00:00:00Z' }, csrf_token: 's'.repeat(43),

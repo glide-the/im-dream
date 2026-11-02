@@ -56,6 +56,8 @@
 #                    sessions; Voice Threads and Reflections tasks own those flows.
 # [Sync] 2026-08-31: retire daily-picture generation, its scheduler, and the
 #                    now-empty PolyCLI runtime; historical picture reads remain.
+# [Sync] 2026-10-25: reuse the shared public router for server and embedded iOS Python.
+# [Sync] 2026-10-25: preserve production route order through the shared business-router inventory.
 """FastAPI application for Writing, Story Workspace, and Claude Agent APIs."""
 
 import os
@@ -136,9 +138,9 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
+from routers.public import create_public_router
 from typing import Any
 
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
@@ -522,79 +524,20 @@ async def shutdown_admin_request_auth():
 # ========== Custom API Endpoints (Clean Interface) ==========
 
 
-@app.get("/")
-def root():
-    """Root endpoint"""
-    base = BACKEND_PUBLIC_BASE_URL.rstrip("/") + "/"
-    return PlainTextResponse(
-        f"The server is configured with a public base URL of {base}"
-        f" - did you mean to visit {base}api/claude-agent/threads instead?"
-    )
-
-
-@app.get("/robots.txt", include_in_schema=False)
-def robots_txt():
-    """Machine-readable crawler access policy for the public app."""
-    return PlainTextResponse(
-        build_robots_txt(PUBLIC_BASE_URL),
-        media_type="text/plain; charset=utf-8",
-    )
-
-
-@app.get("/sitemap.xml", include_in_schema=False)
-def sitemap_xml():
-    """XML sitemap for the public app surface."""
-    return Response(
-        build_sitemap_xml(PUBLIC_BASE_URL),
-        media_type="application/xml; charset=utf-8",
-    )
-
-
-@app.get("/llms.txt", include_in_schema=False)
-def llms_txt():
-    """Structured app summary for AI search and LLM crawlers."""
-    return PlainTextResponse(
-        build_llms_txt(PUBLIC_BASE_URL, BACKEND_PUBLIC_BASE_URL),
-        media_type="text/plain; charset=utf-8",
-    )
-
-
-@app.get("/api/health")
-def health():
-    """Health endpoint for deploy scripts, Compose healthchecks, and Cloud Run probes."""
-    return {
-        "status": "ok",
-        "version": BACKEND_VERSION,
-        "cors_allow_origins": CORS_ALLOW_ORIGINS,
-    }
+app.include_router(create_public_router(
+    backend_version=BACKEND_VERSION,
+    cors_allow_origins=CORS_ALLOW_ORIGINS,
+    public_base_url=PUBLIC_BASE_URL,
+    backend_public_base_url=BACKEND_PUBLIC_BASE_URL,
+))
 
 
 # ========== Router Registration ==========
 
-app.include_router(auth_router)
-app.include_router(oauth_router)
-app.include_router(device_oauth_router)
-app.include_router(sessions_router)
-app.include_router(pictures_router)
-app.include_router(preferences_router)
-app.include_router(notion_router)
-app.include_router(product_router)
-app.include_router(reports_router)
-app.include_router(voices_router)
-app.include_router(friends_router)
-app.include_router(claude_agent_router)
-app.include_router(storage_router)
-app.include_router(deck_plugins_router)
-app.include_router(claude_plugins_router)
-app.include_router(claude_mcp_router)
-app.include_router(deck_plugin_binding_router)
-app.include_router(deck_versions_router)
-app.include_router(story_workspace_router)
-app.include_router(system_config_router)
-app.include_router(gateway_models_router)
-app.include_router(workspace_router)
-app.include_router(reflections_router)
-app.include_router(memory_router)
+from routers import load_business_routers
+
+for module in load_business_routers():
+    app.include_router(module.router)
 
 
 @app.websocket("/ws/speech-recognition")

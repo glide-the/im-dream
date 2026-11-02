@@ -4,6 +4,7 @@
 # [Sync] 2026-08-28: replace request-controlled home tests with server-owned file-store and no-ambient-token contracts.
 # [Sync] 2026-08-28: normalize context-manager style during the agentdata audit.
 # [Sync] 2026-08-30: cover installed/missing ntn prerequisite projection without exposing an executable path.
+# [Sync] 2026-11-01: cover iOS native-exec denial for the exact bound interpreted entry and retain host access checks.
 
 from __future__ import annotations
 
@@ -23,6 +24,32 @@ from notion.errors import NotionAuthError
 
 
 class TestNotionAuthHelpers(unittest.IsolatedAsyncioTestCase):
+    def test_interpreted_entry_is_readable_and_cannot_replace_its_binding(self):
+        from notion.errors import NotionCLIUnavailableError, NotionConfigError
+        with tempfile.TemporaryDirectory() as root:
+            entry = Path(root) / "ntn"
+            entry.write_bytes(b"interpreted executable fixture")
+            other = Path(root) / "other"
+            other.write_bytes(b"unbound fixture")
+            factory = object()
+            with unittest.mock.patch.object(notion_auth, "_process_factory", None), \
+                 unittest.mock.patch.object(notion_auth, "_process_executable", None), \
+                 unittest.mock.patch.dict(os.environ, {"INK_NOTION_CLI_PATH": str(entry)}), \
+                 unittest.mock.patch.object(notion_auth.os, "access", side_effect=lambda _path, mode: mode == os.R_OK):
+                # Native execution is denied for both files, as observed on iPhone.
+                self.assertEqual(notion_auth.get_notion_cli_installation().status, "missing")
+                notion_auth.bind_notion_process_factory(factory, executable=entry)
+                self.assertEqual(notion_auth.resolve_ntn_executable(), str(entry.resolve()))
+                self.assertEqual(notion_auth.get_notion_cli_installation().status, "installed")
+                with self.assertRaises(NotionConfigError):
+                    notion_auth.bind_notion_process_factory(factory, executable=other)
+                os.environ["INK_NOTION_CLI_PATH"] = str(other)
+                with self.assertRaises(NotionCLIUnavailableError):
+                    notion_auth.resolve_ntn_executable()
+                os.environ["INK_NOTION_CLI_PATH"] = str(entry)
+                with unittest.mock.patch.object(notion_auth.os, "access", return_value=False):
+                    self.assertEqual(notion_auth.get_notion_cli_installation().status, "missing")
+
     def test_cli_installation_status_is_path_free_and_actionable(self):
         with unittest.mock.patch.object(
             notion_auth,

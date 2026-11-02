@@ -1,4 +1,6 @@
 // [Input] Mermaid chart source text extracted from a ```mermaid fenced code block in chat Markdown.
+// [Sync] 2026-10-30: optional concrete copy/PNG operations and controlled preview connect the native document; Web defaults remain.
+// [Sync] 2026-10-30: rasterize a self-contained SVG data URI so the original HTML labels remain exportable without tainting the canvas.
 // [Output] Lazily loaded mermaid SVG render with debounced streaming retries and raw-code fallback;
 //          shared media toolbar offers preview/source, copy, enlarge, and PNG export, with the unified immersive zoom viewer.
 // [Pos] mermaid-block component node in frontend/app/_dream/components/chat
@@ -97,7 +99,7 @@ function downloadBlob(blob: Blob, fileName: string): void {
 // Rasterize the rendered SVG into a PNG download. mermaid emits transparent SVGs
 // sized via viewBox/max-width, so write explicit dimensions and paint the paper
 // background before drawing.
-async function exportSvgAsPng(svgMarkup: string): Promise<void> {
+async function exportSvgAsPng(svgMarkup: string, savePNG?: (blob: Blob, fileName: string) => Promise<void>): Promise<void> {
   const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml');
   const svgEl = doc.documentElement;
   const viewBox = (svgEl.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number);
@@ -107,28 +109,26 @@ async function exportSvgAsPng(svgMarkup: string): Promise<void> {
   svgEl.setAttribute('height', String(height));
 
   const serialized = new XMLSerializer().serializeToString(svgEl);
-  const url = URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' }));
-  try {
-    const image = await loadImage(url);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(width * EXPORT_SCALE);
-    canvas.height = Math.round(height * EXPORT_SCALE);
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('canvas 2d context unavailable');
-    }
-    context.scale(EXPORT_SCALE, EXPORT_SCALE);
-    context.fillStyle = cssVar('--color-bg-paper', '#ffffff');
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) {
-      throw new Error('png encode failed');
-    }
-    downloadBlob(blob, `mermaid-diagram-${Date.now()}.png`);
-  } finally {
-    URL.revokeObjectURL(url);
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+  const image = await loadImage(url);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(width * EXPORT_SCALE);
+  canvas.height = Math.round(height * EXPORT_SCALE);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('canvas 2d context unavailable');
   }
+  context.scale(EXPORT_SCALE, EXPORT_SCALE);
+  context.fillStyle = cssVar('--color-bg-paper', '#ffffff');
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) {
+    throw new Error('png encode failed');
+  }
+  const fileName = `mermaid-diagram-${Date.now()}.png`;
+  if (savePNG) await savePNG(blob, fileName);
+  else downloadBlob(blob, fileName);
 }
 
 function ToolbarButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
@@ -147,16 +147,22 @@ function ToolbarButton({ title, onClick, disabled, children }: { title: string; 
 
 interface MermaidBlockProps {
   chart: string;
+  copyText?: (text: string) => Promise<void>;
+  savePNG?: (blob: Blob, fileName: string) => Promise<void>;
+  preview?: { open: boolean; onChange: (open: boolean) => void };
 }
 
-export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
+export default memo(function MermaidBlock({ chart, copyText, savePNG, preview }: MermaidBlockProps) {
   const { t } = useTranslation();
-  const { copied, copy } = useCopy();
-  const [svg, setSvg] = useState<string | null>(null);
+  const { copied, copy } = useCopy(2000, copyText);
+  const [rendered, setRendered] = useState<{ chart: string; svg: string } | null>(null);
+  const svg = rendered?.chart === chart ? rendered.svg : null;
   const [failed, setFailed] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [isExporting, setIsExporting] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [internalPreviewOpen, setInternalPreviewOpen] = useState(false);
+  const previewOpen = preview?.open ?? internalPreviewOpen;
+  const setPreviewOpen = (open: boolean) => preview ? preview.onChange(open) : setInternalPreviewOpen(open);
   const [previewZoom, setPreviewZoom] = useState(100);
   const instanceIdRef = useRef(`mermaid-${crypto.randomUUID()}`);
   const seqRef = useRef(0);
@@ -169,7 +175,7 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
         .then((mermaid) => enqueueRender(() => mermaid.render(renderId, chart)))
         .then((result) => {
           if (seqRef.current === seq) {
-            setSvg(result.svg);
+            setRendered({ chart, svg: result.svg });
             setFailed(false);
           }
         })
@@ -178,6 +184,7 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
           // Expected during streaming: the fenced block is often syntactically incomplete.
           console.warn('[MermaidBlock] render failed, showing source fallback', error);
           if (seqRef.current === seq) {
+            setRendered(null);
             setFailed(true);
           }
         });
@@ -190,12 +197,12 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
       return;
     }
     setIsExporting(true);
-    exportSvgAsPng(svg)
+    exportSvgAsPng(svg, savePNG)
       .catch((error: unknown) => {
         console.warn('[MermaidBlock] png export failed', error);
       })
       .finally(() => setIsExporting(false));
-  }, [svg, isExporting]);
+  }, [svg, isExporting, savePNG]);
 
   const showPreview = viewMode === 'preview' && svg !== null;
   // Copy the complete fenced Markdown block, not just the chart source.

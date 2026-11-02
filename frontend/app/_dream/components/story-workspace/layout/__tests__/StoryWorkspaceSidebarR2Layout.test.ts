@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: include shared More theme mode and follow existing subscription copy/navigation owners.
 // [Input] Story Workspace sidebar, router, App Decks projection and subscription page sources.
 // [Output] Node seam for the three-entry primary navigation, accessible More
 //          disclosure, restored routes, and Product BFF subscription boundary.
@@ -27,6 +28,7 @@ const EDITOR_WRITE = readFileSync(new URL('../../../chat/EditorWriteApprovalUI.t
 const SESSION_LIFECYCLE = readFileSync(new URL('../../../../hooks/useSessionLifecycle.ts', import.meta.url), 'utf8');
 const PATHS = readFileSync(new URL('../../../../router/storyWorkspacePath.ts', import.meta.url), 'utf8');
 const SUBSCRIPTION = readFileSync(new URL('../../../../views/story-workspace/StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
+const SUBSCRIPTION_PRESENTATION = readFileSync(new URL('../../../../views/story-workspace/subscriptionPresentation.ts', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../../../../views/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../views/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 const WRITING_SPLIT = readFileSync(new URL('../WritingWorkspaceSplitPane.tsx', import.meta.url), 'utf8');
@@ -93,9 +95,9 @@ test('Decks stays inside the workspace and projects the existing DeckManager int
 });
 
 test('sidebar theme switch is a footer utility that follows the shared theme owner', () => {
-  expect(SIDEBAR).toContain("import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme'");
+  expect(SIDEBAR).toContain("import { getTheme, getThemeMode, onThemeChange, toggleTheme } from '../../../utils/theme'");
   expect(SIDEBAR).toContain("useState(() => getTheme() === 'dark')");
-  expect(SIDEBAR).toContain('return onThemeChange((resolved) =>');
+  expect(SIDEBAR).toContain('return onThemeChange((resolved, mode) =>');
   expect(SIDEBAR).toContain('toggleTheme();');
   expect(SIDEBAR).toContain("aria-label={isDark ? '切换到浅色' : '切换到深色'}");
   expect(SIDEBAR).toContain("title={isDark ? '切换到浅色' : '切换到深色'}");
@@ -115,9 +117,10 @@ test('Dream keeps its durable My Dream list while subscription uses the real mon
   expect(DREAM_LAUNCH).toContain('我的 Dream');
   expect(SUBSCRIPTION).toContain('useStoryWorkspaceSubscription');
   expect(SUBSCRIPTION).toContain('Dream · Subscription');
-  expect(SUBSCRIPTION).toContain("{ id: 'info', label: '订阅信息' }");
-  expect(SUBSCRIPTION).toContain("{ id: 'allowance', label: '我的额度' }");
-  expect(SUBSCRIPTION).toContain("{ id: 'plans', label: '可选套餐' }");
+  expect(SUBSCRIPTION).toContain("from './subscriptionPresentation'");
+  expect(SUBSCRIPTION_PRESENTATION).toContain("{ id: 'info', label: '订阅信息' }");
+  expect(SUBSCRIPTION_PRESENTATION).toContain("{ id: 'allowance', label: '我的额度' }");
+  expect(SUBSCRIPTION_PRESENTATION).toContain("{ id: 'plans', label: '可选套餐' }");
   expect(SUBSCRIPTION).toContain('aria-labelledby');
   expect(SUBSCRIPTION).not.toContain('STORY_WORKSPACE_DREAM_PLANS');
   expect(SUBSCRIPTION).not.toContain('订阅功能即将开放');
@@ -133,7 +136,7 @@ test('subscription moves into the focused Settings layout', () => {
   );
   expect(footerMarkup).not.toContain('subscriptionItem');
   expect(footerMarkup).not.toContain("onNavigate('/story-workspace/subscription')");
-  expect(SIDEBAR).toContain("onNavigate('/story-workspace/settings')");
+  expect(SIDEBAR).toContain("handleNavigate('/story-workspace/settings')");
   expect(SETTINGS).toContain("id: 'settings-subscription'");
   expect(SETTINGS).toContain("path: '/story-workspace/subscription'");
   expect(SETTINGS).toContain('StoryWorkspaceSubscriptionPage');
@@ -146,7 +149,7 @@ test('subscription moves into the focused Settings layout', () => {
   expect(SETTINGS).toContain('role="region"');
   expect(SETTINGS).toContain("aria-label={t('settings.workspace.backToApp')}");
   expect(SETTINGS).toContain("onNavigate('/story-workspace/dream')");
-  expect(ROUTER).toContain('showSidebar={!isSettingsRoute}');
+  expect(ROUTER).toContain('showSidebar={!isSettingsRoute && !isReactNativeHost()}');
   expect(ROUTER).toContain("|| activeRoute === 'subscription'");
   expect(ROUTER).toContain('workflowContext={isDreamRoute || isSettingsRoute');
 });

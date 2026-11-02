@@ -1,12 +1,15 @@
+// [Sync] 2026-10-28: share original activity reads with Native via explicit HTTP/foreground/Dream-source inputs; browser visibility and defaults remain.
 // [Input] Chat activity open state and existing authenticated public read APIs.
 // [Output] Independently recoverable recent Chat, today's tasks and Dream snapshots with one visible-session clock.
 // [Pos] Chat-local read coordinator; original Dream landing hook and Agent send/recovery lifecycle remain separate.
 // [Sync] 2026-10-07: stop activity timers/reads on close, hidden page or unmount and reject stale sequences/day responses.
+// [Sync] 2026-10-27: skip the excluded Dream source in RN-hosted activity without changing other source contracts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listChatThreads, type ChatHistoryThread } from '../../api/chatHistoryApi';
 import { getScheduledDay } from '../../api/scheduledTaskApi';
 import { storyWorkspaceFetchDreamRuns } from '../../api/storyWorkspaceApi';
+import {isReactNativeHost} from '../../platform/mobileHost';
 import type { StoryWorkspaceDreamReentryItem } from '../../hooks/story-workspace/contracts';
 import { ACTIVITY_SIDEBAR_POLICY, activityLocalDay, deduplicateActivityThreads, recentChatBatch,
   type ActivitySource, type ScheduledDayData } from './activitySidebarModel';
@@ -20,7 +23,7 @@ export interface ActivityReadState<T> {
 const initialRead = <T,>(data: T): ActivityReadState<T> => ({ data, isLoading: false, error: null, hasSuccess: false });
 const readError = (reason: unknown) => reason instanceof Error ? reason : new Error('Activity read unavailable');
 
-export function useActivitySidebarData(open: boolean) {
+export function useActivitySidebarData(open: boolean, {transport, foreground = true, includeDream = !isReactNativeHost()}: {transport?: typeof fetch; foreground?: boolean; includeDream?: boolean} = {}) {
   const [now, setNow] = useState(Date.now);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden');
   const [chat, setChat] = useState(() => initialRead<ChatHistoryThread[]>([]));
@@ -29,7 +32,7 @@ export function useActivitySidebarData(open: boolean) {
   const [dream, setDream] = useState(() => initialRead<readonly StoryWorkspaceDreamReentryItem[]>([]));
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   // Reopening after midnight must not reuse a frozen clock to label yesterday's task cache as today.
-  const displayNow = activeClock(open && visible, now);
+  const displayNow = activeClock(open && visible && foreground, now);
   const day = activityLocalDay(displayNow, timeZone);
   const session = useRef(0);
   const sequences = useRef<Record<ActivitySource, number>>({ chat: 0, scheduled: 0, dream: 0 });
@@ -37,18 +40,20 @@ export function useActivitySidebarData(open: boolean) {
   const reading = useRef<Partial<Record<ActivitySource, boolean>>>({});
   const currentDay = useRef(day);
   const deletedThreads = useRef(new Set<string>());
-  const active = open && visible;
+  const active = open && visible && foreground;
   const activeRef = useRef(active);
   activeRef.current = active;
   currentDay.current = day;
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
     const onVisibility = () => setVisible(document.visibilityState !== 'hidden');
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   const read = useCallback((source: ActivitySource, force = true) => {
+    if (source === 'dream' && !includeDream) return;
     if (!activeRef.current || (!force && reading.current[source])) return;
     controllers.current[source]?.abort();
     const controller = new AbortController();
@@ -70,7 +75,7 @@ export function useActivitySidebarData(open: boolean) {
         if (source === 'chat') {
           let offset = 0;
           while (valid()) {
-            const batch = await listChatThreads({ limit: ACTIVITY_SIDEBAR_POLICY.chatPageSize, offset }, { signal: controller.signal });
+            const batch = await listChatThreads({ limit: ACTIVITY_SIDEBAR_POLICY.chatPageSize, offset }, { signal: controller.signal, transport });
             if (!valid()) return;
             const result = recentChatBatch(batch, readNow);
             partial = deduplicateActivityThreads([...partial, ...result.rows]).filter((row) => !deletedThreads.current.has(row.id));
@@ -82,7 +87,7 @@ export function useActivitySidebarData(open: boolean) {
             setChat((previous) => ({ ...previous, data: deduplicateActivityThreads([...previous.data, ...partial]) }));
           }
         } else if (source === 'scheduled') {
-          const data = await getScheduledDay(readDay, timeZone, { signal: controller.signal });
+          const data = await getScheduledDay(readDay, timeZone, { signal: controller.signal, transport });
           if (valid()) { setScheduledDay(readDay); setScheduled({ data, isLoading: false, error: null, hasSuccess: true }); }
         } else {
           const data = await storyWorkspaceFetchDreamRuns({ signal: controller.signal });
@@ -99,7 +104,7 @@ export function useActivitySidebarData(open: boolean) {
         if (sequences.current[source] === sequence) reading.current[source] = false;
       }
     })();
-  }, [timeZone]);
+  }, [timeZone, transport, includeDream]);
 
   useEffect(() => {
     const ownedSequences = sequences.current;
@@ -109,14 +114,14 @@ export function useActivitySidebarData(open: boolean) {
     if (!active) return;
     setNow(Date.now());
     for (const source of ['chat', 'scheduled', 'dream'] as const) read(source);
-    const clockTimer = window.setInterval(() => setNow(Date.now()), ACTIVITY_SIDEBAR_POLICY.clockIntervalMs);
-    const refreshTimer = window.setInterval(() => {
+    const clockTimer = globalThis.setInterval(() => setNow(Date.now()), ACTIVITY_SIDEBAR_POLICY.clockIntervalMs);
+    const refreshTimer = globalThis.setInterval(() => {
       for (const source of ['chat', 'scheduled', 'dream'] as const) read(source, false);
     }, ACTIVITY_SIDEBAR_POLICY.refreshIntervalMs);
     return () => {
       session.current += 1;
-      window.clearInterval(clockTimer);
-      window.clearInterval(refreshTimer);
+      globalThis.clearInterval(clockTimer);
+      globalThis.clearInterval(refreshTimer);
       for (const source of ['chat', 'scheduled', 'dream'] as const) {
         ownedSequences[source] += 1;
         ownedControllers[source]?.abort();

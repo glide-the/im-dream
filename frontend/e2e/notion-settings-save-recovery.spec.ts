@@ -4,6 +4,7 @@
 // Project, Episode, canonical artifacts, Run-private publication, after-turn Hook and Agent turns are outside this isolated Settings journey.
 // [Output] Full resource-save/re-read/manual-sync journeys, strict marker/Retry-After boundaries and late-owner rejection.
 // [Pos] Isolated technical E2E in frontend/e2e; all selection/sync writes stay in named memory fixtures.
+// [Sync] 2026-11-01: classify the production Settings/auth owners' exact cancelled GETs; API writes and other errors remain asserted.
 // [Sync] 2026-10-07: cover confirmed saved scope, retained drafts/index, UI-only cooldown and actor/connector ABA cleanup without changing Calendar's 63 cases.
 import { expect, test, type Page, type Route } from '@playwright/test';
 // @ts-expect-error Playwright's Node modules are outside the browser tsconfig.
@@ -40,7 +41,7 @@ const catalog = { schema_version: 5, package_revision: 'settings-recovery-1',
   skills: [], operations: [] };
 
 async function fixture(page: Page, standalone = false) {
-  const base = standalone ? null : await installFixtures(page);
+  const base = standalone ? null : await installFixtures(page, { notionSettingsLifecycle: true });
   const errors: string[] = [];
   if (standalone) {
     page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));

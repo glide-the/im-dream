@@ -1,8 +1,15 @@
 // [Input] Consume file proxy URL utility and AIInputDock upload file metadata.
 // [Output] Provide chat input attachment conversion, upload hint, and file-dialog guard helpers.
 // [Pos] chat-input-dock helper node in frontend/app/_dream/components/chat
+// [Sync] 2026-10-28: export the original 50MiB check and file-size labels for the native picker; retain attachment DTO conversion.
 // [Sync] 2026-05-25: split input-dock helper exports out of the component file while removing customer-context plumbing.
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
+export const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+export function formatFileSize(bytes:number):string {
+  if(bytes<1024)return `${bytes} B`;
+  if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+}
 
 export interface UploadedFile {
   id: string;

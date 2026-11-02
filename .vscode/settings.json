@@ -1,8 +1,12 @@
 {
+  // [Input] Existing registered Dream browser origin and backend interpreter.
+  // [Output] Shared editor launch host, port, and backend address.
+  // [Pos] VS Code local debug configuration; authentication remains Admin-owned.
+  // [Sync] 2026-10-31: use the registered localhost browser origin for the normal login entry.
   // Keep editor analysis, terminals, and Python commands on the backend environment.
   "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
-  "inkDream.frontendHost": "127.0.0.1",
+  "inkDream.frontendHost": "localhost",
   "inkDream.frontendPort": 5173,
   "inkDream.backendUrl": "http://127.0.0.1:8765"
 }

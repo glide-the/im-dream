@@ -1,0 +1,5 @@
+# [Input] Task-specific ZIP files regenerated from the task directories.
+# [Output] Source task records stay in Git; generated distribution copies stay local.
+# [Pos] Ignore rule for frontend/e2e/ios/tasks packaging outputs.
+# [Sync] 2026-11-01: keep one generated ZIP per task outside source tracking.
+/*.zip

@@ -1,4 +1,7 @@
+# [Sync] 2026-10-26: retain current SDK observation while a verified committed reply completes its original queue lifecycle.
 # [Sync] 2026-09-28: use the Admin-bound scheduled turn ID under the ordinary Thread lock before entering the shared Service.
+# [Sync] 2026-10-25: accept a composition-owned Runner constructor for the iOS in-process transport.
+# [Sync] 2026-10-25: send Stop cancellation once and shield pending cleanup from the bounded response wait.
 # [Sync] 2026-09-27: bind a claimed task-result source turn to its persisted Admin identity.
 # [Sync] 2026-09-28: expose source-input generations so wait_threads wakes when a user queues new input.
 # [Sync] 2026-09-28: expose the owning Factory task's completion so task-result grants remain live through queued follow-up turns.
@@ -256,7 +259,9 @@ class ClaudeAgentThreadFactory:
         claude_code_runtime_env_provider: (
             Callable[[], Mapping[str, str]] | None
         ) = None,
+        runner_factory: Callable[[], ClaudeAgentRunner] | None = None,
     ) -> None:
+        self._runner_factory = runner_factory
         self._pool = AgentRunStatePool()
         self._observers = SessionObserverRegistry()
         self._service = ClaudeAgentService(
@@ -742,7 +747,7 @@ class ClaudeAgentThreadFactory:
             )
             if state.runner is None:
                 await self._observers.emit_before_runner_created(session_id)
-                runner = ClaudeAgentRunner()
+                runner = self._runner_factory() if self._runner_factory is not None else ClaudeAgentRunner()
                 state.with_runner(runner)
                 await self._observers.emit_after_runner_created(session_id, runner)
             else:
@@ -804,7 +809,10 @@ class ClaudeAgentThreadFactory:
                     )
                     active_queue_claim = None
                 if continuation is None:
-                    if not execution.sdk_terminal_received:
+                    if (
+                        not execution.sdk_terminal_received
+                        and getattr(execution, "committed_response_recovered", False) is not True
+                    ):
                         # A missing SDK terminal leaves consumption uncertain.  Keep
                         # the durable queue intact for explicit reconciliation.
                         self._input_accepting.discard(session_id)
@@ -1072,10 +1080,11 @@ class ClaudeAgentThreadFactory:
                 "lifecycle": snapshot.get("lifecycle", "idle"),
             }
 
-        bg_task.cancel()
+        if not bg_task.cancelling():
+            bg_task.cancel()
         if _STOP_WAIT_SECONDS > 0:
             try:
-                await asyncio.wait_for(bg_task, timeout=_STOP_WAIT_SECONDS)
+                await asyncio.wait_for(asyncio.shield(bg_task), timeout=_STOP_WAIT_SECONDS)
             except asyncio.CancelledError:
                 pass
             except asyncio.TimeoutError:

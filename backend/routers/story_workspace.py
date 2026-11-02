@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-10-26: pass current OAuth confirmation reads into exact accepted-message recovery after Run authority.
 # [Sync] 2026-09-16: remove the unused legacy Run application factory; public Run routes stay on Admin DTOs.
 # [Sync] 2026-09-16: compose Guidance Agent turns with the exact Workflow/Deck/Admin persistence owner.
 # [Sync] 2026-09-16: inject one Admin DTO client/actor into the database-free launch composition.
@@ -29,6 +30,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional, Protocol
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -53,6 +55,7 @@ from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_curren
 from services.admin_data.errors import AdminDataError
 from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.story_workspace.dream_confirmation_service import StoryWorkspaceDreamGatewayRuntimeFactory
 from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
 from services.admin_data.story_workspace_output_data import (
     AdminStoryWorkspaceOutputData,
@@ -199,7 +202,9 @@ class DreamArtifactService(Protocol):
         *,
         actor: dict[str, str],
         artifact_data: AdminStoryWorkspaceArtifactData,
+        confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
     ) -> Any: ...
 
     async def get_episode_artifacts(
@@ -260,6 +265,7 @@ class DreamConfirmationService(Protocol):
         run_data: AdminRunData,
         confirmation_data: AdminStoryWorkspaceConfirmationData,
         access_token: str,
+        gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory | None = None,
     ) -> Any: ...
 
 
@@ -1016,6 +1022,16 @@ def _confirmation_data(
     )
 
 
+def _confirmation_gateway_runtime_factory(
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+    current_user: dict = Depends(get_current_user),
+) -> StoryWorkspaceDreamGatewayRuntimeFactory:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return lambda resolution: owner.gateway_runtime(actor, resolution, uuid4().hex)
+
+
 def _guidance_data_error(exc: AdminDataError, request_id: str):
     if not exc.outcome_unknown:
         if exc.code == "WORKFLOW_RUN_NOT_FOUND" and exc.status_code == 404:
@@ -1104,6 +1120,8 @@ async def story_workspace_get_workflow_run_dream_files(
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
     artifact_data: AdminStoryWorkspaceArtifactData = Depends(_artifact_data),
+    confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
+    gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory = Depends(_confirmation_gateway_runtime_factory),
 ):
     try:
         actor = {"actor_id": str(current_user["user_id"])}
@@ -1121,7 +1139,9 @@ async def story_workspace_get_workflow_run_dream_files(
             workflow_run_id,
             actor=actor,
             artifact_data=artifact_data,
+            confirmation_data=confirmation_data,
             access_token=request_actor.access_token,
+            gateway_runtime_factory=gateway_runtime_factory,
         ),
         by_alias=True,
     )
@@ -1311,6 +1331,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
     service: DreamConfirmationService = Depends(get_dream_confirmation_service),
     run_data: AdminRunData = Depends(_run_data),
     confirmation_data: AdminStoryWorkspaceConfirmationData = Depends(_confirmation_data),
+    gateway_runtime_factory: StoryWorkspaceDreamGatewayRuntimeFactory = Depends(_confirmation_gateway_runtime_factory),
 ):
     """Persist one hidden confirmation and queue the originating Chat Agent."""
 
@@ -1336,6 +1357,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
             run_data=run_data,
             confirmation_data=confirmation_data,
             access_token=request_actor.access_token,
+            gateway_runtime_factory=gateway_runtime_factory,
         ),
         by_alias=True,
     )

@@ -7,6 +7,9 @@ import { browserRequestHeaders } from '../../lib/browserSession';
 // [Output] Render the Markdown-aware chat input, slash suggestions, file/sketch attachments, and message submit/stop actions.
 // [Sync] 2026-10-09: add a local sketch entry; share file upload and return completion without changing message DTOs.
 // [Pos] chat-input-dock component node in frontend/app/_dream/components/chat
+// [Sync] 2026-10-28: share original Skill discovery and keyboard state; preserve the Web listbox, DOM and draft-only selection.
+// [Sync] 2026-10-28: share the existing draft/send/rejection state through useComposerDraft; Web DOM, upload, Tiptap and callbacks remain.
+// [Sync] 2026-10-28: share the original size formatter/limit and workspace response reader with native upload; endpoints and ordering remain unchanged.
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
 // [Sync] 2026-06-09: hide the manual approval switch when IM full-access mode
@@ -44,7 +47,6 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import type { ToolChoice } from '../../lib/chat-schema';
@@ -63,12 +65,10 @@ import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
 import SketchInputDialog from './SketchInputDialog';
 import './AIInputDock.css';
-import {
-  filterInstalledSkillCommands,
-  loadAvailableSkillCommands,
-  withBuiltinCompact,
-  type AvailableSkillCommand,
-} from './slashSkillCommands';
+import useComposerDraft, {buildToolChoiceOptions} from './useComposerDraft';
+import {readWorkspaceUploadResponse} from '../../api/workspaceFileUpload';
+import {MAX_UPLOAD_FILE_SIZE_BYTES,formatFileSize} from './AIInputDock.helpers';
+import useComposerSkills from './useComposerSkills';
 
 type AIInputDockMode = 'simple' | 'full';
 
@@ -107,16 +107,8 @@ interface AIInputDockProps {
   prefillNonce?: number;
 }
 
-const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
-
 function generateFileId(): string {
   return `file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function revokeObjectPreviewUrl(url?: string) {
@@ -133,13 +125,6 @@ function shouldSendWithKeyboard(
     shiftKey: event.shiftKey,
     isComposing: event.nativeEvent.isComposing,
   });
-}
-
-function buildToolChoiceOptions(t: TFunction): { value: ToolChoice; label: string; title: string }[] {
-  return [
-    { value: 'auto', label: t('chat.inputDock.toolChoiceAuto'), title: t('chat.inputDock.toolChoiceAutoTitle') },
-    { value: 'manual', label: t('chat.inputDock.toolChoiceManual'), title: t('chat.inputDock.toolChoiceManualTitle') },
-  ];
 }
 
 export default function AIInputDock({
@@ -167,8 +152,6 @@ export default function AIInputDock({
 }: AIInputDockProps) {
   const { t } = useTranslation();
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
-  const [query, setQuery] = useState(() => prefill ?? '');
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -177,11 +160,13 @@ export default function AIInputDock({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
-  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly AvailableSkillCommand[]>([]);
-  const [activeSkillIndex, setActiveSkillIndex] = useState(0);
-  const [dismissedSlashDraft, setDismissedSlashDraft] = useState<string | null>(null);
+  const {query,setQuery,uploadedFiles,setUploadedFiles,toolChoice,setToolChoice,handleSend,hasUploadingFiles,showStopAction,canSend} = useComposerDraft({
+    onSendMessage,disabled,loading,onStop,fullAccessEnabled:resolvedFullAccessEnabled,defaultToolChoice,initialDraft:prefill,
+    onUploadBlocked:() => setUploadError(t('chat.inputDock.waitForUpload')),releasePreview:revokeObjectPreviewUrl,
+  });
+  const skills=useComposerSkills({query,setQuery,focused:isInputFocused,workspaceEnabled,deckId,threadId});
+  const matchingSkillCommands=skills.matches,activeSkillIndex=skills.activeIndex,selectSkillCommand=skills.select;
   const skillListboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
@@ -202,42 +187,10 @@ export default function AIInputDock({
     if (prefillNonce === undefined || lastAppliedPrefillNonceRef.current === prefillNonce) return;
     lastAppliedPrefillNonceRef.current = prefillNonce;
     setQuery(prefill ?? '');
-    setDismissedSlashDraft(null);
+    skills.resetDismissal();
   }, [prefill, prefillNonce]);
 
-  useEffect(() => {
-    let active = true;
-    setInstalledSkillCommands([]);
-    if (!workspaceEnabled) return () => { active = false; };
-    void loadAvailableSkillCommands({ deckId, threadId })
-      .then((commands) => {
-        if (active) setInstalledSkillCommands(commands);
-      })
-      .catch(() => {
-        if (active) setInstalledSkillCommands([]);
-      });
-    return () => { active = false; };
-  }, [deckId, threadId, workspaceEnabled]);
-
-  const matchingSkillCommands = useMemo(
-    () => !isInputFocused || dismissedSlashDraft === query
-      ? []
-      : filterInstalledSkillCommands(query, withBuiltinCompact(installedSkillCommands)),
-    [dismissedSlashDraft, installedSkillCommands, isInputFocused, query],
-  );
   const contextPercent = contextUsagePercentage(contextUsage);
-
-  useEffect(() => {
-    setActiveSkillIndex(0);
-    if (dismissedSlashDraft !== null && dismissedSlashDraft !== query) {
-      setDismissedSlashDraft(null);
-    }
-  }, [dismissedSlashDraft, query]);
-
-  const selectSkillCommand = useCallback((command: AvailableSkillCommand) => {
-    setQuery(`${command.command} `);
-    setDismissedSlashDraft(null);
-  }, []);
 
   useEffect(() => {
     if (fullAccessEnabled !== undefined) {
@@ -315,29 +268,7 @@ export default function AIInputDock({
         body: formData,
       });
 
-      const responseBody = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        code?: string;
-        uploaded?: string[];
-        files?: Array<{ workspacePath: string; savedAt: string; hash?: string }>;
-      };
-
-      if (!response.ok) {
-        const message = responseBody.error || t('chat.inputDock.workspaceSyncFailed');
-        throw new Error(responseBody.code ? `${message} (${responseBody.code})` : message);
-      }
-
-      const metadata = responseBody.files?.[0];
-      if (metadata?.workspacePath) {
-        return metadata;
-      }
-
-      const fallbackPath = responseBody.uploaded?.[0];
-      if (!fallbackPath) {
-        return undefined;
-      }
-
-      return { workspacePath: fallbackPath, savedAt: new Date().toISOString() };
+      return readWorkspaceUploadResponse(response,t('chat.inputDock.workspaceSyncFailed'));
     },
     [workspaceSessionId, t],
   );
@@ -492,57 +423,7 @@ export default function AIInputDock({
     [handleFiles],
   );
 
-  const handleSend = useCallback(() => {
-    if (disabled || (loading && !onStop)) {
-      return;
-    }
-    if (uploadedFiles.some((file) => file.isUploading)) {
-      setUploadError(t('chat.inputDock.waitForUpload'));
-      return;
-    }
-
-    const trimmedQuery = query.trim();
-    if (!trimmedQuery && uploadedFiles.length === 0) {
-      return;
-    }
-
-    setQuery('');
-    setUploadedFiles([]);
-    const restoreDraft = () => {
-      setQuery((current) => current || trimmedQuery);
-      setUploadedFiles((current) => current.length > 0 ? current : uploadedFiles);
-    };
-    try {
-      void Promise.resolve(onSendMessage(
-        trimmedQuery,
-        uploadedFiles.length > 0 ? uploadedFiles : undefined,
-        resolvedFullAccessEnabled ? 'auto' : toolChoice,
-      )).then(() => {
-        uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
-      }, restoreDraft);
-    } catch {
-      restoreDraft();
-    }
-  }, [
-    resolvedFullAccessEnabled,
-    disabled,
-    loading,
-    onStop,
-    toolChoice,
-    onSendMessage,
-    query,
-    uploadedFiles,
-    t,
-  ]);
-
-  const hasUploadingFiles = uploadedFiles.some((file) => file.isUploading);
-  const hasDraftContent = query.trim().length > 0 || uploadedFiles.length > 0;
-  const showStopAction = loading && Boolean(onStop) && !hasDraftContent;
   const showUploadHint = shouldShowUploadHint(query, isInputFocused);
-  const canSend = useMemo(
-    () => !disabled && (!loading || Boolean(onStop)) && !hasUploadingFiles && hasDraftContent,
-    [disabled, loading, onStop, hasUploadingFiles, hasDraftContent],
-  );
 
   return (
     <div
@@ -676,30 +557,7 @@ export default function AIInputDock({
         onBlur={() => setIsInputFocused(false)}
         disabled={disabled}
         onKeyDown={(event) => {
-          if (matchingSkillCommands.length > 0) {
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              setActiveSkillIndex((current) => (current + 1) % matchingSkillCommands.length);
-              return;
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault();
-              setActiveSkillIndex((current) => (
-                current - 1 + matchingSkillCommands.length
-              ) % matchingSkillCommands.length);
-              return;
-            }
-            if (event.key === 'Enter' || event.key === 'Tab') {
-              event.preventDefault();
-              selectSkillCommand(matchingSkillCommands[activeSkillIndex] ?? matchingSkillCommands[0]);
-              return;
-            }
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              setDismissedSlashDraft(query);
-              return;
-            }
-          }
+          if(skills.keyDown(event.key)){event.preventDefault();return;}
           if (!shouldSendWithKeyboard(event)) {
             return;
           }

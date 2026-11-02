@@ -148,23 +148,24 @@ export function filterInstalledSkillCommands(
   return commands.filter((item) => item.name.includes(query));
 }
 
+// [Sync] 2026-10-28: forward optional HTTP transport through existing common/ref/receipt discovery and failure degradation.
 export async function loadAvailableSkillCommands(input: {
   readonly deckId?: string;
   readonly threadId?: string;
-}): Promise<readonly AvailableSkillCommand[]> {
+},transport:typeof fetch=fetch): Promise<readonly AvailableSkillCommand[]> {
   const [commonCommands, receipt] = await Promise.all([
-    listCommonSkillCommands()
+    listCommonSkillCommands(transport)
       .then(resolveCommonSkillCommands)
       .catch(() => []),
     input.threadId
-      ? getThreadPluginLoadReceipt(input.threadId).catch(() => null)
+      ? getThreadPluginLoadReceipt(input.threadId,transport).catch(() => null)
       : Promise.resolve(null),
   ]);
   const deckId = input.deckId ?? receipt?.deck_id ?? receipt?.receipt?.deck_id ?? null;
   if (deckId === null) return commonCommands;
   const deckCommands = await Promise.all([
-    listDeckClaudePluginRefs(deckId),
-    listClaudePluginInstallations(),
+    listDeckClaudePluginRefs(deckId,transport),
+    listClaudePluginInstallations(transport),
   ])
     .then(([refs, installationResult]) => resolveInstalledSkillCommands({
       refs,

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-26: a committed confirmation retries the original Hook with no model or assistant write; Hook errors retain the existing terminal failure.
 # [Sync] 2026-10-23: ordinary turn fixtures return no task-owned Notion runtime, preserving Chat projection coverage.
 # [Sync] 2026-10-07: scheduled tool-only completions persist a visible final receipt for durable result settlement.
 # [Sync] 2026-09-28: server result turns can ignore, but do not erase, the cached browser Editor snapshot.
@@ -3034,6 +3035,53 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             "errorCode": "GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED",
             "retryable": False,
         })
+
+
+class CommittedDreamConfirmationRecoveryTests(unittest.TestCase):
+    def test_committed_confirmation_retries_only_the_original_hook(self):
+        for hook_fails in (False, True):
+            with self.subTest(hook_fails=hook_fails):
+                async def scenario():
+                    message_id = "dream_confirm_" + "a" * 64
+                    class Persistence(service_module.AdminAgentTurnPersistence):
+                        def completed_dream_confirmation_text(self, **identity):
+                            assert identity == {"actor_id": "7", "thread_id": "thread-confirmed", "message_id": message_id}
+                            return "Original completed reply"
+
+                    hook = unittest.mock.Mock()
+                    if hook_fails:
+                        hook.after_main_turn.side_effect = RuntimeError("private storage failure")
+                    service = ClaudeAgentService(dream_artifact_turn_hook=hook)
+                    runner = unittest.mock.Mock(run_streaming=unittest.mock.AsyncMock(
+                        side_effect=AssertionError("A committed reply must not invoke the model again")))
+                    execution = service_module._TurnExecution(
+                        request=ClaudeAgentRunRequest(user_id="7", thread_id="thread-confirmed",
+                            message_id=message_id, message_parts=[], user_message_pre_persisted=True,
+                            message_metadata={"kind": "story-workspace-dream-confirmation", "dispatch_status": "dispatching", "dispatch_claim_id": "claim-original"},
+                            admin_turn_persistence=Persistence()),
+                        state=AgentRunState(session_id="thread-confirmed"), runner=runner,
+                        run_options=unittest.mock.Mock(),
+                        turn_context=_TurnContext(queue=asyncio.Queue(), confirmation_store=ToolConfirmationStore()),
+                        dream_artifact_turn_ticket=unittest.mock.sentinel.original_ticket,
+                    )
+                    with unittest.mock.patch.object(service, "_persist_assistant_turn", new=unittest.mock.AsyncMock()) as save:
+                        if hook_fails:
+                            with self.assertRaises(service_module.DreamArtifactSyncAfterCommitError):
+                                await service.execute_session(execution)
+                        else:
+                            await service.execute_session(execution)
+                        save.assert_not_awaited()
+                    runner.run_streaming.assert_not_awaited()
+                    hook.after_main_turn.assert_called_once_with(unittest.mock.sentinel.original_ticket)
+                    frames=[]
+                    while not execution.turn_context.queue.empty():
+                        frame=execution.turn_context.queue.get_nowait()
+                        if frame is not None: frames.append(_parse_sse(frame))
+                    self.assertEqual([frame["type"] for frame in frames], [] if hook_fails else ["message-final", "finish"])
+                    self.assertTrue(execution.user_response_committed)
+                    self.assertFalse(execution.sdk_terminal_received)
+                    self.assertTrue(execution.committed_response_recovered)
+                _run(scenario())
 
 
 if __name__ == "__main__":

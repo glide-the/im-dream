@@ -5,6 +5,7 @@
 // [Sync] 2026-09-27: verify queue capability failure preserves the draft, status check recovers, and Stop returns after clearing.
 // [Sync] 2026-09-28: clear the Tiptap draft with user keyboard input before asserting the single Stop action.
 // [Sync] 2026-09-28: verify real ChatPanel removes dispatched/failed queue cards and preserves another queued action.
+// [Sync] 2026-10-25: hold the original queue GET across several poll ticks and require one outstanding read.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -200,6 +201,10 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   let stopHeaders: Record<string, string> = {};
   let queueReady = false;
   let queueReadCount = 0;
+  let queueReadStartedCount = 0;
+  let holdQueueReads = true;
+  let releaseQueueRead!: () => void;
+  const queueReadRelease = new Promise<void>((resolve) => { releaseQueueRead = resolve; });
   let queueEntries: Array<Record<string, unknown>> = [];
   let releaseStop!: () => void;
   const stopRelease = new Promise<void>((resolve) => { releaseStop = resolve; });
@@ -246,6 +251,10 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
       return;
     }
     if (path === `/api/claude-agent/threads/${THREAD_ID}/inputs`) {
+      if (request.method() === 'GET') {
+        queueReadStartedCount += 1;
+        if (holdQueueReads) await queueReadRelease;
+      }
       const unavailable = request.method() === 'POST' || !queueReady;
       if (request.method() === 'GET' && queueReady) queueReadCount += 1;
       await route.fulfill({
@@ -266,7 +275,17 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
 
   try {
     await server.listen();
+    // Use the browser's clock to cover multiple original polling intervals
+    // while the first real component request remains unanswered.
+    await page.clock.install({ time: new Date('2026-10-25T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2026-10-25T00:00:01Z'));
     await page.goto(`${origin}/chat-stop-control`);
+    await expect.poll(() => queueReadStartedCount).toBe(1);
+    await page.clock.runFor(6_000);
+    expect(queueReadStartedCount).toBe(1);
+    holdQueueReads = false;
+    releaseQueueRead();
+    await page.clock.resume();
     const editor = page.locator('#chat-input');
     await editor.fill('keep this queued draft');
     await page.getByRole('button', { name: 'Send message' }).click();
@@ -343,6 +362,8 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     expect(stopHeaders.cookie).toContain('ink_dream_session=opaque-test-handle');
     expect(failures.filter(value => value.includes('/stop'))).toEqual([]);
   } finally {
+    holdQueueReads = false;
+    releaseQueueRead();
     releaseStop();
     await server.close();
     await rm(cacheDir, { recursive: true, force: true });

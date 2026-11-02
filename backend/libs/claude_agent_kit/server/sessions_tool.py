@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Input] Reads only a private Session broker tuple and two retrieval-policy values.
 #         Applies the existing lightweight retrieval strategy to strict Session projections.
 # [Output] Provide GET_SESSIONS_RANGE_TOOL_SPEC, handle_get_sessions_range for the
@@ -183,15 +184,15 @@ def _query_terms(query: str) -> list[str]:
     return [part for part in _TOKEN_SPLIT_RE.split(query) if part]
 
 
-def _env_retrieval_mode() -> str:
-    raw = os.getenv(_SESSION_RETRIEVAL_MODE_ENV, _DEFAULT_RETRIEVAL_MODE)
+def _env_retrieval_mode(environment=None) -> str:
+    raw = (os.environ if environment is None else environment).get(_SESSION_RETRIEVAL_MODE_ENV, _DEFAULT_RETRIEVAL_MODE)
     mode = _normalize_text(raw)
     return mode if mode in _VALID_RETRIEVAL_MODES else _DEFAULT_RETRIEVAL_MODE
 
 
-def _fuzzy_min_score(raw: Any) -> float:
+def _fuzzy_min_score(raw: Any, environment=None) -> float:
     if raw is None:
-        raw = os.getenv(_SESSION_FUZZY_MIN_SCORE_ENV, str(_DEFAULT_FUZZY_MIN_SCORE))
+        raw = (os.environ if environment is None else environment).get(_SESSION_FUZZY_MIN_SCORE_ENV, str(_DEFAULT_FUZZY_MIN_SCORE))
     try:
         value = float(raw)
     except (TypeError, ValueError):
@@ -209,8 +210,8 @@ def _parse_limit(raw: Any) -> int | None:
     return value if value > 0 else None
 
 
-def _resolve_retrieval_mode(args: dict[str, Any]) -> str | None:
-    mode = _normalize_text(args.get("retrieval_mode") or _env_retrieval_mode())
+def _resolve_retrieval_mode(args: dict[str, Any], environment=None) -> str | None:
+    mode = _normalize_text(args.get("retrieval_mode") or _env_retrieval_mode(environment))
     return mode if mode in _VALID_RETRIEVAL_MODES else None
 
 
@@ -313,7 +314,7 @@ def _session_response(
 # ---------------------------------------------------------------------------
 
 
-def handle_get_sessions_range(arguments: dict[str, Any] | None) -> str:
+def handle_get_sessions_range(arguments: dict[str, Any] | None, *, environment=None) -> str:
     """Query sessions in [start_date, end_date] through the private broker.
 
     Returns a JSON string with a ``sessions`` list; each item contains:
@@ -325,8 +326,8 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None) -> str:
     query = _normalize_text(args.get("query") or args.get("fuzzy_query") or "")
     requested_labels = _normalize_labels(args.get("labels") or [])
     label_match = _resolve_label_match(args)
-    retrieval_mode = _resolve_retrieval_mode(args)
-    min_score = _fuzzy_min_score(args.get("min_score"))
+    retrieval_mode = _resolve_retrieval_mode(args, environment)
+    min_score = _fuzzy_min_score(args.get("min_score"), environment)
     limit = _parse_limit(args.get("limit"))
 
     if not start_date or not end_date:
@@ -353,7 +354,7 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None) -> str:
         retrieval_mode = "fuzzy"
 
     try:
-        result = SessionProjectionBrokerClient.from_env(dict(os.environ)).list_sessions(
+        result = SessionProjectionBrokerClient.from_env(dict(os.environ if environment is None else environment)).list_sessions(
             start_date=start_date,
             end_date=end_date,
             include_text=bool(query),

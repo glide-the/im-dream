@@ -1,0 +1,9 @@
+/* [Input] Fixed Mermaid document attribute and original design tokens. */
+/* [Output] Natural inline height; original media Modal owns its full-screen viewport. */
+/* [Pos] Diagram document only; ordinary Web layout remains unchanged. */
+html[data-mermaid-document], html[data-mermaid-document] body {
+  height: auto; min-height: 0; margin: 0; overflow: hidden;
+  background: var(--color-bg-app);
+}
+.mermaid-document { width: 100%; min-width: 0; color: var(--color-text-primary); }
+.mermaid-document .markdown-media-block { margin: 0; }

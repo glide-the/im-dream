@@ -1,6 +1,9 @@
+// [Sync] 2026-10-29: reuse the original related-conversation page size from shared Deck constants; Web presentation remains.
+// [Sync] 2026-10-29: share original home visibility, query and preview selections with Native; retain Web markup and CSS.
 // [Input] Persisted Deck DTOs, PDF page-layout contract, pagination policy, and DeckManager callbacks.
 // [Output] User published-clean Deck home, default-visible system Decks, preview page, Work inventory, and related Chat cleanup.
 // [Pos] Presentational Deck launch and Settings / Work management surfaces in frontend/app/_dream/components/deck.
+// [Sync] 2026-10-27: keep Dream type filters outside RN mobile presentation.
 // [Sync] 2026-08-16: align the page with Deck设计需求.pdf pages 1-2; remove the table/dashboard layout,
 //                    keep marketplace options absent, and show only exact active runtime-version facts.
 // [Sync] 2026-08-17: keep user Decks behind enabled/published-clean facts while system Decks default to visible.
@@ -20,9 +23,11 @@ import { FaCog, FaCommentAlt, FaPlay, FaShieldAlt, FaTrashAlt } from 'react-icon
 import { useTranslation } from 'react-i18next';
 import type { ChatHistoryThread } from '../../api/chatHistoryApi';
 import type { Deck } from '../../api/voiceApi';
-import { DECK_ENABLED_LAUNCH_LIMIT, DECK_MANAGEMENT_PAGE_SIZE } from '../../constants/deck';
+import { DECK_ENABLED_LAUNCH_LIMIT, DECK_MANAGEMENT_PAGE_SIZE, DECK_RELATED_THREADS_PAGE_SIZE } from '../../constants/deck';
 import { COLORS, iconMap } from '../deckVisuals';
 import './DeckManagerPanels.css';
+import {isReactNativeHost} from '../../platform/mobileHost';
+import {isSystemDeckDisplay,isDeckHomeVisible,matchesDeckHomeQuery,deckPreviewVoices,deckExamplePrompt} from './deckPresentation';
 
 interface DeckManagerPanelProps {
   decks: Deck[];
@@ -67,25 +72,6 @@ interface DeckPreviewPanelProps {
 type AgentTypeFilter = 'all' | 'chat' | 'dream';
 type StatusFilter = 'all' | 'enabled' | 'disabled';
 
-const RELATED_THREADS_PAGE_SIZE = 20;
-const DEFAULT_INITIALIZED_DECK_REASON = 'default_initialized';
-
-const isSystemDeckDisplay = (deck: Deck): boolean => (
-  deck.is_system || deck.publish_block_reason === DEFAULT_INITIALIZED_DECK_REASON
-);
-
-const isUserDeckHomeVisible = (deck: Deck): boolean => (
-  deck.enabled
-  && deck.deck_version_capability === true
-  && typeof deck.deck_version === 'number'
-  && deck.deck_version > 0
-  && deck.deck_version_dirty === false
-  && deck.deck_version_status === 'published'
-);
-
-const isDeckHomeVisible = (deck: Deck): boolean => (
-  isSystemDeckDisplay(deck) || isUserDeckHomeVisible(deck)
-);
 
 export function DeckLaunchPanel({
   decks,
@@ -117,16 +103,8 @@ export function DeckLaunchPanel({
     dream: visibleHomeDecks.filter((deck) => deck.agent_type === 'dream').length,
   }), [visibleHomeDecks]);
   const visibleDecks = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
     return visibleHomeDecks.filter((deck) => {
-      const matchesQuery = normalizedQuery.length === 0 || [
-        deck.name,
-        deck.name_zh,
-        deck.name_en,
-        deck.description,
-        deck.description_zh,
-        deck.description_en,
-      ].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery));
+      const matchesQuery = matchesDeckHomeQuery(deck, query);
       const matchesAgentType = agentType === 'all' || deck.agent_type === agentType;
       return matchesQuery && matchesAgentType;
     });
@@ -271,7 +249,7 @@ export function DeckLaunchPanel({
         <section aria-labelledby="deck-manager-launch-catalog-title" className="deck-manager-launch-catalog">
           <div className="deck-manager-launch-catalog__controls">
             <div aria-label={t('deck.creator.agentTypeFilter')} className="deck-manager-filter-tabs" role="tablist">
-              {(['all', 'chat', 'dream'] as const).map((candidate) => (
+              {(['all', 'chat', 'dream'] as const).filter(candidate => !isReactNativeHost() || candidate !== 'dream').map((candidate) => (
                 <button
                   aria-selected={agentType === candidate}
                   key={candidate}
@@ -405,10 +383,7 @@ export function DeckPreviewPanel({
   const { i18n, t } = useTranslation();
   const isSystem = isSystemDeckDisplay(deck);
   const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-  const voices = deck.voices || [];
-  const enabledVoices = voices.filter((voice) => voice.enabled);
-  const trialVoice = enabledVoices[0] || voices[0] || null;
-  const examples = voices.slice(0, 3);
+  const {voices,trialVoice,examples} = deckPreviewVoices(deck);
   const fallbackPrompt = deck.description || t('deck.preview.defaultDescription', { deck: deck.name });
   const locale = i18n.resolvedLanguage === 'zh' ? 'zh-CN' : 'en-US';
   const updatedAt = deck.updated_at ? new Intl.DateTimeFormat(locale, {
@@ -476,9 +451,7 @@ export function DeckPreviewPanel({
       <section aria-label={t('deck.preview.examples')} className="deck-manager-preview__hero">
         {examples.length > 0 ? examples.map((voice, index) => {
           const VoiceIcon = iconMap[voice.icon as keyof typeof iconMap] || Icon;
-          const prompt = voice.system_prompt?.split('\n').find((line) => line.trim().length > 0)?.trim()
-            || deck.description
-            || t('deck.labels.noDescription');
+          const prompt = deckExamplePrompt(deck, voice, t('deck.labels.noDescription'));
           return (
             <button
               aria-busy={launchingDream}
@@ -688,7 +661,7 @@ export function DeckSettingsPanel({
     try {
       const rows = await onLoadRelatedThreads(deck.id, offset);
       setRelatedThreads((current) => append ? [...current, ...rows] : rows);
-      setRelatedThreadsHasMore(rows.length === RELATED_THREADS_PAGE_SIZE);
+      setRelatedThreadsHasMore(rows.length === DECK_RELATED_THREADS_PAGE_SIZE);
     } catch (loadError) {
       setRelatedThreadsError(
         loadError instanceof Error && loadError.message
@@ -797,7 +770,7 @@ export function DeckSettingsPanel({
       <section aria-labelledby="deck-manager-all-title" className="deck-manager-catalog">
         <div className="deck-manager-catalog__controls">
           <div aria-label={t('deck.creator.agentTypeFilter')} className="deck-manager-filter-tabs" role="tablist">
-            {(['all', 'chat', 'dream'] as const).map((candidate) => (
+            {(['all', 'chat', 'dream'] as const).filter(candidate => !isReactNativeHost() || candidate !== 'dream').map((candidate) => (
               <button
                 aria-selected={agentType === candidate}
                 key={candidate}

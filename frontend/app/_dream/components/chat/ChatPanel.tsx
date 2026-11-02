@@ -1,3 +1,4 @@
+// [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
 // [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
 // [Sync] 2026-10-12: retain submission-owned Stop through lazy admission and panel remount; unknown cannot unlock retry.
 // [Sync] 2026-10-11: keep the thread-scoped material callback stable so chat refreshes preserve image loading and previews.
@@ -15,6 +16,8 @@
 // [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
 // [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
+// [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
+import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
 import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
 import { TaskSessionLinksFailure } from './TaskSessionNavigation';
@@ -39,6 +42,7 @@ import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSess
 // [Sync] 2026-06-09: SSE reconnect — subscribe GET /threads/{id}/stream when reconnectStreamNonce bumps.
 // [Sync] 2026-06-09: keep reconnect effect deps stable (threadId/nonce only) so parent re-renders do not abort stream.
 // [Sync] 2026-06-09: agentBusy drives input dock stop button (streaming/submitted/reconnect).
+// [Sync] 2026-10-25: keep periodic input reads single-flight and cancel their request when this Thread effect ends.
 // [Sync] 2026-06-09: show a floating scroll-to-bottom arrow above AIInputDock when the message list is scrolled away from the bottom.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin chat transport and SSE reconnect.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
@@ -105,7 +109,6 @@ import { ClaudeAgentChatTransport } from '../../lib/claude-agent-transport';
 import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
-  type ChatAttachment,
   type ChatMetadata,
   type ToolChoice,
 } from '../../lib/chat-schema';
@@ -179,7 +182,7 @@ import {
   type ChatUserMessage,
   type CoordinatedChatSendOptions,
 } from './chatUserMessageIngress';
-const CHAT_BOTTOM_PROXIMITY_PX = 120;
+import {chatScrollPosition} from './chatScrollPosition';
 const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
 interface SystemConfigData {
@@ -492,37 +495,8 @@ export default function ChatPanel({
         }
         const requestContext = requestContextRef.current;
 
-        const attachments: ChatAttachment[] = (getPendingData()?.rawAttachments ?? [])
-          .filter((file) => file.storageKey)
-          .map((file) => ({
-            type: 'file',
-            url: toFileProxyUrl(file.storageKey!),
-            storageKey: file.storageKey,
-            mediaType: file.type,
-            filename: file.name,
-            size: file.size,
-            workspacePath: file.workspacePath,
-            savedAt: file.savedAt,
-            hash: file.hash,
-          }));
-
-        const requestToolChoice: ToolChoice = requestContext.imFullAccessEnabled
-          ? 'auto'
-          : getPendingData()?.toolChoice ?? requestContext.currentToolChoice;
-
-        const requestBody: ChatApiSchemaRequestBody = {
-          id,
-          ...(requestContext.deckId ? { deckId: requestContext.deckId } : {}),
-          ...(requestContext.voiceId ? { voiceId: requestContext.voiceId } : {}),
-          resume: true,
-          message: lastMessage,
-          toolChoice: requestToolChoice,
-          allowedAppDefaultToolkit: [],
-          allowedMcpServers: {},
-          attachments,
-          systemPrompt: requestContext.voiceSystemPrompt ?? requestContext.settingsSystemPrompt,
-          ...(requestContext.editorState != null ? { editor_state: requestContext.editorState } : {}),
-        };
+        const pending=getPendingData();
+        const requestBody:ChatApiSchemaRequestBody=buildClaudeChatRequest({id,message:lastMessage,context:requestContext,attachments:pending?.rawAttachments,toolChoice:pending?.toolChoice});
 
         setTimeout(() => {
           pendingDataRef.current = null;
@@ -1100,20 +1074,30 @@ export default function ChatPanel({
 
   useEffect(() => {
     let active = true;
+    let inFlight = false;
+    const cancellation = new AbortController();
     const load = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
       try {
-        const snapshot = await fetchThreadInputs(threadId);
+        const snapshot = await fetchThreadInputs(threadId, cancellation.signal);
         if (active) {
           setThreadInputs(snapshot.entries);
           setInputOwnerLocal(snapshot.local_owner);
         }
       } catch {
         // The queue capability is deployed separately; ordinary history remains usable.
+      } finally {
+        inFlight = false;
       }
     };
     void load();
     const timer = window.setInterval(() => { void load(); }, 2000);
-    return () => { active = false; window.clearInterval(timer); };
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      cancellation.abort();
+    };
   }, [threadId]);
 
   const selectQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
@@ -1299,11 +1283,9 @@ export default function ChatPanel({
   }, [agentBusy, visibleMessages]);
 
   const updateScrollToBottomVisibility = useCallback((element: HTMLDivElement) => {
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    const isScrollable = element.scrollHeight - element.clientHeight > CHAT_BOTTOM_PROXIMITY_PX;
-    const isNearBottom = distanceFromBottom < CHAT_BOTTOM_PROXIMITY_PX;
-    isNearBottomRef.current = isNearBottom;
-    setShowScrollToBottom(isScrollable && !isNearBottom);
+    const position = chatScrollPosition(element.scrollHeight, element.scrollTop, element.clientHeight);
+    isNearBottomRef.current = position.isNearBottom;
+    setShowScrollToBottom(position.showScrollToBottom);
   }, []);
 
   const updateActiveTurn = useCallback((element: HTMLDivElement) => {

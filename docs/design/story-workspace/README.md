@@ -1,8 +1,16 @@
+<!-- [Sync] 2026-10-27: 移动设计现行正文迁移至multi-platform，当前目录仅保留旧路径导航。 -->
+<!-- [Sync] 2026-10-25: 索引指向关闭Claude命令沙箱的部署设计，区分候选接线、完整业务与历史隔离原型。 -->
+<!-- [Sync] 2026-10-25: 保留原网页登录与业务；删除原生认证协议，平台仅适配资源、导航和通信。 -->
+<!-- [Sync] 2026-10-25: 移动设计索引对应iOS安装包宿主业务回执和物理设备门槛。 -->
+<!-- [Sync] 2026-10-24: iOS稿明确最小宿主与端侧业务未完成范围。 -->
+<!-- [Sync] 2026-10-24: 索引移动共享架构、共享交互和iOS/Android独立设计稿。 -->
 <!-- [Input] Current Story Workspace product modules and cross-system Dream/Deck contracts. -->
 <!-- [Output] Authoritative index for Story Workspace interaction and data design, linked to the independent Dream workspace PRD. -->
 <!-- [Pos] Story Workspace design entry point. -->
 <!-- [Sync] 2026-10-10: link the independent Dream workspace PRD and keep this directory as the formal interaction design set. -->
 <!-- [Sync] 2026-09-02: index the Episode-first synchronization plan and EP02 isolated-read sequence. -->
+
+<!-- [Sync] 2026-10-27: 增加RN目标正式交互与HTTP/实例生命周期架构入口，旧WebView图示保留实现归属。 -->
 
 # Story Workspace 业务设计索引
 
@@ -31,6 +39,7 @@
 | [Project 与 Episode 工作台](./project-and-episode-workbench.md) | Episode、故事线、场景、镜头的阅读与编辑 |
 | [Artifact 阅读与降级](./artifact-reading-and-degradation.md) | 文件投影、revision、缺失、无效与降级显示 |
 | [Skill 指令与工作台自动同步](./skill-commands-and-workbench-sync.md) | 已安装 Skill 的自由调用、Chat Slash 菜单和主 Agent Hook 自动同步 |
+| [跨平台客户端设计](../multi-platform/README.md) | RN/RN Web、Next Web发布、HTTP、App管理器、中介者及平台生命周期 |
 | [设置](./settings.md) | Story Workspace 设置导航与无障碍 |
 | [Thread 绑定冲突与恢复](./thread-binding-conflict-recovery.md) | launch provenance、当前 Agent、真实完整性冲突、消息/附件保留与重新加载 |
 

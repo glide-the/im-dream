@@ -1,3 +1,5 @@
+// [Sync] 2026-11-01: opt in to exact same-origin Settings GET cancellation during AuthProvider/Notion owner cleanup.
+// [Sync] 2026-10-29: serve the existing bulk Deck catalog DTO during Settings boot reads.
 // [Sync] 2026-10-15: classify only memory Settings GET aborts from React cleanup/reload in its explicit fixture lane.
 // [Sync] 2026-10-14: classify exact Reflections history GET lifecycle cancellation only in its explicit fixture lane.
 // [Sync] 2026-10-13: classify only the mounted Notion probe GET cancellation during connector refresh/unmount.
@@ -75,6 +77,7 @@ type FixtureOptions = {
   reflectionHistory?: boolean;
   authEntryLifecycle?: boolean;
   memorySettingsLifecycle?: boolean;
+  notionSettingsLifecycle?: boolean;
   longTitle?: boolean;
   taskCount?: number;
   diaryCount?: number;
@@ -232,6 +235,12 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     const expectedMemorySettingsCleanup = options.memorySettingsLifecycle && request.method() === 'GET'
       && path === '/api/memory/behavior' && failure === 'net::ERR_ABORTED'
       && refererPath === '/story-workspace/settings/behavior';
+    // AuthProvider and useNotionConnector abort their replaced/unmounted GETs.
+    // Keep the opt-in confined to the exact Settings route, same origin and no query.
+    const expectedNotionSettingsCleanup = options.notionSettingsLifecycle && request.method() === 'GET'
+      && ['/auth/session', '/api/connectors'].includes(path) && parsedUrl.search === ''
+      && failure === 'net::ERR_ABORTED' && refererPath === '/story-workspace/settings/resources'
+      && referer !== '' && new URL(referer).origin === parsedUrl.origin;
     if (expectedThreadHandoffAbort) {
       threadHandoffAborts.push({ method: request.method(), path, query: parsedUrl.search,
         error: failure, pagePath: new URL(page.url()).pathname, refererPath });
@@ -241,7 +250,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
       && !expectedNavigationAbort && !expectedDreamListNavigationAbort && !expectedChatListNavigationAbort
       && !expectedScheduledResultNavigationAbort && !expectedUnknownRun && !expectedNotionCancellation
       && !expectedScheduledRelationNavigationAbort && !expectedNotionProbeCancellation
-      && !expectedMemorySettingsCleanup && !expectedAuthEntryCancellation && !expectedHistoryCancellation && !expectedHistoryNavigationCancellation) {
+      && !expectedMemorySettingsCleanup && !expectedNotionSettingsCleanup && !expectedAuthEntryCancellation && !expectedHistoryCancellation && !expectedHistoryNavigationCancellation) {
       unexpected.push(`request: ${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
@@ -420,7 +429,7 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
     // Boot calls unrelated to this isolated UI contract are production-shaped empty reads.
     // No request writes a backend, database, model or worker; diary writes stay in memory.
     if (request.method() === 'GET') {
-      await route.fulfill({ json: path === '/api/decks' ? { decks: [] }
+      await route.fulfill({ json: (path === '/api/decks' || path === '/api/decks/catalog') ? { decks: [] }
         : path === '/api/default-voices' ? {} : path === '/api/claude-agent/threads' ? { threads: [] } : {} });
       return;
     }

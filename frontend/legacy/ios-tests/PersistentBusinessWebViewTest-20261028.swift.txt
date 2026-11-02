@@ -1,0 +1,42 @@
+// [Input] Historical whole-business InkBusinessSurface host and its original XCTest helpers.
+// [Output] Unchanged retired route-persistence test body for source traceability.
+// [Pos] Historical source fragment; excluded from current RN compilation and acceptance.
+    func testReactNativeShellAndPersistentRoutes() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let email = environment["INK_DREAM_TEST_EMAIL"], !email.isEmpty else {
+            throw XCTSkip("The existing account was not supplied.")
+        }
+        let webView = try await logIn(email: email, password: environment["INK_DREAM_TEST_PASSWORD"] ?? "")
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        let views = windows.flatMap(descendants)
+        XCTAssertTrue(views.contains { NSStringFromClass(type(of: $0)).contains("RCTRootView") })
+        let surface = try XCTUnwrap(views.compactMap { $0 as? InkBusinessSurface }.first)
+        XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
+        for label in ["Chat", "Decks", "More"] {
+            XCTAssertTrue(views.contains { $0.accessibilityLabel == label }, "RN navigation entry is missing: \(label)")
+        }
+        _ = try await evaluate(webView, "window.__INK_RN_PERSISTENCE_PROBE__ = 'same-document'; return true;", arguments: [:])
+        for (revision, path) in ["/story-workspace/decks", "/story-workspace/settings", "/story-workspace/chat"].enumerated() {
+            surface.navigationRequest = ["path": path, "revision": revision + 1]
+            try await waitForJavaScript(webView, timeout: 60, arguments: ["path": path]) {
+                "return location.pathname === args.path && window.__INK_RN_PERSISTENCE_PROBE__ === 'same-document';"
+            }
+            let current = try await waitForWebView(timeout: 5)
+            XCTAssertTrue(current === webView)
+        }
+        surface.navigationRequest = ["path": "/story-workspace/dream", "revision": 4]
+        try await waitForJavaScript(webView, timeout: 30) {
+            "return location.pathname === '/story-workspace/chat' && !document.querySelector('[data-story-workspace-region=sidebar]') && !Array.from(document.querySelectorAll('[role=tab]')).some(tab => /Dream/.test(tab.textContent || ''));"
+        }
+        print("IOS_RN_PERSISTENCE_PROOF nativeRoot=true webViewIdentity=retained supportedRoutes=3 dreamExcluded=true relay=disabled modelCalls=0")
+        if let window = windows.first(where: { $0.isKeyWindow }) {
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "RN iPhone Chat and safe areas"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }

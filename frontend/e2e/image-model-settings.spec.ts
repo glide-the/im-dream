@@ -1,3 +1,4 @@
+// [Sync] 2026-10-29: uncertain auto-save clicks assert the original feedback/re-read rather than a transient checked state.
 // [Input] Production ModelConfigSection and same-origin session with isolated catalog/preferences HTTP seams.
 // [Output] Visible Chrome journeys for independent saves, refresh, native/Images badges and recovery.
 // [Pos] Provider-free Settings verification; no normal account, database or model acceptance.
@@ -117,13 +118,13 @@ test('failed or malformed saves retain the last selection and never claim succes
   try {
     await expect(image(page).getByRole('radio', { name: /Images 图片甲/ })).toBeChecked();
     state.malformedSave = true;
-    await image(page).getByRole('radio', { name: /Images 图片乙/ }).check();
+    await image(page).getByRole('radio', { name: /Images 图片乙/ }).click();
     await expect(page.getByText('Image 模型保存结果未确认，请重新加载设置核对。')).toBeVisible();
     await expect(image(page).getByRole('radio', { name: /Images 图片甲/ })).toBeChecked();
     await expect(image(page).getByRole('radio', { name: /Images 图片乙/ })).toBeDisabled();
     state.malformedSave = false; state.disconnectSave = true;
     await page.getByRole('button', { name: '重新加载设置', exact: true }).click();
-    await image(page).getByRole('radio', { name: /Images 图片乙/ }).check();
+    await image(page).getByRole('radio', { name: /Images 图片乙/ }).click();
     await expect(page.getByText('网络连接失败，Image 模型保存结果未确认，请重新加载设置核对。')).toBeVisible();
     await expect(image(page).getByRole('radio', { name: /Images 图片甲/ })).toBeChecked();
     state.disconnectSave = false;
@@ -138,7 +139,7 @@ test('a lost save response is recovered by reading settings without repeating th
   try {
     await expect(image(page).getByRole('radio', { name: /Images 图片甲/ })).toBeChecked();
     state.disconnectSave = true; state.commitBeforeDisconnect = true;
-    await image(page).getByRole('radio', { name: /Images 图片乙/ }).check();
+    await image(page).getByRole('radio', { name: /Images 图片乙/ }).click();
     await expect(page.getByText('网络连接失败，Image 模型保存结果未确认，请重新加载设置核对。')).toBeVisible();
     expect(state.saved.image_model).toBe('image-b');
     state.disconnectSave = false;

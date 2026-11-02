@@ -2,11 +2,14 @@
 // [Output] Strict source/created task-session navigation and server-reported task status for Chat.
 // [Pos] Chat API adapter; creation, runtime state and SDK identifiers remain server-owned.
 // [Sync] 2026-09-27: add fail-closed task-session relation parsing and read transport.
+// [Sync] 2026-10-30: inject Native HTTP/cancellation into the same read/parser; Web defaults remain fetch.
 // [Sync] 2026-09-27: read each owned task's runtime status without inferring completion in Browser.
 // [Sync] 2026-09-27: accept optional completion-result fields but omit them from the information-card projection.
 // [Sync] 2026-09-27: accept the server's completed task status after final-result commit.
 import { API_BASE } from '../../lib/apiBase';
 import { browserRequestHeaders } from '../../lib/browserSession';
+
+export type TaskSessionReadOptions = {transport?: typeof fetch; signal?: AbortSignal};
 
 export type TaskSessionLaunchStatus = 'pending' | 'starting' | 'failed';
 
@@ -99,19 +102,19 @@ function parseSnapshot(value: unknown): TaskSessionLinksSnapshot {
   };
 }
 
-export async function fetchTaskSessionLinks(threadId: string): Promise<TaskSessionLinksSnapshot> {
-  const response = await fetch(
+export async function fetchTaskSessionLinks(threadId: string, options: TaskSessionReadOptions = {}): Promise<TaskSessionLinksSnapshot> {
+  const response = await (options.transport ?? fetch)(
     `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/task-links`,
-    { headers: { ...browserRequestHeaders() }, cache: 'no-store' },
+    { headers: { ...browserRequestHeaders() }, cache: 'no-store', ...(options.signal ? {signal: options.signal} : {}) },
   );
   if (!response.ok) throw new TaskSessionLinksError(response.status);
   return parseSnapshot(await response.json().catch(() => null));
 }
 
-export async function fetchTaskSessionDetail(sourceThreadId: string, taskId: string): Promise<TaskSessionDetail> {
-  const response = await fetch(
+export async function fetchTaskSessionDetail(sourceThreadId: string, taskId: string, options: TaskSessionReadOptions = {}): Promise<TaskSessionDetail> {
+  const response = await (options.transport ?? fetch)(
     `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(sourceThreadId)}/tasks/${encodeURIComponent(taskId)}`,
-    { headers: { ...browserRequestHeaders() }, cache: 'no-store' },
+    { headers: { ...browserRequestHeaders() }, cache: 'no-store', ...(options.signal ? {signal: options.signal} : {}) },
   );
   if (!response.ok) throw new TaskSessionLinksError(response.status);
   const value: unknown = await response.json().catch(() => null);

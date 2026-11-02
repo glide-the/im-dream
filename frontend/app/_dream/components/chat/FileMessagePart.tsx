@@ -1,6 +1,10 @@
+// [Sync] 2026-10-30: share original file labels/URL helpers with Native; DOM markup remains unchanged.
+// [Input] Original file message part and role.
+// [Output] Original image/attachment DOM.
+// [Pos] Web attachment presentation.
 import { memo } from 'react';
 import type { FileUIPart } from 'ai';
-import { toFileProxyUrl, withStorageAuthToken } from '../../lib/toFileProxyUrl';
+import {formatFileSize,resolveFileUrl} from './fileMessagePresentation';
 import { IconDownload, IconFile } from './Icons';
 
 interface FileMessagePartProps {
@@ -8,24 +12,6 @@ interface FileMessagePartProps {
   isUserMessage: boolean;
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function resolveFileUrl(url?: string) {
-  if (!url) return undefined;
-  if (url.startsWith('/') || url.startsWith('http')) {
-    // Persisted proxy URLs carry no credentials; attach the current auth token
-    // so <img src> / download links pass backend storage auth.
-    return withStorageAuthToken(url);
-  }
-  if (url.startsWith('blob:') || url.startsWith('data:')) {
-    return url;
-  }
-  return toFileProxyUrl(url);
-}
 
 export const FileMessagePart = memo(function FileMessagePart({ part, isUserMessage }: FileMessagePartProps) {
   const isImage = part.mediaType?.startsWith('image/');

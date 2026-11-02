@@ -4,6 +4,7 @@
 [Output] Default/override and version-only failure contract without installations.
 [Pos] Plugin install boundary tests; no database, provider or user service.
 [Sync] 2026-09-15: bind default plugin management to the Agent Runtime resolver.
+[Sync] 2026-10-26: native transport retains original version/help checks and rejects another executable.
 """
 import os
 from pathlib import Path
@@ -58,3 +59,27 @@ def test_version_output_does_not_replace_management_compatibility(management_exi
             assert cli.get_cli_version(Path("/qualified/runtime")) == "2.1.241 (Claude Code)"
         assert run.call_args_list[1].args[0] == ["/qualified/runtime", "plugin", "--help"]
         assert run.call_args_list[1].kwargs["env"] == {"CLAUDE_CONFIG_DIR": "/managed"}
+
+
+def test_bound_transport_runs_original_version_and_management_checks(tmp_path, monkeypatch):
+    executable = tmp_path / "cli.js"
+    executable.write_text("// original runtime fixture")
+    results = [subprocess.CompletedProcess([], 0, "2.1.241 (Claude Code)\n", ""),
+               subprocess.CompletedProcess([], 0, "plugin help", "")]
+    runner = mock.Mock(side_effect=results)
+    monkeypatch.setattr(cli, "_command_execution", None)
+    monkeypatch.setenv("INK_CLAUDE_CLI_PATH", "")
+    monkeypatch.setenv("INK_CLAUDE_PLUGIN_RUNTIME_ROOT", str(tmp_path / "managed-runtime"))
+    cli.bind_command_execution(executable, runner)
+    with mock.patch.object(cli.subprocess, "run", side_effect=AssertionError("desktop subprocess")):
+        assert cli.get_cli_version() == "2.1.241 (Claude Code)"
+    assert [call.args[0] for call in runner.call_args_list] == [
+        [str(executable), "--version"], [str(executable), "plugin", "--help"]]
+    assert runner.call_args_list[1].kwargs["env"]["CLAUDE_CONFIG_DIR"]
+    with pytest.raises(cli.ClaudeCliError, match="already bound"):
+        cli.bind_command_execution(executable, runner)
+    with pytest.raises(cli.ClaudeCliError, match="mismatch"):
+        cli.get_cli_version(tmp_path / "foreign-cli")
+    monkeypatch.setenv("INK_CLAUDE_CLI_PATH", str(tmp_path / "foreign-cli"))
+    with pytest.raises(cli.ClaudeCliError, match="differs"):
+        cli.resolve_claude_binary()

@@ -1,0 +1,18 @@
+<!-- [Input] Current attachment policy shared by the Android native file adapter. -->
+<!-- [Output] Configurable import size and file-extension allowlist. -->
+<!-- [Pos] Android resource configuration for the gated file capability. -->
+<!-- [Sync] 2026-10-24: add an empty release-owned external-host allowlist. -->
+<!-- [Sync] 2026-10-24: align the Android file adapter with the current mobile attachment boundary. -->
+
+<resources>
+    <integer name="mobile_maximum_import_bytes">52428800</integer>
+    <string-array name="mobile_allowed_file_extensions">
+        <item>pdf</item><item>txt</item><item>md</item><item>csv</item><item>json</item>
+        <item>doc</item><item>docx</item><item>xls</item><item>xlsx</item><item>ppt</item><item>pptx</item>
+        <item>zip</item><item>rar</item><item>7z</item><item>tar</item><item>gz</item>
+        <item>mp3</item><item>wav</item><item>m4a</item><item>ogg</item>
+        <item>mp4</item><item>webm</item><item>mov</item>
+        <item>png</item><item>jpg</item><item>jpeg</item><item>gif</item><item>webp</item><item>heic</item>
+    </string-array>
+    <string-array name="mobile_allowed_external_hosts" />
+</resources>

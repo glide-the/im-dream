@@ -1,6 +1,7 @@
 // [Input] Real BFF boundary functions with explicit test-owned origin/secret/clock.
 // [Output] Deterministic cookie/PKCE/callback/return/origin/CSRF validation without services or browser.
 // [Pos] Provider-free Node contracts for Next BFF login security.
+// [Sync] 2026-10-31: exercise private App callback/local receiver, original transaction rejection and per-origin configuration boundaries.
 // [Sync] 2026-09-18: cover exact forwarded public origin recovery after a tunnel rewrites the transport host.
 // [Sync] 2026-09-17: cover explicit loopback proxy origin recovery without trusting arbitrary internal URLs.
 // [Sync] 2026-09-16: cover exact public Host recovery from Next's normalized internal request URL.
@@ -19,6 +20,65 @@ function boundary(clock: () => number = () => 1_000): BffLoginBoundary {
 }
 
 function cookieHeader(cookie: string): string { return cookie.split(';')[0]; }
+
+test('private account redirect uses the original local HTTP receiver with the same encrypted transaction', () => {
+  const origin = 'http://localhost:5173';
+  const bff = new BffLoginBoundary({ publicOrigin: origin, callbackUri: 'com.inkmemory.example.auth:/auth/callback', cookieSecret }, () => 1_000);
+  assert.equal(bff.callbackUri, 'com.inkmemory.example.auth:/auth/callback');
+  assert.equal(bff.callbackRequestUri, origin + '/auth/callback');
+  const tx = bff.createTransaction('/chat');
+  const cookie = cookieHeader(bff.transactionCookie(tx));
+  const query = new URLSearchParams({ code: 'original-code', state: tx.state, iss: 'https://admin.example/api/auth' });
+  const request = (path = '/auth/callback', value = cookie, params = query.toString()) => new Request(origin + path + '?' + params, { headers: { cookie: value } });
+  assert.deepEqual(bff.validateCallback(request(), 'https://admin.example/api/auth'), tx);
+  assert.throws(() => bff.validateCallback(request('/other'), 'https://admin.example/api/auth'), { code: 'BFF_OAUTH_CALLBACK_INVALID' });
+  assert.throws(() => bff.validateCallback(request('/auth/callback', ''), 'https://admin.example/api/auth'), { code: 'BFF_LOGIN_TRANSACTION_INVALID' });
+  const other = cookieHeader(bff.transactionCookie(bff.createTransaction('/chat')));
+  assert.throws(() => bff.validateCallback(request('/auth/callback', other), 'https://admin.example/api/auth'), { code: 'BFF_OAUTH_CALLBACK_INVALID' });
+  for (const field of ['code', 'state', 'iss']) {
+    assert.throws(() => bff.validateCallback(request('/auth/callback', cookie, query + '&' + field + '=duplicate'), 'https://admin.example/api/auth'), { code: 'BFF_OAUTH_CALLBACK_INVALID' });
+  }
+  assert.throws(() => bff.validateCallback(request(), 'https://other.example/api/auth'), { code: 'BFF_OAUTH_CALLBACK_INVALID' });
+  assert.throws(() => bff.validateCallback(request('/auth/callback', cookie, query + '&error=access_denied'), 'https://admin.example/api/auth'), { code: 'BFF_OAUTH_CALLBACK_INVALID' });
+});
+
+test('private callback configuration rejects non-account schemes, authorities, nonlocal hosts and ambiguous paths', () => {
+  for (const callbackUri of [
+    'com.inkmemory.example.mcp:/oauth/callback', 'com.inkmemory.example:/auth/callback',
+    'javascript:/auth/callback', 'com.inkmemory.example.auth://auth/callback',
+    'com.inkmemory.example.auth:///auth/callback', 'com.inkmemory.example.auth:/wrong',
+    'com.inkmemory.example.auth:/auth/callback?code=value', 'com.inkmemory.example.auth:/auth/callback#fragment',
+    'com.inkmemory.example.auth:/auth/../auth/callback', 'com.inkmemory.example.auth:/auth/%63allback',
+  ]) assert.throws(() => new BffLoginBoundary({ publicOrigin: 'http://localhost:5173', callbackUri, cookieSecret }), { code: 'BFF_CONFIGURATION_INVALID' });
+  for (const publicOrigin of ['https://dream.example', 'https://localhost', 'http://device.lan:5173']) {
+    assert.throws(() => new BffLoginBoundary({ publicOrigin, callbackUri: 'com.inkmemory.example.auth:/auth/callback', cookieSecret }), { code: 'BFF_CONFIGURATION_INVALID' });
+  }
+});
+
+test('private callbacks retain the registered URI when Next selects an exact loopback address and keep cookie AAD isolated', () => {
+  const env = { INK_DREAM_PUBLIC_ORIGIN: 'http://localhost:5173', INK_DREAM_BFF_REDIRECT_URI: 'com.inkmemory.example.auth:/auth/callback', INK_DREAM_BFF_COOKIE_SECRET: cookieSecret };
+  const local = BffLoginBoundary.fromRequest(new Request('http://localhost:5173/auth/start'), env);
+  const other = BffLoginBoundary.fromRequest(new Request('http://127.0.0.1:5173/auth/start'), env);
+  assert.equal(local.callbackUri, env.INK_DREAM_BFF_REDIRECT_URI);
+  assert.equal(other.callbackUri, env.INK_DREAM_BFF_REDIRECT_URI);
+  assert.equal(other.callbackRequestUri, 'http://127.0.0.1:5173/auth/callback');
+  const tx = local.createTransaction('/');
+  assert.throws(() => other.readTransaction(new Request(other.callbackRequestUri, { headers: { cookie: cookieHeader(local.transactionCookie(tx)) } })), { code: 'BFF_LOGIN_TRANSACTION_INVALID' });
+  assert.throws(() => BffLoginBoundary.fromRequest(new Request('http://localhost:5173/auth/start', { headers: { 'x-forwarded-host': 'dream.example', 'x-forwarded-proto': 'https' } }), env), { code: 'BFF_CONFIGURATION_INVALID' });
+});
+
+test('private callback transactions expire through the original clock and retain handle CSRF checks', () => {
+  let now = 1_000;
+  const origin = 'http://localhost:5173';
+  const bff = new BffLoginBoundary({ publicOrigin: origin, callbackUri: 'com.inkmemory.example.auth:/auth/callback', cookieSecret }, () => now);
+  const tx = bff.createTransaction('/');
+  const cookie = cookieHeader(bff.transactionCookie(tx));
+  now = tx.expires_at;
+  assert.throws(() => bff.readTransaction(new Request(bff.callbackRequestUri, { headers: { cookie } })), { code: 'BFF_LOGIN_TRANSACTION_INVALID' });
+  const active = cookieHeader(bff.handleCookie(handle, now + 60));
+  assert.equal(bff.requireMutation(new Request(origin + '/api/settings', { method: 'POST', headers: { cookie: active, origin, 'x-ink-csrf': bff.csrfToken(handle) } })), handle);
+  assert.throws(() => bff.requireMutation(new Request(origin + '/api/settings', { method: 'POST', headers: { cookie: active, origin } })), { code: 'BFF_CSRF_INVALID' });
+});
 
 test('encrypted transaction cookie round trips without exposing PKCE and uses host-only flags', () => {
   const bff = boundary(); const tx = bff.createTransaction('/story?name=hello%20world');

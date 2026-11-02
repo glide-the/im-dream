@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: load public exports on access so pure DTO imports do not initialize the Runner.
 # [Input] None — top-level package re-export.
 # [Output] Expose ClaudeAgentRunner, create_agent_runner, SimpleClaudeAgentSDKClient,
 #          AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolChoiceMode,
@@ -53,26 +54,29 @@ create_necklace_mcp_server
     tools for current pet hardware/location/action data.
 """
 
-from .messages import AttachmentPayload, RuntimeContext, build_user_message_content
-from .server import (
-    ClaudeAgentRunner,
-    SimpleClaudeAgentSDKClient,
-    create_agent_runner,
-    create_necklace_mcp_server,
-    create_user_mcp_server,
-    get_or_create_workspace,
-)
-from .types import (
-    AgentRunOptions,
-    AgentRunResult,
-    AgentStreamingCallbacks,
-    IClaudeAgentSDKClient,
-    ToolChoiceMode,
-    ToolApprovalMode,
-    ToolApprovalPolicy,
-    ToolApprovalViolation,
-    ToolEventPayload,
-)
+# Keep pure message/protocol imports independent from executable Agent services.
+from importlib import import_module
+
+_MESSAGE_EXPORTS = {"AttachmentPayload", "RuntimeContext", "build_user_message_content"}
+_SERVER_EXPORTS = {
+    "ClaudeAgentRunner", "SimpleClaudeAgentSDKClient", "create_agent_runner",
+    "create_necklace_mcp_server", "create_user_mcp_server", "get_or_create_workspace",
+}
+
+
+def __getattr__(name):
+    if name in _MESSAGE_EXPORTS:
+        module = ".messages"
+    elif name in _SERVER_EXPORTS:
+        module = ".server"
+    elif name in __all__:
+        module = ".types"
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module, __name__), name)
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     # Runner

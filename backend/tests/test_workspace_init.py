@@ -1,3 +1,7 @@
+# [Input] Isolated plugin fixtures, frozen workspace manifests and managed Python caches.
+# [Output] Profile, cache repair and original launch validation regression evidence.
+# [Pos] Workspace-init technical tests; no normal business database or model calls.
+# [Sync] 2026-10-26: verify frozen runtime root changes and copied-cache pip entry points while preserving initialization results.
 """Unit tests for workspace init profiles + managed plugin venvs.
 
 Design: docs/design/deck/drama-forge-workspace-init-design.md §4-§6.
@@ -292,6 +296,57 @@ class PackerInitIntegrationTests(unittest.TestCase):
         self.assertFalse((workspace / "stories").exists())  # init NOT re-run
         self.assertTrue((venv_dir / "bin" / "python3").is_file())  # venv rebuilt
         self.assertEqual(second["runtime"]["venv_dirs"], first["runtime"]["venv_dirs"])
+
+    def test_frozen_runtime_root_rebinds_only_derived_manifest_paths(self) -> None:
+        workspace = Path(self._tmp.name) / "moved-workspace"
+        workspace.mkdir()
+        first = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        manifest_path = workspace / ".ink" / "launch-manifest.json"
+        original = json.loads(manifest_path.read_text())
+        old_venv = Path(first["runtime"]["venv_dirs"][0])
+        import shutil
+        shutil.rmtree(old_venv.parent)
+        (workspace / "CLAUDE.md").write_text("preserve the user's workspace edits\n")
+        (workspace / "stories").rmdir()
+        relocated_root = Path(self._tmp.name) / "current-container-runtime"
+        with mock.patch.dict(os.environ, {"INK_CLAUDE_PLUGIN_RUNTIME_ROOT": str(relocated_root)}):
+            second = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        current = json.loads(manifest_path.read_text())
+        actual_venvs = read_workspace_runtime_venv_dirs(workspace)
+        self.assertEqual(actual_venvs, second["runtime"]["venv_dirs"])
+        self.assertEqual(len(actual_venvs), 1)
+        self.assertTrue(Path(actual_venvs[0]).is_relative_to(relocated_root))
+        self.assertNotEqual(actual_venvs, first["runtime"]["venv_dirs"])
+        self.assertEqual(
+            {key: value for key, value in current.items() if key != "runtime"},
+            {key: value for key, value in original.items() if key != "runtime"},
+        )
+        self.assertTrue(second["frozen"])
+        self.assertEqual((workspace / "CLAUDE.md").read_text(), "preserve the user's workspace edits\n")
+        self.assertFalse((workspace / "stories").exists())
+
+    def test_frozen_moved_venv_rebuilds_original_pip_entry_point(self) -> None:
+        workspace = Path(self._tmp.name) / "copied-container-workspace"
+        workspace.mkdir()
+        first = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        old_root = Path(os.environ["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"])
+        current_root = Path(self._tmp.name) / "copied-container-runtime"
+        import shutil
+        import subprocess
+        shutil.move(old_root, current_root)
+        with mock.patch.dict(os.environ, {"INK_CLAUDE_PLUGIN_RUNTIME_ROOT": str(current_root)}):
+            second = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        venv = Path(second["runtime"]["venv_dirs"][0])
+        result = subprocess.run([str(venv / "bin" / "pip"), "--version"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(venv), result.stdout)
+        identity_fields = ("package_spec", "resolved_version", "artifact_digest", "relative_path")
+        self.assertEqual(
+            [{key: entry[key] for key in identity_fields} for entry in second["plugins"]],
+            [{key: entry[key] for key in identity_fields} for entry in first["plugins"]],
+        )
+        self.assertEqual(second["init_steps"], first["init_steps"])
 
     def test_invalid_profile_fails_pack(self) -> None:
         # Corrupt the packed copy's profile after first pack? No — corrupt at

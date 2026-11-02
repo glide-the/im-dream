@@ -5,6 +5,7 @@
 // [Sync] 2026-09-27: retain ambiguous Admin outcomes so the UI asks for a status check before retry.
 // [Sync] 2026-09-27: malformed success receipts fail closed before reaching Chat state.
 // [Sync] 2026-09-28: queue controls exclude dispatched, terminal, and uncertain input states.
+// [Sync] 2026-10-25: verify queue reads carry the caller's cancellation signal and preserve abort errors.
 
 import { expect, test } from '@playwright/test';
 import { clearBrowserSession, loadBrowserSession } from '../../../lib/browserSession';
@@ -102,5 +103,31 @@ test('queue transport retains message ID and revision under the Browser session'
   } finally {
     globalThis.fetch = originalFetch;
     clearBrowserSession();
+  }
+});
+
+test('queue reads forward caller cancellation and preserve the AbortError', async () => {
+  const originalFetch = globalThis.fetch;
+  const cancellation = new AbortController();
+  const aborted = new DOMException('Owned queue read cancelled', 'AbortError');
+  let observedSignal: AbortSignal | null | undefined;
+  globalThis.fetch = (async (_input, init) => {
+    observedSignal = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      if (!observedSignal) {
+        reject(new Error('The queue request has no caller signal'));
+        return;
+      }
+      observedSignal.addEventListener('abort', () => reject(aborted), { once: true });
+    });
+  }) as typeof fetch;
+  try {
+    const pending = fetchThreadInputs('owned-thread', cancellation.signal);
+    const result = expect(pending).rejects.toBe(aborted);
+    cancellation.abort();
+    await result;
+    expect(observedSignal).toBe(cancellation.signal);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

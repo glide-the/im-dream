@@ -4,6 +4,8 @@
 // [Sync] 2026-09-06: expire adapter sessions with their short-lived views and revalidate policy/manifest before bounded calls.
 
 import { randomUUID } from 'node:crypto';
+// [Sync] 2026-10-27: server timer ownership remains explicit beside RN global types.
+import { setTimeout, clearTimeout } from 'node:timers';
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
@@ -38,7 +40,7 @@ type RuntimeSession = {
   manifestIdentity: string;
   manifestRevision: number;
   manifestFeatures: McpAppsPluginManifest['features'];
-  expiryTimer: ReturnType<typeof setTimeout> | null;
+  expiryTimer: NodeJS.Timeout | null;
   closed: boolean;
 };
 
@@ -381,7 +383,7 @@ export class McpAppsHttpAdapter {
         session.expiryTimer = null;
         if (delay < remaining) schedule();
         else void this.#drop(sessionId, true);
-      }, delay);
+      }, delay) as unknown as NodeJS.Timeout;
       session.expiryTimer.unref?.();
     };
     schedule();

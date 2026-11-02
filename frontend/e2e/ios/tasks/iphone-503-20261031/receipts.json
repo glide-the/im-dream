@@ -1,0 +1,157 @@
+{
+  "taskId": "iphone-503-20261031",
+  "operationDate": "2026-10-31",
+  "archiveDate": "2026-11-01",
+  "evidenceSource": "Recorded tool calls in this chat; original helper retained under frontend/ios/build/iphone-503-20261031",
+  "currentDesktopExecution": "stopped_by_user",
+  "archiveExecution": {
+    "desktopActions": 0,
+    "accountActions": 0,
+    "modelCalls": 0
+  },
+  "originalScript": {
+    "source": "frontend/ios/build/iphone-503-20261031/mirror-click.applescript",
+    "archive": "mirror-click.original.applescript",
+    "sha256": "75ea550295ecd15cb6c897aa1b6923c5ce87076ba43ca8c50e89e5153b53e183",
+    "byteIdentical": true
+  },
+  "operations": [
+    {
+      "id": "window-inspect",
+      "language": "AppleScript",
+      "exitCode": 0,
+      "observation": "window_bounds_read",
+      "details": {
+        "position": [
+          1045,
+          38
+        ],
+        "size": [
+          314,
+          699
+        ]
+      }
+    },
+    {
+      "id": "coordinate-click",
+      "language": "AppleScript",
+      "exitCode": 0,
+      "observation": "target_page_change_not_observed",
+      "details": {
+        "screenshotSize": [
+          630,
+          1398
+        ],
+        "screenshotPoint": [
+          519,
+          1294
+        ],
+        "returnedReference": "mirror window group"
+      }
+    },
+    {
+      "id": "mouse-down-up",
+      "language": "OSA JavaScript",
+      "exitCode": 0,
+      "observation": "target_page_change_not_observed",
+      "details": {
+        "desktopPoint": [
+          1304,
+          685
+        ]
+      }
+    },
+    {
+      "id": "warp-and-delay",
+      "language": "OSA JavaScript",
+      "exitCode": 1,
+      "errorCode": -1708,
+      "observation": "command_interrupted_effect_unconfirmed",
+      "details": {}
+    },
+    {
+      "id": "mouse-move-down-up",
+      "language": "OSA JavaScript",
+      "exitCode": 0,
+      "observation": "target_page_change_not_observed",
+      "details": {
+        "desktopPoint": [
+          1304,
+          685
+        ]
+      }
+    },
+    {
+      "id": "window-properties",
+      "language": "AppleScript",
+      "exitCode": 1,
+      "errorCode": -1719,
+      "observation": "window_index_failed",
+      "details": {}
+    },
+    {
+      "id": "process-properties",
+      "language": "AppleScript",
+      "exitCode": 1,
+      "errorCode": -1728,
+      "observation": "process_query_failed",
+      "details": {
+        "unrelatedProcessOutputIncluded": false
+      }
+    },
+    {
+      "id": "activate-reopen-properties",
+      "language": "AppleScript",
+      "exitCode": 1,
+      "errorCode": -1708,
+      "observation": "candidate_context_count_failed",
+      "details": {
+        "activationEffectConfirmed": false
+      }
+    },
+    {
+      "id": "named-process-properties",
+      "language": "AppleScript",
+      "exitCode": 0,
+      "observation": "process_properties_read",
+      "details": {
+        "frontmost": false,
+        "visible": true,
+        "windowCount": 0
+      }
+    }
+  ],
+  "computerControlFailures": [
+    {
+      "code": "noWindowsAvailable",
+      "observed": true
+    },
+    {
+      "domain": "SCStreamErrorDomain",
+      "code": -3812,
+      "observed": true
+    }
+  ],
+  "independentBusinessEvidence": {
+    "installedBuild": "19",
+    "sessionHTTP": 200,
+    "systemConfigHTTP": 200,
+    "historyHTTP": 200,
+    "accountMatched": true,
+    "csrfPresent": true,
+    "visibleHistoryObserved": true,
+    "realModelCalls": 0,
+    "clickEffect": "not_verified",
+    "normalPasswordForm": "not_verified",
+    "loginSheetClose": "not_verified",
+    "realClaudeTask": "not_verified"
+  },
+  "excluded": [
+    "credentials",
+    "cookies",
+    "authorization data",
+    "business body",
+    "screenshots",
+    "complete process inventories"
+  ]
+}

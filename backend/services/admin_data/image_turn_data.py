@@ -3,6 +3,7 @@
 # [Output] Immutable binding/selection and verified native-result facts with original receipt-only recovery.
 # [Pos] Image-only adapter; its unknown-write state never blocks unrelated assistant/session persistence.
 # [Sync] 2026-10-10: keep actual source call, file hash and Gateway result identities independent.
+# [Sync] 2026-10-26: recover a definite same-message bind conflict from the original immutable receipt when only the Runtime attempt ID changed.
 from __future__ import annotations
 
 import hashlib
@@ -176,7 +177,30 @@ class AdminImageTurnData:
             return result
 
     def bind(self, input_dto: ImageTurnBindInputDTO) -> ImageTurnBindOutputDTO:
-        return self._execute(BIND_IMAGE_TURN, input_dto)
+        with self._lock:
+            try:
+                return self._execute(BIND_IMAGE_TURN, input_dto)
+            except AdminDataError as error:
+                if error.code != "OPERATION_REQUEST_CONFLICT" or error.status_code != 409 or error.outcome_unknown:
+                    raise
+                grant = self._grant_provider()
+                if grant.purpose != "server-persistence" or grant.thread_id != input_dto.thread_id:
+                    raise AdminDataError("IMAGE_TURN_AUTHORITY_REQUIRED", 403) from None
+                key = image_receipt_key(input_dto.turn_key)
+                receipt = self._client.receipt(BIND_IMAGE_TURN, key, access_token=grant.token)
+                if (not isinstance(receipt, CommittedReceiptDTO) or receipt.request_id != key
+                    or receipt.operation != BIND_IMAGE_TURN.capability.name
+                    or not isinstance(receipt.result, ImageTurnBindOutputDTO)):
+                    raise error
+                result = receipt.result
+                # The receipt owns the first attempt ID. Reuse that fact for
+                # the same saved message without replacing the Factory's new
+                # attempt, the stable Gateway key or any persisted binding.
+                if (result.model_dump(exclude={"turn_id", "canonical_user_id", "run_id"})
+                    != input_dto.model_dump(exclude={"turn_id"})
+                    or result.canonical_user_id != self._canonical_user_id or result.run_id != grant.run_id):
+                    raise error
+                return result
 
     def select(self, input_dto: ImageTurnSelectInputDTO) -> ImageTurnSelectOutputDTO:
         return self._execute(SELECT_IMAGE_OPERATION, input_dto)

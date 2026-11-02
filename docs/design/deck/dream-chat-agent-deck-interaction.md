@@ -126,7 +126,7 @@ Chat 选择器和全局 Voice 配置曾分别读取 Deck 列表，再逐项读�
 - Admin `deck.catalog` 接受空输入，使用认证主体确定用户，要求 `dream:read` 与现有 Deck schema capability。操作描述追加到 Registry 尾部，已有操作描述和 hash 保持。
 - `DeckVoiceRepository.catalog` 复用 `list(false)`，按返回的 Deck ID 集合一次查询全部 Voice；空列表直接返回。列表策略装饰继续由现有 `list` 负责。
 - Dream `AdminDeckListData.catalog` 校验精确 operation capability、严格 DTO、Deck ID 唯一性、Voice ID 唯一性和 `voice.deck_id` 对应关系，再执行原 Memory 字段转换。
-- `listDecksWithVoices` 为 Chat、全局 Voice 初始化、Deck 管理和 Reflections提供同一传输。相同 transport 与当前会话 CSRF 的在途读取共享 Promise；成功或失败后释放，下一次显式读取获取新数据。会话变更后拒绝旧响应。
+- `listDecksWithVoices` 为 Chat、全局 Voice 初始化、Deck 管理、Reflections 和原生启动提供同一传输。相同 transport 与当前会话 CSRF 的在途读取共享 Promise；成功或失败后释放，下一次显式读取获取新数据。会话变更后拒绝旧响应。
 - 成功读取对应一次浏览器目录请求与一次 Admin 领域读取。Admin 共享传输层保留现有只读恢复规则：网络超时后使用相同 request ID 再尝试一次，第二次使用现有较短超时；领域消费者继续读取完整目录。
 - 页面加载期间保持既有禁用和加载文案；成功后按现有 enabled 规则展示。失败沿现有错误反馈结束加载；重新进入、刷新或现有重试入口发起完整目录读取。
 - 发布顺序为 Admin 发布 `deck.catalog` → Dream 后端与前端更新。缺少 operation capability 时 Dream 返回结构化不可用响应。
@@ -191,15 +191,19 @@ stateDiagram-v2
 验收：选择器的目录加载发起一次完整读取；相同会话并发调用共享该请求；读取过程无逐项 Deck 详情请求；空目录保留空状态；失败结束加载且新读取可恢复；技术测试回执与正常账户验收分别记录。
 
 
-## 10. 提交范围与技术验证入口（2026-10-29）
+## 10. 技术验证记录（2026-10-29）
 
-提交范围覆盖 Admin 目录操作、Dream 目录转发和原 Web 选择器调用方。数据库 schema 与已有业务写操作保持现行合同。
+以下回执属于受控 HTTP / Provider-free 技术验证。
 
-| 工作目录 | 验证命令 |
-| --- | --- |
-| Dream backend/ | `./.venv/bin/python -m pytest -q tests/test_admin_deck_list_routes.py tests/test_admin_deck_detail_routes.py` |
-| Admin 根目录 | `pnpm exec vitest run app/lib/dream/deckCatalog.test.ts app/lib/dream/deckVoiceDto.test.ts app/lib/dream/deckVoiceRepository.test.ts app/lib/dream/deckVoiceService.test.ts app/lib/dream/deckPluginBindingRegistration.test.ts --reporter=default` |
-| Dream frontend/ 与 Admin 根目录 | `pnpm exec tsc --noEmit --incremental false --pretty false` |
-| Dream frontend/ | `E2E_WEB_BASE=http://127.0.0.1:5174 pnpm exec playwright test --config=e2e/deck-catalog.config.ts --reporter=line --workers=1` |
+| 工作目录 | 命令 | 退出码与关键输出 |
+| --- | --- | --- |
+| Dream `backend/` | `./.venv/bin/python -m pytest -q tests/test_admin_deck_list_routes.py tests/test_admin_deck_detail_routes.py` | 0；73 passed |
+| Admin 根目录 | `pnpm exec vitest run app/lib/dream/deckCatalog.test.ts app/lib/dream/deckVoiceDto.test.ts app/lib/dream/deckVoiceRepository.test.ts app/lib/dream/deckVoiceService.test.ts app/lib/dream/deckPluginBindingRegistration.test.ts --reporter=default` | 0；5 files / 32 passed |
+| Dream `frontend/` 与 Admin 根目录 | `pnpm exec tsc --noEmit --incremental false --pretty false` | 各 0；无诊断 |
+| Dream `frontend/` | `pnpm exec playwright test --config=e2e/web-rnw-regression.config.ts e2e/deck-catalog.spec.ts e2e/native-chat-setup.spec.ts e2e/chat-dream-agent-refactor.spec.ts e2e/chat-first-deck-defaults.spec.ts --reporter=line --workers=1` | 首轮退出 1；13 passed，1 项旧 fixture 的导航取消读取预期失败；修订后按下行复核通过 |
+| Dream `frontend/` | `pnpm exec playwright test --config=e2e/web-rnw-regression.config.ts e2e/chat-first-deck-defaults.spec.ts --reporter=line --workers=1` | 最终定向执行 0；1 passed |
+| 两仓受影响源文件与测试 | 定向 `pnpm exec eslint` 与 `git diff --check` | 各 0 |
 
-浏览器验证使用安装版 Chrome 和具名隔离前端进程；HTTP、认证和模型边界由 fixture 提供。目录传输检查并发调用共享单次请求，完整 Chat 页面检查选择器可操作前逐项 Deck 详情 GET 数量为 0。Markdown 引用、目录清单、Mermaid 和受影响文件定向代码检查另行记录回执。
+目录传输测试验证 Chat、StrictMode 重建和 Voice 初始化并发调用只产生一次 `/api/decks/catalog`。原生启动读取集合为 `/api/decks/catalog` 与 `/api/system-config`。完整 Chat 页面在选择器可操作前的逐项 Deck 详情 GET 数量为 0。Deck 页面测试对取消的认证与连接读取要求同路径后续读取成功。
+
+受影响 Markdown 的相对引用检查未发现缺失路径；Chrome 中的 Mermaid 解析覆盖本文三个 `sequenceDiagram` 和一个 `stateDiagram-v2`，应用错误为 0。Admin 原 292 项操作描述经完整对照保持，目录操作追加为第 293 项。本轮保留现有只读传输短超时恢复规则，未执行数据库迁移、真实模型调用或远程部署。

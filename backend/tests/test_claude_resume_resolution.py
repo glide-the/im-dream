@@ -1,4 +1,6 @@
 # [Sync] 2026-10-12: verify SDK interrupt/context cleanup survives repeated cancellation without replay.
+# [Sync] 2026-10-25: qualify iOS Node long-path encoding without accepting foreign/Bun project directories.
+# [Sync] 2026-10-26: supply the owned application root when emulating iOS directory traversal.
 # [Input] Production session probe and SDK adapter with isolated filesystem/client fixtures.
 # [Output] Verify identity/layout/access boundaries and connect-only bounded recovery.
 # [Pos] Provider-free resume regression tests; never touches business data.
@@ -114,6 +116,35 @@ class ResumeStorageTests(unittest.TestCase):
         long_cwd = self.cwd / ("a" * 100) / ("b" * 100)
         long_cwd.mkdir(parents=True)
         self.assertIsNone(self.probe(cwd=long_cwd))
+
+    def test_ios_node_hash_matches_runtime_utf16_vectors(self):
+        # Values recorded from the pinned Runtime's Math.abs(djb2Hash).toString(36).
+        for value, expected in (("a" * 201, "rkvsv5"), ("项目😀" + "/a" * 120, "vgchm0"),
+                                ("/tmp/" + "x" * 205, "ams34f")):
+            with self.subTest(value=expected), patch.object(storage.sys, "platform", "ios"):
+                self.assertEqual(storage._runtime_long_project_hash(value), expected)
+
+    def test_ios_resume_probes_exact_node_long_project(self):
+        cwd = self.cwd / ("项目😀" + "a" * 100) / ("b" * 100)
+        cwd.mkdir(parents=True)
+        units = str(cwd).encode("utf-16-le")
+        sanitized = "".join(chr(unit) if chr(unit).isascii() and chr(unit).isalnum() else "-"
+                            for unit in (int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2)))
+        bun_hash = storage._runtime_long_project_hash(str(cwd))
+        node_hash = storage._node_runtime_long_project_hash(str(cwd))
+        self.assertNotEqual(node_hash, bun_hash)
+        bun_record = self.home / "projects" / (sanitized[:200] + "-" + bun_hash) / self.record.name
+        node_record = self.home / "projects" / (sanitized[:200] + "-" + node_hash) / self.record.name
+        self.write_record(bun_record, cwd=str(cwd))
+        with patch.object(storage.sys, "platform", "ios"), patch.object(Path, "home", return_value=self.cwd.parent):
+            self.assertIsNone(self.probe(cwd=cwd))
+            self.write_record(node_record, cwd=str(cwd))
+            self.assertEqual(self.probe(cwd=cwd), str(node_record))
+            node_record.unlink()
+            node_record.symlink_to(bun_record)
+            with self.assertRaises(storage.ClaudeResumeStorageError):
+                self.probe(cwd=cwd)
+        self.assertEqual(self.probe(cwd=cwd), str(bun_record))
 
 
 class ResumeConnectTests(unittest.IsolatedAsyncioTestCase):

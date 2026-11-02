@@ -1,3 +1,6 @@
+# [Sync] 2026-10-30: place the bound image-material marker immediately before the original ordered image/reference pairs, preserving leading context.
+# [Sync] 2026-10-28: align resume documentation with the existing local-transcript guard; runtime behavior unchanged.
+# [Sync] 2026-10-26: an exact committed Dream confirmation retries its original artifact Hook before any model or message write.
 # [Sync] 2026-10-23: project Reflections task-scoped Notion metadata and host Read callback through the existing Runtime hook.
 # [Sync] 2026-10-13: require an explicit image capability from the turn owner; text-only Reflections owners remain valid.
 # [Sync] 2026-10-13: explicit server-owned MCP snapshots carry no dynamically resolved workspace scope.
@@ -2135,12 +2138,10 @@ class ClaudeAgentService:
         # Resume turn: verified claude_session_id from DB → SDK
         #              resumes the existing transcript.
         #
-        # [Sync] 2026-09-13: probe the current Runtime project before
-        # committing to resume.  A fresh deployment or CLI retention reaping
-        # will cause the subprocess to exit 1 ("Fatal error in message reader")
-        # if we pass a stale claude_session_id. Only missing records permit a
-        # fresh SDK session; _persist_turn will write the new claude_session_id
-        # so the DB self-heals for the next turn.
+        # [Sync] 2026-10-28: a bound Thread resumes its exact local transcript.
+        # A missing record fails with CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE
+        # before SDK connection. Admin message history alone does not recreate
+        # that Runtime session or replace its stored binding.
         # ---------------------------------------------------------------
         from libs.claude_agent_kit.server.session_files import locate_resumable_session
 
@@ -2561,6 +2562,30 @@ class ClaudeAgentService:
 
         # --- P2 fix: save user message immediately before inference ---
         await self._persist_user_message(execution)
+        request = execution.request
+        if request.user_message_pre_persisted and (request.message_metadata or {}).get("kind") == "story-workspace-dream-confirmation":
+            persistence = request.admin_turn_persistence
+            if not isinstance(persistence, AdminAgentTurnPersistence):
+                raise configuration_invalid()
+            committed_text = await asyncio.to_thread(persistence.completed_dream_confirmation_text,
+                actor_id=request.user_id, thread_id=request.thread_id, message_id=request.message_id)
+            if committed_text is not None:
+                ticket = execution.dream_artifact_turn_ticket
+                if ticket is None:
+                    raise configuration_invalid()
+                execution.user_response_committed = True
+                # The current owner recovers a prior committed reply; no new
+                # SDK terminal was received in this execution.
+                execution.committed_response_recovered = True
+                try:
+                    await asyncio.to_thread(self._dream_artifact_turn_hook.after_main_turn, ticket)
+                except DreamArtifactTurnHookError as exc:
+                    raise DreamArtifactSyncAfterCommitError(exc.issue.code) from exc
+                except Exception as exc:
+                    raise DreamArtifactSyncAfterCommitError("DREAM_ARTIFACT_SYNC_FAILED") from exc
+                await queue.put(_event("message-final", {"text": committed_text}))
+                await _put_terminal(queue, _event("finish", {"finishReason": "stop"}))
+                return None
         provider = execution.turn_context.image_provider
         if provider is not None:
             from services.admin_data.image_turn_data import image_material_header
@@ -2575,7 +2600,11 @@ class ClaudeAgentService:
             options.gateway_idempotency_key, options.gateway_image_turn_key = key, key
             options.image_tool_authorizer = provider.authorize_tool
             blocks = options.user_message if isinstance(options.user_message, list) else [{"type": "text", "text": options.user_message}]
-            options.user_message = [{"type": "text", "text": image_material_header(key, request.message_id)}, *blocks]
+            # Gateway consumes ordered image/reference pairs after this marker.
+            # Keep the ContextBuilder's leading instructions outside those pairs.
+            image_index = next((index for index, block in enumerate(blocks) if block.get("type") == "image"), 0)
+            options.user_message = [*blocks[:image_index],
+                {"type": "text", "text": image_material_header(key, request.message_id)}, *blocks[image_index:]]
 
         # Emit session metadata header
         await queue.put(
@@ -3918,6 +3947,7 @@ class _TurnExecution:
     # None on the first turn of a session.
     resume_existing_session: Optional[dict] = None
     user_response_committed: bool = False
+    committed_response_recovered: bool = False
     queue_result_failed: bool = False
     sdk_terminal_received: bool = False
 

@@ -17,6 +17,7 @@ Hard rules (deck-integration-delta §Install Flow):
 # [Output] Plugin-management-compatible executable and bounded subprocess receipts.
 # [Pos] Shared plugin install subprocess boundary, not another CLI resolver.
 # [Sync] 2026-09-15: reject version-only compatibility and stop selecting ambient claude.
+# [Sync] 2026-10-26: allow the iOS composition to bind the same Runtime through its native command transport.
 
 from __future__ import annotations
 
@@ -36,6 +37,27 @@ from . import runtime
 _ENV_CLI_PATH = "INK_CLAUDE_CLI_PATH"
 _DEFAULT_TIMEOUT_SECONDS = 300
 _MAX_CAPTURE_BYTES = 64 * 1024
+_command_execution = None
+
+
+def bind_command_execution(executable: Path, runner) -> None:
+    """Bind a platform process transport; retain the original CLI checks."""
+    global _command_execution
+    executable = Path(executable).resolve(strict=True)
+    if not executable.is_file() or not callable(runner):
+        raise ClaudeCliError("Invalid local CLI transport")
+    if _command_execution is not None:
+        raise ClaudeCliError("Local CLI transport already bound")
+    _command_execution = (executable, runner)
+
+
+def _run_command(argv, **kwargs):
+    if _command_execution is None:
+        return subprocess.run(argv, **kwargs)
+    executable, runner = _command_execution
+    if Path(argv[0]).resolve() != executable:
+        raise ClaudeCliError("Local CLI executable mismatch")
+    return runner(argv, **kwargs)
 
 # Redact common credential shapes before persisting output.
 _REDACT_PATTERNS = [
@@ -88,6 +110,11 @@ class CliExecution:
 def resolve_claude_binary() -> Path:
     """Resolve the qualified Runtime or an explicit plugin-only executable."""
     override = os.environ.get(_ENV_CLI_PATH, "").strip()
+    if _command_execution is not None:
+        executable = _command_execution[0]
+        if override and Path(override).resolve() != executable:
+            raise ClaudeCliError("Configured plugin CLI differs from the application Runtime")
+        return executable
     candidate: str | None = None
     if override:
         configured_path = Path(override)
@@ -159,7 +186,7 @@ def snapshot_delta(before: dict[str, str], after: dict[str, str]) -> dict[str, l
 def get_cli_version(executable: Path | None = None) -> str:
     """Verify plugin command support and return the CLI version (single line)."""
     binary = executable or resolve_claude_binary()
-    result = subprocess.run(
+    result = _run_command(
         [str(binary), "--version"],
         capture_output=True,
         text=True,
@@ -172,7 +199,7 @@ def get_cli_version(executable: Path | None = None) -> str:
             f"{result.stderr.strip()[:200]}"
         )
     # --version succeeds even when a headless build removed management commands.
-    management = subprocess.run(
+    management = _run_command(
         [str(binary), "plugin", "--help"],
         env=runtime.managed_cli_env(), capture_output=True, text=True,
         timeout=30, check=False,
@@ -204,7 +231,7 @@ def run_claude(
     started = datetime.now(UTC)
     timed_out = False
     try:
-        result = subprocess.run(
+        result = _run_command(
             full_argv,
             cwd=str(cwd),
             env=runtime.managed_cli_env(),

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Sync] 2026-10-15: register owner-bound L2 list/read and L3 resolution Tools.
 # [Input] Consume MCP Server/types, Session retrieval and strict Dream Thread Tool contracts.
 # [Output] Provide create_user_mcp_server() with Session retrieval and six Thread Tools and three memory Tools.
@@ -33,10 +34,11 @@ from .reflection_memory_tool import MEMORY_TOOL_SPECS, handle_memory_tool
 USER_MCP_TOOL_NAMES: frozenset[str] = frozenset({GET_SESSIONS_RANGE_TOOL_NAME, *THREAD_TOOL_SPECS, *MEMORY_TOOL_SPECS})
 
 
-def create_user_mcp_server() -> McpServer:
+def create_user_mcp_server(*, environment=None) -> McpServer:
     """Create the external stdio server for Ink's current user tools."""
 
     server = McpServer("user")
+    context = {} if environment is None else {"environment": dict(environment)}
 
     @server.list_tools()  # type: ignore[misc]
     async def list_tools() -> list[mcp_types.Tool]:
@@ -55,15 +57,15 @@ def create_user_mcp_server() -> McpServer:
         arguments: dict[str, Any] | None,
     ) -> list[mcp_types.TextContent]:
         if name == GET_SESSIONS_RANGE_TOOL_NAME:
-            result_text = handle_get_sessions_range(arguments)
+            result_text = handle_get_sessions_range(arguments, **context)
         elif name in MEMORY_TOOL_SPECS:
             call_id = sha256(repr(server.request_context.request_id).encode("utf-8")).hexdigest()
-            result_text = handle_memory_tool(name, arguments, call_id)
+            result_text = handle_memory_tool(name, arguments, call_id, **context)
         elif name in THREAD_TOOL_SPECS:
             # MCP request identity is transport-owned; a model cannot choose
             # the command key or pass actor/session/process identifiers.
             call_id = sha256(repr(server.request_context.request_id).encode("utf-8")).hexdigest()
-            result_text = handle_thread_tool(name, arguments, call_id)
+            result_text = handle_thread_tool(name, arguments, call_id, **context)
         else:
             raise ValueError(f"Unknown tool: {name!r}")
         return [mcp_types.TextContent(type="text", text=result_text)]

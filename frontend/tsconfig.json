@@ -13,6 +13,7 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    "moduleSuffixes": [".web", ""],
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -41,6 +42,8 @@
     "app/**/*.tsx"
   ],
   "exclude": [
+    "**/*.native.ts",
+    "**/*.native.tsx",
     "node_modules",
     "app/_dream/**/__tests__/**",
     "app/_dream/**/*.test.ts",

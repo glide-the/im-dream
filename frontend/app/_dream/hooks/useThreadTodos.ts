@@ -1,3 +1,4 @@
+// [Sync] 2026-10-30: share original Todo REST projection with cancellable Native reads and preserve Web store defaults.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] todo-updated SSE 事件（经 claude-agent-transport convertEvent 转发）
@@ -136,36 +137,21 @@ export function applyTodoEvent(threadId: string, event: ThreadTodoEvent): void {
  * Used on initial load / reconnect (与 hydrateThreadPlan 并行, §5.6).
  * Fetch failures leave the current state untouched.
  */
-export async function hydrateThreadTodos(threadId: string): Promise<void> {
-  if (!threadId) return;
-  try {
-    const res = await fetch(
+export async function readThreadTodos(threadId: string, options: {transport?: typeof fetch; signal?: AbortSignal} = {}): Promise<ThreadTodoState> {
+    const res = await (options.transport ?? fetch)(
       apiUrl(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/todos`),
-      { headers: { ...browserRequestHeaders() } },
+      { headers: { ...browserRequestHeaders() }, ...(options.signal ? {signal: options.signal} : {}) },
     );
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`Todos unavailable (${res.status})`);
     const data = (await res.json()) as ThreadTodosApiResponse;
 
-    if (!data.exists) {
-      // §5.5: exists:false 时 source/todos/updated_at 为空。
-      setThreadTodos(threadId, {
-        source: null,
-        exists: false,
-        todos: [],
-        truncated: false,
-        updatedAt: null,
-      });
-      return;
-    }
+    if (!data.exists) return {...EMPTY_THREAD_TODOS, todos: []};
+    return {source: data.source ?? null, exists: true,
+      todos: Array.isArray(data.todos) ? data.todos : [], truncated: data.truncated === true, updatedAt: data.updated_at ?? null};
+}
 
-    setThreadTodos(threadId, {
-      source: data.source ?? null,
-      exists: true,
-      todos: Array.isArray(data.todos) ? data.todos : [],
-      truncated: data.truncated === true,
-      updatedAt: data.updated_at ?? null,
-    });
-  } catch {
-    // Network/parse failure: keep existing state, panel simply stays stale.
-  }
+export async function hydrateThreadTodos(threadId: string): Promise<void> {
+  if (!threadId) return;
+  try {setThreadTodos(threadId, await readThreadTodos(threadId));}
+  catch { /* Network/parse failure retains the original store. */ }
 }

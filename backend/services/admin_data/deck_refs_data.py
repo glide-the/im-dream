@@ -2,6 +2,7 @@
 # [Input] Actual Admin refs DTOs, current request OAuth and source-bound installation metadata.
 # [Output] Three exact operations and the original public refs projection after local artifact/CLI checks.
 # [Pos] Deck Claude Plugin refs consumer; Admin owns locks/semantic revision/transactions, Dream owns bytes/CLI.
+# [Sync] 2026-10-25: load artifact/CLI verification only for prepared refs, preserving DTO-only imports.
 # [Sync] 2026-09-15: replace public refs SQL without paths, actor selectors or copied verification algorithms.
 from __future__ import annotations
 
@@ -10,7 +11,6 @@ from uuid import uuid4
 
 from pydantic import BeforeValidator, Field, field_validator, model_validator
 
-from services.claude_plugin.install_service import PluginInstallService
 from .chat_models import ChatStrictDTO, EntityId, validate_timestamp_text
 from .client import AdminDataClient, DomainOperation
 from .errors import AdminDataError, invalid_response
@@ -169,6 +169,7 @@ class AdminDeckRefsData:
         refs = []
         for position, selected in enumerate(selection.refs):
             record = by_id[selected.plugin_installation_id].model_dump()
+            from services.claude_plugin.install_service import PluginInstallService
             if not PluginInstallService.verify_installation_artifact(record):
                 raise AdminDataError("CLAUDE_PLUGIN_INTEGRITY_FAILED", 409, request_id)
             if not PluginInstallService.check_cli_compatibility(record):

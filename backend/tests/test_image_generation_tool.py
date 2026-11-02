@@ -1,3 +1,4 @@
+# [Sync] 2026-10-30: original Service output keeps the current image marker adjacent to ordered image/reference pairs after leading context.
 # [Sync] 2026-10-10: separate saved AI/Image ownership; Responses images stay disabled pending a complete bridge.
 # [Input] Synthetic Gateway responses, actual private broker, production Service and temporary Thread files.
 # [Output] PNG input/reference/edit and generation/save/reopen contracts plus denial and cancellation evidence.
@@ -123,10 +124,13 @@ def test_uploaded_png_visual_input_and_edit_reference_use_same_file(bound):
         [{"type": "text", "text": "Keep the drawing layout and make the lines red"}],
         attachments=[attachment], include_runtime_context=False,
     )
-    assert blocks[0] == {"type": "image", "source": {
+    image_indexes = [index for index, block in enumerate(blocks) if block["type"] == "image"]
+    assert len(image_indexes) == 1
+    image_index = image_indexes[0]
+    assert blocks[image_index] == {"type": "image", "source": {
         "type": "base64", "media_type": "image/png", "data": attachment.data,
     }}
-    assert blocks[1] == {"type": "text", "text": "Reference image for editing: " + reference}
+    assert blocks[image_index + 1] == {"type": "text", "text": "Reference image for editing: " + reference}
     assert blocks[-1]["text"] == "Keep the drawing layout and make the lines red"
     result = request_image(client, {"prompt": blocks[-1]["text"], "reference_images": [reference]})
     assert len(transport.calls) == 1
@@ -137,6 +141,54 @@ def test_uploaded_png_visual_input_and_edit_reference_use_same_file(bound):
     assert result.images[0].uri != reference
     assert (provider.workspace / saved["workspacePath"]).read_bytes() == original
     assert result.images[0].uri.startswith("workspace://files/generated/")
+
+
+@pytest.mark.parametrize("image_count", [0, 1, 2])
+def test_service_current_image_materials_follow_marker_without_context_interleaving(bound, image_count):
+    provider, transport, _, _ = bound
+    attachments = []
+    for index in range(image_count):
+        saved = save_buffer_to_workspace_files(provider.workspace, f"material-{index}.png", "image/png", picture())
+        attachments.append(AttachmentPayload(name=saved["fileName"], media_type="image/png",
+            data=base64.b64encode(picture()).decode("ascii"), id="workspace://" + quote(saved["workspacePath"], safe="/")))
+    original = ClaudeAgentContextBuilder(context_session_count=0).build_user_message(
+        [{"type": "text", "text": "Describe the attached pictures."}], attachments=attachments,
+        include_runtime_context=False)
+    captured = []
+
+    async def scenario():
+        class Runner:
+            async def run_streaming(self, options, callbacks):
+                captured.extend(options.user_message)
+                await callbacks.on_text_delta("The pictures were received.")
+                await callbacks.on_text_done("The pictures were received.")
+                return AgentRunResult("The pictures were received.", None, True, protocol_completed=True)
+
+        owner = Persistence()
+        request = ClaudeAgentRunRequest(user_id="7", thread_id="image-thread", message_id="material-message",
+            model="ai-model", message_parts=[{"type": "text", "text": "Describe the attached pictures."}],
+            attachments=attachments, admin_turn_persistence=owner)
+        context = _TurnContext(asyncio.Queue(), ToolConfirmationStore(), image_provider=provider)
+        execution = _TurnExecution(request=request, state=AgentRunState(session_id="image-thread"),
+            runner=Runner(), run_options=SimpleNamespace(user_message=list(original), model="ai-model"), turn_context=context)
+        service = ClaudeAgentService()
+        service._store_story_workspace_output = AsyncMock(return_value=None)
+        await service.execute_session(execution)
+
+    asyncio.run(scenario())
+    markers = [index for index, block in enumerate(captured)
+        if block.get("type") == "text" and block.get("text", "").startswith("[Ink image materials: ")]
+    assert len(markers) == 1
+    marker = markers[0]
+    assert captured[:marker] + captured[marker + 1:] == original
+    for index, attachment in enumerate(attachments):
+        assert captured[marker + 1 + 2 * index] == {"type": "image", "source": {
+            "type": "base64", "media_type": attachment.media_type, "data": attachment.data}}
+        assert captured[marker + 2 + 2 * index] == {"type": "text", "text": "Reference image for editing: " + attachment.id}
+    trailing = captured[marker + 1 + 2 * image_count:]
+    assert all(block["type"] == "text" and not block["text"].startswith("Reference image for editing: ") for block in trailing)
+    assert captured[-1]["text"] == "Describe the attached pictures."
+    assert not transport.calls
 
 
 def test_full_generate_display_save_reopen_edit(bound):
@@ -610,3 +662,4 @@ def test_owned_image_http_cancel_closes_socket_before_headers(tmp_path):
         server.shutdown()
         server.server_close()
         worker.join(3)
+# [Sync] 2026-10-25: validate image/reference adjacency after existing context prefixes without changing message assembly.

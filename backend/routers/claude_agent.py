@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Sync] 2026-10-15: freeze owner memory settings and current message before each turn broker starts.
 #!/usr/bin/env python3
 # [Sync] 2026-10-12: project closed contextUsage snapshots through owner-checked history DTOs.
@@ -101,7 +102,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from agent_factory import claude_agent_thread_factory
+from claude_agent.runtime_owner import get_thread_factory
+claude_agent_thread_factory = get_thread_factory()
 from libs.claude_agent_kit.server.session_projection_protocol import (
     ThreadToolCommandRequestDTO,
     ThreadToolCommandResultDTO,

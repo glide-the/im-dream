@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-10-25: 移动稿只定义容器适配，沿用原网页登录与全部工作台业务。 -->
+<!-- [Sync] 2026-10-24: 移动应用PRD同步双平台设计与第一宿主/bridge/资格门禁代码切片。 -->
+<!-- [Sync] 2026-10-24: 链接同业务目录移动应用产品需求，原有工作台规则保持现行归属。 -->
 <!-- [Input] Notion 项目定位与 Dream 工作记录、现行 Dream/Story Workspace 页面代码、Dream Agent 和 Story Workspace 设计。 -->
 <!-- [Output] Dream 工作台的产品目的、边界、功能描述、桌面/窄屏骨架、状态、失败恢复和验收要求。 -->
 <!-- [Pos] Dream 工作台现行独立 PRD；Deck 工作流、Deck 配置、Claude Code Plugins 和运行程序分别由其他文档负责。 -->
@@ -16,6 +19,8 @@ Dream 工作台用于承载持续创作。用户在 Chat 中选择 Dream 类型 
 - Dream 首页、初稿、同步、Episode 阅读和失败恢复缺少统一的产品入口。
 
 本 PRD 统一 Dream 工作台的用户目的和页面范围。现有正式设计继续负责具体时序和数据合同。
+
+移动安装、端侧Python运行、原网页登录的平台接入及前后台恢复见[移动应用PRD](mobile-app.md)，该稿复用本文的Run、Thread、Project与Episode规则。
 
 ## 目标与边界
 

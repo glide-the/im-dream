@@ -1,0 +1,14 @@
+// [Input] Explicit account-login completion and AppState events owned by the technical harness.
+// [Output] RNW presentation with observable native login Promise and runtime-start boundaries.
+// [Pos] Test-only platform facade; UIKit dismissal and real account login are separately verified.
+// [Sync] 2026-11-01: hold/fail original startup and observe clipboard/lifecycle without business requests.
+export * from './appearance-platform-web-boundary';
+const f=(window as any).__sessionPlatform??=((window as any).__sessionPlatform={presented:0,starts:0,state:'active',copies:[] as string[],copyFails:false,listeners:new Set<(state:string)=>void>(),runtimePending:null as null|{resolve:(value:unknown)=>void;reject:(value:unknown)=>void},pending:null as null|{resolve:()=>void;reject:(value:{code:string})=>void}});
+export const AppState={get currentState(){return f.state;},addEventListener(_event:string,fn:(state:string)=>void){f.listeners.add(fn);return{remove:()=>f.listeners.delete(fn)};}};
+f.change=(state:string)=>{f.state=state;f.listeners.forEach((fn:(state:string)=>void)=>fn(state));};
+f.active=()=>f.change('active');
+f.finish=()=>{const pending=f.pending;f.pending=null;pending?.resolve();};
+f.cancel=(code='LOGIN_CANCELLED')=>{const pending=f.pending;f.pending=null;pending?.reject({code});};
+const ready=()=>({state:'ready',localWebOrigin:'http://localhost:5173',privateEndpoint:'fixture-private-endpoint',token:'fixture-private-token'});
+f.settleRuntime=(error?:unknown)=>{const pending=f.runtimePending;f.runtimePending=null;if(error)pending?.reject(error);else pending?.resolve(ready());};
+export const NativeModules={InkRuntime:{ensureStarted:async()=>{f.starts++;if(new URLSearchParams(location.search).has('hold-runtime'))return new Promise((resolve,reject)=>{f.runtimePending={resolve,reject};});return ready();},copyText:async(value:string)=>{if(f.copyFails)throw Error('private-copy-error');f.copies.push(value);},presentLogin:()=>{f.presented++;return new Promise<void>((resolve,reject)=>{f.pending={resolve,reject};});}}};

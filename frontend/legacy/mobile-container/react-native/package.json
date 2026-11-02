@@ -1,0 +1,23 @@
+{
+  "name": "ink-memory-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "bundle:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ../ios/build/react-native/main.jsbundle --assets-dest ../ios/build/react-native"
+  },
+  "dependencies": {
+    "react": "19.1.0",
+    "react-native": "0.81.5"
+  },
+  "devDependencies": {
+    "@babel/core": "7.28.5",
+    "@react-native/babel-preset": "0.81.5",
+    "@react-native/metro-config": "0.81.5",
+    "@react-native-community/cli": "20.0.2",
+    "@react-native-community/cli-platform-ios": "20.0.2",
+    "@types/react": "19.1.13",
+    "typescript": "5.8.3"
+  }
+}

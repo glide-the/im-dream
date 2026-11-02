@@ -1,9 +1,12 @@
+// [Sync] 2026-10-29: initialize the original theme/style and i18n in the self-owned source fixture.
 // [Sync] 2026-10-07: the existing isolated Settings host uses the real AuthProvider/public session for actor-owned resource recovery.
 // [Input] Production Notion Settings components and provider-free intercepted connector DTOs.
 // [Output] Minimal browser harness for Settings summary, redesigned detail/child navigation, and disconnect interaction.
 // [Pos] Notion connector technical browser fixture in frontend/e2e/fixtures.
 // [Sync] 2026-08-29: host the seven-section Notion detail and focused child views beside the restored disabled discovery placeholders.
 
+import '../../app/_dream/i18n';
+import '../../app/_dream/index.css';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthProvider } from '../../app/_dream/contexts/AuthContext';

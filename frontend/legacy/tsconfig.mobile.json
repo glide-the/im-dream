@@ -1,0 +1,23 @@
+// [Input] Canonical Dream React modules, the mobile entry, and shared bridge policy JSON.
+// [Output] No-emit type validation for the local WebView resource build.
+// [Pos] Mobile resource typecheck boundary inside the sole frontend workspace.
+// [Sync] 2026-10-24: include the mobile entry that the Next-oriented root tsconfig omits.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "mobile/**/*.ts",
+    "mobile/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "app/_dream/**/__tests__/**",
+    "app/_dream/**/*.test.ts",
+    "app/_dream/**/*.test.tsx"
+  ]
+}

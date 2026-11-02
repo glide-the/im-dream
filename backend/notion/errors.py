@@ -2,6 +2,7 @@
 # [Input] Shared Notion connector backend modules.
 # [Output] Provide typed connector/auth/operation/snapshot exceptions.
 # [Pos] error node in backend/notion
+# [Sync] 2026-11-01: describe CLI resolution and execution failures under the existing exception contract.
 # [Sync] 2026-07-04: initial connector error hierarchy for auth, discovery,
 #                    persistence, and workspace snapshot materialization.
 # [Sync] 2026-08-28: add safe credential, reauthorization, and permission error
@@ -36,7 +37,7 @@ class NotionAuthTimeoutError(NotionAuthError):
 
 
 class NotionCLIUnavailableError(NotionAuthError):
-    """The `ntn` CLI was not found on PATH."""
+    """The owned `ntn` entry could not be resolved or executed."""
 
 
 class NotionOperationError(NotionConnectorError):

@@ -1,3 +1,4 @@
+# [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
 # [Input] Model-selected opaque artifact references and private turn broker capability.
 # [Output] Three strict owner-bound memory Tools, with no path, actor or current-message selector.
 # [Pos] User MCP memory surface; Admin credentials stay exclusively in the Host.
@@ -85,14 +86,14 @@ MEMORY_TOOL_SPECS={
  'resolve_memory_behavior':('根据当前任务和行为设置，解析指定记忆主题可采用的回应行动。不修改记忆或设置。',{**_OBJ,'properties':{'artifacts':{'type':'array','items':_REF,'maxItems':100}},'required':['artifacts']}),
 }
 _OPERATIONS={'list_memory_distillations':'memory.list','read_memory_distillation':'memory.read','resolve_memory_behavior':'memory.resolve'}
-def handle_memory_tool(name,arguments,call_id):
+def handle_memory_tool(name,arguments,call_id,*,environment=None):
     if arguments is None and name=='list_memory_distillations': arguments={}
     if not isinstance(arguments,dict): raise ValueError('Invalid memory arguments')
     operation=_OPERATIONS[name]
     allowed={'memory.list':{'limit','before'},'memory.read':{'artifact_id','revision'},'memory.resolve':{'artifacts'}}[operation]
     if set(arguments)-allowed: raise ValueError('Invalid memory arguments')
     try:
-        result=MemoryBrokerClient.from_env(dict(os.environ)).command(operation,arguments,call_id)
+        result=MemoryBrokerClient.from_env(dict(os.environ if environment is None else environment)).command(operation,arguments,call_id)
         return result.model_dump_json(exclude_none=True)
     except SessionProjectionProtocolError as error:
         return json.dumps({'status':'unavailable','error_code':error.code})
