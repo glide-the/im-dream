@@ -1,4 +1,5 @@
 // [Sync] 2026-10-31: retire an acknowledged Stop reader epoch and schedule canonical recovery independently of cancelled-reader completion.
+// [Sync] 2026-11-01: await cancellable Writing context preparation before any native user-message dispatch; selection changes reject late snapshots.
 // [Sync] 2026-10-30: expose original multi-part user DTO submission and document-bound editor result/settlement; composer queue behavior remains.
 // [Sync] 2026-10-30: recover after an acknowledged reader cancellation and retain Stopping until original idle; unacknowledged transport failures retain their original path.
 // [Sync] 2026-10-30: coalesce adjacent deltas within each received HTTP chunk and commit one ordered projection; preserve control barriers and Stop ownership.
@@ -40,18 +41,19 @@ function inputFailureKey(error:unknown):string {
   }
   return error instanceof TypeError?'chat.inputQueue.unavailable':'chat.inputQueue.sendFailed';
 }
-export default function useNativeChatThread({context,onSettled,onSessionExpired,transport:rawTransport=clientFetch,stream=openResponse}:{context:ClaudeChatRequestContext;onSettled?:()=>void;onSessionExpired?:()=>void;transport?:typeof fetch;stream?:typeof openResponse}) {
+export default function useNativeChatThread({context,prepareEditorState,onSettled,onSessionExpired,transport:rawTransport=clientFetch,stream=openResponse}:{context:ClaudeChatRequestContext;prepareEditorState?:(threadId:string|null,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>;onSettled?:()=>void;onSessionExpired?:()=>void;transport?:typeof fetch;stream?:typeof openResponse}) {
   const [state,setState]=useState(empty),current=useRef(state);current.current=state;
-  const latest=useRef({context,onSettled,onSessionExpired});latest.current={context,onSettled,onSessionExpired};
+  const latest=useRef({context,prepareEditorState,onSettled,onSessionExpired});latest.current={context,prepareEditorState,onSettled,onSessionExpired};
   const transport=useCallback<typeof fetch>(async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401)latest.current.onSessionExpired?.();return response;},[rawTransport]);
   const mounted=useRef(true),epoch=useRef(0),selectionEpoch=useRef(0),connection=useRef<OpenResponse|null>(null),postLock=useRef<number|null>(null);
   const livePresentedTurnIds=useRef(new Set<string>());
   const acknowledgedReaderStops=useRef(new WeakSet<OpenResponse>());
+  const contextPreparations=useRef(new Set<AbortController>());
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),attempt=useRef(0),queueIds=useRef(new Map<string,string>()),olderLock=useRef(false);
   function update(patch:Partial<typeof state>|((value:typeof state)=>typeof state)) {if(!mounted.current)return;setState(value=>{const next=typeof patch==='function'?patch(value):{...value,...patch};current.current=next;return next;});}
   function active(id:string,version:number) {return mounted.current && epoch.current===version && current.current.threadId===id;}
   function ownsSelection(id:string,version:number) {return mounted.current && selectionEpoch.current===version && current.current.threadId===id;}
-  function closeReader(acknowledgedStop=false) {if(acknowledgedStop && connection.current)acknowledgedReaderStops.current.add(connection.current);connection.current?.cancel();connection.current=null;if(timer.current)clearTimeout(timer.current);timer.current=undefined;}
+  function closeReader(acknowledgedStop=false) {for(const pending of contextPreparations.current)pending.abort();contextPreparations.current.clear();if(acknowledgedStop && connection.current)acknowledgedReaderStops.current.add(connection.current);connection.current?.cancel();connection.current=null;if(timer.current)clearTimeout(timer.current);timer.current=undefined;}
   function newChat() {selectionEpoch.current++;epoch.current++;closeReader();queueIds.current.clear();livePresentedTurnIds.current.clear();update(empty());}
   async function refreshQueue(id=current.current.threadId) {
     if(!id)return;const version=epoch.current;
@@ -145,7 +147,13 @@ export default function useNativeChatThread({context,onSettled,onSessionExpired,
     const selected={...latest.current.context,currentToolChoice:toolChoice},effective=selected.imFullAccessEnabled?'auto':toolChoice;
     postLock.current=epoch.current;update({posting:true,error:null});
     let id=before.threadId,dispatched=false,rejected=false,submission:ClaudeThreadSubmission|undefined;const version=epoch.current;
+    const preparation=new AbortController();
     try {
+      if(latest.current.prepareEditorState){
+        contextPreparations.current.add(preparation);
+        selected.editorState=await latest.current.prepareEditorState(before.threadId,preparation.signal);
+        if(preparation.signal.aborted||epoch.current!==version||!mounted.current)throw new Error('CHAT_SELECTION_CHANGED');
+      }
       id ??= await createChatThread(selected.deckId,selected.voiceId,undefined,transport);
       if(!id)throw new Error('CHAT_THREAD_CREATE_FAILED');
       if(epoch.current!==version || !mounted.current)return;
@@ -166,7 +174,7 @@ export default function useNativeChatThread({context,onSettled,onSessionExpired,
         else if(submission)update(value=>({...value,messages:value.messages.filter(message=>message.id!==submission?.messageId)}));
       }
       if(!dispatched || rejected)throw error;
-    } finally {if(postLock.current===version)postLock.current=null;}
+    } finally {contextPreparations.current.delete(preparation);if(postLock.current===version)postLock.current=null;}
   }
   function settleToolCall(toolCallId:string,expectedThreadId=current.current.threadId) {
     update(value=>value.threadId!==expectedThreadId?value:({...value,settled:new Set([...value.settled,toolCallId]),runtimePending:new Set([...value.runtimePending].filter(id=>id!==toolCallId))}));

@@ -5,10 +5,13 @@
 // [Sync] 2026-10-29: follow the native local appearance while retaining original session/refresh ownership.
 // [Output] Native application session using original BFF Cookie/CSRF semantics.
 // [Pos] Native session boundary; the Web view is limited to the existing authentication flow.
+// [Sync] 2026-11-01: keep diagnostics reachable while startup/session is pending, without releasing the original account view.
+// [Sync] 2026-11-01: retain original session-read errors for the existing diagnostics page.
 // [Sync] 2026-10-28: coalesce foreground/401 session reads and apply only the canonical current snapshot.
 import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {ActivityIndicator,AppState,NativeModules,Pressable,Text,View} from 'react-native';
+import {ActivityIndicator,AppState,Keyboard,NativeModules,Pressable,Text,View} from 'react-native';
 import useInkColors from '../components/useInkColors.native';
+import RuntimeDiagnostics from '../components/RuntimeDiagnostics.native';
 import {isBrowserSessionCurrent,loadBrowserSession,revokeBrowserSession,type BrowserSession,type BrowserUser} from '../../app/_dream/lib/browserSession';
 import {BackendRuntimeManager} from '../runtime/BackendRuntimeManager';
 import {clientFetch} from './transport';
@@ -18,19 +21,32 @@ export default function SessionGate({children,beforeRelease}: {beforeRelease?:()
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [loggingIn,setLoggingIn]=useState(false);
+  const [diagnostics,setDiagnostics]=useState(false);
+  const [runtimeFailed,setRuntimeFailed]=useState(false);
+  const [checkingSession,setCheckingSession]=useState(false);
   const loginPending=useRef(false);
   const inFlight=useRef<Promise<void>|null>(null),mounted=useRef(true);
   const foreground=useInkColors()['color-text-primary'];
+  const startupError=()=>BackendRuntimeManager.getSnapshot().errorCode==='CAPABILITY_UNAVAILABLE'?'当前端侧运行能力尚未就绪。':'本地服务启动失败，请关闭后重新打开应用。';
   function refresh():Promise<void> {
     if(loginPending.current)return Promise.resolve();
     if(inFlight.current)return inFlight.current;
+    if(BackendRuntimeManager.getSnapshot().state==='failed') {
+      if(mounted.current){setRuntimeFailed(true);setLoading(false);setError(startupError());}
+      return Promise.resolve();
+    }
     const operation=(async()=>{
-      if(mounted.current){setLoading(true);setError('');}
-      try {await BackendRuntimeManager.ensureStarted();const next=await loadBrowserSession(clientFetch);if(mounted.current && !loginPending.current && isBrowserSessionCurrent(next)){
+      if(mounted.current){setLoading(true);setError('');setCheckingSession(false);}
+      try {await BackendRuntimeManager.ensureStarted();if(mounted.current)setCheckingSession(true);BackendRuntimeManager.recordSessionRead('reading');const next=await loadBrowserSession(clientFetch);if(mounted.current && !loginPending.current && isBrowserSessionCurrent(next)){
+        BackendRuntimeManager.recordSessionRead(next?'available':'signed_out');
         if(currentSession.current&&currentSession.current.user.id!==next?.user.id)await release.current?.().catch(()=>undefined);
         if(mounted.current&&!loginPending.current&&isBrowserSessionCurrent(next))setSession(next);
       }}
-      catch {if(mounted.current)setError('工作区暂时无法打开，请重试。');}
+      catch (cause) {
+        const failed=BackendRuntimeManager.getSnapshot().state==='failed';
+        if(!failed){BackendRuntimeManager.recordSessionRead('unavailable');BackendRuntimeManager.recordError('session',cause);}
+        if(mounted.current){setRuntimeFailed(failed);setError(failed?startupError():'工作区暂时无法打开，请重试。');}
+      }
       finally {if(mounted.current)setLoading(false);}
     })();
     inFlight.current=operation;void operation.finally(()=>{if(inFlight.current===operation)inFlight.current=null;});return operation;
@@ -50,11 +66,15 @@ export default function SessionGate({children,beforeRelease}: {beforeRelease?:()
     finally {loginPending.current=false;if(mounted.current)setLoggingIn(false);}
   }
   async function logout() { await release.current?.().catch(()=>undefined); await revokeBrowserSession(clientFetch); setSession(null); }
-  if (session) return children(logout,refresh,session.user);
-  return <View style={{flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20}}>
+  const content=session?children(logout,refresh,session.user):<View style={{flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20}}>
     <Text style={{fontSize: 24, color:foreground}}>Ink &amp; Memory</Text>
-    {loading||loggingIn ? <ActivityIndicator color={foreground} /> : <Pressable accessibilityRole="button" onPress={() => void (error ? refresh() : login())} style={{padding: 16}}><Text style={{color:foreground}}>{error ? '重试' : '登录'}</Text></Pressable>}
+    {loading||loggingIn ? <><ActivityIndicator color={foreground} /><Text style={{color:foreground}}>{loggingIn?'正在登录':checkingSession?'正在检查登录状态':'正在准备本地服务'}</Text></> : !runtimeFailed?<Pressable accessibilityRole="button" onPress={() => void (error ? refresh() : login())} style={{padding: 16}}><Text style={{color:foreground}}>{error ? '重试' : '登录'}</Text></Pressable>:null}
     {error ? <Text accessibilityRole="alert" style={{color:foreground}}>{error}</Text> : null}
-    {error && !loading && !loggingIn ? <Pressable accessibilityRole="button" onPress={() => void login()}><Text style={{color:foreground}}>重新登录</Text></Pressable> : null}
+    {error && !runtimeFailed && !loading && !loggingIn ? <Pressable accessibilityRole="button" onPress={() => void login()}><Text style={{color:foreground}}>重新登录</Text></Pressable> : null}
+    <Pressable accessibilityRole="button" onPress={()=>{Keyboard.dismiss();setDiagnostics(true);}} style={{padding:12,minHeight:44}}><Text style={{color:foreground}}>开发者控制页</Text></Pressable>
+  </View>;
+  return <View style={{flex:1}}>
+    <View style={{flex:1}} pointerEvents={diagnostics?'none':'auto'} aria-hidden={diagnostics} accessibilityElementsHidden={diagnostics} importantForAccessibility={diagnostics?'no-hide-descendants':'auto'}>{content}</View>
+    {diagnostics?<View style={{position:'absolute',top:0,bottom:0,left:0,right:0}}><RuntimeDiagnostics onBack={()=>setDiagnostics(false)}/></View>:null}
   </View>;
 }

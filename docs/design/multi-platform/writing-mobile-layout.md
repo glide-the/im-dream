@@ -1,4 +1,6 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Input] 原App写作画布、StateChooser/StateCube、WritingView.native、会话生命周期与已通过设计。 -->
+<!-- [Sync] 2026-11-01: 写作关联对话修复已接入移动入口及按请求保存上下文；实施前原文归历史快照，源码与设备采用分别验收。 -->
 <!-- [Sync] 2026-11-01: 补充写作记录关联对话的只读诊断设计；保留原入口、三类关联及草稿生命周期，修正建议与设备验收分别登记。 -->
 <!-- [Output] 写作移动排版、心情内层滚动、所属页头接线、关联对话与触屏入口诊断设计。 -->
 <!-- [Pos] 现行跨平台写作交互；产品规则及骨架归mobile-app PRD，执行与验证归专项评审记录。 -->
@@ -10,7 +12,7 @@
 
 用户反馈手机写作段落留白、启动心情内容无法触摸滚动，以及心情入口占用正文首行。实现前的18px×1.8与全页横线32.4px周期一致；固定偏移、非整行卡片混排和字体/宽度变化后的高度更新构成布局风险。当前源码将移动正文行框、内层滚动与所属页头分别交给原所有者处理。
 
-产品规则、桌面及窄屏骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#写作排版与心情入口)，[定位与评审记录](../../exec/writing-mobile-layout-review-20261101.md)保留判断与分项回执。[实施前设计原文](history/writing-mobile-layout-before-implementation-20261101.md)完整保存原建议及业务图。
+产品规则、桌面及窄屏骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#写作排版与心情入口)，[定位与评审记录](../../exec/writing-mobile-layout-review-20261101.md)保留判断与分项回执。[实施前设计原文](history/writing-mobile-layout-before-implementation-20261101.md)完整保存原建议及业务图。
 
 ## 目标与边界
 
@@ -232,9 +234,9 @@ sequenceDiagram
 
 用户确认本次“笔记”指“更多 → 写作”或时间线中的写作记录。现行写作编辑对象为`EditorState`，持久化对象为Writing Session。打开指定记录的生产入口位于写作页的`CalendarPopup`日记列表，依次执行`handleOpenEntry → getSession → App.handleLoadEntry → loadPersistedEditorSession`。`CollectionsView`时间线展示日期、历史图片、评论和报告；Web与Native当前均未提供从普通日期卡直接打开写作对话的动作。
 
-当前源码具备写作卡片打开关联Chat的两端接线。`ChatWidgetUI`的Chat按钮以`isHovered=false`初始化，默认透明且不接收指针，只有原鼠标进入事件将其显示；现有Web旅程先hover再点击。触屏入口可发现性存在明确缺口，当前iPhone上的事件与点击结果待验证。端侧发送上下文存在独立差异。[只读诊断与评审](../../exec/writing-linked-chat-review-20261101.md)保存逐项代码证据、包体来源范围与请求回执。产品规则及骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#写作记录与关联对话)。本节与前文排版实施的状态分别维护，本轮新增源码修改为零。
+原诊断确认移动Chat按钮依赖鼠标悬停，端侧发送缺少写作上下文与保存屏障。当前源码通过原mobileWriting呈现已有按钮，使用原文档通信按次取得已保存快照，并拒绝切换后的旧回执。[实施前设计原文](history/writing-linked-chat-before-fix-20261101.md)与[只读诊断](../../exec/writing-linked-chat-review-20261101.md)保留原证据及当时状态；[修复执行记录](../../exec/writing-linked-chat-fix-20261101.md)保存当前实现和验证。产品规则及骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#写作记录与关联对话)。
 
-原组件的隔离触摸样本已复现：390宽度、移动触屏初态下，两次点击Chat按钮所在坐标均未触发onOpenChat，底层标题分别折叠和展开；桌面hover后普通点击成功一次。构建22的本地Next静态chunk含相同的false初态、鼠标事件与指针显隐表达式。该证据支持入口显示条件的局部修正，WKWebView真机及实际A/B请求继续独立验收。
+实施前的原组件隔离触摸样本在390宽度下两次点击均未打开Chat，底层标题分别折叠和展开；桌面hover后成功一次。原构建22本地Next静态chunk含相同显示条件。当前源码的真实DOM技术旅程已通过移动首触与A/B/A保存快照，连续5次结果一致；新候选WKWebView设备采用与真实账户请求继续独立验收。
 
 ### 目标与边界
 
@@ -248,11 +250,11 @@ sequenceDiagram
 | 对象 | 当前规则与交互 |
 | --- | --- |
 | 当前记录 | `EditorState.id`标识Writing Session；日历选择后替换编辑器状态、文本、标签和心情，关闭日历 |
-| 对话卡片 | 每个`ChatWidgetData.threadId`打开其指向的Thread；一份记录可以含多个卡片。当前非折叠卡片的Chat按钮仍有鼠标悬停显示条件 |
+| 对话卡片 | 每个`ChatWidgetData.threadId`打开其指向的Thread；一份记录可以含多个卡片。mobileWriting下原Chat按钮直接可见且可点；桌面保持hover，折叠和缺少threadId仍隐藏 |
 | Voice关联 | `ensureVoiceThread(voiceId, existingThreadId)`优先复用已有Voice Thread；不同记录的卡片允许指向同一Thread |
 | 手动写作建议 | `EditorState.writingThreadId`由`WritingSuggestionController`懒创建、保存并复用；该引用与对话卡片分别消费，当前建议卡无直接Chat跳转入口 |
 | Web展示 | `handleOpenWritingChatThread`传入准确Thread与递增nonce，`WritingWorkspaceSplitPane`显示原`ChatView`；桌面分栏，Web窄屏采用原覆盖面板 |
-| 端侧展示 | `WritingDocument`发送`open-thread`；`WritingView.receive`核对固定URL、documentId和active；`MoreNavigator`透传；`Business`建立原侧会话Modal |
+| 端侧展示 | `WritingDocument`发送带可选editorSessionId的`open-thread`；`WritingView.receive`核对固定URL、documentId和active；`MoreNavigator`透传；Writing侧Business按Session与Thread区分身份，原Modal呈现 |
 | 主Chat稿 | 端侧切换到更多及打开侧会话保留底层`Business`与输入组件；覆盖期间暂停焦点，返回后恢复原实例 |
 | 侧会话稿 | `useComposerDraft`持有组件内未发送稿；关闭Modal会卸载该侧`Business`。Web关闭写作Chat面板或切换Thread会卸载原ChatPanel。跨关闭/跨Thread恢复未发送稿未形成当前合同 |
 | 写作正文 | 继续`useSessionLifecycle`的保存与恢复；切换后恢复已保存状态，保存失败沿原反馈处理。即时未保存稿的切换边界列入验证 |
@@ -265,22 +267,37 @@ sequenceDiagram
 3. 端侧未知状态使用现有“重试读取”；`retry`替换读取epoch，自动恢复沿原退避策略。`AppState`回前台重新读取。旧epoch或已卸载实例的结果不得更新当前Thread。
 4. 原生文档加载失败显示原Retry，点击执行WebView重载。此操作可能影响尚未保存的编辑内容，应优先处理已有对话中的读取失败；记录读取和模型发送均未形成回执时，不连续重发。
 5. 401经原`onSessionExpired → refreshSession → SessionGate`恢复；Web局部文档沿原`AuthProvider`。账户退出或切换释放原业务实例。恢复后重新选择原记录及其卡片，跨账户草稿恢复保持关闭。
-6. 没有对话卡片、卡片已折叠或卡片缺少threadId时，Chat按钮不渲染；已有threadId的非折叠卡片仍需原悬停条件显示。读取失败使用原读取反馈；缺少关联入口的产品扩展单列需求。当前历史503回执只支持其记录时段和接口的失败判断。
-7. Web写作Chat发送包含当前`editor_state`且执行`ensureSessionPersistedForAgent`；端侧侧会话当前只收到threadId。对齐此项属于建议、未实现的发送上下文工作项，不作为本次“无法进入”的已证根因。
+6. 没有对话卡片、卡片已折叠或卡片缺少threadId时，Chat按钮不渲染；移动端已有threadId的展开卡片直接显示原按钮，首次触摸执行原onOpenChat。读取失败使用原读取反馈；缺少关联入口的产品扩展单列需求。历史503回执只支持其记录时段和接口的失败判断。
+7. Web继续原`editor_state`与`ensureSessionPersistedForAgent`。端侧Writing侧会话每次普通或MCP App用户消息提交前，通过原state/event通信请求当前目标Session快照，等待原保存完成，调用原`buildClaudeChatRequest`投影为editor_state。原队列入口继续其既有协议。
+8. 保存失败、笔记变化、文档替换、超时或取消均拒绝本次提交，原`useComposerDraft`恢复输入，不创建新Thread、不提交Agent POST。页面显示“当前笔记暂时无法用于对话”及输入保留反馈。用户返回写作核对原记录后可再次发送；原重新读取只读取历史和配置。
+9. 普通主Chat、任务侧会话及Calendar打开的任务Thread保持原上下文规则。Writing侧会话内部选择其他Thread或新建Chat后不携带原笔记快照；账户切换继续释放原Business。
 
-#### 后续局部修正条件
+#### 当前修正与后续条件
 
 | 观察结果 | 处理方式 | 状态 |
 | --- | --- | --- |
 | 原重试或网络恢复后，同一卡片打开原Thread | 保留现有实现并记录恢复回执 | 待设备复验 |
-| 有关联的展开卡片在触屏上缺少可见Chat入口 | 复用App现有mobileWriting值传给原ChatWidgetUI，让移动卡片原按钮可见且可点击；桌面沿原hover，折叠与关联条件保持 | 源码显示条件已证；触摸与包内资源待验证，建议、未实现 |
+| 有关联的展开卡片在触屏上缺少可见Chat入口 | App将mobileWriting透传原ChatWidgetUI，原Chat按钮常显并接收点击 | 源码已实现；当前候选设备采用独立验收 |
 | 安装资源缺少现有接线 | 按现有构建流程更新对应RN或Next资源，安装前后核对同一bundle ID与资源摘要 | 条件化后续工作，本轮未构建或安装 |
 | 点击有open-thread且history/status成功，Modal未显示 | 在`Business`原`sideChat/Modal`呈现处修正具体条件 | 待该故障证据，建议、未实现 |
 | 点击未形成open-thread | 在原`WritingDocument/receive`的实际阻断位置修正字段或active接线 | 待该故障证据，建议、未实现 |
-| 打开正确Thread，发送时缺少写作上下文 | 在原文档协议内取得绑定本次记录的上下文并等待原保存屏障，再由原request builder发送 | 源码差异已证；发送回执与局部协议评审为实施依赖，建议、未实现 |
-| 创建Thread迟到或记录读取乱序 | 复用既有身份校验方式，在对应共享回调核对触发时的Session/目标与当前请求；旧结果停止导航 | 共享控制流风险；待确定性复现，建议、未实现 |
+| 打开正确Thread，发送时缺少写作上下文 | 原文档协议按请求取得快照，等待原保存，由原request builder发送 | 源码已实现，故障及A/B回归归修复记录 |
+| 创建Thread迟到 | handleAgentSelect在await后核对原Session及原Chat卡片仍存在，再更新卡片与导航 | 局部身份守卫已实现；原Voice关联和已创建Thread保留 |
+| 日历读取乱序 | 继续按原入口验收；后续依据实际乱序回执选择对应局部守卫 | 当前未调整，独立依赖 |
 
-发送上下文修正需覆盖“点击时记录 → 发送前保存 → 同次请求快照”的身份匹配；单纯在打开时复制一份正文不能满足Web发送前的保存规则。该工作限制在现有文档消息与发送入口，无新增HTTP接口、全局存储或平行Chat。后续实现提交需明确同次请求回执、取消与超时沿用的配置，以及保存失败时保留输入并阻止发送的行为。本轮保留此依赖，关闭未经证实的协议扩展实施。
+#### 按需保存与快照协议
+
+| 对象 | 校验与生命周期 |
+| --- | --- |
+| 原open-thread扩展 | Writing卡片附带editorSessionId；Calendar任务可省略。宿主创建的准备回调绑定当时documentId与Session |
+| 原state.contextRequest | 非空requestId和sessionId；固定URL、documentId与递增revision校验继续执行。每个WritingView只持有一个在途准备，重复并发请求直接拒绝 |
+| App保存屏障 | `ensureSessionPersistedForAgent(expectedSessionId)`保存当前engine快照，校验等待期间的Session与内容；无参Web调用保持原行为 |
+| chat-context | 带documentId/requestId/sessionId及editorState；id必须等于sessionId，cells必须为数组。App在保存完成后复核快照签名才回传 |
+| chat-context-error | 仅session-changed或save-failed；拒绝本次发送，不包含原始异常、凭证或正文日志 |
+| WritingContextRequests | 拒绝旧document/Session/request回执；重载、隐藏、会话失效及卸载取消等待。技术期限来自sessionSync的WRITING_CHAT_CONTEXT_TIMEOUT_MS，当前30秒，只结束本地等待 |
+| Native提交 | `submitMessage`在createChatThread、beginClaudeThreadSubmission和stream POST前等待快照；读取epoch更换和卸载取消AbortSignal，迟到结果不派发 |
+
+该通信仅传递当前用户明确发送所需的原EditorState；正文不写入诊断日志或全局缓存。原保存HTTP、认证、权限、Thread关系、builder及SSE保持原所有者。关闭侧会话释放组件内草稿；主Chat实例、已保存正文与服务端任务继续原生命周期。
 
 ### 关联对话正常业务时序
 
@@ -298,6 +315,7 @@ sequenceDiagram
   participant Web as ChatView
   participant Native as useNativeChatThread
   participant Hydrate as hydrateClaudeThreadSession
+  participant HTTP as clientFetch/openResponse
   User->>Calendar: 写作页日历选择记录A
   Calendar->>API: getSession(A.id)
   API-->>Calendar: 原Session DTO
@@ -306,7 +324,7 @@ sequenceDiagram
   Life-->>App: 原id、cells、标签与心情
   Calendar-->>User: 关闭日历，显示A
   User->>App: A内ChatWidgetUI的Chat入口
-  Note over User,App: 当前按钮依赖hover；移动入口常显为建议、未实现
+  Note over User,App: 移动展开卡片的已有入口直接可点；桌面沿原hover
   App->>App: handleOpenWritingChatThread(card.threadId)
   alt Web
     App->>Web: requestedThreadId与递增nonce
@@ -323,6 +341,20 @@ sequenceDiagram
     Native->>Hydrate: openThread后读取messages与status
     Hydrate-->>Native: 原历史及运行状态
     Native-->>User: 原侧会话Modal
+    User->>Business: 发送当前输入
+    Business->>Native: 原send或sendUserMessage
+    Native->>View: prepareEditorState(signal)
+    View->>Doc: 原state.contextRequest
+    Doc->>App: 目标Session与requestId
+    App->>Life: ensureSessionPersistedForAgent(Session)
+    Life->>API: 原saveSession，按需保存
+    API-->>Life: 保存成功
+    App->>App: 复核当前Session与快照签名
+    App-->>Doc: chat-context快照
+    Doc-->>View: 匹配documentId、requestId与sessionId
+    View-->>Native: 原editorState
+    Native->>HTTP: 原POST /api/claude-agent，editor_state
+    HTTP-->>Native: 原SSE与任务状态
     User->>Business: 关闭侧会话
     Business-->>User: 返回原写作及保留的主Chat实例
   end
@@ -374,11 +406,19 @@ sequenceDiagram
     View->>Doc: WebView.reload
     Doc-->>View: 新documentId的ready
     Note over View,Doc: 恢复已保存Session；旧documentId消息拒绝
+  else 发送前保存失败或笔记变化
+    User->>Native: 提交原输入
+    Native->>View: prepareEditorState(signal)
+    View->>Doc: 原state.contextRequest
+    Doc-->>View: chat-context-error，原保存或身份校验失败
+    View-->>Native: 拒绝本次准备
+    Native-->>User: 原输入恢复与明确反馈，Agent POST为零
   end
   opt 读取期间关闭或切换Thread
     User->>Business: 关闭或选择其他对话
     Business->>Native: 卸载或openThread
     Native->>Native: mounted或epoch失配
+    Native->>View: 取消准备AbortSignal
     Hydrate-->>Native: 旧请求迟到
     Native->>Native: 拒绝旧结果写入当前Thread
   end
@@ -401,6 +441,11 @@ stateDiagram-v2
   ReadingThread --> SessionRecovery: HTTP401
   SessionRecovery --> Writing: 原会话恢复后重新选择
   ThreadVisible --> ThreadUnknown: 流中断后读取待核对
+  ThreadVisible --> PreparingNote: Writing侧会话发送
+  PreparingNote --> ThreadVisible: 保存与身份匹配后向原Thread提交
+  PreparingNote --> ContextFailed: 保存失败或笔记变化或超时
+  ContextFailed --> PreparingNote: 用户核对原笔记后再次发送
+  PreparingNote --> Writing: 关闭并取消准备，零Agent派发
   ThreadVisible --> Writing: 关闭原面板或Modal
   ReadingThread --> Writing: 关闭，旧回执拒绝
   note right of Writing
@@ -410,4 +455,4 @@ stateDiagram-v2
   end note
 ```
 
-图中状态用于描述页面反馈，当前生产代码沿既有state与epoch执行。拟议修正需先满足[后续实施清单](../../exec/writing-linked-chat-review-20261101.md#后续实施清单)的证据和依赖；图示不提高设备与真实模型验收状态。
+图中状态用于描述页面反馈，生产代码沿原state与epoch执行。当前改动、回退及技术回执归[修复记录](../../exec/writing-linked-chat-fix-20261101.md)；初次诊断中的条件化后续项按原历史状态保留。图示不提高设备与真实模型验收状态。

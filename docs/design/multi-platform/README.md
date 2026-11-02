@@ -1,3 +1,8 @@
+<!-- [Sync] 2026-11-01: 启动状态与只读开发者页已接入源码，设备采用和真实页面验收单列。 -->
+<!-- [Sync] 2026-11-01: 本次任务直接链接独立PRD和独立交互设计，页面骨架与流程可分别查看。 -->
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
+<!-- [Sync] 2026-11-01: 启动方案收敛为已有异步路径与最少状态展示，索引当前精简正文。 -->
+<!-- [Sync] 2026-11-01: 索引启动等待分析、正式启动交互、只读开发者页及专项评审；新增能力未实现。 -->
 <!-- [Sync] 2026-11-01: 索引端侧网页链接的系统默认浏览器规则与Notion授权闪退修复。 -->
 <!-- [Sync] 2026-11-01: 索引Web窄屏与端侧共用更多卡片、用途指引及原导航保持范围。 -->
 <!-- [Sync] 2026-11-01: 索引iPhone Notion安装提示阶段、随包资源及本轮恢复设计。 -->
@@ -31,11 +36,13 @@
 
 # Ink & Memory 跨平台方案
 
-写作记录打开关联对话的入口、三类关联、草稿与任务生命周期见[现行写作设计补充](writing-mobile-layout.md#写作记录与关联对话)。[专项只读诊断与评审](../../exec/writing-linked-chat-review-20261101.md)记录构建22、网络证据范围及条件化后续实施项；本轮源码与安装包保持。
+本次移动端异步启动与开发者页单独维护：[独立PRD](../../prd/mobile-app/mobile-startup.md)直接展示启动页和开发者页骨架；[独立交互与技术设计](mobile-startup-interaction.md)集中维护操作、实现依据、四张业务图和生命周期；[专项评审](../../exec/mobile-startup-design-review-20261101.md)维护实施及验收。新增页面已接入源码，现有后台启动与原业务条件继续复用；设备采用与真实页面验收分别记录。
+
+写作记录打开关联对话的入口、三类关联、草稿与任务生命周期见[现行写作设计补充](writing-mobile-layout.md#写作记录与关联对话)。移动原卡片入口和发送前笔记快照已接入源码，[修复执行记录](../../exec/writing-linked-chat-fix-20261101.md)保存技术与设备资格；[原只读诊断](../../exec/writing-linked-chat-review-20261101.md)及[实施前设计](history/writing-linked-chat-before-fix-20261101.md)保留历史证据。
 
 <!-- [Sync] 2026-11-01: 增加写作移动布局专项设计入口；设计与实现、设备验收分别记录。 -->
 
-写作排版、启动心情滚动和所属页面导航入口见[专项交互设计](writing-mobile-layout.md)；[产品规则与骨架](../../prd/dream-workspace/mobile-app.md#写作排版与心情入口)归原业务PRD，[定位与评审](../../exec/writing-mobile-layout-review-20261101.md)记录源码判断及待执行验收。该项最小实现已接入源码，技术、隔离浏览器与真机资格见专项评审记录。
+写作排版、启动心情滚动和所属页面导航入口见[专项交互设计](writing-mobile-layout.md)；[产品规则与骨架](../../prd/mobile-app/mobile-app.md#写作排版与心情入口)归原业务PRD，[定位与评审](../../exec/writing-mobile-layout-review-20261101.md)记录源码判断及待执行验收。该项最小实现已接入源码，技术、隔离浏览器与真机资格见专项评审记录。
 
 **React Native生成iOS、Android原生主界面；共享组件通过React Native Web接入Next；业务通过HTTP访问端侧Dream Python和Claude。**
 
@@ -70,7 +77,7 @@ iPhone Notion安装提示的触发条件、资源入口和失败恢复见[现行
 
 执行前提：先保证正常Web服务、原页面、网页登录和桌面/窄屏交互可用。共享改动逐次完成Web类型、生产构建与原页面回归后继续原生接线；精简RN主页面保留未验收状态。当前检查和实际业务范围见[执行记录](../../exec/mobile-app-design-review-20261024.md)。
 
-[运行库架构](mobile-runtime-architecture.md)、[iOS运行库与平台差异](mobile-ios-interaction.md)、[Android运行库与平台差异](mobile-android-interaction.md)继续提供端侧执行依据；前端目录、主界面承载与交互以统一工程设计为准。产品范围见[移动PRD](../../prd/dream-workspace/mobile-app.md)，制品与账号前提见[发布设计](../../deploy/mobile-app-release.md)。
+[运行库架构](mobile-runtime-architecture.md)、[iOS运行库与平台差异](mobile-ios-interaction.md)、[Android运行库与平台差异](mobile-android-interaction.md)继续提供端侧执行依据；前端目录、主界面承载与交互以统一工程设计为准。产品范围见[移动PRD](../../prd/mobile-app/mobile-app.md)，制品与账号前提见[发布设计](../../deploy/mobile-app-release.md)。
 
 
 2026-10-30图表补充：Native Mermaid已复用原DOM图表；原Web与Native技术回归、实际Hermes/WebKit复制/缩放/PNG导出及取消释放通过，普通包已采用。新旧制品和剩余范围归[图表执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-30mermaid图表适配与目标资格)。

@@ -1,6 +1,7 @@
 # [Input] Native-owned in-process endpoint and original ClaudeAgentOptions.
 # [Output] Original SDK command encoding and JSONL/control parsing over a private local socket.
 # [Pos] iOS execution transport; the SDK and original Runtime retain Agent behavior.
+# [Sync] 2026-11-01: propagate the original Next startup error through existing control frames and NSError.
 # [Sync] 2026-10-25: retain the application container HOME when the original Runner supplies only its thread config home.
 # [Sync] 2026-10-25: qualify original Next through same-PID worker listening ownership and an actual page response.
 # [Sync] 2026-10-26: await Worker exit after bounded EOF grace before releasing the private socket and owned MCP scope.
@@ -42,7 +43,7 @@ async def query_native_status(path: str | Path) -> dict:
     endpoint = read_native_endpoint(path)
     async with await anyio.connect_tcp("127.0.0.1", endpoint["port"]) as connection:
         await connection.send((json.dumps({"version": 1, "type": "status", "token": endpoint["token"]}) + "\n").encode())
-        response = json.loads(await BufferedByteReceiveStream(connection).receive_until(b"\n", 4096))
+        response = json.loads(await BufferedByteReceiveStream(connection).receive_until(b"\n", 16 * 1024 * 1024))
     if response.get("type") != "status" or response.get("pid") != os.getpid():
         raise CLIConnectionError("IOS_RUNTIME_PROCESS_MISMATCH")
     return {key: value for key, value in response.items() if key not in {"type", "pid"}}
@@ -53,7 +54,7 @@ async def start_native_web(path: str | Path, backend_origin: str) -> str:
     async with await anyio.connect_tcp("127.0.0.1", endpoint["port"]) as connection:
         await connection.send((json.dumps({"version": 1, "type": "start_web", "token": endpoint["token"],
                                           "backendOrigin": backend_origin}) + "\n").encode())
-        response = json.loads(await BufferedByteReceiveStream(connection).receive_until(b"\n", 4096))
+        response = json.loads(await BufferedByteReceiveStream(connection).receive_until(b"\n", 16 * 1024 * 1024))
     if response.get("type") != "web_started" or response.get("pid") != os.getpid():
         raise CLIConnectionError(response.get("code", "IOS_NEXT_PROCESS_MISMATCH"))
     import httpx
@@ -62,7 +63,7 @@ async def start_native_web(path: str | Path, backend_origin: str) -> str:
             while True:
                 status = (await query_native_status(path)).get("web", {})
                 if status.get("state") == "failed":
-                    raise CLIConnectionError(status.get("code", "IOS_NEXT_WORKER_FAILED"))
+                    raise CLIConnectionError(status.get("error") or status.get("code", "IOS_NEXT_WORKER_FAILED"))
                 if (status.get("state") != "listening" or status.get("origin") != response["origin"]
                         or status.get("backendOrigin") != backend_origin):
                     await anyio.sleep(0.1)

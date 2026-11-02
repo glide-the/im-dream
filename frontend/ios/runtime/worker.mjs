@@ -3,6 +3,7 @@
 // [Input] App-owned Runtime entry and one session's SDK arguments/environment.
 // [Output] Original Runtime JSONL/control or original Next standalone HTTP in one application worker.
 // [Pos] Node worker entry; isolates module state without launching an OS process.
+// [Sync] 2026-11-01: forward original Next console errors to the existing host status without changing stderr.
 // [Sync] 2026-10-25: Runtime commands use the bundled interpreter; Next retains command denial and no Mac execution.
 // [Sync] 2026-10-25: use the packaged Bash as the default CLI shell; Simulator host zsh does not establish guest availability.
 // [Sync] 2026-10-25: report the original Next server's actual loopback listening event to the private host.
@@ -20,6 +21,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
 import { subscribe } from 'node:diagnostics_channel';
+import { format } from 'node:util';
 const { installIOSProcessBoundary } = await import(workerData.processBoundaryURL);
 
 // The pinned Node24 child_process implementation calls these native bindings.
@@ -105,6 +107,12 @@ subscribe('undici:request:error', ({ request, error }) => {
 });
 
 if (workerData.application === 'next') {
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args) => {
+    try { parentPort.postMessage({ type: 'next_error', error: format(...args) }); }
+    catch { /* Error observation leaves the original console call intact. */ }
+    originalConsoleError(...args);
+  };
   const { installIOSAdminHTTP } = await import(workerData.adminHTTPURL);
   installIOSAdminHTTP();
   const listen = net.Server.prototype.listen;

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Input] 用户报告构建21打开Notion授权闪退，并要求在模拟器修复、回归七项及统一端侧默认浏览器。 -->
 <!-- [Output] 崩溃依据、局部修复、模拟器与七项网页验证及制品状态。 -->
 <!-- [Pos] 本轮Notion授权链接修复执行记录；前轮安装检测证据保留在ios-notion-20261101.md。 -->
@@ -28,7 +29,7 @@
 | 授权与权限 | 原验证码、轮询、凭证与回调已有明确所有者 | 保留原业务接口和状态 | 新认证协议与权限变更数0 | 真实Notion授权独立验收 |
 | 七项Web回归 | 既有七项依赖Next页面；正常5173占用默认构建锁 | 本轮独立Next输出与CLI宿主，复用原页面和mock DTO | 原服务保持运行，七项通过 | 无 |
 
-[正式交互设计](../design/multi-platform/mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)包含正常、异常与状态图。[移动产品需求](../prd/dream-workspace/mobile-app.md#设置资源详情与恢复骨架)保留原桌面及窄屏骨架。
+[正式交互设计](../design/multi-platform/mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)包含正常、异常与状态图。[移动产品需求](../prd/mobile-app/mobile-app.md#设置资源详情与恢复骨架)保留原桌面及窄屏骨架。
 
 ## 当前证据
 

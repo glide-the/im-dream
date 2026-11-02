@@ -3,6 +3,7 @@
 // [Input] Native-owned endpoint path, fixed Runtime/Next resources, workspace root and private connections.
 // [Output] One authenticated application-process socket, persistent original Next and per-session Runtime workers.
 // [Pos] iOS Node embedding bootstrap; no model loop, tool router or remote execution.
+// [Sync] 2026-11-01: preserve the original Next error in existing authenticated startup status.
 // [Sync] 2026-10-31: preserve the existing configured BFF account redirect when starting the original Next worker.
 // [Sync] 2026-10-25: load the fixed worker source as an ESM data URL and leave foreign process descriptors outside Worker unmanaged-FD cleanup.
 // [Sync] 2026-10-25: retain the original Workspace Mode-off default at the fixed bundled backend directory.
@@ -108,12 +109,13 @@ if (hostConfig.version !== 1 || webOrigin.origin !== configuredWebOrigin || webO
 }
 let webWorker;
 let webFailure;
+let webError;
 let webListening = false;
 let boundBackendOrigin;
 
 function webStatus() {
   return { state: webFailure ? 'failed' : webListening ? 'listening' : webWorker ? 'starting' : 'unstarted',
-    origin: webOrigin.origin, backendOrigin: boundBackendOrigin, code: webFailure };
+    origin: webOrigin.origin, backendOrigin: boundBackendOrigin, code: webFailure, error: webError };
 }
 
 function startWeb(backendOrigin) {
@@ -134,14 +136,15 @@ function startWeb(backendOrigin) {
     webWorker.stdout.on('data', data => process.stdout.write(data));
     webWorker.stderr.on('data', data => process.stderr.write(data));
     webWorker.on('message', message => {
+      if (message?.type === 'next_error' && typeof message.error === 'string') webError = message.error;
       if (message?.type === 'next_listening' && message.pid === process.pid && message.port === Number(webOrigin.port)) {
         webListening = true;
       }
     });
-    webWorker.on('error', () => { webFailure = 'IOS_NEXT_WORKER_FAILED'; });
-    webWorker.on('exit', () => { webFailure ||= 'IOS_NEXT_WORKER_STOPPED'; });
+    webWorker.on('error', error => { webFailure = 'IOS_NEXT_WORKER_FAILED'; webError = error.stack || String(error); });
+    webWorker.on('exit', code => { webFailure ||= 'IOS_NEXT_WORKER_STOPPED'; webError ??= `Next Worker exited with code ${code}`; });
   }
-  if (webFailure) throw new Error(webFailure);
+  if (webFailure) throw new Error(webError || webFailure);
   return { type: 'web_started', origin: webOrigin.origin, execution: 'application-process', pid: process.pid };
 }
 const server = net.createServer(socket => {

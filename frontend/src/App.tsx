@@ -1,4 +1,5 @@
 // [Sync] 2026-11-01: hand all Chat, Plan, file and workspace external links to the shared native system-browser action.
+// [Sync] 2026-11-01: Writing side Chat retains its source Session binding and prepares saved context before native sends.
 // [Sync] 2026-10-31: hidden Chat scenes and covering panels release local editor focus while retaining their composer.
 // [Sync] 2026-10-31: await scoped MCP document closure before Thread/new Chat/side view changes; SessionGate owns account departure.
 // [Sync] 2026-10-30: adopt original task activity sections and source-thread navigation without replacing Chat/runtime owners.
@@ -71,8 +72,9 @@ import type {EditorJumpToCellDetail} from '../app/_dream/components/chat/editorW
 import SessionGate from './platform/SessionGate';
 import ScreenFrame from './components/ScreenFrame';
 import {clientFetch} from './platform/transport';
+import type {WritingThreadContext} from '../app/_dream/components/Editor/WritingDocument.protocol';
 
-function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner}: {documentOwner?:object;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string}) {
+function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner,writingContext}: {documentOwner?:object;writingContext?:WritingThreadContext;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string}) {
   const {t}=useTranslation();
   const composer=useRef<NativeAIInputDockHandle>(null),share=useRef<NativeChatShareHandle>(null);
   const [fileSidebarOpen,setFileSidebarOpen]=useState(false);
@@ -91,7 +93,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const [editorJump,setEditorJump]=useState<{nonce:number;detail:EditorJumpToCellDetail}>();
   const [activityOpen,setActivityOpen]=useState(false),[activityFilters,setActivityFilters]=useState(nativeActivityFilters),[scheduledDetail,setScheduledDetail]=useState<{taskId:string;snapshot?:ScheduledTaskMarkerSnapshot|null}|null>(null);
   const activity=useNativeActivitySidebarData(activityOpen,{onSessionExpired:()=>void refreshSession()});
-  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string;documentOwner:object}|null>(null);
+  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string;documentOwner:object;writingContext?:WritingThreadContext}|null>(null);
   const [section, setSection] = useState<'chat' | 'decks' | 'more'>('chat');
   const [moreVisited,setMoreVisited]=useState(false),[moreNonce,setMoreNonce]=useState(0),moreSource=useRef<'chat'|'decks'>('chat');
   const [settingsNavigation,setSettingsNavigation]=useState<NativeSettingsNavigation>({nonce:0,target:'menu'});
@@ -104,7 +106,13 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const selectedDeck = boundContext.threadId?(boundDeck ?? (boundContext.deckId?undefined:legacyContext?.deck)):decks.find(deck=>deck.id===selection?.deckId);
   const selectedVoice = selectedDeck?.voices?.find(voice=>voice.id===(boundContext.threadId?boundContext.voiceId:selection?.agentId)) ?? legacyContext?.voice;
   const session = useNativeChatThread({context:{deckId:boundContext.threadId?boundContext.deckId:selection?.deckId,voiceId:boundContext.threadId?boundContext.voiceId:selection?.agentId,
-    voiceSystemPrompt:selectedVoice?.system_prompt,settingsSystemPrompt:config.system_prompt,imFullAccessEnabled:config.im_full_access_enabled===true,currentToolChoice:toolChoice},onSettled:()=>void history.reload(),onSessionExpired:()=>void refreshSession()});
+    voiceSystemPrompt:selectedVoice?.system_prompt,settingsSystemPrompt:config.system_prompt,imFullAccessEnabled:config.im_full_access_enabled===true,currentToolChoice:toolChoice},
+    prepareEditorState:writingContext?async(id,signal)=>{
+      if(id!==initialThreadId)return undefined;
+      setError('');
+      try{return await writingContext.prepareEditorState(signal);}
+      catch(error){if(!signal.aborted)setError(t('chat.writingContextUnavailable'));throw error;}
+    }:undefined,onSettled:()=>void history.reload(),onSessionExpired:()=>void refreshSession()});
   const history=useNativeChatHistory({enabled:section==='chat' && (!session.threadId || activityOpen),onSessionExpired:()=>void refreshSession()});
   const thread=session.threadId,messages=session.messages,running=session.running || session.posting || session.recovering,stopping=session.stopping,
     uncertain=!configLoaded || session.unknown || (session.recovering && !session.thread) || Boolean(session.thread?.deck_id && boundDeck?.id!==session.thread.deck_id);
@@ -191,7 +199,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
       {moreVisited?<MoreNavigator ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
-        onOpenThread={id=>setSideChat({threadId:id,documentOwner:{}})} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
+        onOpenThread={(id,writingContext)=>setSideChat({threadId:id,writingContext,documentOwner:{}})} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
         renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
@@ -208,7 +216,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     {workspaceUri?<WorkspaceFilePreview key={thread??'no-thread'} uri={workspaceUri} threadId={thread??undefined} availability={workspaceAvailability} resources={fileResources} onClose={()=>setWorkspaceUri(null)} onOpenWorkspace={openWorkspace} onOpenLink={url=>{void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'));}} onAddImageMaterial={addWorkspaceImage}/>:null}
     {origin && section==='chat'?<SketchInputSurface key={composerKey} origin={origin} open={sketchOpen} disabled={uncertain} onClose={()=>setSketchOpen(false)} onAdd={file=>composer.current?.addFile(file) ?? Promise.resolve(false)} />:null}
     <Modal visible={sideChat!==null} animationType="slide" presentationStyle="pageSheet" onRequestClose={()=>void closeSideChat()} supportedOrientations={['portrait','landscape']}>
-      {sideChat?<ScreenFrame><Business key={sideChat.threadId} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} onClose={()=>void closeSideChat()}/></ScreenFrame>:null}
+      {sideChat?<ScreenFrame><Business key={JSON.stringify([sideChat.threadId,sideChat.writingContext?.sessionId??null])} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} writingContext={sideChat.writingContext} onClose={()=>void closeSideChat()}/></ScreenFrame>:null}
     </Modal>
   </SafeAreaView>;
 }

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-27: RN框架目标保持，按原生与网页区域减少迁移范围。 -->
 <!-- [Input] 当前Dream网页业务、Kotlin/WebView工程及移动平台约束。 -->
@@ -35,7 +36,7 @@ App组合根持有BackendRuntimeManager（建议、未实现），与原runtime 
 
 Android使用Kotlin/WebView承载现有React，计划在同应用身份内运行Dream Python。当前工程含固定appassets来源、WebMessage、私有runtime service与系统文件适配；Python和Claude尚未接入，Android构建/真机回执仍缺失。
 
-本稿使用[PRD](../../prd/dream-workspace/mobile-app.md)与[共享交互](./mobile-app-interaction.md)中的正常网页业务；平台容器不另建账户和任务流程。
+本稿使用[PRD](../../prd/mobile-app/mobile-app.md)与[共享交互](./mobile-app-interaction.md)中的正常网页业务；平台容器不另建账户和任务流程。
 
 ## 目标与边界
 
@@ -59,7 +60,7 @@ Android使用Kotlin/WebView承载现有React，计划在同应用身份内运行
 
 ### 页面与操作
 
-使用[PRD正文骨架](../../prd/dream-workspace/mobile-app.md#页面骨架)与原响应式页面。Back先处理IME和当前原弹窗，再按原业务历史返回；根页面交给系统。键盘/inset保证原输入区和Login、发送/停止按钮可见，不重写原页面或原提交条件。
+使用[PRD正文骨架](../../prd/mobile-app/mobile-app.md#页面骨架)与原响应式页面。Back先处理IME和当前原弹窗，再按原业务历史返回；根页面交给系统。键盘/inset保证原输入区和Login、发送/停止按钮可见，不重写原页面或原提交条件。
 
 保持WebView第一方Cookie与原顶层form导航。远程认证页面无法调用本地bridge。文件适配需返回原业务可消费的文件输入，保留`useFileUpload`上传和`AIInputDock`写workspace顺序；原生临时副本无法定义新业务存储。
 

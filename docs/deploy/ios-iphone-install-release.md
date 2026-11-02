@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-02: 原iPhone从23覆盖安装24并普通启动，2161项原数据metadata保持；保留首次失联回执。 -->
+<!-- [Sync] 2026-11-01: 启动控制页构建24完成签名与制品核对，原iPhone安装时连接中断，设备采用待重连。 -->
+<!-- [Sync] 2026-11-01: 当前工作区公网构建23重新生成Next/RN与Python资源，原iPhone从22覆盖安装并启动；源env和手机数据保持。 -->
 <!-- [Sync] 2026-11-01: 写作资源纠偏要求prepare/build/verify与实际服务根摘要一致；模拟器及物理制品资格分别登记。 -->
 <!-- [Sync] 2026-11-01: 构建22修复Notion授权链接闪退，模拟器默认浏览器与七项Web通过；同机覆盖安装及启动通过，真实授权独立验收。 -->
 <!-- [Sync] 2026-11-01: Notion构建21同机升级，精确解释执行文件可读检测及版本/帮助通过；原资源401保留授权前提。 -->
@@ -30,13 +33,13 @@
 
 # iPhone 打包、安装与发布操作手册
 
-现行状态优先见第二十一节；下方旧小节保留对应阶段的制品与回执。
+最新设备采用见[构建24覆盖安装与普通启动](#2026-11-02-构建24覆盖安装与普通启动)；下方旧小节保留对应阶段的制品与回执。
 
 认证职责和状态见[目标编译与认证合同](../design/multi-platform/mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，后续问题按[端侧认证排障指南](mobile-auth-troubleshooting.md)逐层取证。本手册保留每次制品和实际验证原文；本轮文档整理未复测设备/API。
 
 ## 适用范围
 
-最新制品及执行状态采用[构建8与停止恢复](#十四2026-10-31构建8与停止恢复)，各日期记录保留原阶段范围。
+最新设备版本采用[构建24覆盖安装与普通启动](#2026-11-02-构建24覆盖安装与普通启动)，各日期记录保留原阶段范围。
 
 当前工程入口为 [`frontend/ios/InkMemory.xcworkspace`](../../frontend/ios/InkMemory.xcworkspace)，Scheme 为 `InkMemory`。React Native 主界面从 [`index.native.js`](../../frontend/index.native.js)装配；Swift 加载包内 `main.jsbundle`，原 Python 后端与 Node/Next 运行库一起进入安装包。正常网页登录和保留的 DOM 文档继续使用现有适配。
 
@@ -550,3 +553,74 @@ Admin后通道复用单个App级临时URLSession，每个Task在resume前绑定�
 [构建22开发IPA](../../frontend/ios/build/InkMemory-NotionLinks-Release-device-20261101-b22.ipa)复用21原生、后端与生效配置，正常`index.native.js`重新生成Hermes。SHA256 `1bba8268b0baa142521ffb73b30fcdb0c8a66d4cc082755963d4c7f3eee6e241`，142,559,295字节、0600；签名及83个framework严格校验通过，profile期限沿前节。
 
 原Notion默认回调提取`Linking.openURL`导致接收者丢失；现行平台函数保留接收者、Promise失败合同及系统默认浏览器选择。模拟器原组件点击闪退复现、修复后Safari打开/返回及失败反馈、十九项原生页面与七项Web回归通过。原iPhone覆盖安装和启动均退出0，读回0.1.0/22。真实Notion授权网页确认、资源读取及正式渠道发布分别验收。[本轮设计与命令](../exec/ios-notion-links-20261101.md)保留全部范围及失败历史。
+
+
+## 2026-11-01 当前工作区公网构建23
+
+用户授权将最新工作区代码打包至原iPhone，Admin采用`https://ink-admin.suoxya.com`。本轮读取当前合同及工作树，保留未提交的写作关联对话修复，沿当前源码重新准备独立Next standalone、RN/Hermes字节码、Python及Node运行资源。业务源码、源env、依赖与正常服务保持；递增构建号采用23，同一bundle ID覆盖安装原22，卸载与数据清理操作为0。
+
+执行依据归私有工件`frontend/ios/build/iphone-latest-20261101/optimized-prompt.md`，本轮规划整理一次。源码基线为`f40a9cfae8e85489a5354ccce7987f0a6a50f57d`及当时未提交改动；549份前端runtime输入在构建后、签名后与当前源码匹配。独立Next根为`frontend/ios/build/iphone-latest-20261101/Next`，打包来源门禁退出0，Mac Web的`.next`保持。
+
+### 制品与公网配置
+
+- 应用：`Ink & Memory`、`com.inkmemory.mobile`、`0.1.0 (23)`。
+- [开发IPA](../../frontend/ios/build/InkMemory-PublicAdmin-Release-device-20261101-b23.ipa)：142791393字节，权限0600，SHA256 `e82d23a635f1b453fd95c9bd26840929ff4266d9de87e17c182fa2dad05d103f`。
+- Next BUILD_ID：`0venWLY53yy9qjALxSnQI`；来源回执SHA256 `56774dd982c308f5a59fcf705c17f2a4cf289d853031330e2d5159ae45aee445`。
+- Hermes字节码`main.jsbundle`：5744210字节，SHA256 `39e5bd8733e5c4d353a3d37b7ec87e54f0e945d2d80e16c18cc5c3946a643394`。引擎Framework二进制摘要与JS字节码摘要分别记录。
+- 83个Framework和主应用沿原开发身份签名；profile匹配原设备及Team，有效至2026-11-08 01:03:45（Asia/Shanghai）。
+
+安装包的原env配置项采用公网Admin：前后端`INK_ADMIN_DREAM_BASE_URL`及`INK_ADMIN_DREAM_TRANSPORT_BASE_URL`为公网根，`INK_ADMIN_AUTH_ISSUER`为公网`/api/auth`；后端`INK_ADMIN_PRODUCT_API_BASE_URL`及`INK_GATEWAY_BASE_URL`使用同一公网根。修改仅作用于待签名副本的这些既有URL键，其他配置字节保持。Dream本机origin、原正常网页登录回调、Client及PKCE仍沿原所有者，源env写入0，凭证正文输出0。
+
+### 实际命令与回执
+
+确定性阶段由luna_test_runner执行，主Agent执行公网配置、签名、安装与启动。原始回执归`frontend/ios/build/iphone-latest-20261101/validation/`及同根的设备JSON；旧22制品保留。
+
+| 命令或阶段 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `pnpm exec tsc --noEmit --pretty false --incremental false`，frontend | 0 | Web类型通过，7.153秒 |
+| `pnpm run native:typecheck`，frontend | 0 | Native类型通过，3.430秒 |
+| `INK_IOS_NEXT_ROOT=<本轮Next绝对路径> python3 frontend/ios/scripts/prepare-next.py` | 0 | 无env的当前源码准备完成，725文件、549 runtime输入；复用已安装依赖 |
+| `pnpm --dir <本轮Next根>/build-source build` | 0 | Next生产构建通过，27.616秒；私有tsconfig仅指定原安装typeRoots |
+| `INK_IOS_NEXT_ROOT=<本轮Next根> python3 frontend/ios/scripts/bundle-next.py --verify-sources`，构建前后 | 0 | 当前checkout与prepared输入一致，无旧资源采纳 |
+| `env -u SKIP_BUNDLING INK_IOS_NEXT_ROOT=<本轮Next根> xcodebuild -workspace frontend/ios/InkMemory.xcworkspace -scheme InkMemory -configuration Release -sdk iphoneos -destination generic/platform=iOS -derivedDataPath frontend/ios/build/rebuild-iphone-20261031/DerivedData -jobs 3 CURRENT_PROJECT_VERSION=23 CODE_SIGNING_ALLOWED=NO build` | 0 | BUILD SUCCEEDED，59.735秒；正常RN入口重新生成字节码 |
+| `python3 frontend/ios/build/iphone-latest-20261101/package23.py` | 0 | 公网URL投影、83个Framework签名、主应用签名与IPA归档完成 |
+| `codesign --verify --deep --strict <release23/Payload/InkMemory.app>`、`unzip -t <本轮IPA>` | 0 | 签名与归档完整性通过；329份Python和4份Node平台源匹配当前仓库 |
+| `xcrun devicectl device install app --device F615EA70-0AFD-5E1A-9373-AECBD061688D <本轮签名App>` | 0 | 原iPhone22覆盖升级23；未卸载、未清理数据 |
+| `xcrun devicectl device process launch --device F615EA70-0AFD-5E1A-9373-AECBD061688D com.inkmemory.mobile` | 0 | 普通启动成功，PID 10173 |
+| `xcrun devicectl device info apps`及`device info processes`，同一设备 | 0 | 设备读回0.1.0/23及同一新安装路径，App进程存在 |
+
+制品来源、构建、签名、安装和普通进程启动已完成。本轮额外发起的模型任务、账户维护及第三方授权操作为0。笔记A/B对话、完整登录、资源及Claude真实任务的本轮真机页面验收未执行；先前技术或真实业务回执保留各自版本范围。TestFlight与App Store发布未执行。
+
+## 2026-11-01 启动控制页构建24（待设备重连）
+
+用户授权将已验证的启动控制页及原始错误日志安装至原iPhone。构建24采用当前工作区普通`index.native.js`入口、当前Next standalone、Python及Node资源。原模拟器准备/就绪与两入口资格、原始EADDRINUSE展示/复制资格见[专项记录](../exec/mobile-startup-design-review-20261101.md#原始错误日志补充2026-11-01)。
+
+| 交付项 | 结果 |
+| --- | --- |
+| 应用与制品 | `com.inkmemory.mobile`、0.1.0/24；[开发IPA](../../frontend/ios/build/InkMemory-Startup-Release-device-20261101-b24.ipa)，142812974字节、0600，SHA256 `ecb6ef6066d9eb7e7c26bdc14c3c1374896c2a0f49dd7f30a05ba9237793be56` |
+| 构建 | 独立`prepare-next.py`、`pnpm build`、前后两次`bundle-next.py --verify-sources`及`xcodebuild ... CURRENT_PROJECT_VERSION=24 CODE_SIGNING_ALLOWED=NO build`均退出0；原DerivedData增量构建约49秒 |
+| 当前来源 | Next runtime输入550份、Python329份及Node4份逐字匹配；HBC `9acabc8e61f4e5651ea34d95d6a0b5b7404ff182ec343a94a14a86d2e4e78d27`，Next BUILD_ID `KOV9qB9o5Tu9uPUYbr6Ms` |
+| 开发签名 | 原Team/profile，83个Framework及主应用签名通过；deep/strict、IPA CRC均退出0；原有效期至2026-11-08 01:03:45上海时间 |
+| 既有配置 | 副本沿原23制品规则采用公网Admin；正常账号回调、源env及锁文件保持；依赖安装和模型调用为0 |
+| 安装前设备 | 同一iPhone16可连接，已解锁，原App读回0.1.0/23；原数据目录2161项metadata已保存 |
+| 首次安装 | `devicectl device install app`退出1、12.206秒，CoreDevice连接失效，NWError60超时；设备随后unavailable |
+| 当前设备采用 | 无成功安装回执；设备读回与普通启动等待同一iPhone重新连接，最新已确认版本为23 |
+
+本轮工件归`frontend/ios/build/startup-iphone-20261101-b24/`。首次私有打包脚本将签名基线误指release24，复制profile前退出；已修正为原release23并完成后续签名，失败日志保留。安装失败与包体签名/源码资格分别记录。设备发现重试返回CoreDevice1000，Xcode发现同一设备available=false，说明需恢复设备连接。卸载、数据清理、账号维护及正常服务变更为0；本轮物理页面、业务与正式渠道发行均未验收。
+
+## 2026-11-02 构建24覆盖安装与普通启动
+
+用户要求继续安装。设备已恢复可连接，安装前读回同一`com.inkmemory.mobile`为0.1.0/23。本轮复用前节已签名构建24，IPA SHA256仍为`ecb6ef6066d9eb7e7c26bdc14c3c1374896c2a0f49dd7f30a05ba9237793be56`；原生、Next、Python与RN资源重新构建次数为0。
+
+| 命令或核对 | 退出码 | 实际结果 |
+| --- | --- | --- |
+| `codesign --verify --deep --strict <release24/Payload/InkMemory.app>` | 0 | 既有签名通过，包内版本24与HBC摘要匹配原制品回执 |
+| `xcrun devicectl device install app --device F615EA70-0AFD-5E1A-9373-AECBD061688D <release24/Payload/InkMemory.app>` | 0 | 20.827秒，同一iPhone16从23覆盖升级24 |
+| `devicectl device info apps` | 0 | 读回0.1.0/24，新安装路径与安装回执匹配 |
+| `devicectl device info files`，安装前/后且启动前 | 各0 | Library/Application Support均2161项，路径增删0，普通文件及符号链接metadata变化0 |
+| `devicectl device process launch` | 0 | 普通启动PID10604 |
+| `devicectl device info processes` | 0 | PID10604及新安装路径仍存在 |
+
+本次采用包含启动控制页与原始错误日志。源env、原配置、登录回调、开发签名、正常服务及业务数据维护操作保持原范围；卸载、数据清理、依赖安装和模型调用为0。数据核对仅读取metadata，正文与凭证读取为0。物理页面、登录、真实业务及任务恢复验收分别执行。
+
+回执归`frontend/ios/build/startup-iphone-20261101-b24/resume-20261102/`，包括`preflight-commands.json`、`install24-command.json`、`install24.json`、`apps-after.json`、`data-comparison.json`、`launch24.json`、`processes-after.json`及`device24-receipt.json`。前节首次失联与未完成安装的原回执保持历史状态；本节记录设备24实际采用。

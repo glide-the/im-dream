@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: explain failed Writing context preparation while retaining the unsent Chat input.
 // [Sync] 2026-11-01: label the report detail drag handle and its touch/keyboard accessibility guidance.
 // [Sync] 2026-10-29: label native General feedback without changing original Web settings actions.
 // [Sync] 2026-10-29: localize the shared narrow More theme entry; existing theme actions remain.
@@ -969,6 +970,7 @@ const resources = {
             state_unknown: 'Reply status needs checking'
           }
         },
+        writingContextUnavailable: 'This note could not be prepared. Return to Writing and try again. Your input is kept.',
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
           consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
@@ -2107,6 +2109,7 @@ const resources = {
             state_unknown: '回复状态待核对'
           }
         },
+        writingContextUnavailable: '当前笔记暂时无法用于对话。请返回写作后重试，输入内容已保留。',
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
           consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',

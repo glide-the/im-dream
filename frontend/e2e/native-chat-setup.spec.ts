@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: original config/catalog errors survive read recovery in process diagnostics.
 // [Sync] 2026-10-29: configuration-only refresh preserves catalog/runtime/draft and rejects older reads.
 // [Sync] 2026-10-28: require one complete catalog read per setup cycle and reject per-Deck detail traffic.
 // [Input] Production native startup read hook, runtime manager and original Deck/config HTTP contracts.
@@ -12,6 +13,8 @@ import React,{useEffect,useState} from 'react';import {createRoot} from 'react-d
 import {NativeModules} from 'react-native';
 import useNativeChatSetup from '/app/_dream/components/chat/useNativeChatSetup.native.ts';
 import {loadBrowserSession} from '/app/_dream/lib/browserSession.ts';
+import {BackendRuntimeManager} from '/src/runtime/BackendRuntimeManager.ts';
+window.__startupManager=BackendRuntimeManager;
 const mode=new URLSearchParams(location.search).get('mode');
 const f=window.__setupFixture={calls:[],runtimeStarts:0,runtimeFailures:mode==='runtime-error'?1:0,failConfig:mode==='failed',failCatalog:mode==='failed',invalidConfig:false,expired:false,expirations:0,hold:mode==='held',held:[],variant:'original',mounts:0,configRefreshFailures:0};
 NativeModules.InkRuntime={ensureStarted:()=>{f.runtimeStarts++;return f.runtimeFailures-->0?Promise.reject(Error('fixture startup failed')):Promise.resolve({state:'ready',localWebOrigin:'http://127.0.0.1:5173'});}};
@@ -46,9 +49,12 @@ async function open(page:Page,mode='success'){await page.goto(base+'?mode='+mode
 async function state(page:Page){return page.evaluate(()=>(window as any).__setupFixture.snapshot);}
 async function settled(page:Page){await expect.poll(async()=>(await state(page))?.loading).toBe(false);}
 test('failed initial reads retry original endpoints while preserving the draft and shared runtime',async({page})=>{
- await open(page,'failed');await settled(page);await expect(page.getByRole('button',{name:'Send readiness'})).toBeDisabled();
+ await open(page,'failed');await settled(page);
+ const originalErrors=await page.evaluate(()=>(window as any).__startupManager.getSnapshot().errors);expect(originalErrors.config.text).toContain('HTTP_503');expect(originalErrors.catalog.text).toContain('fixture catalog unavailable');
+ await expect(page.getByRole('button',{name:'Send readiness'})).toBeDisabled();
  await page.getByRole('textbox',{name:'Source draft'}).fill('Keep my edited draft');
  await page.evaluate(()=>{const f=(window as any).__setupFixture;f.failConfig=false;f.failCatalog=false;});await page.getByRole('button',{name:'Retry reads'}).click();await settled(page);
+ expect(await page.evaluate(()=>(window as any).__startupManager.getSnapshot().errors)).toEqual(originalErrors);
  expect(await state(page)).toMatchObject({configLoaded:true,error:'',config:{workspace_enabled:false,im_full_access_enabled:true},decks:[{id:'fixture-deck'}]});await expect(page.getByRole('textbox',{name:'Source draft'})).toHaveValue('Keep my edited draft');
  expect(await page.evaluate(()=>{const f=(window as any).__setupFixture;return {starts:f.runtimeStarts,mounts:f.mounts,allReads:f.calls.every(c=>c.method==='GET'),csrf:f.calls.every(c=>c.headers['x-ink-csrf']==='a'.repeat(43))};})).toEqual({starts:1,mounts:1,allReads:true,csrf:true});
 });

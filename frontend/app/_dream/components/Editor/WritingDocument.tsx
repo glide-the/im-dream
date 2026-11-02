@@ -1,4 +1,5 @@
 // [Sync] 2026-11-01: project chooser presentation to the existing native page header; persistence remains in App.
+// [Sync] 2026-11-01: relay Session-bound context requests/results through the original App save barrier before native Chat sends.
 // [Sync] 2026-10-30: deliver a native historical Editor jump through the original Writing event after authenticated mounting.
 'use client';
 // [Input] Original authenticated Writing engine/canvas and native-owned display/navigation state.
@@ -23,7 +24,7 @@ function Canvas({state,emit}:{state:WritingDocumentState;emit:(event:EventPayloa
  useEffect(()=>{if(!auth.isLoading&&!auth.isAuthenticated)emit({type:'session-expired'});},[auth.isLoading,auth.isAuthenticated,emit]);
  if(auth.isLoading)return <p role="status">{state.language==='zh'?'正在读取…':'Loading…'}</p>;
  if(!auth.isAuthenticated)return <p role="alert">{state.language==='zh'?'请重新登录。':'Please sign in again.'}</p>;
- return <App writingDocument={{active:state.active,showEnergyBar:state.showEnergyBar,openChooserNonce:state.openChooserNonce,onChooserView,onOpenThread:threadId=>emit({type:'open-thread',threadId}),onPrepareChat:input=>emit({type:'prepare-chat',input}),onOpenResources:()=>emit({type:'resources'})}}/>;
+ return <App writingDocument={{active:state.active,showEnergyBar:state.showEnergyBar,openChooserNonce:state.openChooserNonce,onChooserView,contextRequest:state.contextRequest,onContextResult:emit,onOpenThread:(threadId,editorSessionId)=>emit({type:'open-thread',threadId,...(editorSessionId?{editorSessionId}:{})}),onPrepareChat:input=>emit({type:'prepare-chat',input}),onOpenResources:()=>emit({type:'resources'})}}/>;
 }
 export default function WritingDocument(){
  const id=useRef(''),revision=useRef(-1),[state,setState]=useState<WritingDocumentState|null>(null);

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-11-01: 写作排版、心情滚动与页头入口的最小实现归writing-mobile-layout；设备与浏览器资格分项。 -->
 <!-- [Sync] 2026-11-01: MoreNavigationContent统一Web窄屏和Native卡片布局及用途指引，平台宿主和原业务保持。 -->
 <!-- [Sync] 2026-11-01: 补iPhone Notion安装提示的触发阶段、随包恢复、执行错误反馈与本轮验收入口。 -->
@@ -1755,7 +1756,7 @@ stateDiagram-v2
 | Native元信息弹层 | 点击原模式信息入口，按原300宽/380最大高呈现 | 外部点击、系统返回、辅助功能Escape、Thread变化和后台关闭 | 原字段、Agent按钮、插件版本及摘要 |
 | 摘要复制反馈 | 用户点击原Copy动作 | 采用既有Native clipboard，反馈计时结束或卸载清理 | 复制完整摘要，原生剪贴板保留用户选择 |
 
-窄屏保持New/活动/More原操作的44点触控区域；上下文槽可收缩，名称单行省略，完整名称由元信息读取。滚动范围限定元信息内容，底层会话与输入保持挂载。产品骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#会话思维模式信息骨架)。
+窄屏保持New/活动/More原操作的44点触控区域；上下文槽可收缩，名称单行省略，完整名称由元信息读取。滚动范围限定元信息内容，底层会话与输入保持挂载。产品骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#会话思维模式信息骨架)。
 
 ### 正常业务时序
 
@@ -1985,7 +1986,7 @@ stateDiagram-v2
 | 读取复杂度 | 原catalog已包含预览字段 | 复用useNativeChatSetup | 无新详情GET、Hook、后端接口或缓存 | 目录失败/401和真机资格 |
 | 完整Deck范围 | 创建/编辑/Work管理仍待迁移 | 保留原完整工作项和验收 | 首页/预览阶段与完整交付分别记录 | 管理、版本、相邻页面及完整iOS交付 |
 
-产品骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#deck首页与预览骨架)，实际命令、制品和验收边界归[执行记录](../../exec/mobile-app-design-review-20261024.md)。
+产品骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#deck首页与预览骨架)，实际命令、制品和验收边界归[执行记录](../../exec/mobile-app-design-review-20261024.md)。
 
 当前验收状态：Web类型/生产构建、25项相关技术回归及图标修订后的4项定向复跑通过；普通Simulator候选取得真实目录、返回、试用空稿、示例预填及跨栏目草稿保持回执。旧包首次ready非空稿的TypeError已由原Tiptap存活实例检查修复。后续XCTest对同一普通候选执行原生拖动，Information从y=743移动至y=414，Updated行可点击，底部Decks导航持续可点击；1项通过，原ScrollView继续复用。此前CUA滚轮/拖动未取得位移的观察保留于执行稿，该控制方式退出滚动故障依据。当前滚动回执覆盖393×852的iOS Simulator详情页；完整Deck管理、其他页面和移动交付继续按原矩阵验收。测试源与具体命令见[执行记录](../../exec/mobile-app-design-review-20261024.md#2026-10-29再次核对本机3000与原生详情滚动)。
 
@@ -2389,7 +2390,7 @@ stateDiagram-v2
 
 **概念与规则。** [MoreNavigationContent](../../../frontend/app/_dream/components/story-workspace/layout/MoreNavigationContent.tsx)负责两组卡片、用途、当前外观和主题失败反馈。调用方传入平台字体组件、SVG图标节点、已有配色及原操作回调，三个参数分别对应字体选择、SVG节点类型和配色读取差异。Web通过原CSS token提供颜色，Native沿原`InkLabel`、`useInkColors`及`useNativeThemeMode`。主题模式与实际外观由原`theme.ts`或`theme.native.ts`提供；共享组件只持有本次主题写入的失败反馈，下一次操作先清除反馈。Web原账户区域继续位于卡片内容之后。
 
-Web标题、关闭按钮、焦点约束、背景滚动锁、关闭恢复焦点及正文纵滚由原`Modal`持有，CSS仅调整原窄屏作用域。Native页头、`ScrollView`、安全区及目标页实例继续原宿主管理。宽度达到原桌面断点后关闭窄屏菜单，桌面disclosure、原主题和设置入口保持。页面骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#更多导航与写作时间线页面骨架)。
+Web标题、关闭按钮、焦点约束、背景滚动锁、关闭恢复焦点及正文纵滚由原`Modal`持有，CSS仅调整原窄屏作用域。Native页头、`ScrollView`、安全区及目标页实例继续原宿主管理。宽度达到原桌面断点后关闭窄屏菜单，桌面disclosure、原主题和设置入口保持。页面骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#更多导航与写作时间线页面骨架)。
 
 ```mermaid
 sequenceDiagram
@@ -2939,7 +2940,7 @@ stateDiagram-v2
 
 ## 原生更多入口与目标页接线
 
-2026-11-01写作移动布局补充归[专项交互设计](writing-mobile-layout.md)，包含稿纸行框、心情内容纵滚、当前WritingView页头右侧入口及既有局部文档通信边界。该调整已接入最小源码实现，原生展示消息与单次展开在既有文档边界传递；产品规则及双视口骨架归[原移动PRD](../../prd/dream-workspace/mobile-app.md#写作排版与心情入口)，[专项评审](../../exec/writing-mobile-layout-review-20261101.md)记录定位与验收前提。下文已有接线和历史资格保留各自范围。
+2026-11-01写作移动布局补充归[专项交互设计](writing-mobile-layout.md)，包含稿纸行框、心情内容纵滚、当前WritingView页头右侧入口及既有局部文档通信边界。该调整已接入最小源码实现，原生展示消息与单次展开在既有文档边界传递；产品规则及双视口骨架归[原移动PRD](../../prd/mobile-app/mobile-app.md#写作排版与心情入口)，[专项评审](../../exec/writing-mobile-layout-review-20261101.md)记录定位与验收前提。下文已有接线和历史资格保留各自范围。
 
 ### 背景与问题
 
@@ -4370,7 +4371,7 @@ stateDiagram-v2
 
 ### 目标与边界
 
-在原详情顶部提供触摸拖动与松手吸附，两端共用局部高度计算。正文滚动与原关闭、上一条、下一条保持，桌面Web继续45vh。新增依赖、Modal平台、业务接口、权限、数据库和任务改动为0。产品骨架归[移动PRD](../../prd/dream-workspace/mobile-app.md#回顾详情高度与触摸阅读)。
+在原详情顶部提供触摸拖动与松手吸附，两端共用局部高度计算。正文滚动与原关闭、上一条、下一条保持，桌面Web继续45vh。新增依赖、Modal平台、业务接口、权限、数据库和任务改动为0。产品骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#回顾详情高度与触摸阅读)。
 
 ### 概念与规则
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
 // [Sync] 2026-11-01: mobile Writing uses one-row prose, explicit keyboard focus, shared line geometry and the original chooser/persistence.
 // [Sync] 2026-10-29: wait for the original Cookie/CSRF session before submitting the MCP OAuth callback.
 // [Sync] 2026-10-29: expose the original Writing canvas as a local editor document; RN owns cross-page navigation and Web defaults retain the complete shell.
@@ -75,7 +76,7 @@ import AnalysisView from './components/AnalysisView';
 import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
-import type { WritingChooserView } from './components/Editor/WritingDocument.protocol';
+import type { WritingChooserView, WritingContextRequest, WritingContextResult } from './components/Editor/WritingDocument.protocol';
 import type { VoiceConfig } from './api/voiceApi';
 import { getVoices, getStateConfig } from './utils/voiceStorage';
 import { getDefaultVoices, chatWithVoiceSSE, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
@@ -88,7 +89,7 @@ import RegisterForm from './components/Auth/RegisterForm';
 import DeviceVerificationPage from './components/Auth/DeviceVerificationPage';
 import { LOCAL_IMPORT_CLEANUP_KEYS, STORAGE_KEYS } from './constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from './utils/timezone';
-import { useSessionLifecycle } from './hooks/useSessionLifecycle';
+import { getEditorStatePersistenceSignature, useSessionLifecycle } from './hooks/useSessionLifecycle';
 import { useWritingSuggestions } from './hooks/useWritingSuggestions';
 import {
   WritingSuggestionCell,
@@ -248,7 +249,8 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 // @@@ Main App Component
 export interface WritingDocumentHost {
   active:boolean;showEnergyBar:boolean;openChooserNonce?:number;onChooserView?:(view:WritingChooserView)=>void;
-  onOpenThread:(threadId:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
+  contextRequest?:WritingContextRequest;onContextResult?:(result:WritingContextResult)=>void;
+  onOpenThread:(threadId:string,editorSessionId?:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
 }
 export default function App({writingDocument}:{writingDocument?:WritingDocumentHost}={}) {
   const isMobile = useMobile();
@@ -407,6 +409,28 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     setVoiceConfigs,
     setStateConfig
   });
+
+  useEffect(() => {
+    const request = writingHost.current?.contextRequest;
+    if (!request) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const current = engineRef.current?.getState();
+        if (!isAuthenticated || current?.id !== request.sessionId) throw new Error('Writing Session unavailable');
+        const snapshot = JSON.parse(JSON.stringify(current)) as EditorState;
+        await ensureSessionPersistedForAgent(request.sessionId);
+        const live = engineRef.current?.getState();
+        if (live?.id !== request.sessionId || getEditorStatePersistenceSignature(live) !== getEditorStatePersistenceSignature(snapshot)) {
+          throw new Error('Writing Session changed during preparation');
+        }
+        if (!cancelled) writingHost.current?.onContextResult?.({...request,type:'chat-context',editorState:snapshot as unknown as Record<string,unknown>});
+      } catch {
+        if (!cancelled) writingHost.current?.onContextResult?.({...request,type:'chat-context-error',code:engineRef.current?.getState().id===request.sessionId?'save-failed':'session-changed'});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [writingDocument?.contextRequest?.requestId, engineRef, ensureSessionPersistedForAgent, isAuthenticated]);
 
   // @@@ Chat widget state
   const [dropdownVisible, setDropdownVisible] = useState(false);
@@ -1205,13 +1229,13 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
 
   // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
   const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
-    if(writingDocument){writingDocument.onOpenThread(threadId);return;}
+    if(writingDocument){writingDocument.onOpenThread(threadId,engineRef.current?.getState().id);return;}
     setRequestedChatThreadId(threadId);
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
     setWritingChatPanelOpen(true);
-  }, [writingDocument]);
+  }, [writingDocument, engineRef]);
 
   // Dream owns its presentation protocol, but its source thread remains a
   // normal Chat thread. Selecting Chat reopens that thread so Chat can attach
@@ -1314,6 +1338,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     }
 
     const cursorPos = textarea.selectionStart;
+    const sourceSessionId = engineRef.current.getState().id;
 
     // Snapshot widget IDs before insertion to identify the newly added widget
     const beforeWidgetIds = new Set(
@@ -1336,6 +1361,8 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     void (async () => {
       try {
         const threadId = await ensureVoiceThread(voiceName, voiceConfig.thread_id);
+        const liveState = engineRef.current?.getState();
+        if (liveState?.id !== sourceSessionId || !liveState.cells.some(cell => cell.id === newWidget?.id && cell.type === 'widget' && cell.widgetType === 'chat')) return;
         if (newWidget && engineRef.current) {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
@@ -2148,6 +2175,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                       return (
                         <ChatWidgetUI
                           key={cell.id}
+                          isMobile={mobileWriting}
                           data={cell.data as ChatWidgetData}
                           onSendMessage={(msg) => handleChatSend(cell.id, msg)}
                           onOpenChat={(cell.data as ChatWidgetData).threadId ? (threadId) => {

@@ -1,4 +1,5 @@
 // [Sync] 2026-10-31: retain delayed cancelled readers while qualifying independent acknowledged Stop recovery and late-reader ownership.
+// [Sync] 2026-11-01: qualify native Writing context-before-dispatch, A/B snapshots, failed-save draft restoration and cancellation without replay.
 // [Sync] 2026-10-31: qualify saved user-only tail recovery with not_found and an unchanged empty probe without replay or invented assistant output.
 // [Sync] 2026-10-30: cover original multi-part MCP user ingress and verified live process retention across compact canonical recovery.
 // [Sync] 2026-10-30: distinguish an acknowledged native read cancellation from an unacknowledged network failure during recovery.
@@ -21,6 +22,7 @@ import {AppState} from 'react-native';
 Object.defineProperty(AppState,'currentState',{value:'active',writable:true,configurable:true});
 AppState.listeners=new Set();AppState.addEventListener=(_,fn)=>{AppState.listeners.add(fn);return {remove:()=>AppState.listeners.delete(fn)};};
 import useNativeChatThread from '/app/_dream/components/chat/useNativeChatThread.native.ts';
+import useComposerDraft from '/app/_dream/components/chat/useComposerDraft.ts';
 import {loadBrowserSession} from '/app/_dream/lib/browserSession.ts';
 import '/app/_dream/i18n.ts';
 import QueueCard from '/app/_dream/components/chat/ThreadInputQueueCard.native.tsx';
@@ -100,9 +102,18 @@ async function stream(path,init={}) {
  })()};
 }
 function Harness(){
- const [draft,setDraft]=useState(''),[notice,setNotice]=useState(''),[mode,setMode]=useState('complete');
- const session=useNativeChatThread({context:{deckId:'fixture-deck',voiceId:'fixture-agent',voiceSystemPrompt:'Original voice prompt',imFullAccessEnabled:false,currentToolChoice:'manual'},transport,stream,onSessionExpired:()=>{f.expirations++;}});
+ const [draft,setDraft]=useState(''),[notice,setNotice]=useState(''),[mode,setMode]=useState('complete'),[writingNote,setWritingNote]=useState(null);
+ const session=useNativeChatThread({context:{deckId:'fixture-deck',voiceId:'fixture-agent',voiceSystemPrompt:'Original voice prompt',imFullAccessEnabled:false,currentToolChoice:'manual'},
+  prepareEditorState:writingNote?async(id,signal)=>{
+   (f.contextRequests??=[]).push({threadId:id,sessionId:writingNote});
+   if(f.holdContext)await new Promise((resolve,reject)=>{const abort=()=>{f.contextAborts=(f.contextAborts??0)+1;reject(new Error('Context cancelled'));};signal.addEventListener('abort',abort,{once:true});f.releaseContext=()=>{signal.removeEventListener('abort',abort);resolve();};});
+   if(f.failContext)throw new Error('Save failed');
+   return {id:writingNote,cells:[{id:writingNote+'-cell',type:'text',content:'Fixture '+writingNote}]};
+  }:undefined,transport,stream,onSessionExpired:()=>{f.expirations++;}});
+ const writingDraft=useComposerDraft({onSendMessage:(text,files,choice)=>session.send(text,files,choice),disabled:false,loading:false,fullAccessEnabled:false,defaultToolChoice:'manual',onUploadBlocked:()=>{},releasePreview:()=>{}});
  return <main><textarea aria-label="Draft" value={draft} onChange={e=>setDraft(e.target.value)}/>
+  <button onClick={()=>setWritingNote('note-A')}>Use Writing A</button><button onClick={()=>setWritingNote('note-B')}>Use Writing B</button>
+  <textarea aria-label="Writing draft" value={writingDraft.query} onChange={e=>writingDraft.setQuery(e.target.value)}/><button onClick={writingDraft.handleSend}>Send Writing draft</button>
   <select aria-label="Fixture stream mode" value={mode} onChange={e=>{setMode(e.target.value);f.mode=e.target.value;}}>{['complete','finish-open','finish-running','hold','approval','burst-hold','native-cancel','native-cancel-late','native-disconnect','mcp-complete'].map(value=><option key={value}>{value}</option>)}</select>
   <button onClick={()=>void session.send(draft,[],'manual').then(()=>setNotice('sent')).catch(()=>setNotice('rejected'))}>Send</button>
   <button onClick={()=>void session.send('',[{id:'fixture-file',name:'picture.png',mimeType:'image/png',size:12,storageKey:'fixture-image',workspacePath:'files/picture.png',savedAt:'2026-10-28T00:00:00Z',hash:'fixture-hash'}],'manual')}>Send stored attachment</button>
@@ -141,6 +152,45 @@ test.beforeEach(async({page})=>{
   await page.goto(base);await expect(page.getByRole('main')).toBeVisible();
 });
 async function state(page:import('@playwright/test').Page){return JSON.parse(await page.getByLabel('State',{exact:true}).innerText());}
+test('Writing A/B sends wait for saved context and use the selected note on the same Thread',async({page})=>{
+ await page.evaluate(()=>{(window as any).__nativeChatFixture.owner=false;});
+ await page.getByRole('button',{name:'Open existing thread',exact:true}).click();await expect.poll(async()=>(await state(page)).recovering).toBe(false);
+ await page.getByRole('button',{name:'Use Writing A',exact:true}).click();await page.evaluate(()=>{(window as any).__nativeChatFixture.holdContext=true;});
+ await page.getByLabel('Writing draft',{exact:true}).fill('Discuss note A');await page.getByRole('button',{name:'Send Writing draft',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.contextRequests?.length??0)).toBe(1);
+ expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.method==='POST'))).toHaveLength(0);
+ await page.evaluate(()=>{const f=(window as any).__nativeChatFixture;f.holdContext=false;f.releaseContext();});
+ await expect.poll(async()=>{const value=await state(page);return {posting:value.posting,running:value.running,recovering:value.recovering};}).toEqual({posting:false,running:false,recovering:false});
+ await page.getByRole('button',{name:'Use Writing B',exact:true}).click();await page.getByLabel('Writing draft',{exact:true}).fill('Discuss note B');await page.getByRole('button',{name:'Send Writing draft',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST').length)).toBe(2);
+ const sends=await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST'));
+ expect(sends.map((call:any)=>call.body.editor_state.id)).toEqual(['note-A','note-B']);expect(sends.map((call:any)=>call.body.id)).toEqual(['fixture-thread','fixture-thread']);
+});
+test('Writing save failure keeps the original composer draft and creates no Thread or Agent POST',async({page})=>{
+ await page.getByRole('button',{name:'Use Writing A',exact:true}).click();await page.evaluate(()=>{(window as any).__nativeChatFixture.failContext=true;});
+ await page.getByLabel('Writing draft',{exact:true}).fill('Keep this unsent Writing message');await page.getByRole('button',{name:'Send Writing draft',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.contextRequests?.length??0)).toBe(1);
+ await expect(page.getByLabel('Writing draft',{exact:true})).toHaveValue('Keep this unsent Writing message');
+ expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.method==='POST'))).toHaveLength(0);
+});
+test('Writing MCP user messages pass through the same saved context preparation',async({page})=>{
+ await page.getByRole('button',{name:'Use Writing A',exact:true}).click();
+ await page.getByRole('button',{name:'Send MCP message',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST').length)).toBe(1);
+ const sent=await page.evaluate(()=>(window as any).__nativeChatFixture.calls.find((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST').body);
+ expect(sent.editor_state).toMatchObject({id:'note-A'});expect(sent.message.parts).toEqual([{type:'text',text:'First MCP block'},{type:'text',text:'Second MCP block'}]);
+ expect(await page.evaluate(()=>(window as any).__nativeChatFixture.contextRequests)).toHaveLength(1);
+});
+test('navigation cancels an in-flight Writing context request without dispatching its late snapshot',async({page})=>{
+ await page.getByRole('button',{name:'Use Writing A',exact:true}).click();await page.evaluate(()=>{(window as any).__nativeChatFixture.holdContext=true;});
+ await page.getByLabel('Writing draft',{exact:true}).fill('Retain cancelled preparation');await page.getByRole('button',{name:'Send Writing draft',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.contextRequests?.length??0)).toBe(1);
+ await page.getByRole('button',{name:'New chat',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.contextAborts??0)).toBe(1);
+ await expect(page.getByLabel('Writing draft',{exact:true})).toHaveValue('Retain cancelled preparation');
+ await page.evaluate(()=>(window as any).__nativeChatFixture.releaseContext?.());
+ expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.method==='POST'))).toHaveLength(0);
+});
 test('actual native session submits the original context/manual DTO and recovers persisted output',async({page})=>{
   await page.getByLabel('Draft',{exact:true}).fill('Keep existing business');await page.getByRole('button',{name:'Send',exact:true}).click();
   await expect.poll(async()=>({running:(await state(page)).running,posting:(await state(page)).posting})).toEqual({running:false,posting:false});

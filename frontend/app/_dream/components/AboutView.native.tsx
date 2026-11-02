@@ -2,8 +2,10 @@
 // [Output] Native project/team/timeline/links page with the original serif headings and system body font.
 // [Pos] Settings About destination; no backend or model lifecycle changes.
 // [Sync] 2026-11-01: route links through the shared system-browser action and recover synchronous failures.
+// [Sync] 2026-11-01: open the same read-only startup diagnostics leaf used before authentication.
 import {useState} from 'react';
-import {Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {Keyboard,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import RuntimeDiagnostics from '../../../src/components/RuntimeDiagnostics.native';
 import {openExternalLink} from '../../../src/platform/externalLinks.native';
 import {useTranslation} from 'react-i18next';
 import Svg,{Path} from 'react-native-svg';
@@ -12,11 +14,14 @@ import useInkColors from '../../../src/components/useInkColors.native';
 import {teamMembers,developmentTimeline,ABOUT_REPOSITORY_URL,ABOUT_SUMMARY,ABOUT_DESCRIPTION} from './aboutPresentation';
 export default function AboutView({onBack,openLink=openExternalLink}:{onBack:()=>void;openLink?:(url:string)=>Promise<unknown>}) {
   const {t,i18n}=useTranslation(),c=useInkColors(),[error,setError]=useState(false),text={color:c['color-text-primary']},secondary={color:c['color-text-secondary']};
+  const [diagnostics,setDiagnostics]=useState(false);
+  if(diagnostics)return <RuntimeDiagnostics onBack={()=>setDiagnostics(false)}/>;
   const heading=(label:string)=><Text accessibilityRole="header" style={[styles.heading,text]}>{label}</Text>;
   return <View style={[styles.fill,{backgroundColor:c['color-bg-app']}]}>
     <View style={styles.header}><Pressable accessibilityRole="button" onPress={onBack} style={styles.button}><InkLabel style={text}>{t('settings.workspace.preferences.back')}</InkLabel></Pressable><InkLabel accessibilityRole="header" style={[text,{fontSize:22}]}>{t('settings.workspace.navigation.about')}</InkLabel></View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.intro}><Text accessibilityRole="header" style={[styles.brand,text]}><Text style={{fontStyle:'italic'}}>I</Text>nk &amp; <Text style={{fontStyle:'italic'}}>M</Text>emory</Text><Text style={[styles.summary,secondary]}>{ABOUT_SUMMARY}</Text></View>
+      <Pressable accessibilityRole="button" onPress={()=>{Keyboard.dismiss();setDiagnostics(true);}} style={styles.button}><InkLabel style={text}>开发者控制页</InkLabel></Pressable>
       <View style={styles.section}>{heading('About the Project')}{ABOUT_DESCRIPTION.map(paragraph=><Text key={paragraph} style={[styles.body,secondary]}>{paragraph}</Text>)}</View>
       <View style={styles.section}>{heading('The Team')}{teamMembers.map(member=><View key={member.name} style={[styles.card,{backgroundColor:c['color-bg-paper'],borderColor:c['color-border-paper']}]}><Text style={[styles.member,text]}>{member.name}</Text><Text style={[styles.role,secondary]}>{member.role}</Text><Text style={[styles.body,secondary]}>{member.description}</Text></View>)}</View>
       <View style={styles.section}>{heading('Development Timeline')}<View style={[styles.timeline,{borderLeftColor:c['color-border-paper']}]}>{developmentTimeline.map(item=><View key={item.version} style={styles.release}><View style={[styles.dot,{backgroundColor:c['color-text-primary'],borderColor:c['color-bg-app']}]}/><Text style={[styles.date,secondary]}>{item.date} • {item.version}</Text><Text style={[styles.member,text]}>{item.title}</Text><Text style={[styles.body,secondary]}>{item.description}</Text></View>)}</View></View>

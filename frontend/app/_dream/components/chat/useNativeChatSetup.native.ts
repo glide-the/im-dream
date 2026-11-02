@@ -4,6 +4,7 @@
 // [Input] App-owned runtime readiness, original system configuration and Deck reads, and native HTTP.
 // [Output] Retryable read snapshots without replacing the conversation, draft or backend process.
 // [Pos] Native Chat startup read lifecycle; server configuration and business endpoints retain ownership.
+// [Sync] 2026-11-01: expose original configuration/catalog failures through current-process diagnostics.
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {Deck} from '../../api/voiceApi';
 import {listDecksWithVoices} from '../../api/deckReadApi';
@@ -37,14 +38,18 @@ export default function useNativeChatSetup({transport=clientFetch,onSessionExpir
       if(active && response.status===401 && !expired){expired=true;expiredOwner.current?.();}
       return response;
     };
-    const refreshCatalog=async()=>{
+    const observe=async<T,>(source:'config'|'catalog',operation:()=>Promise<T>):Promise<T>=>{
+      try{return await operation();}
+      catch(cause){if(active&&!controller.signal.aborted)BackendRuntimeManager.recordError(source,cause);throw cause;}
+    };
+    const refreshCatalog=()=>observe('catalog',async()=>{
       const next=await listDecksWithVoices(read);
       if(!active)throw new Error('HTTP_ABORTED');
       setDecks(next);
       return next;
-    };
+    });
     catalogOwner.current=refreshCatalog;
-    const refreshConfiguration=async()=>{
+    const refreshConfiguration=()=>observe('config',async()=>{
       const sequence=++configRequest;
       const response=await read('/api/system-config',{headers:browserRequestHeaders()});
       if(!response.ok)throw new Error(`HTTP_${response.status}`);
@@ -56,7 +61,7 @@ export default function useNativeChatSetup({transport=clientFetch,onSessionExpir
       if(!active)throw new Error('HTTP_ABORTED');
       if(sequence===configRequest)setConfig(next);
       return next;
-    };
+    });
     configOwner.current=refreshConfiguration;
     void (async()=>{
       try {

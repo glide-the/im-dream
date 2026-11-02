@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-10-27: 迁移multi-platform；本文保留既有WebView合同，现行RN主界面见mobile-react-native-interaction.md。 -->
 <!-- [Input] 当前Dream网页业务、正常网页登录要求和双原生宿主。 -->
 <!-- [Output] 保持原业务的共享用户旅程、交互时序、页面状态与适配边界。 -->
@@ -17,7 +18,7 @@
 
 移动端复用Dream网页交互和端侧Python业务。宿主提供WebView、解释器、平台输入和必要系统操作。前稿将技术缺口转成了独立认证、文件规则与业务状态，现行稿已删除这些设计。
 
-[PRD与骨架](../../prd/dream-workspace/mobile-app.md)、[架构](./mobile-runtime-architecture.md)、[iOS](./mobile-ios-interaction.md)、[Android](./mobile-android-interaction.md)、[发布稿](../../deploy/mobile-app-release.md)与[复审记录](../../exec/mobile-app-design-review-20261024.md#2026-10-25-保留网页业务的设计复审与实现修正)共同定义范围。
+[PRD与骨架](../../prd/mobile-app/mobile-app.md)、[架构](./mobile-runtime-architecture.md)、[iOS](./mobile-ios-interaction.md)、[Android](./mobile-android-interaction.md)、[发布稿](../../deploy/mobile-app-release.md)与[复审记录](../../exec/mobile-app-design-review-20261024.md#2026-10-25-保留网页业务的设计复审与实现修正)共同定义范围。
 
 ## 目标与边界
 

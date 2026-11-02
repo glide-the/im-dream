@@ -1,4 +1,5 @@
 // [Sync] 2026-10-30: reuse the Writing destination for original session/cell jump intents from historical editor tool results.
+// [Sync] 2026-11-01: forward the original Writing Session context preparer with its exact linked Thread.
 // [Input] Authenticated public owner, App-owned origin/catalog and existing Settings/Chat callbacks.
 // [Output] One native five-item More page and persistent Writing/Timeline/Reflections/Settings destinations.
 // [Pos] Navigation composition only; normal login, permissions, task execution and backend lifecycle remain App/server owned.
@@ -19,7 +20,8 @@ import WritingView from '../../WritingView.native';
 import MoreNavigationPage from './MoreNavigationPage.native';
 import type {EditorJumpToCellDetail} from '../../chat/editorWriteTools';
 import type {MoreNavigationDestination} from './moreNavigation';
-interface Props {onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
+import type {WritingThreadContext} from '../../Editor/WritingDocument.protocol';
+interface Props {onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
 export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),callbacks=useRef({onSessionExpired,onClose});callbacks.current={onSessionExpired,onClose};
  const [page,setPage]=useState<MoreNavigationDestination|'menu'>('menu'),[visited,setVisited]=useState<Set<MoreNavigationDestination>>(()=>new Set());

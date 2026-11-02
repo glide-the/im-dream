@@ -10,6 +10,7 @@
 //                    and Editor completion jumps retain exact session identity.
 // [Sync] 2026-09-01: include the Session-owned Writing suggestion Thread in
 //                    persistence signatures and saved EditorState snapshots.
+// [Sync] 2026-11-01: an optional native Writing Session binding saves the current engine snapshot and rejects selection changes.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
@@ -166,14 +167,22 @@ export function useSessionLifecycle({
     }
   }, [getFirstLineFromState, isAuthenticated, saveSessionToDatabase]);
 
-  const ensureSessionPersistedForAgent = useCallback(async () => {
-    if (!isAuthenticated) return;
-    const editorState = latestStateRef.current;
+  const ensureSessionPersistedForAgent = useCallback(async (expectedSessionId?: string) => {
+    if (!isAuthenticated) {
+      if (expectedSessionId) throw new Error('Writing authentication is unavailable');
+      return;
+    }
+    const editorState = expectedSessionId ? engineRef.current?.getState() : latestStateRef.current;
     if (!editorState) throw new Error('Editor state is missing, cannot start Agent turn');
+    if (expectedSessionId && editorState.id !== expectedSessionId) throw new Error('Writing Session changed before persistence');
     const signature = getEditorStatePersistenceSignature(editorState);
     if (signature === lastPersistedSessionSignatureRef.current) return;
     clearAutoSaveTimer();
     await saveSessionToDatabase(editorState);
+    if (expectedSessionId && (engineRef.current?.getState().id !== expectedSessionId
+      || getEditorStatePersistenceSignature(engineRef.current.getState()) !== signature)) {
+      throw new Error('Writing Session changed during persistence');
+    }
   }, [clearAutoSaveTimer, isAuthenticated, saveSessionToDatabase]);
 
   const loadPersistedEditorSession = useCallback(({

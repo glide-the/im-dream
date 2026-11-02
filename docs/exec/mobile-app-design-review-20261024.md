@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-11-01: 追加回顾详情手柄调整、共享吸附/取消恢复和桌面保持，分列触摸技术与设备资格。 -->
 <!-- [Sync] 2026-11-01: 追加Web窄屏与端侧更多共用图标卡片、用途指引、桌面保持及技术验证记录。 -->
 <!-- [Sync] 2026-11-01: 追加20同机原登录协议、真实Claude单次完成、正常Admin单次结算及剩余UI验收。 -->
@@ -158,7 +159,7 @@
 
 当前范围为实现iOS兼容代码，先在关闭Mac relay的Simulator内运行原Dream后端与原Claude Runtime，再推进物理iPhone。原24个业务路由、Factory、Runner、自有MCP和ASGI流已有目标技术回执；原网页登录、会话、保护读取、真实模型响应与持久化已通过，第五次原Chat提交通过页面终态检查。普通重开已读取原历史，第七次提交恢复原Session并取得新增真实回复、消息与结算，页面停止按钮持续显示的现象再次出现。当前继续核对原状态/历史恢复查询与HTTP传输；真实停止、稳定结束反馈、完整系统工具、物理iPhone和发行待完成。业务基线为现有Dream网页。此前计划、方案和验证原文保存在[历史快照](history/mobile-app-before-web-business-preservation-20261025.md)，其候选设计退出当前实施依据。
 
-[产品需求](../prd/dream-workspace/mobile-app.md) · [共享交互](../design/multi-platform/mobile-app-interaction.md) · [iOS](../design/multi-platform/mobile-ios-interaction.md) · [Android](../design/multi-platform/mobile-android-interaction.md) · [架构](../design/multi-platform/mobile-runtime-architecture.md) · [发布](../deploy/mobile-app-release.md)。
+[产品需求](../prd/mobile-app/mobile-app.md) · [共享交互](../design/multi-platform/mobile-app-interaction.md) · [iOS](../design/multi-platform/mobile-ios-interaction.md) · [Android](../design/multi-platform/mobile-android-interaction.md) · [架构](../design/multi-platform/mobile-runtime-architecture.md) · [发布](../deploy/mobile-app-release.md)。
 
 ## 2026-10-25 保留网页业务的设计复审与实现修正
 
@@ -2278,7 +2279,7 @@ Admin修订仅将领取资格判断移到`scopedRun`之前；满足条件后继�
 
 | 交付物 | 位置 | 状态 |
 | --- | --- | --- |
-| 产品范围与骨架 | [移动PRD](../prd/dream-workspace/mobile-app.md) | RN目标、正常网页登录与创建模块排除已写入 |
+| 产品范围与骨架 | [移动PRD](../prd/mobile-app/mobile-app.md) | RN目标、正常网页登录与创建模块排除已写入 |
 | 正式业务交互 | [RN交互稿](../design/multi-platform/mobile-react-native-interaction.md) | 包含登录、Chat/停止、附件和异常恢复四组时序及页面状态图 |
 | 技术架构与实例 | [运行时架构](../design/multi-platform/mobile-runtime-architecture.md#react-native目标架构2026-10-27) | HTTP边界、中介者、管理器、启动时序、状态及实例生命周期表 |
 | 双平台与发布影响 | [iOS](../design/multi-platform/mobile-ios-interaction.md#react-native目标接入)、[Android](../design/multi-platform/mobile-android-interaction.md#react-native目标接入)、[发布稿](../deploy/mobile-app-release.md) | 原库、签名和渠道要求保持，RN接线均待实施 |
@@ -2381,7 +2382,7 @@ Admin修订仅将领取资格判断移到`scopedRun`之前；满足条件后继�
 | RN原生区域＋完整网页业务区 | 只适配实际进入原生区域的页面及基础组件 | 当前渐进设计策略；网页业务保持可达，迁移按区域验收 |
 | 全面RN原生页面＋RN Web | 广泛迁移DOM/CSS、平台事件与依赖 | 保留后续覆盖目标，禁止默认将整个项目列入首发重写 |
 
-现行入口为[RN内的前端复用取舍](../design/multi-platform/frontend-reuse-tradeoffs.md)。[主交互稿](../design/multi-platform/mobile-react-native-interaction.md)、[架构](../design/multi-platform/mobile-runtime-architecture.md#前端取舍适用范围)、[PRD](../prd/dream-workspace/mobile-app.md)和双平台/发布说明已补充相同实施边界。先前偏移的框架替换推荐已移除，Swift/Kotlin只承担RN平台适配和运行库。
+现行入口为[RN内的前端复用取舍](../design/multi-platform/frontend-reuse-tradeoffs.md)。[主交互稿](../design/multi-platform/mobile-react-native-interaction.md)、[架构](../design/multi-platform/mobile-runtime-architecture.md#前端取舍适用范围)、[PRD](../prd/mobile-app/mobile-app.md)和双平台/发布说明已补充相同实施边界。先前偏移的框架替换推荐已移除，Swift/Kotlin只承担RN平台适配和运行库。
 
 ### 评审与后续条件
 
@@ -3926,7 +3927,7 @@ PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/ink-web-real-chat-20261028/regression/results.j
 
 `App.tsx`接回原错误区域的“重试读取”，不重建输入卡与当前Thread；初始配置未知时，发送和快捷操作保持不可用。`ChatPage.native.tsx`、`QuickActionStrip.native.tsx`只接收该禁用状态。Web生产入口、布局、业务接口、权限及普通env保持。
 
-业务规则、正常/异常时序与状态图见[统一项目结构设计](../design/multi-platform/react-native-web-project-structure.md)的“原生启动读取与重试”；产品规则见[移动应用PRD](../prd/dream-workspace/mobile-app.md)。本阶段未新增业务页面、接口、数据库或常驻任务。
+业务规则、正常/异常时序与状态图见[统一项目结构设计](../design/multi-platform/react-native-web-project-structure.md)的“原生启动读取与重试”；产品规则见[移动应用PRD](../prd/mobile-app/mobile-app.md)。本阶段未新增业务页面、接口、数据库或常驻任务。
 
 ### 技术验证与候选构建
 
@@ -4425,7 +4426,7 @@ xcrun xcresulttool export attachments \
 
 上一目标轮归类为progress：本机Admin实际连接与原生详情滚动取得回执。本轮优化提示词及计划保存于`/tmp/ink-ios-deck-management-20261029/optimized-prompt.txt`和`plan.json`；完整RN/RNW、原Web、正常网页登录、端侧Python/Node/Next/Claude目标保持。当前阶段真实模型与业务写入预算均为0，正常账户只打开已有记录、读取、聚焦及返回；CRUD、版本提交和删除测试只使用HTTP fixture。
 
-依据原DeckManager、DeckEditorModal及Deck产品设计，接回原首页创建/设置/用户编辑入口、完整非Dream Work列表、失焦保存元数据、Agent维护与原图标/颜色、ready安装引用、显式内容版本及相关Chat管理。新普通页面与弹窗使用RN，原Web DOM/CSS及后端接口保持。原函数和Hook复用取代新后端服务、通用表单框架、数据库及整页网页容器。业务骨架和三类图位于[移动PRD](../prd/dream-workspace/mobile-app.md#deck维护与内容版本骨架)和[统一工程设计](../design/multi-platform/react-native-web-project-structure.md#原生deck维护与内容版本)。
+依据原DeckManager、DeckEditorModal及Deck产品设计，接回原首页创建/设置/用户编辑入口、完整非Dream Work列表、失焦保存元数据、Agent维护与原图标/颜色、ready安装引用、显式内容版本及相关Chat管理。新普通页面与弹窗使用RN，原Web DOM/CSS及后端接口保持。原函数和Hook复用取代新后端服务、通用表单框架、数据库及整页网页容器。业务骨架和三类图位于[移动PRD](../prd/mobile-app/mobile-app.md#deck维护与内容版本骨架)和[统一工程设计](../design/multi-platform/react-native-web-project-structure.md#原生deck维护与内容版本)。
 
 | 模块 | 本轮修改 | 业务归属 |
 | --- | --- | --- |
@@ -4981,7 +4982,7 @@ Native取消测试观察到精确GET事件请求ERR_ABORTED，并断言任务sto
 
 本次需求为端侧More的用途导航和现况提示。执行依据为`/tmp/ink-more-layout-20261030/optimized-prompt.md`及`plan.md`。范围限定原五项入口的呈现，保留写作、时间线、回顾、主题、设置同层；原业务、返回、账户、权限和端侧运行库保持。
 
-交付物：`MoreNavigationPage.native.tsx`采用写作横卡、时间线/回顾双卡及主题/设置列表；图标使用原已安装SVG能力，用途文案归既有i18n双语资源。当前主题读取原mode和effective，主题切换沿原受控回调。新增页面、依赖、配置、查询和业务接口均为0。产品骨架归[PRD](../prd/dream-workspace/mobile-app.md#端侧更多的图标与用途骨架)，布局、状态来源和评审归[统一设计](../design/multi-platform/react-native-web-project-structure.md#端侧更多的图标与用途布局)。
+交付物：`MoreNavigationPage.native.tsx`采用写作横卡、时间线/回顾双卡及主题/设置列表；图标使用原已安装SVG能力，用途文案归既有i18n双语资源。当前主题读取原mode和effective，主题切换沿原受控回调。新增页面、依赖、配置、查询和业务接口均为0。产品骨架归[PRD](../prd/mobile-app/mobile-app.md#端侧更多的图标与用途骨架)，布局、状态来源和评审归[统一设计](../design/multi-platform/react-native-web-project-structure.md#端侧更多的图标与用途布局)。
 
 本阶段实际验证如下。命令在仓库根或表中指定的frontend目录执行；日志及原始JSON位于`/tmp/ink-more-layout-20261030/`。
 
@@ -5103,7 +5104,7 @@ Thread为`22644d1d-c2e8-403b-a9b7-50b341c1b09d`，本机Claude session为`30c50f
 | 原生/服务执行边界 | App内运行库已可执行真实Chat | 复用原代码及正常账户，查询正常消息/用量 | 两条completed、一条cancelled，真实记录可复核 | 完整工具、文件和MCP App呈现继续实施 |
 | 复杂度 | 现有reducer、Stop、history/status和运行库已具备职责 | 修改原Native Hook及现有技术spec，增加原生只读验收方法 | 新业务页面、依赖、业务接口、Admin改码、schema及运行服务为0 | 余下iOS设计矩阵 |
 
-正常、异常、状态及实例生命周期归[现行设计](../design/multi-platform/react-native-web-project-structure.md#原生chat流式投影与停止收尾)，产品规则归[移动PRD](../prd/dream-workspace/mobile-app.md#原任务与数据)。
+正常、异常、状态及实例生命周期归[现行设计](../design/multi-platform/react-native-web-project-structure.md#原生chat流式投影与停止收尾)，产品规则归[移动PRD](../prd/mobile-app/mobile-app.md#原任务与数据)。
 
 ### 命令与验证回执
 
@@ -5329,7 +5330,7 @@ ntn当前资格继续复用[包内与网络补验](#2026-10-30ntn安装包与网
 
 具体修订：原SVG Blob图像载入后，Chrome的canvas.toBlob抛出tainted-canvas SecurityError。PNG路径改为同一序列化SVG内容的数据URI，保持标签、尺寸与原导出比例。SVG结果按chart匹配；新source和解析失败退出旧图导出。共享useCopy允许具体平台writer，原Web缺省保持navigator.clipboard；卸载后释放反馈timer并忽略迟到写入结果。
 
-产品规则和桌面/窄屏骨架归[移动PRD](../prd/dream-workspace/mobile-app.md#消息中的图表)，接口、实例及正常/异常/状态图归[正式设计](../design/multi-platform/react-native-web-project-structure.md#mermaid图表的平台适配)。
+产品规则和桌面/窄屏骨架归[移动PRD](../prd/mobile-app/mobile-app.md#消息中的图表)，接口、实例及正常/异常/状态图归[正式设计](../design/multi-platform/react-native-web-project-structure.md#mermaid图表的平台适配)。
 
 ### 失败、修订和命令结果
 
@@ -5718,7 +5719,7 @@ Admin源码、账号、回调注册和Google配置变更0；正常密码登录�
 | 维护范围 | 平台差异集中在系统授权及Cookie存储 | 一个具体账号适配文件，复用原Probe/Host/框架 | 新依赖/业务API/表/发布平台0 | 普通包采用及Web相邻回归 |
 | 验收归属 | QA与普通应用分别持有数据和运行入口 | 独立ID、QA删env、旧普通包资源及公开GET核对 | QA16项通过并卸载，原账户/历史/制品保持 | 真实Google、设备及原发行前提 |
 
-本阶段评审：待满足明确前提后通过。Native源码、目标编译与16项平台技术完成；原正常安装包保持。系统Google授权、同Client精确登记、既有BFF env目标映射、普通包采用及真实账号业务继续实施，完整iOS交付目标保持active。[iOS正常/异常/状态图](../design/multi-platform/mobile-ios-interaction.md#google正常账户授权的回调兼容)与[产品骨架](../prd/dream-workspace/mobile-app.md#google系统登录拟议交互)同步当前源码及反馈范围。
+本阶段评审：待满足明确前提后通过。Native源码、目标编译与16项平台技术完成；原正常安装包保持。系统Google授权、同Client精确登记、既有BFF env目标映射、普通包采用及真实账号业务继续实施，完整iOS交付目标保持active。[iOS正常/异常/状态图](../design/multi-platform/mobile-ios-interaction.md#google正常账户授权的回调兼容)与[产品骨架](../prd/mobile-app/mobile-app.md#google系统登录拟议交互)同步当前源码及反馈范围。
 
 第14轮文档门禁全部退出0：本阶段native/check-docs.py为129目标/434链接/339锚点，原RNW结构检查为10文档/248链接/59锚点，指定Node24的Mermaid检查为13文件/145图且网络禁用，精确129目标git diff --check无输出；3,435条Markdown新增行术语扫描0匹配。07源码快照6项摘要继续一致，命令和原始日志归`runner/14-docs-receipt.md`。本段追加后的引用/差异复核单列。
 

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Input] 用户授权的iPhone Notion安装提示定位、现有生产入口及当前工作区。 -->
 <!-- [Output] 根因、最小修复、设计评审与分项验证回执。 -->
 <!-- [Pos] 本轮iPhone Notion执行记录；原历史阶段保留在mobile-app-design-review-20261024.md。 -->
@@ -18,7 +19,7 @@
 
 ## 最小修复与设计评审
 
-[正式交互与技术设计](../design/multi-platform/react-native-web-project-structure.md#iphone-notion安装提示与恢复2026-11-01)直接包含正常、异常与恢复时序及状态图；[移动产品需求](../prd/dream-workspace/mobile-app.md#设置资源详情与恢复骨架)复用原桌面和窄屏骨架，补充原反馈区规则。
+[正式交互与技术设计](../design/multi-platform/react-native-web-project-structure.md#iphone-notion安装提示与恢复2026-11-01)直接包含正常、异常与恢复时序及状态图；[移动产品需求](../prd/mobile-app/mobile-app.md#设置资源详情与恢复骨架)复用原桌面和窄屏骨架，补充原反馈区规则。
 
 | 文件 | 本轮修订 |
 | --- | --- |

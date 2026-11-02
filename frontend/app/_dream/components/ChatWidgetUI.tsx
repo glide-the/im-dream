@@ -1,3 +1,7 @@
+// [Input] Existing ChatWidgetData, viewport mode and original send/open/collapse callbacks.
+// [Output] The original inline card with a directly actionable linked Chat button on mobile.
+// [Pos] Writing card presentation; Thread relationships, drafts and task execution remain caller-owned.
+// [Sync] 2026-11-01: reuse the original linked Chat action without hover on mobile, retaining desktop hover and collapse guards.
 // [Sync] 2026-05-30: restore inline Deck chat — onSendMessage/isProcessing props connect to
 //   handleChatSend in App.tsx which calls chatWithVoice with full writing context (allText,
 //   metaPrompt, statePrompt). "Chat →" button opens the full Chat view when thread is available.
@@ -55,6 +59,7 @@ const iconMap = {
 
 interface ChatWidgetUIProps {
   data: ChatWidgetData;
+  isMobile?: boolean;
   onSendMessage: (message: string) => void;
   /** Called when the user clicks "Chat →". Passes the linked thread_id. */
   onOpenChat?: (threadId: string) => void;
@@ -70,7 +75,7 @@ interface ChatWidgetUIProps {
   isReasoningDone?: boolean;
 }
 
-export default function ChatWidgetUI({ data, onSendMessage, onOpenChat, onDelete, onToggleCollapse, isProcessing, streamingText, streamingReasoning, isReasoningDone }: ChatWidgetUIProps) {
+export default function ChatWidgetUI({ data, isMobile = false, onSendMessage, onOpenChat, onDelete, onToggleCollapse, isProcessing, streamingText, streamingReasoning, isReasoningDone }: ChatWidgetUIProps) {
   const [inputValue, setInputValue] = useState('');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -234,8 +239,8 @@ export default function ChatWidgetUI({ data, onSendMessage, onOpenChat, onDelete
             fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.2s',
-            opacity: isHovered ? 1 : 0,
-            pointerEvents: isHovered ? 'auto' : 'none',
+            opacity: isMobile || isHovered ? 1 : 0,
+            pointerEvents: isMobile || isHovered ? 'auto' : 'none',
             lineHeight: '1.5',
             whiteSpace: 'nowrap',
           }}

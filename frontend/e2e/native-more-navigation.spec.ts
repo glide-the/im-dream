@@ -1,4 +1,5 @@
 // [Sync] 2026-11-01: retain prior screenshots by writing shared-card evidence to the current validation directory.
+// [Sync] 2026-11-01: verify Writing context identity through the original More callback and preserve the underlying Chat draft.
 // [Sync] 2026-10-30: keep exact accessible navigation names while qualifying native icon guidance and local theme status.
 // [Input] Production MoreNavigator and destination components with explicit native document/HTTP boundaries.
 // [Output] Native five-peer composition, destination return, theme, retained report/draft and fixed document lifetime evidence.
@@ -17,10 +18,10 @@ import {loadBrowserSession} from '/app/_dream/lib/browserSession.ts';import i18n
 import {initTheme} from '/app/_dream/utils/theme.native.ts';import '/app/_dream/styles/tokens.css';import '/app/_dream/index.css';
 await i18n.changeLanguage('en');initTheme();
 await loadBrowserSession(async()=>Response.json({user:{id:'7',email:'more@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'s'.repeat(43)}));
-window.__settingsFixture={uuidCalls:[]};const f=window.__nativeMore={closes:0,expired:0,threads:[],inputs:[],resources:0,settings:0};
+window.__settingsFixture={uuidCalls:[]};const f=window.__nativeMore={closes:0,expired:0,threads:[],contexts:[],inputs:[],resources:0,settings:0};
 function Harness(){const [draft,setDraft]=useState('Existing Chat draft'),[nonce,setNonce]=useState(0);return <div style={{height:'100dvh',display:'flex',flexDirection:'column'}}>
 <textarea aria-label="Existing Chat draft" value={draft} onChange={event=>setDraft(event.target.value)}/><button onClick={()=>setNonce(value=>value+1)}>Open More root</button>
-<div style={{flex:1,minHeight:0,display:'flex',flexDirection:'column'}}><More ownerId="7" origin="http://localhost:5173" decks={[]} active resetNonce={nonce} onClose={()=>f.closes++} onSessionExpired={()=>f.expired++} onOpenThread={id=>f.threads.push(id)} onPrepareChat={input=>f.inputs.push(input)} onResources={()=>f.resources++} onSettingsOpen={()=>f.settings++} renderSettings={(back,active)=><div><h1>Settings destination</h1><button onClick={back}>Back to More</button></div>}/></div></div>;}
+<div style={{flex:1,minHeight:0,display:'flex',flexDirection:'column'}}><More ownerId="7" origin="http://localhost:5173" decks={[]} active resetNonce={nonce} onClose={()=>f.closes++} onSessionExpired={()=>f.expired++} onOpenThread={(id,context)=>{f.threads.push(id);f.contexts.push(context);}} onPrepareChat={input=>f.inputs.push(input)} onResources={()=>f.resources++} onSettingsOpen={()=>f.settings++} renderSettings={(back,active)=><div><h1>Settings destination</h1><button onClick={back}>Back to More</button></div>}/></div></div>;}
 createRoot(document.querySelector('#root')).render(<Harness/>);
 `;
 let server:Awaited<ReturnType<typeof createServer>>,base:string;
@@ -53,4 +54,15 @@ test('native More composition preserves the Timeline report across root navigati
 });
 test('native More Writing frame loads only its fixed local editor and retains the instance across menus',async({page})=>{
  const f=await timelineFixture(page);await open(page);await page.getByRole('button',{name:'Writing',exact:true}).click();await expect(page.getByRole('status',{name:'Synthetic Writing document'})).toBeVisible();expect(await page.evaluate(()=>(window as any).__writingFrame.urls)).toEqual(['http://localhost:5173/native/writing']);await page.evaluate(()=>(window as any).__writingFrame.emit({type:'open-thread',threadId:'original-writing-thread'}));expect(await page.evaluate(()=>(window as any).__nativeMore.threads)).toEqual(['original-writing-thread']);await page.getByRole('button',{name:'← More',exact:true}).click();await page.evaluate(()=>(window as any).__writingFrame.emit({type:'open-thread',threadId:'late-hidden-thread'}));expect(await page.evaluate(()=>(window as any).__nativeMore.threads)).toEqual(['original-writing-thread']);await page.getByRole('button',{name:'Writing',exact:true}).click();expect(await page.evaluate(()=>(window as any).__writingFrame.urls)).toHaveLength(1);await expect(page.getByRole('textbox',{name:'Existing Chat draft'})).toHaveValue('Existing Chat draft');expect(f.createRequests).toEqual([]);expect(f.errors).toEqual([]);
+});
+test('native Writing forwards a note-bound context request, rejects old replies and keeps the main Chat draft',async({page})=>{
+ await timelineFixture(page);await open(page);await page.getByRole('button',{name:'Writing',exact:true}).click();
+ await expect(page.getByRole('status',{name:'Synthetic Writing document'})).toBeVisible();
+ await page.evaluate(()=>{const frame=(window as any).__writingFrame;frame.emit({type:'open-thread',threadId:'shared-thread',editorSessionId:'note-A'});const f=(window as any).__nativeMore;f.contexts[0].prepareEditorState(new AbortController().signal).then((state:any)=>{f.contextResult=state;});});
+ const request=await page.evaluate(()=>(window as any).__writingFrame.states.at(-1).contextRequest);expect(request).toMatchObject({sessionId:'note-A'});
+ await page.evaluate(request=>(window as any).__writingFrame.emit({type:'chat-context',documentId:'old-document',...request,editorState:{id:'note-A',cells:[]}}),request);
+ expect(await page.evaluate(()=>(window as any).__nativeMore.contextResult)).toBeUndefined();
+ await page.evaluate(request=>(window as any).__writingFrame.emit({type:'chat-context',...request,editorState:{id:'note-A',cells:[]}}),request);
+ await expect.poll(()=>page.evaluate(()=>(window as any).__nativeMore.contextResult)).toEqual({id:'note-A',cells:[]});
+ await page.getByRole('button',{name:'← More',exact:true}).click();await expect(page.getByRole('textbox',{name:'Existing Chat draft'})).toHaveValue('Existing Chat draft');
 });

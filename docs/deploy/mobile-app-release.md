@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-02: 启动控制页24已在同一iPhone覆盖安装并普通启动，原数据metadata保持，完整业务单列。 -->
+<!-- [Sync] 2026-11-01: 启动控制页24开发制品已通过签名/来源核对，iPhone连接中断，安装待重连。 -->
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-31: 公网制品当前12，原Product API端点补齐与HTTP配置清单保持现有env归属。 -->
 <!-- [Sync] 2026-10-31: 公网设备构建11恢复已登记Web回调，安装、登录关闭、设备运行与正式发行分列。 -->
@@ -179,7 +182,7 @@ Xcode16.4、SDK18.5继续用于当前开发构建；2026-10-31复核的[Apple上
 
 选定Swift/WKWebView、Kotlin/Android WebView与端侧Dream Python，复用现有React、Next BFF和业务代码，公网Admin/Gateway提供现有账户、数据与模型入口。2026-10-26关闭Mac relay的Simulator已完成原Dream创建、审核确认、四份Episode产物、故事索引及确认ACK；原完成回复、Session、持久化和4次确认阶段请求结算均已核对，后置同步恢复零新增模型。原Chat长Bash、运行中停止及同Session恢复保留独立真实回执。iPhone新开发包已签名构建和Wi-Fi覆盖安装，启动被设备锁屏拒绝，真机账户业务继续待验收。Android、第三方工具覆盖、Google平台回调及渠道资格沿原计划验收；完整移动发行资格维持未通过。
 
-[PRD](../prd/dream-workspace/mobile-app.md)、[架构](../design/multi-platform/mobile-runtime-architecture.md)、[共享交互](../design/multi-platform/mobile-app-interaction.md)、[iOS](../design/multi-platform/mobile-ios-interaction.md)、[Android](../design/multi-platform/mobile-android-interaction.md)和[复审记录](../exec/mobile-app-design-review-20261024.md#2026-10-25-保留网页业务的设计复审与实现修正)承载现行范围。原历史快照保留原文，退出实现依据。
+[PRD](../prd/mobile-app/mobile-app.md)、[架构](../design/multi-platform/mobile-runtime-architecture.md)、[共享交互](../design/multi-platform/mobile-app-interaction.md)、[iOS](../design/multi-platform/mobile-ios-interaction.md)、[Android](../design/multi-platform/mobile-android-interaction.md)和[复审记录](../exec/mobile-app-design-review-20261024.md#2026-10-25-保留网页业务的设计复审与实现修正)承载现行范围。原历史快照保留原文，退出实现依据。
 
 ## 发现与问题定义
 
@@ -470,3 +473,11 @@ Google账号发布资格继续待验收：[兼容设计](../design/multi-platfor
 阶段说明：以下构建12保留原Product API配置回执，现行17与其业务资格分别登记。
 
 当前公网制品采用[构建12](ios-iphone-install-release.md#十七2026-10-31公网admin构建12与product-api配置)：手机已无线升级、版本读回与数据保留通过，Simulator原用量200。原密码回调沿构建11，完整模型业务、真机运行及第三方授权继续分别验收。
+
+## 2026-11-01 启动控制页构建24
+
+[构建24开发IPA](../../frontend/ios/build/InkMemory-Startup-Release-device-20261101-b24.ipa)包含本轮启动控制页及原始错误日志，当前普通RN/Next/Python与Node资源核对通过；原Team和83个Framework签名、deep/strict及归档CRC通过。公网Admin及原登录回调沿既有配置，源env与锁文件保持。首次iPhone安装遇CoreDevice连接失效和NWError60，设备随后不可用；设备采用、普通启动和物理页面验收待同一iPhone重连。最新成功读回为构建23，卸载与数据清理为0。[制品摘要与命令回执](ios-iphone-install-release.md#2026-11-01-启动控制页构建24待设备重连)分别记录。
+
+## 2026-11-02 构建24设备采用
+
+同一iPhone16从23覆盖安装0.1.0/24，安装命令退出0、20.827秒，设备版本读回24；普通启动退出0，PID10604后续仍存在。复用原签名IPA，安装前后2161项数据metadata保持，卸载和清理操作为0。[实际安装回执](ios-iphone-install-release.md#2026-11-02-构建24覆盖安装与普通启动)区分普通启动、物理页面及完整业务资格；前节失联记录保留原日期范围。

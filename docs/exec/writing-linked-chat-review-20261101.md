@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Input] 用户确认的写作记录入口、Web与Native直接调用链、设备构建22、既有请求回执和只读工作边界。 -->
 <!-- [Output] 差异诊断、网络证据范围、交互设计评审、条件化实施清单及验证回执。 -->
 <!-- [Pos] 写作记录关联对话专项执行记录；产品规则归mobile-app，业务时序归现行writing-mobile-layout。 -->
@@ -7,7 +8,7 @@
 
 ## 范围与处理结论
 
-本轮直接采用用户给定的Optimized Prompt规划一次。用户随后明确“笔记”指“更多 → 写作”或时间线中的写作记录。读取根合同、直接目录合同、现行移动PRD、写作设计和相关源码；保留现有未提交改动。本轮交付[产品规则与骨架](../prd/dream-workspace/mobile-app.md#写作记录与关联对话)及[现行跨平台交互设计补充](../design/multi-platform/writing-mobile-layout.md#写作记录与关联对话)。
+本轮直接采用用户给定的Optimized Prompt规划一次。用户随后明确“笔记”指“更多 → 写作”或时间线中的写作记录。读取根合同、直接目录合同、现行移动PRD、写作设计和相关源码；保留现有未提交改动。本轮交付[产品规则与骨架](../prd/mobile-app/mobile-app.md#写作记录与关联对话)及[现行跨平台交互设计补充](../design/multi-platform/writing-mobile-layout.md#写作记录与关联对话)。
 
 - **故障根因待验证**：未取得用户本次A/B操作的实际请求和响应，当前证据不足以将失败归因于网络、认证、记录关联或Modal。
 - **已有打开路径**：写作记录内的`ChatWidgetUI → handleOpenWritingChatThread → WritingDocument → WritingView → MoreNavigator → Business → openThread`已经接通。Web与Native均使用卡片的threadId；选中记录本身不自动切换Chat。

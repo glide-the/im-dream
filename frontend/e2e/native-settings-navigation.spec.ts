@@ -1,6 +1,7 @@
 // [Input] Production Settings/resource-owner composition, original DTOs and explicit native module/HTTP fixtures.
 // [Output] Six-category/Work/Calendar navigation, retained Chat state and account-scoped OAuth/read lifecycles.
 // [Pos] Provider-free technical qualification; actual system browser, native build and real business remain separate acceptance.
+// [Sync] 2026-11-01: use the shared fixture's published Memory/Product export names.
 import {expect,test,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild} from 'vite';
 import {fileURLToPath} from 'node:url';
@@ -10,7 +11,7 @@ import SettingsPage from '/app/_dream/views/story-workspace/StoryWorkspaceSettin
 import {createNativeSettingsResources} from '/src/platform/settingsResources.native.ts';
 import {MCP_OAUTH_OPERATION_STORAGE_KEY as key} from '/app/_dream/components/claude-mcp/oauthHandoff.ts';
 import {loadBrowserSession} from '/app/_dream/lib/browserSession.ts';
-import {initial,context,plans} from '/e2e/native/settings-fixture-data.ts';
+import {memorySnapshot as initial,subscriptionContext as context,subscriptionPlans as plans} from '/e2e/native/settings-fixture-data.ts';
 import i18n from '/app/_dream/i18n.ts';import '/app/_dream/styles/tokens.css';
 await i18n.changeLanguage('en');await loadBrowserSession(async()=>Response.json({user:{id:'7',email:'settings@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'r'.repeat(43)}));
 window.__settingsFixture={uuidCalls:[]};
@@ -50,7 +51,7 @@ async function owner(page:Page){await page.goto(base+'?owner=1');await expect(pa
 test('native Settings opens all six categories and preserves the original Chat draft',async({page})=>{
  await page.goto(base);await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();for(const name of ['General','Subscription','Work','Memory responses','AI models','About'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
  for(const name of ['General','Subscription','Memory responses','AI models','About']){await page.getByRole('button',{name,exact:true}).click();await expect(page.getByRole('button',{name:/back/i}).first()).toBeVisible();await page.getByRole('button',{name:/back/i}).first().click();await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();}
- await page.getByRole('button',{name:'Work',exact:true}).click();await expect(page.getByRole('tab')).toHaveText(['Deck','Resource links','Plugins']);await page.getByRole('tab',{name:'Plugins',exact:true}).click();await expect.poll(async()=>((await facts(page)).calls.filter((call:any)=>call.path==='/api/claude-plugins/installations').length)).toBe(1);await page.getByRole('button',{name:'Back',exact:true}).click();
+ await page.getByRole('button',{name:'Work',exact:true}).click();await expect(page.getByRole('tablist',{name:'Work management categories',exact:true}).getByRole('tab')).toHaveText(['Deck','Resource links','Plugins']);await page.getByRole('tab',{name:'Plugins',exact:true}).click();await expect.poll(async()=>((await facts(page)).calls.filter((call:any)=>call.path==='/api/claude-plugins/installations').length)).toBe(1);await page.getByRole('button',{name:'Back',exact:true}).click();
  await page.evaluate(()=>(window as any).__settingsNav.logoutFails=true);await page.getByRole('button',{name:'Logout',exact:true}).click();await expect(page.getByRole('alert')).toHaveText('退出失败，请重试。');await expect(page.getByRole('textbox',{name:'Existing Chat draft'})).toHaveValue('Original unsent Chat draft');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 test('native Settings search and Calendar resources intent reach the original resources pages',async({page})=>{
