@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="310" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 310" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="310"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-310)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="0" width="520" height="310" rx="12" ry="12" style="stroke: none; stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="28" y="275" style="font-family: Helvetica; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,550) scale(1,-1)">A QUIET PLACE FOR YOUR WORDS</text>
+			<rect x="201" y="37" width="276" height="218" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<path d="M 229,246 L 229,48 Z" style="stroke: rgb(65%,40%,32%); stroke-linecap: butt; stroke-width: 0.7;"/>
+			<path d="M 216,198 L 463,198 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<path d="M 216,170 L 463,170 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<path d="M 216,142 L 463,142 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<path d="M 216,114 L 463,114 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<path d="M 216,86 L 463,86 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<path d="M 216,58 L 463,58 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.5;"/>
+			<text x="247" y="210" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 19px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,420) scale(1,-1)">写下今天的一点光。</text>
+			<text x="247" y="171" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 14px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,342) scale(1,-1)">把经历留在纸上，</text>
+			<text x="247" y="143" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 14px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,286) scale(1,-1)">把自己看得更清楚。</text>
+			<rect x="40" y="80" width="184" height="130" rx="10" ry="10" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<text x="58" y="176" style="font-family: Helvetica; font-size: 27px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,352) scale(1,-1)">Write.</text>
+			<text x="58" y="140" style="font-family: Helvetica; font-size: 27px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,280) scale(1,-1)">Remember.</text>
+			<path d="M 59,126 L 177,126 Z" style="stroke: rgb(95%,61%,7%); stroke-linecap: butt; stroke-width: 4;"/>
+			<text x="58" y="102" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,204) scale(1,-1)">内容 · 层级 · 反馈</text>
+			<path d="M 400,72 L 456,128 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 7;"/>
+			<circle cx="449" cy="120" r="3" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(95%,61%,7%); fill-rule: evenodd;"/>
+			<circle cx="488" cy="263" r="5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(95%,61%,7%); fill-rule: evenodd;"/>
+			<text x="30" y="26" style="font-family: Helvetica; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,52) scale(1,-1)">PAPER / INK / MEMORY</text>
+		</g>
+	</g>
+</svg>

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Existing startup/read results, original errors and the native copy action.
 // [Output] Read-only startup diagnostics available before local services or authentication are ready.
 // [Pos] Shared native developer leaf; refresh never starts a runtime or sends an HTTP request.
@@ -10,7 +11,7 @@ import {BackendRuntimeManager, formatRuntimeDiagnostics} from '../runtime/Backen
 
 const startupLabels = {idle: '尚未启动', starting: '正在启动', ready: '本地服务已就绪', failed: '启动失败'};
 const sessionLabels = {reading: '正在读取', available: '原会话有效', signed_out: '当前未登录', unavailable: '原会话读取失败'};
-const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录'};
+const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录', login: '登录页面', registration: '注册', google: 'Google 登录'};
 
 export default function RuntimeDiagnostics({onBack}: {onBack: () => void}) {
   const colors = useInkColors();

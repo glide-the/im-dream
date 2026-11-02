@@ -1,4 +1,12 @@
+<!-- [Input] 当前Web/Native颜色、组件规则与现行规范出版入口。 -->
+<!-- [Output] 色彩来源、主题文档、页面适用范围与验收索引。 -->
+<!-- [Pos] color_system现行索引；具体取值归亮暗色文件。 -->
+
 # Color System PRD — 索引
+
+<!-- [Sync] 2026-11-02: UI规范v3.0提供应用图示与Token配对测量，现行色值和组件适用范围保持。 -->
+
+应用视觉样例、组件与桌面/窄屏骨架见[UI规范v3.0](../mobile-app/ui-guidelines/README.md)。该规范记录普通文本、链接及暗色按钮的现行对比度取样缺口，配色建议标记为待后续评估。Settings/Deck轻纸面规则沿本目录；更多页卡片沿现行MoreNavigationContent的具体适用范围。
 
 > 面向 `docs/prd` 下聊天、文件、侧边栏、Dashboard、历史记录、发送区和暗色模式 PRD 的统一色彩系统。  
 > 本文是索引入口，具体设计稿见子文档。不修改源码、不引入新业务逻辑。
@@ -40,7 +48,7 @@
 - 不使用本轮外部 Fictional / sticker 参考色覆盖产品主题。
 - 旧 PRD 中 `#FF7A00`、`#FF6B00` 不作为全局主色；工具步骤或链接可使用"注意色"，但不得压过产品的纸张与炭黑主视觉。
 - 旧 PRD 中 Tailwind、Font Awesome、远程头像和独立 HTML 原型不作为项目约束；项目当前使用 React、CSS/inline style、`react-icons` 和本地字体。
-- 暗色主题已完整实现；亮色保持不变作为默认主题。
+- 主题模式缺省为system；显式light、dark与系统媒体规则按当前源码应用。亮暗色文档分别记录声明块、媒体差异与测量缺口。
 
 ---
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Sync] 2026-10-30: the native login presentation opens the existing sign-in route; the RN root owns the authenticated home.
 // [Sync] 2026-10-31: route only the retained login document's explicit account navigation through its operation owner.
 // [Input] Original Web resources/theme tokens, v1 bridge requests and iOS lifecycle/network notifications.
@@ -170,6 +171,11 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
             if authenticated && path.hasPrefix("/story-workspace/") { lastBusinessPath = path }
             var projection: [String: Any] = ["path": path, "authenticated": authenticated, "loading": false, "failed": false]
             if let failed = state["authFailure"] as? Bool { projection["authFailure"] = failed }
+            if let error = state["authError"] as? [String: Any],
+               let source = error["source"] as? String, ["login", "registration", "google"].contains(source),
+               let text = error["error"] as? String {
+                projection["authError"] = ["source": source, "error": text]
+            }
             hostStateDidChange?(projection)
             return
         }
@@ -446,7 +452,7 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
         logger.error("Local page load failed code=\(failure.code)")
         if reactNativeHost {
             webFailed = true
-            hostStateDidChange?(["loading": false, "failed": true])
+            hostStateDidChange?(["loading": false, "failed": true, "authError": ["source": "login", "error": ["phase": "page-load", "domain": failure.domain, "code": failure.code, "message": failure.localizedDescription]]])
             return
         }
         guard presentedViewController == nil else { return }

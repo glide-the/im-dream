@@ -4,6 +4,7 @@
 // [Pos] Provider-free technical fixture; actual UIKit sheet and normal-account login require target acceptance.
 // Impact: login presentation changes; Thread, Project/Episode, artifacts, Run publication, Hook and real data remain unchanged.
 // [Sync] 2026-11-01: qualify original startup errors, native details, unchanged copying and observer release.
+// [Sync] 2026-11-02: reuse RN global and actual shared SVG paths for the themed preparation composition.
 // Technical impact: startup state/page changes; original authentication is preserved. Project/Episode,
 // canonical artifacts, Run-private publication, after-turn Hook, PostgreSQL/API projection are out of scope.
 import {expect,test,type Page} from '@playwright/test';
@@ -25,7 +26,7 @@ let server:Awaited<ReturnType<typeof createServer>>,base:string;
 type Facts={authenticated:boolean;reads:number;failed:boolean;logoutFails:boolean;logoutCalls:number;errors:string[];httpStatuses:{path:string;status:number}[];httpDiagnostics:{path:string;status:number}[]};
 const facts=new WeakMap<Page,Facts>();
 test.beforeAll(async()=>{
- server=await createServer({root,configFile:false,logLevel:'silent',cacheDir:'/tmp/ink-mobile-startup-implementation-20261101/vite-session',optimizeDeps:{noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','react-native-svg','react-native-svg/lib/module/elements.web.js','i18next','react-i18next','zod']},resolve:{alias:[{find:/^react-native$/,replacement:root+'e2e/native/session-platform-web-boundary.ts'},{find:/^react-native-svg$/,replacement:root+'e2e/native/svg-web-boundary.tsx'}]},server:{host:'127.0.0.1',port:0,strictPort:true},plugins:[{name:'native-session-fixture',enforce:'pre',resolveId(id){if(id==='/session-entry.tsx')return '\0session-entry';},async load(id){return id==='\0session-entry'?(await transformWithEsbuild(entry,'session-entry.tsx',{loader:'tsx',jsx:'automatic',target:'esnext'})).code:null;},configureServer(vite){vite.middlewares.use(async(req,res,next)=>{if(req.url?.split('?')[0]!=='/native-session')return next();res.setHeader('Content-Type','text/html');res.end(await vite.transformIndexHtml('/native-session','<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body style="margin:0"><div id="root"></div><script type="module" src="/session-entry.tsx"></script></body></html>'));});}}]});
+ server=await createServer({root,configFile:false,logLevel:'silent',define:{global:'globalThis'},cacheDir:'/tmp/ink-mobile-startup-implementation-20261101/vite-session',optimizeDeps:{force:true,noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','react-native-svg','react-native-svg/lib/module/elements.web.js','i18next','react-i18next','zod']},resolve:{alias:[{find:/^react-native$/,replacement:root+'e2e/native/session-platform-web-boundary.ts'},{find:/^react-native-svg$/,replacement:root+'e2e/native/svg-web-boundary.tsx'}]},server:{host:'127.0.0.1',port:0,strictPort:true},plugins:[{name:'native-session-fixture',enforce:'pre',resolveId(id){if(id==='/session-entry.tsx')return '\0session-entry';},async load(id){return id==='\0session-entry'?(await transformWithEsbuild(entry,'session-entry.tsx',{loader:'tsx',jsx:'automatic',target:'esnext'})).code:null;},configureServer(vite){vite.middlewares.use(async(req,res,next)=>{if(req.url?.split('?')[0]!=='/native-session')return next();res.setHeader('Content-Type','text/html');res.end(await vite.transformIndexHtml('/native-session','<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body style="margin:0"><div id="root"></div><script type="module" src="/session-entry.tsx"></script></body></html>'));});}}]});
  await server.listen();const address=server.httpServer?.address();if(!address||typeof address==='string')throw Error('SESSION_FIXTURE_LISTENER');base='http://127.0.0.1:'+address.port+'/native-session';
 });
 test.afterAll(async()=>{await server?.close();});
@@ -72,7 +73,11 @@ test('session loss closes existing documents before removing the current account
 
 test('pending startup leaves diagnostics interactive and shares one native initialization',async({page})=>{
  await page.setViewportSize({width:390,height:844});const f=facts.get(page)!;f.authenticated=true;
- await page.goto(base+'?hold-runtime');await expect(page.getByText('正在准备本地服务',{exact:true})).toBeVisible();expect(f.reads).toBe(0);
+ await page.goto(base+'?hold-runtime');await expect(page.getByText('正在准备',{exact:true})).toBeVisible();expect(f.reads).toBe(0);
+ await expect(page.getByTestId('startup-artwork')).toBeVisible();
+ await expect(page.getByTestId('startup-artwork').locator('svg')).toHaveAttribute('viewBox','0 0 1254 1254');
+ await expect(page.getByTestId('startup-artwork').locator('path')).toHaveCount(7);
+ await expect(page.getByTestId('startup-artwork').locator('image,rect,img')).toHaveCount(0);
  expect(await page.evaluate(()=>{const manager=(window as any).__startupManager;return manager.ensureStarted()===manager.ensureStarted();})).toBe(true);
  await page.getByRole('button',{name:'开发者控制页',exact:true}).click();await expect(page.getByRole('heading',{name:'开发者控制页'})).toBeVisible();await expect(page.getByText('正在启动',{exact:true})).toBeVisible();
  const updated=await page.evaluate(()=>(window as any).__startupManager.getSnapshot().updatedAt);
@@ -83,6 +88,7 @@ test('pending startup leaves diagnostics interactive and shares one native initi
  await page.getByRole('button',{name:'复制诊断摘要',exact:true}).click();await expect(page.getByText('诊断摘要已复制',{exact:true})).toBeVisible();
  const copied=await page.evaluate(()=>(window as any).__sessionPlatform.copies[0]);expect(copied).toContain('启动状态: ready');expect(copied).not.toContain('fixture-private');expect(copied).not.toContain('localhost');
  await page.getByRole('button',{name:'返回',exact:true}).click();await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();expect(f.reads).toBe(1);expect(await page.evaluate(()=>(window as any).__sessionPlatform.listeners.size)).toBe(1);
+ await expect(page.getByTestId('startup-artwork')).toHaveCount(0);
 });
 
 test('failed startup exposes the original native cause without automatic restart or session traffic',async({page})=>{
@@ -104,7 +110,8 @@ test('error logs preserve Error message, stack and cause and retain only the lat
 });
 
 test('diagnostic observation pauses in background and reads the latest startup result on return',async({page})=>{
- await page.goto(base+'?hold-runtime');await page.getByRole('button',{name:'开发者控制页',exact:true}).click();expect(await page.evaluate(()=>(window as any).__sessionPlatform.listeners.size)).toBe(2);
+ // SessionGate, pending artwork and the diagnostics page each own one AppState subscription.
+ await page.goto(base+'?hold-runtime');await page.getByRole('button',{name:'开发者控制页',exact:true}).click();expect(await page.evaluate(()=>(window as any).__sessionPlatform.listeners.size)).toBe(3);
  await page.evaluate(()=>(window as any).__sessionPlatform.change('background'));await expect(page.getByText('观测已暂停，上次读取',{exact:true})).toBeVisible();
  await page.evaluate(()=>(window as any).__sessionPlatform.settleRuntime());await expect.poll(()=>page.evaluate(()=>(window as any).__startupManager.getSnapshot().state)).toBe('ready');await expect(page.getByText('正在启动',{exact:true})).toBeVisible();
  await page.evaluate(()=>(window as any).__sessionPlatform.active());await expect(page.getByText('本地服务已就绪',{exact:true})).toBeVisible();await page.getByRole('button',{name:'返回',exact:true}).click();expect(await page.evaluate(()=>(window as any).__sessionPlatform.listeners.size)).toBe(1);expect(await page.evaluate(()=>(window as any).__sessionPlatform.starts)).toBe(1);
@@ -122,4 +129,16 @@ test('the same diagnostics leaf opens from About and preserves the original draf
 test('session failure keeps the local runtime ready and diagnostic refresh does not replay the request',async({page})=>{
  const f=facts.get(page)!;f.failed=true;await page.goto(base);await expect(page.getByRole('alert')).toHaveText('工作区暂时无法打开，请重试。');await page.getByRole('button',{name:'开发者控制页',exact:true}).click();await expect(page.getByText('本地服务已就绪',{exact:true})).toBeVisible();await expect(page.getByText('原会话读取失败',{exact:true})).toBeVisible();const reads=f.reads;
  await page.getByRole('button',{name:'刷新',exact:true}).click();expect(f.reads).toBe(reads);await page.getByRole('button',{name:'返回',exact:true}).click();f.failed=false;f.authenticated=true;await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByRole('heading',{name:'Native home'})).toBeVisible();expect(await page.evaluate(()=>(window as any).__sessionPlatform.starts)).toBe(1);
+});
+
+test('native account and registration failures reach the existing diagnostics without reissuing login',async({page})=>{
+ await open(page);
+ await page.evaluate(()=>{const platform=(window as any).__sessionPlatform;platform.accountError('google',{phase:'authorization-configuration',code:1,message:'OAuth callback mismatch'});platform.accountError('registration','AUTH_REGISTRATION_INCOMPLETE');platform.accountError('login',{domain:'NSURLErrorDomain',code:-1009,message:'The Internet connection appears to be offline.'});platform.accountError('unknown-source','discard this event');});
+ await page.getByRole('button',{name:'开发者控制页',exact:true}).click();
+ await expect(page.getByText(/OAuth callback mismatch/)).toBeVisible();
+ await expect(page.getByText(/AUTH_REGISTRATION_INCOMPLETE/)).toBeVisible();
+ await expect(page.getByText(/NSURLErrorDomain/)).toBeVisible();
+ await page.getByRole('button',{name:'复制诊断摘要',exact:true}).click();
+ const copied=await page.evaluate(()=>(window as any).__sessionPlatform.copies[0]);expect(copied).toContain('authorization-configuration');expect(copied).toContain('AUTH_REGISTRATION_INCOMPLETE');expect(copied).not.toContain('discard this event');
+ expect(await page.evaluate(()=>(window as any).__sessionPlatform.presented)).toBe(0);expect(await page.evaluate(()=>(window as any).__sessionPlatform.starts)).toBe(1);
 });

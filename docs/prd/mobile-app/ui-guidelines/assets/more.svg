@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="310" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 310" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="310"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-310)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="8" y="17" width="178" height="285" rx="15" ry="15" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<text x="20" y="285" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 7px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,570) scale(1,-1)">9:41</text>
+			<path d="M 156,290 L 172,290 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 2;"/>
+			<text x="20" y="263" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 16px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,526) scale(1,-1)">‹</text>
+			<text x="85.0" y="264" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,528) scale(1,-1)">更多</text>
+			<path d="M 16,253 L 178,253 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 16,49 L 178,49 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="30" y="34" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,68) scale(1,-1)">Chat</text>
+			<text x="85.88671875" y="34" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,68) scale(1,-1)">Decks</text>
+			<text x="152.88671875" y="34" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,68) scale(1,-1)">More</text>
+			<rect x="223" y="88" width="289" height="190" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<rect x="223" y="88" width="60" height="190" rx="8" ry="8" style="stroke: none; stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<path d="M 283,278 L 283,88 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="233" y="258" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,516) scale(1,-1)">Ink &amp;</text>
+			<text x="233" y="244" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,488) scale(1,-1)">Memory</text>
+			<text x="233" y="216" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,432) scale(1,-1)">Chat</text>
+			<text x="233" y="192" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,384) scale(1,-1)">Dream</text>
+			<text x="233" y="168" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,336) scale(1,-1)">Decks</text>
+			<text x="233" y="144" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,288) scale(1,-1)">更多</text>
+			<text x="296" y="256" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,512) scale(1,-1)">更多</text>
+			<path d="M 292,246 L 502,246 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="8" y="1" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,2) scale(1,-1)">窄屏 / Native区域骨架</text>
+			<text x="223" y="71" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,142) scale(1,-1)">桌面Web参照 / 沿原导航</text>
+			<text x="20" y="241" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,482) scale(1,-1)">记录与回望</text>
+			<rect x="20" y="188" width="154" height="43" rx="9" ry="9" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="30" y="212" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,424) scale(1,-1)">写作</text>
+			<text x="30" y="197" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 7px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,394) scale(1,-1)">写下今天的经历</text>
+			<rect x="20" y="132" width="73.0" height="47" rx="9" ry="9" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="28" y="153" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,306) scale(1,-1)">时间线</text>
+			<rect x="101.0" y="132" width="73.0" height="47" rx="9" ry="9" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="109.0" y="153" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,306) scale(1,-1)">回顾</text>
+			<text x="20" y="112" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,224) scale(1,-1)">偏好</text>
+			<rect x="20" y="79" width="154" height="23" rx="7" ry="7" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="29" y="86" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,172) scale(1,-1)">主题 · 当前外观</text>
+			<rect x="20" y="52" width="154" height="23" rx="7" ry="7" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="29" y="59" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,118) scale(1,-1)">设置</text>
+			<text x="296" y="229" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,458) scale(1,-1)">原侧栏更多入口</text>
+			<text x="296" y="202" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,404) scale(1,-1)">写作 / 时间线 / 回顾</text>
+			<text x="296" y="174" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,348) scale(1,-1)">主题 / 账户</text>
+			<text x="296" y="146" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,292) scale(1,-1)">设置菜单 → 原子页</text>
+			<text x="223" y="45" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,90) scale(1,-1)">五项同层入口 / 全页纵滚 / 原返回</text>
+			<text x="223" y="26" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,52) scale(1,-1)">主题动作保持当前页面</text>
+		</g>
+	</g>
+</svg>

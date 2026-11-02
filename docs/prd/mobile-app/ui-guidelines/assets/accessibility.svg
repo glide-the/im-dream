@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="224" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 224" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="224"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-224)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="127" width="166" height="89" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="12" y="181" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 14px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,362) scale(1,-1)">阅读这段文字</text>
+			<text x="12" y="151" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,302) scale(1,-1)">10.61 : 1</text>
+			<text x="4" y="104" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,208) scale(1,-1)">主文本</text>
+			<text x="4" y="84" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,168) scale(1,-1)">当前值取样</text>
+			<rect x="177" y="127" width="166" height="89" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="189" y="181" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 14px;fill: rgb(60%,54%,47%); stroke:none;" transform="translate(0,362) scale(1,-1)">阅读这段文字</text>
+			<text x="189" y="151" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(60%,54%,47%); stroke:none;" transform="translate(0,302) scale(1,-1)">2.93 : 1</text>
+			<text x="181" y="104" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,208) scale(1,-1)">弱文本</text>
+			<text x="181" y="84" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,168) scale(1,-1)">当前值取样</text>
+			<rect x="354" y="127" width="166" height="89" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(95%,90%,84%); fill-rule: evenodd;"/>
+			<text x="366" y="181" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 14px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,362) scale(1,-1)">阅读这段文字</text>
+			<text x="366" y="151" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,302) scale(1,-1)">1.21 : 1</text>
+			<text x="358" y="104" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,208) scale(1,-1)">暗色主操作白字</text>
+			<text x="358" y="84" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,168) scale(1,-1)">当前值取样</text>
+			<path d="M 0,62 L 520,62 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="8" y="38" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,76) scale(1,-1)">普通文本目标 4.5 : 1</text>
+			<text x="8" y="15" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,30) scale(1,-1)">检测缺口与后续建议分别记录；应用Token保持。</text>
+		</g>
+	</g>
+</svg>

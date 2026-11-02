@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- [Input] docs/user/subscription-and-usage.md的面向使用者正文。 -->
+<!-- [Output] ink-dream 订阅与用量说明的独立静态网页，正文与Markdown来源一致。 -->
+<!-- [Pos] frontend/public/subscription-and-usage.html；内部发布资料归docs/deploy。 -->
+<!-- [Sync] 2026-11-02: 统一ink-dream叙述主体与单一主题，移出内部发布和验证内容。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="description" content="ink-dream 订阅与用量说明，面向ink-dream使用者。">
+  <title>ink-dream 订阅与用量说明</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.8; color: #242424; background: #faf9f6; }
+    body { margin: 0; }
+    main { max-width: 48rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; overflow-wrap: anywhere; }
+    h1, h2 { line-height: 1.4; }
+    h1 { font-size: 1.9rem; }
+    h2 { margin-top: 2rem; font-size: 1.25rem; }
+    a { color: #275b91; text-underline-offset: .18em; }
+    .status { color: #595959; }
+    li { margin-block: .5rem; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #e9e7e2; background: #20201f; }
+      .status { color: #c4c0b7; }
+      a { color: #a0c9f1; }
+    }
+    @media print {
+      :root { color: #000; background: #fff; }
+      main { max-width: none; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>ink-dream 订阅与用量说明</h1>
+  <p class="status">文档状态：草案，尚未生效。更新日期：2026年11月2日。</p>
+  <p>本说明解释ink-dream的服务费用、订阅周期和使用额度。具体服务范围及收费条件，以你确认使用或购买时展示的信息为准。</p>
+  <section aria-labelledby="section-1">
+  <h2 id="section-1">一、服务范围和价格</h2>
+  <p>ink-dream会在收费前说明服务范围、价格、使用期限、额度及适用限制。免费服务的范围和额度以实际展示的信息为准。</p>
+  <p>购买涉及自动续订时，购买前应明确续订周期、续订费用及取消方式。是否发生付款，以原购买渠道确认的交易结果为准。</p>
+  </section>
+  <section aria-labelledby="section-2">
+  <h2 id="section-2">二、使用额度如何记录</h2>
+  <p>Token是计算人工智能处理量的单位。你的可用额度、已使用量和适用周期，以账户中显示的记录为准。</p>
+  <p>一次请求的最终使用量根据实际处理结果确认。停止请求前已经发生的处理可能计入用量；你可以依据相应记录核对结果。</p>
+  <p>可用额度不足或达到使用限制时，相应请求可能暂停受理。你可以查看剩余额度和周期时间，再决定后续使用安排。</p>
+  </section>
+  <section aria-labelledby="section-3">
+  <h2 id="section-3">三、周期和服务变化</h2>
+  <p>按月提供的服务以账户对应的周期起止时间为准。按周期提供的额度按照对应周期管理；单独购买额度的有效期依购买时的说明及适用规则确定。</p>
+  <p>变更订阅前，ink-dream会说明生效时间、后续费用及额度安排。已经确认的服务记录和交易记录用于核对变更结果。</p>
+  </section>
+  <section aria-labelledby="section-4">
+  <h2 id="section-4">四、取消、退款和恢复</h2>
+  <p>如你购买了自动续订服务，可以通过原购买渠道管理或取消续订。取消后的可用期限，以该渠道及订阅中确认的信息为准。</p>
+  <p>退款条件、申请方式和处理结果依原购买渠道的规则及适用法律确定。需要恢复已购服务时，按原购买渠道提供的方式核对账户与权益。</p>
+  <p>请保留必要的订单信息，并妥善保管账户资料。</p>
+  </section>
+  <section aria-labelledby="section-5">
+  <h2 id="section-5">五、费用和用量问题</h2>
+  <p>如你对费用、订阅或用量记录有疑问，请联系<a href="mailto:dmeck@suoxya.com">dmeck@suoxya.com</a>，提供发生时间、问题说明及必要的订单或用量信息。请勿发送账户密码或支付凭据。</p>
+  </section>
+</main>
+</body>
+</html>

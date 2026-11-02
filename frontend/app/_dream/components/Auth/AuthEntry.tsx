@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Server-projected Admin form actions, selected login/register mode and public auth feedback.
 // [Output] Restored Dream email/password/register/Google card using top-level Admin form navigation.
 // [Pos] Dream product login interaction; Admin remains the only credential validator and Session authority.
@@ -7,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { FaGoogle } from 'react-icons/fa';
 import { z } from 'zod';
 import { useAuth } from '../../contexts/AuthContext';
+import {reportMobileHostRoute} from '../../platform/mobileHost';
 
 const optionsDto = z.strictObject({ password_action: z.url(), google_action: z.url() });
 type EntryMode = 'login' | 'register';
@@ -37,6 +39,7 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
   const [options, setOptions] = useState<z.infer<typeof optionsDto> | null>(null);
   const [optionsFailed, setOptionsFailed] = useState(false);
   const [entryError, setEntryError] = useState<string | null>(() => returnedError());
+  const [returnedFailure] = useState(() => new URLSearchParams(window.location.search).get('auth_error'));
   const returnTo = currentReturnLocation();
 
   useEffect(() => {
@@ -48,21 +51,29 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
     const abort = new AbortController();
     void fetch('/auth/options', { credentials: 'same-origin', cache: 'no-store', signal: abort.signal })
       .then(async response => {
-        if (!response.ok) throw new Error('AUTH_OPTIONS_UNAVAILABLE');
+        if (!response.ok) throw new Error(`AUTH_OPTIONS_UNAVAILABLE (HTTP ${response.status})`);
         const parsed = optionsDto.safeParse(await response.json());
         if (!parsed.success) throw new Error('AUTH_OPTIONS_INVALID');
         setOptions(parsed.data);
       })
-      .catch(() => {
+      .catch((cause:unknown) => {
         if (!abort.signal.aborted) {
           setOptionsFailed(true);
           setEntryError('Login is temporarily unavailable. Please try again.');
+          reportMobileHostRoute(false,true,{source:mode==='register'?'registration':'login',error:cause instanceof Error?`${cause.name}: ${cause.message}\n${cause.stack??''}`:String(cause)});
         }
       });
     return () => abort.abort();
   }, []);
 
   const error = authError || entryError;
+  useEffect(()=>{
+    if(error&&!optionsFailed) {
+      const source=returnedFailure==='google'?'google':returnedFailure==='registration'||mode==='register'?'registration':'login';
+      const code=['credentials','registration','google'].includes(returnedFailure??'')?`auth_error=${returnedFailure}: `:'';
+      reportMobileHostRoute(false,true,{source,error:code+error});
+    }
+  },[error,mode,optionsFailed,returnedFailure]);
 
   return <div style={{ width: '100%', maxWidth: '400px', margin: '0 auto', padding: '32px', backgroundColor: 'var(--color-bg-paper)', border: '2px solid var(--color-border-paper)', borderRadius: '12px', boxShadow: '0 4px 12px var(--color-shadow-soft)', fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif" }}>
     <h2 style={{ margin: '0 0 24px', fontSize: '24px', fontWeight: 600, color: 'var(--color-text-body)', textAlign: 'center' }}>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>

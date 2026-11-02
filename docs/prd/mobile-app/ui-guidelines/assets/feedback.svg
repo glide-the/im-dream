@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="227" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 227" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="227"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-227)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="14" y="192" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,384) scale(1,-1)">一项普通资源</text>
+			<text x="275" y="192" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,384) scale(1,-1)">来源与说明</text>
+			<path d="M 14,180 L 506,180 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="14" y="150" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,300) scale(1,-1)">一项已选资源</text>
+			<text x="275" y="150" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,300) scale(1,-1)">来源与说明</text>
+			<text x="486" y="150" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 15px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,300) scale(1,-1)">✓</text>
+			<path d="M 14,138 L 506,138 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="19" cy="103" r="4" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(29%,56%,88%); fill-rule: evenodd;"/>
+			<text x="34" y="99" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,198) scale(1,-1)">正在读取已有内容…</text>
+			<circle cx="19" cy="66" r="4" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(49%,58%,40%); fill-rule: evenodd;"/>
+			<text x="34" y="62" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,124) scale(1,-1)">内容已保存</text>
+			<circle cx="19" cy="29" r="4" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(65%,40%,32%); fill-rule: evenodd;"/>
+			<text x="34" y="25" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,50) scale(1,-1)">读取失败，请重试</text>
+			<text x="464" y="25" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,50) scale(1,-1)">重试</text>
+		</g>
+	</g>
+</svg>

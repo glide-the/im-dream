@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] iOS application-owned embedded runtime module.
 // [Output] Shared startup facts and the original error returned by each observed source.
 // [Pos] RN runtime coordinator; Python/Node ownership stays in the native singleton.
@@ -6,7 +7,7 @@ import {NativeModules} from 'react-native';
 
 export type RuntimeFacts = {state: 'ready'; localWebOrigin: string};
 export type SessionReadState = 'reading' | 'available' | 'signed_out' | 'unavailable';
-export type RuntimeErrorSource = 'startup' | 'session' | 'config' | 'catalog';
+export type RuntimeErrorSource = 'startup' | 'session' | 'config' | 'catalog' | 'login' | 'registration' | 'google';
 export type RuntimeErrorRecord = Readonly<{source: RuntimeErrorSource; at: number; text: string}>;
 export type RuntimeSnapshot = Readonly<{
   state: 'idle' | 'starting' | 'ready' | 'failed';

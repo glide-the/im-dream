@@ -2,6 +2,7 @@
 // [Input] Locked iOS target resources and explicit Native source/test membership.
 // [Output] App and XCTest targets with shared runtime and account/MCP adapter ownership.
 // [Pos] InkMemory Xcode project definition.
+// [Sync] 2026-11-02: compile AppIcon and startup artwork assets with the launch storyboard in both app configurations.
 // [Sync] 2026-10-31: include the account system-session adapter and isolated Cookie/callback contracts.
 {
 	archiveVersion = 1;
@@ -11,6 +12,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B21000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000001 /* Assets.xcassets */; };
+		B21000000000000000000002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000002 /* LaunchScreen.storyboard */; };
 		31BE985023FDD9EA2448F3D6 /* libPods-InkMemoryTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */; };
 		3DAC5BECD317E0AEED498712 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */; };
 		5A7C3E95C0D0218C7185E6FD /* libPods-InkMemory.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 56AEFE3EDE3527C52CA910C6 /* libPods-InkMemory.a */; };
@@ -71,6 +74,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B22000000000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B22000000000000000000002 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ../PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-InkMemoryTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		56AEFE3EDE3527C52CA910C6 /* libPods-InkMemory.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-InkMemory.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -159,6 +164,8 @@
 		A70000000000000000000002 /* InkMemory */ = {
 			isa = PBXGroup;
 			children = (
+				B22000000000000000000001 /* Assets.xcassets */,
+				B22000000000000000000002 /* LaunchScreen.storyboard */,
 				F20000000000000000000003 /* InkRuntimeModule.m */,
 				F20000000000000000000001 /* InkReactNative.swift */,
 				F20000000000000000000008 /* InkAccountLogin.swift */,
@@ -307,6 +314,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B21000000000000000000001 /* Assets.xcassets in Resources */,
+				B21000000000000000000002 /* LaunchScreen.storyboard in Resources */,
 				3DAC5BECD317E0AEED498712 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -515,7 +524,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 586161365EB29DA385141265 /* Pods-InkMemory.debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -566,7 +575,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = FD961F623BA9B7A49A8DF68E /* Pods-InkMemory.release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

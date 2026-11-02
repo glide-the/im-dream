@@ -3,6 +3,7 @@
 <!-- [Input] iOS bundle identity and supported interface orientations. -->
 <!-- [Output] Native application metadata consumed by Xcode and iOS. -->
 <!-- [Pos] InkMemory iOS target property-list contract. -->
+<!-- [Sync] 2026-11-02: select the supplied artwork launch storyboard. -->
 <!-- [Sync] 2026-10-31: register the distinct target account callback for system authorization and original BFF handoff. -->
 <!-- [Sync] 2026-10-29: register the target-specific MCP resource callback; normal account login retains its existing Web callback. -->
 <!-- [Sync] 2026-10-27: register the existing Excalifont and Xiaolai assets for equivalent native typography. -->
@@ -65,8 +66,8 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
-  <key>UILaunchScreen</key>
-  <dict/>
+  <key>UILaunchStoryboardName</key>
+  <string>LaunchScreen</string>
   <key>UIAppFonts</key>
   <array>
     <string>fonts/Excalifont-Regular.ttf</string>

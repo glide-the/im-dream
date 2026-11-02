@@ -2,6 +2,7 @@
 // [Sync] 2026-10-29: observe the original ink-theme preference for matching native insets and explicit/system appearance.
 // [Output] One iOS scene containing the bundled React Native composition root.
 // [Pos] iOS application entry.
+// [Sync] 2026-11-02: reuse the static launch storyboard while the RN root loads its first content.
 // [Sync] 2026-10-24: extend through container insets while retaining the keyboard safe area.
 // [Sync] 2026-10-24: create the first native iOS container entry.
 // [Sync] 2026-10-25: keep the original Web header and composer inside the iPhone system safe area.
@@ -45,6 +46,10 @@ struct ReactNativeAppView: UIViewRepresentable {
             preconditionFailure("The packaged React Native bundle is missing.")
         }
         let root = RCTRootView(bundleURL: bundle, moduleName: "InkMemory", initialProperties: nil, launchOptions: nil)
+        root.loadingView = UIStoryboard(name: "LaunchScreen", bundle: nil).instantiateInitialViewController()?.view
+        root.loadingView?.backgroundColor = background
+        root.loadingViewFadeDelay = 0
+        root.loadingViewFadeDuration = 0.15
         root.backgroundColor = background
         return root
     }

@@ -23,6 +23,7 @@ import Darwin
 import WebKit
 import OSLog
 import AuthenticationServices
+// [Sync] 2026-11-02: forward original account and login-document failures to the existing runtime diagnostics page.
 
 @objc(InkRuntime)
 final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegate, ASWebAuthenticationPresentationContextProviding {
@@ -47,7 +48,7 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
     private var mcpAuthorizationReject: RCTPromiseRejectBlock?
     private var mcpAuthorizationAnchor: UIWindow?
     @objc override static func requiresMainQueueSetup() -> Bool { true }
-    override func supportedEvents() -> [String]! { ["InkUploadProgress"] }
+    override func supportedEvents() -> [String]! { ["InkUploadProgress", "InkAccountError"] }
     override func startObserving() { DispatchQueue.main.async { self.observing = true } }
     override func stopObserving() { DispatchQueue.main.async { self.observing = false } }
 
@@ -398,10 +399,13 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
             let schemes = (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? [])
                 .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
             let account = NativeAccountLogin(origin: origin, callback: callback.flatMap { schemes.contains($0.scheme ?? "") ? $0 : nil },
-                navigation: navigation, probe: probe, chinese: language.hasPrefix("zh")) { [weak controller] in controller?.reloadAccountDocument() }
+                navigation: navigation, probe: probe, chinese: language.hasPrefix("zh"), diagnostic: { [weak self] value in
+                    self?.sendEvent(withName: "InkAccountError", body: value)
+                }) { [weak controller] in controller?.reloadAccountDocument() }
             self.accountLogin = account
             controller.accountNavigation = { [weak account] action, page in account?.handles(action, page: page) ?? false }
-            controller.hostStateDidChange = { state in
+            controller.hostStateDidChange = { [weak self] state in
+                if let error = state["authError"] as? [String: Any] { self?.sendEvent(withName: "InkAccountError", body: error) }
                 if state["authenticated"] as? Bool == true || state["loading"] as? Bool == false { probe.check() }
             }
             presenter.present(navigation, animated: true) { probe.check() }

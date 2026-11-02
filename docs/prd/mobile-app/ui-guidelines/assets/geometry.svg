@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="222" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 222" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="222"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-222)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="203" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,406) scale(1,-1)">图标与点击区域分开表达</text>
+			<rect x="8" y="143" width="44" height="44" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: none; fill-rule: evenodd; stroke-dasharray: 3, 3;"/>
+			<path d="M 36,175 L 24,165 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<path d="M 24,165 L 36,154 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<text x="21.0" y="124" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,248) scale(1,-1)">返回</text>
+			<rect x="72" y="143" width="44" height="44" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: none; fill-rule: evenodd; stroke-dasharray: 3, 3;"/>
+			<path d="M 94,175 L 94,155 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<path d="M 84,165 L 104,165 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<text x="85.0" y="124" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,248) scale(1,-1)">新建</text>
+			<rect x="136" y="143" width="44" height="44" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: none; fill-rule: evenodd; stroke-dasharray: 3, 3;"/>
+			<rect x="148" y="154" width="21" height="21" rx="3" ry="3" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 0.85; fill: none; fill-rule: evenodd;"/>
+			<path d="M 148,169 L 169,169 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.2;"/>
+			<text x="149.0" y="124" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,248) scale(1,-1)">日历</text>
+			<rect x="200" y="143" width="44" height="44" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: none; fill-rule: evenodd; stroke-dasharray: 3, 3;"/>
+			<path d="M 214,173 L 230,157 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<path d="M 214,157 L 230,173 Z" style="stroke: rgb(24%,20%,16%); stroke-linecap: butt; stroke-width: 1.8;"/>
+			<text x="213.0" y="124" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,248) scale(1,-1)">关闭</text>
+			<text x="300" y="203" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,406) scale(1,-1)">现行容器圆角取样</text>
+			<rect x="300" y="126" width="93" height="59" rx="13" ry="13" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="326.244384765625" y="105" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,210) scale(1,-1)">图标区 13</text>
+			<rect x="410" y="126" width="93" height="59" rx="18" ry="18" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(96%,93%,89%); fill-rule: evenodd;"/>
+			<text x="431.744384765625" y="105" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,210) scale(1,-1)">更多条目 18</text>
+			<path d="M 0,83 L 520,83 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="8" y="57" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,114) scale(1,-1)">轻纸面列表</text>
+			<text x="11" y="41" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,82) scale(1,-1)">名称与说明按同一基线排列</text>
+			<path d="M 11,34 L 238,34 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="11" y="17" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,34) scale(1,-1)">名称与说明按同一基线排列</text>
+			<path d="M 11,10 L 238,10 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<rect x="288" y="9" width="225" height="60" rx="12" ry="12" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<text x="303" y="42" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,84) scale(1,-1)">更多页已有卡片</text>
+			<text x="303" y="22" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,44) scale(1,-1)">容器服务于入口和用途说明</text>
+		</g>
+	</g>
+</svg>

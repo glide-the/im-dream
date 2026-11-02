@@ -2,6 +2,7 @@
 // [Output] Wide/narrow recovery, current-session restoration and original top-level form POST receipts.
 // [Pos] Provider-free browser regression; no real credentials, accounts, database or model requests.
 // [Sync] 2026-10-25: retry reloads the original page; credential errors retain the normal form interaction.
+// [Sync] 2026-11-02: qualify original login/register switching and host error delivery without creating accounts.
 import { expect, test, type Page } from '@playwright/test';
 import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -18,16 +19,18 @@ const session = { user: { id: '1', email: 'recovery@example.test', display_name:
 // Episode, canonical/private artifacts, Hooks, database and models are out of scope.
 const diagnostics = new WeakMap<Page, string[]>();
 const entry = `
-  import React from 'react';
+  import React,{useState} from 'react';
   import { createRoot } from 'react-dom/client';
   import { AuthProvider, useAuth } from '/app/_dream/contexts/AuthContext.tsx';
-  import AuthEntry from '/app/_dream/components/Auth/AuthEntry.tsx';
+  import LoginForm from '/app/_dream/components/Auth/LoginForm.tsx';
+  import RegisterForm from '/app/_dream/components/Auth/RegisterForm.tsx';
   import '/app/_dream/styles/tokens.css';
   function Surface() {
     const auth = useAuth();
+    const [mode,setMode]=useState('login');
     if (auth.isLoading) return React.createElement('p', null, 'Loading session');
     if (auth.isAuthenticated) return React.createElement('h1', null, 'Session restored');
-    return React.createElement(AuthEntry, {mode:'login', onSwitch:()=>{}});
+    return mode==='login'?React.createElement(LoginForm,{onSuccess:()=>{},onSwitchToRegister:()=>setMode('register')}):React.createElement(RegisterForm,{onSuccess:()=>{},onSwitchToLogin:()=>setMode('login')});
   }
   createRoot(document.querySelector('#root')).render(React.createElement(AuthProvider, null, React.createElement(Surface)));
 `;
@@ -157,5 +160,50 @@ for (const width of [1440, 390]) {
       expect(submissions).toHaveLength(1);
       expect(Object.fromEntries(submissions[0])).toEqual({mode:'login', return_to:'/auth-entry-recovery', email:'recovery@example.test', password:'fixture-password-only'});
     });
+
+    test('registration keeps the original form target and returns its failure to host diagnostics',async({page})=>{
+      await page.addInitScript(()=>{
+        const host=window as any;host.__accountErrors=[];host.__INK_NATIVE_HOST__={framework:'react-native'};
+        host.webkit={messageHandlers:{inkHostState:{postMessage:(value:unknown)=>host.__accountErrors.push(value)}}};
+      });
+      await page.route('**/auth/session',route=>route.fulfill({status:401,json:{}}));
+      await page.route('**/auth/options',route=>route.fulfill({json:actions}));
+      let mode:string|null=null;
+      await page.route(`${admin}/auth/dream/password`,route=>{
+        expect(route.request().isNavigationRequest()).toBe(true);
+        mode=new URLSearchParams(route.request().postData()??'').get('mode');
+        return route.fulfill({status:303,headers:{location:base+'?auth_error=registration'}});
+      });
+      await page.goto(base);
+      await page.getByRole('button',{name:'Register',exact:true}).click();
+      await expect(page.getByRole('heading',{name:'Create Account'})).toBeVisible();
+      await expect(page.getByLabel('Display Name (Optional)')).toBeVisible();
+      await page.getByLabel('Email',{exact:true}).fill('recovery@example.test');
+      await page.locator('input[name="password"]').fill('fixture-password-only');
+      await expect(page.getByRole('button',{name:'Register',exact:true})).toBeEnabled();
+      await page.getByRole('button',{name:'Register',exact:true}).click();
+      await expect(page.getByRole('alert')).toContainText('Account creation was not completed.');
+      expect(mode).toBe('register');
+      await expect.poll(()=>page.evaluate(()=>(window as any).__accountErrors.some((value:any)=>value.authError?.source==='registration'&&value.authError.error.includes('auth_error=registration')))).toBe(true);
+      expect(await page.evaluate(()=>JSON.stringify((window as any).__accountErrors))).not.toContain('fixture-password-only');
+    });
   });
 }
+
+test('login diagnostics include the HTTP failure message even when WebKit stack excludes it',async({page})=>{
+  await page.addInitScript(()=>{
+    const host=window as any;host.__accountErrors=[];host.__INK_NATIVE_HOST__={framework:'react-native'};
+    host.webkit={messageHandlers:{inkHostState:{postMessage:(value:unknown)=>host.__accountErrors.push(value)}}};
+    const OriginalError=Error;
+    const frame=(error:Error)=>{error.stack='@http://localhost/original-webkit-frame.js:1:1';return error;};
+    host.Error=new Proxy(OriginalError,{
+      construct:(target,args,newTarget)=>frame(Reflect.construct(target,args,newTarget)),
+      apply:(target,receiver,args)=>frame(Reflect.apply(target,receiver,args)),
+    });
+  });
+  await page.route('**/auth/session',route=>route.fulfill({status:401,json:{}}));
+  await page.route('**/auth/options',route=>route.fulfill({status:503,json:{detail:'BFF_ADMIN_UNAVAILABLE'}}));
+  await page.goto(base);
+  await expect(page.getByRole('alert')).toContainText('Login is temporarily unavailable.');
+  await expect.poll(()=>page.evaluate(()=>(window as any).__accountErrors.some((value:any)=>value.authError?.source==='login'&&value.authError.error.includes('AUTH_OPTIONS_UNAVAILABLE (HTTP 503)')))).toBe(true);
+});

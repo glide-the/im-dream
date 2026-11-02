@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="152" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 152" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="152"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-152)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="134" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,268) scale(1,-1)">同一条规则，从名称走到页面</text>
+			<rect x="0" y="53" width="150" height="59" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="12" y="91" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,182) scale(1,-1)">语义变量</text>
+			<text x="12" y="73" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,146) scale(1,-1)">bg-paper</text>
+			<rect x="185" y="53" width="150" height="59" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="197" y="91" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,182) scale(1,-1)">组件</text>
+			<text x="197" y="73" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,146) scale(1,-1)">输入容器</text>
+			<rect x="370" y="53" width="150" height="59" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="382" y="91" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,182) scale(1,-1)">页面</text>
+			<text x="382" y="73" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,146) scale(1,-1)">Chat输入区</text>
+			<path d="M 154,82 L 180,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 176,85 L 180,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 176,79 L 180,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 339,82 L 365,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 361,85 L 365,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 361,79 L 365,82 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="0" y="25" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,50) scale(1,-1)">颜色值随主题映射；组件和页面通过用途引用。</text>
+		</g>
+	</g>
+</svg>

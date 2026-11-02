@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="222" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 222" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="222"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-222)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="0" width="520" height="222" rx="8" ry="8" style="stroke: none; stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<text x="15" y="186" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,372) scale(1,-1)">标题</text>
+			<text x="88" y="186" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 28px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,372) scale(1,-1)">把记忆留在纸上</text>
+			<text x="15" y="133" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,266) scale(1,-1)">正文</text>
+			<text x="88" y="133" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 15px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,266) scale(1,-1)">今天，我留意到一个反复出现的想法。</text>
+			<text x="15" y="98" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,196) scale(1,-1)">说明</text>
+			<text x="88" y="98" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 10px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,196) scale(1,-1)">最后更新 · 内容与状态分层表达</text>
+			<path d="M 15,77 L 505,77 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="15" y="53" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,106) scale(1,-1)">写作正文</text>
+			<text x="88" y="52" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 18px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,104) scale(1,-1)">行距随着实际文字大小一起变化。</text>
+			<path d="M 88,45 L 493,45 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="88" y="23" style="font-family: Xiaolai, PingFang SC, sans-serif; font-size: 18px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,46) scale(1,-1)">自然换行，保留光标与阅读位置。</text>
+			<path d="M 88,16 L 493,16 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+		</g>
+	</g>
+</svg>

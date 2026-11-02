@@ -1,9 +1,10 @@
+# [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 # [Sync] 2026-10-31: include the private native Admin HTTP adapter and its exact resource digest.
 #!/usr/bin/env python3
 # [Input] Prepared original Runtime resources and Xcode target build settings.
 # [Output] App-local Node, original Runtime and original Next standalone resources with provenance receipts.
 # [Pos] iOS resource build phase; normal application configuration stays outside React assets.
-# [Sync] 2026-10-31: preserve the configured BFF account redirect; bundle identity never replaces the normal Web login callback.
+# [History] 2026-10-31: the earlier package retained the HTTP callback pending published native registration.
 # [Sync] 2026-10-29: project the existing public MCP callback env key to this native target URI; source env/client credentials remain unchanged.
 # [Sync] 2026-10-25: keep generated RuntimeArtifacts separate from tracked runtime sources.
 # [Sync] 2026-10-25: copy the explicit loopback host configuration and package the isolated original Next build.
@@ -16,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import plistlib
 import subprocess
 import sys
 
@@ -98,5 +100,20 @@ body = re.sub(r"(?m)^\s*(?:export\s+)?INK_CLAUDE_MCP_OAUTH_REDIRECT_URI\s*=.*(?:
 environment.write_text(body + "INK_CLAUDE_MCP_OAUTH_REDIRECT_URI=" + callback + "\n")
 environment.chmod(0o600)
 
-# Preserve the original frontend account redirect copied above. The OAuth server
-# must publish a configured App URI before a target can adopt that URI.
+# The same published Client retains its original HTTP callback and an exact App
+# callback. Only the packaged frontend copy adopts the native target receiver.
+account = identifier + ".auth:/auth/callback"
+metadata = plistlib.loads((ios / "InkMemory/Info.plist").read_bytes())
+if metadata.get("InkAccountOAuthCallbackURI", "").replace("$(PRODUCT_BUNDLE_IDENTIFIER)", identifier) != account:
+    raise RuntimeError("The packaged account callback must match Info.plist")
+account_environment = (next_root / next_entry).parent / ".env.local"
+if account_environment.is_file():
+    body = account_environment.read_text()
+    pattern = r"(?m)^([ \t]*(?:export[ \t]+)?INK_DREAM_BFF_REDIRECT_URI[ \t]*=[ \t]*)([^\r\n]*)"
+    if len(re.findall(pattern, body)) > 1:
+        raise RuntimeError("Duplicate BFF account callback configuration")
+    body, count = re.subn(pattern, lambda match: match.group(1) + account, body)
+    if not count:
+        body = body.rstrip("\r\n") + "\nINK_DREAM_BFF_REDIRECT_URI=" + account + "\n"
+    account_environment.write_text(body)
+    account_environment.chmod(0o600)

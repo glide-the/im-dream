@@ -36,6 +36,10 @@
 
 # Ink & Memory 跨平台方案
 
+<!-- [Sync] 2026-11-02: 增加应用UI规范与正式交互入口，文档验证和业务资格分别记录。 -->
+
+应用视觉、组件、四类桌面/窄屏骨架与术语见[UI规范v3.0](../../prd/mobile-app/ui-guidelines/README.md)，代表流程的正常/异常时序与状态转换见[正式交互稿](ui-guidelines-interaction.md)，问题诊断、方案取舍和文档验证见[评审记录](../../exec/ui-guidelines-review-20261102.md)。本次交付范围为文档与图示。
+
 本次移动端异步启动与开发者页单独维护：[独立PRD](../../prd/mobile-app/mobile-startup.md)直接展示启动页和开发者页骨架；[独立交互与技术设计](mobile-startup-interaction.md)集中维护操作、实现依据、四张业务图和生命周期；[专项评审](../../exec/mobile-startup-design-review-20261101.md)维护实施及验收。新增页面已接入源码，现有后台启动与原业务条件继续复用；设备采用与真实页面验收分别记录。
 
 写作记录打开关联对话的入口、三类关联、草稿与任务生命周期见[现行写作设计补充](writing-mobile-layout.md#写作记录与关联对话)。移动原卡片入口和发送前笔记快照已接入源码，[修复执行记录](../../exec/writing-linked-chat-fix-20261101.md)保存技术与设备资格；[原只读诊断](../../exec/writing-linked-chat-review-20261101.md)及[实施前设计](history/writing-linked-chat-before-fix-20261101.md)保留历史证据。

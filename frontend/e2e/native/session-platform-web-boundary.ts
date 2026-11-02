@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Explicit account-login completion and AppState events owned by the technical harness.
 // [Output] RNW presentation with observable native login Promise and runtime-start boundaries.
 // [Pos] Test-only platform facade; UIKit dismissal and real account login are separately verified.
@@ -12,3 +13,10 @@ f.cancel=(code='LOGIN_CANCELLED')=>{const pending=f.pending;f.pending=null;pendi
 const ready=()=>({state:'ready',localWebOrigin:'http://localhost:5173',privateEndpoint:'fixture-private-endpoint',token:'fixture-private-token'});
 f.settleRuntime=(error?:unknown)=>{const pending=f.runtimePending;f.runtimePending=null;if(error)pending?.reject(error);else pending?.resolve(ready());};
 export const NativeModules={InkRuntime:{ensureStarted:async()=>{f.starts++;if(new URLSearchParams(location.search).has('hold-runtime'))return new Promise((resolve,reject)=>{f.runtimePending={resolve,reject};});return ready();},copyText:async(value:string)=>{if(f.copyFails)throw Error('private-copy-error');f.copies.push(value);},presentLogin:()=>{f.presented++;return new Promise<void>((resolve,reject)=>{f.pending={resolve,reject};});}}};
+// Prebundled and direct imports represent the same explicitly owned fixture device.
+const accountObservers:Set<(value:unknown)=>void>=f.accountObservers??=(new Set<(value:unknown)=>void>());
+Object.assign(NativeModules.InkRuntime,{addListener:()=>{},removeListeners:()=>{}});
+export class NativeEventEmitter {
+  addListener(name:string,listener:(value:unknown)=>void){if(name==='InkAccountError')accountObservers.add(listener);return{remove:()=>accountObservers.delete(listener)};}
+}
+Object.assign(f,{accountError:(source:string,error:unknown)=>accountObservers.forEach(listener=>listener({source,error}))});

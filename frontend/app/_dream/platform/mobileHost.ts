@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Read-only native host marker and canonical route matches.
 // [Output] Mobile-only presentation policy and credential-free navigation state.
 // [Pos] RN host integration; HTTP, permissions and business state retain their original modules.
@@ -22,9 +23,9 @@ export function mobileHostPath(path: string): string {
   return url.pathname + url.search;
 }
 
-export function reportMobileHostRoute(authenticated: boolean, authFailure = false): void {
+export function reportMobileHostRoute(authenticated: boolean, authFailure = false, authError?: {source:'login'|'registration'|'google';error:string}): void {
   if (!isReactNativeHost()) return;
   (window as NativeWindow).webkit?.messageHandlers?.inkHostState?.postMessage({
-    path: window.location.pathname + window.location.search, authenticated, authFailure,
+    path: window.location.pathname + window.location.search, authenticated, authFailure, ...(authError?{authError}:{}),
   });
 }

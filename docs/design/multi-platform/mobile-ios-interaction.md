@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-02: 系统Google操作携带明确选择，原provider签名验证后继续原social流程；失败停止自动跳转。 -->
+<!-- [Sync] 2026-11-02: 修复公网包账号回调映射与现有诊断接线，原HTTP回调、Client、PKCE和用户权限保持。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-11-01: 端侧网页链接统一系统默认浏览器，修复Notion默认Linking接收者及同步失败恢复。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
@@ -31,7 +33,7 @@
 
 # Ink & Memory iOS交互设计
 
-现行登录认证、目标编译与配置职责见[运行库认证合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，操作指南见[认证排障](../../deploy/mobile-auth-troubleshooting.md)。iOS已有登录文档、系统授权和Cookie适配源码；公网Google精确回调与完整业务资格待验收。下方旧日期阶段保留其原始状态，本轮设备/账号复测0。
+现行登录认证、目标编译与配置职责见[运行库认证合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，操作指南见[认证排障](../../deploy/mobile-auth-troubleshooting.md)。iOS已有登录文档、系统授权和Cookie适配源码；构建26的真机账号错误日志复验通过，当前构建27已安装启动。公网Google完整授权与新账户创建资格按[本轮执行记录](../../exec/ios-account-entry-fix-20261102.md)登记。下方旧日期阶段保留其原始状态。
 
 ## 现行iOS工程与交互
 
@@ -721,3 +723,135 @@ stateDiagram-v2
 ```
 
 当前实现为局部程序修订；模拟器复现、默认浏览器实际打开与返回、同步失败恢复及七项Web回归已通过，构建22已在原iPhone安装启动。实际命令及真实授权资格分别归[本轮执行记录](../../exec/ios-notion-links-20261101.md)。技术fixture的授权页使用明确合成地址，真实Notion授权及内容读取继续沿原正常账户入口独立验收。
+
+
+## 公网包账号回调与诊断接线（2026-11-02）
+
+设备构建24的`Info.plist`接收`com.inkmemory.mobile.auth:/auth/callback`，其包内BFF采用`http://localhost:5173/auth/callback`。`NativeAccountCallback.authorization`的精确匹配拒绝该Google操作。公网对应Client同时缺少App回调登记。注册入口在原iPhone可切换到Create Account，表单与按钮正常；账户创建成功尚需独立验证。
+
+选定最小修订：`bundle-node.py`只对包内前端env的既有`INK_DREAM_BFF_REDIRECT_URI`投影目标App回调，先按实际bundle identifier解析Info中的Xcode宏并精确核对；仓库env保持。Admin沿同一loopback服务和Client增量登记App回调，保留原HTTP回调、S256、scope、grant和密钥；browser-session交换按所属服务的精确URI校验。未知回调继续拒绝。构建25的App原生接收地址与BFF配置一致。
+
+正常交互沿原表单、系统授权、原BFF交易Cookie及session验证。用户切换注册继续现有字段与POST；Google系统会话仍执行现有Admin授权与账户页面，Google身份验证由原provider处理。登录成功后关闭原窗口，再由原`SessionGate`进入主页。系统取消、左上关闭及重开继续原规则。
+
+错误观测复用[启动交互中的账号错误接入](mobile-startup-interaction.md#账号错误接入2026-11-02)。公开`auth_error`保留credentials、registration或google对应来源；options HTTP状态、页面加载NSError和Google各阶段错误进入现有错误列表，页面刷新退出请求重放职责。收集范围排除表单、Cookie和授权查询值。原启动与账号实例生命周期保持。
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Entry as AuthEntry
+  participant Native as NativeAccountLogin
+  participant BFF as Next auth/start和auth/callback
+  participant System as ASWebAuthenticationSession
+  participant Admin as Admin OAuth及原账户页面
+  participant Gate as SessionGate
+  User->>Entry: 点击Continue with Google
+  Entry->>Native: 原POST导航交给账号操作
+  Native->>BFF: GET /auth/start
+  BFF-->>Native: 303 原Client与S256授权URL
+  Native->>Native: 精确匹配已登记App回调
+  Native->>System: 打开原Admin授权URL
+  System->>Admin: 原授权及Google登录
+  Admin-->>System: 原code与state返回App
+  System-->>Native: 匹配账号回调
+  Native->>BFF: 原GET /auth/callback及交易Cookie
+  BFF->>Admin: 原browser-session交换
+  Admin-->>BFF: 原会话句柄
+  BFF-->>Native: 原Cookie及303
+  Native->>Native: 原Cookie复制及session验证
+  Native-->>Gate: 原登录窗口关闭后完成
+  Gate-->>User: 原主页
+```
+
+该图定义现有成功路径，真实Google账户验证状态以[本轮执行记录](../../exec/ios-account-entry-fix-20261102.md)为准。历史本机及公网阶段回执继续保留。
+
+## Google选择连续性（2026-11-02）
+
+### 背景与问题
+
+原iOS宿主将Google表单转换为通用authorize，系统账户页要求再次选择Google。该分支改变原按钮的一次选择交互。现行修订保留同一Client及系统浏览器，在原授权查询携带单值`identity_provider=google`。
+
+### 目标与边界
+
+Admin原provider签名该查询，`selectedGoogleLogin`核对签名、有效期及单值Google选择；`AuthSignIn`沿原`adminAuthClient.signIn.social`继续。该参数只控制原页面入口。原PKCE、state、Cookie、scope、账户关联与权限处理保持。三份Admin实现、一个宿主方法及对应回归承载修订；新接口、依赖和数据表为0。原设计中手动第二次选择Google的图示与回执保留历史状态。
+
+### 概念与规则
+
+当前页面最多自动发起一次Google操作，准备阶段显示正在打开Google。API失败保留原错误与重试；Google错误回调在原页面使用`#google-error`恢复控件，移除provider追加的`error`和`error_description`后保留原签名查询，避免再次自动跳转并允许显式重试。系统取消仍结束本次账号操作并回到原登录弹窗。签名、Client、回调和授权同意继续由原模块分别校验。完整Google身份验证按实际回执登记。
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant N as NativeAccountLogin
+  participant B as Next auth/start及auth/callback
+  participant S as ASWebAuthenticationSession
+  participant A as Admin OAuth Provider
+  participant P as AuthSignIn及selectedGoogleLogin
+  participant G as Google
+  U->>N: 点击原Continue with Google
+  N->>B: 原GET /auth/start
+  B-->>N: 原Client及S256授权URL
+  N->>S: 原authorize URL携带identity_provider=google
+  S->>A: 原授权请求
+  A-->>P: 原已签名登录查询
+  P->>P: 验签、期限及单值Google选择
+  P->>A: 原signIn.social及oauth_query
+  A-->>S: Google授权URL和原状态Cookie
+  S->>G: Google身份验证
+  G-->>A: 原/api/auth/callback/google
+  A-->>S: 原授权同意及App回调
+  S-->>N: 原账号回调
+  N->>B: 原callback、Cookie及session校验
+  B-->>N: 原会话结果
+  N-->>U: 关闭登录窗口，原主页
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant N as NativeAccountLogin
+  participant S as ASWebAuthenticationSession
+  participant P as AuthSignIn
+  participant A as Admin Google处理
+  participant D as BackendRuntimeManager
+  U->>N: 选择Google
+  N->>S: 系统授权
+  alt 用户取消
+    S-->>N: canceledLogin
+    N-->>U: 原Dream登录弹窗
+  else 原social API失败
+    P->>A: 原signIn.social
+    A-->>P: 原失败响应
+    P-->>U: 原错误及Google重试
+  else Google回调失败
+    A-->>P: 原签名页面及google-error片段
+    P->>P: 停止自动跳转
+    P-->>U: 原错误及Google重试
+  else 宿主配置或回调失败
+    N->>D: InkAccountError原阶段错误
+    N-->>U: 原失败与恢复操作
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> LoginVisible
+  LoginVisible --> PreparingGoogle: 原Google按钮
+  PreparingGoogle --> GoogleVisible: 验证签名并继续原social
+  PreparingGoogle --> RetryVisible: 原social或宿主失败
+  PreparingGoogle --> LoginVisible: 系统取消
+  GoogleVisible --> RetryVisible: google-error或宿主失败
+  RetryVisible --> PreparingGoogle: 用户重试Google
+  GoogleVisible --> LoginVisible: 系统取消
+  GoogleVisible --> HomeVisible: 原授权及session成功
+  LoginVisible --> [*]: 左上关闭
+```
+
+评审：修订恢复原Google按钮的一次选择语义；原网页、账户和授权边界保持。技术验证、Admin部署、系统授权进入Google页面与完整身份验证分别记录，当前进度归[执行记录](../../exec/ios-account-entry-fix-20261102.md)。
+
+当前采用回执：构建27原iPhone的Google入口与取消/关闭通过，真实Google账号选择页已目视核对；公网候选Linux制品采用并返回200。独立出口修复后的Google登录由用户真机复验确认通过；新账户创建继续独立登记，详细命令与退出码见[最终采用记录](../../exec/ios-account-entry-fix-20261102.md#最终制品与服务采用)。
+
+### 服务端兑换网络与弹窗验收
+
+2026-11-02用户实际Google网页登录后停在认证服务登录页，公开error=invalid_code。原Admin出口上游无监听并返回CONNECT502，原App成功回调尚未触发。当前采用独立Docker Clash出口，原Client、PKCE、scope、账户、回调和finishLogin保持；服务名tun-proxy，容器使用现有混合端口配置。
+
+正常流程仍按原Google回调、Admin授权、App回调、BFF exchange/session及finishLogin执行；网络失败沿原错误页与重新发起恢复。公开端点连通记录为服务端网络验证。2026-11-02用户确认修复后真机复验通过；自动化runner受系统签名信任拦截，逐阶段会话及界面证据继续按缺失登记。部署范围与用户验收回执见[账号执行记录](../../exec/ios-account-entry-fix-20261102.md#google回调兑换与独立出口2026-11-02后续)。

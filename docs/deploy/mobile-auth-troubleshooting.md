@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: Google网页后invalid_code先检查Admin独立出口，新增Docker代理与真机工具信任边界。 -->
 <!-- [Sync] 2026-11-01: 20实际密码303及PKCE回调、会话/配置/历史200、真实任务完成并结算；保留先前503及UI缺口。 -->
 <!-- [Sync] 2026-11-01: 追加19复用连接残余超时与20失败池处理，桌面停止约束和真机独立资格保持。 -->
 <!-- [Sync] 2026-10-31: 构建18定向日志已实现，补阶段判定与受控复现；真机采用及业务结果单列。 -->
@@ -362,3 +363,19 @@ USB数据连接已枚举到同一设备。usbmuxd直连原App端口返回连接�
 单次密码POST返回303，原/auth/start、authorize、/auth/callback与/login导航完成，合法会话/CSRF恢复；配置、模型目录和历史均200。原公开POST /api/claude-agent单次发送，App内Python→原SDK/CLI完成，最终回复匹配约定短回复，助手completed、Thread idle、原messages持久化通过。正常Admin同一账户时间窗口内仅1项Gateway请求，HTTP200、succeeded、settled；实际模型deepseek-v4-flash-vision-exp，输入3627、缓存读取19712、输出89、扣减23428 Token。追加模型调用0。
 
 后台协议读取与页面显示分别验收；本次操作未控制真机页面。原页面的登录弹窗关闭及历史/新回复显示待手机可见回执。网络丢失恢复、取消隔离与失败池排空已通过定向技术合同；实际真机恢复触发及长期网络稳定性仍缺证据。具体回执归[执行记录](../exec/mobile-app-design-review-20261024.md#2026-11-01-构建20原登录协议与一次真实claude任务)。
+
+## Google登录后停在认证服务登录页
+
+Google网页身份验证后，Admin通过`https://oauth2.googleapis.com/token`兑换授权码。该段连接由Admin的出口提供；手机VPN覆盖手机网络。`invalid_code`覆盖provider授权码兑换失败，排障按服务端实际连接证据判断。
+
+本轮发现原Tinyproxy17891的上游17890缺失，CONNECT502。当前原生Admin继续原HTTP代理配置，Tinyproxy指向Docker Clash混合代理17892；容器BitzNet节点独立出站。服务名tun-proxy，当前配置TUN关闭，宿主默认路由保持。Admin部署资源归其`deploy/clash/`目录，真实配置退出Git。
+
+排查顺序：
+
+1. 核对公开OAuth错误码、时间与请求路径，输出排除完整查询、授权code/state、Cookie与凭据。
+2. 核对Admin服务用户、实际Node环境、现有HTTP代理监听及对应上游，使用无凭据公开Google端点验证连接。token端点GET404与JWK200只证明网络。
+3. 核对容器healthy、回环发布、原配置、节点选择和私有日志；原Admin及PostgreSQL保持。
+4. 重新发起原Google登录，观察原App回调、BFF exchange/session、弹窗关闭及主页。先前失败或过期的code退出重放。
+5. iOS拒绝测试runner时，将签名、profile、设备信任及UI工具状态单列。工具错误退出业务缺陷判定；后续真机闭环以可见主页与原会话共同确认。
+
+2026-11-02独立出口采用后，用户确认真机复验通过。该结果登记为用户手工验收，自动化runner限制及逐阶段证据缺口分别保留。本轮实际结果与限制见[账号执行记录](../exec/ios-account-entry-fix-20261102.md#google回调兑换与独立出口2026-11-02后续)。
