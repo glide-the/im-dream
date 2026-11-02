@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 增加独立iOS App Store手册入口，分列发布前提、操作、评审及文档验证。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-29: 本机Admin 3000传输、旧SSH转发卸载、Simulator普通env装配及原网页登录读取回执按范围登记。 -->
 <!-- [Sync] 2026-10-28: 登记 VS Code Chrome 调试实例的扩展隔离与 hydration mismatch 排查。 -->
@@ -59,6 +60,7 @@
 | [`mobile-app-release.md`](mobile-app-release.md) | iOS/Android路线与打包发布设计 | 端侧采用现有关闭Claude命令沙箱配置；保留系统沙箱与业务权限，完整工具、真机、Android及发行继续验收 |
 | [`mobile-auth-troubleshooting.md`](mobile-auth-troubleshooting.md) | 端侧目标编译与登录认证排障 | 原env/回调/Cookie、503/504、平台差异、命令模板及后续验收；真机17失败保留 |
 | [`ios-iphone-install-release.md`](ios-iphone-install-release.md) | iPhone 实机操作手册 | 当前 RN 工程、开发签名、临时包、TestFlight 与 App Store 路径及回执 |
+| [`ios-app-store-release.md`](ios-app-store-release.md) | iOS App Store上架操作手册 | 账号与分发签名、资源和审核前提、Archive、TestFlight、提审发行、恢复流程与文档评审；实际上传及发布待执行 |
 | [`release-system-design.md`](release-system-design.md) | 历史发布体系设计 | 保留旧 Vite/npm/nginx/SQLite/GCS 判断；不是当前操作手册 |
 | [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md) | Claude SDK/Runtime 打包发布与 Dream 集成 | PyPI SDK、npm 五包、OIDC、精确版本/哈希、验证和回滚的中文执行手册 |
 | [`claude-registry-release-acceptance.md`](claude-registry-release-acceptance.md) | Claude registry 发布后验收 | provider-free 校验 PyPI/npm 制品身份、安装和 fail-closed 条件 |
