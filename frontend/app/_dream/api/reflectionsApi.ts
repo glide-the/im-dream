@@ -2,6 +2,7 @@
 // [Output] One shared Reflections API including original idempotent creation, SSE-first start, recovery and strict report history.
 // [Pos] Domain extraction from voiceApi; voiceApi preserves its existing public exports.
 // [Sync] 2026-10-29: preserve Web payloads/parser/policy; native can supply local HTTP streams, original storage keys and Foundation UUID.
+// [Sync] 2026-11-02: expose pending-submission state, retain committed task identity and recover it by read before continuing the original task.
 import {z} from 'zod';
 import {getBrowserCsrfToken,browserRequestHeaders} from '../lib/browserSession';
 import {API_BASE} from '../lib/apiBase';
@@ -320,6 +321,7 @@ async function reflectionCreateError(response: Response): Promise<string> {
 
 const pendingReflectionSubmissionSchema = z.strictObject({
   request_key: z.string().uuid(),
+  task_id: z.string().uuid().optional(),
   body: z.strictObject({
     sections: z.array(z.enum(['echoes', 'traits', 'patterns'])).optional(),
     auto_start: z.boolean(), language: z.string(), session_ids: z.array(z.string()).optional(),
@@ -327,6 +329,26 @@ const pendingReflectionSubmissionSchema = z.strictObject({
       deck_id: z.string().optional(), agent_id: z.string().optional(), snapshot_version: z.string().optional() }).optional(),
   }),
 });
+
+function readPendingReflectionSubmission() {
+  try {
+    const parsed = pendingReflectionSubmissionSchema.safeParse(JSON.parse(localStorage.getItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION) || 'null'));
+    return parsed.success ? parsed.data : null;
+  } catch { return null; }
+}
+
+function hasPendingReflectionSubmission(): boolean {
+  return readPendingReflectionSubmission() !== null;
+}
+
+function reflectionSubmissionRecoveryMessage(taskKnown = false): string {
+  if (taskKnown) return currentFrontendLanguage().startsWith('zh')
+    ? '上次分析已创建，请重试读取其状态。'
+    : 'The previous analysis was created. Retry to read its status.';
+  return currentFrontendLanguage().startsWith('zh')
+    ? '上次分析提交结果尚未确认，请重试以恢复该次提交。'
+    : 'The previous analysis submission has not been confirmed. Retry to recover it.';
+}
 
 async function createReflectionTask(
   sections?: ReflectionSectionKey[],
@@ -336,31 +358,44 @@ async function createReflectionTask(
   analysisContent?: ReflectionAnalysisContentOptions,
 ): Promise<ReflectionTask> {
   const fresh = { sections, auto_start: autoStart, language, session_ids: sessionIds, analysis_content: analysisContent };
-  let submission: z.infer<typeof pendingReflectionSubmissionSchema>;
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION) || 'null');
-    const parsed = pendingReflectionSubmissionSchema.safeParse(stored);
-    submission = parsed.success
-      ? parsed.data
-      : { request_key: await requestId(), body: fresh };
-  } catch { submission = { request_key: await requestId(), body: fresh }; }
+  const submission: z.infer<typeof pendingReflectionSubmissionSchema> = readPendingReflectionSubmission() ?? { request_key: await requestId(), body: fresh };
   localStorage.setItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION, JSON.stringify(submission));
-  const res = await fetch(`${API_BASE}/api/reflections/tasks`, {
-    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ ...submission.body, request_key: submission.request_key }),
-  });
+  if (submission.task_id) {
+    // An authorized committed receipt already identifies the task. A failed read keeps it pending.
+    try {
+      const task = await getReflectionTask(submission.task_id);
+      if (task.task_id !== submission.task_id) throw new Error('Invalid recovered analysis task');
+      localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
+      return task;
+    } catch { throw new Error(reflectionSubmissionRecoveryMessage(true)); }
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/reflections/tasks`, {
+      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ ...submission.body, request_key: submission.request_key }),
+    });
+  } catch { throw new Error(reflectionSubmissionRecoveryMessage()); }
   if (!res.ok) {
     const failure: unknown = await res.clone().json().catch(() => null);
     const detail = isRecord(failure) && isRecord(failure.detail) ? failure.detail : null;
     const outcomeUnknown = detail?.creation_committed === true || detail?.outcome_unknown === true
       || (res.status >= 500 && detail?.outcome_unknown !== false);
-    if (!outcomeUnknown) localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
+    if (outcomeUnknown) {
+      const committedTaskId = detail?.creation_committed === true ? z.string().uuid().safeParse(detail.task_id) : null;
+      if (committedTaskId?.success) localStorage.setItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION,
+        JSON.stringify({ ...submission, task_id: committedTaskId.data }));
+      throw new Error(reflectionSubmissionRecoveryMessage(committedTaskId?.success === true));
+    }
+    localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
     const message = await reflectionCreateError(res);
-    throw new Error(outcomeUnknown ? `${message} ${currentFrontendLanguage().startsWith('zh')
-      ? '重试会恢复上次提交的分析。' : 'Retry to recover the previous analysis submission.'}` : message);
+    throw new Error(message);
   }
-  const task = normalizeReflectionTask(await res.json());
-  if (!task.task_id) throw new Error('Invalid analysis task response');
+  let task: ReflectionTask;
+  try {
+    task = normalizeReflectionTask(await res.json());
+    if (!task.task_id) throw new Error('Invalid analysis task response');
+  } catch { throw new Error(reflectionSubmissionRecoveryMessage()); }
   localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_PENDING_SUBMISSION);
   return task;
 }
@@ -499,6 +534,10 @@ async function runReflectionsTask(
   options: RunReflectionsTaskOptions = {},
 ): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
   const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage(), options.sessionIds, options.analysisContent);
+  if (task.status === 'FAILED') throw new Error(reflectionKnownFailure(task.error_summary) ?? (task.error_summary || 'Reflections task failed'));
+  if (task.status === 'COMPLETED' || task.status === 'PARTIAL_FAILED') {
+    return reflectionResultsBySection(task.results ?? await getReflectionTaskResults(task.task_id));
+  }
   options.onEvent?.({
     id: 'client-task-created',
     task_id: task.task_id,
@@ -509,7 +548,7 @@ async function runReflectionsTask(
   });
   let started = false;
   const startOnce = async () => {
-    if (started) return;
+    if (started || task.status !== 'CREATED') return;
     started = true;
     await startReflectionTask(task.task_id);
   };
@@ -653,9 +692,9 @@ async function getAnalysisHistory(options: { limit?: number; before?: AnalysisHi
     } } as AnalysisHistoryReport)), next_cursor: data.next_cursor,
   };
 }
-  return {getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory};
+  return {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory};
 }
 
-export const {getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory}=createReflectionsApi();
+export const {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory}=createReflectionsApi();
 
 export type ReflectionsApi=ReturnType<typeof createReflectionsApi>;

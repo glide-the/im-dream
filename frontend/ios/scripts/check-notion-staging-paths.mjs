@@ -1,4 +1,5 @@
 // [Sync] 2026-10-31: reproduce native ancestor aliases while preserving child symlink, digest and mode checks.
+// [Sync] 2026-11-03: qualify the second pinned guest resource and reject ripgrep symlink/digest mismatches.
 // [Input] Original host bootstrap and isolated canonical/aliased native directory fixtures.
 // [Output] Notion staging path, digest, symlink rejection and executable-mode regression without CLI/network execution.
 // [Pos] Provider-free host validation; all files are created under a named temporary fixture root.
@@ -22,7 +23,7 @@ const fixtureBytes=Buffer.from('synthetic pinned Notion executable; never execut
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 let passed=0;
 
-function runCase({alias=false,parentSymlink=false,executableSymlink=false,invalidDigest=false}={}) {
+function runCase({alias=false,parentSymlink=false,executableSymlink=false,invalidDigest=false,ripgrepSymlink=false,invalidRipgrepDigest=false}={}) {
  const temporary=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ink-notion-staging-paths-')));
  try {
   const resources=path.join(temporary,'resources'),data=path.join(temporary,'data');
@@ -35,10 +36,14 @@ function runCase({alias=false,parentSymlink=false,executableSymlink=false,invali
   fs.writeFileSync(path.join(resources,'guest/manifest.json'),JSON.stringify({rootDigest,entries:[]}));
   fs.writeFileSync(path.join(source,'manifest.json'),JSON.stringify({binarySha256:digest(invalidDigest?Buffer.from('different fixture'):fixtureBytes)}));
   fs.writeFileSync(path.join(source,'ntn'),fixtureBytes);
+  const ripgrep=path.join(resources,'node/ripgrep');fs.mkdirSync(ripgrep);
+  fs.writeFileSync(path.join(ripgrep,'rg'),fixtureBytes);
+  fs.writeFileSync(path.join(ripgrep,'manifest.json'),JSON.stringify({guestPath:'usr/local/bin/rg',binarySha256:digest(invalidRipgrepDigest?Buffer.from('different fixture'):fixtureBytes)}));
   const outside=path.join(temporary,'outside');fs.mkdirSync(outside);
   const victim=path.join(outside,'retained.txt');fs.writeFileSync(victim,'retained');
   if(parentSymlink){fs.rmdirSync(bin);fs.symlinkSync(outside,bin);}
   if(executableSymlink)fs.symlinkSync(victim,path.join(bin,'ntn'));
+  if(ripgrepSymlink)fs.symlinkSync(victim,path.join(bin,'rg'));
   let nativeData=data;
   if(alias){nativeData=path.join(temporary,'native-data-alias');fs.symlinkSync(data,nativeData);}
   const endpoint=path.join(nativeData,'Library/Application Support/InkMemory/runtime/node-fixture.json');
@@ -51,6 +56,8 @@ function runCase({alias=false,parentSymlink=false,executableSymlink=false,invali
   const execute=()=>vm.runInContext(bootstrap,context,{filename:hostPath});
   if(invalidDigest)assert.throws(execute,/IOS_NOTION_CLI_DIGEST_MISMATCH/);
   else if(parentSymlink||executableSymlink)assert.throws(execute,/IOS_NOTION_CLI_PATH_INVALID/);
+  else if(invalidRipgrepDigest)assert.throws(execute,/IOS_RIPGREP_DIGEST_MISMATCH/);
+  else if(ripgrepSymlink)assert.throws(execute,/IOS_RIPGREP_PATH_INVALID/);
   else {
    execute();
    assert.equal(context.__stagingResult.guestRoot,guest);
@@ -59,6 +66,8 @@ function runCase({alias=false,parentSymlink=false,executableSymlink=false,invali
    assert.deepEqual(fs.readFileSync(executable),fixtureBytes);
    assert.equal(fs.statSync(executable).mode&0o777,0o755);
    assert.equal(fs.lstatSync(executable).isSymbolicLink(),false);
+   assert.deepEqual(fs.readFileSync(path.join(bin,'rg')),fixtureBytes);
+   assert.equal(fs.statSync(path.join(bin,'rg')).mode&0o777,0o755);
   }
   assert.equal(fs.readFileSync(victim,'utf8'),'retained');
   if(parentSymlink)assert.equal(fs.existsSync(path.join(outside,'ntn')),false);
@@ -71,4 +80,6 @@ runCase({alias:true});
 runCase({parentSymlink:true});
 runCase({executableSymlink:true});
 runCase({invalidDigest:true});
+runCase({ripgrepSymlink:true});
+runCase({invalidRipgrepDigest:true});
 console.log(JSON.stringify({passed,failed:0,networkRequests:0,cliExecutions:0,credentialReads:0,temporaryRootsRemaining:0}));

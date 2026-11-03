@@ -12,6 +12,7 @@
 # [Sync] 2026-10-13: include the effective workflow's field definitions and frozen diary retrieval instructions in the final user message.
 # [Sync] 2026-10-13: preserve the selected server model and its CLI configuration in internal Reflections turns.
 # [Sync] 2026-10-13: repeat exact frozen Notion citation IDs after the output contract without repairing invalid references.
+# [Sync] 2026-11-03: request frozen diary bodies through the existing get_sessions_range include_text option.
 """Run Reflections tasks from an immutable Admin worker snapshot."""
 
 from __future__ import annotations
@@ -306,7 +307,7 @@ def _build_sessions_context(snapshot: ReflectionLaunchSnapshotDTO) -> str:
     lines = [
         "Full note bodies are intentionally omitted from this prompt.",
         "Use only these frozen session IDs in related_session_ids.",
-        "Fetch needed content with mcp__user__get_sessions_range; its server projection is bound to this task snapshot.",
+        "Read needed note bodies with mcp__user__get_sessions_range(include_text=true); its server projection is bound to this task snapshot.",
     ]
     lines.extend(
         json.dumps(_session_metadata(session), ensure_ascii=False)
@@ -604,7 +605,7 @@ class ClaudeAgentReflectionsRunner:
             "Complete this Reflections analysis in this turn. The selected Agent supplies an analysis perspective; "
             "retain this task and its required output format instead of replying as an ordinary chat.\n"
             "The sessions_context contains diary metadata. Use the available mcp__user__get_sessions_range "
-            "tool to read the frozen diary texts you need before drawing conclusions about the writer.\n"
+            "tool with include_text=true to read the frozen diary texts you need before drawing conclusions about the writer.\n"
             f"{workflow}\n{answer_contract}\n{_language_instruction(snapshot.language)}\n{notion_rule}"
             "If the available evidence supports no insights, return [] instead of an explanation or a follow-up question. "
             "Then output ONLY a JSON array."

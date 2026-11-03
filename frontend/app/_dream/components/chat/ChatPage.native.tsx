@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: retain the original history row and identify deletion failure for a fresh confirmed retry.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Sync] 2026-10-28: retain landing actions while initial server configuration is unreadable; submission readiness follows the caller.
 // [Sync] 2026-10-28: allow App-level search ownership outside the hidden underlying scene while activity/detail is open.
@@ -16,7 +17,7 @@ import QuickActionStrip from './QuickActionStrip.native';
 import type {QuickActionStripItem} from './QuickActionStrip.types';
 import {groupChatThreadsByDate} from './chatHistoryPresentation';
 import {IconClock,IconSearch} from './Icons';
-export interface NativeChatPageProps {hasConversation:boolean;composer:ReactNode;conversation:ReactNode;history:NativeChatHistory;quickActions:QuickActionStripItem[];quickActionsDisabled?:boolean;onQuickAction:(item:QuickActionStripItem)=>void;onSelectThread:(id:string)=>void;onDeleteThread:(id:string)=>void;activeThreadId?:string|null;showSearch?:boolean;}
+export interface NativeChatPageProps {hasConversation:boolean;composer:ReactNode;conversation:ReactNode;history:NativeChatHistory;quickActions:QuickActionStripItem[];quickActionsDisabled?:boolean;onQuickAction:(item:QuickActionStripItem)=>void;onSelectThread:(id:string)=>void;onDeleteThread:(id:string,title?:string)=>void;activeThreadId?:string|null;showSearch?:boolean;}
 export default function ChatPage({hasConversation,composer,conversation,history,quickActions,quickActionsDisabled=false,onQuickAction,onSelectThread,onDeleteThread,activeThreadId,showSearch=true}:NativeChatPageProps){
   const {t}=useTranslation(),colors=useInkColors();
   return <View style={styles.fill}>
@@ -34,7 +35,7 @@ export default function ChatPage({hasConversation,composer,conversation,history,
               <IconSearch width={13.6} height={13.6} color={colors['color-text-secondary']} /><InkLabel style={{fontSize:12.8,fontWeight:'600',color:colors['color-text-secondary']}}>{t('chat.search.button')}</InkLabel>
             </Pressable>
           </View>
-          {history.deleteError?<InkLabel accessibilityRole="alert" style={{color:colors['color-state-error'],padding:8}}>{t('chat.activity.historyFailed')}</InkLabel>:null}
+          {history.deleteError?<InkLabel accessibilityRole="alert" style={{color:colors['color-state-error'],padding:8}}>{t('deck.related.deleteFailed')}</InkLabel>:null}
           </>} groups={groupChatThreadsByDate(history.threads,t)} activeThreadId={activeThreadId} deletingThreadId={history.deletingId}
             loading={history.loading} loadingMore={history.loadingMore} error={history.error} moreError={history.moreError} hasMore={history.hasMore}
             onSelectThread={onSelectThread} onDeleteThread={onDeleteThread} onReload={()=>void history.reload()} onLoadMore={()=>void history.loadMore()} />}

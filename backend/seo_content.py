@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-02: use Kastention in public display content with original URLs and crawler policy.
 # [Input] Consume public frontend/backend URL values, curated knowledge links, and public crawler requests.
 # [Output] Generate SEO metadata content for robots.txt, sitemap.xml, and llms.txt with public knowledge references.
 # [Pos] backend SEO content helper
@@ -15,10 +16,10 @@ from datetime import date
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from xml.sax.saxutils import escape as xml_escape
 
-APP_NAME = "Ink & Memory"
+APP_NAME = "Kastention"
 APP_TAGLINE = "Write. Reflect. Listen to the voices within."
 APP_DESCRIPTION = (
-    "Ink & Memory is a bilingual AI journaling studio for reflective writing, "
+    f"{APP_NAME} is a bilingual AI journaling studio for reflective writing, "
     "inner voice feedback, visual memory timelines, and personal pattern discovery."
 )
 APP_KEYWORDS = (
@@ -63,7 +64,7 @@ BLOG_AND_KNOWLEDGE_BASE_LINKS = (
 PUBLIC_APP_PATHS = (
     (
         "",
-        "Ink & Memory app homepage for AI-assisted journaling and self-reflection.",
+        f"{APP_NAME} app homepage for AI-assisted journaling and self-reflection.",
     ),
 )
 
@@ -211,5 +212,5 @@ def build_llms_txt(
 {", ".join(APP_KEYWORDS)}
 
 ## Attribution
-Ink & Memory is an open-source AI journaling and reflective writing application.
+{APP_NAME} is an open-source AI journaling and reflective writing application.
 """

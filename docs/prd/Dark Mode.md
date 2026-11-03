@@ -1,6 +1,7 @@
+<!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 # Dark Mode PRD
 
-> Ink & Memory 聊天与文件 PRD 的暗色模式设计规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
+> Kastention 聊天与文件 PRD 的暗色模式设计规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 

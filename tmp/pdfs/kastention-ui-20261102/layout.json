@@ -1,0 +1,124 @@
+{
+  "pages": 19,
+  "figures": 17,
+  "font": "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+  "source_sha256": "0e5dad36a1743f0af9b1757de923c6842bcee286b91d55928635a1f4caac526b",
+  "pdf_sha256": "5f2662c592e57b975125f4c0af97af440e262ae629bd7d2c93639ee38e6559df",
+  "layout": [
+    {
+      "page": 1,
+      "section": "cover",
+      "content_bottom_pt": 235.51,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 2,
+      "section": "guide",
+      "content_bottom_pt": 327.29,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 3,
+      "section": "principles",
+      "content_bottom_pt": 203.0,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 4,
+      "section": "color",
+      "content_bottom_pt": 155.24,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 5,
+      "section": "typography",
+      "content_bottom_pt": 194.71,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 6,
+      "section": "layout",
+      "content_bottom_pt": 187.72,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 7,
+      "section": "geometry",
+      "content_bottom_pt": 208.21,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 8,
+      "section": "controls",
+      "content_bottom_pt": 175.48,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 9,
+      "section": "feedback",
+      "content_bottom_pt": 186.15,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 10,
+      "section": "overlays",
+      "content_bottom_pt": 198.36,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 11,
+      "section": "chat",
+      "content_bottom_pt": 145.11,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 12,
+      "section": "writing",
+      "content_bottom_pt": 145.11,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 13,
+      "section": "reflections",
+      "content_bottom_pt": 127.91,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 14,
+      "section": "more",
+      "content_bottom_pt": 127.91,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 15,
+      "section": "states",
+      "content_bottom_pt": 232.32,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 16,
+      "section": "accessibility",
+      "content_bottom_pt": 146.32,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 17,
+      "section": "glossary-a",
+      "content_bottom_pt": 159.87,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 18,
+      "section": "glossary-b",
+      "content_bottom_pt": 126.74,
+      "safe_bottom_pt": 56
+    },
+    {
+      "page": 19,
+      "section": "sources",
+      "content_bottom_pt": 269.49,
+      "safe_bottom_pt": 56
+    }
+  ],
+  "overflow": []
+}

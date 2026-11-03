@@ -13,6 +13,8 @@
 // [Sync] 2026-10-28: expose GET-only binary Workspace leases, text reads and system export without passing binary bytes through JS.
 // [Sync] 2026-10-28: message Copy writes caller-selected text to UIPasteboard without a service request.
 // [Input] React Native lifecycle calls and relative original BFF HTTP requests.
+// [Sync] 2026-11-03: sample own-process CPU and existing native activity on demand; no background timer or extra runtime.
+// [Sync] 2026-11-02: retain one scene-local diagnostics overlay on the existing bridge; never create a second backend or key window.
 // [Output] App-owned runtime, incremental HTTP reads and normal Web authentication.
 // [Pos] iOS platform adapter; React Native owns main application screens.
 // [Sync] 2026-10-28: import user-selected file handles and upload bytes through the original BFF or signed direct URL; retain Cookie/CSRF ownership and request cancellation.
@@ -47,10 +49,81 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
     private var mcpAuthorizationID: String?
     private var mcpAuthorizationReject: RCTPromiseRejectBlock?
     private var mcpAuthorizationAnchor: UIWindow?
+    private var diagnosticsOverlay: NativeDiagnosticsOverlay?
+    private var diagnosticsOptions: NSDictionary = [:]
+    private var diagnosticsSceneObserver: NSObjectProtocol?
+    private let performanceQueue = DispatchQueue(label: "com.inkmemory.diagnostics.cpu", qos: .utility)
+    private var performanceReading = false
     @objc override static func requiresMainQueueSetup() -> Bool { true }
     override func supportedEvents() -> [String]! { ["InkUploadProgress", "InkAccountError"] }
     override func startObserving() { DispatchQueue.main.async { self.observing = true } }
     override func stopObserving() { DispatchQueue.main.async { self.observing = false } }
+
+    @objc(readPerformanceSample:rejecter:)
+    func readPerformanceSample(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            guard !self.performanceReading else { reject("CPU_SAMPLE_BUSY", "采样仍在执行。", nil); return }
+            self.performanceReading = true
+            var mainID: UInt64 = 0
+            pthread_threadid_np(nil, &mainID)
+            let selected = self.requests.prefix(NativeRuntimePerformance.requestLimit)
+            let activity = selected.compactMap { $0.value.performanceActivity(id: $0.key) }
+            let truncated = self.requests.count > selected.count
+            let sampledMainID = mainID
+            self.performanceQueue.async {
+                let result = Result { try NativeRuntimePerformance.collect(mainThreadID: sampledMainID, requests: activity, requestsTruncated: truncated) }
+                DispatchQueue.main.async {
+                    self.performanceReading = false
+                    switch result {
+                    case .success(let sample): resolve(sample)
+                    case .failure(let error): reject("CPU_SAMPLE_UNAVAILABLE", "当前CPU采样不可用。", error)
+                    }
+                }
+            }
+        }
+    }
+
+    @objc(configureDiagnosticsOverlay:)
+    func configureDiagnosticsOverlay(_ options: NSDictionary) {
+        DispatchQueue.main.async {
+            self.diagnosticsOptions = options
+            if options["enabled"] as? Bool == true {
+                if self.diagnosticsSceneObserver == nil {
+                    self.diagnosticsSceneObserver = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in self?.applyDiagnosticsOverlay() }
+                }
+            } else if let observer = self.diagnosticsSceneObserver {
+                NotificationCenter.default.removeObserver(observer); self.diagnosticsSceneObserver = nil
+            }
+            self.applyDiagnosticsOverlay()
+        }
+    }
+
+    private func applyDiagnosticsOverlay() {
+        guard diagnosticsOptions["enabled"] as? Bool == true else { diagnosticsOverlay?.setEnabled(false); return }
+        guard let bridge,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive && $0.windows.contains(where: { $0.isKeyWindow }) }) else { return }
+        if diagnosticsOverlay?.scene !== scene {
+            diagnosticsOverlay?.dispose()
+            diagnosticsOverlay = NativeDiagnosticsOverlay(scene: scene, bridge: bridge)
+        }
+        diagnosticsOverlay?.configure(diagnosticsOptions)
+        diagnosticsOverlay?.setEnabled(true)
+    }
+
+    @objc(dismissRuntimeDiagnostics)
+    func dismissRuntimeDiagnostics() {
+        DispatchQueue.main.async { self.diagnosticsOverlay?.close() }
+    }
+
+    override func invalidate() {
+        super.invalidate()
+        DispatchQueue.main.async {
+            if let observer = self.diagnosticsSceneObserver { NotificationCenter.default.removeObserver(observer); self.diagnosticsSceneObserver = nil }
+            self.diagnosticsOptions = [:]
+            self.diagnosticsOverlay?.dispose(); self.diagnosticsOverlay = nil
+        }
+    }
 
     @objc(randomUUID:rejecter:)
     func randomUUID(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
@@ -544,6 +617,13 @@ enum NativeMcpOAuthCallback {
 }
 
 final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
+    // Reuse the original request owner; omit URL parameters, body, headers and response content.
+    func performanceActivity(id: String) -> [String: Any]? {
+        guard !finished else { return nil }
+        let path = request.url?.path ?? ""
+        let label = path.hasPrefix("/api/claude-agent") ? "Chat请求" : path.hasPrefix("/api/reflections") ? "回顾请求" : "其他本地请求"
+        return ["id": "http:\(id)", "kind": "request", "label": label, "phase": head == nil ? "reading" : "waiting_head"]
+    }
     private(set) var readableHeaders: [String: String] = [:]
     private let request: URLRequest
     private var head: ((Int) -> Void)?

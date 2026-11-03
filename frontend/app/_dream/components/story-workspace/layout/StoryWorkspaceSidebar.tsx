@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: let the Writing page reuse the existing narrow More menu and report its open state.
 // [Sync] 2026-11-01: narrow More shares native cards and guidance; existing Modal, desktop and route owners remain.
 // [Sync] 2026-10-29: narrow More opens one full-page five-item menu; desktop disclosure and routes remain.
@@ -13,6 +14,7 @@
 // [Sync] 2026-08-15: group restored Writing, Timeline, and Analysis under an
 //                    accessible More disclosure below Chat, Dream, and Decks.
 // [Sync] 2026-09-18: render the same navigation as a thumb-reachable bottom bar and More sheet on mobile.
+import { BRAND_NAME } from '../../../constants/brand';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {Text} from 'react-native';
@@ -94,7 +96,7 @@ export function StoryWorkspaceSidebar({
     || currentPath === storyWorkspaceMainNavPaths.timeline
     || currentPath === storyWorkspaceMainNavPaths.analysis
   ));
-  const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
+  const displayName = user?.display_name?.trim() || user?.email || `${t('brand.name')} 用户`;
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
   const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
   useEffect(() => {
@@ -513,7 +515,7 @@ export function StoryWorkspaceSidebar({
 
       <header className="story-workspace-sidebar__brand">
         <div className="story-workspace-sidebar__brand-text">
-          <p className="story-workspace-sidebar__brand-name">Ink &amp; Memory</p>
+          <p className="story-workspace-sidebar__brand-name">{BRAND_NAME}</p>
         </div>
         <button
           aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}

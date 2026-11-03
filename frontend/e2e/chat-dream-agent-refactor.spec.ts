@@ -1,4 +1,5 @@
 // [Sync] 2026-10-28: serve complete Agent catalogs and assert the selector creates no per-Deck GET requests.
+// [Sync] 2026-11-02: expect the renamed application display text; existing behavior checks remain.
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
 //          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
@@ -617,7 +618,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   const commonSkillListbox = page.getByRole('listbox', { name: '聊天指令' });
   await expect(commonSkillListbox).toBeVisible();
   await expect(commonSkillListbox.getByRole('option')).toHaveCount(6);
-  await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Ink & Memory/ })).toBeVisible();
+  await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Kastention/ })).toBeVisible();
   await expect(commonSkillListbox.getByRole('option', { name: /\/compact\b/ })).toBeVisible();
   await page.screenshot({ path: '../output/playwright/common-skills-slash-menu.png' });
   await commonSkillListbox.getByRole('option', { name: /\/asr\b/ }).click();

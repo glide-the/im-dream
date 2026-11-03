@@ -17,6 +17,17 @@
     "sha512": "e8jntAeYwzOJiNARBp+vzvUyuoWor5plQrA47cOJlctK7Ly1j/vUo6XBYJu8B9Ik4A/g5WO0N2G1BsKg+JTTMQ==",
     "use": "Private iOS compatibility qualification; desktop binaries are excluded"
   },
+  "ripgrep": {
+    "version": "0.1.12",
+    "url": "https://registry.npmjs.org/@glide-the/ink-claude-code-dream-linux-arm64/-/ink-claude-code-dream-linux-arm64-0.1.12.tgz",
+    "sha512": "gD8QaOr9TQTgFVpIhrGm1OzmbaCUECBPsVwZxLnnWZBHSJEnlsOwdDBRfsBmZNWF1z69YyolH9LlNRHNNyHktw==",
+    "binaryMember": "package/runtime/lib/core/chunks/vendor/ripgrep/arm64-linux/rg",
+    "binarySha256": "fa8f640e4baec82e134c03983373833815dbaee5354f760818bb6840727a4385",
+    "licenseMember": "package/runtime/lib/core/chunks/vendor/ripgrep/COPYING",
+    "licenseSha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+    "guestPath": "usr/local/bin/rg",
+    "execution": "existing application-process Linux ARM64 interpreter; statically linked ELF"
+  },
   "notionCli": {
     "version": "0.15.1",
     "url": "https://registry.npmjs.org/ntn/-/ntn-0.15.1.tgz",

@@ -1,7 +1,9 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Existing preparation/session phase, current theme and the diagnostics action.
 // [Output] Centered vector/wordmark composition with a separate status and utility footer.
 // [Pos] Native initial preparation view; SessionGate owns startup, login and failure transitions.
 // [Sync] 2026-11-02: align transparent artwork, project typography and safe-area content in short/portrait/landscape layouts.
+import { BRAND_NAME } from '../../app/_dream/constants/brand';
 import {ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View} from 'react-native';
 import InkLabel from './InkLabel.native';
 import StartupArtwork from './StartupArtwork.native';
@@ -14,7 +16,7 @@ export default function StartupScreen({visible, checkingSession, onDiagnostics}:
   return <View testID="startup-screen" style={[styles.screen, {backgroundColor: colors['color-bg-app']}]}>
     <View style={styles.brand}>
       <StartupArtwork visible={visible} size={size}/>
-      <InkLabel style={[styles.wordmark, {color: colors['color-text-primary']}]}>Ink &amp; Memory</InkLabel>
+      <InkLabel style={[styles.wordmark, {color: colors['color-text-primary']}]}>{BRAND_NAME}</InkLabel>
     </View>
     <View style={styles.footer}>
       <View accessibilityRole="progressbar" style={styles.status}>

@@ -1,4 +1,5 @@
 // [Sync] 2026-10-12: verify builtin compact is independent of Skill catalog and removes name collisions.
+// [Sync] 2026-11-02: expect the renamed application display text; existing behavior checks remain.
 // [Input] Backend common commands plus installed Claude-plugin inventories, Deck refs, and receipts.
 // [Output] Contract coverage for safe merged slash Skill discovery and text-only matching.
 // [Pos] Chat composer Skill suggestion unit contract.
@@ -113,9 +114,9 @@ test('resolves safe backend common Skills and rejects malformed public commands'
     { command: '/ASR', name: 'asr' },
     { command: '/../unsafe', name: '../unsafe' },
   ])).toEqual([
-    { command: '/asr', name: 'asr', sourceLabel: 'Ink & Memory' },
-    { command: '/hhxg-market', name: 'hhxg-market', sourceLabel: 'Ink & Memory' },
-    { command: '/symbolic-board', name: 'symbolic-board', sourceLabel: 'Ink & Memory' },
+    { command: '/asr', name: 'asr', sourceLabel: 'Kastention' },
+    { command: '/hhxg-market', name: 'hhxg-market', sourceLabel: 'Kastention' },
+    { command: '/symbolic-board', name: 'symbolic-board', sourceLabel: 'Kastention' },
   ]);
 });
 

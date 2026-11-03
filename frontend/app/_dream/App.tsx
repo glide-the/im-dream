@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
 // [Sync] 2026-11-01: mobile Writing uses one-row prose, explicit keyboard focus, shared line geometry and the original chooser/persistence.
 // [Sync] 2026-10-29: wait for the original Cookie/CSRF session before submitting the MCP OAuth callback.
@@ -57,6 +58,7 @@
 //                    persistent WritingSuggestionCells on one Session-owned Thread.
 // [Sync] 2026-09-01: expose regeneration only on the latest Writing suggestion Cell.
 // [Sync] 2026-09-05: use a framework-neutral public asset URL for the Next/Vite compatibility shell.
+import { BRAND_NAME, BRAND_BANNER_PATH } from './constants/brand';
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell, WritingSuggestionCell as WritingSuggestionCellData } from './engine/EditorEngine';
@@ -162,7 +164,7 @@ function McpOAuthCallbackPage() {
   const callbackReady = Boolean(query.get('code') && query.get('state'));
 
   useEffect(() => {
-    document.title = 'MCP authorization callback · Ink & Memory';
+    document.title = `MCP authorization callback · ${BRAND_NAME}`;
     if (isLoading) return;
     const operationId = readClaudeMcpOAuthOperation();
     if (!isAuthenticated || !callbackReady || !operationId) {
@@ -1616,7 +1618,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
   }
 
   // @@@ Show auth screen if not authenticated
-  const loginBannerUrl = '/login-banner.jpg';
+  const loginBannerUrl = BRAND_BANNER_PATH;
 
   if (isDeviceVerificationRoute) {
     return <DeviceVerificationPage />;

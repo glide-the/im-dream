@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-27: extract the unchanged landing action translation model for native reuse; DOM layout and handlers stay intact.
@@ -105,6 +106,7 @@
 //                    transport for an explicit whole-thread export.
 // [Sync] 2026-09-29: own scheduled-task marker details as a mutually exclusive right sidebar and accept Calendar task drafts.
 // [Sync] 2026-10-07: reuse the history sidebar for the priority activity bell, independent read recovery and original navigation/delete behavior.
+import { BRAND_NAME } from '../../constants/brand';
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {buildDefaultLandingQuickActions} from './chatLandingActions';
@@ -1360,7 +1362,7 @@ function ChatViewContent({
                   queuedToolChoice={queuedToolChoice}
                   queuedPromptNonce={queuedPromptNonce}
                   claimQueuedPrompt={claimQueuedPrompt}
-                  inputPlaceholder="Ask Ink & Memory…"
+                  inputPlaceholder={`Ask ${BRAND_NAME}…`}
                   editorState={editorState}
                   ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
@@ -1406,7 +1408,7 @@ function ChatViewContent({
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
                         }}
-                        placeholder="Ask Ink & Memory…"
+                        placeholder={`Ask ${BRAND_NAME}…`}
                         disabled={isCreatingThread || dreamLaunch.isLaunching}
                         loading={isCreatingThread || dreamLaunch.isLaunching}
                         contextControl={(

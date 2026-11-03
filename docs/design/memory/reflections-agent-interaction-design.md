@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: 日记全文通过原get_sessions_range显式include_text读取；默认摘要及snapshot权限保持。 -->
 <!-- [Sync] 2026-10-29: 前端任务客户端/状态已共享给Native，更新现行源码归属；业务、后端与权限合同保持。 -->
 <!-- [Sync] 2026-10-23: v2 创建冻结 Notion 范围，栏目通过原 Read hook 按需读取并登记实际证据。 -->
 <!-- [Input] backend/routers/reflections.py、backend/reflections_agent.py、Claude Agent ThreadFactory/Service、Admin section persistence 与前端 voiceApi.ts。 -->
@@ -49,6 +50,8 @@
 - 模型由 `resolve_platform_model()` 读取栏目 owner 的服务器配置和 Gateway catalog 后选择。选定 Agent 的 prompt 在 Reflections 系统提示前拼接；模型运行参数由选定模型提供。
 - 前端提交的 `language` 经后端规范化后写入输入快照；栏目工作区的 `MEMORY_ANSWER_PROMPT.md` 追加该语言的输出要求，title、description、evidence 使用该语言，JSON 字段名保持既有合同。
 - 日记检索通过本栏目的 snapshot Session provider 返回冻结范围。v2 的 Notion 提示只包含来源元数据，正文由现有 Read hook 经任务 Host 按需读取；v1 保留原正文注入。私有 Session broker 的配置及权限见[独立设计](../claude-agent/session-projection-broker-design.md)。
+
+`get_sessions_range`默认返回原摘要；显式`include_text=true`通过同一broker的原`include_text`字段读取已授权正文，在原结果增加`text`。Reflections执行说明对需要的冻结日记使用该选项。日期、标签、模糊评分、limit、响应预算、request_id匹配及provider归属继续执行；无新增Tool、HTTP、actor参数或权限类别。空正文按原值返回，模型依据实际正文生成结果，合法空数组继续沿原零结果规则处理。
 
 ### 两组事件
 
@@ -159,7 +162,7 @@ sequenceDiagram
         K->>G: 已选模型的推理请求
         G-->>K: 模型输出或工具调用
         opt 需要补充日记正文
-            K->>O: 经 user MCP 和私有 broker 查询冻结 Session
+            K->>O: get_sessions_range(include_text=true)，经原私有broker查询冻结Session
             O-->>K: 本栏目 snapshot 中的日记正文
         end
         opt v2 Agent 需要 Notion 正文

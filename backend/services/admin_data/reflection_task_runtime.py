@@ -2,6 +2,7 @@
 # [Output] Snapshot-only Session provider plus canonical, symlink-rejecting Reflections workspace writes.
 # [Pos] Reflections Runtime composition helper; no Admin/RTA credential, SQL or MCP behavior.
 # [Sync] 2026-09-15: bind every Reflections workspace to the configured Agent thread root with 0700 ownership.
+# [Sync] 2026-11-03: map authenticated iOS task locators to the App-owned root; retain task identity and local symlink checks.
 """Server-owned helpers for composing a Reflections child Agent turn."""
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 from datetime import date
 import os
 from pathlib import Path
+import re
+import sys
 
 from .errors import AdminDataError
 from .reflection_task_models import (
@@ -87,7 +90,7 @@ class ReflectionSnapshotSessionProjectionProvider:
 def canonical_reflection_workspace(
     *, task_id: ReflectionTaskId, advertised_path: str, workspace_root: str
 ) -> Path:
-    """Validate Admin's task workspace locator against Dream's configured root."""
+    """Bind Admin's task locator to this executor's configured workspace root."""
 
     configured_root = Path(workspace_root)
     if not configured_root.is_absolute():
@@ -96,7 +99,17 @@ def canonical_reflection_workspace(
     expected = root / task_id / "memory"
     advertised = Path(advertised_path)
     normalized_advertised = Path(os.path.abspath(advertised))
-    if not advertised.is_absolute() or normalized_advertised != expected:
+    # Admin supplies a task locator after service/task authorization. Its host
+    # path cannot be opened in an iOS App container. Validate the exact task
+    # suffix, then use only the local root; no advertised ancestor is accessed.
+    ios_task_locator = (
+        sys.platform == "ios"
+        and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", task_id) is not None
+        and advertised.is_absolute()
+        and advertised_path == os.path.normpath(advertised_path)
+        and advertised.parts[-2:] == (task_id, "memory")
+    )
+    if not advertised.is_absolute() or (normalized_advertised != expected and not ios_task_locator):
         raise AdminDataError("REFLECTION_WORKSPACE_BINDING_CONFLICT", 409)
     try:
         expected.relative_to(root)

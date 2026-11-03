@@ -12,6 +12,7 @@
 # [Sync] 2026-10-25: bundle the pinned command root and the existing sandbox-disabled deployment value.
 # [Sync] 2026-10-26: retain the verified offline plugin wheelhouse with the packaged command resources.
 # [Sync] 2026-10-30: require the locked Notion CLI binary and notice before copying application resources.
+# [Sync] 2026-11-03: verify locked ripgrep bytes and the single iOS selector adapter before packaging.
 import hashlib
 import json
 import os
@@ -31,6 +32,14 @@ if json.loads((source / "notion/manifest.json").read_text()) != notion:
 for name, expected in (("ntn", notion["binarySha256"]), ("LICENSE.md", notion["licenseSha256"])):
     if hashlib.sha256((source / "notion" / name).read_bytes()).hexdigest() != expected:
         raise RuntimeError("Prepared Notion CLI resource digest mismatch")
+ripgrep = json.loads((ios / "node-dependencies.json").read_text())["ripgrep"]
+if json.loads((source / "ripgrep/manifest.json").read_text()) != ripgrep:
+    raise RuntimeError("Prepared ripgrep manifest differs from the dependency lock")
+for name, expected in (("rg", ripgrep["binarySha256"]), ("COPYING", ripgrep["licenseSha256"])):
+    if hashlib.sha256((source / "ripgrep" / name).read_bytes()).hexdigest() != expected:
+        raise RuntimeError("Prepared ripgrep resource digest mismatch")
+if sum(item.get("iosRipgrepAdapter", False) for item in json.loads((source / "runtime-adaptation.json").read_text())["files"]) != 1:
+    raise RuntimeError("Prepared Runtime ripgrep selector is missing")
 destination = Path(os.environ["TARGET_BUILD_DIR"]) / os.environ["UNLOCALIZED_RESOURCES_FOLDER_PATH"] / "node"
 shutil.rmtree(destination, ignore_errors=True)
 shutil.copytree(source, destination)
@@ -41,6 +50,7 @@ receipt = json.loads(receipt_path.read_text())
 receipt["platformFiles"] = {name: hashlib.sha256((destination / name).read_bytes()).hexdigest()
     for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs", "ios-admin-http.mjs")}
 receipt["notionCli"] = notion
+receipt["ripgrep"] = ripgrep
 receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
 shutil.copy2(ios / "host-config.json", destination / "host-config.json")
 print("Bundled original Runtime JavaScript and iOS application-process host.")

@@ -2,6 +2,7 @@
 # [Input] Original Next app/config/lockfile and the already installed frontend dependency graph.
 # [Output] A credential-free, separately owned source directory for an original standalone build.
 # [Sync] 2026-11-01: isolate explicitly owned Next outputs and record original runtime-source inputs for packaging freshness checks.
+# [Sync] 2026-11-03: bundle Undici's same-version scalar llhttp for the iOS polywasm interpreter; preserve original HTTP dispatchers.
 # [Pos] iOS build preparation; it never modifies the running Web checkout or installs packages.
 from __future__ import annotations
 
@@ -49,6 +50,12 @@ const originalWebpack = nextConfig.webpack;
 nextConfig.webpack = (config, context) => {
   const selected = originalWebpack ? originalWebpack(config, context) : config;
   selected.cache = false;
+  // NodeMobile polywasm parses SIMD modules before rejecting their instructions
+  // at execution. Select Undici's existing scalar parser for this iOS build.
+  if (context.isServer) {
+    selected.resolve.alias = { ...selected.resolve.alias,
+      '../llhttp/llhttp_simd-wasm.js$': fileURLToPath(import.meta.resolve('undici/lib/llhttp/llhttp-wasm.js')) };
+  }
   return selected;
 };
 export default nextConfig;

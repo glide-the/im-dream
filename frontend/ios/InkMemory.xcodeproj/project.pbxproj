@@ -2,6 +2,7 @@
 // [Input] Locked iOS target resources and explicit Native source/test membership.
 // [Output] App and XCTest targets with shared runtime and account/MCP adapter ownership.
 // [Pos] InkMemory Xcode project definition.
+// [Sync] 2026-11-03: compile the diagnostics-only one-shot native CPU sampler in the original app target.
 // [Sync] 2026-11-02: compile AppIcon and startup artwork assets with the launch storyboard in both app configurations.
 // [Sync] 2026-10-31: include the account system-session adapter and isolated Cookie/callback contracts.
 {
@@ -12,6 +13,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F1000000000000000000000A /* NativeRuntimePerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000A /* NativeRuntimePerformance.swift */; };
 		B21000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000001 /* Assets.xcassets */; };
 		B21000000000000000000002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000002 /* LaunchScreen.storyboard */; };
 		31BE985023FDD9EA2448F3D6 /* libPods-InkMemoryTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */; };
@@ -74,6 +76,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F2000000000000000000000A /* NativeRuntimePerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRuntimePerformance.swift; sourceTree = "<group>"; };
 		B22000000000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B22000000000000000000002 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ../PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -168,6 +171,7 @@
 				B22000000000000000000002 /* LaunchScreen.storyboard */,
 				F20000000000000000000003 /* InkRuntimeModule.m */,
 				F20000000000000000000001 /* InkReactNative.swift */,
+				F2000000000000000000000A /* NativeRuntimePerformance.swift */,
 				F20000000000000000000008 /* InkAccountLogin.swift */,
 				F20000000000000000000004 /* InkFileUploads.swift */,
 				F20000000000000000000006 /* InkWorkspaceFiles.swift */,
@@ -448,6 +452,7 @@
 			files = (
 				F10000000000000000000003 /* InkRuntimeModule.m in Sources */,
 				F10000000000000000000001 /* InkReactNative.swift in Sources */,
+				F1000000000000000000000A /* NativeRuntimePerformance.swift in Sources */,
 				F10000000000000000000008 /* InkAccountLogin.swift in Sources */,
 				F10000000000000000000004 /* InkFileUploads.swift in Sources */,
 				F10000000000000000000006 /* InkWorkspaceFiles.swift in Sources */,

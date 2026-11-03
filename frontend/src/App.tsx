@@ -1,3 +1,7 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
+// [Sync] 2026-11-02: restore one main-owned side Chat; retain Writing source identity until its original editor reopens.
+// [Sync] 2026-11-02: bind native Chat restoration to the validated account and each primary/side Thread input owner.
+// [Sync] 2026-11-02: confirm the named Chat before deletion; retain one request and recheck the visible Thread after asynchronous cleanup.
 // [Sync] 2026-11-01: hand all Chat, Plan, file and workspace external links to the shared native system-browser action.
 // [Sync] 2026-11-01: Writing side Chat retains its source Session binding and prepares saved context before native sends.
 // [Sync] 2026-10-31: hidden Chat scenes and covering panels release local editor focus while retaining their composer.
@@ -25,8 +29,9 @@
 // [Sync] 2026-10-28: wire the full native composer, original rich editor and persistent sketch leaf; complete page parity remains pending.
 // [Sync] 2026-10-28: replace the fixed-auto prototype transport with canonical native Chat lifecycle and server configuration.
 // [Sync] 2026-10-28: SwiftUI supplies the iOS keyboard viewport; disable duplicate RN keyboard avoidance.
+import { BRAND_NAME } from '../app/_dream/constants/brand';
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {KeyboardAvoidingView, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Alert, KeyboardAvoidingView, Keyboard, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {openExternalLink} from './platform/externalLinks.native';
 import {isToolUIPart} from 'ai';
 import {useTranslation} from 'react-i18next';
@@ -36,6 +41,7 @@ import {getDeck} from '../app/_dream/api/deckReadApi';
 import useNativeChatSetup,{type NativeChatConfig} from '../app/_dream/components/chat/useNativeChatSetup.native';
 import DeckChatSelector,{type DeckAgentSelection} from '../app/_dream/components/deck/DeckChatSelector.native';
 import useNativeChatThread from '../app/_dream/components/chat/useNativeChatThread.native';
+import {createNativeChatRecovery} from '../app/_dream/components/chat/nativeChatRecovery.native';
 import ToolConfirmationDock from '../app/_dream/components/chat/ToolConfirmationDock.native';
 import ChatPage from '../app/_dream/components/chat/ChatPage.native';
 import ActivitySidebar,{nativeActivityFilters} from '../app/_dream/components/chat/ActivitySidebar.native';
@@ -74,8 +80,9 @@ import ScreenFrame from './components/ScreenFrame';
 import {clientFetch} from './platform/transport';
 import type {WritingThreadContext} from '../app/_dream/components/Editor/WritingDocument.protocol';
 
-function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner,writingContext}: {documentOwner?:object;writingContext?:WritingThreadContext;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string}) {
+function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner,writingContext,onReturnToWriting,onRecoveryDeparture}: {documentOwner?:object;writingContext?:WritingThreadContext;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string;onReturnToWriting?:()=>Promise<void>;onRecoveryDeparture?:()=>void}) {
   const {t}=useTranslation();
+  const recovery=useMemo(()=>createNativeChatRecovery(ownerId,initialThreadId),[ownerId,initialThreadId]);
   const composer=useRef<NativeAIInputDockHandle>(null),share=useRef<NativeChatShareHandle>(null);
   const [fileSidebarOpen,setFileSidebarOpen]=useState(false);
   const [sketchOpen,setSketchOpen]=useState(false),[composerKey,setComposerKey]=useState(0);
@@ -93,7 +100,13 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const [editorJump,setEditorJump]=useState<{nonce:number;detail:EditorJumpToCellDetail}>();
   const [activityOpen,setActivityOpen]=useState(false),[activityFilters,setActivityFilters]=useState(nativeActivityFilters),[scheduledDetail,setScheduledDetail]=useState<{taskId:string;snapshot?:ScheduledTaskMarkerSnapshot|null}|null>(null);
   const activity=useNativeActivitySidebarData(activityOpen,{onSessionExpired:()=>void refreshSession()});
-  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string;documentOwner:object;writingContext?:WritingThreadContext}|null>(null);
+  const [sideChat,setSideChat]=useState<{threadId:string;notice?:string;documentOwner:object;writingContext?:WritingThreadContext;restoredWritingSessionId?:string}|null>(()=>{
+    const saved=recovery.readSideChat();if(!saved)return null;
+    return {threadId:saved.threadId,documentOwner:{},...(saved.writingSessionId?{restoredWritingSessionId:saved.writingSessionId,
+      writingContext:{sessionId:saved.writingSessionId,prepareEditorState:async()=>{throw Error('WRITING_CONTEXT_UNAVAILABLE');}}}: {})};
+  });
+  const currentSideChat=useRef(sideChat);currentSideChat.current=sideChat;
+  useEffect(()=>()=>{currentSideChat.current=null;},[]);
   const [section, setSection] = useState<'chat' | 'decks' | 'more'>('chat');
   const [moreVisited,setMoreVisited]=useState(false),[moreNonce,setMoreNonce]=useState(0),moreSource=useRef<'chat'|'decks'>('chat');
   const [settingsNavigation,setSettingsNavigation]=useState<NativeSettingsNavigation>({nonce:0,target:'menu'});
@@ -105,7 +118,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const legacyContext=boundContext.threadId?decks.flatMap(deck=>(deck.voices ?? []).map(voice=>({deck,voice}))).find(({voice})=>voice.thread_id===boundContext.threadId):undefined;
   const selectedDeck = boundContext.threadId?(boundDeck ?? (boundContext.deckId?undefined:legacyContext?.deck)):decks.find(deck=>deck.id===selection?.deckId);
   const selectedVoice = selectedDeck?.voices?.find(voice=>voice.id===(boundContext.threadId?boundContext.voiceId:selection?.agentId)) ?? legacyContext?.voice;
-  const session = useNativeChatThread({context:{deckId:boundContext.threadId?boundContext.deckId:selection?.deckId,voiceId:boundContext.threadId?boundContext.voiceId:selection?.agentId,
+  const session = useNativeChatThread({recovery,initialThreadId,context:{deckId:boundContext.threadId?boundContext.deckId:selection?.deckId,voiceId:boundContext.threadId?boundContext.voiceId:selection?.agentId,
     voiceSystemPrompt:selectedVoice?.system_prompt,settingsSystemPrompt:config.system_prompt,imFullAccessEnabled:config.im_full_access_enabled===true,currentToolChoice:toolChoice},
     prepareEditorState:writingContext?async(id,signal)=>{
       if(id!==initialThreadId)return undefined;
@@ -114,6 +127,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       catch(error){if(!signal.aborted)setError(t('chat.writingContextUnavailable'));throw error;}
     }:undefined,onSettled:()=>void history.reload(),onSessionExpired:()=>void refreshSession()});
   const history=useNativeChatHistory({enabled:section==='chat' && (!session.threadId || activityOpen),onSessionExpired:()=>void refreshSession()});
+  const writingRecoveryBlocked=Boolean(onReturnToWriting&&session.threadId===initialThreadId);
   const thread=session.threadId,messages=session.messages,running=session.running || session.posting || session.recovering,stopping=session.stopping,
     uncertain=!configLoaded || session.unknown || (session.recovering && !session.thread) || Boolean(session.thread?.deck_id && boundDeck?.id!==session.thread.deck_id);
   const canStop=chatMainTurnCanStop(session.posting?'submitted':'ready',session.running,false) || stopping;
@@ -121,7 +135,9 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const foreground=colors['color-text-primary'];
   const taskActivity=useNativeTaskActivity(thread,{active:section==='chat'&&sideChat===null,running:session.running||session.posting,onSessionExpired:()=>void refreshSession()});
   const visibleThread=useRef(thread);visibleThread.current=thread;
-  useEffect(()=>{if(initialThreadId)void session.openThread(initialThreadId);},[initialThreadId]);
+  useEffect(()=>{if(initialThreadId&&thread!==initialThreadId)onRecoveryDeparture?.();},[thread,initialThreadId,onRecoveryDeparture]);
+  const deleteRequest=useRef<object|null>(null);
+  useEffect(()=>()=>{deleteRequest.current=null;},[]);
   useEffect(()=>{
     const record=session.thread;
     setBoundContext(record?{threadId:record.id,deckId:record.deck_id ?? undefined,voiceId:record.voice_id ?? undefined}:{});
@@ -134,30 +150,60 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     return()=>{active=false;};
   },[session.thread?.id,session.thread?.deck_id,setup.revision]);
   const selectThread=async(id:string)=>{await closeToolResultDocuments(toolDocumentOwner);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSketchOpen(false);setComposerKey(value=>value+1);return session.openThread(id);};
-  const deleteThread=(id:string)=>{void history.remove(id).then(async removed=>{if(!removed)return;activity.removeChat(id);if(id===session.threadId){await closeToolResultDocuments(toolDocumentOwner);if(id!==session.threadId)return;session.newChat();setComposerKey(value=>value+1);setSketchOpen(false);}});};
+  const deleteThread=(id:string,displayTitle?:string)=>{
+    if(deleteRequest.current)return;
+    const row=history.threads.find(item=>item.id===id)??activity.chat.data.find(item=>item.id===id);
+    const savedDate=row?new Date(row.created_at):null;
+    const title=displayTitle?.trim()||row?.title?.trim()||row?.match?.excerpt?.trim()||(id===thread?session.thread?.title?.trim():undefined)||`${t('chat.history.fallbackTitle')}${savedDate&&Number.isFinite(savedDate.getTime())?` · ${savedDate.toLocaleString()}`:''}`;
+    const request={};deleteRequest.current=request;let confirmed=false;
+    const cancel=()=>{if(!confirmed&&deleteRequest.current===request)deleteRequest.current=null;};
+    Alert.alert(t('chat.history.deleteThread'),t('deck.related.confirmDelete',{title}),[
+      {text:t('deck.details.cancel'),style:'cancel',onPress:cancel},
+      {text:t('deck.related.delete'),style:'destructive',onPress:()=>{
+        if(confirmed||deleteRequest.current!==request)return;confirmed=true;
+        void history.remove(id).then(async removed=>{
+          if(!removed||deleteRequest.current!==request)return;
+          activity.removeChat(id);
+          if(id===visibleThread.current){await closeToolResultDocuments(toolDocumentOwner);if(id!==visibleThread.current||deleteRequest.current!==request)return;session.newChat();setComposerKey(value=>value+1);setSketchOpen(false);}
+        }).finally(()=>{if(deleteRequest.current===request)deleteRequest.current=null;});
+      }},
+    ],{cancelable:true,onDismiss:cancel});
+  };
   const workspaceAvailability=!configLoaded?'loading':config.workspace_enabled===false?'disabled':'enabled';
   const openWorkspace=(uri:string)=>{setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setWorkspaceUri(uri);};
   const addWorkspaceImage=async(file:NativePickedFile)=>{if(!composer.current||visibleThread.current!==thread){releaseNativeFiles([file.id]);return false;}return composer.current.addFile(file);};
   const newChat=async()=>{await closeToolResultDocuments(toolDocumentOwner);session.newChat();setBoundContext({});setBoundDeck(undefined);setDeckPrefill(undefined);setError('');setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setComposerKey(value=>value+1);};
-  const openSection=(value:'chat'|'decks'|'more')=>{if(value==='more'){if(section!=='more')moreSource.current=section;setMoreVisited(true);setMoreNonce(n=>n+1);}Keyboard.dismiss();setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSection(value);};
+  const openSection=(value:'chat'|'decks'|'more')=>{recovery.clearSideChat();if(value==='more'){if(section!=='more')moreSource.current=section;setMoreVisited(true);setMoreNonce(n=>n+1);}Keyboard.dismiss();setSketchOpen(false);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSection(value);};
   const tryDeck=async(deck:Deck,voice:Voice,input?:string)=>{if(deck.agent_type==='dream')return;await newChat();setSelection({deckId:deck.id,agentId:voice.id});setDeckPrefill({text:input ?? '',nonce:composerKey+1});openSection('chat');};
   const toggleActivity=()=>{Keyboard.dismiss();setFileSidebarOpen(false);setWorkspaceUri(null);setScheduledDetail(null);setSketchOpen(false);setActivityOpen(value=>!value);};
   const toggleWorkspace=()=>{Keyboard.dismiss();setActivityOpen(false);setWorkspaceUri(null);setScheduledDetail(null);setSketchOpen(false);setFileSidebarOpen(value=>!value);};
   useEffect(()=>{if(configLoaded&&config.workspace_enabled===false)setFileSidebarOpen(false);},[configLoaded,config.workspace_enabled]);
   const retryReads=()=>{setError('');setup.retry();if(session.error)void session.retry();else if(!setup.error&&!contextReadError)void history.reload();};
   const stop=()=>session.stop();
-  const openSideChat=async(entry:ThreadInputEntry)=>{const task=await session.sideTask(entry);if(task&&visibleThread.current===entry.thread_id)setSideChat({threadId:task.thread_id,documentOwner:{},notice:task.error_code?t('chat.inputQueue.sideChatLaunchFailed'):undefined});};
-  const closeSideChat=async()=>{const current=sideChat;if(current)await closeToolResultDocuments(current.documentOwner);setSideChat(value=>value===current?null:value);};
+  const openSideChat=async(entry:ThreadInputEntry)=>{const task=await session.sideTask(entry);if(task&&visibleThread.current===entry.thread_id){recovery.rememberSideChat({threadId:task.thread_id});setSideChat({threadId:task.thread_id,documentOwner:{},notice:task.error_code?t('chat.inputQueue.sideChatLaunchFailed'):undefined});}};
+  const closeSideChat=async()=>{
+    const current=currentSideChat.current;if(!current)return false;
+    await closeToolResultDocuments(current.documentOwner);if(currentSideChat.current!==current)return false;
+    recovery.clearSideChat({threadId:current.threadId,writingSessionId:current.writingContext?.sessionId});currentSideChat.current=null;setSideChat(null);return true;
+  };
+  const returnToWriting=async()=>{
+    const current=currentSideChat.current;if(!current?.restoredWritingSessionId)return;
+    const transport:typeof fetch=async(input,init)=>{const response=await clientFetch(input,init);if(response.status===401)void refreshOwner.current();return response;};
+    const target=await recovery.readWritingTarget({threadId:current.threadId,writingSessionId:current.restoredWritingSessionId},transport);
+    if(currentSideChat.current!==current)return;
+    if(!await closeSideChat())return;
+    setEditorJump({nonce:++editorJumpNonce.current,detail:target});openSection('more');
+  };
   const closeBusiness=async()=>{await closeToolResultDocuments(toolDocumentOwner);onClose?.();};
   return <SafeAreaView style={styles.fill}><KeyboardAvoidingView style={styles.fill} accessibilityElementsHidden={activityOpen||fileSidebarOpen||scheduledDetail!==null} importantForAccessibility={activityOpen||fileSidebarOpen||scheduledDetail!==null?'no-hide-descendants':'auto'} enabled={Boolean(onClose) || Platform.OS !== 'ios'} behavior={onClose&&Platform.OS==='ios'?'padding':undefined}>
-    <View style={[styles.header,section==='more'?styles.hidden:undefined]}>{section!=='chat'?<InkLabel style={[styles.title,{color:foreground}]}>Ink &amp; Memory</InkLabel>:null}<View style={styles.fill}/>
+    <View style={[styles.header,section==='more'?styles.hidden:undefined]}>{section!=='chat'?<InkLabel style={[styles.title,{color:foreground}]}>{BRAND_NAME}</InkLabel>:null}<View style={styles.fill}/>
       {onClose?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputQueue.closeSideChat')} onPress={()=>void closeBusiness()} style={styles.action}><InkLabel style={{color:foreground}}>{t('chat.history.close')}</InkLabel></Pressable>:section==='chat'?<ChatTopActions creating={session.posting&&!thread} activityOpen={activityOpen} workspaceEnabled={configLoaded&&config.workspace_enabled!==false} workspaceOpen={fileSidebarOpen}
       contextBadge={selectedVoice && (!thread || boundContext.threadId===thread)?<ChatAgentBadge voice={selectedVoice}/>:undefined}
       planAction={thread?<PlanButton key={thread} threadId={thread} origin={origin} workspaceAvailability={workspaceAvailability} workspaceResources={fileResources} onOpenWorkspace={openWorkspace} onOpenLink={url=>void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'))} activity={taskActivity} active={section==='chat'&&sideChat===null} onNavigateThread={id=>void selectThread(id)} onOpenScheduledTask={snapshot=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail({taskId:snapshot.id,snapshot});}} onSessionExpired={()=>void refreshSession()}/>:undefined}
       pluginReceipt={<PluginReceiptBadge threadId={thread??null} deck={!thread || boundContext.threadId===thread?selectedDeck:undefined} activeVoiceId={selectedVoice?.id} activeVoiceName={selectedVoice?.name} onSessionExpired={()=>void refreshSession()}
         onSelectAgent={thread?voiceId=>{if(!selectedDeck?.voices?.some(voice=>voice.enabled && voice.id===voiceId))return;setBoundContext(current=>current.threadId===thread?{...current,voiceId}:current);}:undefined}/>}
         onNewChat={newChat} onToggleActivity={toggleActivity} onToggleWorkspace={toggleWorkspace} onShare={()=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail(null);setWorkspaceUri(null);setSketchOpen(false);share.current?.open();}}/>:null}</View>
-    {error || setup.error || contextReadError || session.error ? <View><Text accessibilityRole="alert" style={[styles.error,{color:foreground}]}>{error || setup.error || contextReadError || '会话状态待核对，请重试读取。'}</Text><Pressable accessibilityRole="button" disabled={Boolean(setup.error)&&setup.loading} style={styles.action} onPress={retryReads}><Text style={{color:foreground}}>{setup.loading?'正在读取…':'重试读取'}</Text></Pressable></View> : null}
+    {writingRecoveryBlocked || error || setup.error || contextReadError || session.error ? <View><Text accessibilityRole="alert" style={[styles.error,{color:foreground}]}>{writingRecoveryBlocked?t('chat.writingContextUnavailable'):error || setup.error || contextReadError || '会话状态待核对，请重试读取。'}</Text><Pressable accessibilityRole="button" disabled={Boolean(setup.error)&&setup.loading} style={styles.action} onPress={retryReads}><Text style={{color:foreground}}>{setup.loading?'正在读取…':'重试读取'}</Text></Pressable>{writingRecoveryBlocked?<Pressable accessibilityRole="button" style={styles.action} onPress={()=>void onReturnToWriting?.().catch(()=>setError(t('chat.writingContextUnavailable')))}><Text style={{color:foreground}}>{t('nav.writing')}</Text></Pressable>:null}</View> : null}
     <View style={[styles.fill,section!=='chat'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='chat'} importantForAccessibility={section==='chat'?'auto':'no-hide-descendants'}><ChatPage showSearch={false} hasConversation={Boolean(thread)} history={history} activeThreadId={thread}
       quickActions={buildDefaultLandingQuickActions(t)} quickActionsDisabled={!configLoaded} onSelectThread={id=>void selectThread(id)}
       onDeleteThread={deleteThread}
@@ -182,7 +228,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       </View>:null}
       {session.confirmation ? <ToolConfirmationDock key={session.confirmation.partKey} confirmation={session.confirmation} onConfirm={session.confirm} /> : null}
       {origin ? <View style={styles.shrink}>
-        <AIInputDock key={composerKey} ref={composer} origin={origin} disabled={uncertain} loading={running}
+        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
           active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
           onSendMessage={(text,files,choice)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}
@@ -199,7 +245,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
       {moreVisited?<MoreNavigator ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
-        onOpenThread={(id,writingContext)=>setSideChat({threadId:id,writingContext,documentOwner:{}})} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
+        onOpenThread={(id,writingContext)=>{recovery.rememberSideChat({threadId:id,writingSessionId:writingContext?.sessionId});setSideChat({threadId:id,writingContext,documentOwner:{}});}} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
         renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
@@ -216,7 +262,8 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     {workspaceUri?<WorkspaceFilePreview key={thread??'no-thread'} uri={workspaceUri} threadId={thread??undefined} availability={workspaceAvailability} resources={fileResources} onClose={()=>setWorkspaceUri(null)} onOpenWorkspace={openWorkspace} onOpenLink={url=>{void openExternalLink(url,origin).catch(()=>setError('链接暂时无法打开。'));}} onAddImageMaterial={addWorkspaceImage}/>:null}
     {origin && section==='chat'?<SketchInputSurface key={composerKey} origin={origin} open={sketchOpen} disabled={uncertain} onClose={()=>setSketchOpen(false)} onAdd={file=>composer.current?.addFile(file) ?? Promise.resolve(false)} />:null}
     <Modal visible={sideChat!==null} animationType="slide" presentationStyle="pageSheet" onRequestClose={()=>void closeSideChat()} supportedOrientations={['portrait','landscape']}>
-      {sideChat?<ScreenFrame><Business key={JSON.stringify([sideChat.threadId,sideChat.writingContext?.sessionId??null])} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} writingContext={sideChat.writingContext} onClose={()=>void closeSideChat()}/></ScreenFrame>:null}
+      {sideChat?<ScreenFrame><Business key={JSON.stringify([sideChat.threadId,sideChat.writingContext?.sessionId??null])} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} writingContext={sideChat.writingContext} onClose={()=>void closeSideChat()}
+        onReturnToWriting={sideChat.restoredWritingSessionId?returnToWriting:undefined} onRecoveryDeparture={()=>recovery.clearSideChat({threadId:sideChat.threadId,writingSessionId:sideChat.writingContext?.sessionId})}/></ScreenFrame>:null}
     </Modal>
   </SafeAreaView>;
 }

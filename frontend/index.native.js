@@ -1,4 +1,5 @@
 // [Input] Shared React Native application.
+// [Sync] 2026-11-02: register the diagnostics-only leaf for a scene overlay sharing the original bridge; the business root stays mounted.
 // [Sync] 2026-10-29: restore local appearance and language before mounting the application.
 // [Output] Native InkMemory application registration.
 // [Pos] iOS/Android entry.
@@ -8,8 +9,10 @@ import './src/platform/sdkWebApis.native';
 import {AppRegistry} from 'react-native';
 import './app/_dream/i18n';
 import App from './src/App';
+import {RuntimeDiagnosticsWindow} from './src/components/RuntimeDiagnostics.native';
 import {initTheme} from './app/_dream/utils/theme.native';
 import {initInterfaceLanguage} from './src/platform/interfacePreferences.native';
 initTheme();
 initInterfaceLanguage();
 AppRegistry.registerComponent('InkMemory', () => App);
+AppRegistry.registerComponent('InkRuntimeDiagnostics', () => RuntimeDiagnosticsWindow);

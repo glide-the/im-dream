@@ -1,3 +1,12 @@
+<!-- [Sync] 2026-11-03: APP-07补原工具资源、Notion线程home适配、方案取舍及正常/异常/状态图，真实资格单列。 -->
+<!-- [Sync] 2026-11-03: APP-04现行生命周期与恢复方案独立维护，旧章节与图示保留，暂停状态保持。 -->
+<!-- [Sync] 2026-11-03: iOS构建选择同版Undici标量HTTP解析器；原创建、流式、期限及取消协议保持。 -->
+<!-- [Sync] 2026-11-03: 恢复四项验收；回顾正文按同一实测区域分配高度，原手势复用，APP-04保持暂停。 -->
+<!-- [Sync] 2026-11-02: 汇入回顾截图、原pending/task_id恢复、错误去重及三类业务图，网络根因与新候选验收保持未确认。 -->
+<!-- [Sync] 2026-11-02: 汇入原启动阶段计时、CPU解释边界与图示，性能归因和Simulator测量保持待执行。 -->
+<!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
+<!-- [Sync] 2026-11-02: 汇入前后台与重开恢复的原输入、任务查询、正常/异常时序和状态，保留验证暂停范围。 -->
+<!-- [Sync] 2026-11-02: 汇入App删除确认的正常/异常时序和状态图，原业务与验证暂停边界保持。 -->
 <!-- [Sync] 2026-11-02: 系统Google操作携带明确选择，原provider签名验证后继续原social流程；失败停止自动跳转。 -->
 <!-- [Sync] 2026-11-02: 修复公网包账号回调映射与现有诊断接线，原HTTP回调、Client、PKCE和用户权限保持。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
@@ -31,7 +40,9 @@
 
 <!-- [Sync] 2026-10-27: 增加RN目标，复用原iOS运行库与网页登录；工作台创建退出端侧范围。 -->
 
-# Ink & Memory iOS交互设计
+# Kastention iOS交互设计
+
+当前名称规则见[应用名称需求](../../prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
 现行登录认证、目标编译与配置职责见[运行库认证合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，操作指南见[认证排障](../../deploy/mobile-auth-troubleshooting.md)。iOS已有登录文档、系统授权和Cookie适配源码；构建26的真机账号错误日志复验通过，当前构建27已安装启动。公网Google完整授权与新账户创建资格按[本轮执行记录](../../exec/ios-account-entry-fix-20261102.md)登记。下方旧日期阶段保留其原始状态。
 
@@ -855,3 +866,591 @@ stateDiagram-v2
 2026-11-02用户实际Google网页登录后停在认证服务登录页，公开error=invalid_code。原Admin出口上游无监听并返回CONNECT502，原App成功回调尚未触发。当前采用独立Docker Clash出口，原Client、PKCE、scope、账户、回调和finishLogin保持；服务名tun-proxy，容器使用现有混合端口配置。
 
 正常流程仍按原Google回调、Admin授权、App回调、BFF exchange/session及finishLogin执行；网络失败沿原错误页与重新发起恢复。公开端点连通记录为服务端网络验证。2026-11-02用户确认修复后真机复验通过；自动化runner受系统签名信任拦截，逐阶段会话及界面证据继续按缺失登记。部署范围与用户验收回执见[账号执行记录](../../exec/ios-account-entry-fix-20261102.md#google回调兑换与独立出口2026-11-02后续)。
+
+## App删除确认与目标辨认（2026-11-02）
+
+### 背景与问题
+
+Chat首页、活动列表和工作区文件的触屏删除需要执行前确认；已有Deck/Agent与写作确认需要显示所选对象。发现依据、入口清单及源码候选归[APP-01](../../exec/app-experience-delete-20261102.md)。
+
+### 目标与边界
+
+复用原生Alert和原网页确认，保持原删除接口、归属校验、持久化和任务语义。原生确认直接满足目标辨认及取消；自定义弹层需要额外焦点与布局处理，撤销存储需要新增业务生命周期。本轮选择现有确认能力和已有对象快照。
+
+### 概念与规则
+
+`Business.deleteThread`从同ID历史/活动或当前Thread取得原名称及已有摘要，保存本次操作身份。确认一次后调用原`useNativeChatHistory.remove`；成功沿原历史移除、活动投影和当前选择更新，失败保留原对象。账户实例卸载使旧确认失效。异步文档关闭后再次读取当前选择，保护已打开的其他Thread。
+
+`FileSidebar.native::remove`显示已有相对路径及文件夹删除范围，确认后核对原Thread/Workspace身份、组件存活及面板可见性。Deck/Agent与CalendarPopup沿原确认补名称、首行或日期，原mutation、保存及授权继续原模块所有。
+
+### 删除正常时序
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant UI as ChatHistoryList.native / ActivitySidebar.native
+  participant App as App.tsx Business
+  participant Alert as 原生Alert
+  participant H as useNativeChatHistory.native
+  participant API as deleteChatThread
+  U->>UI: 点击目标删除
+  UI->>App: deleteThread(id, 当前显示名称)
+  App->>Alert: 显示同ID名称与永久删除范围
+  alt 用户取消或关闭
+    Alert-->>App: cancel
+    App-->>UI: 保留目标及当前选择
+  else 用户确认
+    Alert->>App: onPress（同操作执行一次）
+    App->>H: remove(id)
+    H->>API: 原认证DELETE
+    API-->>H: 成功
+    H-->>App: true，移除同ID历史行
+    App->>App: activity.removeChat(id)
+    opt 当前选择仍为id
+      App->>App: closeToolResultDocuments；再次核对选择
+      App->>App: session.newChat及原输入实例更新
+    end
+    App-->>UI: 展示更新后的列表/当前对话
+  end
+```
+
+### 删除失败与恢复
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant App as App.tsx Business
+  participant H as useNativeChatHistory.native
+  participant API as deleteChatThread
+  U->>App: 辨认目标并确认删除
+  App->>H: remove(id)
+  H->>API: 原认证DELETE
+  API-->>H: 失败或请求异常
+  H-->>App: false，deleteError=true，保留原行
+  App-->>U: 删除失败，原条目与当前选择保持
+  U->>App: 再次点击目标删除
+  App-->>U: 重新显示同ID名称及确认
+  U->>App: 确认重试
+  App->>H: remove(id)
+  H->>API: 原认证DELETE
+  API-->>H: 成功
+  H-->>App: true
+  App-->>U: 更新对应历史及活动行
+```
+
+### 删除操作状态
+
+```mermaid
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> Confirming: 点击目标删除并保存操作身份
+  Confirming --> Ready: 取消或关闭 / 零DELETE
+  Confirming --> Deleting: 确认一次 / 原DELETE
+  Confirming --> Retired: 账户实例卸载或文件身份变更
+  Deleting --> Failed: 失败 / 保留对象及当前选择
+  Failed --> Confirming: 再次点击删除
+  Deleting --> Removed: 成功 / 移除同ID行
+  Removed --> Ready: 核对当前选择并沿原流程收尾
+  Retired --> [*]
+```
+
+文件分支沿`FileSidebar.native::remove`执行相同确认、取消、原DELETE和失败保留路径，确认内容采用`file.path`；成功沿原目录刷新。Deck与Agent保留原确认及mutation路径，提示新增所选名称。
+
+
+### 评审与验收状态
+
+选择已有确认组件，新增页面、接口、数据库及后台撤销为0。页面骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#app删除确认与目标辨认2026-11-02)。本轮代码及设计为待验证候选；用户已暂停luna-test-stage，文档路径/Mermaid、Web回归与Simulator完整旅程均记为待执行。评审结论为待满足明确测试前提后通过，执行与剩余依赖归[总清单](../../exec/app-experience-fixes-20261102.md)。
+
+## 前后台与进程重开恢复（2026-11-02）
+
+2026-11-03现行方案见[APP-04专项恢复设计](mobile-recovery-interaction.md)。下文保留原候选、图示与阶段评审；当前事实、实例生命周期、恢复边界及后续验收以专项方案为准，APP-04实现与行为验收继续暂停。
+
+### 背景与问题
+
+原前后台reader释放与任务GET恢复已存在。进程重开缺少当前Thread及未发送输入的恢复。当前候选复用原iOS Settings和输入Hook，详见[APP-04](../../exec/app-experience-foreground-recovery-20261102.md)。
+
+### 目标与边界
+
+恢复客户端选择与输入，服务端继续所有消息、任务、权限和终态。Settings保存当前公开owner、主/侧Thread范围、Thread ID、未发送文本及已完成上传的storageKey元数据。任务、消息正文、凭据及未完成上传字节退出该记录。新的数据库、后台常驻及自动重发为0。
+
+### 概念与规则
+
+`App.Business`按原已校验账户与显式侧Thread装配`nativeChatRecovery`；`useComposerDraft`提供原输入快照，`AIInputDock.native`读取初始输入。选择变化使旧输入写入代次失效；Settings解析和存储错误只记录固定类别，原JSON及正文不写入诊断。
+
+`useNativeChatThread`通过原history/status/stream恢复，后台关闭本地reader及尚未派发的准备，前台重新读取同一Thread，队列后台暂停轮询。迟到入队结果按原选择代次处理，Stop沿原接口及恢复。后台前已被原服务接受的任务以服务状态为准，客户端不自动重放提交。
+
+主Business还可保存一个原侧对话指针；显式initialThreadId的侧Business不递归创建侧弹层。进程重开后恢复原侧对话阅读与独立草稿。Writing活文档回调无法持久化，来源未重建时保留原writingContextUnavailable发送保护；用户点击原“写作”入口后，通过原GET核对session id、editor_state.id与writingThreadId，再沿editorJump打开原来源。普通侧对话保持原发送能力。关闭、主导航或侧内改选使同一指针失效；迟到来源读取按实例与原指针匹配处理。无新Writing协议、业务映射或自动保存/重发。
+
+
+生命周期：App与嵌入式Python/Node同进程存续；进程终止后本地执行结束。原`claude_agent_thread_status`先执行`_admin_thread`归属校验，本地session缺失返回`running=false/lifecycle=not_found`；stream只在原运行实例存在时读取。客户端展示原历史和原状态，不合成completed、cancelled或助手消息。模型中断写入、Gateway结算和任务状态仍需Simulator集成证据。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant A as App.Business
+  participant C as useComposerDraft
+  participant R as nativeChatRecovery
+  participant S as useNativeChatThread
+  participant H as 原history/status/stream
+  participant W as 原Writing入口
+  U->>C: 输入文本并添加已上传附件
+  C->>R: 原输入状态快照
+  R->>R: 按owner和scope写入Settings
+  U->>S: 切入后台
+  S->>S: 递增epoch并关闭本地reader
+  U->>S: 返回前台
+  S->>H: GET messages与status
+  H-->>S: 原消息及running
+  alt running为true
+    S->>H: GET stream
+    H-->>S: 原增量事件
+  else running为false
+    S-->>U: 显示原保存结果
+  end
+  Note over C,R: 同一输入实例保留草稿与附件
+  U->>A: 进程结束后重新打开
+  A->>R: 原账户就绪后读取恢复记录
+  R-->>A: 当前Thread与未发送输入
+  A->>S: 装配原Hook与Thread指针
+  A->>C: 装配原输入Hook
+  S->>H: 原GET恢复并校验服务器归属
+  H-->>S: 原任务与消息状态
+  opt 保存一个侧对话指针
+    A->>R: 主Business读取侧指针
+    R-->>A: 原侧Thread与可选writingSessionId
+    A->>S: 装配侧Business并执行原GET恢复
+    Note over A,S: 侧Business自动装配侧指针数为零
+    alt 有Writing来源
+      A-->>U: 原消息与草稿，发送禁用，提供写作入口
+      U->>A: 点击写作
+      A->>H: GET原Session并核对id和writingThreadId
+      H-->>A: 来源校验通过
+      A->>W: 原editorJump，用户显式导航
+      U->>W: 打开原关联对话
+      W->>A: 原live WritingThreadContext
+    else 普通侧对话
+      A-->>U: 原阅读、输入与发送
+    end
+  end
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant C as useComposerDraft
+  participant S as useNativeChatThread
+  participant H as 原HTTP与SSE
+  U->>C: 点击发送
+  C->>S: 原send
+  S->>H: 原创建Thread请求
+  U->>S: 创建响应返回前进入后台
+  S->>S: 递增epoch并关闭准备任务
+  H-->>S: 创建响应迟到
+  S-->>C: 选择代次变化，结束后续派发
+  C-->>U: 原拒绝恢复草稿
+  U->>S: 原任务返回前台
+  S->>H: GET messages/status
+  H-->>S: 网络错误
+  S-->>U: 原待核实反馈与读取重试
+  U->>S: 网络恢复后重试读取
+  S->>H: 原GET
+  H-->>S: 运行中或原终态
+  U->>S: 显式Stop
+  S->>H: 原Stop请求
+  H-->>S: 原允许关闭reader的回执
+  S->>S: 递增epoch并关闭旧reader
+  S->>H: 原history/status恢复
+  H-->>S: 原取消结果及空闲
+  H-->>S: 旧reader迟到事件
+  S->>S: epoch不匹配，退出当前投影
+  U->>S: Writing侧对话点击写作
+  S->>H: GET原Session
+  H-->>S: 403或来源关联不匹配
+  S-->>U: 原来源错误与写作重试，保留草稿和发送保护
+```
+
+### 状态转换
+
+```mermaid
+stateDiagram-v2
+  [*] --> Restoring: 原会话就绪且有保存Thread
+  [*] --> Ready: 原会话就绪且无保存Thread
+  Ready --> Preparing: 用户发送
+  Preparing --> Ready: 后台中断派发前准备并恢复输入
+  Preparing --> Running: 原用户提交获准
+  Running --> Background: AppState background
+  Ready --> Background: AppState background
+  Background --> Restoring: AppState active且有Thread
+  Background --> Ready: AppState active且无Thread
+  Restoring --> Unknown: 原读取失败
+  Unknown --> Restoring: 原读取重试
+  Restoring --> Running: 原status为running
+  Restoring --> Ready: 原status为空闲
+  Restoring --> WritingSourceRequired: 保存的侧指针带Writing来源
+  WritingSourceRequired --> WritingSourceRequired: 来源GET失败，保留草稿并显式重试
+  WritingSourceRequired --> WritingSource: 用户点击写作，原来源GET匹配并经editorJump打开
+  WritingSource --> Ready: 用户从原入口重开关联Chat，取得原活准备回调
+  Running --> Stopping: 用户Stop
+  Stopping --> Restoring: 原Stop回执后核实
+  Running --> Restoring: 原finish或读取结束
+  Background --> [*]: 系统结束进程
+  Ready --> [*]: 用户结束进程
+```
+
+图中Background描述页面生命周期；任务状态继续由原服务返回。进程结束后的运行实例重新装配，继续读取既有Thread；记录中保留原消息及其终态。
+
+### 评审与验收状态
+
+采用已有Settings与当前输入Hook，新增适配只对应账户与侧对话范围差异。现有任务查询、停止及权限保持原模块所有。桌面/窄屏骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#前后台与进程重开恢复2026-11-02)。代码和测试规格已形成候选；luna-test-stage、文档校验与Simulator执行按用户要求暂停。评审结论为待满足明确测试前提后通过；恢复页面与真实模型执行分别验收。
+
+## 端侧启动阶段耗时定位（2026-11-02）
+
+### 背景与问题
+
+已有端到端启动和接口耗时样本包含解释器、Node、原模块装配及Admin等待，当前证据无法给出CPython计算性能损失比例。已选方案先在原启动语句外增加固定阶段计时，性能优化以同条件测量为前提，原始样本及来源归[APP-03](../../exec/app-experience-python-performance-20261102.md)。
+
+### 目标与边界
+
+复用原EmbeddedDreamBackend、CPython适配和mobile_runtime.ios装配，记录启动阶段墙钟与进程CPU元数据。保持原初始化顺序、锁、ready缓存、调用结果、异常和认证。新解释器、新运行服务、后台执行和全面模块延迟导入退出本轮范围。
+
+### 概念与规则
+
+- Native记录队列等待、合并调用、缓存命中、两次Python启动、Node启动/endpoint等待和总体启动；同进程attempt用于关联同一次启动。
+- CPython记录解释器初始化、GIL等待、入口模块导入及原入口调用。启动活动期间原Admin传输记录固定等待阶段，原payload、结果和GIL释放行为保持。
+- Python在原插件、Notion、Admin认证、Factory、业务路由、监听和Next准备周围记录固定阶段；计时输出失败按诊断局部处理，原业务异常继续传播。
+- 日志仅含固定层/阶段/结果、单调耗时、进程CPU耗时、时间和PID等关联元数据。请求地址、凭据、身份、正文及原始payload退出计时日志。
+- 进程CPU包含同进程Node及其他线程活动，嵌套阶段耗时不可直接相加。原Admin传输阶段包含重新获得GIL的时间，字段按该测量边界解释。
+- 冷启动、同进程缓存路径、不同制品和失败样本分别保存。Simulator仅报告Simulator条件，真实iPhone性能及jetsam另行验收。
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant S as SessionGate
+  participant M as BackendRuntimeManager
+  participant E as EmbeddedDreamBackend
+  participant P as IMDreamPythonCall / mobile_runtime.ios
+  participant N as IMDreamNodeStart
+  participant A as 原Admin接口
+  U->>S: 打开App
+  S->>M: ensureStarted
+  M->>E: start
+  E->>P: start(nil)，记录初始化与导入
+  P-->>E: 原公开ASGI健康回执
+  E->>N: 启动原Node并等待该PID endpoint
+  N-->>E: endpoint就绪
+  E->>P: start(runtimeEndpoint)
+  P->>A: 原Factory按原规则加载policy
+  A-->>P: 原结果或原LKG处理
+  P->>P: 装配原路由、ASGI及Next，记录阶段耗时
+  P-->>E: 原ready facts
+  E-->>M: 原成功结果
+  M-->>S: 共享启动结果与原总耗时
+  S->>A: 原会话、配置与目录读取
+  A-->>S: 原公开DTO
+  S-->>U: 原主页与原业务操作可用
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant E as EmbeddedDreamBackend
+  participant P as mobile_runtime.ios
+  participant W as 原Next Worker
+  participant D as 原RuntimeDiagnostics
+  U->>E: 原启动入口
+  E->>P: 第二次start(runtimeEndpoint)
+  P->>W: 原start_native_web
+  W-->>P: 原监听或请求错误
+  P->>P: next_web_ready记录failed，原异常继续传播
+  P-->>E: 原失败
+  E->>E: 记录bind及startup_total failed，释放本轮waiters
+  E-->>D: 原NSError沿既有诊断链显示
+  D-->>U: 原错误与恢复说明
+  U->>E: 沿原恢复入口重开或重试
+  E->>P: 保留原已绑定owner，执行原恢复
+  P-->>E: 原成功或失败回执
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Starting: 原start
+  Starting --> Starting: 合并waiter
+  Starting --> Ready: 原ready facts
+  Starting --> Failed: 原异常
+  Failed --> Starting: 原后续start
+  Ready --> Ready: cached_ready复用原facts
+  Ready --> ProcessEnded: 原App进程结束
+  Failed --> ProcessEnded: 原App进程结束
+  ProcessEnded --> Idle: 新进程原入口
+```
+
+图中为原启动状态与本次观测边界；图示、源码评审和文档修订均未替代运行验收。本次无页面或弹窗修订，桌面和窄屏继续[现行启动PRD骨架](../../prd/mobile-app/mobile-startup.md#页面设计)。
+
+### 评审与验收状态
+
+新增计时只对应当前阶段不可分辨的证据缺口，源码候选未调整原业务调度、返回DTO和原权限。公开会话、配置、目录、历史及核心任务作为同一旅程的终点；日志生成和网络连通分别记录。用户暂停luna-test-stage后，合同脚本、构建、文档图示与Simulator测量均待执行；尚无当前瓶颈归因、同条件基线或性能改善数值。评审结论为待满足明确测量与测试前提后通过。
+
+## 回顾分析失败反馈与原提交恢复（2026-11-02）
+
+### 背景与问题
+
+截图前段来自reflectionCreateError对未映射且非401创建失败的通用反馈，后段来自原待确认提交恢复提示。相同错误存在多处呈现。截图仅显示21:23，实际日期、构建、请求状态及task_id未知，不能据此完成网络根因判断。证据和源码映射归[APP-02](../../exec/app-experience-reflections-20261102.md)。
+
+### 目标与边界
+
+复用原createReflectionTask、任务查询、显式start及报告接口，保持来源冻结、request_key、body、权限与任务语义。原pending记录兼容增加可选task_id，候选采用已有服务端创建后失败DTO。无新增服务端接口、数据库或自动模型重发。
+
+### 概念与规则
+
+已存在pending时，useReflections先处理原提交，退出同日新分析选择流程。AnalysisView.native显示明确恢复按钮和原输入说明，在一个原错误区域按完整文案去重；历史和报告保存错误各自保留原位置。
+
+已知task_id优先GET原任务，保留原输入及请求身份。运行中或终态采用原任务读取；准备态只沿原显式继续规则启动。创建结果未知时，原幂等恢复沿同一request_key和body；明确拒绝与未确认状态分别处理。报告任务读取失败保留reportRetryTaskId，retryReportSave恢复同一任务的原报告。
+
+统计使用传入的账户timezone，旧effect退出后忽略迟到结果；日记date_key由同一时区的getLocalDayKey计算。统计刷新独立于原历史与任务恢复，原Web/Native继续共享同一Hook与DTO。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant M as MoreNavigator.native
+  participant V as AnalysisView.native
+  participant H as useReflections
+  participant A as createReflectionsApi
+  participant S as 原Reflections任务及报告接口
+  U->>M: 更多中选择回顾
+  M->>V: 账户timezone和原API及storage
+  V->>H: 原页面状态
+  H->>A: fetchSessionsAggregate(timezone)
+  A-->>H: 统计及日记摘要
+  H-->>V: 统计及账户时区日期
+  U->>V: 选择原Notion和Agent后生成
+  opt 当天已有报告
+    V-->>U: 原再次分析弹窗及日记选择
+    U->>V: 确认原来源组合
+  end
+  H->>A: runReflectionsTask
+  A->>S: 原POST tasks及request_key
+  S-->>A: 原task_id
+  A->>S: 原GET events后POST start
+  S-->>V: 原任务进度及结果
+  H->>S: 原任务时间读取及报告保存
+  S-->>H: 原历史和来源
+  H-->>V: 原报告阅读
+  U->>V: 原章节与条目阅读后返回
+  V-->>U: 原回顾主页及历史入口
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant M as MoreNavigator.native
+  participant H as useReflections
+  participant A as createReflectionsApi
+  participant S as 原任务及报告接口
+  H->>A: 统计读取A
+  M->>H: 账户timezone更新
+  H->>H: 使读取A的effect失效
+  H->>A: 统计读取B
+  A-->>H: 读取B返回
+  H->>H: 更新统计与候选日期
+  A-->>H: 读取A延迟返回
+  H->>H: 忽略失效effect结果
+  Note over H,S: 原历史及任务观察继续
+  opt 原创建请求结果未知
+    A-->>U: 原恢复提示
+    U->>H: 显式重试
+    H->>A: 原request_key及body
+    A->>S: 恢复原创建回执
+  end
+  opt 原报告保存失败
+    H-->>U: 保留结果和重试保存入口
+    U->>H: 重试保存
+    H->>S: 原task_id的report接口
+  end
+  opt 完成后任务信息读取失败
+    S-->>H: 任务日期或来源读取错误
+    H->>H: 保留原task_id供原保存重试
+    H-->>U: 错误反馈及原重试保存入口
+    U->>H: 重试保存
+    H->>S: 原report接口及历史读取
+    S-->>H: 同一任务的报告与来源
+    U->>H: 从原历史入口重开报告
+  end
+  U->>M: 返回更多
+  M->>H: 原实例保留
+  Note over M,S: 页面隐藏无任务停止请求
+```
+
+### 状态图
+
+```mermaid
+stateDiagram-v2
+  [*] --> 回顾主页
+  回顾主页 --> 来源选择: 原分析内容入口
+  来源选择 --> 回顾主页: 关闭并保留选择
+  回顾主页 --> 同日选择: 当天已有报告
+  同日选择 --> 回顾主页: 取消
+  回顾主页 --> 任务观察: 原显式生成或活动任务恢复
+  同日选择 --> 任务观察: 原所选内容提交
+  任务观察 --> 任务观察: 时区刷新仅更新统计
+  任务观察 --> 回顾主页: 原失败反馈
+  任务观察 --> 报告待恢复: 完成后任务信息读取失败
+  报告待恢复 --> 回顾主页: 原保存重试成功并刷新历史
+  任务观察 --> 报告阅读: 原完成或部分成功
+  报告阅读 --> 报告阅读: 原手柄及章节和条目切换
+  报告阅读 --> 回顾主页: 原返回
+  回顾主页 --> 回顾主页: 时区刷新及过期响应隔离
+```
+
+### 评审与验收状态
+
+修订直接对应错误重复、恢复含义及已创建任务读回缺口，复用原幂等提交和任务接口。原始提交失败的HTTP原因尚无本次证据；用户暂停后未执行修订后检查，修订前12项fixture结果只说明原基线。文档/Mermaid、Web相邻、22项原生规格与Simulator完整业务均待执行，评审结论为待满足明确测试和请求取证前提后通过。页面骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#回顾分析失败反馈与原提交恢复2026-11-02)。
+
+### 2026-11-03原生正文分配与当前验收
+
+上方暂停状态保留2026-11-02历史含义。当前APP-01/02/03/05已恢复验收，APP-04持续暂停，实际命令与结论归[总清单](../../exec/app-experience-fixes-20261102.md)。
+
+`ReflectionBlogPage.native.tsx`在原阅读区域的`onLayout`更新实测高度；列表及详情分别使用该高度乘以原`useReflectionDetailSheet.fraction`计算的互补高度。固定高度区禁用flex伸缩，正文ScrollView填充手柄、标题/关闭和播放器之间的剩余空间；布局变化继续触发同一区域测量。正文观察标识为`reflection-detail-body`，供原生验收读取几何与触摸滚动。原停靠点、PanResponder、选择、报告和任务状态均复用。
+
+原安装候选的XCUITest已确认手柄真实上下拖动和诊断覆盖/返回通过；默认正文被挤压的修订采用独立候选构建，正文滚动按新候选另行验收。源码评审选择局部高度分配，未引入新弹窗、接口、后端服务或报告状态。
+
+## iOS HTTP解析器资源选择（2026-11-03）
+
+回顾沿原`createReflectionTask`、Next `forwardBackendRequest`与Python Reflections路由创建任务。固定NodeMobile `24.21.0-0`的polywasm会在函数首次执行时编译WASM指令；Undici `6.28.1`默认SIMD llhttp在该阶段触发`Unsupported instruction: 0xFD`，对应本地BFF创建HTTP502。相同版本自带的标量`llhttp-wasm.js`已通过具名provider-free的原生产转发入口：POST202、SSE200和读取首块后的AbortError。
+
+`frontend/ios/scripts/prepare-next.py`在生成iOS standalone的服务端webpack配置时，将精确的`../llhttp/llhttp_simd-wasm.js`资源请求映射到已安装同版Undici的`llhttp-wasm.js`。业务源码、共享Web构建、依赖锁、HTTP解析器ABI和第三方包文件保持。该选择归iOS目标构建适配；客户端、Python与Claude实例的生命周期及业务状态按前文规则执行。
+
+原POST `headersTimeout:0`保留来源准备期间的响应头等待，原GET事件流`bodyTimeout:0`保留稀疏进度事件，连接限制、调用方AbortSignal、认证头及Cookie所有权继续由原模块执行。构建校验核对实际内联WASM字节与同版标量资产摘要，并核对包内Next source receipt；普通Simulator沿原pending请求恢复，新的任务创建、执行、报告保存和历史重读另取真实业务回执。
+
+方案比较与评审：选择构建资源别名以复用同版解析器；全局WebAssembly包装、共享HTTP替换、取消期限和运行库升级均无当前需求。本节交付目标适配方案及源码；技术验证、Simulator真实业务和物理iPhone资格按[APP-02执行记录](../../exec/app-experience-reflections-20261102.md)逐项登记。
+
+官方资料查阅日期2026-11-03：[固定polywasm源码](https://github.com/fogtape/nodejs-mobile/blob/v24.21.0-0/deps/polywasm/polywasm.js)、[Undici原解析器与同版回退资源](https://github.com/nodejs/undici/blob/v6.28.1/lib/dispatcher/client-h1.js)、[webpack精确别名](https://webpack.js.org/configuration/resolve/#resolvealias)。
+
+## iOS Reflections工作区定位（2026-11-03）
+
+Admin通过原`reflection-task.worker-load`在服务与任务归属校验后返回`ReflectionWorkerLoadOutputDTO`，其`workspace_path`来自Admin主机配置。iOS执行器的物理目录位于App数据容器，原`AGENT_CWD`由Native endpoint指定。Simulator实际调用链在`ReflectionsTaskEngine._assemble_context`→`_prepare_task_workspace`→`canonical_reflection_workspace`拒绝跨主机绝对路径，返回`REFLECTION_WORKSPACE_BINDING_CONFLICT`。
+
+目标适配由原`canonical_reflection_workspace`处理：iOS接受规范绝对路径、标准小写任务UUID及精确`task_id/memory`末段，将任务定位映射到当前`AGENT_CWD/task_id/memory`。Admin路径的祖先不参与本地文件访问；任务ID继续来自已认证worker-load及原DTO校验。Linux和Web服务继续按原规则要求定位与配置根完全匹配。
+
+本地根校验、逐层符号链接拒绝、Task根0700、O_NOFOLLOW写入及原任务归属继续执行；相对路径、其他任务、遍历、错误末段均拒绝。原`CLAUDE_CODE_TMPDIR`、Thread workspace、模型权限及发布capability保持。本项复用原函数及配置，无新增HTTP、env键、数据库字段、Admin部署或权限入口。
+
+用户交互继续执行原任务状态：未确认提交沿原pending恢复；已保存FAILED的任务保留失败和历史，新的分析由原新建入口显式提交。源码修复及技术检查完成后，由总控限定下一次新分析完成任务、报告和历史验证；失败任务的状态与原始记录保持。原正常、异常与状态图继续适用。
+
+## iOS命令工具与Notion正文读取（APP-07）
+
+### 背景与问题
+
+原Runtime将`process.platform=ios`用于内置ripgrep路径，`prepare-node.py`原先只复制JavaScript。原Notion Read hook使用直属Thread workspace的`.notion-home`，Node `notion-cli`入口原先只接受用户级`notion-runtime`子目录。截图显示`rg ENOENT`和`NOTION_CAPABILITY_UNAVAILABLE`；定向回归复现线程home被拒。
+
+### 目标与边界
+
+复用原SDK、Runtime、ChildProcess、guest、Read hook、CLI、权限与输出。构建从同版Runtime Linux ARM64制品提取静态rg，沿现有host暂存并恢复执行位；精确一处iOS selector适配从Worker读取host绑定路径。Node接受规范化直属thread `.notion-home`，其余env、精确ntn与资源归属校验保持。Mac业务替代、新HTTP接口、宽泛cwd、工具注册及新授权方式为0。
+
+### 概念与规则
+
+`node-dependencies.json`锁定完整制品和资源摘要，`prepare-node.py`生成单处适配回执，`bundle-node.py`核对后入包。host只绑定固定guest rg路径，Worker在会话env投影后写入`INK_IOS_RIPGREP_PATH`。原Grep/Glob仍由Runtime执行。
+
+Notion命令cwd接受原`notion-runtime`子目录及`workspaceRoot/<thread>/.notion-home`。原`realpath===cwd`和目录检查继续执行，外部路径、嵌套home、symlink、其他命令、ambient `HOME/NOTION_API_TOKEN`和错误keyring继续拒绝。actor、页面选择和auth文件所有权由原Python边界校验。原失败反馈、Stop、临时结果0700/0600及原Thread关系保持。
+
+方案评审：原工具所需资源和已存在的thread home分别补齐；替代工具与共享用户home会增加协议或改变凭证归属，已排除。评审、源码和分项验证回执归[APP-07](../../exec/app-experience-claude-notion-20261103.md)。以下图示描述当前候选执行；设备验收按回执确认。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant UI as ChatPage.native
+    participant R as ClaudeAgentRunner / Runtime
+    participant H as host.cjs / worker.mjs
+    participant G as DreamGuestProcess
+    participant P as apply_notion_page_read_redirect
+    participant N as NotionOperationClient / ntn
+    participant API as Notion API
+    U->>UI: 原对话提交搜索或正文读取任务
+    UI->>R: 原Chat请求及当前Thread
+    R->>R: 原工具审批与输入校验
+    alt Grep / Glob / Bash
+        R->>H: 原ChildProcess及host绑定执行文件
+        H->>G: 已打包命令 / cwd / env
+        G-->>R: stdout / stderr / exit
+    else Read已选Notion页面
+        R->>P: .notion/pages/id.json
+        P->>P: 校验Thread索引与private home
+        P->>N: get_page_markdown(id)
+        N->>H: 精确ntn及thread .notion-home
+        H->>H: 校验目录 / env / 执行文件摘要
+        H->>G: 原CLI命令
+        G->>API: 已授权页面读取
+        API-->>N: 页面Markdown与完整性字段
+        N-->>P: 原OperationResult
+        P-->>R: 同Thread私有临时结果
+    end
+    R-->>UI: 原工具结果及回复
+    UI-->>U: 原卡片与正文，保存后可重开
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant UI as ChatPage.native / Notion详情页
+    participant R as ClaudeAgentRunner / Runtime
+    participant H as host.cjs / worker.mjs
+    participant P as apply_notion_page_read_redirect
+    participant N as NotionOperationClient
+    U->>UI: 提交原对话任务
+    UI->>R: 原Chat请求
+    alt 命令缺失或非零退出
+        R->>H: 原执行请求
+        H-->>R: 原错误或exit回执
+        R-->>UI: 原工具失败结果
+    else Notion读取失败
+        R->>P: 原Read输入
+        P->>N: 原页面读取
+        N-->>P: 认证 / 权限 / 执行 / 请求失败
+        P-->>R: 原安全错误码与恢复操作
+        R-->>UI: 同一对话失败反馈
+    end
+    UI-->>U: 保留原消息 / 资源选择 / 轻索引
+    opt 需要授权恢复
+        U->>UI: 原Notion详情重新连接或授权页面
+        UI-->>U: 原浏览器流程完成并返回
+    end
+    U->>UI: 原对话明确重试
+    UI->>R: 原Thread继续请求
+    R-->>UI: 新工具结果，旧失败保留
+    opt 用户停止当前执行
+        U->>UI: Stop
+        UI->>R: 原cancel / interrupt
+        R->>H: 原terminate与退出等待
+        H-->>R: 原exit回执
+        R-->>UI: 原停止状态
+    end
+```
+
+### 对话工具状态
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> Pending: 用户提交
+    Pending --> Running: 原审批允许及输入有效
+    Pending --> Failed: 原审批拒绝或输入失败
+    Running --> Completed: 原结果成功
+    Running --> Failed: 执行或页面读取失败
+    Running --> Stopped: 用户Stop及原退出回执
+    Failed --> Pending: 用户在原Thread明确重试
+    Stopped --> Pending: 用户继续提交
+    Completed --> History: 保存并重开
+    Failed --> History: 原失败结果保存并重开
+    History --> Pending: 用户发起新读取
+```

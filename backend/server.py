@@ -1,6 +1,7 @@
 # [Sync] 2026-10-15: own the capability-gated Reflections memory worker and behavior router.
 #!/usr/bin/env python3
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
+# [Sync] 2026-11-02: use the existing backend display-name constant for API metadata.
 # [Input] Consume backend/.env, HTTP requests, Admin auth/data clients, and runtime config.
 # [Output] Publish FastAPI application and REST/SSE routes, including a
 #          credential-free Claude SDK/CLI identity line during startup.
@@ -60,6 +61,7 @@
 # [Sync] 2026-10-25: preserve production route order through the shared business-router inventory.
 """FastAPI application for Writing, Story Workspace, and Claude Agent APIs."""
 
+from seo_content import APP_NAME
 import os
 import time
 from pathlib import Path
@@ -176,7 +178,7 @@ CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
 # ========== FastAPI Application ==========
 
 app = FastAPI(
-    title="Ink & Memory API",
+    title=f"{APP_NAME} API",
     description="Writing, Story Workspace, and Claude Agent API",
     version="2.0.0",
 )
@@ -554,7 +556,7 @@ if __name__ == "__main__":
     import uvicorn
 
     print("\n" + "=" * 60)
-    print("🎭 Ink & Memory FastAPI Server")
+    print(f"🎭 {APP_NAME} FastAPI Server")
     print(f"🧾 Version: {BACKEND_VERSION}")
     print("=" * 60)
     print("\n📚 API Endpoints:")

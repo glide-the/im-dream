@@ -1,3 +1,7 @@
+// [Sync] 2026-11-03: label full user-message expansion and collapse in the existing Chat locale scope.
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
+// [Sync] 2026-11-02: explain explicit attachment selection after an interrupted native upload.
+// [Sync] 2026-11-02: name the file/folder path and permanent deletion scope in native Workspace confirmations.
 // [Sync] 2026-11-01: explain failed Writing context preparation while retaining the unsent Chat input.
 // [Sync] 2026-11-01: label the report detail drag handle and its touch/keyboard accessibility guidance.
 // [Sync] 2026-10-29: label native General feedback without changing original Web settings actions.
@@ -32,7 +36,7 @@
 // [Sync] 2026-09-28: explain uncertain dispatched inputs separately from retained unsent drafts.
 // [Sync] 2026-09-26: localize queued input status, guidance and failure feedback.
 // [Input] User locale and product-facing translation keys.
-// [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
+// [Output] English and Simplified Chinese UI copy for Kastention surfaces.
 // [Pos] Frontend i18next resource registry.
 // [Sync] 2026-10-27: native windows without browser storage retain the original English fallback; Web language keys and copy remain unchanged.
 // [Sync] 2026-09-13: add explicit file-download and report-preview close labels.
@@ -67,6 +71,7 @@
 // [Sync] 2026-09-17: add safe Chat recovery copy for an exhausted subscription-period Token allowance.
 // [Sync] 2026-09-18: align the visible Chat shortcut hint with Enter send and Shift+Enter newline behavior.
 
+import { BRAND_NAME, BRAND_NAME_ZH } from './constants/brand';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
@@ -76,6 +81,7 @@ const LANGUAGE_STORAGE_KEY = 'ink-language';
 const resources = {
   en: {
     translation: {
+      brand: { name: BRAND_NAME },
       nav: {
         writing: 'Writing',
         timeline: 'Timeline',
@@ -194,7 +200,7 @@ const resources = {
           },
           about: {
             title: 'About',
-            description: 'Information about the Ink & Memory workspace.'
+            description: `Information about the ${BRAND_NAME} workspace.`
           }
         }
       },
@@ -322,7 +328,7 @@ const resources = {
           noAgents: 'No Agent is configured for this Deck.',
           infoTitle: 'Information',
           infoDeveloper: 'Developer',
-          systemDeveloper: 'Ink & Memory',
+          systemDeveloper: BRAND_NAME,
           userDeveloper: 'You',
           infoType: 'Category',
           infoVersion: 'Version',
@@ -723,6 +729,7 @@ const resources = {
           failed: 'Context compaction did not complete',
           unconfirmed: 'Context compaction completion not confirmed'
         },
+        message: {expand: 'Expand message', collapse: 'Collapse message'},
         historyTurn: {
           loading: 'Loading conversation…',
           duration: 'Took {{duration}}',
@@ -751,7 +758,7 @@ const resources = {
           exportFailed: 'Export failed. Please try again.',
           workspaceImageUnavailable: 'Workspace image unavailable',
           you: 'You',
-          assistant: 'Ink & Memory',
+          assistant: BRAND_NAME,
           footer: 'Write today. Remember forever.',
           thinking: 'Thinking',
           truncated: '… (truncated)',
@@ -803,8 +810,8 @@ const resources = {
         toolConfirmation: {
           userRejectedTool: 'User rejected the tool execution',
           userCancelledAnswer: 'User cancelled the question',
-          askUserTitle: 'I&M needs your answer',
-          confirmTitle: 'Allow I&M to call the {{tool}} tool',
+          askUserTitle: `${BRAND_NAME} needs your answer`,
+          confirmTitle: `Allow ${BRAND_NAME} to call the {{tool}} tool`,
           rejectOnlyTitle: 'This request requires safe handling',
           rejectOnlyDescription: 'The original request cannot be displayed safely. Reject it so the Dream Agent can continue.',
           rejectAndContinue: 'Reject and continue',
@@ -825,7 +832,7 @@ const resources = {
           approved: 'Approved',
           cancelled: 'Cancelled',
           rejected: 'Rejected',
-          networkConfirmTitle: 'Allow I&M to make a network request via {{tool}}',
+          networkConfirmTitle: `Allow ${BRAND_NAME} to make a network request via {{tool}}`,
           networkHostLabel: 'Host: ',
           networkHostUnknown: 'unknown (network shell command)',
           networkPolicyLabel: 'Network policy: ',
@@ -912,6 +919,7 @@ const resources = {
           toolChoiceManualTitle: 'Every tool call requires manual confirmation',
           workspaceSyncFailed: 'Failed to sync the file to the workspace',
           uploadFailed: 'Upload failed',
+          uploadInterrupted: 'Select these files again to finish uploading: {{names}}',
           fileTooLarge: '{{name}}: file too large (max {{max}})',
           waitForUpload: 'Please wait for file uploads to finish',
           deleteFileAria: 'Delete file {{name}}',
@@ -1132,6 +1140,8 @@ const resources = {
           zoomIn: 'Zoom in'
         },
         workspaceFile: {
+          confirmDeleteFile: 'Delete “{{path}}”? This permanently removes the file.',
+          confirmDeleteFolder: 'Delete “{{path}}”? This permanently removes the folder and its contents.',
           checking: 'Checking Workspace…',
           loadingImage: 'Loading Workspace image…',
           imageAlt: 'Workspace image',
@@ -1217,6 +1227,7 @@ const resources = {
   },
   zh: {
     translation: {
+      brand: { name: BRAND_NAME_ZH },
       nav: {
         writing: '写作',
         timeline: '时间线',
@@ -1335,7 +1346,7 @@ const resources = {
           },
           about: {
             title: '关于',
-            description: 'Ink & Memory 工作区信息。'
+            description: `${BRAND_NAME_ZH} 工作区信息。`
           }
         }
       },
@@ -1463,7 +1474,7 @@ const resources = {
           noAgents: '这个思维模式暂未配置 Agent。',
           infoTitle: '信息',
           infoDeveloper: '开发者',
-          systemDeveloper: 'Ink & Memory',
+          systemDeveloper: BRAND_NAME_ZH,
           userDeveloper: '你',
           infoType: '类别',
           infoVersion: '版本',
@@ -1863,6 +1874,7 @@ const resources = {
           failed: '上下文压缩未完成',
           unconfirmed: '未确认上下文压缩完成'
         },
+        message: {expand: '展开消息', collapse: '收起消息'},
         historyTurn: {
           loading: '正在加载对话…',
           duration: '用时 {{duration}}',
@@ -1891,7 +1903,7 @@ const resources = {
           exportFailed: '导出失败，请重试。',
           workspaceImageUnavailable: '工作空间图片不可用',
           you: '我',
-          assistant: 'Ink & Memory',
+          assistant: BRAND_NAME_ZH,
           footer: 'Write today. Remember forever.',
           thinking: '思考过程',
           truncated: '…（已截断）',
@@ -1943,8 +1955,8 @@ const resources = {
         toolConfirmation: {
           userRejectedTool: '用户拒绝执行工具',
           userCancelledAnswer: '用户取消了问题回答',
-          askUserTitle: 'I&M 需要你的回答',
-          confirmTitle: '是否允许 I&M 调用 {{tool}} 工具',
+          askUserTitle: `${BRAND_NAME_ZH} 需要你的回答`,
+          confirmTitle: `是否允许 ${BRAND_NAME_ZH} 调用 {{tool}} 工具`,
           rejectOnlyTitle: '此请求需要安全处理',
           rejectOnlyDescription: '原始请求无法安全展示。请拒绝本次操作，让 Dream Agent 回到可继续处理的状态。',
           rejectAndContinue: '拒绝并继续',
@@ -1965,7 +1977,7 @@ const resources = {
           approved: '已同意',
           cancelled: '已取消',
           rejected: '已拒绝',
-          networkConfirmTitle: '是否允许 I&M 通过 {{tool}} 发起网络请求',
+          networkConfirmTitle: `是否允许 ${BRAND_NAME_ZH} 通过 {{tool}} 发起网络请求`,
           networkHostLabel: '目标主机：',
           networkHostUnknown: '未知（网络类命令）',
           networkPolicyLabel: '网络策略：',
@@ -2052,6 +2064,7 @@ const resources = {
           toolChoiceManualTitle: '每次工具调用都需要手动确认',
           workspaceSyncFailed: '工作空间文件同步失败',
           uploadFailed: '上传失败',
+          uploadInterrupted: '以下附件尚未上传完成，请重新选择：{{names}}',
           fileTooLarge: '{{name}}: 文件过大 (最大 {{max}})',
           waitForUpload: '请等待文件上传完成',
           deleteFileAria: '删除文件 {{name}}',
@@ -2269,6 +2282,8 @@ const resources = {
           zoomIn: '放大'
         },
         workspaceFile: {
+          confirmDeleteFile: '确定删除“{{path}}”吗？此文件将被永久删除。',
+          confirmDeleteFolder: '确定删除“{{path}}”吗？此文件夹及其中内容将被永久删除。',
           checking: '正在检查工作空间…',
           loadingImage: '正在加载工作空间图片…',
           imageAlt: '工作空间图片',

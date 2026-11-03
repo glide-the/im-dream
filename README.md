@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
 <!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
 <!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
@@ -11,13 +12,15 @@
 <!-- [Pos] Canonical English README; README.zh.md mirrors its structure, commands and facts. -->
 <!-- [Sync] 2026-10-09: describe concrete product modules and thinking modes; replace the generic creation journey and update illustrations. -->
 
-# Ink & Memory Dream
+# Kastention
+
+当前名称规则见[应用名称需求](docs/prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
 <p align="center">
   English · <a href="README.zh.md">中文</a>
 </p>
 
-**Ink & Memory helps users organize personal thinking modes and apply them to analysis, task execution and creative work.** Decks hold approaches to a kind of need, problem-solving paths and Agent configuration. Chat provides conversations and task entry points; Dream brings creative conversations and project outputs into one workbench. Writing, Analysis, Calendar and resource connections help users collect material, arrange work and return to existing tasks.
+**Kastention helps users organize personal thinking modes and apply them to analysis, task execution and creative work.** Decks hold approaches to a kind of need, problem-solving paths and Agent configuration. Chat provides conversations and task entry points; Dream brings creative conversations and project outputs into one workbench. Writing, Analysis, Calendar and resource connections help users collect material, arrange work and return to existing tasks.
 
 The product positioning follows the [Notion project description](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37). Current module scope follows the repository's current designs. The Chinese interface calls Decks “思维模式”; the English interface retains Deck.
 

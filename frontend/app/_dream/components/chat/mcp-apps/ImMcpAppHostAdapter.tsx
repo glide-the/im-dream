@@ -1,5 +1,6 @@
 'use client';
 
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Connected same-origin MCP Client, trusted saved result, server-owned Host policy, and current Chat ingress.
 // [Output] Metadata-validated AppBridge host with controlled calls/messages, context updates, and ordered teardown.
 // [Pos] Phase 1-3 sole iframe owner; Browser never receives upstream connection or credential material.
@@ -7,6 +8,7 @@
 // [Sync] 2026-09-06: keep the mounted official App stable when the current Chat ingress callback identity changes during parent polling/renders.
 // [Sync] 2026-09-13: keep opaque source-identity validation when the sandbox asset follows the frontend's entry origin.
 
+import { BRAND_NAME } from '../../../constants/brand';
 import { useEffect, useRef, useState } from 'react';
 import { AppBridge, PostMessageTransport } from '@mcp-ui/client';
 import {
@@ -238,7 +240,7 @@ export default function ImMcpAppHostAdapter({
         outer = document.createElement('iframe');
         outer.dataset.testid = 'im-mcp-app-host-frame';
         outer.dataset.policyRevision = policy.revision;
-        outer.title = 'Ink & Memory MCP App';
+        outer.title = `${BRAND_NAME} MCP App`;
         outer.style.width = '100%';
         outer.style.height = '320px';
         outer.style.border = '0';

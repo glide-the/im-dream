@@ -1,3 +1,7 @@
+// [Input] Existing application fixture and visible Chat controls.
+// [Output] Original journey assertions with current application-name selectors.
+// [Pos] Retained E2E harness; authentication and runtime prerequisites keep their existing contract.
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = 'http://127.0.0.1:5173';
@@ -123,7 +127,7 @@ test('Dream selects one Deck and persists immutable thread provenance', async ({
     response.url().endsWith('/api/claude-agent/threads')
     && response.request().method() === 'POST'
   ));
-  await page.getByPlaceholder('Ask Ink & Memory…').fill('Create a short story premise.');
+  await page.getByPlaceholder('Ask Kastention…').fill('Create a short story premise.');
   await page.getByRole('button', { name: 'Send' }).click();
   const threadResponse = await threadResponsePromise;
   expect(threadResponse.ok()).toBeTruthy();

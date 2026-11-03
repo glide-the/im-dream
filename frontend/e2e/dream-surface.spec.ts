@@ -1,3 +1,7 @@
+// [Input] Existing application fixture and visible Chat controls.
+// [Output] Original journey assertions with current application-name selectors.
+// [Pos] Retained E2E harness; authentication and runtime prerequisites keep their existing contract.
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -425,7 +429,7 @@ test('Gate redirect, deep links and query preservation (real backend)', async ({
   //    effects. Run-location proof is therefore carried by step 1; recorded in
   //    the Task 6 acceptance report as a dev-mode follow-up defect.
   await page.goto(`${WEB_BASE}/story-workspace/episodes/ep-e2e/review?run=${ctx.pendingRunId}`);
-  await expect(page.getByPlaceholder('Ask Ink & Memory…')).toBeVisible();
+  await expect(page.getByPlaceholder('Ask Kastention…')).toBeVisible();
 
   // 3. Legacy/no-surface regression on the UI shell: the Dream page loads
   //    cleanly and renders no surface link buttons (aggregation seam has no

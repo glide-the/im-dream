@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-03: APP-04导航同步双后台执行适配、真实进度、系统到期与原恢复；新增接口建议未实现。 -->
+<!-- [Sync] 2026-11-03: 增加APP-06消息阅读交互与独立执行记录索引。 -->
+<!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
 <!-- [Sync] 2026-11-01: 启动状态与只读开发者页已接入源码，设备采用和真实页面验收单列。 -->
 <!-- [Sync] 2026-11-01: 本次任务直接链接独立PRD和独立交互设计，页面骨架与流程可分别查看。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
@@ -34,7 +37,13 @@
 <!-- [Pos] 跨平台文档导航；2026-10-27统一frontend工程。 -->
 <!-- [Sync] 2026-10-28: Web当前可用性和原页面回归先于后续原生推进，RN精简主页面继续停止正式部署。 -->
 
-# Ink & Memory 跨平台方案
+<!-- [Sync] 2026-11-03: APP-04专项入口聚焦当前恢复问题的处理步骤与实例生命周期。 -->
+
+# Kastention 跨平台方案
+
+APP-04采用[后台执行与恢复专项方案](mobile-recovery-interaction.md)：原宿主内的小型适配器统一有限后台时间和iOS26持续任务，定义真实进度资格、系统回调收尾、原工作及句柄生命周期；许可退出后按原会话、Thread与输入恢复。新增接口为建议、未实现。正文保留原三幅恢复图并新增三幅后台许可图，原[iOS章节](mobile-ios-interaction.md#前后台与进程重开恢复2026-11-02)保留历史图示。
+
+当前名称规则见[应用名称需求](../../prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
 <!-- [Sync] 2026-11-02: 增加应用UI规范与正式交互入口，文档验证和业务资格分别记录。 -->
 
@@ -62,7 +71,7 @@ iPhone Notion安装提示的触发条件、资源入口和失败恢复见[现行
 
 统一发布工程归`frontend/`：`src/`共享源码，`ios/`与`android/`原生工程，`app/`保留Next服务端和现有Web视图；精确别名与平台文件选择由Next/Metro配置。旧`mobile/`工程已退役，代码存入`frontend/legacy/`。
 
-2026-10-31现行物理设备与普通Simulator采用[开发构建17](../../deploy/ios-iphone-install-release.md#二十一2026-10-31-admin连接复用与构建17)，Admin后通道共享App级URLSession，Task独立delegate和取消。设备覆盖安装与普通进程启动通过；Simulator冷启动自动恢复原账号、配置和20项真实历史。真机17原会话、配置和历史均返回503，工作区实现验收未通过，当前手机再次锁屏。后续优先完成普通前台console、传输绑定与超时定位。原页面、正常网页登录、Client/权限和业务接口保持，完整Claude及正式发行继续独立验收。
+2026-10-31现行物理设备与普通Simulator采用[开发构建17](../../exec/history/ios-release-documents-before-reader-revision-20261102.md#二十一2026-10-31-admin连接复用与构建17)，Admin后通道共享App级URLSession，Task独立delegate和取消。设备覆盖安装与普通进程启动通过；Simulator冷启动自动恢复原账号、配置和20项真实历史。真机17原会话、配置和历史均返回503，工作区实现验收未通过，当前手机再次锁屏。后续优先完成普通前台console、传输绑定与超时定位。原页面、正常网页登录、Client/权限和业务接口保持，完整Claude及正式发行继续独立验收。
 
 
 构建8阶段的普通Simulator使用产品标识`com.inkmemory.mobile`、0.1.0/8，采用RN Chat/Decks/More、正常账号回调与局部持久业务文档；`App.web.tsx`继续装配原`DreamRoot`。同Client的产品回调、密码登录关闭、左上关闭/重开和冷启动会话保持通过；系统Google入口/取消沿前阶段回执，完整Google账户授权待验收。主界面整页WebView策略原文保存于[历史快照](history/rn-container-before-rnw-20261027/README.md)。
@@ -97,6 +106,8 @@ iPhone Notion安装提示的触发条件、资源入口和失败恢复见[现行
 [Google正常账号回调兼容](mobile-ios-interaction.md#google正常账户授权的回调兼容)补充现行代码缺口、官方依据、最小方案、正常/异常时序及状态图；原Client、S256、权限和Web保持，程序实现/登记/真实授权分列。
 
 
-当前物理设备采用当前工作树重建的公网构建13，Swift/Metro/Python/Next生产构建、签名、Wi-Fi升级、版本及运行目录保留和普通启动通过；本机配置构建8及失败构建10保留。构建11普通Simulator采用已登记Web回调，原密码登录200、弹窗关闭及RN Chat历史显示通过；当前Simulator12补原Product API地址，用量200、原系统配置200，session/模型目录503及完整真实业务继续跟踪。端侧Python/Node/Next/Claude及RN页面保持。Google私有回调公网采用与完整授权继续待验收。当前[设备手册](../../deploy/ios-iphone-install-release.md#十八2026-10-31当前源码构建13与iphone安装)和[iOS交互规则](mobile-ios-interaction.md#公网密码网页登录与配置回调保留)提供回调、失败恢复及分项验收。
+当前物理设备采用当前工作树重建的公网构建13，Swift/Metro/Python/Next生产构建、签名、Wi-Fi升级、版本及运行目录保留和普通启动通过；本机配置构建8及失败构建10保留。构建11普通Simulator采用已登记Web回调，原密码登录200、弹窗关闭及RN Chat历史显示通过；当前Simulator12补原Product API地址，用量200、原系统配置200，session/模型目录503及完整真实业务继续跟踪。端侧Python/Node/Next/Claude及RN页面保持。Google私有回调公网采用与完整授权继续待验收。当前[设备手册](../../exec/history/ios-release-documents-before-reader-revision-20261102.md#十八2026-10-31当前源码构建13与iphone安装)和[iOS交互规则](mobile-ios-interaction.md#公网密码网页登录与配置回调保留)提供回调、失败恢复及分项验收。
 
 端侧网页链接与Notion授权恢复见[iOS现行交互](mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)，[本轮执行记录](../../exec/ios-notion-links-20261101.md)区分模拟器技术、七项Web及真实授权资格。
+
+APP-06消息展示按[消息阅读交互](chat-message-reading.md)和[PRD骨架](../../prd/chat/message-reading.md)执行；[独立记录](../../exec/app-experience-chat-rendering-20261103.md)分别登记原失败、技术、Simulator与剩余资格。

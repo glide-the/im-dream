@@ -1,9 +1,10 @@
-<!-- [Input] ink-dream隐私、订阅与人工智能三份使用说明。 -->
+<!-- [Sync] 2026-11-02: 对外说明采用Kastention应用名称。 -->
+<!-- [Input] Kastention隐私、订阅与人工智能三份使用说明。 -->
 <!-- [Output] 面向普通使用者的文档入口。 -->
 <!-- [Pos] docs/user对外目录入口。 -->
 <!-- [Sync] 2026-11-02: 按使用者问题组织文档。 -->
 
-# ink-dream 使用说明
+# Kastention 使用说明
 
 - [隐私政策](privacy-policy.md)：了解你的信息如何处理，以及如何管理权限和提出个人信息请求。
 - [订阅与用量说明](subscription-and-usage.md)：了解服务费用、使用额度、订阅周期及取消方式。

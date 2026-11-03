@@ -1,6 +1,8 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Existing About page content and repository destination.
 // [Output] Original team, release timeline and project copy shared by Web/native.
 // [Pos] Static presentation data; no network request or release status is inferred.
+import { BRAND_NAME } from '../constants/brand';
 type TeamMember = {
   name: string;
   role: string;
@@ -21,7 +23,7 @@ export const teamMembers: TeamMember[] = [
   {
     name: 'glide-the',
     role: 'Contributor',
-    description: "Contributes to Ink & Memory's development and product iteration."
+    description: `Contributes to ${BRAND_NAME}'s development and product iteration.`
   }
 ];
 
@@ -54,6 +56,6 @@ export const developmentTimeline=[
 export const ABOUT_REPOSITORY_URL='https://github.com/shuxueshuxue/ink-and-memory';
 export const ABOUT_SUMMARY='A reflective writing companion that helps you capture thoughts and memories';
 export const ABOUT_DESCRIPTION=[
-  'Ink & Memory is an experimental writing tool that brings multiple "voices" to your writing process. As you write, AI-powered personas inspired by Disco Elysium provide commentary, insights, and alternative perspectives on your thoughts.',
+  `${BRAND_NAME} is an experimental writing tool that brings multiple "voices" to your writing process. As you write, AI-powered personas inspired by Disco Elysium provide commentary, insights, and alternative perspectives on your thoughts.`,
   "The system analyzes your writing in real-time and generates contextual comments from different archetypal voices—Logic, Empathy, Drama, Rhetoric, and more. These voices don't just respond to what you write; they help you think differently about it.",
 ] as const;

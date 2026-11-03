@@ -4,6 +4,8 @@
 // [Sync] 2026-10-28: register Workspace binary resource/text/export methods; existing HTTP/SSE methods remain.
 // [Sync] 2026-10-28: export the existing message Copy action to the system clipboard.
 // [Input] RN promise call metadata.
+// [Sync] 2026-11-03: register one-shot own-process CPU sampling; the diagnostics view owns scheduling.
+// [Sync] 2026-11-02: expose scene-local diagnostics visibility and dismissal; runtime and authentication methods retain their owners.
 // [Output] Swift InkRuntime registration without importing its generated class interface twice.
 // [Pos] Runtime module export; implementation stays in InkReactNative.swift.
 // [Sync] 2026-10-28: export picked-file handles/upload and inherited upload-progress events.
@@ -11,6 +13,9 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 @interface RCT_EXTERN_MODULE(InkRuntime, RCTEventEmitter)
+RCT_EXTERN_METHOD(readPerformanceSample:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(configureDiagnosticsOverlay:(NSDictionary *)options)
+RCT_EXTERN_METHOD(dismissRuntimeDiagnostics)
 RCT_EXTERN_METHOD(randomUUID:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(presentMcpAuthorization:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(cancelMcpAuthorization:(NSString *)operationId)

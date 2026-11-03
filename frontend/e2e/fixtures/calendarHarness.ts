@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: complete the real initial mood choice before opening Calendar; retain the first-day chooser and original focus assertions.
 // [Sync] 2026-11-01: opt in to exact same-origin Settings GET cancellation during AuthProvider/Notion owner cleanup.
 // [Sync] 2026-10-29: serve the existing bulk Deck catalog DTO during Settings boot reads.
 // [Sync] 2026-10-15: classify only memory Settings GET aborts from React cleanup/reload in its explicit fixture lane.
@@ -468,6 +469,10 @@ export async function openCalendar(page: Page, viewport = { width: 1440, height:
   await page.goto(`${WEB_BASE}/story-workspace/writing`);
   const calendarButton = page.getByRole('button', { name: 'Calendar' });
   await expect(calendarButton).toBeVisible();
+  const initialMood = page.getByRole('dialog', { name: 'How are you feeling today?', exact: true });
+  await expect(initialMood).toBeVisible();
+  await initialMood.getByRole('button', { name: 'OK', exact: true }).click();
+  await expect(initialMood).toHaveCount(0);
   await options.beforeOpen?.();
   await calendarButton.focus();
   await calendarButton.press('Enter');

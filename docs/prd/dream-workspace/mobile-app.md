@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行名称更新，原章节锚点继续可达。 -->
 <!-- [Sync] 2026-11-01: 本次启动相关旧章节直接指向移动应用业务目录内的独立PRD。 -->
 <!-- [Input] 移动应用PRD迁移后的现行文档地址与原章节锚点。 -->
 <!-- [Output] 旧路径及原章节的迁移指引。 -->
@@ -6,7 +7,7 @@
 
 # 移动应用产品需求迁移指引
 
-现行全文：[Ink & Memory 移动应用产品需求](../mobile-app/mobile-app.md)。
+现行全文：[Kastention 移动应用产品需求](../mobile-app/mobile-app.md)。
 
 产品范围、页面骨架与验收条件归`docs/prd/mobile-app/`；架构和正式交互设计归`docs/design/multi-platform/`。原文内容和图示随全文迁移。
 
@@ -14,7 +15,7 @@
 
 <a id="ink--memory-移动应用产品需求"></a>
 
-- [Ink & Memory 移动应用产品需求](../mobile-app/mobile-app.md#ink--memory-移动应用产品需求)
+- [Kastention 移动应用产品需求](../mobile-app/mobile-app.md#ink--memory-移动应用产品需求)
 
 <a id="背景与问题"></a>
 

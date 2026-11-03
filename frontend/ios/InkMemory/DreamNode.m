@@ -1,6 +1,7 @@
 // [Input] Pinned NodeMobile framework and the bundled original Runtime resources.
 // [Output] One application-process Node event loop with private SDK endpoint metadata.
 // [Pos] iOS executable host; Mac is excluded from runtime configuration.
+// [Sync] 2026-11-03: name the existing Node loop thread for exact diagnostics attribution; worker and guest CPU remain separate.
 // [Sync] 2026-10-25: pass the native App data root for bundled in-process command execution.
 #import "DreamNode.h"
 #import <NodeMobile/NodeMobile.h>
@@ -24,6 +25,7 @@ NSString *IMDreamNodeStart(NSString *resources, NSError **error) {
           [resources stringByAppendingPathComponent:@"node/host.cjs"], endpoint, workspaces,
           [resources stringByAppendingPathComponent:@"node/core/cli.js"], NSHomeDirectory()];
         [NSThread detachNewThreadWithBlock:^{
+            NSThread.currentThread.name = @"DreamNode";
             char **argv = calloc(arguments.count + 1, sizeof(char *));
             for (NSUInteger i = 0; i < arguments.count; i++) argv[i] = strdup(arguments[i].UTF8String);
             node_start((int)arguments.count, argv);

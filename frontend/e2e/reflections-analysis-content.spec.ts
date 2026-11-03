@@ -1,4 +1,5 @@
 // [Sync] 2026-11-01: verify touch-only detail resizing, snapping/cancel, scrolling and original desktop height.
+// [Sync] 2026-11-02: unknown-submission feedback names the unconfirmed outcome while preserving explicit same-key recovery.
 // [Sync] 2026-10-29: reuse original public Reflections fixture and current bulk catalog DTO; assertions remain.
 // [Sync] 2026-10-23: verify persisted diary scope/read counts, legacy and Notion-only reports across locales and widths.
 // [Sync] 2026-10-23: verify on-demand copy, inline rerun controls and return position after keyboard focus.
@@ -191,7 +192,7 @@ test('unknown creation outcome retries with the exact same request key', async (
   await openAnalysis(page);
   const generate = page.getByRole('button', { name: 'Generate New Analysis', exact: true });
   await generate.click();
-  await expect(page.getByText(/The analysis could not start\. Check the selected content and retry\./).first()).toBeVisible();
+  await expect(page.getByText('The previous analysis submission has not been confirmed. Retry to recover it.', { exact: true }).first()).toBeVisible();
   await generate.click();
   await expect.poll(() => fixture.createRequests.length).toBe(2);
   expect(fixture.createRequests[0].request_key).toBe(fixture.createRequests[1].request_key);

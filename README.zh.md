@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
 <!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
 <!-- [Sync] 2026-10-12: image model division, sketch input and Stop cancellation delivery; full real acceptance remains open. -->
@@ -11,13 +12,15 @@
 <!-- [Pos] 仓库中文入口；与 README.md 保持结构、命令及事实一致。 -->
 <!-- [Sync] 2026-10-09: 依据具体功能重写产品定位与模块描述，移除泛化创作流程；同步思维模式配图。 -->
 
-# Ink & Memory Dream
+# Kastention
+
+当前名称规则见[应用名称需求](docs/prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
 <p align="center">
   <a href="README.md">English</a> · 中文
 </p>
 
-**Ink & Memory 用于整理个人思维模式，并将这些模式用于具体问题的分析、任务执行和创作。** 思维模式保存处理某类需求的思考方向、解决路径与 Agent 配置；Chat 提供对话和任务入口；Dream 将创作对话与项目产物放在同一工作台。写作、回顾、日历与资源连接帮助用户积累材料、安排工作和重新进入已有任务。
+**卡片结构用于整理个人思维模式，并将这些模式用于具体问题的分析、任务执行和创作。** 思维模式保存处理某类需求的思考方向、解决路径与 Agent 配置；Chat 提供对话和任务入口；Dream 将创作对话与项目产物放在同一工作台。写作、回顾、日历与资源连接帮助用户积累材料、安排工作和重新进入已有任务。
 
 产品定位依据[Notion 项目说明](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37)，各模块的当前范围以仓库中的现行设计为准。中文界面称为“思维模式”，英文界面沿用 Deck。
 

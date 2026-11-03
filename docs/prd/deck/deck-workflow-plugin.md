@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 <!-- [Input] Notion 项目定位与工作流记录、现行 Deck 工作流绑定代码和独立 Dream 工作台 PRD。 -->
 <!-- [Output] Dream 类型 Deck 的工作流定义、版本配置、设置目录和 Deck 维护页面骨架、状态与验收要求。 -->
 <!-- [Pos] Deck 工作流插件现行 PRD；Claude Code Plugins、工作流发布后台、远程 Marketplace 和运行程序细节分别在范围外。 -->
@@ -8,7 +9,7 @@
 
 ## 背景与问题
 
-Ink & Memory 中的 Deck 承载一种思维模式。Dream 类型 Deck 进一步把这种思维模式用于持续创作：用户在同一 Chat 中向 Dream Agent 提出目标、调用创作 Skill，Agent 生成内容，Story Workspace 展示项目、Episode、剧本、分镜和审阅结果。
+Kastention 中的 Deck 承载一种思维模式。Dream 类型 Deck 进一步把这种思维模式用于持续创作：用户在同一 Chat 中向 Dream Agent 提出目标、调用创作 Skill，Agent 生成内容，Story Workspace 展示项目、Episode、剧本、分镜和审阅结果。
 
 此前的独立稿把“选择工作流版本”写成了 Deck 工作流插件的全部目的。这个定义过窄：版本选择只是进入工作流前的配置，不能说明工作流如何组织 Dream Agent、创作阶段、工作台内容、审阅和同步失败恢复。
 

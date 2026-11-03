@@ -1,5 +1,7 @@
 // [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
+// [Sync] 2026-11-02: register a diagnostics-only native window leaf on the existing bridge and runtime snapshot.
 // [Input] Existing startup/read results, original errors and the native copy action.
+// [Sync] 2026-11-03: show actual bounded CPU/activity charts with a foreground-only shared sampler lease.
 // [Output] Read-only startup diagnostics available before local services or authentication are ready.
 // [Pos] Shared native developer leaf; refresh never starts a runtime or sends an HTTP request.
 // [Sync] 2026-11-01: show and copy original error text, including native error details, without redaction.
@@ -7,13 +9,19 @@ import {useEffect, useRef, useState} from 'react';
 import {AppState, BackHandler, NativeModules, Platform, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import InkLabel from './InkLabel.native';
 import useInkColors from './useInkColors.native';
+import RuntimePerformanceCharts from './RuntimePerformanceCharts.native';
+import {initialPerformanceState} from '../runtime/runtimePerformance';
 import {BackendRuntimeManager, formatRuntimeDiagnostics} from '../runtime/BackendRuntimeManager';
 
 const startupLabels = {idle: '尚未启动', starting: '正在启动', ready: '本地服务已就绪', failed: '启动失败'};
 const sessionLabels = {reading: '正在读取', available: '原会话有效', signed_out: '当前未登录', unavailable: '原会话读取失败'};
-const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录', login: '登录页面', registration: '注册', google: 'Google 登录'};
+const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录', login: '登录页面', registration: '注册', google: 'Google 登录', recovery: '输入恢复'};
 
-export default function RuntimeDiagnostics({onBack}: {onBack: () => void}) {
+export function RuntimeDiagnosticsWindow() {
+  return <RuntimeDiagnostics onBack={()=>NativeModules.InkRuntime.dismissRuntimeDiagnostics()}/>;
+}
+
+export default function RuntimeDiagnostics({onBack,active=true}: {onBack: () => void;active?:boolean}) {
   const colors = useInkColors();
   const [snapshot, setSnapshot] = useState(BackendRuntimeManager.getSnapshot);
   const [paused, setPaused] = useState(AppState.currentState === 'background' || AppState.currentState === 'inactive');
@@ -22,16 +30,19 @@ export default function RuntimeDiagnostics({onBack}: {onBack: () => void}) {
   const mounted = useRef(true), copying = useRef(false);
   useEffect(() => {
     mounted.current = true;
+    setPaused(!active||AppState.currentState!=='active');
     let unsubscribe: (() => void) | undefined;
     const read = () => { setSnapshot(BackendRuntimeManager.getSnapshot()); setReadAt(Date.now()); };
     const observe = () => { unsubscribe?.(); read(); unsubscribe = BackendRuntimeManager.subscribe(read); };
-    if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') observe();
+    if (active&&AppState.currentState === 'active') observe();
+    const performanceLease=BackendRuntimeManager.observePerformance(active&&AppState.currentState==='active');
     const lifecycle = AppState.addEventListener('change', state => {
-      const active = state === 'active'; setPaused(!active);
-      if (active) observe(); else { unsubscribe?.(); unsubscribe = undefined; }
+      const foreground = state === 'active'; setPaused(!active||!foreground);
+      performanceLease.setActive(active&&foreground);
+      if (active&&foreground) observe(); else { unsubscribe?.(); unsubscribe = undefined; }
     });
-    return () => { mounted.current = false; unsubscribe?.(); lifecycle.remove(); };
-  }, []);
+    return () => { mounted.current = false; unsubscribe?.(); lifecycle.remove(); performanceLease.release(); };
+  }, [active]);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const listener = BackHandler.addEventListener('hardwareBackPress', () => { onBack(); return true; });
@@ -50,10 +61,11 @@ export default function RuntimeDiagnostics({onBack}: {onBack: () => void}) {
     } catch { if (mounted.current) setFeedback('复制失败，请重试。'); }
     finally { copying.current = false; }
   }
-  return <View style={[styles.fill, {backgroundColor: colors['color-bg-app']}]}>
+  return <View accessibilityViewIsModal style={[styles.fill, {backgroundColor: colors['color-bg-app']}]}>
     <View style={styles.header}><Pressable accessibilityRole="button" onPress={onBack} style={styles.button}><InkLabel style={text}>返回</InkLabel></Pressable><InkLabel accessibilityRole="header" style={[styles.title, text]}>开发者控制页</InkLabel></View>
     <ScrollView style={styles.fill} contentContainerStyle={styles.content}>
       {row('启动状态', startupLabels[snapshot.state])}
+      <RuntimePerformanceCharts state={snapshot.performance??initialPerformanceState()} onPause={value=>BackendRuntimeManager.pausePerformance(value)}/>
       <InkLabel accessibilityRole="header" style={[styles.title, text]}>错误日志</InkLabel>
       <InkLabel style={{color: colors['color-text-secondary']}}>本次应用中各来源最近一次错误，按原文显示。</InkLabel>
       {Object.values(snapshot.errors ?? {}).sort((a, b) => b.at - a.at).map(item => <View key={item.source} style={styles.row}>
@@ -70,7 +82,7 @@ export default function RuntimeDiagnostics({onBack}: {onBack: () => void}) {
       {row('公网连接', '未单独观测')}
       {row('启动错误码', snapshot.errorCode ?? '无')}
       {snapshot.state === 'failed' ? <InkLabel style={text}>{snapshot.errorCode === 'CAPABILITY_UNAVAILABLE' ? '当前端侧运行能力尚未就绪。' : '本地启动失败，请关闭后重新打开应用。'}</InkLabel> : null}
-      <InkLabel style={{color: colors['color-text-secondary']}}>仅展示当前应用内已有的启动和会话结果。</InkLabel>
+      <InkLabel style={{color: colors['color-text-secondary']}}>展示当前应用内的启动、会话与本进程采样结果。</InkLabel>
       {row(paused ? '观测已暂停，上次读取' : '本页读取时间', date(readAt))}
     </ScrollView>
     <View style={[styles.footer, {borderColor: colors['color-border-paper']}]}>

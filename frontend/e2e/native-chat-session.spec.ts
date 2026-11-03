@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: specify selection-owned late queue submission receipts; this addition awaits paused mechanical validation.
 // [Sync] 2026-10-31: retain delayed cancelled readers while qualifying independent acknowledged Stop recovery and late-reader ownership.
 // [Sync] 2026-11-01: qualify native Writing context-before-dispatch, A/B snapshots, failed-save draft restoration and cancellation without replay.
 // [Sync] 2026-10-31: qualify saved user-only tail recovery with not_found and an unchanged empty probe without replay or invented assistant output.
@@ -353,6 +354,32 @@ test('background releases only the reader and foreground restores the same persi
   expect(calls.filter((call:any)=>call.path==='/api/claude-agent' && call.method==='POST')).toHaveLength(1);
   expect(calls.some((call:any)=>call.path.endsWith('/stop'))).toBe(false);
   expect(calls.some((call:any)=>call.path.includes('/messages'))).toBe(true);
+});
+test('a late queued send cannot add its receipt to a newly selected empty conversation',async({page})=>{
+  await page.getByLabel('Fixture stream mode').selectOption('hold');await page.getByLabel('Draft',{exact:true}).fill('Original running task');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(async()=>(await state(page)).messages.length).toBeGreaterThan(1);
+  await page.evaluate(()=>{(window as any).__nativeChatFixture.holdQueue=true;});await page.getByLabel('Draft',{exact:true}).fill('Queued before navigation');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>Boolean((window as any).__nativeChatFixture.releaseQueue))).toBe(true);
+  await page.getByRole('button',{name:'New chat',exact:true}).click();await page.evaluate(()=>(window as any).__nativeChatFixture.releaseQueue());await expect(page.getByLabel('Notice',{exact:true})).toHaveText('sent');
+  await expect.poll(async()=>({id:(await state(page)).id,queue:(await state(page)).queue})).toEqual({id:null,queue:[]});
+  expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST'))).toHaveLength(1);
+});
+test('a late queued send failure cannot replace the error state of a newly selected conversation',async({page})=>{
+  await page.getByLabel('Fixture stream mode').selectOption('hold');await page.getByLabel('Draft',{exact:true}).fill('Running source task');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(async()=>(await state(page)).messages.length).toBeGreaterThan(1);
+  await page.evaluate(()=>{const f=(window as any).__nativeChatFixture;f.holdQueue=true;f.failQueue=true;});await page.getByLabel('Draft',{exact:true}).fill('Unconfirmed queued input');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>Boolean((window as any).__nativeChatFixture.releaseQueue))).toBe(true);
+  await page.getByRole('button',{name:'New chat',exact:true}).click();await page.evaluate(()=>(window as any).__nativeChatFixture.releaseQueue());await expect(page.getByLabel('Notice',{exact:true})).toHaveText('rejected');
+  expect(await state(page)).toMatchObject({id:null,queue:[],error:null});expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path.endsWith('/inputs')&&call.method==='POST'))).toHaveLength(1);
+});
+test('foreground reader replacement retains the original queued submission receipt without replay',async({page})=>{
+  await page.getByLabel('Fixture stream mode').selectOption('hold');await page.getByLabel('Draft',{exact:true}).fill('Retain current task');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(async()=>(await state(page)).messages.length).toBeGreaterThan(1);
+  await page.evaluate(()=>{(window as any).__nativeChatFixture.holdQueue=true;});await page.getByLabel('Draft',{exact:true}).fill('One queued input');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>Boolean((window as any).__nativeChatFixture.releaseQueue))).toBe(true);
+  await page.getByRole('button',{name:'Background',exact:true}).click();await page.getByRole('button',{name:'Foreground',exact:true}).click();await page.evaluate(()=>(window as any).__nativeChatFixture.releaseQueue());
+  await expect.poll(async()=>(await state(page)).queue.length).toBe(1);expect((await state(page)).id).toBe('fixture-thread');expect((await state(page)).queue[0].text).toBe('One queued input');
+  expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((call:any)=>call.path.endsWith('/inputs')&&call.method==='POST'))).toHaveLength(1);
 });
 for(const boundary of ['HTTP','stream'])test(`401 at the ${boundary} boundary requests normal session refresh without resubmitting business`,async({page})=>{
   await page.getByRole('button',{name:`Expire ${boundary} session`,exact:true}).click();

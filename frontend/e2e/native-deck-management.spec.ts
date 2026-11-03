@@ -1,5 +1,5 @@
 // [Input] Production Native Deck manager/editor, original APIs/hooks and public-shape HTTP fixtures.
-// [Output] Create/blur-save/Agent/plugin/version/confirmation/recovery and narrow-page contracts.
+// [Output] Create/blur-save/Agent/plugin/version/named-confirmation/recovery and narrow-page contracts.
 // [Pos] Provider-free technical UI lane; no normal account, service, database or model writes.
 // Impact: Project/Episode/artifact/Run/Hook/DB are out of scope; Chat receives local draft intent only.
 import {expect,test,type Page} from '@playwright/test';
@@ -96,6 +96,7 @@ test('native Agent operations retain original default payload, visual options, s
   await page.getByRole('radio',{name:'Agent Color Green',exact:true}).click();await expect(page.getByRole('radio',{name:'Agent Color Green',exact:true})).toBeChecked();
   await page.getByRole('switch',{name:'Toggle Travel writer',exact:true}).click();await expect(page.getByRole('switch',{name:'Toggle Travel writer',exact:true})).not.toBeChecked();await page.getByRole('button',{name:'Travel writer',exact:true}).click();
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'Delete',exact:true}).click();expect((await calls(page)).some((call:any)=>call.path.startsWith('/api/voices/')&&call.method==='DELETE')).toBe(false);
+  expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmations.at(-1))).toContain('Travel writer');
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);await page.getByRole('button',{name:'Delete',exact:true}).click();await expect(page.getByRole('button',{name:'Travel writer',exact:true})).toHaveCount(0);
 });
 test('native plugin refs retain ready eligibility, selection after failure and original retry payload',async({page})=>{
@@ -146,6 +147,7 @@ test('native Deck enable/delete/sync preserve original payloads and destructive 
   expect((await calls(page)).some((call:any)=>call.path.endsWith('/sync'))).toBe(false);await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);
   await page.getByRole('button',{name:'More actions for Published Notes',exact:true}).click();await page.getByRole('button',{name:'Sync with Original',exact:true}).click();await expect.poll(async()=>(await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/sync').length).toBe(1);
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:'Delete Deck',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmations.at(-1))).toContain('Disabled Notes');
   expect((await calls(page)).some((call:any)=>call.path==='/api/decks/disabled'&&call.method==='DELETE')).toBe(false);await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);
   await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:'Delete Deck',exact:true}).click();await expect(page.getByRole('button',{name:'Edit Disabled Notes',exact:true})).toHaveCount(0);
 });

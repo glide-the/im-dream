@@ -4,12 +4,33 @@
 // [Pos] Minimal CPython embedding adapter; no subprocess, socket server or remote fallback.
 // [Sync] 2026-10-25: initialize isolated CPython and invoke the real FastAPI backend entry.
 // [Sync] 2026-10-25: expose target memory observations through a fixed CPython native module.
+// [Sync] 2026-11-02: measure startup-only interpreter, GIL, import, entry and Admin native wait without recording payloads.
 #import "DreamPython.h"
 #include "DreamHTTP.h"
 #include <Python/Python.h>
 #include <TargetConditionals.h>
 #include <os/proc.h>
 #include <mach/mach.h>
+#include <sys/resource.h>
+#include <stdatomic.h>
+#include <unistd.h>
+
+// start() waits on the ASGI thread; its Admin callback can run on that other thread.
+static _Atomic unsigned int IMStartupCalls = 0;
+typedef struct { double wall; double cpu; } IMStartupSample;
+static IMStartupSample IMStartupNow(void) {
+    struct rusage usage = {0};
+    getrusage(RUSAGE_SELF, &usage);
+    double cpu = usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1e6
+               + usage.ru_stime.tv_sec + usage.ru_stime.tv_usec / 1e6;
+    return (IMStartupSample){NSProcessInfo.processInfo.systemUptime, cpu};
+}
+static void IMStartupLog(const char *phase, IMStartupSample start, BOOL success) {
+    IMStartupSample end = IMStartupNow();
+    fprintf(stderr, "DREAM_STARTUP {\"layer\":\"cpython\",\"phase\":\"%s\",\"outcome\":\"%s\",\"elapsedMs\":%.3f,\"processCpuMs\":%.3f,\"timestampMs\":%.0f,\"pid\":%d}\n",
+            phase, success ? "ok" : "failed", (end.wall - start.wall) * 1000,
+            (end.cpu - start.cpu) * 1000, NSDate.date.timeIntervalSince1970 * 1000, getpid());
+}
 
 static PyObject *IMAvailableMemory(PyObject *self, PyObject *args) {
 #if TARGET_OS_SIMULATOR
@@ -36,10 +57,14 @@ static PyObject *IMAvailableMemory(PyObject *self, PyObject *args) {
 static PyObject *IMAdminHTTP(PyObject *self, PyObject *args) {
     const char *payload;
     if (!PyArg_ParseTuple(args, "s", &payload)) return NULL;
+    BOOL measure = atomic_load_explicit(&IMStartupCalls, memory_order_relaxed) > 0;
+    IMStartupSample waiting = measure ? IMStartupNow() : (IMStartupSample){0};
     char *response;
     Py_BEGIN_ALLOW_THREADS
     response = IMDreamHTTPPerform(payload, NULL, NULL);
     Py_END_ALLOW_THREADS
+    // A returned native JSON envelope keeps its original HTTP outcome upstream.
+    if (measure) IMStartupLog("admin_http_wait", waiting, response != NULL);
     if (!response) return PyErr_NoMemory();
     PyObject *result = PyUnicode_FromString(response);
     free(response);
@@ -104,9 +129,24 @@ static BOOL IMInitialize(NSString *resources, NSError **error) {
 }
 
 NSString *IMDreamPythonCall(NSString *resources, NSString *function, NSString *payload, NSError **error) {
-    if (!Py_IsInitialized() && !IMInitialize(resources, error)) return nil;
+    BOOL startup = [function isEqualToString:@"start"];
+    if (startup) atomic_fetch_add_explicit(&IMStartupCalls, 1, memory_order_relaxed);
+    if (!Py_IsInitialized()) {
+        IMStartupSample initialization = IMStartupNow();
+        BOOL initialized = IMInitialize(resources, error);
+        IMStartupLog("interpreter_initialize", initialization, initialized);
+        if (!initialized) {
+            if (startup) atomic_fetch_sub_explicit(&IMStartupCalls, 1, memory_order_relaxed);
+            return nil;
+        }
+    }
+    IMStartupSample entered = startup ? IMStartupNow() : (IMStartupSample){0};
     PyGILState_STATE gil = PyGILState_Ensure();
+    if (startup) IMStartupLog("gil_acquire", entered, YES);
+    IMStartupSample importing = startup ? IMStartupNow() : (IMStartupSample){0};
     PyObject *module = PyImport_ImportModule("mobile_runtime.ios");
+    if (startup) IMStartupLog("entry_module_import", importing, module != NULL);
+    IMStartupSample invocation = startup ? IMStartupNow() : (IMStartupSample){0};
     PyObject *callable = module ? PyObject_GetAttrString(module, function.UTF8String) : NULL;
     PyObject *argument = payload ? PyUnicode_FromString(payload.UTF8String) : NULL;
     PyObject *result = callable && (!payload || argument) ? (payload ? PyObject_CallOneArg(callable, argument) : PyObject_CallNoArgs(callable)) : NULL;
@@ -129,5 +169,7 @@ NSString *IMDreamPythonCall(NSString *resources, NSString *function, NSString *p
     Py_XDECREF(callable);
     Py_XDECREF(module);
     PyGILState_Release(gil);
+    if (startup) IMStartupLog(payload ? "runtime_bind_entry" : "public_bootstrap_entry", invocation, value != nil);
+    if (startup) atomic_fetch_sub_explicit(&IMStartupCalls, 1, memory_order_relaxed);
     return value;
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-02: v3.1名称修订，完整字标沿原图形与出版入口输出。
 # [Input] 同目录Markdown、现行颜色Token、项目手写字体与可配置中文正文字体。
 # [Output] 可编辑SVG、嵌入字体的规范PDF及页面边界检查JSON。
 # [Pos] 单文档出版工具；应用运行、依赖和构建入口保持。
@@ -123,8 +124,7 @@ class Figure:
         self.rect(x, y, w, h, 'paper', 'border', 8)
         self.rect(x, y, 60, h, 'bg', None, 8)
         self.line(x+60, y, x+60, y+h)
-        self.text(x+10, y+20, 'Ink &', 10, font=HAND_FONT)
-        self.text(x+10, y+34, 'Memory', 10, font=HAND_FONT)
+        self.text(x+6, y+24, 'Kastention', 8, font=HAND_FONT)
         for i, label in enumerate(['Chat', 'Dream', 'Decks', '更多']):
             self.text(x+10, y+62+i*24, label, 9)
         self.text(x+73, y+22, title, 12)
@@ -430,9 +430,9 @@ def export(output: Path, check_path: Path):
     pages=list(zip(chunks[1::2],chunks[2::2]))
     output.parent.mkdir(parents=True,exist_ok=True)
     doc=canvas.Canvas(str(output),pagesize=(PAGE_W,PAGE_H),pageCompression=1)
-    doc.setTitle('Ink & Memory 应用界面设计规范 v3.0')
-    doc.setAuthor('Ink & Memory')
-    doc.setSubject('现行UI规则、规范示意、代表页面和交互反馈；规范文档v3.0')
+    doc.setTitle('Kastention 应用界面设计规范 v3.1')
+    doc.setAuthor('Kastention')
+    doc.setSubject('现行UI规则、规范示意、代表页面和交互反馈；规范文档v3.1')
     style=ParagraphStyle('body',fontName=BODY_FONT,fontSize=10.2,leading=17.2,
                          textColor=col('body'),wordWrap='CJK',alignment=TA_LEFT,
                          splitLongWords=True,spaceAfter=7)
@@ -444,12 +444,12 @@ def export(output: Path, check_path: Path):
     for page_no,(slug,source) in enumerate(pages,1):
         doc.setFillColor(col('solid'));doc.rect(0,0,PAGE_W,PAGE_H,fill=1,stroke=0)
         doc.setFillColor(col('secondary'));doc.setFont('Helvetica',7.5)
-        doc.drawString(MARGIN,PAGE_H-28,'INK & MEMORY / APP UI GUIDELINES')
-        doc.drawRightString(PAGE_W-MARGIN,PAGE_H-28,'v3.0 / 2026.11.02')
+        doc.drawString(MARGIN,PAGE_H-28,'KASTENTION / APP UI GUIDELINES')
+        doc.drawRightString(PAGE_W-MARGIN,PAGE_H-28,'v3.1 / 2026.11.02')
         doc.setStrokeColor(col('border'));doc.setLineWidth(.5)
         doc.line(MARGIN,41,PAGE_W-MARGIN,41)
         doc.setFont(BODY_FONT,7.5);doc.setFillColor(col('secondary'))
-        doc.drawString(MARGIN,27,'规范示意 · v3.0')
+        doc.drawString(MARGIN,27,'规范示意 · v3.1')
         doc.setFont('Helvetica',8);doc.drawRightString(PAGE_W-MARGIN,27,f'{page_no:02d} / {len(pages):02d}')
         doc.bookmarkPage(slug)
         lines=source.strip().splitlines()
@@ -540,7 +540,7 @@ def export(output: Path, check_path: Path):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output',type=Path,default=ROOT/'docs/prd/Ink-Memory-App-UI-Guidelines-v3.pdf')
-    parser.add_argument('--validation',type=Path,default=ROOT/'tmp/pdfs/ink-ui-20261102/layout.json')
+    parser.add_argument('--output',type=Path,default=ROOT/'docs/prd/Kastention-App-UI-Guidelines-v3.1.pdf')
+    parser.add_argument('--validation',type=Path,default=ROOT/'tmp/pdfs/kastention-ui-20261102/layout.json')
     args=parser.parse_args()
     export(args.output.resolve(),args.validation.resolve())

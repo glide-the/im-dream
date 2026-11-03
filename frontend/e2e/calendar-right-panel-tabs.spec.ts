@@ -5,6 +5,7 @@
 // [Sync] 2026-10-07: preserve natural paper-seam and exterior safety assertions while distinguishing sticky translation; assert month rows remain inside their shell.
 // [Sync] 2026-10-06: snapshot-first, historical creation, visible-only metadata verification and preserved calendar journeys.
 // [Sync] 2026-10-06: borderless three-panel/theme/four-width visuals with actual opaque/alpha contrast and original scroll owners.
+// [Sync] 2026-11-02: diary deletion checks the existing first line in the original confirmation and retains the record on cancellation.
 // [Sync] 2026-10-06: verify rendered delete-label line rectangles in the diary journey and all long-title visual combinations.
 // [Sync] 2026-10-06: record actual focus/pointer events before Modal opening and prove initial-frame readiness with a bounded test-only RAF gate.
 // [Sync] 2026-10-07: verify one rounded floating workspace, natural short/empty/long heights, real exterior shadow safety and preserved full journeys.
@@ -335,7 +336,9 @@ test('editor trap and history retain the existing owner and close menu on tab sw
   await page.keyboard.press('Escape'); await expect(card.getByRole('button', { name: /更多操作/ })).toBeFocused();
 });
 
-test('diary journey opens and returns with current marker and preserves its original delete confirmation', async ({ page }) => {
+test('diary journey opens and returns with current marker and names the target in its original delete confirmation', async ({ page }) => {
+  let deletions = 0;
+  page.on('request', request => { if (request.method() === 'DELETE' && new URL(request.url()).pathname === '/api/sessions/note_existing_qa') deletions++; });
   await setup(page); let { dialog } = await openCalendar(page);
   await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await dialog.getByRole('button', { name: '打开: 普通日历笔记仍然可见' }).click();
@@ -345,9 +348,14 @@ test('diary journey opens and returns with current marker and preserves its orig
   await dialog.getByRole('tab', { name: '日记', exact: true }).click();
   await expect(dialog.getByText('当前笔记', { exact: true })).toBeVisible();
   await expectSingleLineAction(dialog.getByRole('button', { name: '删除: 普通日历笔记仍然可见' }));
-  page.once('dialog', (confirmation) => { expect(confirmation.type()).toBe('confirm'); void confirmation.accept(); });
+  page.once('dialog', (confirmation) => { expect(confirmation.type()).toBe('confirm'); expect(confirmation.message()).toContain('普通日历笔记仍然可见'); void confirmation.dismiss(); });
+  await dialog.getByRole('button', { name: '删除: 普通日历笔记仍然可见' }).click();
+  await expect(dialog.getByRole('button', { name: '打开: 普通日历笔记仍然可见' })).toBeVisible();
+  expect(deletions).toBe(0);
+  page.once('dialog', (confirmation) => { expect(confirmation.type()).toBe('confirm'); expect(confirmation.message()).toContain('普通日历笔记仍然可见'); expect(confirmation.message()).toMatch(/\d{4}-\d{2}-\d{2}/); void confirmation.accept(); });
   await dialog.getByRole('button', { name: '删除: 普通日历笔记仍然可见' }).click();
   await expect(dialog.getByText('这一天暂无记录')).toBeVisible();
+  expect(deletions).toBe(1);
 });
 
 test('Notion journey reads a snapshot, groups metadata, opens directly, refreshes and reads creation on other dates', async ({ page, context }) => {

@@ -3,6 +3,7 @@
 <!-- [Output] Static system launch surface matching the native preparation artwork. -->
 <!-- [Pos] iOS launch storyboard; animation begins in StartupArtwork.native after React loads. -->
 <!-- [Sync] 2026-11-02: use transparent themed vectors at the same optical center and responsive size as StartupScreen. -->
+<!-- [Sync] 2026-11-03: keep the first-frame illustration image view non-opaque. -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23727" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="launch-controller">
     <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
@@ -19,7 +20,7 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="StartupArtwork" translatesAutoresizingMaskIntoConstraints="NO" id="launch-artwork">
+                            <imageView opaque="NO" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="StartupArtwork" translatesAutoresizingMaskIntoConstraints="NO" id="launch-artwork">
                                 <rect key="frame" x="108.5" y="298" width="176" height="176"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="176" priority="750" id="artwork-width"/>

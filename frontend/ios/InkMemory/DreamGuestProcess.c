@@ -1,4 +1,5 @@
 // [Input] Packaged Linux command root, App-owned paths and original Node argv/stdio.
+// [Sync] 2026-11-03: observe existing command generations and actual host threads without changing execution or registering additional tasks.
 // [Output] In-process interpreted commands with original startup/exit/stop results.
 // [Pos] iOS command compatibility; Claude command sandbox is disabled by deployment configuration.
 // [Sync] 2026-10-25: reuse qualified guest execution and mount original App data/resource paths.
@@ -22,6 +23,7 @@ struct invocation {
     char *file, *argv, *environment, *cwd;
     int argc, fd[3], pid, startup, started, finished, references;
     uint32_t generation;
+    uint64_t host_thread_id;
     IMDreamGuestExitCallback callback;
     void *context;
 };
@@ -36,6 +38,21 @@ extern int do_wait(int, pid_t_, struct siginfo_ *, struct rusage_ *, int);
 
 static char *kernel_data, *kernel_resources;
 static uint32_t next_generation = 1;
+
+int IMDreamGuestCopyActivity(IMDreamGuestActivity *items,size_t capacity,size_t *total) {
+    int result=pthread_mutex_trylock(&state_lock);
+    if(result)return result;
+    size_t count=0;
+    for(struct invocation *call=invocations;call;call=call->next) {
+        if(call->finished)continue;
+        if(count<capacity)items[count]=(IMDreamGuestActivity){call->host_thread_id,call->generation,call->pid,call->started};
+        count++;
+        if(count>capacity)break;
+    }
+    *total=count;
+    pthread_mutex_unlock(&state_lock);
+    return 0;
+}
 
 // Mount the original App paths at their original names. Commands and Node share files.
 static int mount_application_path(const char *path) {
@@ -204,6 +221,11 @@ static int execute_guest_file(struct invocation *call) {
 
 static void *run_invocation(void *pointer) {
     struct invocation *call = pointer;
+    uint64_t host_thread_id=0;
+    pthread_threadid_np(NULL,&host_thread_id);
+    pthread_mutex_lock(&state_lock);
+    call->host_thread_id=host_thread_id;
+    pthread_mutex_unlock(&state_lock);
     block_host_pipe_signal();
     int result = become_new_init_child();
     if (result < 0) {
