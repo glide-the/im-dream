@@ -1,6 +1,7 @@
 <!-- [Input] ink-dream iOS工程、开发签名和目标设备。 -->
 <!-- [Output] 本地准备、构建、安装、启动及安装失败处理步骤。 -->
 <!-- [Pos] iPhone开发安装手册；商店发行归App Store上架手册。 -->
+<!-- [Sync] 2026-11-04: 移动配置改为完整运行配置，说明.env复制、Admin连接选择及编辑器入口。 -->
 <!-- [Sync] 2026-11-03: 增加公网Admin配置片段及合并步骤，核对Product API地址和既有前端配置。 -->
 <!-- [Sync] 2026-11-02: 正文聚焦安装任务，逐版本设备回执移存执行历史。 -->
 
@@ -56,9 +57,9 @@ python3 frontend/ios/scripts/bundle-next.py --verify-sources
 
 使用公网Admin时，按以下顺序准备配置：
 
-1. 将[移动打包配置模板](../../backend/.env.mobile.example)复制为`backend/.env.mobile`。该本机文件已加入Git忽略规则。
-2. 将配置片段按键合并到`backend/.env`。认证、Product API及Gateway地址采用`https://ink-admin.suoxya.com`；Service Secret和Gateway Key沿用原已登记值，其余运行配置保留。`INK_ADMIN_PRODUCT_API_BASE_URL`需要单独核对。
-3. 将片段中的Admin认证与数据访问配置同步到`frontend/.env.local`，保留前端原Cookie Secret和本机Next来源。`INK_DREAM_API_RESOURCE`沿用Admin登记的`https://ink-frontend.suoxya.com/api`；Client ID、resource和回调需与目标Admin登记一致。Product写请求的`INK_ADMIN_PRODUCT_ORIGIN`需在目标Admin的`PRODUCT_API_ORIGIN_ALLOWLIST`内，本模板沿用原`http://127.0.0.1:5173`，登记情况由Admin管理方核对。
+1. 从现用`backend/.env`复制完整配置到`backend/.env.mobile`，保留全部公共运行配置和已登记凭据；已有移动配置时保留目标Admin连接值。新建配置可参考[移动完整配置模板](../../backend/.env.mobile.example)，空白凭据在本机填写。该本机文件已加入Git忽略规则，文件权限使用`0600`。
+2. 在`.env.mobile`中设置目标Admin连接。认证、Product API及Gateway地址采用`https://ink-admin.suoxya.com`；Service Secret和Gateway Key使用目标Admin已登记值。其余配置与`.env`保持一致，公共配置调整时同步两份文件。编辑器的`Backend: Python (server.py, Admin)`通过`envFile`直接加载`.env.mobile`；普通Backend入口加载`.env`。两个入口共用原后端端口，按先后运行。
+3. 为iOS打包时，将`.env.mobile`中的目标Admin连接按键合并到`backend/.env`，将Admin认证与数据访问配置同步到`frontend/.env.local`，保留前端原Cookie Secret和本机Next来源。`INK_ADMIN_PRODUCT_API_BASE_URL`需要单独核对。`INK_DREAM_API_RESOURCE`沿用Admin登记的`https://ink-frontend.suoxya.com/api`；Client ID、resource和回调需与目标Admin登记一致。Product写请求的`INK_ADMIN_PRODUCT_ORIGIN`需在目标Admin的`PRODUCT_API_ORIGIN_ALLOWLIST`内，本模板沿用原`http://127.0.0.1:5173`，登记情况由Admin管理方核对。
 4. 使用原Xcode流程重新打包。当前脚本读取`backend/.env`和`frontend/.env.local`；`.env.mobile`用于准备配置。打包时账户回调按实际Bundle ID写为`<Bundle ID>.auth:/auth/callback`，MCP回调写为`<Bundle ID>.mcp:/oauth/callback`；账户回调需在原Admin Client中精确登记。
 
 服务地址、账户回调和MCP回调分别管理。地址调整后重新生成并签名安装包；日志保留错误与配置键，密码、Cookie和service secret保存在受控配置中。具体认证问题按[认证排障指南](mobile-auth-troubleshooting.md)处理。
