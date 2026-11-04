@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-10-28: expose one authenticated Deck/Agent catalog read before the dynamic Deck route.
 # [Sync] 2026-09-15: both public Deck list modes use Admin without default or filesystem side effects.
 # [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
@@ -58,7 +59,7 @@ from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_ope
 
 
 class _DeckRoute(SafeRequestValidationRoute):
-    validation_error_detail = "Invalid Deck request"
+    validation_error_detail = "Invalid Kastention request"
 
 
 router = APIRouter(route_class=_DeckRoute)
@@ -120,7 +121,7 @@ def _default_deck_plugin_unavailable() -> HTTPException:
     return HTTPException(
         status_code=409,
         detail=(
-            "Default Deck plugin "
+            "Default Kastention plugin "
             f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
             f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
         ),
@@ -187,7 +188,7 @@ async def get_deck(deck_id: str, current_user: dict = Depends(get_current_user),
     """Read the owned Deck aggregate through Admin and restore its public fields."""
     deck = await invoke_admin_operation(current_user, data.detail, DeckIdInputDTO(deck_id=deck_id))
     if deck is None:
-        raise HTTPException(status_code=404, detail="Deck not found")
+        raise HTTPException(status_code=404, detail="Kastention not found")
     return deck
 
 
@@ -211,10 +212,10 @@ _deck_mutation_router = APIRouter(route_class=_DeckRoute)
 
 
 _DECK_DELETE_BLOCKED_MESSAGES = {
-    "child_decks": "Deck cannot be deleted while derived Decks still reference it.",
-    "related_threads": "Deck cannot be deleted while related Chat conversations still exist.",
-    "runtime_history": "Deck cannot be deleted because it has immutable runtime history.",
-    "referenced_records": "Deck cannot be deleted because it is still referenced.",
+    "child_decks": "Kastention cannot be deleted while derived Kastention still reference it.",
+    "related_threads": "Kastention cannot be deleted while related Chat conversations still exist.",
+    "runtime_history": "Kastention cannot be deleted because it has immutable runtime history.",
+    "referenced_records": "Kastention cannot be deleted because it is still referenced.",
 }
 
 
@@ -239,22 +240,22 @@ def _deck_mutation_error(kind: str, deck_id: str):
                 reason = exc.details.reason if isinstance(exc.details, DeckDeleteBlockedDetailsDTO) else "referenced_records"
                 raise HTTPException(status_code=409, detail=_deck_delete_blocked_message(reason))
             messages = {
-                "DEFAULT_DECK_PUBLISH_FORBIDDEN": (409, "System-initialized Decks cannot be published"),
-                "SELF_COLLECTION_FORBIDDEN": (409, "You cannot collect your own published Deck"),
-                "COLLECTION_SOURCE_UNAVAILABLE": (409, "Only system or published Decks can be collected"),
+                "DEFAULT_DECK_PUBLISH_FORBIDDEN": (409, "System-initialized Kastention cannot be published"),
+                "SELF_COLLECTION_FORBIDDEN": (409, "You cannot collect your own published Kastention"),
+                "COLLECTION_SOURCE_UNAVAILABLE": (409, "Only system or published Kastention can be collected"),
             }
             expected_kind = "publish" if exc.code == "DEFAULT_DECK_PUBLISH_FORBIDDEN" else "collect"
             if exc.code in messages and kind == expected_kind and exc.status_code in {404, 409}:
                 status, message = messages[exc.code]
                 raise HTTPException(status_code=status, detail=message)
             if exc.code == "DECK_ACCESS_DENIED" and exc.status_code == 404:
-                responses = {"sync": (400, "Deck not found or permission denied"),
-                    "publish": (404, "Deck not found or not owned by user"),
-                    "collect": (404, f"Deck {deck_id} not found")}
-                status, message = responses.get(kind, (404, "Deck not found or permission denied"))
+                responses = {"sync": (400, "Kastention not found or permission denied"),
+                    "publish": (404, "Kastention not found or not owned by user"),
+                    "collect": (404, f"Kastention {deck_id} not found")}
+                status, message = responses.get(kind, (404, "Kastention not found or permission denied"))
                 raise HTTPException(status_code=status, detail=message)
             if exc.code == "DECK_PARENT_MISSING" and kind == "sync" and exc.status_code in {404, 409}:
-                raise HTTPException(status_code=400, detail="Deck is not a fork (no parent)" if exc.status_code == 409 else "Parent deck not found")
+                raise HTTPException(status_code=400, detail="Kastention is not a fork (no parent)" if exc.status_code == 409 else "Parent Kastention not found")
         raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code,
             "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
     return error
@@ -264,7 +265,7 @@ def _deck_mutation_error(kind: str, deck_id: str):
 async def update_deck(deck_id: str, request: DeckUpdateRequest, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
     result = await invoke_admin_operation(current_user, data.update, request.domain_input(deck_id), error_handler=_deck_mutation_error("update", deck_id))
     if not result.changed:
-        raise HTTPException(status_code=404, detail="Deck not found or permission denied")
+        raise HTTPException(status_code=404, detail="Kastention not found or permission denied")
     return {"success": True}
 
 
@@ -272,7 +273,7 @@ async def update_deck(deck_id: str, request: DeckUpdateRequest, current_user: di
 async def delete_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckMutationData = Depends(_deck_mutation_data)):
     result = await invoke_admin_operation(current_user, data.delete, DeckIdInputDTO(deck_id=deck_id), error_handler=_deck_mutation_error("delete", deck_id))
     if not result.changed:
-        raise HTTPException(status_code=404, detail="Deck not found or permission denied")
+        raise HTTPException(status_code=404, detail="Kastention not found or permission denied")
     return {"success": True}
 
 
@@ -312,7 +313,7 @@ def _voice_error(kind: str, voice_id: str | None = None):
     def error(exc, request_id):
         if not exc.outcome_unknown and exc.status_code == 404:
             if exc.code == "DECK_ACCESS_DENIED" and kind in {"create", "collect"}:
-                raise HTTPException(status_code=400, detail="Deck not found or permission denied" if kind == "create" else "Target deck not found or permission denied")
+                raise HTTPException(status_code=400, detail="Kastention not found or permission denied" if kind == "create" else "Target Kastention not found or permission denied")
             if exc.code == "VOICE_ACCESS_DENIED" and kind == "collect":
                 raise HTTPException(status_code=400, detail=f"Voice {voice_id} not found")
         raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code,

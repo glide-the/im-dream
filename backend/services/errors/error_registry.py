@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 """Canonical, client-safe Deck Plugin, ClaudePlugin, and workflow API errors.
 
 [Input] Stable server error codes from plugin, Deck, and workflow boundaries.
@@ -17,22 +18,22 @@ from typing import Any
 ERROR_REGISTRY: dict[str, dict[str, str]] = {
     "WORKFLOW_SELECTION_REQUIRED": {
         "phase": "selection",
-        "meaning": "A valid Deck Plugin binding has not been selected.",
+        "meaning": "A valid Kastention Plugin binding has not been selected.",
         "recovery": "Select an exact release and run preflight again.",
     },
     "DECK_PLUGIN_UNAVAILABLE": {
         "phase": "selection",
-        "meaning": "The requested Deck Plugin release is not available.",
+        "meaning": "The requested Kastention Plugin release is not available.",
         "recovery": "Choose another authorized, published release.",
     },
     "DECK_PLUGIN_MANIFEST_INVALID": {
         "phase": "install",
-        "meaning": "The Deck Plugin manifest is invalid.",
+        "meaning": "The Kastention Plugin manifest is invalid.",
         "recovery": "Publish a corrected release.",
     },
     "DECK_PLUGIN_SOURCE_DENIED": {
         "phase": "install",
-        "meaning": "The Deck Plugin source is not trusted.",
+        "meaning": "The Kastention Plugin source is not trusted.",
         "recovery": "Approve the source or choose a trusted source.",
     },
     "DECK_PLUGIN_INTEGRITY_FAILED": {
@@ -52,7 +53,7 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     },
     "DECK_HOST_INCOMPATIBLE": {
         "phase": "compatibility",
-        "meaning": "The Deck host does not support this release.",
+        "meaning": "The Kastention host does not support this release.",
         "recovery": "Upgrade the host or choose a compatible release.",
     },
     "CLAUDE_AGENT_INCOMPATIBLE": {
@@ -67,17 +68,17 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     },
     "DECK_RUNTIME_CONFIG_INVALID": {
         "phase": "config",
-        "meaning": "The Deck runtime configuration is invalid.",
-        "recovery": "Correct the Deck configuration and run preflight again.",
+        "meaning": "The Kastention runtime configuration is invalid.",
+        "recovery": "Correct the Kastention configuration and run preflight again.",
     },
     "DECK_RUNTIME_CONFIG_INCOMPATIBLE": {
         "phase": "config",
-        "meaning": "The Deck runtime snapshot contract is incompatible.",
+        "meaning": "The Kastention runtime snapshot contract is incompatible.",
         "recovery": "Choose a compatible runtime profile or release.",
     },
     "DECK_RUNTIME_CONFIG_UNAVAILABLE": {
         "phase": "config",
-        "meaning": "The Deck runtime configuration is temporarily unavailable.",
+        "meaning": "The Kastention runtime configuration is temporarily unavailable.",
         "recovery": "Retry preflight with the same idempotent request.",
     },
     "WORKFLOW_PERMISSION_DENIED": {
@@ -87,7 +88,7 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     },
     "DECK_PLUGIN_DISABLED": {
         "phase": "status",
-        "meaning": "The Deck Plugin installation is disabled.",
+        "meaning": "The Kastention Plugin installation is disabled.",
         "recovery": "Enable it or explicitly select another release.",
     },
     "DECK_PLUGIN_UPGRADE_PENDING": {
@@ -142,7 +143,7 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     },
     "BINDING_REVISION_CONFLICT": {
         "phase": "concurrency",
-        "meaning": "The Deck Plugin binding changed concurrently.",
+        "meaning": "The Kastention Plugin binding changed concurrently.",
         "recovery": "Refresh the binding and confirm the selection again.",
     },
     "IDEMPOTENCY_CONFLICT": {
@@ -243,7 +244,7 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     },
     "CLAUDE_PLUGIN_REF_INVALID": {
         "phase": "selection",
-        "meaning": "The Deck plugin reference set is invalid.",
+        "meaning": "The Kastention plugin reference set is invalid.",
         "recovery": "Submit references to ready installations only.",
     },
     "CLAUDE_PLUGIN_OPERATION_NOT_FOUND": {

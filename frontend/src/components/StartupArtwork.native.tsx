@@ -1,57 +1,27 @@
-// [Input] Shared vector paths, current ink color, visible preparation state and system motion preference.
-// [Output] A decorative breathing illustration while preparation is visible and the app is active.
-// [Pos] Native preparation-page artwork; SessionGate owns readiness and navigation.
-// [Sync] 2026-11-02: draw transparent vector linework and blue/white fills on the current app background.
-// [Sync] 2026-11-03: explicitly keep the native vector viewport and animation container clear and borderless.
-import {useEffect, useRef, useState} from 'react';
-import {AccessibilityInfo, Animated, AppState, Easing} from 'react-native';
-import Svg, {Path} from 'react-native-svg';
+// [Input] Original shared v4.2 face paths, display mode, semantic colors and visible foreground state.
+// [Output] One integrated character/clock used by both startup and idle presentation.
+// [Pos] Shared artwork boundary; iOS Core Animation owns keyframes without JS frame work.
+// [Sync] 2026-11-03: unify the face and dial; remove the independent outer clock and whole-image breathing loop.
+import {useEffect,useState} from 'react';
+import {AppState,Platform,requireNativeComponent,UIManager,View,type ColorValue,type ViewProps} from 'react-native';
+import Svg,{Circle,G,Line,Path} from 'react-native-svg';
 import artwork from '../assets/startup-artwork.json';
 import useInkColors from './useInkColors.native';
-import {STARTUP_BREATH_HALF_CYCLE_MS} from './startupPresentation';
-
-export default function StartupArtwork({visible, size = 176}: {visible: boolean; size?: number}) {
-  const colors = useInkColors();
-  const progress = useRef(new Animated.Value(0)).current;
-  const [active, setActive] = useState(AppState.currentState === 'active');
-  const [reduceMotion, setReduceMotion] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    let preferenceChanged = false;
-    const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', value => {
-      preferenceChanged = true;
-      setReduceMotion(value);
-    });
-    void AccessibilityInfo.isReduceMotionEnabled().then(value => {
-      if (mounted && !preferenceChanged) setReduceMotion(value);
-    }).catch(() => undefined);
-    const state = AppState.addEventListener('change', next => setActive(next === 'active'));
-    return () => { mounted = false; motion.remove(); state.remove(); };
-  }, []);
-
-  useEffect(() => {
-    progress.setValue(0);
-    if (!visible || !active || reduceMotion) return;
-    const animation = Animated.loop(Animated.sequence([
-      Animated.timing(progress, {toValue: 1, duration: STARTUP_BREATH_HALF_CYCLE_MS, easing: Easing.inOut(Easing.sin), useNativeDriver: true, isInteraction: false}),
-      Animated.timing(progress, {toValue: 0, duration: STARTUP_BREATH_HALF_CYCLE_MS, easing: Easing.inOut(Easing.sin), useNativeDriver: true, isInteraction: false}),
-    ]));
-    animation.start();
-    return () => { animation.stop(); progress.setValue(0); };
-  }, [active, progress, reduceMotion, visible]);
-
-  return <Animated.View
-    pointerEvents="none"
-    accessible={false}
-    accessibilityElementsHidden
-    importantForAccessibility="no-hide-descendants"
-    testID="startup-artwork"
-    style={{width: size, height: size, backgroundColor: 'transparent', borderWidth: 0, transform: [{scale: progress.interpolate({inputRange: [0, 1], outputRange: [1, 1.035]})}]}}
-  >
-    <Svg width="100%" height="100%" viewBox={artwork.viewBox} color={colors['color-text-primary']} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{backgroundColor:'transparent',borderWidth:0}} accessible={false}>
-      {artwork.paths.map((shape, index) => <Path key={index} {...shape}/>)}
-    </Svg>
-  </Animated.View>;
+export type ArtworkMode='clock'|'happy'|'sad';
+type Props={visible:boolean;size?:number;mode?:ArtworkMode;expression?:'happy'|'sad'};
+type NativeProps=ViewProps&{enabled:boolean;clockMode:ArtworkMode;faceMood:'happy'|'sad';colorInk:ColorValue;colorMinute:ColorValue;colorSecond:ColorValue;colorPaper:ColorValue};
+const NativeClock=Platform.OS==='ios'&&UIManager.getViewManagerConfig?.('InkKastentionClock')?requireNativeComponent<NativeProps>('InkKastentionClock'):null;
+export default function StartupArtwork({visible,size=176,mode='happy',expression='happy'}:Props){
+  const c=useInkColors(),[now,setNow]=useState(()=>new Date()),[active,setActive]=useState(AppState.currentState==='active');
+  useEffect(()=>{if(NativeClock)return;const listener=AppState.addEventListener('change',state=>setActive(state==='active'));return()=>listener.remove();},[]);
+  useEffect(()=>{if(NativeClock||!visible||!active)return;let timer:ReturnType<typeof setTimeout>;let disposed=false;
+    const update=()=>{if(disposed)return;setNow(new Date());timer=setTimeout(update,1000-Date.now()%1000+4);};update();
+    return()=>{disposed=true;clearTimeout(timer);};},[visible,active]);
+  const common={testID:'startup-artwork',accessible:false,accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants' as const,style:{width:size,height:size,backgroundColor:'transparent',borderWidth:0}};
+  if(NativeClock)return <NativeClock {...common} enabled={visible} clockMode={mode} faceMood={expression} colorInk={c['color-text-primary']} colorMinute={c['color-text-secondary']} colorSecond={c['color-action-link']} colorPaper={c['color-bg-paper']}/>;
+  const sad=mode==='sad'||(mode==='clock'&&expression==='sad');
+  return <View {...common}><Svg width="100%" height="100%" viewBox={artwork.viewBox} color={c['color-text-primary']} fill="none" strokeLinecap="round" strokeLinejoin="round">
+    {artwork.paths.map((shape,index)=><Path key={index} {...shape} d={index===6&&sad?'M 495 746 C 528 680 590 684 648 737':shape.d} opacity={mode==='clock'&&index>=4?0.11:1}/>)}
+    {mode==='clock'?<G>{[{angle:now.getHours()%12*30,end:493,width:19,color:c['color-text-primary']},{angle:now.getMinutes()*6,end:401,width:13,color:c['color-text-secondary']},{angle:now.getSeconds()*6,end:359,width:6,color:c['color-action-link']}].map((hand,index)=><Line key={index} x1={625} y1={674} x2={625} y2={hand.end} stroke={hand.color} strokeWidth={hand.width} rotation={hand.angle} origin="625,650"/>)}<Circle cx={625} cy={650} r={13} fill={c['color-text-primary']} stroke={c['color-bg-paper']} strokeWidth={9}/></G>:null}
+  </Svg></View>;
 }
-

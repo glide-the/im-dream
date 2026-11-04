@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Deck feature display names are Kastention / 卡片结构; concept definitions, technical identities and existing data remain. -->
 <!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
 <!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
@@ -20,19 +23,19 @@
   English · <a href="README.zh.md">中文</a>
 </p>
 
-**Kastention helps users organize personal thinking modes and apply them to analysis, task execution and creative work.** Decks hold approaches to a kind of need, problem-solving paths and Agent configuration. Chat provides conversations and task entry points; Dream brings creative conversations and project outputs into one workbench. Writing, Analysis, Calendar and resource connections help users collect material, arrange work and return to existing tasks.
+**Kastention helps users organize personal thinking modes and apply them to analysis, task execution and creative work.** Kastention configurations hold approaches to a kind of need, problem-solving paths and Agent configuration. Chat provides conversations and task entry points; Dream brings creative conversations and project outputs into one workbench. Writing, Analysis, Calendar and resource connections help users collect material, arrange work and return to existing tasks.
 
-The product positioning follows the [Notion project description](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37). Current module scope follows the repository's current designs. The Chinese interface calls Decks “思维模式”; the English interface retains Deck.
+The product positioning follows the [Notion project description](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37). Current module scope follows the repository's current designs. The Deck feature uses **Kastention** in English and **卡片结构** in Chinese. Existing Deck concept definitions remain in effect; the [current naming rules](docs/prd/kastention/kastention.md#当前功能名称) define the display names.
 
-![Product overview: Decks organize problem-solving approaches, Chat supports conversations and tasks, and Dream holds creative outputs](assets/readme/product-overview.en.svg)
+![Product overview: Kastention organizes problem-solving approaches, Chat supports conversations and tasks, and Dream holds creative outputs](assets/readme/product-overview.en.svg)
 
 *Feature illustration based on the product positioning and [current navigation design](docs/design/story-workspace/product-scope-and-navigation.md).*
 
 ## Product modules
 
-### Decks: thinking modes
+### Kastention: thinking modes
 
-Organize thinking approaches, problem-solving paths and execution methods for reuse in later work. Users can browse and try existing Decks or create their own, write names and descriptions, configure Agent roles and Claude plugins, and maintain drafts, content versions and enabled status. System Decks offer starting points such as screenplay and music creation, with entry points in Chat and Dream. Current functionality focuses on modes organized and configured by the user.
+Organize thinking approaches, problem-solving paths and execution methods for reuse in later work. Users can browse and try existing Kastention configurations or create their own, write names and descriptions, configure Agent roles and Claude plugins, and maintain drafts, content versions and enabled status. System Kastention configurations offer starting points such as screenplay and music creation, with entry points in Chat and Dream. Current functionality focuses on modes organized and configured by the user.
 
 ### Chat conversations
 
@@ -74,7 +77,7 @@ Bring a creative task's ongoing conversation, shared material and Episode output
 
 *Reused from the application's [creation guide](docs/design/story-workspace/project-and-episode-workbench.md#创作阶段指引). The upper panel shows shared project material, the middle panel shows Episode creation and review, and the lower panel shows future rendering, voice production and editing. The current workbench covers organizing, reading and collaborating on script and storyboard outputs.*
 
-The primary navigation is **Chat, Dream and Decks**. **More** provides Writing, Timeline and Analysis. Settings manages language, theme, models and resource connections. The UI uses the warm paper [color system](docs/prd/color_system/README.md) and supports narrow screens. Language and theme persist in the current browser; see the [Settings design](docs/design/story-workspace/settings.md).
+The primary navigation is **Chat, Dream and Kastention**. **More** provides Writing, Timeline and Analysis. Settings manages language, theme, models and resource connections. The UI uses the warm paper [color system](docs/prd/color_system/README.md) and supports narrow screens. Language and theme persist in the current browser; see the [Settings design](docs/design/story-workspace/settings.md).
 
 ## Current scope and enablement
 
@@ -265,7 +268,7 @@ Provider-free checks prove deterministic contracts. Real Google, model and busin
 - **Chat returns `GATEWAY_API_KEY_INVALID`:** the Dream service key no longer matches Admin's active canonical-subject Gateway key. AutoDL sync and qualification now stop before replacing the runtime env when this binding is invalid. Recover or rotate the key through the Admin-owned release operation, restart only Dream so it reloads the private env, and rerun the real `create Thread -> POST /api/claude-agent -> SSE` acceptance before publishing.
 - **MCP App does not appear:** public App rendering is disabled (`productionAppsEffective=false`). Check connection and tool availability; ordinary tool results remain available.
 
-Never commit secrets, transcripts or user workspace contents. Browser input, user env, Decks, plugins and workspace settings cannot override server-owned model/resource configuration. Thread temporary files use the server-bound `{AGENT_CWD}/{thread_id}/.claude-tmp`; do not widen that boundary to `/tmp`.
+Never commit secrets, transcripts or user workspace contents. Browser input, user env, Kastention configurations, plugins and workspace settings cannot override server-owned model/resource configuration. Thread temporary files use the server-bound `{AGENT_CWD}/{thread_id}/.claude-tmp`; do not widen that boundary to `/tmp`.
 
 `CLAUDE_CODE_CLI_PATH` is reserved for an explicit, reviewed absolute-path rollback, not a workaround for stale PATH. Dream does not silently select an ambient `claude` or SDK-bundled CLI. Application rollback does not reverse Admin database migrations. See [SDK/Runtime integration and rollback](docs/deploy/claude-sdk-runtime-packaging-and-integration.md).
 
@@ -275,7 +278,7 @@ Real send-path acceptance requires **create Thread → `POST /api/claude-agent` 
 
 | Topic | Entry |
 | --- | --- |
-| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [thinking modes PRD](docs/prd/deck/thinking-modes.md), [Deck design](docs/design/deck/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
+| Current product design | [Story Workspace](docs/design/story-workspace/README.md), [Kastention PRD](docs/prd/kastention/kastention.md), [Kastention design](docs/design/kastention/README.md), [Chat PRDs](docs/prd/chat/.folder.md) |
 | Writing and reflection | [Manual writing suggestions](docs/design/writing-manual-suggestions.md), [reflection analysis](docs/prd/reflection-blog.md) |
 | Conversations and creation | [Input queue](docs/prd/chat/queued-input.md), [turn navigation](docs/prd/chat/turn-navigation.md), [Dream re-entry](docs/design/story-workspace/dream-workspace-and-reentry.md), [creative workbench](docs/design/story-workspace/project-and-episode-workbench.md) |
 | Calendar and recurring tasks | [Calendar PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md), [scheduled-task design](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |

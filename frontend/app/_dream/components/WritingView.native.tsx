@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: publish only account-owned dated mood and chooser occupation to the idle presentation.
 // [Sync] 2026-11-01: open Writing document links through the shared native system-browser action.
 // [Sync] 2026-11-01: supply cancellable Session-bound save/context preparation to native Writing side conversations.
 // [Sync] 2026-11-01: render the original chooser value in the native Writing header; open intent carries no business write.
@@ -16,14 +17,16 @@ import useInkColors,{useNativeThemeMode} from '../../../src/components/useInkCol
 import {getShowEnergyBar} from '../../../src/platform/interfacePreferences.native';
 import {readWritingEvent,writingDocumentUrl,WritingContextRequests,type WritingDocumentState,type WritingChooserView,type WritingContextRequest,type WritingThreadContext} from './Editor/WritingDocument.protocol';
 import type {EditorJumpToCellDetail} from './chat/editorWriteTools';
-type Props={onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};origin:string;active:boolean;onBack:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;onSessionExpired:()=>void};
-export default function WritingView({onEditorJumpDispatched,editorJump,origin,active,onBack,onOpenThread,onPrepareChat,onOpenResources,onSessionExpired}:Props){
+import {idleMood} from '../../../src/runtime/idleMood';
+type Props={ownerId?:string;onIdleBlocked?:(blocked:boolean)=>void;onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};origin:string;active:boolean;onBack:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;onSessionExpired:()=>void};
+export default function WritingView({ownerId,onIdleBlocked,onEditorJumpDispatched,editorJump,origin,active,onBack,onOpenThread,onPrepareChat,onOpenResources,onSessionExpired}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),theme=useNativeThemeMode(),view=useRef<WebView<object>>(null),id=useRef(''),revision=useRef(0);
  const chooserRevision=useRef(0),openChooserNonce=useRef(0);
  const contextRequest=useRef<WritingContextRequest|undefined>(undefined);
  const [contextRequests]=useState(()=>new WritingContextRequests(request=>{contextRequest.current=request;sync();}));
  const [chooser,setChooser]=useState<WritingChooserView|null>(null);
  const [ready,setReady]=useState(false),[error,setError]=useState(false);
+ useEffect(()=>{onIdleBlocked?.(active&&Boolean(chooser?.expanded));return()=>onIdleBlocked?.(false);},[active,chooser?.expanded,onIdleBlocked]);
  const url=writingDocumentUrl(origin),latest=useRef({active,theme,language:i18n.language.startsWith('zh')?'zh' as const:'en' as const,showEnergyBar:getShowEnergyBar(),editorJump});latest.current={active,theme,language:i18n.language.startsWith('zh')?'zh':'en',showEnergyBar:getShowEnergyBar(),editorJump};
  const callbacks=useRef({onOpenThread,onPrepareChat,onOpenResources,onSessionExpired,onEditorJumpDispatched});callbacks.current={onOpenThread,onPrepareChat,onOpenResources,onSessionExpired,onEditorJumpDispatched};
  function sync(){if(!id.current)return;const state:WritingDocumentState={...latest.current,type:'state',documentId:id.current,revision:++revision.current,...(openChooserNonce.current?{openChooserNonce:openChooserNonce.current}:{}),...(contextRequest.current?{contextRequest:contextRequest.current}:{})};view.current?.injectJavaScript(`window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(JSON.stringify(state))}}));true;`);}
@@ -39,7 +42,7 @@ export default function WritingView({onEditorJumpDispatched,editorJump,origin,ac
   if(message.documentId!==id.current)return;
   if(message.type==='session-expired'){contextRequests.cancel();setChooser(null);callbacks.current.onSessionExpired();return;}
   if(message.type==='chat-context'||message.type==='chat-context-error'){contextRequests.receive(message);return;}
-  if(message.type==='chooser-view'){if(message.revision>chooserRevision.current){chooserRevision.current=message.revision;setChooser(message);}return;}
+  if(message.type==='chooser-view'){if(message.revision>chooserRevision.current){chooserRevision.current=message.revision;setChooser(message);if(!message.loading&&latest.current.active)idleMood.observe(ownerId,message.selectedStateId,message.createdAt);}return;}
   if(message.type==='editor-jump-dispatched'){if(message.nonce===latest.current.editorJump?.nonce)callbacks.current.onEditorJumpDispatched?.(message.nonce);return;}
   if(!latest.current.active)return;
   if(message.type==='open-thread'){

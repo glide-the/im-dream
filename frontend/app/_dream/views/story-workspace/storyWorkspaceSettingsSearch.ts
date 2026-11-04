@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: make Kastention / 卡片结构 searchable while retaining legacy Deck aliases and routes.
 // [Sync] 2026-10-15: index memory response settings.
 // [Input] Searchable settings navigation items and the user's free-text query.
 // [Output] Stable, token-aware navigation matches derived from labels, routes, section keys and aliases.
@@ -14,7 +15,7 @@ export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
   ],
   'settings-work': [
     'settings-work', 'work', 'deck', '/story-workspace/settings/work',
-    '/story-workspace/settings/work?tab=deck', '工作 卡组',
+    '/story-workspace/settings/work?tab=deck', '工作 卡组 思维模式 卡片结构 kastention',
   ],
   'settings-resources': [
     'settings-resources', 'resources', 'resource links', 'connector', 'notion',
@@ -23,7 +24,7 @@ export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
   ],
   'settings-plugins': [
     'settings-plugins', 'plugins', 'plugin', 'marketplace', 'deck workflow',
-    'deck plugin', 'claude code plugin', 'runtime plugin',
+    'deck plugin', 'kastention workflow', 'kastention plugin', '卡片结构 工作流', 'claude code plugin', 'runtime plugin',
     '/story-workspace/settings/plugins', '/story-workspace/settings/work?tab=plugins',
     '插件 市场 工作流 运行时',
   ],

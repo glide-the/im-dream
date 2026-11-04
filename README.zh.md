@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Deck功能展示名称采用Kastention与卡片结构；原概念、技术身份和现有数据保持。 -->
 <!-- [Sync] 2026-11-02: 现行应用品牌采用Kastention，中文称谓采用卡片结构；原技术身份和历史回执保留。 -->
 <!-- [Sync] 2026-10-12: record fresh local image cancel/retry, history and normal Admin visible verification; unknown usage retains pending settlement. -->
 <!-- [Sync] 2026-10-11: pin published Runtime 0.1.12 with qualified image-native dependencies; real image acceptance remains separate. -->
@@ -20,19 +23,19 @@
   <a href="README.md">English</a> · 中文
 </p>
 
-**卡片结构用于整理个人思维模式，并将这些模式用于具体问题的分析、任务执行和创作。** 思维模式保存处理某类需求的思考方向、解决路径与 Agent 配置；Chat 提供对话和任务入口；Dream 将创作对话与项目产物放在同一工作台。写作、回顾、日历与资源连接帮助用户积累材料、安排工作和重新进入已有任务。
+**卡片结构用于整理个人思维模式，并将这些模式用于具体问题的分析、任务执行和创作。** 卡片结构保存处理某类需求的思考方向、解决路径与 Agent 配置；Chat 提供对话和任务入口；Dream 将创作对话与项目产物放在同一工作台。写作、回顾、日历与资源连接帮助用户积累材料、安排工作和重新进入已有任务。
 
-产品定位依据[Notion 项目说明](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37)，各模块的当前范围以仓库中的现行设计为准。中文界面称为“思维模式”，英文界面沿用 Deck。
+产品定位依据[Notion 项目说明](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37)，各模块的当前范围以仓库中的现行设计为准。Deck功能的英文展示名称为 **Kastention**，中文为 **卡片结构**。原Deck概念定义保持，当前用语见[命名规则](docs/prd/kastention/kastention.md#当前功能名称)。
 
-![产品总览：思维模式组织解决问题的方法，Chat 用于对话与任务，Dream 管理创作产物](assets/readme/product-overview.zh.svg)
+![产品总览：卡片结构组织解决问题的方法，Chat 用于对话与任务，Dream 管理创作产物](assets/readme/product-overview.zh.svg)
 
 *依据产品定位和[现行导航设计](docs/design/story-workspace/product-scope-and-navigation.md)绘制的功能示意图。*
 
 ## 功能模块
 
-### 思维模式
+### 卡片结构
 
-整理针对某类问题的思考方向、解决路径和执行方式，供后续工作重复使用。用户可以浏览和试用已有思维模式，也可以创建自己的模式，编写名称与说明，配置 Agent 角色和 Claude 插件，维护草稿、内容版本及启停状态。系统提供剧本创作、音乐创作等起点；使用入口位于 Chat 和 Dream。当前功能以用户整理和配置为主。
+整理针对某类问题的思考方向、解决路径和执行方式，供后续工作重复使用。用户可以浏览和试用已有卡片结构，也可以创建自己的卡片结构，编写名称与说明，配置 Agent 角色和 Claude 插件，维护草稿、内容版本及启停状态。系统提供剧本创作、音乐创作等起点；使用入口位于 Chat 和 Dream。当前功能以用户整理和配置为主。
 
 ### Chat 对话
 
@@ -76,7 +79,7 @@
 
 *复用应用[创作指引](docs/design/story-workspace/project-and-episode-workbench.md#创作阶段指引)中的插图。上部展示项目共享素材，中部展示逐集创作与审阅，下部的渲染、配音和后期表示未来方向。当前工作台的范围止于剧本与分镜产物的组织、阅读和协作。*
 
-主导航是 **Chat、Dream、思维模式**；**更多**中提供写作、时间线和回顾入口。设置管理语言、主题、模型与资源连接。界面采用暖纸[色彩系统](docs/prd/color_system/README.md)，支持窄屏布局；语言和主题保留在当前浏览器中，详见[设置设计](docs/design/story-workspace/settings.md)。
+主导航是 **Chat、Dream、卡片结构**；**更多**中提供写作、时间线和回顾入口。设置管理语言、主题、模型与资源连接。界面采用暖纸[色彩系统](docs/prd/color_system/README.md)，支持窄屏布局；语言和主题保留在当前浏览器中，详见[设置设计](docs/design/story-workspace/settings.md)。
 
 ## 当前范围与启用条件
 
@@ -267,7 +270,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 - **Chat 返回 `GATEWAY_API_KEY_INVALID`：** Dream service key 与 Admin 当前 active canonical-subject Gateway key 不匹配。AutoDL 现在会在替换运行环境前阻断 sync 和 qualified。必须通过 Admin 所有的发布操作恢复或轮换 Key，仅重启 Dream 以重新读取私有环境，然后完整重跑真实 `create Thread -> POST /api/claude-agent -> SSE` 验收后才能发布。
 - **MCP App 没有显示：**公开 App 渲染仍关闭（`productionAppsEffective=false`）。检查连接和工具可用性；普通工具结果仍可使用。
 
-不得提交 secret、对话正文或用户工作区内容。浏览器输入、用户 env、Deck、Plugin 和工作区设置不能覆盖服务器所有的模型/资源配置。Thread 临时文件使用服务器绑定的 `{AGENT_CWD}/{thread_id}/.claude-tmp`，不得将边界扩大到 `/tmp`。
+不得提交 secret、对话正文或用户工作区内容。浏览器输入、用户 env、卡片结构、Plugin 和工作区设置不能覆盖服务器所有的模型/资源配置。Thread 临时文件使用服务器绑定的 `{AGENT_CWD}/{thread_id}/.claude-tmp`，不得将边界扩大到 `/tmp`。
 
 `CLAUDE_CODE_CLI_PATH` 仅用于明确评审的绝对路径回滚，不能掩盖旧 PATH；Dream 不会静默选择 ambient `claude` 或 SDK 内置 CLI。应用回滚不会反向执行 Admin 数据库 migration。详见[SDK/Runtime 接入与回滚](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)。
 
@@ -277,7 +280,7 @@ Provider-free 检查证明确定性合同。真实 Google、模型与业务验�
 
 | 主题 | 入口 |
 | --- | --- |
-| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[思维模式 PRD](docs/prd/deck/thinking-modes.md)、[思维模式设计](docs/design/deck/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
+| 现行产品设计 | [Story Workspace](docs/design/story-workspace/README.md)、[卡片结构 PRD](docs/prd/kastention/kastention.md)、[卡片结构设计](docs/design/kastention/README.md)、[Chat PRD](docs/prd/chat/.folder.md) |
 | 写作与回顾 | [写作手动建议](docs/design/writing-manual-suggestions.md)、[回顾分析](docs/prd/reflection-blog.md) |
 | 对话与创作 | [输入队列](docs/prd/chat/queued-input.md)、[轮次导航](docs/prd/chat/turn-navigation.md)、[Dream 重入](docs/design/story-workspace/dream-workspace-and-reentry.md)、[创作工作台](docs/design/story-workspace/project-and-episode-workbench.md) |
 | 日历与重复任务 | [日历 PRD](docs/prd/calendar/calendar-right-panel-tabs-prd.md)、[定时任务设计](docs/design/scheduled-tasks/codex-repeat-and-run-options.md) |

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 # [Input] Registry104 contracts, current OAuth, local plugin verifiers and public Deck create/reconcile routes.
 # [Output] Exact two-step evidence flow, closed DTOs, original receipt recovery and Dream-PostgreSQL fences.
 # [Pos] Provider-free Deck-default consumer/route harness; no real PostgreSQL, Google account or model call.
@@ -322,7 +323,7 @@ def test_browser_cannot_author_evidence_actor_or_server_order(boundary, payload)
     browser, state, _verifier_calls, _data = boundary
     response = browser.post("/api/decks", headers=HEADERS, json=payload)
     assert response.status_code == 422
-    assert response.json() == {"detail": "Invalid Deck request"}
+    assert response.json() == {"detail": "Invalid Kastention request"}
     assert state["calls"] == []
 
 

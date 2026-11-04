@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Sync] 2026-10-29: align the existing entry fixture with current public session and top-level password-form contracts; preserve navigation assertions.
 // [Input] Authenticated root App entry with deterministic API responses.
 // [Output] Browser regression proving authenticated root entry is canonical Story
@@ -281,7 +282,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   await expect(storyWorkspaceNavigation.getByRole('button')).toHaveText([
     'Chat',
     'Dream',
-    'Decks',
+    "Kastention",
     'More',
   ]);
   await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
@@ -295,7 +296,7 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   await expect(storyWorkspaceNavigation.getByRole('button')).toHaveText([
     'Chat',
     'Dream',
-    'Decks',
+    "Kastention",
     'More',
     'Writing',
     'Timeline',

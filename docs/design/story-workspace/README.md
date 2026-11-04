@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-10-27: 移动设计现行正文迁移至multi-platform，当前目录仅保留旧路径导航。 -->
 <!-- [Sync] 2026-10-25: 索引指向关闭Claude命令沙箱的部署设计，区分候选接线、完整业务与历史隔离原型。 -->
 <!-- [Sync] 2026-10-25: 保留原网页登录与业务；删除原生认证协议，平台仅适配资源、导航和通信。 -->
@@ -46,7 +47,7 @@
 Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 
 - [Dream Agent 设计索引](../dream-agent/README.md)
-- [Deck 管理、创建弹窗与版本设计索引](../deck/README.md)
+- [Deck 管理、创建弹窗与版本设计索引](../kastention/README.md)
 - [Project / Episode Artifact 合同](../dream-agent/project-episode-artifact-contract.md)
 - [Dream 工具与自动同步边界](../dream-agent/dreamflow-tool-boundaries.md)
 
@@ -64,6 +65,6 @@ Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 
 - 2026-09-02: 同步视图先展示 Episode 索引；稳定 Episode UID 贯穿路由、查询与缓存，缺少指定 Episode 产物时禁止回退其它 Episode。
 - 2026-08-31: Episode 文件 reader 归属初稿的对应 EP 聚焦页；同步视图只保留协调事实和入口。
-- 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/deck/`；本目录只通过 Deck 索引引用跨模块消费合同。
+- 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/kastention/`；本目录只通过 Deck 索引引用跨模块消费合同。
 - 2026-08-16: Dream 首页移除社区 Deck 安装入口，避免暂缓的市场分发继续形成第二套 Deck 流程。
 - 2026-08-31: 合法的同 Deck 下一轮 Agent 切换不改变 Dream launch provenance；真实绑定冲突保留 fail-closed 并进入用户安全的消息级恢复状态。

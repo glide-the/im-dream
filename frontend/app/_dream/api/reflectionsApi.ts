@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Original Reflections task/config/history DTOs, Cookie/CSRF and explicit platform HTTP/storage/UUID differences.
 // [Output] One shared Reflections API including original idempotent creation, SSE-first start, recovery and strict report history.
 // [Pos] Domain extraction from voiceApi; voiceApi preserves its existing public exports.
@@ -287,7 +288,7 @@ function reflectionKnownFailure(value: unknown): string | undefined {
   const code = typeof value === 'string' ? value.match(/^[A-Z][A-Z0-9_]+/)?.[0] : undefined;
   const messages: Record<string, [string, string]> = {
     REFLECTION_AGENT_UNAVAILABLE: ['所选分析 Agent 已不可用，请重新选择。', 'The selected analysis Agent is unavailable. Select it again.'],
-    DECK_ACCESS_DENIED: ['无法使用所选 Deck，请重新选择。', 'The selected Deck is unavailable. Select another Deck.'],
+    DECK_ACCESS_DENIED: ['无法使用所选卡片结构，请重新选择。', 'The selected Kastention is unavailable. Select another Kastention.'],
     NOTION_AUTH_REQUIRED: ['Notion 授权已失效，请重新连接。', 'Reconnect Notion before analyzing.'],
     NOTION_ANALYSIS_READ_FAILED: ['无法读取完整 Notion 内容，请检查页面权限，或关闭 Notion 后重试。', 'Notion content could not be read. Check page permissions or turn off Notion and retry.'],
     NOTION_RESOURCE_UNAVAILABLE: ['有 Notion 页面已无法访问，请检查授权与挂载范围后重试。', 'A Notion page is unavailable. Check access and linked resources, then retry.'],

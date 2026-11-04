@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Exec Report: task_deck_006_backend_workflow-preflight - Workflow Preflight
 
 ## 1. 执行上下文
@@ -8,7 +9,7 @@
 - Parent / Ancestor：`SUO-217` / `SUO-216`
 - 关联设计稿：
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §10.1、§10.2
-  - `docs/design/deck/deck-integration-delta.md` §5.1、§7.2
+  - `docs/design/kastention/kastention-integration-delta.md` §5.1、§7.2
 - 关联 Stage：`docs/stage/stage_deck-plugin-voice-ink-dream-integration.md`，Stage 2 / Wave 1
 - 执行 Agent：`ExecTaskAgent`
 - 执行时间：`2026-08-01 17:47:25 CST`

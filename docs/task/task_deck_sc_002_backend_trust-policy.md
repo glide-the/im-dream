@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_deck_sc_002_backend_trust-policy
 
 ## 1. 任务标题
@@ -11,7 +12,7 @@ Trust-Policy 包：信任根、Publisher Identity、算法与离线 Fail-Closed
 | Task ID | `TASK-DECK-SC-002` |
 | 来源 Issue | `DECK-SC-002` |
 | Paperclip TaskDesign Issue | [SUO-275](/SUO/issues/SUO-275) |
-| Canonical design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1-§4.2.5 |
+| Canonical design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1-§4.2.5 |
 | Domain | `backend` |
 | 优先级 | P0 |
 | 下游 Stage 映射键 | `stage4.supply_chain.DECK-SC-002` |

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # TASK-REQUIREMENT — task_275_shared_deck-stage4-supply-chain
 
 Status: Filled Prompt for Task Document Generation
@@ -30,7 +31,7 @@ Domain: `shared`（覆盖治理、backend 与 full-stack/shared 对齐合同）
 
 按以下顺序消费，发现冲突时采用更上游且更稳定的口径，并停止受影响的 task 细化、记录 clarification owner/action；不得反向改写上游：
 
-1. `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2、§5.2、§6～§9；
+1. `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2、§5.2、§6～§9；
 2. `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md` 中 `DECK-SC-001..009`；
 3. `docs/design/deck-plugin-voice-ink-dream-integration.md`；
 4. `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` 中 `DECK-002`、`DECK-003`、`DECK-008`、`DECK-017`；

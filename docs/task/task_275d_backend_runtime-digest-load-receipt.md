@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_275d_backend_runtime-digest-load-receipt
 
 > Task ID: `task_275d`
@@ -16,7 +17,7 @@ Runtime 物化后二次摘要校验与不可变 Load Receipt
 | 来源条目 | `DECK-SC-004` |
 | Task-stage Issue | [SUO-275](/SUO/issues/SUO-275) |
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
-| Design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1、§4.2.3 |
+| Design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1、§4.2.3 |
 | 既有 task | `task_deck_002_backend_runtime-lock.md`、`task_deck_008_backend_reconcile-load-receipt.md` |
 | Domain / Priority / 标签 | `backend` / P0 / `supply-chain`, `digest`, `runtime`, `verification` |
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Actor-scoped Dream re-entry rows from the production Story Workspace API.
 // [Output] Dream home: active Dream context and durable My Dream re-entry list.
 // [Pos] Story Workspace Dream no-run surface; all new interactions start in canonical Chat.
@@ -69,7 +70,7 @@ function StoryWorkspaceDreamReentryList({
             setQuery(event.currentTarget.value);
             setPages({ initial: 1, in_progress: 1 });
           }}
-          placeholder="目标、Deck 或 Run ID"
+          placeholder="目标、卡片结构或 Run ID"
           type="search"
           value={query}
         />
@@ -129,7 +130,7 @@ function StoryWorkspaceDreamReentryList({
 
       {filteredRuns.length === 0 ? (
         <p className="story-workspace-dream-reentry__empty" role="status">
-          {runs.length === 0 ? '还没有 Dream。请先前往卡组页选择 Dream Deck。' : '没有匹配的 Dream。'}
+          {runs.length === 0 ? '还没有 Dream。请先前往卡片结构页选择 Dream 卡片结构。' : '没有匹配的 Dream。'}
         </p>
       ) : null}
     </div>
@@ -189,7 +190,7 @@ export function StoryWorkspaceDreamLaunch({
       <header className="story-workspace-dream-home__header">
         <div className="story-workspace-dream-home__header-copy">
           <h1 id="dream-home-title">Dream</h1>
-          <span>继续创作，或选择一个 Deck 开始新的 Dream。</span>
+          <span>继续创作，或选择一个卡片结构开始新的 Dream。</span>
         </div>
       </header>
 
@@ -198,7 +199,7 @@ export function StoryWorkspaceDreamLaunch({
           <header><h2 id="dream-active-title">进行中的 Dream</h2><span>{activeDreamRuns.length}</span></header>
           {reentry.isLoading ? <p role="status">正在恢复进行中的 Dream…</p> : null}
           {reentry.error ? <div className="story-workspace-dream-home__error" role="alert">进行中的 Dream 暂时无法加载。<button onClick={reentry.refetch} type="button">重试</button></div> : null}
-          {!reentry.isLoading && !reentry.error && activeDreamRuns.length === 0 ? <p className="story-workspace-dream-home__empty">当前没有进行中的 Dream。可前往卡组页选择 Dream Deck，并在 Chat 中开始创作。</p> : null}
+          {!reentry.isLoading && !reentry.error && activeDreamRuns.length === 0 ? <p className="story-workspace-dream-home__empty">当前没有进行中的 Dream。可前往卡片结构页选择 Dream 卡片结构，并在 Chat 中开始创作。</p> : null}
           <div className="story-workspace-dream-home__active-grid" id="dream-active-list">
             {visibleActiveDreamRuns.map((run) => (
               <ActiveDreamCard key={run.storyWorkspaceRunId} onNavigate={onNavigate} run={run} />

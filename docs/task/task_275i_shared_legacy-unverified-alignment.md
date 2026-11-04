@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] Legacy-unverified assumptions, current source ownership, and production evidence boundaries. -->
 <!-- [输出] task_275i scan, alignment, failure, and rollback contract. -->
 <!-- [定位] Shared verification task record; it does not grant production readiness. -->
@@ -20,7 +21,7 @@
 | 来源条目 | `DECK-SC-009` |
 | Task-stage Issue | [SUO-275](/SUO/issues/SUO-275) |
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
-| Design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.4、§8 |
+| Design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.4、§8 |
 | 旧 Issue 清单 | `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` 的 `DECK-017` |
 | Domain / Priority / 标签 | `shared` / P1 / `supply-chain`, `legacy`, `migration`, `alignment` |
 

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: verify complete actor presence across multiple original turns, detached readers and observer failures.
 # [Input] Consume ClaudeAgentThreadFactory, AgentRunStatePool, AgentRunLifecycle,
 #         ClaudeAgentRunRequest from backend/claude_agent/.
 # [Output] Verify Phase 2 runner flyweight cache, TTL eviction, close_thread,
@@ -350,6 +351,69 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         self.factory = ClaudeAgentThreadFactory()
         # Stub service to avoid real SDK calls
         self._patch_service()
+
+    def test_account_presence_covers_all_turns_and_survives_reader_departure(self):
+        async def scenario():
+            from dataclasses import replace
+            # This scenario intentionally exercises three original concurrent turns.
+            # Use the public configuration seam rather than weakening admission.
+            self.factory._admission.replace_config(replace(
+                self.factory._admission.config, max_concurrent_runs=3,
+            ))
+            gates = {name: asyncio.Event() for name in ("a", "b", "other")}
+            started = {name: asyncio.Event() for name in gates}
+            observed, foreign = [], []
+            detach = self.factory.observe_thread_presence("owner", observed.append)
+            detach_foreign = self.factory.observe_thread_presence("foreign", foreign.append)
+            self.assertEqual(observed, [False])
+
+            async def execute(execution):
+                name = execution.request.thread_id
+                started[name].set()
+                await gates[name].wait()
+                await execution.turn_context.queue.put(None)
+
+            async def read(name, actor):
+                async for _ in self.factory.run_streaming(_make_request(actor, thread_id=name)):
+                    pass
+
+            self.factory._service.execute_session = execute
+            with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
+                readers = [asyncio.create_task(read("a", "owner")), asyncio.create_task(read("b", "owner")), asyncio.create_task(read("other", "foreign"))]
+                try:
+                    await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 3)
+                    self.assertTrue(observed[-1]); self.assertTrue(foreign[-1])
+                    readers[0].cancel()
+                    await asyncio.gather(readers[0], return_exceptions=True)
+                    self.assertEqual(self.factory.session_snapshot("a")["lifecycle"], "running")
+                    gates["a"].set()
+                    # Acquiring the original per-thread lock observes its completed cleanup.
+                    async with self.factory._pool.get_lock("a"):
+                        self.assertEqual(self.factory.session_snapshot("a")["lifecycle"], "idle")
+                    self.assertTrue(observed[-1])
+                    gates["b"].set(); await readers[1]
+                    self.assertFalse(observed[-1]); self.assertTrue(foreign[-1])
+                    detach(); detach_foreign()
+                    count = len(observed), len(foreign)
+                    gates["other"].set(); await readers[2]
+                    self.assertEqual((len(observed), len(foreign)), count)
+                finally:
+                    for gate in gates.values(): gate.set()
+                    await self.factory.aclose()
+                    for reader in readers:
+                        if not reader.done(): reader.cancel()
+                    await asyncio.gather(*readers, return_exceptions=True)
+        _run(scenario())
+
+    def test_presence_observer_failure_cannot_change_original_turn(self):
+        observed = []
+        self.factory.observe_thread_presence("user_1", lambda _: (_ for _ in ()).throw(RuntimeError("detached display")))
+        self.factory.observe_thread_presence("user_1", observed.append)
+        frames = self._drain(_make_request())
+        self.assertTrue(frames)
+        self.assertEqual(observed[0], False)
+        self.assertIn(True, observed)
+        self.assertEqual(observed[-1], False)
 
     def _patch_service(self):
         """Replace service methods with stubs that emit a minimal SSE stream."""

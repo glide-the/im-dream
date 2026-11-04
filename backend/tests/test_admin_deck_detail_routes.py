@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 # [Sync] 2026-10-28: align timeout evidence with the existing bounded read-only transport recovery and original request ID.
 # [Input] Actual Deck detail route/Auth/DTO with controlled Admin aggregates and original Memory values.
 # [Output] Original fields/numbers/time and closed malformed/entity/permission failure evidence.
@@ -112,7 +113,7 @@ def test_nonfinite_legacy_memory_safe_failure_without_heal(boundary, raw):
 def test_null_owned_aggregate_keeps_original_404(boundary):
     browser, outputs, *_ = boundary; outputs["deck"] = None
     response = browser.get("/api/decks/deck-1", headers=HEADERS)
-    assert response.status_code == 404 and response.json() == {"detail":"Deck not found"}
+    assert response.status_code == 404 and response.json() == {"detail":"Kastention not found"}
 
 
 @pytest.mark.parametrize("where,field,value", [

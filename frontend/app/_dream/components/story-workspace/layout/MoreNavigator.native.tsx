@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: pass the existing public account owner to the Writing mood projection.
 // [Sync] 2026-10-30: reuse the Writing destination for original session/cell jump intents from historical editor tool results.
 // [Sync] 2026-11-01: forward the original Writing Session context preparer with its exact linked Thread.
 // [Input] Authenticated public owner, App-owned origin/catalog and existing Settings/Chat callbacks.
@@ -21,8 +22,8 @@ import MoreNavigationPage from './MoreNavigationPage.native';
 import type {EditorJumpToCellDetail} from '../../chat/editorWriteTools';
 import type {MoreNavigationDestination} from './moreNavigation';
 import type {WritingThreadContext} from '../../Editor/WritingDocument.protocol';
-interface Props {onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
-export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched}:Props){
+interface Props {onIdleBlocked?:(blocked:boolean)=>void;onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
+export default function MoreNavigator({ownerId,onIdleBlocked,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),callbacks=useRef({onSessionExpired,onClose});callbacks.current={onSessionExpired,onClose};
  const [page,setPage]=useState<MoreNavigationDestination|'menu'>('menu'),[visited,setVisited]=useState<Set<MoreNavigationDestination>>(()=>new Set());
  const [timezone,setTimezone]=useState(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch{return 'UTC';}}),[timezoneError,setTimezoneError]=useState(false),[prefsRevision,setPrefsRevision]=useState(0);
@@ -42,7 +43,7 @@ export default function MoreNavigator({ownerId,origin,decks,active,resetNonce,on
  return <View style={s.fill}>
   <View style={[s.fill,page!=='menu'?s.hidden:undefined]} accessibilityElementsHidden={page!=='menu'||!active} importantForAccessibility={page==='menu'&&active?'auto':'no-hide-descendants'}><MoreNavigationPage onNavigate={navigate} onToggleTheme={()=>{toggleTheme();}} onClose={onClose}/></View>
   {timezoneError&&['timeline','analysis'].includes(page)?<View style={s.notice}><InkLabel accessibilityRole="alert" style={{color:c['color-state-error']}}>{i18n.language.startsWith('zh')?'无法读取时区设置。':'Timezone settings could not be loaded.'}</InkLabel><Pressable accessibilityRole="button" onPress={()=>setPrefsRevision(value=>value+1)} style={s.retry}><InkLabel style={{color:c['color-text-primary']}}>{t('analysis.history.retry')}</InkLabel></Pressable></View>:null}
-  {scene('writing',origin?<WritingView onEditorJumpDispatched={onEditorJumpDispatched} editorJump={editorJump} origin={origin} active={show('writing')} onBack={root} onOpenThread={onOpenThread} onPrepareChat={onPrepareChat} onOpenResources={()=>{navigate('settings');onResources();}} onSessionExpired={onSessionExpired}/>:<ActivityIndicator color={c['color-text-primary']}/>)}
+  {scene('writing',origin?<WritingView onIdleBlocked={onIdleBlocked} ownerId={ownerId} onEditorJumpDispatched={onEditorJumpDispatched} editorJump={editorJump} origin={origin} active={show('writing')} onBack={root} onOpenThread={onOpenThread} onPrepareChat={onPrepareChat} onOpenResources={()=>{navigate('settings');onResources();}} onSessionExpired={onSessionExpired}/>:<ActivityIndicator color={c['color-text-primary']}/>)}
   {scene('timeline',<CollectionsView timezone={timezone} authenticated api={resource.api} voiceConfigs={voices} active={show('timeline')} onBack={root}/>)}
   {scene('analysis',<AnalysisView timezone={timezone} authenticated api={resource.api} storage={resource.storage} active={show('analysis')} onBack={root} onTimeline={()=>navigate('timeline')}/>)}
   {scene('settings',renderSettings(root,show('settings')))}

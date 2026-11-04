@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] 2026-08-01 SUO-241 Episodes 设计增量和生成期工作拆解。 -->
 <!-- [输出] 历史增量范围、规则、安全约束与验收意图。 -->
 <!-- [范围] 不作为当前派工、审批、assignee、checkout 或实现状态合同。 -->
@@ -23,7 +24,7 @@
 - 来源设计稿：
   - 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`（DEC-020～DEC-025）
   - 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
-  - Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`（DEC-009～DEC-019）
+  - Deck 集成 Delta：`docs/design/kastention/kastention-integration-delta.md`（DEC-009～DEC-019）
   - 参考设计稿：`docs/design/story-workspace/README.md`
 - 生成 Agent：`IssueDispatcher`
 - 所属流水线阶段：`issue`
@@ -44,7 +45,7 @@
 
 - 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`
 - 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
-- Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`
+- Deck 集成 Delta：`docs/design/kastention/kastention-integration-delta.md`
 - 参考设计稿：`docs/design/story-workspace/README.md`
 
 - 本清单覆盖范围：

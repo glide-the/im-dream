@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: bind/release read-only account presence through the original interpreter call boundary.
 // [Input] Bundled Dream Python entry and JSON requests.
 // [Output] Actual backend results on the main queue.
 // [Pos] Serialized interpreter startup and concurrent calls into the persistent Python event loop.
@@ -129,6 +130,13 @@ final class EmbeddedDreamBackend {
     func closeDocument(_ generation: String) {
         guard let data = try? JSONSerialization.data(withJSONObject: ["pageGeneration": generation]) else { return }
         call("close_document", payload: String(decoding: data, as: UTF8.self)) { _ in }
+    }
+
+    func configureThreadPresence(_ value: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: value)
+            call("thread_presence", payload: String(decoding: data, as: UTF8.self), completion: completion)
+        } catch { completion(.failure(error)) }
     }
 
     private func call(_ function: String, payload: String?, completion: @escaping (Result<[String: Any], Error>) -> Void) {

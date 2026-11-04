@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Input] Dated task_213 implementation, static checks, and recorded limitations. -->
 <!-- [Output] Immutable historical execution receipt separated from public-application and production status. -->
 <!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
@@ -15,7 +16,7 @@
 - 关联设计稿:
   - `docs/design/story-workspace/product-scope-and-navigation.md` §2.3、§4.5
   - `docs/design/story-workspace/product-scope-and-navigation.md`
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.5
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.5
 - 关联 Stage: `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` §21.2，Stage 3 / Wave 1
 - Task 文档: `docs/task/task_213_frontend_story_workspace_status.md`
 - 强制模板: `docs/task/TASK-REQUIREMENT-FORMAT.md`

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-29: inject native HTTP into the original Timeline read helpers; Web signatures and defaults remain compatible.
 // [Sync] 2026-10-29: re-export the original Reflections domain API for Web/native reuse; remaining session and Chat behavior stays here.
 // [Sync] 2026-10-29: re-export the original Deck mutation owner; preserve default Web transport and lazy voice-thread association.
@@ -671,7 +672,7 @@ export async function reconcileDefaultDeckPlugin(): Promise<{
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Reconcile default Deck plugin failed');
+    throw new Error(error.detail || 'Reconcile default Kastention plugin failed');
   }
 
   return await response.json();

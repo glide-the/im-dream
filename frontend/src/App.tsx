@@ -1,3 +1,6 @@
+// [Sync] 2026-11-03: retain business views behind an idle clock and share native account Thread presence.
+// [Sync] 2026-11-03: pause hidden Chat UI publication while its live Thread readers remain account-owned.
+// [Sync] 2026-11-03: retain the current Thread composer on reselection and discard previews after confirmed deletion.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-02: restore one main-owned side Chat; retain Writing source identity until its original editor reopens.
 // [Sync] 2026-11-02: bind native Chat restoration to the validated account and each primary/side Thread input owner.
@@ -79,6 +82,8 @@ import SessionGate from './platform/SessionGate';
 import ScreenFrame from './components/ScreenFrame';
 import {clientFetch} from './platform/transport';
 import type {WritingThreadContext} from '../app/_dream/components/Editor/WritingDocument.protocol';
+import useIdleScreenSaver from './components/useIdleScreenSaver.native';
+import IdleScreenSaver from './components/IdleScreenSaver.native';
 
 function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initialNotice,documentOwner,writingContext,onReturnToWriting,onRecoveryDeparture}: {documentOwner?:object;writingContext?:WritingThreadContext;ownerId:string;logout: () => Promise<void>;refreshSession:()=>Promise<void>;initialThreadId?:string;onClose?:()=>void;initialNotice?:string;onReturnToWriting?:()=>Promise<void>;onRecoveryDeparture?:()=>void}) {
   const {t}=useTranslation();
@@ -90,6 +95,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const {origin,decks,configLoaded}=setup;
   const config:Partial<NativeChatConfig>=setup.config ?? {};
   const [contextReadError,setContextReadError]=useState('');
+  const [saverVisible,setSaverVisible]=useState(false);
   const [error, setError] = useState(initialNotice ?? '');
   const toolDocumentOwner=useMemo(()=>documentOwner??{},[documentOwner]);
   const [workspaceUri,setWorkspaceUri]=useState<string|null>(null);
@@ -118,7 +124,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   const legacyContext=boundContext.threadId?decks.flatMap(deck=>(deck.voices ?? []).map(voice=>({deck,voice}))).find(({voice})=>voice.thread_id===boundContext.threadId):undefined;
   const selectedDeck = boundContext.threadId?(boundDeck ?? (boundContext.deckId?undefined:legacyContext?.deck)):decks.find(deck=>deck.id===selection?.deckId);
   const selectedVoice = selectedDeck?.voices?.find(voice=>voice.id===(boundContext.threadId?boundContext.voiceId:selection?.agentId)) ?? legacyContext?.voice;
-  const session = useNativeChatThread({recovery,initialThreadId,context:{deckId:boundContext.threadId?boundContext.deckId:selection?.deckId,voiceId:boundContext.threadId?boundContext.voiceId:selection?.agentId,
+  const session = useNativeChatThread({recovery,initialThreadId,visible:section==='chat'&&sideChat===null&&!saverVisible,context:{deckId:boundContext.threadId?boundContext.deckId:selection?.deckId,voiceId:boundContext.threadId?boundContext.voiceId:selection?.agentId,
     voiceSystemPrompt:selectedVoice?.system_prompt,settingsSystemPrompt:config.system_prompt,imFullAccessEnabled:config.im_full_access_enabled===true,currentToolChoice:toolChoice},
     prepareEditorState:writingContext?async(id,signal)=>{
       if(id!==initialThreadId)return undefined;
@@ -149,7 +155,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     setBoundDeck(undefined);let active=true;void getDeck(record.deck_id,clientFetch).then(deck=>{if(active)setBoundDeck(deck);}).catch(()=>{if(active)setContextReadError('Agent上下文暂时无法读取，请重试读取对话。');});
     return()=>{active=false;};
   },[session.thread?.id,session.thread?.deck_id,setup.revision]);
-  const selectThread=async(id:string)=>{await closeToolResultDocuments(toolDocumentOwner);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSketchOpen(false);setComposerKey(value=>value+1);return session.openThread(id);};
+  const selectThread=async(id:string)=>{if(id===session.threadId&&!session.unknown){setActivityOpen(false);setScheduledDetail(null);return;}await closeToolResultDocuments(toolDocumentOwner);setWorkspaceUri(null);setFileSidebarOpen(false);setActivityOpen(false);setScheduledDetail(null);setSketchOpen(false);setComposerKey(value=>value+1);return session.openThread(id);};
   const deleteThread=(id:string,displayTitle?:string)=>{
     if(deleteRequest.current)return;
     const row=history.threads.find(item=>item.id===id)??activity.chat.data.find(item=>item.id===id);
@@ -163,6 +169,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
         if(confirmed||deleteRequest.current!==request)return;confirmed=true;
         void history.remove(id).then(async removed=>{
           if(!removed||deleteRequest.current!==request)return;
+          session.invalidateHistory(id);
           activity.removeChat(id);
           if(id===visibleThread.current){await closeToolResultDocuments(toolDocumentOwner);if(id!==visibleThread.current||deleteRequest.current!==request)return;session.newChat();setComposerKey(value=>value+1);setSketchOpen(false);}
         }).finally(()=>{if(deleteRequest.current===request)deleteRequest.current=null;});
@@ -195,7 +202,10 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
     setEditorJump({nonce:++editorJumpNonce.current,detail:target});openSection('more');
   };
   const closeBusiness=async()=>{await closeToolResultDocuments(toolDocumentOwner);onClose?.();};
-  return <SafeAreaView style={styles.fill}><KeyboardAvoidingView style={styles.fill} accessibilityElementsHidden={activityOpen||fileSidebarOpen||scheduledDetail!==null} importantForAccessibility={activityOpen||fileSidebarOpen||scheduledDetail!==null?'no-hide-descendants':'auto'} enabled={Boolean(onClose) || Platform.OS !== 'ios'} behavior={onClose&&Platform.OS==='ios'?'padding':undefined}>
+  const [writingIdleBlocked,setWritingIdleBlocked]=useState(false);
+  const idle=useIdleScreenSaver(writingIdleBlocked||activityOpen||fileSidebarOpen||sketchOpen||scheduledDetail!==null||workspaceUri!==null||sideChat!==null||session.confirmation!==null,Boolean(onClose),setSaverVisible);
+  const showSaver=saverVisible&&!idle.blocked;
+  return <SafeAreaView style={styles.fill} onStartShouldSetResponderCapture={()=>{idle.activity();return false;}} onMoveShouldSetResponderCapture={()=>{idle.activity();return false;}} onTouchEnd={()=>idle.activity()}><KeyboardAvoidingView pointerEvents={showSaver?'none':'auto'} style={styles.fill} accessibilityElementsHidden={showSaver||activityOpen||fileSidebarOpen||scheduledDetail!==null} importantForAccessibility={showSaver||activityOpen||fileSidebarOpen||scheduledDetail!==null?'no-hide-descendants':'auto'} enabled={Boolean(onClose) || Platform.OS !== 'ios'} behavior={onClose&&Platform.OS==='ios'?'padding':undefined}>
     <View style={[styles.header,section==='more'?styles.hidden:undefined]}>{section!=='chat'?<InkLabel style={[styles.title,{color:foreground}]}>{BRAND_NAME}</InkLabel>:null}<View style={styles.fill}/>
       {onClose?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputQueue.closeSideChat')} onPress={()=>void closeBusiness()} style={styles.action}><InkLabel style={{color:foreground}}>{t('chat.history.close')}</InkLabel></Pressable>:section==='chat'?<ChatTopActions creating={session.posting&&!thread} activityOpen={activityOpen} workspaceEnabled={configLoaded&&config.workspace_enabled!==false} workspaceOpen={fileSidebarOpen}
       contextBadge={selectedVoice && (!thread || boundContext.threadId===thread)?<ChatAgentBadge voice={selectedVoice}/>:undefined}
@@ -244,14 +254,14 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
         onTryDeck={tryDeck} />
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
-      {moreVisited?<MoreNavigator ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
+      {moreVisited?<MoreNavigator onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
         onOpenThread={(id,writingContext)=>{recovery.rememberSideChat({threadId:id,writingSessionId:writingContext?.sessionId});setSideChat({threadId:id,writingContext,documentOwner:{}});}} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
         renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
           onSessionExpired={()=>void refreshSession()} onConfigSaved={()=>void setup.refreshConfig().catch(()=>setError('配置暂时无法读取，请重试。'))}/>}/>:null}
     </View>
-    {!onClose?<View accessibilityRole="tablist" style={styles.tabs}>{(['chat','decks','more'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{selected:section===value}} style={styles.action} onPress={() => openSection(value)}><InkLabel style={{color:foreground}}>{value==='chat'?t('nav.chat'):value==='decks'?t('nav.decks'):t('nav.more')}</InkLabel></Pressable>)}</View>:null}
+    {!onClose?<View accessibilityRole="tablist" style={styles.tabs}>{(['chat','decks','more'] as const).map(value => <Pressable key={value} testID={`main-tab-${value}`} accessibilityRole="tab" accessibilityState={{selected:section===value}} style={styles.action} onPress={() => openSection(value)}><InkLabel style={{color:foreground}}>{value==='chat'?t('nav.chat'):value==='decks'?t('nav.decks'):t('nav.more')}</InkLabel></Pressable>)}</View>:null}
   </KeyboardAvoidingView>
     {activityOpen?<View style={styles.overlay}><ActivitySidebar activity={activity} history={history} activeThreadId={thread} filters={activityFilters} onFiltersChange={setActivityFilters} onClose={()=>setActivityOpen(false)} onSelectThread={id=>void selectThread(id)} onDeleteThread={deleteThread} onTask={row=>{setActivityOpen(false);setScheduledDetail({taskId:row.id,snapshot:row.snapshot});}}/></View>:null}
     {scheduledDetail?<View style={styles.overlay}><ScheduledTaskDetailSidebar key={scheduledDetail.taskId} {...scheduledDetail} onSessionExpired={()=>void refreshSession()} onClose={()=>setScheduledDetail(null)} onOpenThread={id=>void selectThread(id)}/></View>:null}
@@ -265,7 +275,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       {sideChat?<ScreenFrame><Business key={JSON.stringify([sideChat.threadId,sideChat.writingContext?.sessionId??null])} ownerId={ownerId} logout={logout} refreshSession={refreshSession} initialThreadId={sideChat.threadId} initialNotice={sideChat.notice} documentOwner={sideChat.documentOwner} writingContext={sideChat.writingContext} onClose={()=>void closeSideChat()}
         onReturnToWriting={sideChat.restoredWritingSessionId?returnToWriting:undefined} onRecoveryDeparture={()=>recovery.clearSideChat({threadId:sideChat.threadId,writingSessionId:sideChat.writingContext?.sessionId})}/></ScreenFrame>:null}
     </Modal>
-  </SafeAreaView>;
+  {showSaver?<IdleScreenSaver onClose={idle.dismiss}/>:null}</SafeAreaView>;
 }
 export default function App() { return <ScreenFrame><SessionGate beforeRelease={()=>closeToolResultDocuments()}>{(logout,refreshSession,user) => <Business key={user.id} ownerId={user.id} logout={logout} refreshSession={refreshSession} />}</SessionGate></ScreenFrame>; }
 const styles = StyleSheet.create({

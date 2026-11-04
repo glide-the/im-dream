@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Current Deck binding/runtime/readiness projection and permitted navigation callbacks.
 // [Output] A compact workflow context and action bar with a sanitized config summary.
 // [Pos] Story Workspace main-region workflow context header.
@@ -71,7 +72,7 @@ export function WorkflowContextBar({
 
       <div className="workflow-context-bar__facts">
         <span className={`workflow-context-bar__fact workflow-context-bar__fact--${runtimeReady === true ? 'ready' : runtimeReady === false ? 'blocked' : 'unknown'}`}>
-          Deck 配置：{runtimeReady === true ? 'Ready' : runtimeReady === false ? '未就绪' : '待确认'}
+          卡片结构配置：{runtimeReady === true ? 'Ready' : runtimeReady === false ? '未就绪' : '待确认'}
         </span>
         <span className={`workflow-context-bar__fact workflow-context-bar__fact--state-${state}`}>
           运行：{storyWorkspaceWorkflowContextLabel(state)}{progressLabel ? ` · ${progressLabel}` : ''}

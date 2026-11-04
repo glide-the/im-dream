@@ -1,4 +1,5 @@
 // [Input] SwiftUI lifecycle, UIKit host and the existing page's background/theme projection.
+// [Sync] 2026-11-03: expose diagnostics occupation to the idle overlay eligibility check.
 // [Sync] 2026-11-03: reuse the launch screen's StartupArtwork vector asset for the diagnostics entry, preserving its appearance variants and original colors.
 // [Sync] 2026-11-02: host scene-local diagnostics above app-owned sheets with a non-key, button-only hit region and the original JS bridge.
 // [Sync] 2026-11-02: inherit the original window's applied appearance before mounting the diagnostics root.
@@ -161,6 +162,7 @@ private final class DiagnosticsOverlayController: UIViewController {
 }
 
 final class NativeDiagnosticsOverlay {
+    var isOpen: Bool { root != nil }
     weak var scene: UIWindowScene?
     private weak var bridge: RCTBridge?
     private let window: DiagnosticsOverlayWindow

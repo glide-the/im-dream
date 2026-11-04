@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] A selected Agent-generated Story Workspace resource and server provenance.
 // [Output] Editable proposal detail with confirm/reject review actions.
 // [Pos] Dream right-rail business review surface.
@@ -245,7 +246,7 @@ export function StoryWorkspaceReviewDetail({
       {sourceReceipt && (
         <dl className="story-workspace-review-detail__source">
           <div><dt>来源</dt><dd>Dream Chat</dd></div>
-          <div><dt>Deck</dt><dd>{deckName || '未使用 Deck'}</dd></div>
+          <div><dt>卡片结构</dt><dd>{deckName || '未使用卡片结构'}</dd></div>
         </dl>
       )}
 

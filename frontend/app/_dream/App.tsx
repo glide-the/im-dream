@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: scope retained Chat to the authenticated user and refresh its reads on route return.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
 // [Sync] 2026-11-01: mobile Writing uses one-row prose, explicit keyboard focus, shared line geometry and the original chooser/persistence.
@@ -268,7 +269,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     setChooserExpanded(view.expanded);
     writingHost.current?.onChooserView?.(view);
   }, []);
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const isDeviceVerificationRoute = !isReactNativeHost() && window.location.pathname === '/oauth/device/verify';
   const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
   const { i18n } = useTranslation();
@@ -295,6 +296,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     }
   }, [currentLanguage, i18n]);
 
+  const [chatRouteActive,setChatRouteActive] = useState(()=> (resolveStoryWorkspacePath(window.location.pathname,window.location.search)?.route??'chat')==='chat');
   const [writingRouteActive, setWritingRouteActive] = useState(() => (
     Boolean(writingDocument) || resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
   ));
@@ -369,6 +371,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
 
   const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
     setWritingRouteActive(route === 'writing');
+    setChatRouteActive(route === 'chat');
     if (route !== 'writing') setWritingChatPanelOpen(false);
     setShowNotionConnectorDetail(false);
     const query = new URLSearchParams(window.location.search);
@@ -1767,6 +1770,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
         overflow: 'hidden',
       }}>
         <StoryWorkspaceRouter
+            key={user?.id}
             mobileMoreNonce={mobileMoreNonce}
             onMobileMoreOpenChange={setMobileMoreOpen}
             decksContent={storyWorkspaceDeckManager}
@@ -1786,6 +1790,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
               chat: (
                 <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
                   <ChatView
+                    isVisible={chatRouteActive}
                     editorState={state ? (state as unknown as Record<string, unknown>) : null}
                     ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
                     onEditorWriteConfirmed={handleEditorWriteConfirmed}

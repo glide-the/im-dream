@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_275b_backend_trust-policy-bundle
 
 > Task ID: `task_275b`
@@ -16,7 +17,7 @@ Trust-Policy 包：信任根、Publisher Identity 与算法生命周期
 | 来源条目 | `DECK-SC-002` |
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
 | Task-stage Issue | [SUO-275](/SUO/issues/SUO-275) |
-| Design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1、§4.2.5 |
+| Design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1、§4.2.5 |
 | Issue 清单 | `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md` |
 | Domain / Priority / 标签 | `backend` / P0 / `supply-chain`, `trust-policy`, `signature`, `security` |
 

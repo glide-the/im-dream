@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: carry the original note date in the read-only chooser projection.
 // [Input] Native display state, original editor navigation intents and Writing chooser presentation.
 // [Output] Fixed local document URL and validated identity/revision messages.
 // [Pos] Writing document boundary; HTTP, permissions, editor persistence and Agent tasks retain their original owners.
@@ -6,7 +7,7 @@
 import {parseEditorJumpToCellDetail,type EditorJumpToCellDetail} from '../chat/editorWriteTools';
 import {WRITING_CHAT_CONTEXT_TIMEOUT_MS} from '../../constants/sessionSync';
 export const WRITING_DOCUMENT_PATH='/native/writing';
-export interface WritingChooserView {loading:boolean;selectedStateId:string|null;name:string;expanded:boolean}
+export interface WritingChooserView {loading:boolean;selectedStateId:string|null;name:string;expanded:boolean;createdAt?:string}
 export interface WritingContextRequest {requestId:string;sessionId:string}
 export type WritingContextResult = WritingContextRequest & ({type:'chat-context';editorState:Record<string,unknown>}|{type:'chat-context-error';code:'session-changed'|'save-failed'});
 export interface WritingThreadContext {sessionId:string;prepareEditorState:(signal:AbortSignal)=>Promise<Record<string,unknown>>}
@@ -32,7 +33,7 @@ export function readWritingEvent(raw:string):WritingDocumentEvent|null {
  let r:Record<string,unknown>;try{r=JSON.parse(raw);}catch{return null;}
  if(!r||typeof r.documentId!=='string')return null;
  if(['ready','session-expired','resources'].includes(String(r.type)))return r as WritingDocumentEvent;
- if(r.type==='chooser-view'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>0&&typeof r.loading==='boolean'&&(r.selectedStateId===null||typeof r.selectedStateId==='string')&&typeof r.name==='string'&&typeof r.expanded==='boolean')return r as WritingDocumentEvent;
+ if(r.type==='chooser-view'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>0&&typeof r.loading==='boolean'&&(r.selectedStateId===null||typeof r.selectedStateId==='string')&&typeof r.name==='string'&&typeof r.expanded==='boolean'&&(r.createdAt===undefined||(typeof r.createdAt==='string'&&Number.isFinite(Date.parse(r.createdAt)))))return r as WritingDocumentEvent;
  if(r.type==='editor-jump-dispatched'&&Number.isSafeInteger(r.nonce))return r as WritingDocumentEvent;
  if(r.type==='open-thread'&&typeof r.threadId==='string'&&r.threadId.length>0&&(r.editorSessionId===undefined||(typeof r.editorSessionId==='string'&&r.editorSessionId.length>0)))return r as WritingDocumentEvent;
  if(isContextRequest(r)){

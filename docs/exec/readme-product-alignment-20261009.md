@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Input] User's README update requirement, Agent.md README contract, current product designs and source navigation. -->
 <!-- [Output] Copy-ready optimized prompt, treatment decision, delivered documentation scope and verification receipts. -->
 <!-- [Pos] Execution record for the 2026-10-09 README product alignment; not a feature or deployment acceptance. -->
@@ -100,7 +102,7 @@
 通过已连接的 Notion 读取用户指定的[项目说明](https://app.notion.com/p/ink-and-memory-38f30b7547c3804cb8a0d1250a3b8ae2?source=copy_link#e4f30b7547c3837ab5d4815f3f1b0e37)、任务管理模块和 Work 连接器设计。项目说明将产品定位于个人思维模式整理，并指出创作成果反馈统计、画布、知识库和完整制作链路尚未完成。历史笔记中的认证和自动写作建议描述由当前本地设计及实现校正。
 
 - 删除泛化五步流程和含命令的剧本阶段表，以九个模块的自然语言功能描述替代：思维模式、Chat、写作与日记、回顾分析、任务与进度、定时任务与日历、资源连接、文件工作区、Dream。
-- 思维模式说明采用同期 PRD（`docs/prd/deck/thinking-modes.md`）及[设计索引](../design/deck/README.md)，保留其他工作刚统一的中文名称；不将概念中的 Skills/MCP/Plugin 组合写成已交付的自动绑定功能。
+- 思维模式说明采用同期 PRD（`docs/prd/kastention/kastention.md`）及[设计索引](../design/kastention/README.md)，保留其他工作刚统一的中文名称；不将概念中的 Skills/MCP/Plugin 组合写成已交付的自动绑定功能。
 - 写作说明依据[手动建议设计](../design/writing-manual-suggestions.md)和现有 `WritingSuggestionCell`；回顾说明依据[回顾分析 PRD](../prd/reflection-blog.md)与 `AnalysisView`。不延用早期自动生成建议或完整成果反馈系统的设想。
 - Dream 明确以剧本组织和分镜为当前重点，保留现有创作插图，并标明图中下部制作能力为未来方向。
 - 双语总览图同步为个人思维模式与九模块总览。技术 capability、安装、版本、认证和运维合同保留，部署门槛收进独立折叠说明。

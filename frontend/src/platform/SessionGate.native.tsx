@@ -4,6 +4,7 @@
 // [Sync] 2026-10-31: release current Native documents before account loss/change/logout; original Cookie/CSRF/login semantics remain.
 // [Sync] 2026-10-30: wait for login-sheet dismissal before showing the native home; coalesce login taps and treat closing as cancellation.
 // [Sync] 2026-10-29: pass the validated public user to account-scoped native navigation; authentication and session refresh retain their owners.
+// [Sync] 2026-11-03: scope native Thread presence to the original authenticated account and defer idle presentation while covered.
 // [Input] Application-owned backend readiness and normal Web login completion.
 // [Sync] 2026-10-29: follow the native local appearance while retaining original session/refresh ownership.
 // [Output] Native application session using original BFF Cookie/CSRF semantics.
@@ -22,6 +23,7 @@ import StartupScreen from '../components/StartupScreen.native';
 import useStartupPresentation from './useStartupPresentation.native';
 import {isBrowserSessionCurrent,loadBrowserSession,revokeBrowserSession,type BrowserSession,type BrowserUser} from '../../app/_dream/lib/browserSession';
 import {BackendRuntimeManager} from '../runtime/BackendRuntimeManager';
+import {IdlePresentationBlocked} from '../components/useIdleScreenSaver.native';
 import {clientFetch} from './transport';
 export default function SessionGate({children,beforeRelease}: {beforeRelease?:()=>Promise<void>;children: (logout: () => Promise<void>,refresh:()=>Promise<void>,user:BrowserUser) => ReactNode}) {
   const [session, setSession] = useState<BrowserSession | null>(null);
@@ -39,6 +41,7 @@ export default function SessionGate({children,beforeRelease}: {beforeRelease?:()
   const colors=useInkColors(),foreground=colors['color-text-primary'];
   const background=colors['color-bg-app'],surface=colors['color-bg-paper'],border=colors['color-border-paper'];
   const diagnosticsAccess=(session!==null||loggingIn)&&!diagnostics;
+  useEffect(()=>BackendRuntimeManager.bindThreadPresence(session?.user.id),[session?.user.id]);
   useEffect(()=>{
     NativeModules.InkRuntime?.configureDiagnosticsOverlay?.({enabled:diagnosticsAccess,background,surface,foreground,border});
   },[diagnosticsAccess,background,surface,foreground,border]);
@@ -55,6 +58,7 @@ export default function SessionGate({children,beforeRelease}: {beforeRelease?:()
       if(mounted.current){setLoading(true);setError('');setCheckingSession(false);}
       try {await BackendRuntimeManager.ensureStarted();if(mounted.current)setCheckingSession(true);BackendRuntimeManager.recordSessionRead('reading');const next=await loadBrowserSession(clientFetch);if(mounted.current && !loginPending.current && isBrowserSessionCurrent(next)){
         BackendRuntimeManager.recordSessionRead(next?'available':'signed_out');
+        if(next)BackendRuntimeManager.refreshThreadPresence(next.user.id);
         if(currentSession.current&&currentSession.current.user.id!==next?.user.id)await release.current?.().catch(()=>undefined);
         if(mounted.current&&!loginPending.current&&isBrowserSessionCurrent(next))setSession(next);
       }}
@@ -99,9 +103,9 @@ export default function SessionGate({children,beforeRelease}: {beforeRelease?:()
     {error && !runtimeFailed && !loading && !loggingIn ? <Pressable accessibilityRole="button" onPress={() => void login()}><Text style={{color:foreground}}>重新登录</Text></Pressable> : null}
     <Pressable accessibilityRole="button" onPress={openDiagnostics} style={{padding:12,minHeight:44}}><Text style={{color:foreground}}>开发者控制页</Text></Pressable>
   </View>;
-  return <View style={{flex:1}}>
+  return <IdlePresentationBlocked.Provider value={diagnostics||showStartup||loggingIn}><View style={{flex:1}}>
     <View style={{flex:1}} pointerEvents={diagnostics||showStartup?'none':'auto'} aria-hidden={diagnostics||showStartup} accessibilityElementsHidden={diagnostics||showStartup} importantForAccessibility={diagnostics||showStartup?'no-hide-descendants':'auto'}>{content}</View>
     {showStartup?<View style={{position:'absolute',top:0,bottom:0,left:0,right:0}} pointerEvents={diagnostics?'none':'auto'} aria-hidden={diagnostics} accessibilityElementsHidden={diagnostics} importantForAccessibility={diagnostics?'no-hide-descendants':'auto'}><StartupScreen visible={!diagnostics} checkingSession={checkingSession} onDiagnostics={openDiagnostics}/></View>:null}
     {diagnostics?<View style={{position:'absolute',top:0,bottom:0,left:0,right:0}}><RuntimeDiagnostics onBack={()=>setDiagnostics(false)}/></View>:null}
-  </View>;
+  </View></IdlePresentationBlocked.Provider>;
 }

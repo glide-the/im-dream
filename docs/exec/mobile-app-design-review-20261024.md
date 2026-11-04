@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-02: 原AppleScript任务包归历史快照，现行ios/tasks仅记录XCUITest E2E任务。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-11-01: 追加回顾详情手柄调整、共享吸附/取消恢复和桌面保持，分列触摸技术与设备资格。 -->
@@ -2222,7 +2223,7 @@ Admin修订仅将领取资格判断移到`scopedRun`之前；满足条件后继�
 
 只读文件核对确认：当前App Data容器为095EAF97-0263-4C1C-A66C-3CDD095313AD，冻结manifest中的venv仍位于旧容器051B3767-F540-4CBE-94CF-05D53D8FA34F，解释器文件缺失。原packer会按当前runtime root重建派生venv，随后继续复制旧manifest地址至receipt，原launcher因此拒绝启动。用户文件及原Session保持。
 
-修订限定原`workspace_packer.py`冻结分支：从已验证的原制品profile取得修复后的实际venv路径，验证原runtime路径声明的类型、绝对路径和数量，路径变化时仅更新原manifest的`runtime.venv_dirs`及本次receipt。原插件版本/摘要/顺序、written_at、init步骤、surface及用户文件保持。原launcher继续检查解释器，不增加平台分支、初始化重放、UUID文本替换、协议、依赖或数据库。技术合同见[受管缓存根目录变化](../design/deck/drama-forge-workspace-init-design.md#受管缓存根目录变化)。
+修订限定原`workspace_packer.py`冻结分支：从已验证的原制品profile取得修复后的实际venv路径，验证原runtime路径声明的类型、绝对路径和数量，路径变化时仅更新原manifest的`runtime.venv_dirs`及本次receipt。原插件版本/摘要/顺序、written_at、init步骤、surface及用户文件保持。原launcher继续检查解释器，不增加平台分支、初始化重放、UUID文本替换、协议、依赖或数据库。技术合同见[受管缓存根目录变化](../design/kastention/drama-forge-workspace-init-design.md#受管缓存根目录变化)。
 
 | 实际命令或回执 | 退出码 | 关键结果 |
 | --- | --- | --- |

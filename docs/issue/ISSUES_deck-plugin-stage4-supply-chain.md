@@ -1,10 +1,11 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Deck Plugin Stage 4 Supply-Chain 生产 Gate 增量 Issue 清单
 
 > Issue: SUO-266
 > 父项: SUO-258
 > 设计裁决: SUO-261 (`no_design_delta`)
 > 审批来源: SUO-255
-> 来源设计稿: `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2
+> 来源设计稿: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2
 > 决策状态: `DECK-GATE-DEC-017` = `conditional_frozen`
 > 生成 Agent: IssueDispatcher
 > 生成日期: 2026-08-01
@@ -19,7 +20,7 @@
 
 - Issue 清单文件: `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md`
 - 来源设计稿:
-  - 主设计稿: `docs/design/deck/design_002_deck-plugin-decision-gates.md` (SUO-261)
+  - 主设计稿: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` (SUO-261)
   - 上游主设计: `docs/design/deck-plugin-voice-ink-dream-integration.md`
   - 关联设计稿: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` (SUO-237)
 - 生成 Agent: `IssueDispatcher`
@@ -41,10 +42,10 @@
 
 ## 1. 关联设计稿信息
 
-- 主设计稿: `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2
+- 主设计稿: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2
 - 上游主设计: `docs/design/deck-plugin-voice-ink-dream-integration.md`
 - 关联设计稿: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md`
-- 关联设计稿: `docs/design/deck/deck-integration-delta.md`
+- 关联设计稿: `docs/design/kastention/kastention-integration-delta.md`
 
 - 本清单覆盖范围:
   1. `DECK-GATE-DEC-017` 下具名安全、marketplace/制品平台、runtime owner 的权限范围与签署责任
@@ -115,7 +116,7 @@
 - 前置依赖: 无
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.5
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.5
   - `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` DECK-017
 
 - 分发去向: `@CEOOrchestrator`
@@ -156,7 +157,7 @@
 - 前置依赖: `DECK-SC-001`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1
   - 后端: trust-policy service / signature verifier
 
 - 分发去向: `@TaskDesignAgent`
@@ -195,7 +196,7 @@
 - 前置依赖: `DECK-SC-002`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1, §4.2.3
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1, §4.2.3
   - `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` DECK-002
   - 后端: release service / signature verifier / manifest normalizer
 
@@ -235,7 +236,7 @@
 - 前置依赖: `DECK-SC-003`, `DECK-002`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1, §4.2.3
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1, §4.2.3
   - `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` DECK-002, DECK-008
   - 后端: runtime materialization service / load receipt generator
 
@@ -280,7 +281,7 @@
 - 前置依赖: `DECK-SC-003`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1, §4.2.3
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1, §4.2.3
   - 后端: retention service / reference tracker / lifecycle manager
 
 - 分发去向: `@TaskDesignAgent`
@@ -321,7 +322,7 @@
 - 前置依赖: `DECK-SC-005`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1, §4.2.5
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1, §4.2.5
   - 后端: disaster recovery service / cold storage adapter
 
 - 分发去向: `@TaskDesignAgent`
@@ -368,7 +369,7 @@
 - 前置依赖: `DECK-SC-003`, `DECK-SC-004`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §5.2
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §5.2
   - 后端: security test suite / tamper detection framework
 
 - 分发去向: `@TaskDesignAgent`
@@ -414,7 +415,7 @@
 - 前置依赖: `DECK-SC-006`, `DECK-SC-005`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §5.2
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §5.2
   - 后端: disaster recovery test suite / cleanup test framework
 
 - 分发去向: `@TaskDesignAgent`
@@ -459,7 +460,7 @@
 - 前置依赖: `DECK-SC-003`
 
 - 关联路径:
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.4, §8
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.4, §8
   - `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` DECK-017
   - 全仓库：代码、文档、配置
 

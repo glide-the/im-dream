@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_deck_006_backend_workflow-preflight
 
 ## 1. 任务标题
@@ -13,7 +14,7 @@ Story Workspace Workflow Preflight
 - **标签**: `story-workspace`, `preflight`, `execution`
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §10.1, §10.2
-  - `docs/design/deck/deck-integration-delta.md` §5.1, §7.2
+  - `docs/design/kastention/kastention-integration-delta.md` §5.1, §7.2
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 DECK-006
 
 ## 3. 任务目标

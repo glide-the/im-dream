@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-04: separate the Dream PreToolUse .dream-guard collision from the earlier Runtime env defect and record the narrow actor-bound read-command remediation. -->
 <!-- [Sync] 2026-09-13: record bounded Dream PATH repair, 45 passing tests and two real resumed Notion CLI reads on installed 0.1.9. -->
 
+<!-- [Sync] 2026-11-03: iOS Transport补服务端PATH默认交付，原nativeNtn、owner、mode与shadow拒绝保持；App目标验证单列。 -->
 # Notion CLI Agent Bash 环境修复设计
 
 ## 2026-09-13 config 读取事件（修复与真实只读验收完成）
@@ -332,3 +333,29 @@ workers 配置缺失本身不降低普通 API/doctor 能力，也不单独显示
 | 版本绑定业务资格、四平台资格、npm 发布、registry 安装 | Runtime publication policy 和 Dream exact manifest gate | **已完成**；qualification `33306855166`、publish `33306940462` 成功，五包 registry fresh install 与 Dream 0.1.4 原子版本面通过。 |
 
 因此，本问题的本机实现、真实 Dream 验收、四目标 release qualification、registry 回下载、公网五包发布和 Dream 0.1.4 版本采用均已完成。真实业务回执与 provider-free registry 验收继续保持独立证据语义。
+
+## 2026-11-03 iOS Worker PATH默认值交付
+
+### 背景与问题
+
+APP-07新增截图和同一Simulator公开Chat请求均执行`notion-cli → Bash → ntn api v1/search`，返回exit 4及`No workspace selected`。同一账户的Read hook已实时读取非空正文，资源发现返回26个数据库；actor/thread的auth、config、workspaces文件均存在，默认workspace和auth key匹配。
+
+App内阶段诊断确认原`notionProjection`在`native-executable`处拒绝：home与Thread匹配、home与Node UID均501、mode0700；实际PATH第一项为guest逻辑`/usr/local/bin`，Node文件系统检查ntn返回ENOENT。原服务端PATH第一项为`prepare_notion_runtime`登记的已校验实体目录。
+
+### 目标与边界
+
+保留原SDK、Runtime、ntn、认证、actor/thread、工具描述及审批。`IOSClaudeTransport.connect`原先只复制SDK显式env；普通SDK的父PATH默认值在该平台交接时缺失。修复限定为：显式env缺少PATH且服务端存在PATH时补默认值；显式PATH、显式空值及父凭据隔离保持。原`nativeNtn`的owner、mode、binary、shadow和workspace校验继续执行。
+
+### 概念与规则
+
+- 当前服务端PATH由既有命令准备入口登记，SDK显式PATH具有优先级。
+- Transport只补PATH默认值及既有HOME默认值，其他父环境不新增继承。
+- 原workspace配置保持actor文件与每轮thread投影归属，NOTION_WORKSPACE_ID、全局shell配置和用户资源选择修改为0。
+- 评审采用Transport默认值交付；增加workspace变量、扩大Runtime权限或共享home缺少对应根因依据，排除。
+- 正常时序、拒绝反馈、原Thread重试和停止状态由[现行iOS交互稿](../multi-platform/mobile-ios-interaction.md#ios命令工具与notion正文读取app-07)维护；[执行记录](../../exec/app-experience-claude-notion-20261103.md)保存实际目标回执。
+
+### 验证与交付资格
+
+原生产connect与SDK参数的四项环境合同基线为1 failed、3 passed，失败项为省略PATH时的默认交付。修复后PATH与原Notion Worker共7项通过，原SDK环境及凭据归属另13项通过。测试只使用自有loopback握手，Runtime、模型、账户和Notion API调用均为0。
+
+Simulator候选采用既有原生/Node/Next制品，仅更新与源码SHA-256匹配的单个Python资源并重新加载原模块。完整App包构建和物理iPhone资格分别记录，本任务设备操作为0；并行任务已交付的build30尚缺该PATH分支。临时Runtime诊断制品已恢复原摘要；原Runtime权限逻辑修改为0。修复后原账户CLI实际回执按执行记录更新。

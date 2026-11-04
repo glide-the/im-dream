@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-04: 角色渲染采用共享v4.2组件；保留历史呼吸图，开屏展示计时保持原规则。 -->
 <!-- [Sync] 2026-11-03: 诊断浮动按钮复用启动页同源StartupArtwork深浅色SVG资源；原触摸、拖动、层级与诊断返回流程保持。 -->
 <!-- [Sync] 2026-11-03: 同场景RCTAlertController窗口采用精确层级适配，原确认与系统窗口所有权保持。 -->
 <!-- [Sync] 2026-11-02: 汇入同桥接诊断浮动入口、原生展示生命周期及正常/异常/状态图，原业务与验证暂停状态保持。 -->
@@ -50,9 +51,15 @@ Python已由`EmbeddedDreamBackend`在后台启动。用户需要前端在准备�
 
 两页产品骨架直接位于[独立PRD](../../prd/mobile-app/mobile-startup.md#页面设计)。原登录弹窗由现有`presentLogin`处理，开发者页不改登录提交或关闭次序。
 
+### v4.2一体化角色（现行）
+
+`StartupScreen.native.tsx`与`IdleScreenSaver.native.tsx`共用`StartupArtwork.native.tsx`。开屏传入默认`happy`模式，屏保传入`clock`及当日已知心情；脸型直接承载表盘。iOS通过`InkKastentionClock`绘制原七条路径、十二时位、三针、三条发丝和数字时间，Core Animation执行预设关键帧。可见且前台时仅保留一个整秒Timer；隐藏、后台及卸载释放计时，减少动态效果时直接定位指针并取消形变。具体关键帧与共享结构归[屏保技术设计](mobile-background-execution-technical.md)及用户[v4.2规范](../../prd/Kastention-时钟交互规范-v4.2.md)。
+
+最低1000ms展示仍由`useStartupPresentation`累计；展示时长与角色动效分别持有生命周期。下方旧呼吸参数及相关图示保留为历史记录，其渲染规则由本节替代。诊断按钮和系统加载占位继续使用原同源静态资源；业务页面、导航、认证和底层草稿保持原入口。
+
 ### 2026-11-02 图标与启动插画
 
-本节保留首轮位图实现与三张交互图。现行透明矢量和布局以[透明矢量开屏](#透明矢量开屏现行)为准；第一张AppIcon继续沿本节资源。
+本节保留首轮位图实现与三张历史交互图。现行渲染以[v4.2一体化角色](#v42一体化角色现行)为准；透明布局沿下方矢量章节，第一张AppIcon继续沿本节资源。
 
 `Assets.xcassets/AppIcon.appiconset`使用第一张用户参考图重建的1024×1024 RGB PNG。工程Debug与Release均指定`AppIcon`，Asset Catalog加入应用Resources阶段。第二张1254×1254图片保留原始字节，分别供Asset Catalog和Metro打包；来源及摘要见[实施记录](../../exec/mobile-app-branding-20261102.md)。
 
@@ -126,7 +133,9 @@ stateDiagram-v2
     Removed --> [*]: 原登录或业务或失败反馈
 ```
 
-### 透明矢量开屏（现行）
+### 透明矢量开屏（历史渲染与保留布局）
+
+本节保留原呼吸实现和三幅历史业务图；透明边缘与安全区布局继续采用，角色动效以[v4.2一体化角色](#v42一体化角色现行)为准。
 
 背景与问题：用户要求第二张图转换为透明矢量，并纠正开屏布局。首轮PNG包含米色纸张，图像方框与页面背景分别显示；应用名称、加载指示与开发者操作集中在同一纵向组内。当前选定路径重绘加原主题布局，图形保留轮廓、五官及蓝白帽子。
 
@@ -205,13 +214,13 @@ stateDiagram-v2
 
 目标与边界：原后台启动、会话读取和账户状态继续执行；开屏展示与这些请求并行。`SessionGate`保持原账户子树挂载，以绝对定位的`StartupScreen`覆盖当前内容。覆盖期间关闭底层触控和无障碍入口，展示完成恢复当前实例；业务恢复和APP-04暂停范围保持原状态。
 
-概念与规则：`startupPresentation.ts`定义用户指定的1000ms展示及500ms单方向呼吸。`useStartupPresentation.native.ts`通过`performance.now()`累计前台无遮挡时间，只接收`SessionGate`原AppState观察的回调。初次挂载开始一个周期，实际进入background重置下一次1秒；inactive暂停当前剩余时间，active继续。诊断及loggingIn遮挡期间取消自有timer并保存剩余，解除遮挡后继续；卸载取消timer。系统减少动态效果保留相同展示时长，角色静态显示。
+概念与规则：`startupPresentation.ts`定义用户指定的1000ms展示。原500ms单方向呼吸常量保留历史导出，现行`StartupArtwork`采用v4.2发丝关键帧。`useStartupPresentation.native.ts`通过`performance.now()`累计前台无遮挡时间，只接收`SessionGate`原AppState观察的回调。初次挂载开始一个周期，实际进入background重置下一次1秒；inactive暂停当前剩余时间，active继续。诊断及loggingIn遮挡期间取消自有timer并保存剩余，解除遮挡后继续；卸载取消timer。系统减少动态效果保留相同展示时长，角色取消形变。
 
 `showStartup`满足展示计时在途或原未登录准备在途时为true；最低一秒结束后，原准备仍在途则继续反馈。会话有效时原业务子树可在覆盖下挂载，原请求沿自身条件执行。完成和失败按原结果显示，额外运行库初始化、业务提交或任务重发为零。登录原生窗口内的诊断浮动入口沿原条件可达；业务开屏期间由屏内入口打开原诊断内容。
 
 透明边缘：RN `StartupArtwork`的动画容器及Svg明确设置透明背景、borderWidth=0；原七条路径保持。Storyboard imageView设置opaque=NO。主入口使用同文件内的`StartupReactRootView`，在`super.layoutSubviews()`后将`loadingView.frame`设为`bounds`；loadingView.backgroundColor为clear、isOpaque=false，主背景由宿主所有。当前修订覆盖源码及技术合同，新包首次设备画面单列验收。
 
-#### 每次打开正常时序
+#### 每次打开正常时序（历史呼吸文案，展示计时继续采用）
 
 ```mermaid
 sequenceDiagram
@@ -433,7 +442,7 @@ sequenceDiagram
 
 SessionGate只将原已登录或loggingIn状态及主题投影给configureDiagnosticsOverlay，原账户刷新、beforeRelease、children和注销接口保持。折叠窗口只命中按钮；打开时在原bridge按需挂载InkRuntimeDiagnostics叶子，继续使用RuntimeDiagnostics的原快照、日志、刷新、复制与前后台观察。
 
-浮动入口使用启动页的透明角色图形。`StartupArtwork.native.tsx`读取`src/assets/startup-artwork.json`；现有`sync-startup-artwork.mjs`从同一数据生成iOS `StartupArtwork.imageset`深浅色SVG，系统启动页和诊断按钮共用该资源集。按钮通过原生UIImage加载资源并保留原始蓝白填充及主题线稿色，在原44点按钮内等比完整展示。诊断入口保持静态，启动页呼吸动画继续由原StartupArtwork组件所有。原无障碍名称、可见性、点击、拖动、窗口层级、安全区和业务返回流程保持。
+浮动入口使用启动页的透明角色图形。`StartupArtwork.native.tsx`读取`src/assets/startup-artwork.json`；现有`sync-startup-artwork.mjs`从同一数据生成iOS `StartupArtwork.imageset`深浅色SVG，系统启动页和诊断按钮共用该资源集。按钮通过原生UIImage加载资源并保留原始蓝白填充及主题线稿色，在原44点按钮内等比完整展示。诊断入口保持静态，启动页与屏保的v4.2动效由共享StartupArtwork组件所有。原无障碍名称、可见性、点击、拖动、窗口层级、安全区和业务返回流程保持。
 
 诊断展示期间临时隐藏原窗口的无障碍元素，返回恢复原属性、释放诊断根及其订阅。原窗口保持key身份，业务页面及弹窗保持实例。场景断开、桥接失效、登出、会话丢失和SessionGate卸载释放或撤销该展示层；场景恢复只采用最近展示配置。新增展示不初始化第二个后端，不创建日志服务，不新增认证接口。
 

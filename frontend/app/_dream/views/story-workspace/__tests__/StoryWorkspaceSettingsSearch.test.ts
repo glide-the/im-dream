@@ -1,6 +1,7 @@
 // [Input] Settings navigation labels, section IDs, paths and nested connector aliases.
 // [Output] Deterministic evidence that sidebar search resolves every indexed route, including MCP resources.
 // [Pos] Pure Settings navigation search regression; no browser, API or persisted configuration.
+// [Sync] 2026-11-03: verify renamed Kastention / 卡片结构 searches reach the existing Work route.
 // [Sync] 2026-09-17: cover both Deck Workflow and Claude Code plugin aliases on the shared Plugins route.
 import { expect, test } from '@playwright/test';
 import {
@@ -59,5 +60,11 @@ test('defines searchable keys for every Settings navigation destination', () => 
   expect(Object.keys(STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS).sort()).toEqual(routeKeys);
   for (const [id, searchKeys] of Object.entries(STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS)) {
     expect(filterStoryWorkspaceSettingsNavigation([{ id, searchKeys }], id)).toHaveLength(1);
+  }
+  const destinations = Object.entries(STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS)
+    .map(([id, searchKeys]) => ({ id, searchKeys }));
+  for (const query of ['Kastention', '卡片结构']) {
+    expect(filterStoryWorkspaceSettingsNavigation(destinations, query).map(item => item.id))
+      .toEqual(['settings-work', 'settings-plugins']);
   }
 });

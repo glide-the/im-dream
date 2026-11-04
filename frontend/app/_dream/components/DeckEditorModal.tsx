@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: reuse localized Kastention empty-state copy; retain original Agent and form ownership.
 // [Input] Deck/Voice CRUD, real runtime-version facts, plugin refs, and Chat handoff.
 // [Output] Compact IM maintenance dialog with overview, Agents, plugins, and folded version history.
 // [Pos] Deck maintenance modal in frontend/app/_dream/components.
@@ -295,7 +296,7 @@ export default function DeckEditorModal({
                     )}
                   </div>
                   <div className="deck-agents__items" role="list">
-                    {voices.length === 0 && <p className="deck-empty-copy">No voices in this deck yet</p>}
+                    {voices.length === 0 && <p className="deck-empty-copy">{t('deck.preview.noAgents')}</p>}
                     {voices.map((voice) => {
                       const VoiceIcon = iconMap[voice.icon as keyof typeof iconMap] || iconMap.brain;
                       const accent = COLORS[voice.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';

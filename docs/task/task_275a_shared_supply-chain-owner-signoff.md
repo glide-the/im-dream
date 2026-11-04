@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_275a_shared_supply-chain-owner-signoff
 
 > Task ID: `task_275a`
@@ -19,7 +20,7 @@
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
 | Design 裁决 | [SUO-261](/SUO/issues/SUO-261) — `no_design_delta` |
 | Issue 清单 | `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md` |
-| Canonical design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.5 |
+| Canonical design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.5 |
 | 标签 | `supply-chain`, `ownership`, `governance`, `signature` |
 
 ## 3. 任务目标

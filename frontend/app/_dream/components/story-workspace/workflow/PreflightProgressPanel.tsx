@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] An authoritative WorkflowPreflight snapshot and optional run callback.
 // [Output] The fixed eight-step progress list, stop-on-failure focus, and passed token action.
 // [Pos] Story Workspace workflow preflight progress panel.
@@ -10,12 +11,12 @@ import {
 import { WorkflowErrorCard, type WorkflowRecoveryAction } from './WorkflowErrorCard';
 
 const CHECK_LABELS: Record<WorkflowPreflightCheck, string> = {
-  identity_workspace_permission: '身份、workspace 与 Deck 使用权限',
+  identity_workspace_permission: '身份、workspace 与卡片结构使用权限',
   binding_release: 'Binding revision 与精确 release 可用性',
   manifest_workflow_schema: 'Manifest、workflow definition 与输入输出 schema',
-  host_agent_runtime_compatibility: 'Host、ClaudeAgent、Claude Code 与 Deck runtime 兼容性',
+  host_agent_runtime_compatibility: 'Host、ClaudeAgent、Claude Code 与卡片结构 runtime 兼容性',
   capability_source_policy: '能力交集与来源策略',
-  deck_runtime_snapshot: '创建或复用不可变 Deck runtime snapshot',
+  deck_runtime_snapshot: '创建或复用不可变 Kastention runtime snapshot',
   runtime_materialization: 'Runtime lock 声明、物化、摘要与 load smoke',
   token_issuance: '输入 hash、过期时间与 preflight token',
 };

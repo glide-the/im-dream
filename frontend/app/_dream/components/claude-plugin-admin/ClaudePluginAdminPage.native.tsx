@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Original Work plugin state/API, server permissions and caller-supplied native HTTP.
 // [Output] Native Claude Code Plugins, create actions, Marketplace confirmation/result, operations and uninstall.
 // [Pos] Native Work/Plugins content; Dream workflow administration remains outside the mobile scope.
@@ -47,7 +48,7 @@ function InstallationRow({installation,busy,canManage,onUninstall}:{installation
       {installation.cli_git_commit_sha?<Copy>commit: {installation.cli_git_commit_sha}</Copy>:null}
       <Copy>digest: {installation.artifact_digest}</Copy><Copy>artifact: {installation.artifact_path}</Copy>
       {skills.length?<Copy>skills ({skills.length}): {skills.join(', ')}</Copy>:null}
-      <Copy>decks: {installation.deck_ref_count??0} 个引用</Copy><Copy>installed: {installation.installed_at??'—'}</Copy>
+      <Copy>卡片结构: {installation.deck_ref_count??0} 个引用</Copy><Copy>installed: {installation.installed_at??'—'}</Copy>
     </View>:null}
   </Card>;
 }
@@ -66,7 +67,7 @@ export default function ClaudePluginAdminPage({transport,onSessionExpired,active
       </View>
       {menuOpen?<Card><Button disabled={!p.canManage||p.loading} onPress={()=>open('install')}>安装</Button>
         <Button onPress={()=>open('marketplace')}>从 Marketplace 添加</Button><Button onPress={()=>open('operations')}>最近操作（{p.operations.length}）</Button></Card>:null}
-      <Copy>为 Deck 扩展 Skill、工具和 Agent 能力。在 Deck 创建或维护时选择要使用的插件。下方展示共享安装清单，安装与卸载需要管理权限。</Copy>
+      <Copy>为卡片结构扩展 Skill、工具和 Agent 能力。在卡片结构创建或维护时选择要使用的插件。下方展示共享安装清单，安装与卸载需要管理权限。</Copy>
       {p.error?<Card><Copy error>{p.error}</Copy><Button onPress={()=>void p.refresh()}>重试</Button></Card>:null}
       {p.successMessage?<View accessibilityLiveRegion="polite"><Copy>{p.successMessage}</Copy></View>:null}
       {!p.loading&&!p.error&&!p.canManage?<Copy>当前账户没有共享插件管理权限；已安装列表保持只读。</Copy>:null}
@@ -115,7 +116,7 @@ export default function ClaudePluginAdminPage({transport,onSessionExpired,active
             </>:null}
             {p.marketplaceStep==='result'&&p.marketplaceResult?<>
               <Copy heading>{p.marketplaceResult.status==='ready'?'插件可以使用':'安装未完成'}</Copy>
-              <Copy error={p.marketplaceResult.status==='error'}>{p.marketplaceResult.status==='ready'?`${p.marketplaceResult.requested_package_spec} 已进入共享安装列表，可继续绑定到 Deck。`:`${p.marketplaceResult.error_code??'CLAUDE_PLUGIN_INSTALL_FAILED'}：保留当前选择，可直接重试。`}</Copy>
+              <Copy error={p.marketplaceResult.status==='error'}>{p.marketplaceResult.status==='ready'?`${p.marketplaceResult.requested_package_spec} 已进入共享安装列表，可继续绑定到卡片结构。`:`${p.marketplaceResult.error_code??'CLAUDE_PLUGIN_INSTALL_FAILED'}：保留当前选择，可直接重试。`}</Copy>
               <OperationCard operation={p.marketplaceResult}/><View style={s.row}>
                 {p.marketplaceResult.status==='error'?<Button onPress={()=>p.setMarketplaceStep('confirm')}>返回并重试</Button>:null}<Button primary onPress={close}>{p.marketplaceResult.status==='ready'?'完成':'关闭'}</Button>
               </View>

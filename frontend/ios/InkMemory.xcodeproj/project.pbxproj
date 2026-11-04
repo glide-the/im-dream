@@ -1,10 +1,5 @@
 // !$*UTF8*$!
-// [Input] Locked iOS target resources and explicit Native source/test membership.
-// [Output] App and XCTest targets with shared runtime and account/MCP adapter ownership.
-// [Pos] InkMemory Xcode project definition.
-// [Sync] 2026-11-03: compile the diagnostics-only one-shot native CPU sampler in the original app target.
-// [Sync] 2026-11-02: compile AppIcon and startup artwork assets with the launch storyboard in both app configurations.
-// [Sync] 2026-10-31: include the account system-session adapter and isolated Cookie/callback contracts.
+// [Sync] 2026-11-03: Embed Thread Widget and shared v4.2 clock graphics resource/native adapter.
 {
 	archiveVersion = 1;
 	classes = {
@@ -13,12 +8,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F1000000000000000000000A /* NativeRuntimePerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000A /* NativeRuntimePerformance.swift */; };
-		B21000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000001 /* Assets.xcassets */; };
-		B21000000000000000000002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000002 /* LaunchScreen.storyboard */; };
+		176F0090E81A890E45FE5907 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000001 /* Assets.xcassets */; };
+		30AC81D606ED37F510B3E20E /* ThreadActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A064FB94F92230708E170044 /* ThreadActivityWidget.swift */; };
+		312A6B22AFE9918F8103352A /* ThreadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C7A9579ABE65FC1D2F16EA /* ThreadActivityAttributes.swift */; };
 		31BE985023FDD9EA2448F3D6 /* libPods-InkMemoryTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */; };
+		3BF8B28CCFF99A9F6CBA223F /* ThreadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C7A9579ABE65FC1D2F16EA /* ThreadActivityAttributes.swift */; };
 		3DAC5BECD317E0AEED498712 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */; };
+		5436AB8E2057CDD9683EEC1F /* InkIdleBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4588819595CA297AF7DA5BE1 /* InkIdleBackdrop.swift */; };
+		58F8A18FBA5E0F1DFD317C05 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D45B6415B6C00AB34D6CCC7 /* Foundation.framework */; };
 		5A7C3E95C0D0218C7185E6FD /* libPods-InkMemory.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 56AEFE3EDE3527C52CA910C6 /* libPods-InkMemory.a */; };
+		93DBC17FFB96628FB51EA9EF /* InkKastentionClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD2EFA0F7F54160E9F279C20 /* InkKastentionClock.swift */; };
+		9587399CFE5C0B482130B8CA /* InkClockTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 693AC470565991948DDA3880 /* InkClockTime.swift */; };
 		A10000000000000000000001 /* InkMemoryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* InkMemoryApp.swift */; };
 		A10000000000000000000002 /* MobileBridgeContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* MobileBridgeContract.swift */; };
 		A10000000000000000000003 /* RuntimeCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* RuntimeCapabilities.swift */; };
@@ -26,6 +26,9 @@
 		A10000000000000000000006 /* MobileHostViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* MobileHostViewController.swift */; };
 		A10000000000000000000007 /* MobileBridgeContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* MobileBridgeContractTests.swift */; };
 		A10000000000000000000008 /* WeakScriptMessageHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* WeakScriptMessageHandler.swift */; };
+		B21000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000001 /* Assets.xcassets */; };
+		B21000000000000000000002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B22000000000000000000002 /* LaunchScreen.storyboard */; };
+		B730F3BB014213343E95C8D7 /* InkThreadActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 24805168E7F6A341F6213C35 /* InkThreadActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C10000000000000000000001 /* DreamPython.m in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* DreamPython.m */; };
 		C10000000000000000000002 /* EmbeddedDreamBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* EmbeddedDreamBackend.swift */; };
 		C10000000000000000000003 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Python.xcframework */; };
@@ -37,8 +40,10 @@
 		D10000000000000000000002 /* NodeMobile.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* NodeMobile.xcframework */; };
 		D10000000000000000000003 /* NodeMobile.xcframework in Embed Python Framework */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* NodeMobile.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D10000000000000000000004 /* ios_runtime_qualification.py in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* ios_runtime_qualification.py */; };
+		D828B628E8F7A591D8B782A8 /* NativeThreadPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4FE8266F8B81BB9230B06F /* NativeThreadPresence.swift */; };
 		E10000000000000000000001 /* DreamGuestProcess.c in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* DreamGuestProcess.c */; settings = {COMPILER_FLAGS = "-DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -DINK_REALFS_ONLY=1 -DLOG_HANDLER_DPRINTF=1 -fblocks"; }; };
 		E10000000000000000000002 /* DreamNodeProcess.cc in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* DreamNodeProcess.cc */; };
+		EE4887441799ABC52700CBAB /* kastention-clock-v4.2.json in Resources */ = {isa = PBXBuildFile; fileRef = E379F2A44A912CB9376EA463 /* kastention-clock-v4.2.json */; };
 		F10000000000000000000001 /* InkReactNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* InkReactNative.swift */; };
 		F10000000000000000000002 /* InkReactNativeBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* InkReactNativeBridge.m */; };
 		F10000000000000000000003 /* InkRuntimeModule.m in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* InkRuntimeModule.m */; };
@@ -48,6 +53,7 @@
 		F10000000000000000000007 /* NativeWorkspaceFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* NativeWorkspaceFileTests.swift */; };
 		F10000000000000000000008 /* InkAccountLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000008 /* InkAccountLogin.swift */; };
 		F10000000000000000000009 /* NativeAccountLoginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* NativeAccountLoginTests.swift */; };
+		F1000000000000000000000A /* NativeRuntimePerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000A /* NativeRuntimePerformance.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,9 +64,27 @@
 			remoteGlobalIDString = A50000000000000000000001;
 			remoteInfo = InkMemory;
 		};
+		CFB61B8DA65CCBF1A9EE3A28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A40000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0E45C7DAC3E00440D7D4C82E;
+			remoteInfo = InkThreadActivity;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		B2F256847FA17EA0D6DD88A9 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B730F3BB014213343E95C8D7 /* InkThreadActivity.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C90000000000000000000002 /* Embed Python Framework */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -76,14 +100,17 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		F2000000000000000000000A /* NativeRuntimePerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRuntimePerformance.swift; sourceTree = "<group>"; };
-		B22000000000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B22000000000000000000002 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		24805168E7F6A341F6213C35 /* InkThreadActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InkThreadActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2975F1E175F0679757AB00A9 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ../PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		4588819595CA297AF7DA5BE1 /* InkIdleBackdrop.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InkIdleBackdrop.swift; sourceTree = "<group>"; };
 		5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-InkMemoryTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		56AEFE3EDE3527C52CA910C6 /* libPods-InkMemory.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-InkMemory.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		586161365EB29DA385141265 /* Pods-InkMemory.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-InkMemory.debug.xcconfig"; path = "Target Support Files/Pods-InkMemory/Pods-InkMemory.debug.xcconfig"; sourceTree = "<group>"; };
+		693AC470565991948DDA3880 /* InkClockTime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InkClockTime.swift; path = InkMemory/InkClockTime.swift; sourceTree = "<group>"; };
+		7D45B6415B6C00AB34D6CCC7 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		8D5313C7B56C794341BF7FC3 /* Pods-InkMemory-InkMemoryTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-InkMemory-InkMemoryTests.release.xcconfig"; path = "Target Support Files/Pods-InkMemory-InkMemoryTests/Pods-InkMemory-InkMemoryTests.release.xcconfig"; sourceTree = "<group>"; };
+		A064FB94F92230708E170044 /* ThreadActivityWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThreadActivityWidget.swift; sourceTree = "<group>"; };
 		A20000000000000000000001 /* InkMemoryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkMemoryApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* MobileBridgeContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileBridgeContract.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* RuntimeCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCapabilities.swift; sourceTree = "<group>"; };
@@ -94,7 +121,11 @@
 		A20000000000000000000009 /* InkMemory.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InkMemory.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000000000000000000000A /* InkMemoryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InkMemoryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000000000000000000000B /* WeakScriptMessageHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeakScriptMessageHandler.swift; sourceTree = "<group>"; };
+		A2C7A9579ABE65FC1D2F16EA /* ThreadActivityAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThreadActivityAttributes.swift; sourceTree = "<group>"; };
 		B1733BAE1BC6FA4CACC6AC79 /* Pods-InkMemoryTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-InkMemoryTests.release.xcconfig"; path = "Target Support Files/Pods-InkMemoryTests/Pods-InkMemoryTests.release.xcconfig"; sourceTree = "<group>"; };
+		B22000000000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B22000000000000000000002 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		BD2EFA0F7F54160E9F279C20 /* InkKastentionClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InkKastentionClock.swift; path = InkMemory/InkKastentionClock.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* DreamPython.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DreamPython.m; sourceTree = "<group>"; };
 		C20000000000000000000002 /* EmbeddedDreamBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedDreamBackend.swift; sourceTree = "<group>"; };
 		C20000000000000000000003 /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Python/Python.xcframework; sourceTree = "<group>"; };
@@ -108,6 +139,8 @@
 		D20000000000000000000003 /* ios_runtime_qualification.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = ../../backend/tests/ios_runtime_qualification.py; sourceTree = SOURCE_ROOT; };
 		E20000000000000000000001 /* DreamGuestProcess.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = DreamGuestProcess.c; sourceTree = "<group>"; };
 		E20000000000000000000002 /* DreamNodeProcess.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = DreamNodeProcess.cc; sourceTree = "<group>"; };
+		E379F2A44A912CB9376EA463 /* kastention-clock-v4.2.json */ = {isa = PBXFileReference; includeInIndex = 1; name = "kastention-clock-v4.2.json"; path = "../src/assets/kastention-clock-v4.2.json"; sourceTree = "<group>"; };
+		EA4FE8266F8B81BB9230B06F /* NativeThreadPresence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeThreadPresence.swift; sourceTree = "<group>"; };
 		F20000000000000000000001 /* InkReactNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkReactNative.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* InkReactNativeBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = InkReactNativeBridge.m; sourceTree = "<group>"; };
 		F20000000000000000000003 /* InkRuntimeModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = InkRuntimeModule.m; sourceTree = "<group>"; };
@@ -117,10 +150,19 @@
 		F20000000000000000000007 /* NativeWorkspaceFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorkspaceFileTests.swift; sourceTree = "<group>"; };
 		F20000000000000000000008 /* InkAccountLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkAccountLogin.swift; sourceTree = "<group>"; };
 		F20000000000000000000009 /* NativeAccountLoginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAccountLoginTests.swift; sourceTree = "<group>"; };
+		F2000000000000000000000A /* NativeRuntimePerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRuntimePerformance.swift; sourceTree = "<group>"; };
 		FD961F623BA9B7A49A8DF68E /* Pods-InkMemory.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-InkMemory.release.xcconfig"; path = "Target Support Files/Pods-InkMemory/Pods-InkMemory.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		214EF258AED37AB0BBCADB9D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				58F8A18FBA5E0F1DFD317C05 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A60000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -147,6 +189,7 @@
 			children = (
 				56AEFE3EDE3527C52CA910C6 /* libPods-InkMemory.a */,
 				5008C141E56047EA7C9A2FC1 /* libPods-InkMemoryTests.a */,
+				D914ADAEA8F14B3F4636F5BD /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -161,6 +204,10 @@
 				D20000000000000000000002 /* NodeMobile.xcframework */,
 				EFD11CEC287E9EDF67DA5011 /* Pods */,
 				1355C841F5CF4E9FF6B36092 /* Frameworks */,
+				C92814F42403BC0C1D9560AF /* InkThreadActivity */,
+				BD2EFA0F7F54160E9F279C20 /* InkKastentionClock.swift */,
+				693AC470565991948DDA3880 /* InkClockTime.swift */,
+				E379F2A44A912CB9376EA463 /* kastention-clock-v4.2.json */,
 			);
 			sourceTree = "<group>";
 		};
@@ -190,6 +237,8 @@
 				C20000000000000000000002 /* EmbeddedDreamBackend.swift */,
 				C20000000000000000000005 /* LocalDevelopmentRelay.swift */,
 				3F3F5C3585E09D4D0AE529F4 /* PrivacyInfo.xcprivacy */,
+				EA4FE8266F8B81BB9230B06F /* NativeThreadPresence.swift */,
+				4588819595CA297AF7DA5BE1 /* InkIdleBackdrop.swift */,
 			);
 			path = InkMemory;
 			sourceTree = "<group>";
@@ -212,8 +261,28 @@
 			children = (
 				A20000000000000000000009 /* InkMemory.app */,
 				A2000000000000000000000A /* InkMemoryTests.xctest */,
+				24805168E7F6A341F6213C35 /* InkThreadActivity.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C92814F42403BC0C1D9560AF /* InkThreadActivity */ = {
+			isa = PBXGroup;
+			children = (
+				A2C7A9579ABE65FC1D2F16EA /* ThreadActivityAttributes.swift */,
+				A064FB94F92230708E170044 /* ThreadActivityWidget.swift */,
+				2975F1E175F0679757AB00A9 /* Info.plist */,
+			);
+			name = InkThreadActivity;
+			path = InkThreadActivity;
+			sourceTree = "<group>";
+		};
+		D914ADAEA8F14B3F4636F5BD /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7D45B6415B6C00AB34D6CCC7 /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 		EFD11CEC287E9EDF67DA5011 /* Pods */ = {
@@ -233,6 +302,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		0E45C7DAC3E00440D7D4C82E /* InkThreadActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5ECC7C5B1727BAA0ACD3AA98 /* Build configuration list for PBXNativeTarget "InkThreadActivity" */;
+			buildPhases = (
+				EEAE01C93FF057C71186BAC9 /* Sources */,
+				214EF258AED37AB0BBCADB9D /* Frameworks */,
+				17D4715170FA093594354648 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = InkThreadActivity;
+			productName = InkThreadActivity;
+			productReference = 24805168E7F6A341F6213C35 /* InkThreadActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A50000000000000000000001 /* InkMemory */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "InkMemory" */;
@@ -246,10 +332,12 @@
 				C90000000000000000000002 /* Embed Python Framework */,
 				F26E24D61C1588E319DC9AFC /* [CP] Embed Pods Frameworks */,
 				BA0D1F1F4A8CCB4599E7CD96 /* [CP] Copy Pods Resources */,
+				B2F256847FA17EA0D6DD88A9 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BEDFE83E0E8DCCA25E32F872 /* PBXTargetDependency */,
 			);
 			name = InkMemory;
 			productName = InkMemory;
@@ -309,11 +397,20 @@
 			targets = (
 				A50000000000000000000001 /* InkMemory */,
 				A50000000000000000000002 /* InkMemoryTests */,
+				0E45C7DAC3E00440D7D4C82E /* InkThreadActivity */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		17D4715170FA093594354648 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				176F0090E81A890E45FE5907 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A90000000000000000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -321,6 +418,7 @@
 				B21000000000000000000001 /* Assets.xcassets in Resources */,
 				B21000000000000000000002 /* LaunchScreen.storyboard in Resources */,
 				3DAC5BECD317E0AEED498712 /* PrivacyInfo.xcprivacy in Resources */,
+				EE4887441799ABC52700CBAB /* kastention-clock-v4.2.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -469,6 +567,11 @@
 				E10000000000000000000002 /* DreamNodeProcess.cc in Sources */,
 				C10000000000000000000002 /* EmbeddedDreamBackend.swift in Sources */,
 				C10000000000000000000006 /* LocalDevelopmentRelay.swift in Sources */,
+				D828B628E8F7A591D8B782A8 /* NativeThreadPresence.swift in Sources */,
+				5436AB8E2057CDD9683EEC1F /* InkIdleBackdrop.swift in Sources */,
+				3BF8B28CCFF99A9F6CBA223F /* ThreadActivityAttributes.swift in Sources */,
+				93DBC17FFB96628FB51EA9EF /* InkKastentionClock.swift in Sources */,
+				9587399CFE5C0B482130B8CA /* InkClockTime.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -485,6 +588,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EEAE01C93FF057C71186BAC9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				312A6B22AFE9918F8103352A /* ThreadActivityAttributes.swift in Sources */,
+				30AC81D606ED37F510B3E20E /* ThreadActivityWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -493,9 +605,70 @@
 			target = A50000000000000000000001 /* InkMemory */;
 			targetProxy = A30000000000000000000001 /* PBXContainerItemProxy */;
 		};
+		BEDFE83E0E8DCCA25E32F872 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = InkThreadActivity;
+			target = 0E45C7DAC3E00440D7D4C82E /* InkThreadActivity */;
+			targetProxy = CFB61B8DA65CCBF1A9EE3A28 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		3579F4EE25F670F5013A2004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 45KY254AF7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = InkThreadActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkmemory.mobile.threadActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		6DE72176F0987131403C500F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 45KY254AF7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = InkThreadActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkmemory.mobile.threadActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		B10000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -663,6 +836,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5ECC7C5B1727BAA0ACD3AA98 /* Build configuration list for PBXNativeTarget "InkThreadActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3579F4EE25F670F5013A2004 /* Release */,
+				6DE72176F0987131403C500F /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A80000000000000000000001 /* Build configuration list for PBXProject "InkMemory" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Task: Deck 创建/编辑的插件选择与版本绑定（Shared）
 
 > **Task ID**: `task_210_shared_deck_plugin_binding`
@@ -26,7 +27,7 @@ DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared 合同索引
 | Design Issue | `SUO-218` | Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计 |
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
 | 上游 design | `docs/design/deck-plugin-voice-ink-dream-integration.md` | 主设计稿 |
-| 上游 delta | `docs/design/deck/deck-integration-delta.md` | Deck integration 唯一当前 canonical |
+| 上游 delta | `docs/design/kastention/kastention-integration-delta.md` | Deck integration 唯一当前 canonical |
 
 ---
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。
 """Pack vendor/drama-forge into a distributable Claude Code plugin + local marketplace.
 
-Implements docs/design/deck/drama-forge-workspace-init-design.md §3:
+Implements docs/design/kastention/drama-forge-workspace-init-design.md §3:
 
 - whitelist copy (drops .venv/tests/evals/logs/dev artifacts, skill-gen,
   .claude/settings.json, statusline.sh),

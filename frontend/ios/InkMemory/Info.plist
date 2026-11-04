@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- [Sync] 2026-11-03: Enable ActivityKit display; original application identity, permissions and callback configuration remain. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- [Sync] 2026-11-02: rename display text to Kastention; bundle and callback identities remain. -->
 <!-- [Input] iOS bundle identity and supported interface orientations. -->
@@ -54,6 +55,8 @@
   </array>
   <key>RCTNewArchEnabled</key>
   <false/>
+  <key>NSSupportsLiveActivities</key>
+  <true/>
   <key>UIViewControllerBasedStatusBarAppearance</key>
   <false/>
   <key>InkDreamDevelopmentHost</key>

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-29: reuse original plugin state through useClaudePluginAdmin; DOM/CSS, keyboard focus and menu behavior remain.
 // [Input] claudePluginAdminApi typed client, Settings / Work container, and Deck create-menu interaction pattern.
 // [Output] Settings-owned Claude Code plugin admin with one accessible create menu, global Marketplace
@@ -133,7 +134,7 @@ function InstallationRow({
           {skills.length ? (
             <div><FieldLabel>skills ({skills.length})</FieldLabel> {skills.join(', ')}</div>
           ) : null}
-          <div><FieldLabel>decks</FieldLabel> {installation.deck_ref_count ?? 0} 个引用</div>
+          <div><FieldLabel>卡片结构</FieldLabel> {installation.deck_ref_count ?? 0} 个引用</div>
           <div><FieldLabel>installed</FieldLabel> {installation.installed_at ?? '—'}</div>
         </div>
       ) : null}
@@ -430,7 +431,7 @@ export default function ClaudePluginAdminPage() {
       <header className="claude-plugin-admin__header">
         <h2 id="claude-plugin-admin-title">Claude Code Plugins</h2>
         <p>
-          为 Deck 扩展 Skill、工具和 Agent 能力。在 Deck 创建或维护时选择要使用的插件。
+          为卡片结构扩展 Skill、工具和 Agent 能力。在卡片结构创建或维护时选择要使用的插件。
           下方展示共享安装清单，安装与卸载需要管理权限。
         </p>
       </header>
@@ -630,7 +631,7 @@ export default function ClaudePluginAdminPage() {
                 <h4>{marketplaceResult.status === 'ready' ? '插件可以使用' : '安装未完成'}</h4>
                 <p>
                   {marketplaceResult.status === 'ready'
-                    ? `${marketplaceResult.requested_package_spec} 已进入共享安装列表，可继续绑定到 Deck。`
+                    ? `${marketplaceResult.requested_package_spec} 已进入共享安装列表，可继续绑定到卡片结构。`
                     : `${marketplaceResult.error_code ?? 'CLAUDE_PLUGIN_INSTALL_FAILED'}：保留当前选择，可直接重试。`}
                 </p>
                 <OperationCard operation={marketplaceResult} />

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: reuse localized Kastention empty-state copy; retain original Agent and form ownership.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Sync] 2026-10-29: retain editor-owned field drafts across section/Agent changes; explicit close releases local drafts.
 // [Input] Original Deck/Voice DTOs, mutation callbacks, content-version hook and native HTTP.
@@ -83,7 +84,7 @@ export default function DeckEditorModal({deck,isSystem,creatingVoiceId,selectedV
             {label('Agent 类型')}{label(t('deck.labels.agentType.chat'),true)}
           </>:section==='agents'?<>
             <View style={styles.wrap}>{label(`${voices.length} 个配置`)}{!isSystem?button(creatingVoiceId===deck.id?'Adding…':'+ Add',()=>mutate(()=>onAddVoice(deck.id)),disabled||creatingVoiceId===deck.id):null}</View>
-            {!voices.length?label('No voices in this deck yet'):voices.map(voice=><View key={voice.id} style={[styles.voiceRow,{borderColor:colors['color-border-paper']}]}>
+            {!voices.length?label(t('deck.preview.noAgents')):voices.map(voice=><View key={voice.id} style={[styles.voiceRow,{borderColor:colors['color-border-paper']}]}>
               <Pressable accessibilityRole="button" accessibilityLabel={voice.name} accessibilityState={{selected:voice.id===selectedVoice?.id}} onPress={()=>onSelectVoice(voice.id)} style={[styles.voiceIdentity,{backgroundColor:voice.id===selectedVoice?.id?colors['color-bg-hover']:'transparent'}]}>
                 <DeckAgentIcon name={voice.icon} color={deckAgentColor(voice.color,colors)}/>{label(voice.name)}
               </Pressable><Switch accessibilityLabel={`Toggle ${voice.name}`} value={voice.enabled} disabled={disabled} onValueChange={()=>mutate(()=>onToggleVoice(voice.id,voice.enabled))}/>

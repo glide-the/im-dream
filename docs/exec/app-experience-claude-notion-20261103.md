@@ -1,13 +1,13 @@
 <!-- [Input] Notion原反馈、IMG_9153/9154、当前iOS资源打包和Notion Read调用链。 -->
 <!-- [Output] APP-07根因、最小方案评审、源码范围、分项验证回执与剩余依赖。 -->
 <!-- [Pos] App体验APP-07执行记录；真实账户、Simulator、物理设备及发布分别记录。 -->
-<!-- [Sync] 2026-11-03: 技术回归及App内真实模型Bash/Grep执行完成；Notion原账户授权和正常账单关联待完成，物理构建29保持。 -->
+<!-- [Sync] 2026-11-03: 原账户Read正文、Bash CLI搜索及Stop已验证；Transport补PATH默认值，20项目标回归通过，完整新包与手机资格单列。 -->
 
 # APP-07：iOS Claude工具与Notion正文读取
 
 ## 目标与授权边界
 
-修复现有端侧Claude工具执行与已选Notion资源的正文读取，保留原React Native、嵌入式Python、Node Worker、Linux ARM64解释执行、HTTP接口、认证、权限及Thread关系。使用当前`ios-store@97f35b6d`与用户现有工作树；本轮自有修改按下表归属，其他任务改动保留。物理iPhone构建29供用户手动测试，设备安装和操作为0。APP-04保持用户暂停，前后台恢复实施和行为验收为0。
+修复现有端侧Claude工具执行与已选Notion资源的正文读取，保留原React Native、嵌入式Python、Node Worker、Linux ARM64解释执行、HTTP接口、认证、权限及Thread关系。任务启动基线为`ios-store@97f35b6d`，使用用户现有工作树；本轮自有修改按下表归属，其他任务改动保留。任务启动时物理iPhone构建29供用户手动测试，本任务设备安装和操作为0。APP-04保持用户暂停，前后台恢复实施和行为验收为0。
 
 任务：[本对话](codex://threads/01a1a03a-0eba-7370-bef2-575887c4f68d)。[总清单](app-experience-fixes-20261102.md)登记为APP-07。[反馈原文与原图](https://app.notion.com/p/40b30b7547c380f7ac22f85fdd2dbdd0#40d30b7547c38097801ace9d88004b25)保留。截图下载至本轮私有证据目录，权限0600；本记录只描述技术错误，私人正文、凭据和完整环境内容输出为0。
 
@@ -41,6 +41,7 @@
 | `frontend/ios/scripts/prepare-node.py` | 从固定制品提取rg和声明文件；精确匹配一处原选择器，给iOS选择host绑定的已校验路径；保留其他平台选择。 |
 | `frontend/ios/scripts/bundle-node.py` | 核对锁、资源摘要和单处适配回执后打包，记录制品来源。 |
 | `frontend/ios/runtime/host.cjs`、`worker.mjs` | 暂存rg并修复执行位，向Worker提供host拥有的路径；Notion命令接受规范化直属thread home。 |
+| `backend/mobile_runtime/ios_claude_transport.py`、`backend/tests/test_ios_claude_transport_environment.py` | 仅在SDK省略PATH时交付服务端默认路径，保留显式PATH及父secret隔离；以原connect、SDK编码和自有socket验证四项边界。 |
 | `frontend/ios/scripts/check-notion-session-paths.mjs`、`check-notion-staging-paths.mjs` | 生产校验语句的路径、env与资源损坏回归；自有fixture，无账户和命令执行。 |
 | `backend/tests/ios_runtime_qualification.py`、`EmbeddedDreamBackendTests.swift` | 原SDK/Runtime实际Grep/Glob、原Bash/Stop/resume/权限拒绝，以及原ntn在actor/thread home中的目标执行。 |
 
@@ -60,7 +61,7 @@
 | --- | --- | --- |
 | 独立技术回归 | Notion权限、错误、取消、home归属及资源摘要 | 44项及33个subtest通过；路径11、暂存7、DNS6通过 |
 | Simulator App内技术 | 原SDK/Runtime Grep/Glob/Bash、Stop/权限/历史恢复，ntn两类home | 实际3项通过；测试/摘要均退出0，6项安装资源与源码匹配 |
-| Simulator真实业务 | 现有账户、正常Thread、原模型→Bash/Grep→失败恢复与持久化；已选Notion正文 | 原App内真实模型已成功调用Bash/Grep，正常会话保存4轮；Notion本机凭证数量0，原登录页等待用户授权；正常用量未关联到本轮，完整验收保留 |
+| Simulator原账户功能旅程 | 原模型→Bash/Grep、原Skill/Read正文、notion-cli Bash搜索→失败恢复/Stop/历史 | 原账户已授权；Read实时正文及CLI搜索均成功，原失败和正常历史保留；原Stop运行中取消通过。正常业务库与Gateway记录已关联，停止请求结算状态独立记录。最后PATH修复采用单Python资源候选验证，完整新App包、手机及发布分别保留资格 |
 | 物理iPhone | 构建29保留供用户测试 | 本轮未执行 |
 | 商店发布 | TestFlight/App Store | 本轮未执行 |
 
@@ -116,7 +117,7 @@ App PID91757中，原`ClaudeAgentRunner`合成provider请求4次，原Runtime协
 
 目录观察驱动首版使用`.models`字段，产生无效`callable=false`结论；按原`gatewayModelsApi.ts`的`.data`字段修正，取得HTTP200、`callable=true`。两版驱动回执保留，验收使用修正版。
 
-### 正常账单关联与剩余依赖
+### 初始账单观察与授权等待（历史记录）
 
 App内只读审计确认Gateway启用，最终SDK强制配置由`apply_gateway_sdk_env_to_options`在用户覆盖后应用，Gateway origin为现有`https://ink-admin.suoxya.com`。正常用量入口使用现有Admin Product origin `http://127.0.0.1:3000`。本轮未调整这两个地址或其他环境值。审计仅输出启用状态、scheme、host和port，凭据输出0。
 
@@ -136,3 +137,55 @@ Notion原授权页面等待用户完成登录，模拟器本机凭证数量仍�
 授权页明确声明继续操作包含同意Notion开发者条款，已向用户提交当前页面确认请求。等待用户点击授权后，返回App原页面完成轮询，再验证已选页面正文。原资源选择、同步策略、权限及物理设备保持。
 
 重新连接期间存在另一任务的独立Simulator窗口置前；通过Simulator原Window菜单返回本轮iPhone 16 Plus。原App PID95610与原数据、安装容器均保留，未重启设备或App。App内只读协程诊断退出0，采样退出0；未据短暂UI观察将原请求判定为后端失败，最终原页面已取得pending。
+
+### 授权后原账户验证与新增Bash CLI反馈
+
+用户完成当前授权确认后，原连接GET200且`auth_status=authenticated`。原5个数据库选择、接受快照`snap-20261101T051641Z-4be83e39`保留；正常turn将234页轻索引及私有凭证投影到同一Thread。资源发现GET200，返回26个数据库，选择写入0。
+
+Notion真实验证分三轮保留：首轮“两次Read”限制与原Skill前置步骤冲突，正文调用0；次轮Read收到模型传入的空`pages`，原schema返回`Invalid pages parameter: ""`；第三轮按原反馈恢复，Skill→Read(snapshot/connector/index)→Read(一个已选页面)，原调用采用合法`pages="1"`，四次Read均`isError=false`。实时正文payload的`ok=true`、Markdown非空且长度224；最终`APP07_NOTION_OK`。正常历史重开已实际展示该标记及前轮参数失败。正文内容和标题未写入本记录，私有SSE权限0600。
+
+实际停止验证沿同一Thread公开chat入口，显式原模型且`max_turns=1`，请求仅生成合成文本。生产SSE parser观察到text-delta后，通过原Stop接口取消；前置status为running，Stop HTTP200且stop_requested=true，后置status为idle/running=false。流正常结束，`finishReason=stop,cancelled=true`，transportError=0。该证据覆盖运行中Agent停止，页面发送按钮交互和物理设备分别保留资格。
+
+Admin只读核对已确认实际ECS主机、active服务、`ink-admin`用户及现用release。只读事务按本轮Thread及其模型response/idempotency identity关联到正常`ink-memory`业务库：8条user、8条assistant历史，包含两个验证标记和7份可用process；21条Gateway记录中20条settled，1条停止请求为CLIENT_CANCELLED、settlement_failed、HTTP502，原失败保留。正常用量列表先前缺少关联的观察保留，当前正常库记录已取得。未调整Admin服务、配置、账号或数据。
+
+用户新增截图明确展示`notion-cli` Skill的Bash `ntn api v1/search --data '<query/page_size JSON>'`，退出4、`No workspace selected`。本轮在同一Simulator App、同一原账户与Thread，以合成关键词执行原Skill→原Bash→相同API路径，亦退出4；仅改变搜索关键词与分页用于限制私人结果，资源和权限保持。Read hook及资源发现的成功回执与该Bash失败分别记录，Bash CLI修复仍进行中。
+
+actor home与thread home的auth/config/workspaces文件均存在且0600，目录700；config默认workspace与auth key匹配。原Runtime的`notionBashEnvironment`先清除子进程Notion变量，再执行`notionProjection`的cwd、home、owner、mode和原生ntn路径检查；下一项工作为定位其实际拒绝阶段。当前采用本轮命名的Simulator临时诊断制品，仅输出阶段、存在状态、UID及mode，原权限判断保留；源码和手机资源保持，诊断结束须恢复原资源并核对摘要。
+
+### Bash CLI根因、修复与目标回执
+
+临时诊断只记录原检查阶段及属性，实际得到`reason=native-executable`、Node UID501、home UID501/mode0700及正确Thread绑定。Bash投影检查收到的首项PATH为guest逻辑`/usr/local/bin`，Node文件系统无法定位ntn。服务端PATH首项为已校验的guest实体ntn目录。`IOSClaudeTransport.connect`只复制`options.env`，原SDK在PATH无需修正时省略显式值，父进程默认PATH在此缺失；原Runtime清除Notion绑定后，guest CLI返回未选工作区。
+
+最小修复为Transport在显式env缺少PATH且服务端存在PATH时补当前默认值。显式PATH与显式空值保留，其他父凭据不继承。原Runtime的workspace、owner、mode、ntn binary及shadow检查保持。workspace文件、NOTION_WORKSPACE_ID、授权、资源选择、Tool描述及审批修改为0。
+
+| 命令或目标 | 回执 | 资格 |
+| --- | --- | --- |
+| `cd backend && .venv/bin/python -m pytest tests/test_ios_claude_transport_environment.py -q` | 基线exit1，1 failed/3 passed；失败项缺少PATH | 无provider、账户或业务数据的传输合同 |
+| `cd backend && .venv/bin/python -m pytest tests/test_ios_claude_transport_environment.py tests/test_ios_notion_runtime.py -q` | exit0，7 passed | 修复默认/显式/空/缺失PATH，父secret隔离及原Notion Worker合同 |
+| `cd backend && .venv/bin/python -m pytest tests/test_sdk_env.py::TestNotionCliRuntimeEnv tests/test_notion_credentials.py -q` | exit0，13 passed | 原凭据/环境归属 |
+| 原账户CLI基线，消息`B43463A5-D870-48C9-948B-F9E6FDFE47BF` | HTTP200保存，原Bash工具isError=true、exit4、No workspace selected | 原App内实际复现 |
+| 修复后同链路，消息`65B4E981-FAC7-441C-9FE7-5673C372DF9C` | HTTP200，原Skill→原Bash执行一次`ntn api v1/search`；isError=false，返回合法list，最终APP07_NOTION_CLI_OK | 原账户、原模型max_turns=3、原Thread，资源写入0 |
+
+CLI实际验证使用合成关键词与page_size=1，保留搜索响应为私有证据，仅导出类型、数量和成功状态。原Read正文的224字内容未公开。正常history接口采用最近20条投影，后续回执的userMessages=10表示该页数量；完整历史数量由正常Admin记录核对。
+
+模块更新前确认Simulator所装原文件与修复前源码完全一致；新模块SHA-256为`24c2c5bc0252905bd5b2b2df2198d59036d0aea4a9c3f0c982d8ff887d1c7f38`。保留旧文件后原子更新同一Python资源，并通过原模块reload使后续Transport使用当前定义。App PID95610、原Factory/Runner、Native/Node/Next、锁定依赖及认证均保留。载入后源码摘要匹配且PATH默认分支已加载；未重启App或访问手机。原完整打包入口仍复制该backend模块。
+
+本轮资源更新预算为约12KiB文件及现有目标的一次Chat提交（max_turns=3）；Mac物理16GiB、memory_pressure报告33%可用、磁盘4.4GiB，本任务重型构建0。本轮最后修复的完整App包构建和安装数量0；现有Xcode3/3为前述资源/Read目录修复的技术资格，最后PATH改动由20项定向回归及当前App实际CLI证明，未扩大该旧Xcode结论。
+
+原Runtime临时诊断模块已按原SHA恢复，诊断文件导出至私有证据后删除；证据`notion-projection-probe-resource.json`记录restored=true。源码仅增加Transport默认PATH交付，诊断逻辑未进入源码候选。当前PRD、iOS正常/异常/状态图和Notion技术设计已同步。
+
+### 最终业务关联与交付核对
+
+正常Admin的最终只读事务按本轮Thread及请求identity取得11条user、11条assistant历史、10份可用process和29条Gateway记录。28条请求为settled；其85条Token流水中的已结算请求全部满足`reserve = capture + release`及`capture = allowance_charged_tokens`。停止请求`req_c6204e72d559400ea5bd3b96644709c3`仍为`CLIENT_CANCELLED / settlement_failed / HTTP502`，保留原reserve及失败记录；结算修复未进入本项范围。证据为`evidence/gateway-final-ecs.json`，Admin生产变更为0，后台页面独立登录资格保留。
+
+同一Simulator的正常历史入口重开本轮Thread，原失败记录、`APP07_NOTION_OK`及`APP07_NOTION_CLI_OK`均在原页面的可访问文本中；滚动至末尾后，截图实际显示最终`APP07_NOTION_CLI_OK`。新模型调用为0，历史删除或改写为0。元数据回执为`evidence/final-history-ui.json`。
+
+最终资源核对退出0：已测host、worker、rg、manifest、COPYING与选择器共6项保持原摘要，临时诊断JS恢复原摘要，Transport资源与当前源码摘要匹配，合计8项通过。当前工作树HEAD观察为`a61268cc`，其他任务提交及未提交修改保留；本轮候选以列出的文件摘要和回执定位。
+
+原反馈APP-07行与已修复页对应段落已精确同步，包含新增PATH根因、20项目标回归、实际CLI搜索、11轮正常历史、29条Gateway、85条Token流水和单列停止结算异常。末段更新首次返回`no_match`，重新读取该段并移除页面包装尾部后更新成功，最终无警告；原截图、其他问题和APP-04暂停状态保留。
+
+本项源码修复及Simulator原账户功能验证完成。最后PATH修复的完整新App包构建、物理iPhone安装及商店发布均为0；普通发送按钮的独立交互资格保留。既有Xcode3/3、最后20项定向回归、单模块候选和真实账户回执按各自范围使用。
+
+并行交付核对：另一任务的总记录已登记Release30安装与启动，本任务手机操作仍为0。只读检查其本地`iphone-handoff-20261103-b30/Payload/InkMemory.app/app/mobile_runtime/ios_claude_transport.py`确认文件存在，摘要与当前源码不同且缺少最后PATH默认分支；build30的rg与Read目录适配采用资格按该任务回执使用，当前PATH修复待后续完整安装包采用。
+
+最终机械检查r6退出0：13份文档存在、162条本地引用、91锚点、72围栏、新增134行禁词0、目录条目8/8；`node frontend/ios/build/claude-notion-20261103/regression/mermaid-app07-parse.mjs`退出0，3/3图由本机Chrome实际解析，自有浏览器已关闭。限定文档`git diff --check`及新测试/本文尾空白和围栏检查均退出0；后续设备状态措辞增补由下一次限定文档检查记录。

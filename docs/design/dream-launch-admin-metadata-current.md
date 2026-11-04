@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Input] Admin Registry133 plus registered Runtime/source/Preflight/Run/dispatch/failure contracts and the Dream launch call graph. -->
 <!-- [Output] Current launch DTO/ORM ownership, normal/replay/failure flows, state rules and verification evidence. -->
 <!-- [Pos] Dream launch production design; Admin owns persistence and Dream owns Agent execution. -->
@@ -101,7 +102,7 @@ sequenceDiagram
 
 生产实现位于 `backend/services/story_workspace/dream_launch_application_service.py`、`dream_launch_endpoint_service.py`、`dream_launch_infrastructure.py`、路由和 `backend/services/admin_data/*` 消费者。launch 模块不得导入 `database`、调用 `get_db`、执行 SQL/ORM 或定义数据库 fallback。
 
-已通过的技术证据：Dream focused 75 项 launch 测试、相关 Admin request/preflight/run/deck 247 项测试、Python compile 与 AST/关键字 DB fence；Admin focused 18 项测试、TypeScript typecheck，以及 script-owned PostgreSQL 的 63 migration + 受限执行角色 9 项集成测试。隔离数据库已清理。完整仓库门禁、正常 Google 登录和真实模型 launch 仍按跨项目验收计划执行，不能由这些隔离结果替代。
+已通过的技术证据：Dream focused 75 项 launch 测试、相关 Admin request/preflight/run/kastention 247 项测试、Python compile 与 AST/关键字 DB fence；Admin focused 18 项测试、TypeScript typecheck，以及 script-owned PostgreSQL 的 63 migration + 受限执行角色 9 项集成测试。隔离数据库已清理。完整仓库门禁、正常 Google 登录和真实模型 launch 仍按跨项目验收计划执行，不能由这些隔离结果替代。
 
 ### 发布顺序与回滚条件
 

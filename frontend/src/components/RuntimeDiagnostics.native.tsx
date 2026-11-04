@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: label native Thread presence observation failures in the existing diagnostics list.
 // [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Sync] 2026-11-02: register a diagnostics-only native window leaf on the existing bridge and runtime snapshot.
 // [Input] Existing startup/read results, original errors and the native copy action.
@@ -15,7 +16,7 @@ import {BackendRuntimeManager, formatRuntimeDiagnostics} from '../runtime/Backen
 
 const startupLabels = {idle: '尚未启动', starting: '正在启动', ready: '本地服务已就绪', failed: '启动失败'};
 const sessionLabels = {reading: '正在读取', available: '原会话有效', signed_out: '当前未登录', unavailable: '原会话读取失败'};
-const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录', login: '登录页面', registration: '注册', google: 'Google 登录', recovery: '输入恢复'};
+const errorLabels = {startup: '启动', session: '登录会话', config: '配置读取', catalog: 'Agent 目录', login: '登录页面', registration: '注册', google: 'Google 登录', recovery: '输入恢复',presence:'活跃 Thread 观察'};
 
 export function RuntimeDiagnosticsWindow() {
   return <RuntimeDiagnostics onBack={()=>NativeModules.InkRuntime.dismissRuntimeDiagnostics()}/>;

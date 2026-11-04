@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_275f_backend_cold-recovery-operations
 
 > Task ID: `task_275f`
@@ -16,7 +17,7 @@
 | 来源条目 | `DECK-SC-006` |
 | Task-stage Issue | [SUO-275](/SUO/issues/SUO-275) |
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
-| Design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1、§4.2.5 |
+| Design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1、§4.2.5 |
 | Domain / Priority / 标签 | `backend` / P1 / `supply-chain`, `disaster-recovery`, `sla`, `operations` |
 | Clarification | 冷存储实现未指定；默认由 marketplace/制品平台 owner 选择并披露，只要满足冻结合同 |
 

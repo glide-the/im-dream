@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Exec Report: task_275a - 具名 Supply-Chain Owner 签署
 
 > Continuation note (2026-08-02): Sections 1–8 preserve the first, blocked execution snapshot. Section 9 is the authoritative continuation for the canonical [SUO-291](/SUO/issues/SUO-291) survivor after [SUO-295](/SUO/issues/SUO-295) resolved the duplicate-writer conflict. Historical evidence was not deleted or rewritten.
@@ -7,7 +8,7 @@
 - Task ID: `task_275a`
 - 执行 Issue: [SUO-291](/SUO/issues/SUO-291)
 - 关联 Issue: [SUO-275](/SUO/issues/SUO-275)、父项 [SUO-288](/SUO/issues/SUO-288)
-- 关联设计稿: `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.5
+- 关联设计稿: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.5
 - 关联 Stage: [SUO-282](/SUO/issues/SUO-282)，Stage 1，顺序 `task_275a → task_275b`
 - 执行 Agent: ExecTaskAgent，`principal_id=2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471`
 - 执行时间: `2026-08-01T18:33:20+08:00` 起

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Exec Report: DECK-015 - 安全撤销、回滚与降级路径
 
 > **执行状态**: completed（仅 development/test）
@@ -15,7 +16,7 @@
 | 来源控制项 | [SUO-217](/SUO/issues/SUO-217) |
 | Parent / Ancestor | [SUO-217](/SUO/issues/SUO-217)；[SUO-216](/SUO/issues/SUO-216) |
 | 关联 Task | `docs/task/task_deck_015_backend_revocation-rollback.md` |
-| 关联设计 | `docs/design/deck-plugin-voice-ink-dream-integration.md` §6.2、§12.2、§12.3；`docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.4 |
+| 关联设计 | `docs/design/deck-plugin-voice-ink-dream-integration.md` §6.2、§12.2、§12.3；`docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.4 |
 | 关联 Issue 清单 | `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 `DECK-015` |
 | 关联 Stage | `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` §21.2，Stage 4 / Wave 1 |
 | Checkout | harness 已为本 run 签出；未重复调用 checkout |

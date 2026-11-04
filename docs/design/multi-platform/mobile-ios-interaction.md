@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-11-03: APP-07补原工具资源、Notion线程home适配、方案取舍及正常/异常/状态图，真实资格单列。 -->
+<!-- [Sync] 2026-11-03: APP-07补原工具资源、Notion线程home与Transport PATH默认交付、方案取舍及正常/异常/状态图，真实资格单列。 -->
 <!-- [Sync] 2026-11-03: APP-04现行生命周期与恢复方案独立维护，旧章节与图示保留，暂停状态保持。 -->
 <!-- [Sync] 2026-11-03: iOS构建选择同版Undici标量HTTP解析器；原创建、流式、期限及取消协议保持。 -->
 <!-- [Sync] 2026-11-03: 恢复四项验收；回顾正文按同一实测区域分配高度，原手势复用，APP-04保持暂停。 -->
@@ -1360,6 +1360,8 @@ Admin通过原`reflection-task.worker-load`在服务与任务归属校验后返�
 
 Notion命令cwd接受原`notion-runtime`子目录及`workspaceRoot/<thread>/.notion-home`。原`realpath===cwd`和目录检查继续执行，外部路径、嵌套home、symlink、其他命令、ambient `HOME/NOTION_API_TOKEN`和错误keyring继续拒绝。actor、页面选择和auth文件所有权由原Python边界校验。原失败反馈、Stop、临时结果0700/0600及原Thread关系保持。
 
+`IOSClaudeTransport.connect`在SDK显式env缺少`PATH`时补充当前服务端PATH，保留显式值及显式空值。该默认路径包含原`prepare_notion_runtime`登记的已校验ntn实体目录；其余父进程凭据保持隔离。原Runtime的`notionProjection`继续校验当前Thread、owner、mode、原生文件及PATH shadow，拒绝时清除Notion子进程绑定。actor及thread中的默认workspace配置保持原文件归属。
+
 方案评审：原工具所需资源和已存在的thread home分别补齐；替代工具与共享用户home会增加协议或改变凭证归属，已排除。评审、源码和分项验证回执归[APP-07](../../exec/app-experience-claude-notion-20261103.md)。以下图示描述当前候选执行；设备验收按回执确认。
 
 ### 正常业务时序
@@ -1368,6 +1370,7 @@ Notion命令cwd接受原`notion-runtime`子目录及`workspaceRoot/<thread>/.not
 sequenceDiagram
     actor U as 用户
     participant UI as ChatPage.native
+    participant T as IOSClaudeTransport
     participant R as ClaudeAgentRunner / Runtime
     participant H as host.cjs / worker.mjs
     participant G as DreamGuestProcess
@@ -1376,10 +1379,21 @@ sequenceDiagram
     participant API as Notion API
     U->>UI: 原对话提交搜索或正文读取任务
     UI->>R: 原Chat请求及当前Thread
+    R->>T: 原SDK参数与显式env
+    T->>T: 显式PATH优先，缺失时补服务端默认值
+    T->>H: 原Worker连接帧与环境
+    H-->>R: 原Runtime就绪
     R->>R: 原工具审批与输入校验
     alt Grep / Glob / Bash
+        opt Bash子进程Notion绑定
+            R->>R: notionProjection核对Thread及ntn
+        end
         R->>H: 原ChildProcess及host绑定执行文件
         H->>G: 已打包命令 / cwd / env
+        opt ntn api只读调用
+            G->>API: 原授权API请求
+            API-->>G: 原响应或错误
+        end
         G-->>R: stdout / stderr / exit
     else Read已选Notion页面
         R->>P: .notion/pages/id.json
@@ -1409,7 +1423,12 @@ sequenceDiagram
     participant N as NotionOperationClient
     U->>UI: 提交原对话任务
     UI->>R: 原Chat请求
-    alt 命令缺失或非零退出
+    alt Notion CLI绑定校验拒绝
+        R->>R: notionProjection清除Notion子进程绑定
+        R->>H: 原Bash请求
+        H-->>R: 原ntn非零退出与错误
+        R-->>UI: 原工具失败结果
+    else 命令缺失或非零退出
         R->>H: 原执行请求
         H-->>R: 原错误或exit回执
         R-->>UI: 原工具失败结果

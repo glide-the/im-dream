@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Confirmed Run, `.dream` projections, registry Episode index, and one
 //         explicitly selected Episode artifact surface.
 // [Output] Outline-aligned Episode index plus Run+Episode-isolated workbench and return navigation.
@@ -1242,7 +1243,7 @@ export function StoryWorkspaceExecutionPage({
 
       {agentDialogOpen && (
         <StoryWorkspaceDreamAgentDialog
-          deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
+          deckName={currentRun?.deck_plugin_display_name ?? '当前卡片结构'}
           onClose={() => setAgentDialogOpen(false)}
           onOpenChatThread={onOpenChatThread}
           onWorkspaceViewChange={setWorkspaceView}

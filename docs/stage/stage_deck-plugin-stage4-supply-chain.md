@@ -1,10 +1,11 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Stage 计划 — Deck Plugin Stage 4 Supply-Chain 生产 Gate 执行编排
 
 > Stage Issue: [SUO-282](/SUO/issues/SUO-282)
 > 父项: [SUO-258](/SUO/issues/SUO-258)
 > 设计裁决: [SUO-261](/SUO/issues/SUO-261) `no_design_delta`
 > 审批来源: [SUO-255](/SUO/issues/SUO-255) `request_changes` → follow-up
-> 设计稿: `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2
+> 设计稿: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2
 > 决策状态: `DECK-GATE-DEC-017` = `conditional_frozen`
 > Issue 清单: `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md`
 > Task 需求: `docs/task/TASK-REQUIREMENT-task_275_shared_deck-stage4-supply-chain.md`
@@ -18,7 +19,7 @@
 
 | 输入类型 | 路径 | 状态 |
 |---|---|---|
-| 设计稿 | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2 | `conditional_frozen` |
+| 设计稿 | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2 | `conditional_frozen` |
 | Issue 清单 | `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md` | 已冻结 |
 | Task 需求 | `docs/task/TASK-REQUIREMENT-task_275_shared_deck-stage4-supply-chain.md` | 已冻结 |
 | Canonical Tasks | `docs/task/task_275a` ~ `task_275i` | 9/9 已生成 |

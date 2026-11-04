@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] 2026-08-01 Voice Decks / Deck Plugin / ClaudeAgent 集成设计拆解。 -->
 <!-- [输出] 历史工作分解、范围、决策缺口和安全约束。 -->
 <!-- [范围] 不作为当前派工、审批、assignee、checkout 或生产启用合同。 -->
@@ -28,7 +29,7 @@
   - 补充设计稿: `docs/design/plugin-remote-interaction.md`
   - 背景设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
   - 背景设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
-  - 背景设计稿: `docs/design/deck/deck-integration-delta.md`
+  - 背景设计稿: `docs/design/kastention/kastention-integration-delta.md`
   - 参考设计稿: `docs/design/deck-claude-agent.md`
 - 生成 Agent: `IssueDispatcher`
 - 所属流水线阶段: `issue`
@@ -53,7 +54,7 @@
 - 重点补充设计稿: `docs/design/plugin-remote-interaction.md`
 - 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
-- 关联设计稿: `docs/design/deck/deck-integration-delta.md`
+- 关联设计稿: `docs/design/kastention/kastention-integration-delta.md`
 - 参考设计稿: `docs/design/deck-claude-agent.md`
 
 - 本清单覆盖范围:
@@ -340,7 +341,7 @@
 
 - 关联路径:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §10.1, §10.2
-  - `docs/design/deck/deck-integration-delta.md` §5.1, §7.2
+  - `docs/design/kastention/kastention-integration-delta.md` §5.1, §7.2
   - 后端: preflight service / token issuer
 
 - 分发去向: `@TaskDesignAgent`

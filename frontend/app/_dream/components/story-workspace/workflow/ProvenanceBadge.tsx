@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Immutable workflow provenance and independently authorized Voice source metadata.
 // [Output] Read-only run/source tracing with a fixed no-permission redaction state.
 // [Pos] Story Workspace tables/review/run detail provenance surface.
@@ -77,7 +78,7 @@ export function ProvenanceBadge({
             </button>
           </dd>
         </div>
-        <div><dt>Deck Plugin</dt><dd>{provenance.deckPluginId} · v{provenance.deckPluginVersion}</dd></div>
+        <div><dt>Kastention Plugin</dt><dd>{provenance.deckPluginId} · v{provenance.deckPluginVersion}</dd></div>
         {provenance.deckRuntimeProfileId && (
           <div><dt>Runtime profile</dt><dd>{provenance.deckRuntimeProfileId}</dd></div>
         )}

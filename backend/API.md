@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Deck功能展示名统一为Kastention与卡片结构；原概念、接口、数据及历史定义保持。 -->
 <!-- [Sync] 2026-10-14: add owner-scoped report history pagination; existing list/save and task protocols remain unchanged. -->
 <!-- [Sync] 2026-10-07: document owner-scoped scheduled Thread activity reads and fail-closed operation requirements. -->
 <!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
@@ -16,6 +19,8 @@
 五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../docs/design/deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Ink & Memory API Documentation
+
+> 命名说明（2026-11-03）：Deck 功能的英文展示名称统一为 **Kastention**，中文统一为 **卡片结构**。本文保留 Deck 的原有概念定义、业务规则与技术标识；页面文字按[现行命名规则](../docs/prd/kastention/kastention.md#当前功能名称)显示。
 
 > [Sync] 2026-09-16: Admin DTO APIs own all production persistence; Dream has no database initialization or SQL path.
 > [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
@@ -1099,7 +1104,7 @@ Deletes an owned Deck in one PostgreSQL transaction. Mutable
 immutable runtime snapshot are removed before the Deck; owned Voices continue
 to follow the database cascade contract. The route returns `404` for a missing
 or non-owned Deck. Related Chat conversations return `409` with
-`Deck cannot be deleted while related Chat conversations still exist.` so the
+`Kastention cannot be deleted while related Chat conversations still exist.` so the
 client can direct the user to the ordinary Chat deletion flow. Derived Decks or
 immutable runtime snapshots also return `409` without changing the Deck or its
 references. A plugin binding alone is version configuration, not proof of Chat
@@ -1293,11 +1298,11 @@ explicitly named disposable databases. See
 
 PUT accepts `{ "refs": [{ "plugin_installation_id": "...", "enabled": true, "order_index": 0 }] }`; enabled/order are optional, refs defaults empty. IDs are stripped and unique, order follows PostgreSQL integer bounds. Package/digest/compatibility/actor/path fields are rejected. Invalid request JSON/fields return fixed422 `{ "detail": "Invalid plugin request" }` without body echo. There is no arbitrary32-ref product quota.
 
-Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI checks before source-bound replace. Validation/verification failures do not send the write. Unknown writes retain `error.request_id` and `error.outcome_unknown`; no automatic retry. Other plugin install/catalog/runtime APIs remain separately staged. See the [current functional design](../docs/design/deck/deck-claude-plugin-refs-current.md).
+Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI checks before source-bound replace. Validation/verification failures do not send the write. Unknown writes retain `error.request_id` and `error.outcome_unknown`; no automatic retry. Other plugin install/catalog/runtime APIs remain separately staged. See the [current functional design](../docs/design/kastention/kastention-claude-plugin-refs-current.md).
 
-公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../docs/design/deck/deck-detail-version-history.md)。
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../docs/design/kastention/kastention-detail-version-history.md)。
 
-GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../docs/design/deck/deck-detail-version-history.md)。
+GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../docs/design/kastention/kastention-detail-version-history.md)。
 
 ## 分析历史分页
 

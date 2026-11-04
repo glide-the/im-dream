@@ -1,18 +1,21 @@
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-02: retain native Chat restoration errors in the existing per-source diagnostics.
 // [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
+// [Sync] 2026-11-03: bind account-scoped native Thread presence once and share its immutable display snapshot.
 // [Input] iOS application-owned embedded runtime module.
 // [Sync] 2026-11-03: project bounded on-demand performance samples into the existing diagnostics snapshot without changing startup or recovery.
 // [Output] Shared startup facts and the original error returned by each observed source.
 // [Pos] RN runtime coordinator; Python/Node ownership stays in the native singleton.
 // [Sync] 2026-11-01: retain original errors without redaction, one latest error per source in process memory.
 import { BRAND_NAME } from '../../app/_dream/constants/brand';
-import {NativeModules} from 'react-native';
+import {NativeModules,NativeEventEmitter} from 'react-native';
+import {createThreadPresenceStore} from './threadPresence';
+import {idleMood} from './idleMood';
 import {createPerformanceMonitor,type PerformanceState} from './runtimePerformance';
 
 export type RuntimeFacts = {state: 'ready'; localWebOrigin: string};
 export type SessionReadState = 'reading' | 'available' | 'signed_out' | 'unavailable';
-export type RuntimeErrorSource = 'startup' | 'session' | 'config' | 'catalog' | 'login' | 'registration' | 'google' | 'recovery';
+export type RuntimeErrorSource = 'startup' | 'session' | 'config' | 'catalog' | 'login' | 'registration' | 'google' | 'recovery' | 'presence';
 export type RuntimeErrorRecord = Readonly<{source: RuntimeErrorSource; at: number; text: string}>;
 export type RuntimeSnapshot = Readonly<{
   state: 'idle' | 'starting' | 'ready' | 'failed';
@@ -28,6 +31,9 @@ export type RuntimeSnapshot = Readonly<{
 let startup: Promise<RuntimeFacts> | undefined;
 let snapshot: RuntimeSnapshot = Object.freeze({state: 'idle'});
 const listeners = new Set<() => void>();
+const threadPresence=createThreadPresenceStore();
+let presenceBinding=0;
+let presenceOwner:string|undefined;
 
 function publish(value: RuntimeSnapshot) {
   snapshot = Object.freeze(value);
@@ -93,6 +99,23 @@ export function formatRuntimeDiagnostics(value: RuntimeSnapshot): string {
 }
 
 export const BackendRuntimeManager = {
+  getThreadPresenceSnapshot:threadPresence.getSnapshot,
+  subscribeThreadPresence:threadPresence.subscribe,
+  bindThreadPresence(ownerId:string|undefined) {
+    const version=++presenceBinding;
+    presenceOwner=ownerId;
+    threadPresence.setOwner(ownerId);idleMood.setOwner(ownerId);
+    const native=NativeModules.InkRuntime;
+    if(!ownerId||typeof native?.configureThreadPresence!=='function')return()=>{};
+    const listener=ownerId&&typeof native.addListener==='function'?new NativeEventEmitter(native).addListener('InkThreadPresence',(value:unknown)=>{if(version===presenceBinding)threadPresence.accept(value);}):undefined;
+    if(ownerId)void native.configureThreadPresence(ownerId).then((value:unknown)=>{if(version===presenceBinding)threadPresence.accept(value);}).catch((error:unknown)=>{if(version===presenceBinding)BackendRuntimeManager.recordError('presence',error);});
+    return()=>{listener?.remove();if(version!==presenceBinding)return;presenceBinding++;presenceOwner=undefined;threadPresence.setOwner(undefined);idleMood.setOwner(undefined);void native.configureThreadPresence(null).catch(()=>{});};
+  },
+  refreshThreadPresence(ownerId:string) {
+    const version=presenceBinding,native=NativeModules.InkRuntime;
+    if(presenceOwner!==ownerId||typeof native?.configureThreadPresence!=='function')return;
+    void native.configureThreadPresence(ownerId).then((value:unknown)=>{if(version===presenceBinding)threadPresence.accept(value);}).catch((error:unknown)=>{if(version===presenceBinding)BackendRuntimeManager.recordError('presence',error);});
+  },
   observePerformance:(active:boolean)=>performanceMonitor.acquire(active),
   pausePerformance:(paused:boolean)=>performanceMonitor.setPaused(paused),
   getSnapshot: (): RuntimeSnapshot => snapshot,

@@ -1,7 +1,11 @@
+<!-- [Sync] 2026-11-04: Release35包含无框统一时钟和Widget扩展，签名校验、iPhone覆盖安装及普通启动通过；业务验收分列。 -->
+<!-- [Sync] 2026-11-03: 追加Release32最新工作树构建、567项前端来源、签名与iPhone安装/启动，Chat缓存真实业务验收分列。 -->
+<!-- [Sync] 2026-11-03: 追加当前Kastention命名源码Release31，公网Admin包内校验、签名、iPhone覆盖安装和普通启动回执。 -->
 <!-- [Sync] 2026-11-03: APP-07登记原rg ENOENT、Notion能力失败及独立修复/Simulator任务，原截图和构建29保留。 -->
 <!-- [Input] Notion问题页、当前App源码、现行移动设计与用户任务管理要求。 -->
 <!-- [Output] 五项修复的任务归属、影响范围、执行顺序、完整旅程与验收证据。 -->
 <!-- [Pos] 本组App体验问题的总执行记录；业务规则按各模块现行文档维护。 -->
+<!-- [Sync] 2026-11-03: Release30采用当前APP-07原生命令与Notion资源兼容改动，构建/签名/真机安装及启动通过；持续闪烁未确认修复。 -->
 <!-- [Sync] 2026-11-03: 当前工作树重新准备Next并构建Release29，签名、iPhone覆盖安装、版本读回及普通启动通过，保留原数据和公网Admin配置。 -->
 <!-- [Sync] 2026-11-03: APP-06源码修复与Simulator技术旅程通过，登记26项浏览器、2项原生及类型检查，物理设备采用单列。 -->
 <!-- [Sync] 2026-11-03: 新增Notion对话文本渲染反馈登记为APP-06，创建独立任务，修复与验收结果待回执。 -->
@@ -27,7 +31,7 @@
 | APP-04 | 切后台后按真实生命周期恢复页面、会话和任务，定位暂停与进程终止 | ink-dream-memory | BackendRuntimeManager、原会话恢复、输入Hook及已交接的App接线 | 用户于2026-11-03明确暂停；候选保留，修复和行为验收均停止 |
 | APP-05 | 登录后开发者入口覆盖App自有页面及弹窗，复用既有诊断内容 | ink-dream-memory | SessionGate呈现、RuntimeDiagnostics及原生展示层 | 当前Simulator范围目标完成并同步Notion；15项隔离回归、6项原生方法及写作拖动/三种主题/安全区通过 |
 | APP-06 | 长用户消息折叠、Markdown/代码空白、滚到最新及v3.1规范相关Chat布局 | ink-dream-memory | ChatMessageList.native、ChatMarkdown.native及原列表测量/滚动组件 | 当前源码与Simulator技术范围通过；消息8项、相邻18项、原生2项及两端类型通过，真机采用与真实模型未执行 |
-| APP-07 | iOS Claude命令工具与已选Notion正文读取 | ink-dream-memory | 原Runtime资源打包、host/worker与原Notion thread home交付 | 源码及Simulator技术验证完成，44项及33个subtest、原生3项通过；原账户真实模型Bash/Grep成功并保存4轮历史。Notion正文等待原账户授权，正常账单关联、完整验收、物理iPhone与发布保留 |
+| APP-07 | iOS Claude命令工具与已选Notion正文读取 | ink-dream-memory | 原Runtime资源打包、host/worker与原Notion thread home交付 | 源码修复与Simulator功能验证完成：原Bash/Grep、Notion实时Read及notion-cli/Bash搜索、失败恢复/Stop/历史取得回执；新增Transport PATH修复20项定向回归通过。正常Admin记录已关联，停止结算异常单列；最后改动完整新包、物理iPhone与发布保留 |
 
 两个删除描述合并为APP-01。回顾反馈缺少具体复现步骤，APP-02先按原入口完整旅程获取确定失败点。Python性能与后台生命周期分别测量，采用独立任务以避免混淆原因。若代码已满足目标，任务以状态说明、文档和缺口验证交付，代码变更按证据确定。
 
@@ -320,3 +324,96 @@ Notion源页当前状态和“已修复问题”页已逐项同步APP-01/02/03/0
 私有制品：`frontend/ios/build/InkMemory-Latest-Release-device-20261103-b29.ipa`，SHA256 `acc15d2bb1fc464f03a19b03acaa4b930a0d7b4860d69f196cfb6b4f393bca71`。构建、签名、安装及数据元数据回执归`frontend/ios/build/iphone-handoff-20261103-b29/`，核心记录为`receipt.json`、`package-receipt.json`和`installation-receipt.json`。目录0700，日志、回执及IPA为0600。
 
 当前结果为最新源码构建、签名、真机覆盖安装和普通启动完成。已有Simulator验收沿各专项记录；本轮真机可见页面、发热归因、登录/真实模型业务验收、APP-04行为验收、TestFlight与App Store发布均未执行。手机保留在普通运行状态，供用户手动测试。
+
+
+## 最新工作树iPhone交付：Release30（2026-11-03）
+
+用户中断闪烁复现并要求优先打包。本轮采用当前`ios-store`/`97f35b6d`及全部现有源码，保留他人改动。新增命令工具、Notion路径和锁定ripgrep资源随包采用；前端566项输入与build29的Next一致，沿原`bundle-next.py --verify-sources`退出0复用该根。Hermes与build29摘要一致，持续闪烁的生产代码修复为0，专项仍待定位；静止样本与中断回执归[APP-06记录](app-experience-chat-rendering-20261103.md#持续跳动补充反馈与复现范围)。
+
+容量检查确认16GiB物理内存、可用42%、无并行重构建，初始磁盘约1GiB时停止重构建准备。仅删除本轮已停止的独立APP06 Simulator及两份可重建fixture App副本后可用约5.3GiB；原Plus、真机数据、build29完整签名App/IPA、测试日志、xcresult和源文件均保留。复用原DerivedData，Xcode jobs1、Metro max-workers1，本轮Node堆上限2GiB，构建串行；无依赖安装、Pods更新、源env修改或Admin部署。
+
+| 实际命令/操作 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `INK_IOS_NEXT_ROOT=…/iphone-handoff-20261103-b29/Next python3 frontend/ios/scripts/bundle-next.py --verify-sources` | 0 | 当前566输入、744份准备源码及锁摘要匹配 |
+| `env INK_IOS_NEXT_ROOT=…/iphone-handoff-20261103-b29/Next EXTRA_PACKAGER_ARGS='--max-workers 1' NODE_OPTIONS=--max-old-space-size=2048 xcodebuild -workspace frontend/ios/InkMemory.xcworkspace -scheme InkMemory -configuration Release -sdk iphoneos -destination generic/platform=iOS -derivedDataPath frontend/ios/build/rebuild-iphone-20261031/DerivedData -jobs 1 COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=30 ENTRY_FILE=index.native.js build` | 0 | BUILD SUCCEEDED，87秒；11份Native输入摘要在构建完成后匹配当前源码 |
+| `python3 …/iphone-handoff-20261103-b30/sign-package.py` | 0 | 329份Python、4份Node脚本、实际Next receipt及锁定ntn/rg匹配；83 framework和主App签名、deep/strict及ZIP完整性通过 |
+| `xcrun devicectl device install app --device <同一iPhone> …/Payload/InkMemory.app` | 0 | 覆盖安装，无uninstall |
+| `xcrun devicectl device info apps --device <同设备> --bundle-id com.inkmemory.mobile` | 0 | 实际读回Kastention 0.1.0/build30 |
+| `xcrun devicectl device process launch --device <同设备> com.inkmemory.mobile` | 0 | 普通前台启动PID12965，无业务测试或调试参数 |
+| 同设备Library元数据前/后读取 | 均0 | 前后各3823项，3819原路径保留，4项系统Saved Application State/SplashBoard界面快照更新 |
+
+原开发profile覆盖当前设备，有效期至2026-11-07T17:03:45Z；原账户回调、Client、资源标识、凭据及其余配置保持。候选包Admin、Product API及Gateway服务URL采用`https://ink-admin.suoxya.com`，源码配置保持。
+
+私有制品：`frontend/ios/build/InkMemory-Latest-Release-device-20261103-b30.ipa`，151846606字节，SHA256 `403bd020bbb74c91a704c10d38cd0b0b6793e33cf66e80967bcf72bbaa31c4d9`。完整构建、包校验、签名和安装回执归`frontend/ios/build/iphone-handoff-20261103-b30/`中的`receipt.json`、`package-receipt.json`及`installation-receipt.json`；目录0700、日志/回执及IPA为0600。
+
+本轮已完成最新源码构建、签名、真机覆盖安装与普通启动。真机命令执行、Notion正文、持续闪烁及完整真实业务未在本轮验收，APP-04保持暂停，TestFlight和App Store发布未执行。手机保留普通启动状态供用户手动测试。
+
+## 2026-11-03 当前工作树Kastention命名包Release31
+
+Optimized Prompt：完成当前文档目录及引用迁移后，使用最新本地工作树、公网Admin和既有iOS构建流程生成开发安装包。核对容量、锁文件、可恢复旧制品、设备与签名；复用既有依赖，串行构建Next及原生资源。校验包内来源、服务地址与原认证回调，覆盖安装同一iPhone并普通启动，保留原业务数据、权限及未提交工作。
+
+目标为已配对iPhone16，Bundle ID为`com.inkmemory.mobile`，原设备安装为0.1.0/30。构建前主机物理内存16GiB，系统报告30%可用比例，磁盘剩余4.74GiB，无并行Xcode构建；macOS无Linux cgroup。预算采用串行阶段约4GiB内存、增量磁盘约2GiB；Next使用原准备脚本的1 worker，Xcode及Metro各1 worker，Node old space为2048MiB。旧Release30签名App与IPA保留，构建期间未安装依赖、清理未知资源或变更交换配置。
+
+| 阶段 | 实际命令或既有入口 | 退出码与结果 |
+| --- | --- | --- |
+| Next准备及完整构建 | `INK_IOS_NEXT_ROOT=…/iphone-handoff-20261103-b31/Next python3 frontend/ios/scripts/prepare-next.py`；`corepack pnpm --dir …/Next/build-source build` | 均`0`；生产构建及TypeScript通过，46.72秒 |
+| 来源校验 | 同一`INK_IOS_NEXT_ROOT`执行`python3 frontend/ios/scripts/bundle-next.py --verify-sources` | `0`，566项当前runtime输入匹配 |
+| 原生Release构建 | `env INK_IOS_NEXT_ROOT=…/iphone-handoff-20261103-b31/Next NODE_OPTIONS=--max-old-space-size=2048 EXTRA_PACKAGER_ARGS='--max-workers 1' xcodebuild -workspace frontend/ios/InkMemory.xcworkspace -scheme InkMemory -configuration Release -sdk iphoneos -destination generic/platform=iOS -derivedDataPath frontend/ios/build/rebuild-iphone-20261031/DerivedData -jobs 1 COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=31 ENTRY_FILE=index.native.js build` | `0`，BUILD SUCCEEDED，127.23秒；36项原生输入构建前后匹配 |
+| 资源、开发签名及IPA | `python3 …/iphone-handoff-20261103-b31/sign-package.py` | `0`；329份Python及4份Node运行脚本匹配当前源码，83 framework及主App签名、deep/strict及ZIP完整性通过 |
+| 安装及启动 | `python3 …/iphone-handoff-20261103-b31/install.py`依次执行`devicectl device install app`、`device info apps`、`device process launch`及目录元数据读取 | 均`0`；实际设备读回Kastention0.1.0/31，普通前台启动PID13011 |
+
+Next构建单命令记录的最大RSS为1460764672字节，Xcode单命令记录为191758336字节；未测量全部子进程合计峰值。RN Hermes摘要`d07b9940b0ca4a8b0f270e1edcc93ff134588bb0de5671be7413bee0c37f564e`，实际App的Next receipt摘要`a2124a73c8820c09bbd983dc80010304d23dc734c59792fea388fff1b8e50ad5`；两者均与Release30不同。实际包内Admin认证、数据访问、Product API与Gateway采用`https://ink-admin.suoxya.com`，原App账号回调、Client、其余配置与凭据保持；公网地址仅投影到候选包，源码env写入0。
+
+安装采用同Bundle ID覆盖，无uninstall。Library目录元数据3916→3916，保留3912条原路径；4条消失路径均为SplashBoard系统启动页截图缓存。未读取业务正文或凭据，目录元数据结果独立于业务内容验收。
+
+IPA为`frontend/ios/build/InkMemory-Latest-Release-device-20261103-b31.ipa`，151847118字节，SHA256 `94392d9c16bc6dda121c8ad99ff93153b0805ba0285ebd5fbd1007f0f6a5954b`。回执归`frontend/ios/build/iphone-handoff-20261103-b31/`，含`preflight.json`、Next与Xcode构建回执、`package-receipt.json`及`installation-receipt.json`；目录0700、安装包及日志0600。
+
+本轮完成构建、签名、真机安装与进程启动。真实登录、Google授权、Claude/Notion业务、闪烁及发热问题未执行本轮验收；APP-04保持原暂停状态，TestFlight及App Store发布未执行。
+
+
+## 2026-11-03 最新Chat缓存源码iPhone交付Release32
+
+Optimized Prompt：按当前工作树生成下一版iPhone开发安装包，沿用公网Admin、既有账号回调及锁定依赖。保留可恢复旧包，核对容量与并行作业，串行构建并校验实际App资源，开发签名后覆盖安装同一iPhone及普通启动。源码、技术验证、安装启动与真实业务分别记录。
+
+当前源码包含[Chat页面缓存专项](app-experience-chat-cache-20261103.md)的前端修改。准备时捕获新正文预览、Native Thread读取、原生App及Web路由四份输入摘要；实际包内Next来源匹配当前567项runtime输入，Hermes与Next来源摘要均较Release31更新。本轮交付安装包，缓存性能与完整业务效果按专项及后续设备证据分别验收。
+
+构建前物理内存16GiB，系统报告39%可用比例，Data卷2.06GiB可用，无其他Xcode构建。根据现有124MiB Next准备目录、352MiB App、145MiB IPA及缓存增量估算额外磁盘预算1.25GiB；串行内存预算4GiB，Next/Metro/Xcode各1 worker，Node old space2048MiB。macOS无Linux cgroup；原Release31签名App及IPA保留并通过恢复签名校验。未安装依赖、变更交换配置或清理未知资源。
+
+| 阶段 | 实际命令或回执 | 退出码与结果 |
+| --- | --- | --- |
+| 准备、完整构建与来源核对 | `python3 frontend/ios/build/iphone-handoff-20261103-b32/build.py`内依次执行`prepare-next.py`、`corepack pnpm --dir …/Next/build-source build`及`bundle-next.py --verify-sources` | 均0；Next生产构建与TypeScript通过，30.06秒；567项输入匹配 |
+| 原生构建 | 同一具名入口执行Release/iphoneos、generic iOS目标、既有DerivedData、`-jobs 1`、`CURRENT_PROJECT_VERSION=32`、`ENTRY_FILE=index.native.js`及关闭中间签名 | 0；BUILD SUCCEEDED，91.79秒，37项原生输入前后匹配；完整命令归`xcodebuild-release-command.json` |
+| 包校验、开发签名及IPA | `python3 …/iphone-handoff-20261103-b32/sign-package.py` | 0；329份Python、4份Node脚本匹配；83个framework及主App签名、deep/strict和ZIP完整性通过 |
+| 覆盖安装及启动 | `python3 …/iphone-handoff-20261103-b32/install.py`执行原`devicectl device install app`、应用读回、`device process launch`及目录元数据读取 | 均0；同iPhone16实际读回Kastention0.1.0/32，普通启动PID13075 |
+
+实际包内Admin、认证issuer、Product API与Gateway继续采用`https://ink-admin.suoxya.com`及原对应路径；原Client、账号回调、凭据和其余配置保持，仅在候选包投影公网地址，源码env写入0。Next单命令最大RSS1308196864字节，Xcode单命令199622656字节，全部worker合计峰值未测量。
+
+覆盖升级无uninstall。Library元数据4079→4079，保留4075条原路径；4条消失路径均为SplashBoard启动页截图缓存。未读取业务正文或凭据；元数据核对限定目录路径。
+
+IPA：`frontend/ios/build/InkMemory-Latest-Release-device-20261103-b32.ipa`，151851480字节，SHA256 `f92551665d8d64c42f4e2f9120ed0530d1e1af5075bca45ab336e786d043d3cd`。Next receipt摘要`3336b3a8aeecf748afcac1091a0bc53616ed11ebc4e36e338a6a3640c81c38f8`；Hermes摘要`616610993cb4c045c270b4f493db33eeb21c7872754bd0b6b95ac5639ba7f3a7`。完整记录归`frontend/ios/build/iphone-handoff-20261103-b32/receipt.json`、`package-receipt.json`和`installation-receipt.json`，目录0700、顶层日志/回执及IPA0600。
+
+本轮构建、签名、真机覆盖安装及启动完成。真实账户/模型业务、缓存耗时改善、APP-04、闪烁与发热未在本轮验收，APP-04原暂停状态保持。Simulator、TestFlight和App Store操作0。
+
+
+## 2026-11-04 最新工作区iPhone交付Release35
+
+Optimized Prompt：沿现有iOS工程及锁定依赖，将最新工作区打包为同一iPhone的开发安装包，继续使用公网Admin；先核对容量、可恢复制品和签名，再覆盖安装、读回版本及普通启动。保留账户、数据、原认证与权限，记录安装资格和业务验收边界。
+
+本轮交付包含v4.2共享角色时钟、v3.1无框屏保及当前工作区已有修改。前一轮无框Simulator构建34已完成限定关闭／导航／前后台旅程，当前物理设备此前为构建32。原32签名App和IPA保留并经deep／strict验证，工作树与本机env保持。
+
+构建前Mac物理内存16GiB、可用50%，磁盘21GiB，无其他Xcode构建；macOS无Linux cgroup。复用已完整构建且当前573项runtime输入匹配的iOS Next资源，Xcode单job、Metro单worker、Node old space2048MiB，锁定依赖及Pods直接复用，安装依赖0次。45份Native／Widget／工程和锁文件输入在构建前后保持。
+
+| 阶段 | 实际命令／入口 | 退出码与结果 |
+| --- | --- | --- |
+| Next来源复核 | 私有`build.py`调用`INK_IOS_NEXT_ROOT=.../app04-idle-20261103/Next python3 frontend/ios/scripts/bundle-next.py --verify-sources`，构建前后各一次 | 0；当前573项输入通过，复用完整Next制品 |
+| 设备Release构建 | `python3 frontend/ios/build/iphone-handoff-20261104-b35/build.py`沿原workspace／scheme、Release／iphoneos、generic iOS目标、既有DerivedData、`-jobs 1 CURRENT_PROJECT_VERSION=35 ENTRY_FILE=index.native.js -allowProvisioningUpdates build` | 0；BUILD SUCCEEDED，127.74秒；Xcode自动签名并生成当前Widget开发profile |
+| 配置、资源、签名及IPA | 同目录`sign-package.py`复用原打包流程，允许精确的`com.inkmemory.mobile.threadActivity`扩展，排除XCTest | 0；329份Python、4份Node与当前屏保／时钟资产匹配；83个framework、根目录库、主App及Widget签名校验通过，IPA ZIP完整 |
+| 物理覆盖安装、版本回读及普通启动 | 同目录`install.py`执行原`xcrun devicectl device install app`、`device info apps`、`device process launch`及目录元数据核对 | 0；同一iPhone16读回Kastention0.1.0／35，启动PID13361，无uninstall |
+
+包内认证基址、issuer、Product API及Gateway采用`https://ink-admin.suoxya.com`和既有路径。本机Product API继续保留原`127.0.0.1:3000`配置；仅在候选App副本投影公网URL。Client、原OAuth回调、权限和其余配置保持；两份源env的前后SHA一致，源码配置写入0。
+
+设备Library元数据4253→4253，保留4249条原路径；4条移除路径均为SplashBoard启动截图缓存。元数据核对未读取正文、凭据或数据文件内容，未删除业务记录。应用与Widget采用同一既有Team及明确Bundle ID，签名材料继续留在原Keychain／Xcode profile目录。
+
+IPA：`frontend/ios/build/InkMemory-Latest-Release-device-20261104-b35.ipa`，152508223字节，SHA256 `5470856a8f6ad19ef48e509a2cd51f627a604eab5663be9ada6ce5433d2ec172`。完整构建命令、包与安装回执归`frontend/ios/build/iphone-handoff-20261104-b35/`，目录0700，IPA与私有配置0600；设备预检归`frontend/output/iphone-release35-20261104/`。
+
+本轮设备构建、签名、覆盖安装和普通启动完成。iPhone页面、系统活动显示、真实账户／模型业务及发热验收保持各专项范围；TestFlight和App Store操作0，APP-04持续后台计算与音频适配继续暂停。

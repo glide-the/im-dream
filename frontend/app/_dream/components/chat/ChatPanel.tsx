@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: refresh original system configuration when the retained Chat route returns.
 // [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
 // [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
 // [Sync] 2026-10-12: retain submission-owned Stop through lazy admission and panel remount; unknown cannot unlock retry.
@@ -201,6 +202,7 @@ interface SystemConfigResponse {
 interface ChatPanelProps {
   threadId: string;
   initialMessages?: UIMessage[];
+  readRefreshNonce?: number;
   isLoading?: boolean;
   /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
   reconnectStreamNonce?: number;
@@ -287,6 +289,7 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
 export default function ChatPanel({
   threadId,
   initialMessages,
+  readRefreshNonce = 0,
   isLoading = false,
   reconnectStreamNonce = 0,
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
@@ -446,7 +449,7 @@ export default function ChatPanel({
     return () => {
       active = false;
     };
-  }, []);
+  }, [readRefreshNonce]);
 
   useEffect(() => {
     return subscribeImFullAccessChanged((enabled) => {

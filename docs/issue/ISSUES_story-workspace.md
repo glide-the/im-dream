@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] 2026-08-01 Story Workspace 设计拆解、Issue 编号和当时执行编排。 -->
 <!-- [输出] 历史工作分解、范围和失败事实；当前实现状态由源码与 exec 回执判定。 -->
 <!-- [范围] 不作为当前派工、审批、checkout、assignee 或生产能力合同。 -->
@@ -34,7 +35,7 @@
 - 来源设计稿：
   - 主设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`（DEC-009～DEC-011、**DEC-017～DEC-018**）
   - 布局设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
-  - 增量 Delta 设计稿：`docs/design/deck/deck-integration-delta.md`
+  - 增量 Delta 设计稿：`docs/design/kastention/kastention-integration-delta.md`
   - **SUO-230 增量设计稿**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.6 / `docs/design/story-workspace/product-scope-and-navigation.md` §2.4
   - **SUO-298 合同归属增量**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4、`docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7、`docs/design/story-workspace/project-and-episode-workbench.md` DEC-026
   - 背景设计稿：`docs/CLAUDE.md`（Agent 服务集成说明）
@@ -64,7 +65,7 @@
 
 - 主设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
 - 重点补充设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
-- **增量 Delta 设计稿**：`docs/design/deck/deck-integration-delta.md`
+- **增量 Delta 设计稿**：`docs/design/kastention/kastention-integration-delta.md`
 - **SUO-230 增量设计稿**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.6、`docs/design/story-workspace/product-scope-and-navigation.md` §2.4
 - **SUO-298 合同归属增量**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4、`docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7、`docs/design/story-workspace/project-and-episode-workbench.md` DEC-026
 - 关联设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
@@ -1413,7 +1414,7 @@ SUO-298 / DEC-026 → SUO-299-SH-001 → SUO-299-SH-002
 - **歧义点**：Deck 内部 manifest、运行配置、secret provider 的组件边界尚未冻结
 - **可能解释 A**：Deck 统一存储，内部逻辑分层（manifest / runtime config / secret）
 - **可能解释 B**：Deck 保存 manifest；运行配置和密钥引用由内部子组件管理
-- **默认采用解释**：对外保持单一 Deck API/owner，内部可按安全边界拆组件（见 `deck-integration-delta.md` §4.2）
+- **默认采用解释**：对外保持单一 Deck API/owner，内部可按安全边界拆组件（见 `kastention-integration-delta.md` §4.2）
 - **需要确认方**：`@CEOOrchestrator` 路由产品 owner
 - **是否阻塞 task 阶段**：**否**（可采用默认假设继续，但合同冻结前使用 mock/适配层）
 - **风险**：内部拓扑泄漏为重复业务域

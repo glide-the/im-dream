@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_275h_backend_recovery-purge-evidence-pack
 
 > Task ID: `task_275h`
@@ -16,7 +17,7 @@
 | 来源条目 | `DECK-SC-008` |
 | Task-stage Issue | [SUO-275](/SUO/issues/SUO-275) |
 | 来源编排 | [SUO-258](/SUO/issues/SUO-258) |
-| Design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §5.2 |
+| Design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §5.2 |
 | Domain / Priority / 标签 | `backend` / P1 / `supply-chain`, `dr-test`, `cleanup`, `evidence` |
 
 ## 3. 任务目标

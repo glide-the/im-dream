@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-09-17: record exact legacy Dream credential adoption without Admin-user merging. -->
 <!-- [Sync] 2026-09-17: restore the Dream login/register/Google card through direct Admin form actions before PKCE. -->
 <!-- [Sync] 2026-09-17: close Deck detail empty-Memory parity through raw Admin Repository projection and unchanged Dream compatibility parsing. -->
@@ -148,9 +149,9 @@ Next同名password/Google/Device/token薄adapter也返回410，login/register在
 
 公开user-preferences.get/save只由当前OAuth用户管理；所有Runtime entity grant不能替代该授权。闭集字段不含body actor/firstlogin/systemconfig；identity/unified exact capabilities与Admin principal继续校验。原NULL partial merge/缺行{}保留，后台context/System/first-login与import仍独立。现行[用户偏好设计](../design/user-preferences-current.md)描述状态与失败，不以该领域扩大Runtime授权。
 
-公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream兼容投影继续把合法JSON解析为原值、保留empty text并把非法JSON映射为null，不在读取时回写修复。无read retry或DB fallback。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream兼容投影继续把合法JSON解析为原值、保留empty text并把非法JSON映射为null，不在读取时回写修复。无read retry或DB fallback。详见[Deck详情现行规则](../design/kastention/kastention-detail-version-history.md)。
 
-GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../design/deck/deck-detail-version-history.md)。
+GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../design/kastention/kastention-detail-version-history.md)。
 
 GET /api/story-workspace/workflow-preflights/{preflight_id} 独立消费 workflow-preflight.read/current OAuth/dream:read 与 identity/unified exact schemas/hash，响应匹配 canonical actor 和 ID，复用原 17 字段状态/微秒与 datetime JSON。移除该读取无关 default Workspace 初始化；原坏 ID/owner/missing 404 保留，其他安全错误带原 UUID 无重试。POST 使用 OAuth/dream:write、三项 exact schemas 与 workflow-preflight.execute，input_json沿原 canonical 参数编码，reply actor/Deck/revision匹配，保留202/17字段。独立服务器 receipt reader支持原 absent/in_progress/committed，不自动resume或重发；通用两态receipt保持。详见[现行消费设计](../design/workflow-preflight-read-current.md)；POST default Workspace已由注册76的OAuth-write ensure承担，隐藏 source 持久化仍为后续入口。
 

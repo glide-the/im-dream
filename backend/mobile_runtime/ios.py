@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: bind one native-verified account to event-driven local Thread presence without HTTP or polling.
 # [Sync] 2026-10-31: bind configured Admin JSON HTTP to the existing native URLSession transport.
 # [Sync] 2026-10-30: bind the pinned Notion CLI process adapter beside existing plugin/runtime owners.
 # [Sync] 2026-11-02: use the existing backend display-name constant for API metadata.
@@ -53,6 +54,48 @@ _admin_request_owner = None
 _http_owner = None
 _web_origin = None
 _startup_lock = threading.Lock()
+_presence_subscription = None
+_presence_generation = None
+
+
+def thread_presence(payload: str) -> str:
+    """Native-only account binding; actor comes from the host's original session read."""
+    async def configure():
+        global _presence_subscription, _presence_generation
+        value = json.loads(payload)
+        generation = value["generation"]
+        if value.get("release"):
+            if _presence_generation == generation and _presence_subscription is not None:
+                _presence_subscription()
+                _presence_subscription = None
+                _presence_generation = None
+            return "{}"
+        if _factory_owner is None:
+            raise RuntimeError("Dream Factory has not started")
+        actor = value["actorId"]
+        if not isinstance(actor, str) or not actor or not isinstance(generation, str) or not generation:
+            raise ValueError("Invalid local Thread presence scope")
+        if _presence_subscription is not None:
+            _presence_subscription()
+        _presence_generation = generation
+        sequence = 0
+        previous = None
+        from _dream_native import thread_presence as publish
+
+        def changed(active):
+            nonlocal sequence, previous
+            if _presence_generation != generation or active is previous:
+                return
+            previous = active
+            sequence += 1
+            publish(json.dumps({"ownerId": actor, "generation": generation,
+                "sequence": sequence, "hasActiveThread": active,
+                "observedAt": time.time() * 1000}))
+
+        _presence_subscription = _factory_owner.factory.observe_thread_presence(actor, changed)
+        return "{}"
+
+    return _submit(configure())
 
 
 @contextmanager

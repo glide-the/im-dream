@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-29: allow native HTTP injection; paths, DTOs, CAS fields, error class and Web defaults remain unchanged.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
@@ -70,7 +71,7 @@ export class DeckVersionApiError extends Error {
   readonly currentVersion: number | null;
 
   constructor(status: number, payload: ErrorPayload | null) {
-    super(payload?.message || `Deck version request failed (${status})`);
+    super(payload?.message || `Kastention version request failed (${status})`);
     this.name = 'DeckVersionApiError';
     this.status = status;
     this.code = payload?.error_code ?? null;

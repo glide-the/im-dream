@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-03: Kastention plugin设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Input] Deck/ClaudeAgent historical integration design and current plugin installation contract. -->
 <!-- [Output] Preserved integration decisions with current install/pack/load applicability. -->
 <!-- [Pos] Deck integration design; Remote Marketplace owns the deployed installation boundary. -->
@@ -6,9 +9,9 @@
 
 # Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计
 
-> **历史工作流集成设计，原文与图示保留。** Deck 工作流插件的现行产品规则见[独立 PRD](../prd/deck/deck-workflow-plugin.md)及[独立交互设计](deck-plugin/deck-workflow-plugin-interaction.md)；Claude Code Plugins 见其[PRD](../prd/deck/claude-code-plugins.md)及[交互设计](deck-plugin/claude-code-plugins-interaction.md)。本文后续的 Voice Decks、Paperclip、运行依赖和“两类标签”属于历史集成口径，不决定当前用户分类。现有接口、程序和运行历史不因本次范围修订而删除。
+> **历史工作流集成设计，原文与图示保留。** Deck 工作流插件的现行产品规则见[独立 PRD](../prd/kastention/kastention-workflow-plugin.md)及[独立交互设计](kastention-plugin/kastention-workflow-plugin-interaction.md)；Claude Code Plugins 见其[PRD](../prd/kastention/claude-code-plugins.md)及[交互设计](kastention-plugin/claude-code-plugins-interaction.md)。本文后续的 Voice Decks、Paperclip、运行依赖和“两类标签”属于历史集成口径，不决定当前用户分类。现有接口、程序和运行历史不因本次范围修订而删除。
 
-> 当前插件安装以 [Remote Marketplace 合同](deck-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同) 为准：CLI 安装及制品校验必须完成后才能绑定 Deck、打包新 workspace 和 SDK 加载。下面历史规划的“CLI 备选”不替代当前 `PluginInstallService` 的必需管理命令，也不授权活动会话热安装。
+> 当前插件安装以 [Remote Marketplace 合同](kastention-plugin/claude-plugin-remote-marketplace.md#runtime-插件管理合同) 为准：CLI 安装及制品校验必须完成后才能绑定 Deck、打包新 workspace 和 SDK 加载。下面历史规划的“CLI 备选”不替代当前 `PluginInstallService` 的必需管理命令，也不授权活动会话热安装。
 
 > Design Issue：SUO-218
 > Revision Issue：SUO-236
@@ -30,7 +33,7 @@ SUO-198 已在 story-workspace 设计中冻结了 Deck 工作流的运行追溯�
 
 - `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/design/story-workspace/product-scope-and-navigation.md`
-- `docs/design/deck/deck-integration-delta.md`
+- `docs/design/kastention/kastention-integration-delta.md`
 - `docs/design/plugin-remote-interaction.md`
 - `docs/design/deck-claude-agent.md`
 
@@ -141,7 +144,7 @@ StoryWorkflowRun
 
 ```jsonc
 {
-  "schema_version": "deck-plugin/v1",
+  "schema_version": "kastention-plugin/v1",
   "deck_plugin_id": "voice-decks.story-dramatize",
   "deck_plugin_version": "3.1.0",
   "display_name": "悬疑短剧工作流",
@@ -149,7 +152,7 @@ StoryWorkflowRun
   "author": "voice-decks",
   "status": "published",
   "workflow": {
-    "workflow_definition_ref": "deck://voice-decks.story-dramatize/3.1.0/workflow.json",
+    "workflow_definition_ref": "kastention://voice-decks.story-dramatize/3.1.0/workflow.json",
     "input_schema_ref": "schema://story-workspace/input/v1",
     "output_schema_ref": "schema://story-workspace/result/v1",
     "steps": [
@@ -805,7 +808,7 @@ story-workspace 跨域 API 使用上述共享错误码；Deck 管理端可以返
 | `deck_plugin.release.published` | plugin id/version、manifest hash、runtime lock id |
 | `deck_plugin.installation.status_changed` | installation id、old/new status、error code |
 | `runtime_plugin.materialization.status_changed` | materialization id、runtime plugin id/version、declared/materialized 状态 |
-| `deck.plugin_binding.changed` | deck id、old/new exact release、binding revision、actor |
+| `deck.plugin_binding.changed` | kastention id、old/new exact release、binding revision、actor |
 | `workflow.preflight.status_changed` | preflight id、status、failed check/error code、expires at |
 | `workflow.run.created` | SUO-198 来源字段、runtime lock/load receipt refs |
 | `workflow.run.status_changed` | workflow run id、old/new status、failed step/error code |
@@ -938,7 +941,7 @@ Paperclip 的当前 UI/API/spec 仍处 alpha/演进状态，且类型、注释�
 
 - **初始版本 / SUO-218（2026-08-01）**：新建本文；此前无同主题稳定主文档。
 - 相对 SUO-198：保留全部稳定 Workflow Run 字段和历史不可改绑规则；新增发布 runtime lock、materialization、load receipt、权限交集和运行 session 语义。
-- 相对 `docs/design/deck/deck-integration-delta.md`：把 Deck/Ink Dream/Agent 边界细化为 Deck Plugin manifest、Deck 运行配置、生命周期、选择、preflight 和错误/API/事件合同。
+- 相对 `docs/design/kastention/kastention-integration-delta.md`：把 Deck/Ink Dream/Agent 边界细化为 Deck Plugin manifest、Deck 运行配置、生命周期、选择、preflight 和错误/API/事件合同。
 - 相对 `plugin-remote-interaction.md`：把“声明意图 + headless reconcile / CLI 备选 / 热刷新限制 / settings-first”落到 Deck release 与 Workflow Run 的端到端时序。
 - 相对 `deck-claude-agent.md`：保留 Voice chat/thread/Memory 能力，但规定 workflow run 使用独立 run-scoped session，不把内联聊天状态当运行审计。
 - 相对 Paperclip Settings → Plugins：复用列表、详情、能力、健康、配置、启停、升级和错误体验；明确 Paperclip worker、Deck workflow、Claude Code runtime 是不同模型。

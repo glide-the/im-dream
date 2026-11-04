@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-03: use Kastention for the Deck feature in public discovery copy; retain URLs and source contracts.
 # [Sync] 2026-11-02: use Kastention in public display content with original URLs and crawler policy.
 # [Input] Consume public frontend/backend URL values, curated knowledge links, and public crawler requests.
 # [Output] Generate SEO metadata content for robots.txt, sitemap.xml, and llms.txt with public knowledge references.
@@ -190,7 +191,7 @@ def build_llms_txt(
 > {APP_DESCRIPTION}
 
 ## Main Pages
-- [{APP_NAME}]({app_url}): Daily AI journaling studio with bilingual reflective writing, inner voice feedback, customizable voice decks, saved writing sessions, and visual memory timelines.
+- [{APP_NAME}]({app_url}): Daily AI journaling studio with bilingual reflective writing, inner voice feedback, customizable Kastention configurations, saved writing sessions, and visual memory timelines.
 
 ## Blog and Knowledge Base
 {knowledge_base_links}
@@ -198,7 +199,7 @@ def build_llms_txt(
 ## Product Facts
 - {APP_NAME} helps writers capture personal notes, reflect on recurring thoughts, and talk with configurable AI voice personas.
 - The app supports English and Simplified Chinese writing flows.
-- Core features include autosaved writing sessions, AI comments, deck-based voice customization, timeline images, and Reflections analysis.
+- Core features include autosaved writing sessions, AI comments, Kastention-based voice customization, timeline images, and Reflections analysis.
 - Private user notes and authenticated API data are not public index targets.
 
 ## Technical Access

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: assert the Kastention / 卡片结构 workflow heading while preserving original recovery and API scope.
 // [Input] Production StoryWorkspaceSettingsPage and isolated public API fixtures.
 // [Output] Local Chrome checks of workflow scope, removal of the runtime category, detail recovery and narrow layout.
 // [Pos] Provider-free Settings UI regression; no model, plugin installation or database writes.
@@ -120,7 +121,7 @@ test('Settings explains the story workflow and opens only workflow-owned details
     if (!address || typeof address === 'string') throw new Error('Workflow fixture port unavailable');
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`http://127.0.0.1:${address.port}${HARNESS_PATH}`);
-    const workflow = page.getByRole('region', { name: 'Deck 工作流插件', exact: true });
+    const workflow = page.getByRole('region', { name: '卡片结构工作流插件', exact: true });
     await expect(workflow.getByRole('heading', { name: 'Dream Story Workflow', exact: true })).toBeVisible();
     await expect(workflow.getByText('项目准备', { exact: true })).toBeVisible();
     await expect(workflow.getByText('分集创作', { exact: true })).toBeVisible();
@@ -150,7 +151,7 @@ test('Settings explains the story workflow and opens only workflow-owned details
     await dialog.getByRole('button', { name: '关闭插件详情', exact: true }).click();
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await workflow.getByRole('heading', { name: 'Deck 工作流插件', exact: true }).scrollIntoViewIfNeeded();
+    await workflow.getByRole('heading', { name: '卡片结构工作流插件', exact: true }).scrollIntoViewIfNeeded();
     await expect(workflow.getByText('分集创作', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
     await page.screenshot({ path: 'output/playwright/deck-workflow-settings-narrow.png', fullPage: true });

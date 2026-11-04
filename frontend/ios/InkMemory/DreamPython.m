@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: forward local read-only Thread presence to the native host on its main queue.
 // [Sync] 2026-10-31: share bounded, cancellable URLSession Admin HTTP with embedded Node and CPython; original business/authentication remain upstream.
 // [Input] Signed CPython framework, bundled standard library, dependencies and Dream sources.
 // [Output] In-process execution of mobile_runtime.ios, with the GIL released between calls.
@@ -71,7 +72,21 @@ static PyObject *IMAdminHTTP(PyObject *self, PyObject *args) {
     return result;
 }
 
+static PyObject *IMThreadPresence(PyObject *self, PyObject *args) {
+    const char *json;
+    if (!PyArg_ParseTuple(args, "s", &json)) return NULL;
+    NSString *text = [NSString stringWithUTF8String:json];
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    if (![value isKindOfClass:NSDictionary.class]) return PyErr_Format(PyExc_ValueError, "Invalid presence observation");
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:@"InkThreadPresenceObservation" object:nil userInfo:value];
+    });
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef IMNativeMethods[] = {
+    {"thread_presence", IMThreadPresence, METH_VARARGS, "Publish the current native-bound account's local running presence."},
     {"available_memory", IMAvailableMemory, METH_NOARGS, "Read actual target memory headroom."},
     {"admin_http", IMAdminHTTP, METH_VARARGS, "Perform one bounded Admin HTTP request through iOS."},
     {NULL, NULL, 0, NULL},
