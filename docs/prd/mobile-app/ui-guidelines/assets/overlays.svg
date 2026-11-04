@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- [Sync] 2026-11-03: Deck feature display label is Kastention / 卡片结构; geometry and business concepts retained. -->
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="250" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 250" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="250"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-250)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="8" y="6" width="170" height="244" rx="15" ry="15" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,98%,94%); fill-rule: evenodd;"/>
+			<text x="20" y="233" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 7px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,466) scale(1,-1)">9:41</text>
+			<path d="M 148,238 L 164,238 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 2;"/>
+			<text x="20" y="211" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 16px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,422) scale(1,-1)">‹</text>
+			<text x="75.0" y="212" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,424) scale(1,-1)">原页面</text>
+			<path d="M 16,201 L 170,201 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 16,38 L 170,38 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="30" y="23" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,46) scale(1,-1)">Chat</text>
+			<text x="81.88671875" y="23" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,46) scale(1,-1)">Kastention</text>
+			<text x="144.88671875" y="23" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,46) scale(1,-1)">More</text>
+			<rect x="18" y="47" width="150" height="110" rx="10" ry="10" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="30" y="135" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,270) scale(1,-1)">当前局部任务</text>
+			<text x="30" y="111" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,222) scale(1,-1)">正文与选项独立滚动</text>
+			<path d="M 30,99 L 156,99 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="30" y="69" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,138) scale(1,-1)">取消</text>
+			<text x="128" y="69" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,138) scale(1,-1)">原操作</text>
+			<path d="M 184,135 L 220,135 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,138 L 220,135 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,132 L 220,135 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="234" y="132" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,264) scale(1,-1)">标题说明当前任务</text>
+			<path d="M 184,110 L 220,110 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,113 L 220,110 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,107 L 220,110 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="234" y="107" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,214) scale(1,-1)">正文区域可滚动</text>
+			<path d="M 184,69 L 220,69 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,72 L 220,69 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 216,66 L 220,69 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="234" y="66" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 12px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,132) scale(1,-1)">操作与关闭沿原规则</text>
+			<text x="234" y="28" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,56) scale(1,-1)">关闭 → 返回来源页面</text>
+			<text x="234" y="214" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 14px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,428) scale(1,-1)">现有弹层的区域关系</text>
+			<text x="234" y="191" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,382) scale(1,-1)">规范示意 · 具体对象沿原合同</text>
+		</g>
+	</g>
+</svg>

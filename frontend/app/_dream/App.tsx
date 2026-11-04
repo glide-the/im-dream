@@ -1,3 +1,5 @@
+// [Sync] 2026-11-03: scope retained Chat to the authenticated user and refresh its reads on route return.
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
 // [Sync] 2026-11-01: mobile Writing uses one-row prose, explicit keyboard focus, shared line geometry and the original chooser/persistence.
 // [Sync] 2026-10-29: wait for the original Cookie/CSRF session before submitting the MCP OAuth callback.
@@ -57,6 +59,7 @@
 //                    persistent WritingSuggestionCells on one Session-owned Thread.
 // [Sync] 2026-09-01: expose regeneration only on the latest Writing suggestion Cell.
 // [Sync] 2026-09-05: use a framework-neutral public asset URL for the Next/Vite compatibility shell.
+import { BRAND_NAME, BRAND_BANNER_PATH } from './constants/brand';
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell, WritingSuggestionCell as WritingSuggestionCellData } from './engine/EditorEngine';
@@ -162,7 +165,7 @@ function McpOAuthCallbackPage() {
   const callbackReady = Boolean(query.get('code') && query.get('state'));
 
   useEffect(() => {
-    document.title = 'MCP authorization callback · Ink & Memory';
+    document.title = `MCP authorization callback · ${BRAND_NAME}`;
     if (isLoading) return;
     const operationId = readClaudeMcpOAuthOperation();
     if (!isAuthenticated || !callbackReady || !operationId) {
@@ -266,7 +269,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     setChooserExpanded(view.expanded);
     writingHost.current?.onChooserView?.(view);
   }, []);
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const isDeviceVerificationRoute = !isReactNativeHost() && window.location.pathname === '/oauth/device/verify';
   const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
   const { i18n } = useTranslation();
@@ -293,6 +296,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     }
   }, [currentLanguage, i18n]);
 
+  const [chatRouteActive,setChatRouteActive] = useState(()=> (resolveStoryWorkspacePath(window.location.pathname,window.location.search)?.route??'chat')==='chat');
   const [writingRouteActive, setWritingRouteActive] = useState(() => (
     Boolean(writingDocument) || resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
   ));
@@ -367,6 +371,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
 
   const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
     setWritingRouteActive(route === 'writing');
+    setChatRouteActive(route === 'chat');
     if (route !== 'writing') setWritingChatPanelOpen(false);
     setShowNotionConnectorDetail(false);
     const query = new URLSearchParams(window.location.search);
@@ -1616,7 +1621,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
   }
 
   // @@@ Show auth screen if not authenticated
-  const loginBannerUrl = '/login-banner.jpg';
+  const loginBannerUrl = BRAND_BANNER_PATH;
 
   if (isDeviceVerificationRoute) {
     return <DeviceVerificationPage />;
@@ -1765,6 +1770,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
         overflow: 'hidden',
       }}>
         <StoryWorkspaceRouter
+            key={user?.id}
             mobileMoreNonce={mobileMoreNonce}
             onMobileMoreOpenChange={setMobileMoreOpen}
             decksContent={storyWorkspaceDeckManager}
@@ -1784,6 +1790,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
               chat: (
                 <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
                   <ChatView
+                    isVisible={chatRouteActive}
                     editorState={state ? (state as unknown as Record<string, unknown>) : null}
                     ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
                     onEditorWriteConfirmed={handleEditorWriteConfirmed}

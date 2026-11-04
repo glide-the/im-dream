@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] Story Workspace status UI requirement, current app/_dream implementation, and dated execution evidence. -->
 <!-- [输出] task_213 implementation, acceptance, remaining backend/runtime E2E evidence, and rollback contract. -->
 <!-- [定位] 已执行前端任务记录；不声明真实业务或生产验收。 -->
@@ -33,7 +34,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
 | 上游 design | `docs/design/deck-plugin-voice-ink-dream-integration.md` §13.1 | 前端负责范围 |
 | 上游 layout | `docs/design/story-workspace/product-scope-and-navigation.md` §2.3, §4.5 | 既有布局设计 |
-| 上游 delta | `docs/design/deck/deck-integration-delta.md` §7.2 | 工作流运行状态 |
+| 上游 delta | `docs/design/kastention/kastention-integration-delta.md` §7.2 | 工作流运行状态 |
 
 ---
 

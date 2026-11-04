@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Exec Report: DECK-009 - ClaudeAgent Run-Scoped Session
 
 ## 1. 执行上下文
@@ -5,7 +6,7 @@
 - Task ID: `DECK-009` / `task_deck_009_backend_run-scoped-session`
 - 执行 Issue: `SUO-318`
 - 关联 Issue: `SUO-217`；合同证据 `SUO-314`；Stage readiness `SUO-315`
-- 关联设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` §7.4/7.5/13.3/18；`docs/design/deck/design_002_deck-plugin-decision-gates.md` 的 `DECK-GATE-DEC-017/018/020`
+- 关联设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` §7.4/7.5/13.3/18；`docs/design/kastention/design_002_kastention-plugin-decision-gates.md` 的 `DECK-GATE-DEC-017/018/020`
 - 关联 Stage: `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` v1.9，Stage 2 / Wave 4
 - 直接前置: `SUO-312`（task_008，done）；前置报告 `docs/exec/exec_deck_008_backend_reconcile-load-receipt.md`
 - 执行 Agent: `ExecTaskAgent`

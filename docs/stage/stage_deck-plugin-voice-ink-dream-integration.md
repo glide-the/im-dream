@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Stage Plan: Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成
 
 > **Stage Issue**: SUO-244
@@ -15,8 +16,8 @@
 - **补充设计稿**: `docs/design/plugin-remote-interaction.md`
 - **背景设计稿**: `docs/design/story-workspace/product-scope-and-navigation.md`
 - **背景设计稿**: `docs/design/story-workspace/product-scope-and-navigation.md`
-- **背景设计稿**: `docs/design/deck/deck-integration-delta.md`（原 `story-workspace/story-workspace-deck-integration-delta.md` 已迁移）
-- **补充设计稿**: `docs/design/deck/design_002_deck-plugin-decision-gates.md`
+- **背景设计稿**: `docs/design/kastention/kastention-integration-delta.md`（原 `story-workspace/story-workspace-kastention-integration-delta.md` 已迁移）
+- **补充设计稿**: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md`
 - **参考设计稿**: `docs/design/deck-claude-agent.md`
 
 ## 2. 任务输入来源
@@ -371,7 +372,7 @@ task_015 → task_014 → task_013（可独立回滚）
 
 ## 6. DECK-016 ~ DECK-020 冻结条件与 Gate 放置
 
-> **状态来源**: `docs/design/deck/design_002_deck-plugin-decision-gates.md`（`DECK-DESIGN-002`）为当前 canonical 决策 Gate 附录。
+> **状态来源**: `docs/design/kastention/design_002_kastention-plugin-decision-gates.md`（`DECK-DESIGN-002`）为当前 canonical 决策 Gate 附录。
 > **优先级**: 设计附录结论优先于本 Stage 计划中的历史默认假设。
 
 | 决策单 | 标题 | 当前状态 | 影响 Stage | Gate 放置 | 冻结条件 |

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] A workflow selection/readiness state or an authoritative WorkflowRun snapshot.
 // [Output] Explicit empty, warning, progress, review, failure, cancelled, and completion states.
 // [Pos] Story Workspace main workflow status surface.
@@ -59,7 +60,7 @@ export function WorkflowRunStatusPanel({
       <section className="workflow-panel workflow-panel--empty">
         <p className="workflow-panel__eyebrow">Workflow</p>
         <h3 className="workflow-panel__title">选择工作流以开始创作</h3>
-        <p className="workflow-panel__message">工作流会在运行前锁定 Deck 插件版本与运行快照。</p>
+        <p className="workflow-panel__message">工作流会在运行前锁定卡片结构插件版本与运行快照。</p>
         {onChooseWorkflow && <button className="workflow-button workflow-button--primary" onClick={onChooseWorkflow} type="button">选择工作流</button>}
       </section>
     );
@@ -79,9 +80,9 @@ export function WorkflowRunStatusPanel({
   if (state === 'deck_runtime_config_not_ready') {
     return (
       <section className="workflow-panel workflow-panel--warning">
-        <p className="workflow-panel__eyebrow">Deck runtime</p>
-        <h3 className="workflow-panel__title">Deck 运行配置未就绪</h3>
-        {deckOwner && <p className="workflow-panel__message">Deck owner：{deckOwner}</p>}
+        <p className="workflow-panel__eyebrow">Kastention runtime</p>
+        <h3 className="workflow-panel__title">卡片结构运行配置未就绪</h3>
+        {deckOwner && <p className="workflow-panel__message">Kastention owner：{deckOwner}</p>}
         {onViewConfig && <button className="workflow-button workflow-button--primary" onClick={onViewConfig} type="button">查看配置</button>}
       </section>
     );

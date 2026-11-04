@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: qualify the original pinned ntn through both actor and direct-thread credential homes without credentials or API calls.
 // [Sync] 2026-10-30: qualify packaged ntn via original Python and Bash, same-App HTTP and a bounded credential-free HTTPS rejection.
 // [Sync] 2026-10-25: qualify configured original login actions without changing user authentication.
 // [Input] App-bundled iOS CPython, native pydantic-core and the shared Dream router.
@@ -191,6 +192,7 @@ final class EmbeddedDreamBackendTests: XCTestCase {
         completed = returned && backgroundUptime != nil && exit.status == 0 && text == "lifecycle-startlifecycle-end"
     }
 
+    // [Sync] 2026-11-03: execute pinned ntn through both original actor and direct-thread credential homes.
     func testPackagedNotionCLIThroughOriginalBackend() throws {
         _ = try execute(timeout: 120) { EmbeddedDreamBackend.shared.start(completion: $0) }
         try runPython("""
@@ -200,17 +202,22 @@ final class EmbeddedDreamBackendTests: XCTestCase {
         root = Path(os.environ['AGENT_CWD']).parent / 'notion-runtime'
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         home = Path(tempfile.mkdtemp(prefix='ntn-qualification-', dir=root))
+        workspace = Path(tempfile.mkdtemp(prefix='notion-thread-qualification-', dir=os.environ['AGENT_CWD']))
+        thread_home = workspace / '.notion-home'
+        thread_home.mkdir(mode=0o700)
         try:
             assert get_notion_cli_installation().status == 'installed'
             async def qualify_ntn():
-                code, text, error = await _run_ntn_command('--version', notion_home=home, timeout_seconds=30)
-                assert code == 0 and '0.15.1' in text, ('ntn version', code)
-                code, text, error = await _run_ntn_command('--help', notion_home=home, timeout_seconds=30)
-                assert code == 0 and 'Usage:' in text and 'ntn' in text, ('ntn help', code)
+                for credential_home in (home, thread_home):
+                    code, text, error = await _run_ntn_command('--version', notion_home=credential_home, timeout_seconds=30)
+                    assert code == 0 and '0.15.1' in text, ('ntn version', code)
+                    code, text, error = await _run_ntn_command('--help', notion_home=credential_home, timeout_seconds=30)
+                    assert code == 0 and 'Usage:' in text and 'ntn' in text, ('ntn help', code)
             asyncio.run(qualify_ntn())
-            print('IOS_NOTION_CLI_PROOF version=0.15.1 packaged=true originalBackend=true applicationPid=' + str(os.getpid()) + ' accountCredentialsUsed=false apiCalls=0 modelCalls=0')
+            print('IOS_NOTION_CLI_PROOF version=0.15.1 packaged=true originalBackend=true actorAndThreadHomes=true applicationPid=' + str(os.getpid()) + ' accountCredentialsUsed=false apiCalls=0 modelCalls=0')
         finally:
             shutil.rmtree(home)
+            shutil.rmtree(workspace)
         """)
     }
 

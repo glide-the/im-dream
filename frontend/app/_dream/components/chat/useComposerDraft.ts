@@ -1,7 +1,8 @@
 // [Input] Original composer submission, upload state, effective tool permission and draft defaults.
 // [Output] Shared draft/files/permission state and the original send, clear and rejection-restore behavior.
 // [Pos] Headless Web/native composer state extracted from AIInputDock; no DOM, HTTP or runtime ownership.
-import {useCallback,useState} from 'react';
+// [Sync] 2026-11-02: expose the existing draft snapshot to the native restoration owner and accept completed attachment references.
+import {useCallback,useEffect,useState} from 'react';
 import type {TFunction} from 'i18next';
 import type {ToolChoice} from '../../lib/chat-schema';
 import type {UploadedFile} from './AIInputDock.helpers';
@@ -13,6 +14,7 @@ export function buildToolChoiceOptions(t:TFunction):{value:ToolChoice;label:stri
   ];
 }
 
+export interface ComposerDraftSnapshot {query:string;uploadedFiles:UploadedFile[];toolChoice:ToolChoice;}
 export interface ComposerDraftOptions {
   onSendMessage: (message:string,files?:UploadedFile[],toolChoice?:ToolChoice) => void | Promise<void>;
   disabled: boolean;
@@ -21,14 +23,17 @@ export interface ComposerDraftOptions {
   fullAccessEnabled: boolean;
   defaultToolChoice: ToolChoice;
   initialDraft?: string;
+  initialFiles?: UploadedFile[];
+  onDraftChange?: (draft:ComposerDraftSnapshot) => void;
   onUploadBlocked: () => void;
   releasePreview: (url?:string) => void;
 }
 
-export default function useComposerDraft({onSendMessage,disabled,loading,onStop,fullAccessEnabled,defaultToolChoice,initialDraft,onUploadBlocked,releasePreview}:ComposerDraftOptions) {
+export default function useComposerDraft({onSendMessage,disabled,loading,onStop,fullAccessEnabled,defaultToolChoice,initialDraft,initialFiles,onDraftChange,onUploadBlocked,releasePreview}:ComposerDraftOptions) {
   const [query,setQuery] = useState(() => initialDraft ?? '');
-  const [uploadedFiles,setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles,setUploadedFiles] = useState<UploadedFile[]>(() => initialFiles ?? []);
   const [toolChoice,setToolChoice] = useState<ToolChoice>(defaultToolChoice);
+  useEffect(()=>{onDraftChange?.({query,uploadedFiles,toolChoice});},[query,uploadedFiles,toolChoice,onDraftChange]);
   const handleSend = useCallback(() => {
     if (disabled || (loading && !onStop)) return;
     if (uploadedFiles.some(file => file.isUploading)) {onUploadBlocked();return;}

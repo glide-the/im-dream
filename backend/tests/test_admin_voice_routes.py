@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual four Voice/FastAPI/auth/DTO operations and controlled server responses.
 # [Output] Original mutations, optional/null/raw JSON/scopes/errors/unknown receipt evidence.
@@ -133,8 +134,8 @@ def test_changed_false_keeps_original_404(boundary, method, name):
 
 
 @pytest.mark.parametrize('name,code,method,url,body,detail', [
-    ('voice.create', 'DECK_ACCESS_DENIED', 'post', '/api/voices', CREATE, 'Deck not found or permission denied'),
-    ('voice.collect', 'DECK_ACCESS_DENIED', 'post', '/api/voices/source-voice/fork', {'target_deck_id': 'target-deck'}, 'Target deck not found or permission denied'),
+    ('voice.create', 'DECK_ACCESS_DENIED', 'post', '/api/voices', CREATE, 'Kastention not found or permission denied'),
+    ('voice.collect', 'DECK_ACCESS_DENIED', 'post', '/api/voices/source-voice/fork', {'target_deck_id': 'target-deck'}, 'Target Kastention not found or permission denied'),
     ('voice.collect', 'VOICE_ACCESS_DENIED', 'post', '/api/voices/source-voice/fork', {'target_deck_id': 'target-deck'}, 'Voice source-voice not found'),
 ])
 def test_closed_known_domain_errors_keep_original_safe_400(boundary, name, code, method, url, body, detail):

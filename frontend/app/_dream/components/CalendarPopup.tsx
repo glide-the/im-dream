@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: include the existing diary first line and date in the original deletion confirmation.
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive Calendar with a month paper, exclusive task/diary/Notion panels, retained local state and viewport-contained tooltips/modals.
 // [Sync] 2026-10-07: edit Codex-style repeat presets through a secondary schedule dialog, plus source/new Chat mode and captured execution model.
@@ -873,7 +874,9 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
   };
 
   const handleDeleteEntry = async (dateKey: string, entryId: string) => {
-    if (!window.confirm(t('calendar.deleteConfirm'))) return;
+    const entry = calendarData[dateKey]?.find(item => item.id === entryId);
+    const target = entry?.firstLine?.trim();
+    if (!window.confirm([target, dateKey, t('calendar.deleteConfirm')].filter(Boolean).join('\n\n'))) return;
     if (isAuthenticated) {
       try {
         const { deleteSession } = await import('../api/voiceApi'); await deleteSession(entryId);

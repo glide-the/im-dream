@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Kastention · 一体化时间时钟 / 交互原型 v4.2</title>
+<style>
+:root{color-scheme:light;--app:#F6EFE5;--paper:#FFFAF2;--ink:#3F3429;--ink-muted:#7A6A59;--action:#5F4A36;--border:#D8C7B3;--accent:#6095CA;--accent-low:rgba(96,149,202,.13);--face-ink:#3F3429;--hair-line:#3F3429;--hour:#3F3429;--minute:#8D7966;--second:#6095CA;--selection:#4D7EAD;--selected-bg:rgba(96,149,202,.13)}
+body[data-theme-effective="dark"]{color-scheme:dark;--app:#1D1916;--paper:#2A241F;--ink:#F3E8D8;--ink-muted:#C8BCAE;--action:#F3E8D8;--border:#5A4D3D;--accent:#83B0D9;--accent-low:rgba(130,176,217,.14);--face-ink:#F3E8D8;--hair-line:#F3E8D8;--hour:#F3E8D8;--minute:#C9B09A;--second:#8BB8E2;--selection:#A7CBE8;--selected-bg:rgba(130,176,217,.17)}
+*,*::before,*::after{box-sizing:border-box}
+html{min-height:100%}body{margin:0;min-height:100%;background:var(--app);color:var(--ink);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+button,select{font:inherit}button{cursor:pointer;touch-action:manipulation}button:focus-visible,select:focus-visible{outline:2px solid var(--selection);outline-offset:4px}.sr{position:absolute;clip:rect(0,0,0,0);clip-path:inset(50%);overflow:hidden;white-space:nowrap;width:1px;height:1px}
+.page{width:min(1100px,100%);margin:0 auto;padding:22px clamp(16px,3vw,44px) 48px}.topline{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--border);padding-bottom:18px}.identity{display:flex;gap:11px;align-items:center;min-width:0}.ident-mark{width:20px;height:20px;border:1.6px solid var(--ink);border-radius:50%;position:relative;flex-shrink:0}.ident-mark::after{content:"";position:absolute;right:-4px;top:-2px;width:10px;height:6px;border:2px solid var(--accent);border-radius:100% 70% 20% 70%;transform:rotate(-27deg);background:var(--app)}.identity strong{font-size:13px;font-weight:650;letter-spacing:.05em}.identity span{font-size:11px;color:var(--ink-muted)}.theme{display:flex;align-items:center;gap:7px}.theme label{font-size:11px;color:var(--ink-muted)}.theme select{color:var(--ink);background:var(--app);border:1px solid var(--border);border-radius:10px;min-height:40px;padding:0 11px}
+.intro{padding-top:29px;max-width:720px}.eyebrow{font-size:10px;letter-spacing:.16em;color:var(--ink-muted)}h1{font-weight:540;letter-spacing:-.045em;font-size:clamp(27px,3.7vw,43px);line-height:1.28;margin:9px 0 10px}.intro p{margin:0;color:var(--ink-muted);font-size:13px;line-height:1.9}
+.workspace{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(270px,.7fr);gap:clamp(20px,3vw,43px);align-items:center;padding:10px 0 16px}
+.stage{min-width:0;position:relative}.dial{width:100%;max-width:575px;aspect-ratio:1;margin-inline:auto;position:relative;isolation:isolate}.dial-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.face-outline{stroke:var(--face-ink)}.hair-stroke{stroke:var(--hair-line)}.face-eye{fill:var(--face-ink)}.face-mouth{stroke:var(--face-ink);transition:opacity .28s}.face-features{opacity:.11;transition:opacity .3s}.dial[data-mode="happy"] .face-features,.dial[data-mode="sad"] .face-features{opacity:1}
+
+.hands-layer{opacity:1;transition:opacity .23s}.dial[data-mode="happy"] .hands-layer,.dial[data-mode="sad"] .hands-layer{opacity:0}.pivot-ring{stroke:var(--paper);fill:var(--hour);stroke-width:9}.hand-hour{stroke:var(--hour);stroke-width:19;stroke-linecap:round}.hand-minute{stroke:var(--minute);stroke-width:13;stroke-linecap:round}.hand-second{stroke:var(--second);stroke-width:6;stroke-linecap:round}
+
+.face-hit{position:absolute;inset:17% 11% 13% 11%;z-index:3;border:0;background:transparent;border-radius:47%;color:transparent;overflow:hidden}.face-hit:hover{cursor:pointer}
+.marks{position:absolute;inset:0;pointer-events:none;z-index:6}.mark{position:absolute;width:44px;height:44px;display:grid;place-items:center;transform:translate(-50%,-50%);pointer-events:auto;background:transparent;border:0;border-radius:50%;padding:0;color:var(--ink-muted)}.mark-core{width:32px;height:32px;display:grid;place-items:center;border:1px solid transparent;border-radius:50%;transition:transform .22s ease,background .2s ease,border-color .2s ease;color:inherit}.mark svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}.mark:hover .mark-core{transform:scale(1.09);color:var(--ink)}.mark[aria-pressed="true"]{color:var(--selection)}.mark[aria-pressed="true"] .mark-core{background:var(--selected-bg);border-color:var(--selection);transform:scale(1.07)}.mark::after{content:"";position:absolute;width:3px;height:3px;border-radius:50%;background:var(--border);bottom:0;left:50%;transform:translateX(-50%)}.mark[aria-pressed="true"]::after{background:var(--selection);width:4px;height:4px}.mark.is-hour::before{content:"";position:absolute;width:3px;height:3px;right:1px;top:50%;border-radius:50%;background:var(--accent)}
+.clock-caption{margin:0 6px;display:flex;justify-content:space-between;align-items:end;gap:12px;padding-top:4px;border-top:1px solid var(--border)}.clock-caption .reading{font-size:23px;font-variant-numeric:tabular-nums;letter-spacing:.035em;font-weight:440}.clock-caption .date{color:var(--ink-muted);font-size:11px;line-height:1.8}.caption-right{text-align:right;color:var(--ink-muted);font-size:11px;line-height:1.75}.little-live{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--accent);vertical-align:2px;margin-right:5px}
+.side{padding:0 0 6px;min-width:0}.side-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border);padding-bottom:10px}.side-head strong{font-size:13px;font-weight:600}.pos-count{font-size:12px;color:var(--ink-muted);letter-spacing:.09em;font-variant-numeric:tabular-nums}.concept-main{padding-top:22px}.concept-en{font-size:10px;letter-spacing:.1em;color:var(--ink-muted)}.concept-name{font-size:clamp(28px,3vw,36px);font-weight:540;line-height:1.35;margin:9px 0 14px;letter-spacing:-.02em}.concept-desc{font-size:14px;line-height:2;min-height:92px;margin:0;color:var(--ink)}.concept-rule{margin-top:16px;font-size:12px;line-height:1.8;color:var(--ink-muted);border-left:2px solid var(--border);padding:0 0 0 12px}.concept-foot{margin-top:23px;padding-top:16px;border-top:1px solid var(--border);color:var(--ink-muted);font-size:11px;line-height:1.75}
+.mode-head{margin-top:32px;color:var(--ink-muted);font-size:10px;letter-spacing:.1em}.mode-switch{display:flex;align-items:center;gap:9px;margin-top:11px;flex-wrap:wrap}.mode{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 15px;border:1px solid var(--border);background:transparent;border-radius:999px;font-size:12px;color:var(--ink);transition:background .18s,color .18s,border-color .18s}.mode[aria-pressed="true"]{border-color:var(--action);background:var(--action);color:var(--app)}.mode svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.footer{border-top:1px solid var(--border);margin-top:13px;padding-top:18px;display:flex;justify-content:space-between;gap:20px;align-items:flex-start;font-size:11px;color:var(--ink-muted);line-height:1.8}.footer p{margin:0;max-width:750px}.footer span{white-space:nowrap}
+@media(max-width:790px){.workspace{display:block}.stage{max-width:600px;margin:auto}.side{max-width:600px;margin:24px auto 0}.intro{padding-top:20px}.concept-desc{min-height:auto}.mode-head{margin-top:22px}.clock-caption{margin-top:-5px}.footer{margin-top:26px}}
+@media(max-width:390px){.page{padding:15px 12px 30px}.intro{padding-top:17px}h1{font-size:27px}.intro p{font-size:12px}.dial{width:calc(100% + 6px);margin-left:-3px}.mark{width:44px;height:44px}.mark-core{width:30px;height:30px}.mark svg{width:19px;height:19px}.side{margin-top:18px}.footer{display:block}.footer span{display:block;margin-top:10px}.topline .identity span{display:none}}
+@media(prefers-reduced-motion:reduce){.hair,.face-features,.face-mouth,.hands-layer,.mark-core,.mode{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body data-theme-effective="light">
+<div class="page">
+  <header class="topline">
+    <div class="identity"><i class="ident-mark" aria-hidden="true"></i><strong>Ink &amp; Memory</strong><span>/ Kastention</span></div>
+    <div class="theme"><label for="themeSelect">外观</label><select id="themeSelect"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+  </header>
+  <div class="intro"><div class="eyebrow">COMPONENT STUDY / TIME AS FORM</div><h1>让时间有形。</h1><p>原始脸部就是表盘。十二个位置对应时间化思维；秒针逐秒、分针逐分、时针逐时跳格，蓝色发丝每秒轻摆一次。</p></div>
+  <main class="workspace">
+    <section class="stage" aria-label="Kastention 时钟互动区">
+      <div id="dial" class="dial" data-mode="clock">
+        <svg class="dial-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" aria-hidden="true">
+          <g id="artwork">
+            <path class="face-outline" d="M 854 303 C 734 245 578 224 443 251 C 284 282 188 393 165 559 C 139 741 182 895 320 974 C 438 1042 627 1053 790 1016 C 971 975 1083 871 1102 716 C 1116 603 1095 496 1035 418" fill="none" stroke="#3f3429" stroke-width="30"/>
+            <g id="hair" class="hair"><path class="hair-base" d="M 397 284 C 533 235 705 253 853 309 L 787 369 C 666 352 529 316 397 284 Z" fill="#79a9d3" stroke="none" stroke-width="0"><animate class="hair-pulse" id="hairPulse0" attributeName="d" begin="indefinite" dur="520ms" fill="remove" repeatCount="1" calcMode="spline" keyTimes="0;0.14;0.37;0.60;0.78;1" keySplines="0.2 0 0.3 1;0.22 0.65 0.3 1;0.3 0 0.22 1;0.16 0.7 0.3 1;0.4 0 0.2 1" values="M 397 284 C 533 235 705 253 853 309 L 787 369 C 666 352 529 316 397 284 Z;M 397 284 C 533 235 704.12 254.1 850.8 310.54 L 785.24 370.1 C 664.9 352.66 529 316 397 284 Z;M 397 284 C 533 235 709 248 863 302 L 795 364 C 671 349 529 316 397 284 Z;M 397 284 C 533 235 703.08 255.4 848.2 312.36 L 783.16 371.4 C 663.6 353.44 529 316 397 284 Z;M 397 284 C 533 235 705.56 252.3 854.4 308.02 L 788.12 368.3 C 666.7 351.58 529 316 397 284 Z;M 397 284 C 533 235 705 253 853 309 L 787 369 C 666 352 529 316 397 284 Z"/></path><path class="hair-stroke" d="M 556 374 C 653 391 781 353 859 291 C 908 250 920 207 954 198 C 996 185 1012 218 1004 251 C 994 299 949 329 906 353 C 1015 350 1064 330 1098 352 C 1131 376 1109 411 1071 432 C 998 474 858 484 749 459 C 664 440 591 407 556 374 Z" fill="#6095ca" stroke="#3f3429" stroke-width="28"><animate class="hair-pulse" id="hairPulse1" attributeName="d" begin="indefinite" dur="520ms" fill="remove" repeatCount="1" calcMode="spline" keyTimes="0;0.14;0.37;0.60;0.78;1" keySplines="0.2 0 0.3 1;0.22 0.65 0.3 1;0.3 0 0.22 1;0.16 0.7 0.3 1;0.4 0 0.2 1" values="M 556 374 C 653 391 781 353 859 291 C 908 250 920 207 954 198 C 996 185 1012 218 1004 251 C 994 299 949 329 906 353 C 1015 350 1064 330 1098 352 C 1131 376 1109 411 1071 432 C 998 474 858 484 749 459 C 664 440 591 407 556 374 Z;M 556 374 C 653 391 780.56 353.22 857.9 291.88 C 906.24 251.76 917.36 209.64 951.14 201.08 C 992.7 188.3 1008.7 220.86 1001.36 252.98 C 991.8 300.32 947.9 329.66 905.34 353.22 C 1013.46 351.32 1061.36 331.76 1094.7 353.54 C 1127.26 376.88 1106.14 411.88 1069.02 432.88 C 996.68 474.66 857.56 484.44 749 459 C 664 440 591 407 556 374 Z;M 556 374 C 653 391 783 352 864 287 C 916 242 932 195 967 184 C 1011 170 1027 205 1016 242 C 1004 293 954 326 909 352 C 1022 344 1076 322 1113 345 C 1148 372 1122 407 1080 428 C 1004 471 860 482 749 459 C 664 440 591 407 556 374 Z;M 556 374 C 653 391 780.04 353.48 856.6 292.92 C 904.16 253.84 914.24 212.76 947.76 204.72 C 988.8 192.2 1004.8 224.24 998.24 255.32 C 989.2 301.88 946.6 330.44 904.56 353.48 C 1011.64 352.88 1058.24 333.84 1090.8 355.36 C 1122.84 377.92 1102.76 412.92 1066.68 433.92 C 995.12 475.44 857.04 484.96 749 459 C 664 440 591 407 556 374 Z;M 556 374 C 653 391 781.28 352.86 859.7 290.44 C 909.12 248.88 921.68 205.32 955.82 196.04 C 998.1 182.9 1014.1 216.18 1005.68 249.74 C 995.4 298.16 949.7 328.58 906.42 352.86 C 1015.98 349.16 1065.68 328.88 1100.1 351.02 C 1133.38 375.44 1110.82 410.44 1072.26 431.44 C 998.84 473.58 858.28 483.72 749 459 C 664 440 591 407 556 374 Z;M 556 374 C 653 391 781 353 859 291 C 908 250 920 207 954 198 C 996 185 1012 218 1004 251 C 994 299 949 329 906 353 C 1015 350 1064 330 1098 352 C 1131 376 1109 411 1071 432 C 998 474 858 484 749 459 C 664 440 591 407 556 374 Z"/></path><path class="hair-stroke" d="M 570 379 C 684 393 827 359 917 330 C 939 337 953 349 961 365 C 859 429 715 445 570 379 Z" fill="#fffaf2" stroke="#3f3429" stroke-width="14"><animate class="hair-pulse" id="hairPulse2" attributeName="d" begin="indefinite" dur="520ms" fill="remove" repeatCount="1" calcMode="spline" keyTimes="0;0.14;0.37;0.60;0.78;1" keySplines="0.2 0 0.3 1;0.22 0.65 0.3 1;0.3 0 0.22 1;0.16 0.7 0.3 1;0.4 0 0.2 1" values="M 570 379 C 684 393 827 359 917 330 C 939 337 953 349 961 365 C 859 429 715 445 570 379 Z;M 570 379 C 684 393 826.34 359.44 915.24 331.1 C 936.58 338.1 950.58 350.54 958.36 366.1 C 857.68 430.1 714.56 445.66 570 379 Z;M 570 379 C 684 393 830 357 925 325 C 950 332 964 342 973 360 C 865 424 717 442 570 379 Z;M 570 379 C 684 393 825.56 359.96 913.16 332.4 C 933.72 339.4 947.72 352.36 955.24 367.4 C 856.12 431.4 714.04 446.44 570 379 Z;M 570 379 C 684 393 827.42 358.72 918.12 329.3 C 940.54 336.3 954.54 348.02 962.68 364.3 C 859.84 428.3 715.28 444.58 570 379 Z;M 570 379 C 684 393 827 359 917 330 C 939 337 953 349 961 365 C 859 429 715 445 570 379 Z"/></path></g>
+            <g id="faceFeatures" class="face-features"><path class="face-eye" d="M 413 532 C 438 532 446 554 438 582 C 432 605 411 620 394 608 C 378 598 381 573 387 554 C 392 540 402 532 413 532 Z" fill="#3f3429" stroke="none" stroke-width="0"/><path class="face-eye" d="M 788 609 C 810 609 820 631 815 655 C 811 681 795 696 777 689 C 759 683 758 661 763 640 C 768 620 777 609 788 609 Z" fill="#3f3429" stroke="none" stroke-width="0"/><path id="mouthPath" class="face-mouth" d="M 495 676 C 527 726 587 748 648 709" fill="none" stroke="#3f3429" stroke-width="38"/></g>
+          </g>
+          <g id="handsLayer" class="hands-layer">
+            <g id="hourHand"><path class="hand-hour" d="M625 674 L625 493"/></g>
+            <g id="minuteHand"><path class="hand-minute" d="M625 685 L625 401"/></g>
+            <g id="secondHand"><path class="hand-second" d="M625 720 L625 359"/></g>
+            <circle class="pivot-ring" cx="625" cy="650" r="13"/>
+          </g>
+        </svg>
+        <button type="button" id="faceClick" class="face-hit" aria-label="点击脸部，切换时钟、开心、悲伤状态"></button>
+        <div id="marks" class="marks" aria-label="十二个时间化思维刻度"></div>
+      </div>
+      <div class="clock-caption">
+        <div><div id="clockReading" class="reading" aria-live="off">--:--:--</div><div id="clockDate" class="date">本地时间</div></div>
+        <div class="caption-right"><span class="little-live"></span>正在走时<br>点击脸部切换形态</div>
+      </div>
+    </section>
+    <aside class="side" aria-label="时间化思维说明">
+      <div class="side-head"><strong>时间化思维</strong><span id="posCount" class="pos-count">12 / 12</span></div>
+      <div class="concept-main"><div id="conceptEn" class="concept-en">PRESENT · 12</div><h2 id="conceptName" class="concept-name">现在</h2><p id="conceptDesc" class="concept-desc"></p><div id="conceptRule" class="concept-rule"></div></div>
+      <div class="mode-head">DISPLAY / 点击大脸亦可循环切换</div>
+      <div class="mode-switch" role="group" aria-label="显示模式">
+        <button type="button" class="mode" data-mode="clock" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M12 4v8l4 3"/><circle cx="12" cy="12" r="9"/></svg>指针</button>
+        <button type="button" class="mode" data-mode="happy" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14c2.5 3 5.5 3 8 0M8.5 9h.1M15.5 9h.1"/></svg>开心</button>
+        <button type="button" class="mode" data-mode="sad" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 17c2-3 6-3 8 0M8.5 9h.1M15.5 9h.1"/></svg>悲伤</button>
+      </div>
+      <div class="concept-foot">十二个刻度名称为可替换的时间视角草案。选中刻度只切换概念说明，不改变实际时间，也不推断用户的情绪。</div>
+    </aside>
+  </main>
+  <footer class="footer"><p>动画规则：脸型、眼睛和蓝色顶部保留原始 SVG 路径。三条发丝每秒短暂弯曲并恢复，三种状态均生效。指针只在本秒、本分钟或本小时跨界时跳到下一格，短暂停留后迅速跃迁，不执行状态切换转圈。</p><span>INK &amp; MEMORY / UI v3</span></footer>
+</div>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const iconPaths={
+  now:'<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/>',
+  name:'<path d="M5 18V7.5L11 4h8v12.5L13 20H5v-2Z"/><path d="M9 9h7M9 13h5"/>',
+  difference:'<circle cx="12" cy="12" r="8"/><path d="M12 4v16M12 12h8"/>',
+  future:'<path d="M4 12h13m-5-5 5 5-5 5"/><circle cx="20" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  purpose:'<circle cx="11" cy="13" r="7"/><circle cx="11" cy="13" r="2.5"/><path d="m14.5 9.5 6-6m-4.5 0h4.5v4.5"/>',
+  action:'<path d="M3 16h5l4-5h8M15 6l5 5-5 5"/><path d="M3 8h6"/>',
+  event:'<path d="M12 2v5m0 10v5M2 12h5m10 0h5M5 5l3.5 3.5M15.5 15.5 19 19M19 5l-3.5 3.5M8.5 15.5 5 19"/><circle cx="12" cy="12" r="2"/>',
+  record:'<path d="M5 4h14v16H5zM9 8h6M9 12h7M9 16h4"/>',
+  return:'<path d="M7 7H3v5m1-1a8 8 0 1 1 2.5 8.2"/><path d="M3 7l5 5"/>',
+  repeat:'<path d="M4 8a8 8 0 0 1 14-3m0-3v4h-4M20 16a8 8 0 0 1-14 3m0 3v-4h4"/>',
+  wait:'<path d="M6 3h12M6 21h12M7 3v3c0 3 5 3.5 5 6s-5 3-5 6v3M17 3v3c0 3-5 3.5-5 6s5 3 5 6v3"/>',
+  limit:'<path d="M5 3v18M19 3v18M8 12h8M13 9l3 3-3 3"/>'
+};
+const concepts=[
+ {hour:12,key:'now',name:'现在',english:'PRESENT',text:'以此刻作为观察截面：区分正在发生的事件，与对事件的解释。',rule:'时间是观察条件；此刻不是可以永久保存的对象。'},
+ {hour:1,key:'name',name:'命名',english:'NAMING',text:'当经历被命名，它才成为可以被记述、比较和交流的材料。',rule:'词语是一种规定，并不自动等于被命名的对象。'},
+ {hour:2,key:'difference',name:'区分',english:'DISTINCTION',text:'通过此与彼、过去与现在等区分，建立描述变化的条件。',rule:'每一种区分都应说明其依据和适用范围。'},
+ {hour:3,key:'future',name:'预期',english:'EXPECTATION',text:'从现在指向尚未发生之事，让期待保持可修正的形式。',rule:'预期可以被证伪，不等于对未来的事实陈述。'},
+ {hour:4,key:'purpose',name:'目的',english:'PURPOSE',text:'以预想的结果选择当下的行动，并给行动设置终止条件。',rule:'目的与现实结果需要分别记录。'},
+ {hour:5,key:'action',name:'实践',english:'ACTION',text:'让概念的指向进入具体活动，由结果与反馈修正原有判断。',rule:'想要完成与已经完成，是两种时间位置。'},
+ {hour:6,key:'event',name:'事件',english:'EVENT',text:'标记变化发生的时点，形成可以回溯的现实记录。',rule:'先陈述事件，再添加解释。'},
+ {hour:7,key:'record',name:'经验',english:'EXPERIENCE',text:'过去的事件留下记录；经验在反复阅读中被重新组织。',rule:'叙述不会等于过去的全部事实。'},
+ {hour:8,key:'return',name:'回溯',english:'RETROSPECTION',text:'从新的现在返回旧的记忆，观察解释如何在时间中变化。',rule:'区分过去发生了什么，与如今如何理解它。'},
+ {hour:9,key:'repeat',name:'重复',english:'REPETITION',text:'观察不同时点的相似模式，识别相同形式中的具体差异。',rule:'重复是比较结果，不是事件必然相同的证明。'},
+ {hour:10,key:'wait',name:'等待',english:'DELAY',text:'把尚未得到的回应保留在未来，同时规定再次评估的时间。',rule:'等待需要明确期限与重新选择的可能。'},
+ {hour:11,key:'limit',name:'界限',english:'LIMIT',text:'确定某段行动、关系或叙述的结束位置，为下一次观察留出空间。',rule:'结束的是当前过程，而非主体的全部可能。'}
+];
+const order=['clock','happy','sad'];
+const names={clock:'指针',happy:'开心',sad:'悲伤'};
+const dial=$('dial'),faceBtn=$('faceClick'),marks=$('marks');
+const reading=$('clockReading'),dateLabel=$('clockDate');
+const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
+const systemDark=window.matchMedia('(prefers-color-scheme: dark)');
+let mode='clock',selected=12,lastDate='',lastHourMark=-1;
+// Theme comes from the app's semantic color tokens; the standalone demo also remembers it.
+function setTheme(value){
+ const v=['light','dark','system'].includes(value)?value:'system';
+ document.body.dataset.themeEffective=v==='system'?(systemDark.matches?'dark':'light'):v;
+ $('themeSelect').value=v;
+ try{localStorage.setItem('kastention-demo-theme-v42',v)}catch(_){ }
+}
+let savedTheme='system';try{savedTheme=localStorage.getItem('kastention-demo-theme-v42')||'system'}catch(_){ }
+setTheme(savedTheme);
+$('themeSelect').addEventListener('change',e=>setTheme(e.target.value));
+systemDark.addEventListener?.('change',()=>{if($('themeSelect').value==='system')setTheme('system')});
+
+function icon(key){return `<svg viewBox="0 0 24 24" aria-hidden="true">${iconPaths[key]}</svg>`}
+function selectPosition(hour){
+ selected=hour;
+ const c=concepts.find(c=>c.hour===hour);
+ $('posCount').textContent=`${String(hour).padStart(2,'0')} / 12`;
+ $('conceptEn').textContent=`${c.english} · ${String(hour).padStart(2,'0')}`;
+ $('conceptName').textContent=c.name;
+ $('conceptDesc').textContent=c.text;
+ $('conceptRule').textContent=c.rule;
+ marks.querySelectorAll('.mark').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.hour)===hour)));
+ // Concept selection never moves the clock hands or changes the face mode.
+}
+for(const c of concepts){
+ const angle=((c.hour%12)*30-90)*Math.PI/180;
+ const radius=1/Math.sqrt((Math.cos(angle)/342)**2+(Math.sin(angle)/291)**2);
+ const x=625+radius*Math.cos(angle),y=651+radius*Math.sin(angle);
+ const button=document.createElement('button');
+ button.type='button';button.className='mark';button.dataset.hour=c.hour;
+ button.style.left=`${100*x/1254}%`;button.style.top=`${100*y/1254}%`;
+ button.innerHTML=`<span class="mark-core">${icon(c.key)}</span>`;
+ button.setAttribute('aria-label',`${c.hour}点，${c.name}`);button.setAttribute('aria-pressed','false');
+ button.addEventListener('click',()=>selectPosition(c.hour));marks.appendChild(button);
+}
+
+// 3 original SVG cubic-Bezier hair segments, animated by SMIL in the browser.
+// Each animate has six precomputed path states; JS only invokes beginElement once per second.
+const hairAnimations=[$('hairPulse0'),$('hairPulse1'),$('hairPulse2')];
+function tickHair(){
+ if(document.hidden || reduced.matches)return;
+ for(const animation of hairAnimations)animation.beginElement?.();
+}
+reduced.addEventListener?.('change',()=>{
+ if(reduced.matches)for(const a of hairAnimations)a.endElement?.();
+});
+
+// Only three hands; use SVG animateTransform rather than requestAnimationFrame.
+// Every interval is a mechanical jump: dwell -> small anticipation -> quick 6°/30° step -> settle.
+const NS='http://www.w3.org/2000/svg';
+const params={
+ second:{node:$('secondHand'),duration:240,step:6},
+ minute:{node:$('minuteHand'),duration:300,step:6},
+ hour:{node:$('hourHand'),duration:355,step:30}
+};
+for(const [key,p] of Object.entries(params)){
+ const animation=document.createElementNS(NS,'animateTransform');
+ animation.setAttribute('attributeName','transform');
+ animation.setAttribute('type','rotate');
+ animation.setAttribute('begin','indefinite');
+ animation.setAttribute('dur',`${p.duration}ms`);
+ animation.setAttribute('fill','remove');
+ animation.setAttribute('additive','replace');
+ animation.setAttribute('calcMode','spline');
+ animation.setAttribute('keyTimes','0;0.30;0.51;0.69;0.81;1');
+ animation.setAttribute('keySplines','0 0 1 1;0.7 0 1 1;0.55 0 0.8 1;0.2 0 0.45 1;0.3 0 0.6 1');
+ animation.id=`${key}Jump`;
+ p.node.appendChild(animation);p.animation=animation;
+}
+function rotation(deg){return `${deg} 625 650`}
+function angles(now){return {
+  second:now.getSeconds()*6,
+  minute:now.getMinutes()*6,
+  hour:(now.getHours()%12)*30
+}}
+function setHand(key,deg){params[key].node.setAttribute('transform',`rotate(${rotation(deg)})`)}
+function snapHands(now){for(const [key,angle] of Object.entries(angles(now)))setHand(key,angle)}
+function jumpHand(key,startAngle,endAngle){
+ const p=params[key];
+ const dist=endAngle-startAngle; // 6° second/minute, 30° hour; no multiple turns.
+ if(reduced.matches || !p.animation.beginElement){setHand(key,((endAngle%360)+360)%360);return}
+ // Use normalized angle after the native animation; 360° and 0° are visually identical.
+ setHand(key,((endAngle%360)+360)%360);
+ const at=[0,0,0.075,1.065,0.985,1].map(frac=>startAngle+frac*dist);
+ p.animation.setAttribute('values',at.map(rotation).join(';'));
+ p.animation.beginElement();
+}
+
+// Mouth only: morph the original mouth Bézier path, keeping facial outline and eye paths intact.
+const mouth=$('mouthPath');
+const HAPPY='M 495 676 C 527 726 587 748 648 709';
+const SAD='M 495 746 C 528 680 590 684 648 737';
+const mouthMorph=document.createElementNS(NS,'animate');
+mouthMorph.id='mouthMorph';mouthMorph.setAttribute('attributeName','d');
+mouthMorph.setAttribute('begin','indefinite');mouthMorph.setAttribute('dur','290ms');
+mouthMorph.setAttribute('fill','remove');mouthMorph.setAttribute('calcMode','spline');
+mouthMorph.setAttribute('keyTimes','0;1');mouthMorph.setAttribute('keySplines','0.25 0 0.25 1');
+mouth.appendChild(mouthMorph);
+let mouthShape=HAPPY;
+function setMode(next){
+ if(!order.includes(next)||next===mode)return;
+ const nextShape=next==='sad'?SAD:HAPPY;
+ dial.dataset.mode=next;
+ mode=next;
+ document.querySelectorAll('.mode').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===next)));
+ faceBtn.setAttribute('aria-label',`当前${names[next]}模式，点击切换至${names[order[(order.indexOf(next)+1)%3]]}模式`);
+ if(mouthShape!==nextShape){
+  mouth.setAttribute('d',nextShape);
+  if(!reduced.matches && mouthMorph.beginElement){
+   mouthMorph.setAttribute('values',`${mouthShape};${nextShape}`);
+   mouthMorph.beginElement();
+  }
+  mouthShape=nextShape;
+ }
+ // A mode change NEVER triggers a hand jump or a rotation cycle.
+}
+
+function showTime(now){
+ const z=n=>String(n).padStart(2,'0');
+ reading.textContent=`${z(now.getHours())}:${z(now.getMinutes())}:${z(now.getSeconds())}`;
+ const day=now.toDateString();
+ if(day!==lastDate){dateLabel.textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now);lastDate=day}
+ const h=now.getHours()%12||12;
+ if(h!==lastHourMark){marks.querySelectorAll('.mark').forEach(b=>b.classList.toggle('is-hour',Number(b.dataset.hour)===h));lastHourMark=h}
+}
+let previousSecond=null,timer=0;
+function tickClock(first=false){
+ const now=new Date();const epochSec=Math.floor(now.getTime()/1000);
+ if(previousSecond===epochSec)return;
+ const before=previousSecond===null?null:new Date(previousSecond*1000);
+ const isConsecutive=before && epochSec-previousSecond===1;
+ showTime(now);
+ if(isConsecutive){
+  const prev=angles(before),current=angles(now);
+  // One second advances by exactly one tick; the selected concept cannot change this.
+  jumpHand('second',prev.second,current.second+(current.second<prev.second?360:0));
+  if(now.getMinutes()!==before.getMinutes())jumpHand('minute',prev.minute,current.minute+(current.minute<prev.minute?360:0));
+  if(now.getHours()!==before.getHours())jumpHand('hour',prev.hour,current.hour+(current.hour<prev.hour?360:0));
+  tickHair();
+ }else{
+  // After a suspended tab or device-clock correction, resume at the actual current time.
+  // Do not run through missed seconds or rotate any hand through whole turns.
+  for(const p of Object.values(params))p.animation.endElement?.();
+  snapHands(now);
+ }
+ previousSecond=epochSec;
+}
+function schedule(){
+ clearTimeout(timer);if(document.hidden)return;
+ // One timer per whole second, not a constant frame loop. The offset handles timer rounding.
+ const delay=1000-(Date.now()%1000)+4;
+ timer=setTimeout(()=>{tickClock();schedule()},delay);
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden){clearTimeout(timer);}
+ else{tickClock(true);schedule();}
+});
+faceBtn.addEventListener('click',()=>setMode(order[(order.indexOf(mode)+1)%3]));
+document.querySelectorAll('.mode').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+selectPosition(12);tickClock(true);schedule();
+// Minimal observability for prototyping and UI tests, no simulation loop or user-facing controls.
+window.__kastentionClockQA={tickClock,angles,jumpHand};
+})();
+</script>
+</body>
+</html>

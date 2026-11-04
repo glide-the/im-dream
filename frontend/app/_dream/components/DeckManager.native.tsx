@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: include the selected Deck or Agent name in the existing destructive confirmation.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Input] App-owned Deck catalog, original CRUD/defaults, native HTTP and Chat draft callback.
 // [Output] Native launcher, Settings/Work inventory and original maintenance workflows.
@@ -63,8 +64,8 @@ export default function DeckManager({decks,active,loading,error,onRefresh,onSess
   const voiceOwner=(id:string)=>{const deck=catalog.find(item=>item.voices?.some(voice=>voice.id===id));if(!deck)throw new Error(t('deck.messages.updateAgentFailed'));owned(deck.id);return deck;};
   const saveVoice=(id:string,data:Partial<Voice>)=>{const deck=voiceOwner(id);return mutate(deck.id,()=>updateVoice(id,data,read));};
   const addVoice=async(id:string)=>{owned(id);setCreatingVoice(id);try{await mutate(id,async()=>{const result=await createVoice({deck_id:id,name:'New Voice',system_prompt:'You are a helpful assistant.',icon:'brain',color:'blue'},read);setSelected(current=>({...current,[id]:result.voice_id}));});}finally{if(mounted.current)setCreatingVoice(null);}};
-  const removeVoice=async(id:string)=>{const deck=voiceOwner(id);if(await confirmMutation(t('deck.confirm.deleteAgent')))await mutate(deck.id,()=>deleteVoice(id,read));};
-  const removeDeck=async(id:string)=>{owned(id);if(await confirmMutation(t('deck.confirm.delete')))await mutate(id,async()=>{await deleteDeck(id,read);if(editorId===id)setEditorId(null);});};
+  const removeVoice=async(id:string)=>{const deck=voiceOwner(id),voice=deck.voices?.find(item=>item.id===id);if(await confirmMutation([voice?.name?.trim(),t('deck.confirm.deleteAgent')].filter(Boolean).join('\n\n')))await mutate(deck.id,()=>deleteVoice(id,read));};
+  const removeDeck=async(id:string)=>{const deck=owned(id);if(await confirmMutation(`${deck.name}\n\n${t('deck.confirm.delete')}`))await mutate(id,async()=>{await deleteDeck(id,read);if(editorId===id)setEditorId(null);});};
   const sync=async(id:string)=>{owned(id);if(await confirmMutation(t('deck.confirm.sync')))await mutate(id,()=>syncDeck(id,read));};
   const closeRelated=()=>{relatedGeneration.current++;relatedController.current?.abort();setRelated(null);setThreads([]);setRelatedError('');setDeletingThread(null);setRelatedLoading(false);};
   const loadRelated=async(deck:Deck,offset=0)=>{

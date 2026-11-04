@@ -1,0 +1,613 @@
+{
+  "task": "UI规范文档重整",
+  "date": "2026-11-02",
+  "scope": "文档与出版产物",
+  "pdf_sha256": "8cb2a5fd0fae20c1704999ee8ba2751f5789f32ec04b6430ababf0cc8acb616c",
+  "visual_review": {
+    "pages_reviewed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "contact_sheets_reviewed": true,
+    "detail_pages": [
+      4,
+      11,
+      16,
+      17,
+      18,
+      19
+    ],
+    "result": "图文边界、字体、表格、页码和章节布局检查通过"
+  },
+  "reports": {
+    "markdown-validation.json": {
+      "checkedDocuments": [
+        "docs/prd/mobile-app/ui-guidelines/README.md",
+        "docs/design/multi-platform/ui-guidelines-interaction.md",
+        "docs/exec/ui-guidelines-review-20261102.md"
+      ],
+      "relativeLinks": 65,
+      "externalLinksSkipped": 6,
+      "relativeTargetsChecked": 59,
+      "imageLinks": 17,
+      "forbiddenTerms": [
+        "不是",
+        "可是",
+        "但是",
+        "也是",
+        "可信",
+        "不可信",
+        "物化"
+      ],
+      "problems": [],
+      "pass": true
+    },
+    "mermaid-validation.json": {
+      "document": "docs/design/multi-platform/ui-guidelines-interaction.md",
+      "blockCount": 6,
+      "browserVersion": "156.0.8078.74",
+      "chromeExecutable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "localUrl": "http://127.0.0.1:56621/",
+      "results": [
+        {
+          "index": 1,
+          "status": "rendered",
+          "width": 1390,
+          "height": 814.921875,
+          "bboxWidth": 1613.5,
+          "bboxHeight": 1034.0531005859375,
+          "visible": true
+        },
+        {
+          "index": 2,
+          "status": "rendered",
+          "width": 1029,
+          "height": 965,
+          "bboxWidth": 872,
+          "bboxHeight": 961,
+          "visible": true
+        },
+        {
+          "index": 3,
+          "status": "rendered",
+          "width": 640.8125,
+          "height": 650.125,
+          "bboxWidth": 624.8226318359375,
+          "bboxHeight": 634.1499633789062,
+          "visible": true
+        },
+        {
+          "index": 4,
+          "status": "rendered",
+          "width": 1390,
+          "height": 967.84375,
+          "bboxWidth": 1407,
+          "bboxHeight": 1084.50146484375,
+          "visible": true
+        },
+        {
+          "index": 5,
+          "status": "rendered",
+          "width": 1206,
+          "height": 894,
+          "bboxWidth": 1051,
+          "bboxHeight": 890,
+          "visible": true
+        },
+        {
+          "index": 6,
+          "status": "rendered",
+          "width": 775.421875,
+          "height": 575.984375,
+          "bboxWidth": 759.4241943359375,
+          "bboxHeight": 560,
+          "visible": true
+        }
+      ],
+      "consoleErrors": [],
+      "screenshots": [
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-01.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-02.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-03.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-04.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-05.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-06.png"
+      ],
+      "pass": true
+    },
+    "mermaid-validation-first-failure.json": {
+      "document": "docs/design/multi-platform/ui-guidelines-interaction.md",
+      "blockCount": 6,
+      "browserVersion": "156.0.8078.74",
+      "chromeExecutable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "localUrl": "http://127.0.0.1:56055/",
+      "results": [
+        {
+          "index": 1,
+          "status": "error",
+          "error": "Error: Parse error on line 12:\n...没有Thread    Chat->>Create: 原上下文创建    C\n----------------------^\nExpecting '+', '-', '()', 'ACTOR', got 'create'"
+        },
+        {
+          "index": 2,
+          "status": "rendered",
+          "width": 1029,
+          "height": 965,
+          "bboxWidth": 872,
+          "bboxHeight": 961,
+          "visible": true
+        },
+        {
+          "index": 3,
+          "status": "rendered",
+          "width": 640.8125,
+          "height": 650.125,
+          "bboxWidth": 624.8226318359375,
+          "bboxHeight": 634.1499633789062,
+          "visible": true
+        },
+        {
+          "index": 4,
+          "status": "rendered",
+          "width": 1390,
+          "height": 933.953125,
+          "bboxWidth": 1303,
+          "bboxHeight": 976.4281616210938,
+          "visible": true
+        },
+        {
+          "index": 5,
+          "status": "rendered",
+          "width": 1206,
+          "height": 894,
+          "bboxWidth": 1051,
+          "bboxHeight": 890,
+          "visible": true
+        },
+        {
+          "index": 6,
+          "status": "rendered",
+          "width": 659.421875,
+          "height": 575.984375,
+          "bboxWidth": 643.4241943359375,
+          "bboxHeight": 560,
+          "visible": true
+        }
+      ],
+      "consoleErrors": [],
+      "screenshots": [
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-01.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-02.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-03.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-04.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-05.png",
+        "/Users/dmeck/project/ink-dream-memory/tmp/pdfs/ink-ui-20261102/validation/mermaid-06.png"
+      ],
+      "pass": false
+    },
+    "pdf-validation.json": {
+      "pdf": "/Users/dmeck/project/ink-dream-memory/output/pdf/Ink-Memory-App-UI-Guidelines-v3.pdf",
+      "pdfinfoPages": 19,
+      "pageMarkers": [
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19"
+      ],
+      "pageMarkersComplete": true,
+      "fontRows": [
+        {
+          "name": "Helvetica",
+          "type": "Type 1",
+          "encoding": "WinAnsi",
+          "embedded": "no",
+          "subset": "no",
+          "unicode": "no"
+        },
+        {
+          "name": "AAAAAA+ArialUnicodeMS",
+          "type": "TrueType",
+          "encoding": "WinAnsi",
+          "embedded": "yes",
+          "subset": "yes",
+          "unicode": "yes"
+        },
+        {
+          "name": "AAAAAB+ArialUnicodeMS",
+          "type": "TrueType",
+          "encoding": "WinAnsi",
+          "embedded": "yes",
+          "subset": "yes",
+          "unicode": "yes"
+        },
+        {
+          "name": "AAAAAC+ArialUnicodeMS",
+          "type": "TrueType",
+          "encoding": "WinAnsi",
+          "embedded": "yes",
+          "subset": "yes",
+          "unicode": "yes"
+        },
+        {
+          "name": "Times-Roman",
+          "type": "Type 1",
+          "encoding": "WinAnsi",
+          "embedded": "no",
+          "subset": "no",
+          "unicode": "no"
+        },
+        {
+          "name": "AAAAAA+Xiaolai",
+          "type": "TrueType",
+          "encoding": "WinAnsi",
+          "embedded": "yes",
+          "subset": "yes",
+          "unicode": "yes"
+        }
+      ],
+      "customFonts": [
+        "AAAAAA+ArialUnicodeMS",
+        "AAAAAB+ArialUnicodeMS",
+        "AAAAAC+ArialUnicodeMS",
+        "AAAAAA+Xiaolai"
+      ],
+      "customFontsEmbedded": true,
+      "builtinFontsUnembedded": [
+        "Helvetica",
+        "Times-Roman"
+      ],
+      "textFormFeeds": 19,
+      "cjkCodepoints": 6800,
+      "missingGlyphIndicators": {
+        "replacement_character": 0,
+        "question_mark_runs": 0,
+        "tofu_square": 0
+      },
+      "basicMissingGlyphCheckPass": true,
+      "pass": true
+    },
+    "baseline-validation.json": {
+      "baseline": "/tmp/ink-ui-guidelines-20261102-baseline.json",
+      "baselineEntries": 1775,
+      "changedEntries": 1,
+      "missingEntries": 0,
+      "changed": [
+        {
+          "path": "frontend/ios/.folder.md",
+          "expected": "88249e954f75a038c1996b3f185afece2a7fd165722553e90f016cb76019547f",
+          "actual": "4eff0ac2c52c3a903d34ea939eeb3bc4afc1521af16da3990857c790f0be34af"
+        }
+      ],
+      "missing": [],
+      "applicationSourceChanged": [],
+      "otherChangedEntries": [
+        {
+          "path": "frontend/ios/.folder.md",
+          "expected": "88249e954f75a038c1996b3f185afece2a7fd165722553e90f016cb76019547f",
+          "actual": "4eff0ac2c52c3a903d34ea939eeb3bc4afc1521af16da3990857c790f0be34af"
+        }
+      ],
+      "oldPdfChanged": [],
+      "applicationSourceUnchanged": true,
+      "oldPdfUnchanged": true,
+      "pass": true
+    },
+    "index-added-links.json": {
+      "files": [
+        "docs/prd/.folder.md",
+        "docs/prd/mobile-app/.folder.md",
+        "docs/design/multi-platform/.folder.md",
+        "docs/design/multi-platform/README.md",
+        "docs/prd/color_system/README.md",
+        "docs/exec/.folder.md"
+      ],
+      "addedRelativeLinksChecked": 4,
+      "problems": [],
+      "pass": true
+    },
+    "color-validation.json": {
+      "css": "frontend/app/_dream/styles/tokens.css",
+      "cssGroupCounts": {
+        "root": 40,
+        "dark": 40,
+        "system-dark": 40
+      },
+      "documentCounts": {
+        "light": 40,
+        "darkDeclarationAndSystem": 40
+      },
+      "comparisonCount": 120,
+      "mismatches": [],
+      "historyHashes": [
+        {
+          "history": "docs/prd/color_system/history/light-theme-before-ui-guidelines-20261102.md",
+          "source": "docs/prd/color_system/light-theme.md",
+          "expected": "7b37688435359b44a4e2b0980583db9ccd96f8b12ac29aa4c948d91216147dea",
+          "actual": "7b37688435359b44a4e2b0980583db9ccd96f8b12ac29aa4c948d91216147dea",
+          "match": true
+        },
+        {
+          "history": "docs/prd/color_system/history/dark-theme-before-ui-guidelines-20261102.md",
+          "source": "docs/prd/color_system/dark-theme.md",
+          "expected": "4f676e27485f44c8a3dffe3165116829e07ee067466ae1a87d5f4241bde13bf9",
+          "actual": "4f676e27485f44c8a3dffe3165116829e07ee067466ae1a87d5f4241bde13bf9",
+          "match": true
+        }
+      ],
+      "newDocumentPathChecks": {
+        "documents": [
+          "docs/prd/color_system/light-theme.md",
+          "docs/prd/color_system/dark-theme.md",
+          "docs/prd/color_system/history/.folder.md"
+        ],
+        "relativeLinksChecked": 10,
+        "problems": []
+      },
+      "forbiddenTermsChecked": [
+        "不是",
+        "可是",
+        "但是",
+        "也是",
+        "可信",
+        "不可信",
+        "物化"
+      ],
+      "historyForbiddenTermsSkipped": true,
+      "pass": true
+    },
+    "layout.json": {
+      "pages": 19,
+      "figures": 17,
+      "font": "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+      "source_sha256": "872d5101896fbfb82983c446f3f39dc971475eaac006f45bf668c7bf0624f9a3",
+      "pdf_sha256": "8cb2a5fd0fae20c1704999ee8ba2751f5789f32ec04b6430ababf0cc8acb616c",
+      "layout": [
+        {
+          "page": 1,
+          "section": "cover",
+          "content_bottom_pt": 252.71,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 2,
+          "section": "guide",
+          "content_bottom_pt": 327.29,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 3,
+          "section": "principles",
+          "content_bottom_pt": 203.0,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 4,
+          "section": "color",
+          "content_bottom_pt": 155.24,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 5,
+          "section": "typography",
+          "content_bottom_pt": 194.71,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 6,
+          "section": "layout",
+          "content_bottom_pt": 187.72,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 7,
+          "section": "geometry",
+          "content_bottom_pt": 208.21,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 8,
+          "section": "controls",
+          "content_bottom_pt": 175.48,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 9,
+          "section": "feedback",
+          "content_bottom_pt": 186.15,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 10,
+          "section": "overlays",
+          "content_bottom_pt": 198.36,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 11,
+          "section": "chat",
+          "content_bottom_pt": 145.11,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 12,
+          "section": "writing",
+          "content_bottom_pt": 145.11,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 13,
+          "section": "reflections",
+          "content_bottom_pt": 127.91,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 14,
+          "section": "more",
+          "content_bottom_pt": 127.91,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 15,
+          "section": "states",
+          "content_bottom_pt": 232.32,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 16,
+          "section": "accessibility",
+          "content_bottom_pt": 146.32,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 17,
+          "section": "glossary-a",
+          "content_bottom_pt": 159.87,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 18,
+          "section": "glossary-b",
+          "content_bottom_pt": 126.74,
+          "safe_bottom_pt": 56
+        },
+        {
+          "page": 19,
+          "section": "sources",
+          "content_bottom_pt": 269.49,
+          "safe_bottom_pt": 56
+        }
+      ],
+      "overflow": []
+    }
+  },
+  "cleanup": "验证Chrome与自有HTTP服务已退出；原始脚本、JSON和截图已归档到验证附件包；本轮临时预览与基线临时文件已清理。",
+  "publication_correction": {
+    "date": "2026-11-02",
+    "scope": "规范正文聚焦Ink & Memory规则与版本沿革，源文件包和PDF同步更新。",
+    "pages": 19,
+    "figures": 17,
+    "layout_overflow": [],
+    "validation": {
+      "checkedMarkdownDocuments": [
+        "docs/prd/mobile-app/ui-guidelines/.folder.md",
+        "docs/prd/mobile-app/ui-guidelines/README.md",
+        "docs/prd/mobile-app/ui-guidelines/assets/.folder.md",
+        "docs/design/multi-platform/ui-guidelines-interaction.md",
+        "docs/exec/ui-guidelines-review-20261102.md"
+      ],
+      "markdownLocalLinksChecked": 61,
+      "markdownLinkProblems": [],
+      "summaryJson": {
+        "path": "docs/exec/ui-guidelines-validation-20261102.json",
+        "validJson": true,
+        "forbiddenNameOccurrences": []
+      },
+      "markdownForbiddenNameOccurrences": [],
+      "pdf": {
+        "path": "output/pdf/Ink-Memory-App-UI-Guidelines-v3.pdf",
+        "sha256": "8cb2a5fd0fae20c1704999ee8ba2751f5789f32ec04b6430ababf0cc8acb616c",
+        "sha256Match": true,
+        "pages": 19,
+        "pageMarkers": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19"
+        ],
+        "pageMarkersComplete": true,
+        "forbiddenNameOccurrences": []
+      },
+      "layout": {
+        "pages": 19,
+        "figures": 17,
+        "overflow": []
+      },
+      "zips": [
+        {
+          "path": "output/pdf/Ink-Memory-UI-v3-Editable-Sources.zip",
+          "memberCount": 33,
+          "expectedMemberCount": 33,
+          "memberCountMatch": true,
+          "testzip": null,
+          "utf8FilenameErrors": [],
+          "textMemberDecodeErrors": [],
+          "forbiddenNameOccurrences": [],
+          "pass": true
+        },
+        {
+          "path": "output/pdf/Ink-Memory-UI-v3-Validation.zip",
+          "memberCount": 23,
+          "expectedMemberCount": 23,
+          "memberCountMatch": true,
+          "testzip": null,
+          "utf8FilenameErrors": [],
+          "textMemberDecodeErrors": [],
+          "forbiddenNameOccurrences": [],
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    "validation_command": "python3 tmp/pdfs/ink-ui-reference-cleanup-20261102/reference_cleanup_validate.py",
+    "exit_code": 0,
+    "visual_review": {
+      "pages": [
+        3,
+        19
+      ],
+      "result": "修订页文字、图示与排版检查通过。"
+    }
+  },
+  "publication_locations": {
+    "pdf": "docs/prd/Ink-Memory-App-UI-Guidelines-v3.pdf",
+    "editable_sources": "docs/prd/Ink-Memory-UI-v3-Editable-Sources.zip",
+    "pdf_sha256": "8cb2a5fd0fae20c1704999ee8ba2751f5789f32ec04b6430ababf0cc8acb616c",
+    "pdf_bytes_unchanged": true
+  }
+}

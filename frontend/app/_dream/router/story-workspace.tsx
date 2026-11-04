@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: retain the visited Chat subtree during authenticated route navigation.
 // [Sync] 2026-11-01: forward the Writing page return to the existing narrow More menu without route or business changes.
 // [Sync] 2026-10-15: render memory behavior through the existing Settings shell.
 // [Sync] 2026-10-27: accept typed RN navigation and exclude mobile Dream workbench presentation through the existing router.
@@ -281,6 +282,8 @@ export function StoryWorkspaceRouter({
   const [routeNotice, setRouteNotice] = useState<string | null>(null);
 
   const activeRoute: StoryWorkspaceRoute = activeMatch.route;
+  const [chatVisited,setChatVisited] = useState(activeMatch.route==='chat');
+  useEffect(()=>{if(activeRoute==='chat')setChatVisited(true);},[activeRoute]);
   const isDreamRoute = activeRoute === 'dream'
     || activeRoute === 'episode-review'
     || storyWorkspaceDreamStageForRoute(activeMatch) !== null;
@@ -475,7 +478,10 @@ export function StoryWorkspaceRouter({
           <button className="workflow-button" onClick={() => setRouteNotice(null)} type="button">知道了</button>
         </div>
       )}
-      {renderStoryWorkspaceRoute(
+      {(chatVisited || activeRoute==='chat') && <div data-testid="retained-chat-route" hidden={activeRoute!=='chat'} inert={activeRoute!=='chat'} style={{display:activeRoute==='chat'?'flex':'none',width:'100%',height:'100%',flex:1,minHeight:0,minWidth:0,overflow:'hidden'}}>
+        {workspaceContent.chat ?? <StoryWorkspaceDashboardPage title="对话" description="在右侧工作区打开对话。" />}
+      </div>}
+      {activeRoute!=='chat' && renderStoryWorkspaceRoute(
         activeMatch,
         handleOpenReview,
         resourceRefreshNonce,

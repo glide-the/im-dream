@@ -1,4 +1,8 @@
 // [Sync] 2026-11-01: verify native detail PanResponder snapping/cancel, independent scroll and task preservation.
+// [Sync] 2026-11-02: cover account-timezone aggregates, late preference reads and preserved task observation; execution pending after validation pause.
+// [Sync] 2026-11-02: cover completed-task metadata failure and recovery through the existing save retry; execution remains pending.
+// [Sync] 2026-11-02: map the reported duplicated unknown-submission error to one alert, explicit recovery and committed-task reads without a second creation.
+// [Sync] 2026-11-03: use the same source-module route bypass for controlled error fixtures and dashboard journeys; keep alert assertions intact.
 // [Input] Production Native Reflections page/API/storage adapter and original shared public DTO fixtures.
 // [Output] Provider-free UI/SSE/idempotency/config/source/history/recovery and lifecycle evidence.
 // [Pos] Explicit RNW/platform fixture; normal accounts, backend, database, CLI and models remain outside this lane.
@@ -7,11 +11,11 @@
 import {expect,test,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild} from 'vite';
 import {fileURLToPath} from 'node:url';
-import {installReflectionFixtures,TASK_ID,AGENT_ID,CONNECTOR_ID,SNAPSHOT_VERSION,contentSummary} from './fixtures/reflectionsHarness';
+import {installReflectionFixtures,TASK_ID,AGENT_ID,CONNECTOR_ID,SNAPSHOT_VERSION,contentSummary,makeTask} from './fixtures/reflectionsHarness';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const entry=String.raw`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
-import Analysis from '/app/_dream/components/AnalysisView.native.tsx';
+import Analysis,{ReflectionTaskError} from '/app/_dream/components/AnalysisView.native.tsx';
 import {createNativeReflections} from '/src/platform/reflections.native.ts';
 import {loadBrowserSession} from '/app/_dream/lib/browserSession.ts';import i18n from '/app/_dream/i18n.ts';
 import {STORAGE_KEYS} from '/app/_dream/constants/storageKeys.ts';
@@ -19,12 +23,13 @@ import '/app/_dream/styles/tokens.css';import '/app/_dream/index.css';
 const query=new URLSearchParams(location.search);await i18n.changeLanguage(query.get('lang')||'en');
 await loadBrowserSession(async()=>Response.json({user:{id:query.get('owner')||'7',email:'reflection@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'s'.repeat(43)}));
 window.__settingsFixture={uuidCalls:[]};const f=window.__nativeReflections={backs:0,timelines:0,expired:0,consumed:0,calls:[],disposed:false};
-function Harness(){const [shown,setShown]=useState(true),[mounted,setMounted]=useState(true),[draft,setDraft]=useState('Existing unsent Chat draft');const [resource]=useState(()=>createNativeReflections(query.get('owner')||'7',()=>f.expired++));
+function Harness(){const [shown,setShown]=useState(true),[mounted,setMounted]=useState(true),[draft,setDraft]=useState('Existing unsent Chat draft'),[timezone,setTimezone]=useState(query.get('timezone')||'UTC');const [resource]=useState(()=>createNativeReflections(query.get('owner')||'7',()=>f.expired++));
  if(query.has('seed')&&!sessionStorage.getItem('native-reflection-seeded')){const saved=localStorage.getItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK);if(saved)resource.storage.setItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK,saved);sessionStorage.setItem('native-reflection-seeded','true');}
  f.readNative=key=>resource.storage.getItem(key);f.writeNative=(key,value)=>resource.storage.setItem(key,value);f.dispose=()=>{resource.dispose();f.disposed=true;};
+ if(query.has('errorFixture'))return <ReflectionTaskError errors={JSON.parse(query.get('errorFixture'))}/>;
  return <div style={{height:'100dvh',display:'flex',flexDirection:'column'}}><textarea aria-label="Existing Chat draft" value={draft} onChange={event=>setDraft(event.target.value)}/>
- <div><button onClick={()=>setShown(value=>!value)}>{shown?'Hide Reflections':'Show Reflections'}</button><button onClick={()=>{f.dispose();setMounted(false);}}>Unmount Reflections</button></div>
- <div style={{flex:1,minHeight:0,display:shown?'flex':'none',flexDirection:'column'}}>{mounted?<Analysis timezone="UTC" authenticated active={shown} api={resource.api} storage={resource.storage} initialSection={query.get('section')} onSectionConsumed={()=>f.consumed++} onBack={()=>{f.backs++;setShown(false);}} onTimeline={()=>f.timelines++}/>:null}</div></div>;}
+ <div><button onClick={()=>setShown(value=>!value)}>{shown?'Hide Reflections':'Show Reflections'}</button><button onClick={()=>{f.dispose();setMounted(false);}}>Unmount Reflections</button>{query.has('changeTimezone')?<button onClick={()=>setTimezone('Asia/Shanghai')}>Use account timezone</button>:null}</div>
+ <div style={{flex:1,minHeight:0,display:shown?'flex':'none',flexDirection:'column'}}>{mounted?<Analysis timezone={timezone} authenticated active={shown} api={resource.api} storage={resource.storage} initialSection={query.get('section')} onSectionConsumed={()=>f.consumed++} onBack={()=>{f.backs++;setShown(false);}} onTimeline={()=>f.timelines++}/>:null}</div></div>;}
 createRoot(document.querySelector('#root')).render(<Harness/>);
 `;
 let server:Awaited<ReturnType<typeof createServer>>,base:string;
@@ -35,7 +40,8 @@ test.beforeAll(async()=>{
  server=await createServer({root,configFile:false,logLevel:'silent',cacheDir:'/tmp/ink-native-reflections-20261029/vite',optimizeDeps:{noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','react-native-svg','react-native-svg/lib/module/elements.web.js','i18next','react-i18next','zod']},resolve:{alias:[{find:/^react-native$/,replacement:root+'e2e/native/reflections-platform-web-boundary.ts'},{find:/^react-native-svg$/,replacement:root+'e2e/native/svg-web-boundary.tsx'}]},server:{host:'127.0.0.1',port:0,strictPort:true},plugins:[{name:'native-reflections-fixture',enforce:'pre',resolveId(id){if(id==='/reflections-entry.tsx')return '\0reflections-entry';},async load(id){return id==='\0reflections-entry'?(await transformWithEsbuild(entry,'reflections-entry.tsx',{loader:'tsx',jsx:'automatic',target:'esnext'})).code:null;},configureServer(vite){vite.middlewares.use(async(req,res,next)=>{if(req.url?.split('?')[0]!=='/native-reflections')return next();res.setHeader('Content-Type','text/html');res.end(await vite.transformIndexHtml('/native-reflections','<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body style="margin:0"><div id="root"></div><script type="module" src="/reflections-entry.tsx"></script></body></html>'));});}}]});await server.listen();const address=server.httpServer?.address();if(!address||typeof address==='string')throw Error('REFLECTIONS_FIXTURE_LISTENER');base='http://127.0.0.1:'+address.port+'/native-reflections';
 });
 test.afterAll(async()=>{await server?.close();});
-async function open(page:Page,query=''){await page.route('**/app/_dream/**',route=>route.continue());await page.setViewportSize({width:390,height:844});await page.goto(base+query);await expect(page.getByRole('heading',{name:'Reflections',exact:true})).toBeVisible();}
+async function navigate(page:Page,query=''){await page.route('**/app/_dream/**',route=>route.continue());await page.setViewportSize({width:390,height:844});await page.goto(base+query);}
+async function open(page:Page,query=''){await navigate(page,query);await expect(page.getByRole('heading',{name:'Reflections',exact:true})).toBeVisible();}
 async function configFixture(page:Page){
  const writes:{method:string;body:unknown}[]=[];
  const defaults={'WORKFLOW.md':'Original fixture workflow','MEMORY_QUERY_PROMPT.md':'Original query','MEMORY_Distiller_PROMPT.md':'Original distill','MEMORY_ANSWER_PROMPT.md':'Original answer','DEFAULT_UPDATE_MEMORY_PROMPT.md':'Original update'};
@@ -49,14 +55,171 @@ async function configFixture(page:Page){
 }
 const stateCalls=async(page:Page)=>observed.get(page)??[];
 
+for(const scenario of [
+ {name:'one failure across all sections',errors:{echoes:'Submission recovery failed.',traits:'Submission recovery failed.',patterns:'Submission recovery failed.'},message:'Submission recovery failed.'},
+ {name:'different section failures',errors:{echoes:'Submission recovery failed.',traits:'Agent unavailable.',patterns:'Submission recovery failed.'},message:'Submission recovery failed. | Agent unavailable.'},
+])test(`native task error retains ${scenario.name} in one alert`,async({page})=>{
+ const f=await installReflectionFixtures(page);
+ await navigate(page,'?errorFixture='+encodeURIComponent(JSON.stringify(scenario.errors)));
+ await expect(page.getByRole('alert')).toHaveText(scenario.message);await expect(page.getByRole('alert')).toHaveCount(1);
+ expect(f.createRequests).toEqual([]);expect(f.startRequests).toEqual([]);expect(f.errors).toEqual([]);
+});
+
+test.describe('native account timezone refresh',()=>{
+test.use({timezoneId:'UTC'});
+test('native aggregates use the account timezone when the device timezone differs',async({page})=>{
+ await page.clock.setFixedTime(new Date('2026-10-13T03:30:00Z'));
+ const f=await installReflectionFixtures(page,{seedReport:true});
+ await page.route('**/api/sessions/aggregate*',route=>route.fulfill({json:{stats:{total_days:1,total_entries:1,total_words:42},sessions:[{id:'account-date-entry',name:'A diary entry',created_at:'2026-10-12T23:30:00Z',updated_at:'2026-10-12T23:30:00Z',has_text:true,word_count:42}],timezone:'Asia/Shanghai'}}));
+ await open(page,'?timezone=Asia%2FShanghai');
+ await expect(page.getByRole('button',{name:/Open analysis created/}).first()).toBeVisible();
+ await expect.poll(async()=>(await stateCalls(page)).filter(call=>call.path.startsWith('/api/sessions/aggregate')).map(call=>new URL(call.path,'http://fixture.invalid').searchParams.get('timezone'))).toEqual(['Asia/Shanghai']);
+ await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:'A diary entry',exact:true})).toBeVisible();
+ await expect(page.getByText('2026-10-13 · 42 words',{exact:true})).toBeVisible();
+ expect(f.createRequests).toEqual([]);expect(f.startRequests).toEqual([]);expect(f.errors).toEqual([]);
+});
+
+test('native late timezone aggregate cannot replace current stats or same-day diary choices',async({page})=>{
+ await page.clock.setFixedTime(new Date('2026-10-13T03:30:00Z'));
+ const f=await installReflectionFixtures(page,{seedReport:true});
+ let releaseOld:()=>void=()=>{},oldRead=false;
+ const held=new Promise<void>(resolve=>{releaseOld=resolve;});
+ await page.route('**/api/sessions/aggregate*',async route=>{
+  const old=new URL(route.request().url()).searchParams.get('timezone')==='UTC';
+  if(old){oldRead=true;await held;}
+  await route.fulfill({json:{stats:{total_days:old?169:229,total_entries:1,total_words:42},sessions:[{id:old?'old-timezone-entry':'account-timezone-entry',name:old?'Old timezone diary':'Account timezone diary',created_at:'2026-10-12T03:00:00Z',updated_at:'2026-10-12T03:00:00Z',has_text:true,word_count:42}],timezone:old?'UTC':'Asia/Shanghai'}});
+ });
+ try{
+  await open(page,'?changeTimezone=1');await expect.poll(()=>oldRead).toBe(true);
+  await expect(page.getByRole('button',{name:/Open analysis created/}).first()).toBeVisible();
+  const historyReads=f.historyRequests.length;
+  await page.getByRole('button',{name:'Use account timezone',exact:true}).click();
+  await expect(page.getByText('229',{exact:true})).toBeVisible();
+  const oldResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/sessions/aggregate'&&new URL(response.url()).searchParams.get('timezone')==='UTC');
+  releaseOld();await (await oldResponse).finished();
+  expect(f.historyRequests).toHaveLength(historyReads);
+  await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+  await expect(page.getByRole('checkbox',{name:'Account timezone diary',exact:true})).toBeVisible();
+  await expect(page.getByRole('checkbox',{name:'Old timezone diary',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Re-analyze selected entries',exact:true}).click();
+  await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+  expect(f.createRequests).toHaveLength(1);expect(f.createRequests[0].session_ids).toEqual(['account-timezone-entry']);
+  expect(f.errors).toEqual([]);
+ }finally{releaseOld();}
+});
+
+test('native timezone refresh preserves the original running task and stream',async({page})=>{
+ const f=await installReflectionFixtures(page,{holdSse:true});
+ try{
+  await open(page,'?changeTimezone=1');await expect.poll(()=>f.historyRequests.length).toBe(1);
+  await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+  await expect.poll(()=>f.eventRequests.length).toBe(1);await expect.poll(()=>f.startRequests.length).toBe(1);
+  await page.getByRole('button',{name:'Use account timezone',exact:true}).click();
+  await expect.poll(async()=>(await stateCalls(page)).filter(call=>call.path.startsWith('/api/sessions/aggregate')).length).toBe(2);
+  expect(f.historyRequests).toHaveLength(1);expect(f.eventRequests).toEqual([TASK_ID]);expect(f.startRequests).toEqual([TASK_ID]);expect(f.createRequests).toHaveLength(1);
+  f.releaseSse?.();await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+  expect(f.createRequests).toHaveLength(1);expect(f.eventRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);
+ }finally{f.releaseSse?.();}
+});
+});
+
 test('native reports preserve saved sources, section/result reading and the existing timeline callback',async({page})=>{
  const f=await installReflectionFixtures(page,{seedReport:true,includeNotion:true});f.reports[0].report_data.analysis_content=contentSummary(true,true);f.reports[0].report_data.echoes.push({...f.reports[0].report_data.echoes[0],id:'badf6bcd-0442-4119-a5b8-b635341e2661',title:'Second insight',description:'Second complete result.'});await open(page);await expect(page.getByRole('button',{name:/Open analysis created/}).first()).toBeVisible();await page.screenshot({path:'/tmp/ink-native-reflections-20261029/native-dashboard.png'});await page.getByRole('button',{name:/Open analysis created/}).first().click();await expect(page.getByText('Diary scope · 1 entries',{exact:true})).toBeVisible();await expect(page.getByText('Analysis Agent: Reflective analyst',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Notion · Pages read: 1',exact:true}).click();await expect(page.getByRole('link',{name:'Weekly notes',exact:true})).toBeInViewport({ratio:1});await page.getByRole('tab',{name:'Recurring Themes',exact:true}).click();await page.getByRole('button',{name:'Repeated concern',exact:true}).click();await expect(page.getByText('A stable provider-free reflection result.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Previous result',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Next result',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Next result',exact:true}).click();await expect(page.getByText('Second complete result.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'/tmp/ink-native-reflections-20261029/native-report.png'});await expect(page.getByRole('button',{name:'Next result',exact:true})).toBeDisabled();await page.getByRole('button',{name:'Previous result',exact:true}).click();await expect(page.getByText('A stable provider-free reflection result.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Past Reflections',exact:false}).first().click();await expect(page.getByRole('heading',{name:'Reflections',exact:true})).toBeVisible();await page.getByRole('button',{name:'Past Reflections',exact:false}).first().click();expect(await page.evaluate(()=>(window as any).__nativeReflections.timelines)).toBe(1);expect(f.createRequests).toEqual([]);expect(f.startRequests).toEqual([]);expect(f.errors).toEqual([]);
 });
 test('native generation uses original UUID/CSRF, SSE-before-start, report retry and the retained Chat draft',async({page})=>{
  const f=await installReflectionFixtures(page,{reportSaveFailureOnce:true});await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();await expect(page.getByRole('button',{name:'Retry save',exact:true})).toBeVisible();expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([TASK_ID]);expect(f.eventRequests).toEqual([TASK_ID]);expect(f.createRequests[0].request_key).toMatch(/^[0-9a-f-]{36}$/);expect(await page.evaluate(()=>(window as any).__settingsFixture.uuidCalls)).toHaveLength(1);await page.getByRole('button',{name:'Retry save',exact:true}).click();await expect(page.getByRole('button',{name:'Retry save',exact:true})).toHaveCount(0);expect(f.reportRequests).toEqual([TASK_ID,TASK_ID]);const calls=await stateCalls(page);expect(calls.findIndex(call=>call.path.endsWith('/events'))).toBeLessThan(calls.findIndex(call=>call.path.endsWith('/start')));expect(calls.find(call=>call.path==='/api/reflections/tasks')?.headers['x-ink-csrf']).toBe('s'.repeat(43));expect(calls.every(call=>!call.headers.authorization)).toBe(true);await expect(page.getByRole('textbox',{name:'Existing Chat draft',exact:true})).toHaveValue('Existing unsent Chat draft');expect(f.errors).toEqual([]);
 });
+test('native completed-task metadata failure offers save recovery without another analysis',async({page})=>{
+ const f=await installReflectionFixtures(page,{includeNotion:true});
+ const taskPath=`/api/reflections/tasks/${TASK_ID}`;
+ let metadataReads=0;
+ f.allowHttpError(503,taskPath);
+ await page.route(`**${taskPath}`,async route=>{
+  metadataReads++;
+  // The first read delivers completed results; the next read supplies report time and sources.
+  if(metadataReads===2){await route.fulfill({status:503,json:{detail:'ADMIN_UNAVAILABLE'}});return;}
+  const task=makeTask(f);f.taskResponses.push(task);await route.fulfill({json:task});
+ });
+ await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Retry save',exact:true})).toBeVisible();
+ expect(metadataReads).toBe(2);expect(f.reportRequests).toEqual([]);
+ expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([TASK_ID]);
+ await page.getByRole('button',{name:'Retry save',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Retry save',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:/Open analysis created/}).first().click();
+ await page.getByRole('tab',{name:'Recurring Themes',exact:true}).click();
+ await page.getByRole('button',{name:'Repeated concern',exact:true}).click();
+ await expect(page.getByText('A stable provider-free reflection result.',{exact:true})).toBeVisible();
+ expect(f.reportRequests).toEqual([TASK_ID]);expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([TASK_ID]);
+ await expect(page.getByRole('textbox',{name:'Existing Chat draft',exact:true})).toHaveValue('Existing unsent Chat draft');
+ expect(f.errors).toEqual([]);
+});
 test('native unknown creation recovers the exact pending request through Settings after reload',async({page})=>{
- const f=await installReflectionFixtures(page,{creationUnknownOnce:true});await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Retry to recover');const first=f.createRequests[0];await page.reload();await expect(page.getByRole('heading',{name:'Reflections',exact:true})).toBeVisible();await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();expect(f.createRequests).toHaveLength(2);expect(f.createRequests[1]).toEqual(first);expect(f.startRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);
+ await page.clock.setFixedTime(new Date('2026-10-14T03:30:00Z'));
+ const f=await installReflectionFixtures(page,{creationUnknownOnce:true,seedReport:true});
+ await open(page);await page.getByRole('button',{name:/Open analysis created/}).first().waitFor();
+ await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ const message='The previous analysis submission has not been confirmed. Retry to recover it.';
+ await expect(page.getByRole('alert')).toHaveText(message);await expect(page.getByText(message,{exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Recover previous analysis',exact:true})).toBeVisible();
+ const first=f.createRequests[0];expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([]);
+ // A same-day report arriving before recovery must not open a new-input diary chooser.
+ f.reports[0].analysis_created_at='2026-10-14T03:00:00Z';
+ await page.reload();await expect(page.getByRole('heading',{name:'Reflections',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:/Open analysis created/}).first()).toBeVisible();
+ expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([]);
+ await page.getByRole('button',{name:'Recover previous analysis',exact:true}).click();
+ await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Today already has a Reflections analysis.',exact:true})).toHaveCount(0);
+ expect(f.createRequests).toHaveLength(2);expect(f.createRequests[1]).toEqual(first);expect(f.startRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);
+});
+test('native committed submission survives a failed task read and recovers without another POST',async({page})=>{
+ const f=await installReflectionFixtures(page,{creationUnknownOnce:true,committedTaskIdOnUnknown:true});f.taskStatus='CREATED';
+ const taskPath=`/api/reflections/tasks/${TASK_ID}`;let taskReads=0;
+ f.allowHttpError(503,taskPath);
+ await page.route(`**${taskPath}`,async route=>{
+  taskReads++;
+  if(taskReads===1){await route.fulfill({status:503,json:{detail:'ADMIN_UNAVAILABLE'}});return;}
+  const task=makeTask(f);f.taskResponses.push(task);await route.fulfill({json:task});
+ });
+ await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Recover previous analysis',exact:true})).toBeVisible();
+ expect(f.createRequests).toHaveLength(1);expect(taskReads).toBe(0);
+ await page.getByRole('button',{name:'Recover previous analysis',exact:true}).click();
+ await expect(page.getByRole('alert')).toHaveText('The previous analysis was created. Retry to read its status.');
+ expect(taskReads).toBe(1);expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([]);
+ const pending=await page.evaluate(()=>(window as any).__nativeReflections.readNative('reflections-pending-submission'));
+ expect(JSON.parse(pending).task_id).toBe(TASK_ID);
+ await page.reload();await expect(page.getByRole('button',{name:'Recover previous analysis',exact:true})).toBeVisible();
+ expect(taskReads).toBe(1);expect(f.createRequests).toHaveLength(1);
+ await page.getByRole('button',{name:'Recover previous analysis',exact:true}).click();
+ await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+ expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([TASK_ID]);expect(f.eventRequests).toEqual([TASK_ID]);
+ expect(await page.evaluate(()=>(window as any).__nativeReflections.readNative('reflections-pending-submission'))).toBeNull();
+ expect(f.errors).toEqual([]);
+});
+for(const status of ['RUNNING','COMPLETED'] as const)test(`native recovery reads the original ${status} task without starting or creating another task`,async({page})=>{
+ const f=await installReflectionFixtures(page,{creationUnknownOnce:true,committedTaskIdOnUnknown:true});
+ f.taskStatus=status;
+ await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Recover previous analysis',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Recover previous analysis',exact:true}).click();
+ await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+ expect(f.createRequests).toHaveLength(1);expect(f.startRequests).toEqual([]);expect(f.eventRequests).toEqual(status==='RUNNING'?[TASK_ID]:[]);expect(f.reportRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);
+});
+test('native definite creation failure clears pending recovery and displays its error once',async({page})=>{
+ const f=await installReflectionFixtures(page,{createError:'REFLECTION_AGENT_UNAVAILABLE'});
+ await open(page);await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect.poll(()=>f.createRequests.length).toBe(1);expect(f.startRequests).toEqual([]);
+ const message='The selected analysis Agent is unavailable. Select it again.';
+ await expect(page.getByRole('alert')).toHaveText(message);await expect(page.getByText(message,{exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Recover previous analysis',exact:true})).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).__nativeReflections.readNative('reflections-pending-submission'))).toBeNull();
+ const first=f.createRequests[0];f.createError=undefined;
+ await page.getByRole('button',{name:'Generate New Analysis',exact:true}).click();
+ await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();
+ expect(f.createRequests).toHaveLength(2);expect(f.createRequests[1].request_key).not.toBe(first.request_key);expect(f.startRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);
 });
 test('native prepared task stays idle and explicit continuation uses the original task',async({page})=>{
  const f=await installReflectionFixtures(page,{activeTaskOnLoad:true,taskStatus:'CREATED'});await open(page);await expect(page.getByRole('button',{name:'Continue unstarted analysis',exact:true})).toBeVisible();expect(f.startRequests).toEqual([]);expect(f.createRequests).toEqual([]);await page.getByRole('button',{name:'Continue unstarted analysis',exact:true}).click();await expect(page.getByRole('tab',{name:'Recurring Themes',exact:true})).toBeVisible();expect(f.createRequests).toEqual([]);expect(f.startRequests).toEqual([TASK_ID]);expect(f.errors).toEqual([]);

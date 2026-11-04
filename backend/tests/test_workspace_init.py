@@ -1,10 +1,11 @@
+# [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。
 # [Input] Isolated plugin fixtures, frozen workspace manifests and managed Python caches.
 # [Output] Profile, cache repair and original launch validation regression evidence.
 # [Pos] Workspace-init technical tests; no normal business database or model calls.
 # [Sync] 2026-10-26: verify frozen runtime root changes and copied-cache pip entry points while preserving initialization results.
 """Unit tests for workspace init profiles + managed plugin venvs.
 
-Design: docs/design/deck/drama-forge-workspace-init-design.md §4-§6.
+Design: docs/design/kastention/drama-forge-workspace-init-design.md §4-§6.
 """
 
 from __future__ import annotations

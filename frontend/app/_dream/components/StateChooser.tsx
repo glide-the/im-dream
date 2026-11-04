@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: project the existing note date without changing mood selection or saving.
 // [Input] State config, selected emotional state, session timestamp, and user_session labels.
 // [Output] Render the emotional state chooser and compact writing-session metadata line.
 // [Pos] state-chooser component in frontend/app/_dream/components
@@ -89,8 +90,9 @@ export default function StateChooser({
   const expanded = active && !selectedStateLoading && (!selectedStateData || isExpanded);
   const name = selectedStateData?.name ?? '';
   useEffect(() => {
-    latest.current.onViewChange?.({loading: selectedStateLoading, selectedStateId: selectedState, name, expanded});
-  }, [selectedStateLoading, selectedState, name, expanded]);
+    const date=createdAt?parseFlexibleTimestamp(createdAt):new Date();
+    latest.current.onViewChange?.({loading: selectedStateLoading, selectedStateId: selectedState, name, expanded,...(date?{createdAt:date.toISOString()}:{})});
+  }, [selectedStateLoading, selectedState, name, expanded,createdAt]);
 
   // @@@ Use createdAt if provided, otherwise use today
   const timestamp = createdAt ? parseFlexibleTimestamp(createdAt) : null;

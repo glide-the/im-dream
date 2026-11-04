@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 """Deck publishing and collection policy.
 
 [Input] Persisted Deck ownership, publication, parent-template, and local-change facts.
@@ -83,7 +84,7 @@ def require_publishable(deck: Mapping[str, Any]) -> None:
     if is_default_initialized_deck(deck):
         raise DeckSharingPolicyError(
             DEFAULT_INITIALIZED_DECK,
-            "System-initialized Decks cannot be published",
+            "System-initialized Kastention cannot be published",
         )
 
 
@@ -92,10 +93,10 @@ def require_collectable(deck: Mapping[str, Any], actor_id: int) -> None:
     if owner_id is not None and int(owner_id) == int(actor_id):
         raise DeckSharingPolicyError(
             SELF_COLLECTION_FORBIDDEN,
-            "You cannot collect your own published Deck",
+            "You cannot collect your own published Kastention",
         )
     if not _enabled(deck.get("is_system")) and not _enabled(deck.get("published")):
         raise DeckSharingPolicyError(
             COLLECTION_SOURCE_UNAVAILABLE,
-            "Only system or published Decks can be collected",
+            "Only system or published Kastention can be collected",
         )

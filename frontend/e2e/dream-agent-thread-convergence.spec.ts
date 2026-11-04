@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 // [Input] Deterministic canonical history/status/SSE fixtures for the shared Dream/Chat thread.
 // [Output] Independently discoverable S01-S10 browser proof for the canonical Dream/Chat
 //          transport, confirmation, subagent, Stop, failure, reconnect, and reload contracts.
@@ -1176,22 +1177,22 @@ test('S04 approve/reject/AskUser/network/reject-only stay canonical across Dream
     await expect(surface).toHaveAttribute('data-surface', 'dream');
     await expect.poll(() => streamGets).toBe(1);
 
-    let dock = page.getByRole('alertdialog', { name: /Allow I&M to call the Bash tool/ });
+    let dock = page.getByRole('alertdialog', { name: /Allow Kastention to call the Bash tool/ });
     await expect(dock).toContainText('echo approve');
     await dock.getByRole('button', { name: 'Approve' }).click();
     await expect.poll(() => confirmationRequests.length).toBe(1);
-    dock = page.getByRole('alertdialog', { name: /Allow I&M to call the Bash tool/ });
+    dock = page.getByRole('alertdialog', { name: /Allow Kastention to call the Bash tool/ });
     await expect(dock).toContainText('echo reject');
 
     await page.getByRole('button', { name: 'Show Chat' }).click();
     await expect(surface).toHaveAttribute('data-surface', 'chat');
     await expect.poll(() => streamGets).toBe(2);
     await expect.poll(() => interruptedStreams).toBe(1);
-    dock = page.getByRole('alertdialog', { name: /Allow I&M to call the Bash tool/ });
+    dock = page.getByRole('alertdialog', { name: /Allow Kastention to call the Bash tool/ });
     await expect(dock).toContainText('echo reject');
     await dock.getByRole('button', { name: 'Reject' }).click();
 
-    const askUserDock = page.getByRole('alertdialog', { name: 'I&M needs your answer' });
+    const askUserDock = page.getByRole('alertdialog', { name: 'Kastention needs your answer' });
     await expect(askUserDock).toBeVisible();
     await askUserDock.getByRole('radio', { name: 'Gentle path' }).check();
     await askUserDock.getByRole('button', { name: 'Submit' }).click();
@@ -1203,7 +1204,7 @@ test('S04 approve/reject/AskUser/network/reject-only stay canonical across Dream
     await expect.poll(() => interruptedStreams).toBe(2);
 
     const networkDock = page.getByRole('alertdialog', {
-      name: /Allow I&M to make a network request via Bash/,
+      name: /Allow Kastention to make a network request via Bash/,
     });
     await expect(networkDock).toContainText('example.test');
     await expect(networkDock).toContainText('Allowlist');

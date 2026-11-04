@@ -1,3 +1,5 @@
+// [Sync] 2026-11-03: retain saved-prose previews across Thread selection and keep runtime controls behind fresh reconciliation.
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-27: extract the unchanged landing action translation model for native reuse; DOM layout and handlers stay intact.
@@ -105,6 +107,7 @@
 //                    transport for an explicit whole-thread export.
 // [Sync] 2026-09-29: own scheduled-task marker details as a mutually exclusive right sidebar and accept Calendar task drafts.
 // [Sync] 2026-10-07: reuse the history sidebar for the priority activity bell, independent read recovery and original navigation/delete behavior.
+import { BRAND_NAME } from '../../constants/brand';
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {buildDefaultLandingQuickActions} from './chatLandingActions';
@@ -115,6 +118,9 @@ import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/Workspace
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
 import ChatPanel, { type ChatPanelHistoryPage, type ChatPanelRecoverySnapshot } from './ChatPanel';
+import ChatMessageList from './ChatMessageList';
+import {createThreadHistoryPreview,threadHistoryPreviewMessages} from './threadHistoryPreview';
+import {getBrowserCsrfToken} from '../../lib/browserSession';
 import {
   type Attachment,
   type UploadedFile,
@@ -177,6 +183,7 @@ import {
 interface ChatThread extends ClaudeThreadRecord, ChatHistoryThread {}
 
 interface ChatViewProps {
+  isVisible?: boolean;
   threadId?: string;
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
@@ -284,6 +291,7 @@ function ChatViewContent({
   activeVoice,
   landingTab,
   onLandingTabChange,
+  isVisible = true,
 }: ChatViewContentProps) {
   const { t, i18n } = useTranslation();
   const isMobile = useMobile();
@@ -355,6 +363,10 @@ function ChatViewContent({
   });
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messageHydrationError, setMessageHydrationError] = useState(false);
+  const [historyPreview] = useState(createThreadHistoryPreview);
+  const [previewMessages, setPreviewMessages] = useState<UIMessage[]>([]);
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
+  const wasVisible = useRef(isVisible);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
@@ -458,7 +470,7 @@ function ChatViewContent({
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, catalogRefresh]);
 
   // Stable route intent is re-applied only after the Deck is reloaded from the
   // authenticated API. The route never supplies or authorizes Agent type.
@@ -657,6 +669,7 @@ function ChatViewContent({
     if (requestedThreadId === activeThreadId && requestedThreadNonce === undefined) return;
     setThreadSidebarOpen(false);
     setThreadMessages(null);
+    setPreviewMessages(threadHistoryPreviewMessages(historyPreview.read(requestedThreadId)));
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
@@ -733,6 +746,7 @@ function ChatViewContent({
     const threadChanged = hydratedMessagesThreadRef.current !== activeThreadId;
     hydratedMessagesThreadRef.current = activeThreadId;
     setIsLoadingMessages(true);
+    setPreviewMessages(threadHistoryPreviewMessages(historyPreview.read(activeThreadId)));
     if (threadChanged) {
       setThreadMessages(null);
       setMessageHydrationError(false);
@@ -745,9 +759,17 @@ function ChatViewContent({
     const hydrate = async () => {
       let snapshot;
       try {
-        snapshot = await hydrateClaudeThreadSession(activeThreadId);
-      } catch {
+        const requestScope=getBrowserCsrfToken();
+        snapshot = await hydrateClaudeThreadSession(activeThreadId, fetch, {
+          previousHistory: historyPreview.read(activeThreadId),
+          onHistory: history => { if (!cancelled && requestScope===getBrowserCsrfToken()) setPreviewMessages(threadHistoryPreviewMessages(history)); },
+        });
+        if (requestScope!==getBrowserCsrfToken()){if(!cancelled)setPreviewMessages([]);throw Error('CHAT_SESSION_CHANGED');}
+        if (!cancelled)historyPreview.remember(activeThreadId,snapshot,requestScope);
+      } catch (cause) {
         if (!cancelled) {
+          historyPreview.forget(activeThreadId);
+          if (cause && typeof cause==='object' && 'httpStatus' in cause && [401,403,404].includes(Number(cause.httpStatus)))setPreviewMessages([]);
           setMessageHydrationError(true);
           retryTimer = window.setTimeout(
             () => void hydrate(),
@@ -792,7 +814,17 @@ function ChatViewContent({
       cancelled = true;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [activeThreadId, threadReloadNonce]);
+  }, [activeThreadId, threadReloadNonce, historyPreview]);
+
+  useEffect(() => {
+    const returning = isVisible && !wasVisible.current;
+    wasVisible.current = isVisible;
+    if (!isVisible) {
+      setThreadSearchOpen(false); setThreadSidebarOpen(false); setFileSidebarOpen(false);
+      setSubagentSidebarOpen(false); setScheduledTaskDetail(null); setShareDialogOpen(false); setMoreMenuOpen(false);
+    }
+    if (returning) { setCatalogRefresh(value => value + 1); void reloadThreads(); }
+  }, [isVisible, reloadThreads]);
 
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
@@ -800,8 +832,11 @@ function ChatViewContent({
   const handleReconnectComplete = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     if (!activeThreadId) return undefined;
     const requestedThreadId = activeThreadId;
+    const requestScope=getBrowserCsrfToken();
     const snapshot = await hydrateClaudeThreadSession(requestedThreadId);
+    if(requestScope!==getBrowserCsrfToken())return undefined;
     if (activeThreadIdRef.current !== requestedThreadId) return undefined;
+    historyPreview.remember(requestedThreadId,snapshot,requestScope);
     setInitialSettledToolCallIds(snapshot.settledToolCallIds);
     setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
     setInitialRuntimeRunning(snapshot.running);
@@ -824,7 +859,7 @@ function ChatViewContent({
       historyPage,
       toolConfirmationKnown,
     };
-  }, [activeThreadId]);
+  }, [activeThreadId, historyPreview]);
 
   const notifyReconnectComplete = useCallback(() => {
     return handleReconnectComplete();
@@ -948,6 +983,8 @@ function ChatViewContent({
   }, [isCreatingThread, onLandingTabChange, onNewChat, reloadThreads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
+    if (threadId === activeThreadId) { setThreadSidebarOpen(false); setThreadSearchOpen(false); return; }
+    setPreviewMessages(threadHistoryPreviewMessages(historyPreview.read(threadId)));
     // Reset messages synchronously so the incoming ChatPanel (remounted via
     // key={activeThreadId}) starts with initialMessages=undefined and doesn't
     // pick up the previous thread's messages before the fetch completes.
@@ -969,7 +1006,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
-  }, [onLandingTabChange]);
+  }, [activeThreadId, historyPreview, onLandingTabChange]);
 
   const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
     onLandingTabChange(tab);
@@ -1099,6 +1136,7 @@ function ChatViewContent({
     const ok = await deleteThread(threadId);
     setDeletingThreadId(null);
     if (!ok) return;
+    historyPreview.forget(threadId);
     deletedThreadIdsRef.current.add(threadId);
     if (threadHistoryConsumedIdsRef.current.delete(threadId)) {
       threadHistoryOffsetRef.current = Math.max(0, threadHistoryOffsetRef.current - 1);
@@ -1329,7 +1367,7 @@ function ChatViewContent({
           <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               {activeThreadId && landingTab === 'history' && threadMessages === null ? (
-                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto' }}>
+                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   {messageHydrationError ? (
                     <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
                       <p>{t('chat.historyTurn.initialLoadFailed')}</p>
@@ -1337,13 +1375,17 @@ function ChatViewContent({
                         {t('chat.historyTurn.retry')}
                       </button>
                     </div>
-                  ) : <SkeletonList rows={3} />}
+                  ) : previewMessages.length===0 ? <SkeletonList rows={3} /> : null}
+                  {previewMessages.length>0?<div aria-busy={isLoadingMessages} data-testid="chat-history-preview" style={{overflowY:'auto',flex:1,minHeight:0}}>
+                    <ChatMessageList messages={previewMessages} threadId={activeThreadId} isLoading={false} readonly addToolResult={()=>{}} historicalMessageIds={new Set(previewMessages.map(message=>message.id))}/>
+                  </div>:null}
                 </div>
               ) : activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
                   key={activeThreadId}
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
+                  readRefreshNonce={catalogRefresh}
                   isLoading={isLoadingMessages}
                   reconnectStreamNonce={chatReconnectNonceForHydratedThread(
                     initialRuntimeRunning,
@@ -1360,7 +1402,7 @@ function ChatViewContent({
                   queuedToolChoice={queuedToolChoice}
                   queuedPromptNonce={queuedPromptNonce}
                   claimQueuedPrompt={claimQueuedPrompt}
-                  inputPlaceholder="Ask Ink & Memory…"
+                  inputPlaceholder={`Ask ${BRAND_NAME}…`}
                   editorState={editorState}
                   ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
@@ -1385,6 +1427,7 @@ function ChatViewContent({
                   deckId={selectedDeckId}
                   voiceId={selectedAgentId}
                   onConversationStart={() => {
+                    historyPreview.forget(activeThreadId);
                     setHasConversationStarted(true);
                     void reloadThreads();
                   }}
@@ -1406,7 +1449,7 @@ function ChatViewContent({
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
                         }}
-                        placeholder="Ask Ink & Memory…"
+                        placeholder={`Ask ${BRAND_NAME}…`}
                         disabled={isCreatingThread || dreamLaunch.isLaunching}
                         loading={isCreatingThread || dreamLaunch.isLaunching}
                         contextControl={(

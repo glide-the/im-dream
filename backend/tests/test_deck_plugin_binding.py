@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 # [Input] Strict Admin Registry122-129 DTO operations and mocked shared-artifact verification.
 # [Output] Frozen binding/Agent-type public route projections and provider-free failure behavior.
 # [Pos] Dream public ingress contract tests; Admin owns ORM, CAS, UOW and database persistence.
@@ -446,7 +447,7 @@ class BindingRouterTests(unittest.TestCase):
             denied.json(),
             {
                 "error_code": "DECK_ACCESS_DENIED",
-                "message": "Deck not found or permission denied.",
+                "message": "Kastention not found or permission denied.",
             },
         )
 

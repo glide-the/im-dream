@@ -2,6 +2,7 @@
 // [Output] Native Reflections dashboard, saved-report reading, same-day rerun choice and original section configuration.
 // [Pos] Native presentation over useReflections; the App owns the supplied API/storage instance and backend lifecycle.
 // [Sync] 2026-10-29: preserve reachable Web flows and text history navigation; no automatic task launch or whole-page WebView.
+// [Sync] 2026-11-02: label pending recovery explicitly and render task errors once in the existing alert.
 import {useEffect,type ReactNode} from 'react';
 import {KeyboardAvoidingView,Modal,Platform,Pressable,SafeAreaView,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
 import {useTranslation} from 'react-i18next';
@@ -17,6 +18,10 @@ import ReflectionBlogPage from './ReflectionBlogPage.native';
 type Props={timezone:string;authenticated:boolean;api:ReflectionsApi;storage:ReflectionsStorage;onBack:()=>void;onTimeline:()=>void;transport?:typeof fetch;initialSection?:StoryWorkspaceAnalysisSection|null;onSectionConsumed?:()=>void;active?:boolean};
 function Action({children,onPress,disabled=false,label,primary=false}:{children:ReactNode;onPress:()=>void;disabled?:boolean;label?:string;primary?:boolean}) {
   const c=useInkColors();return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.button,{opacity:disabled?0.5:1,borderColor:c['color-border-paper'],backgroundColor:primary?c['color-action-primary']:'transparent'}]}><Text style={{color:primary?c['color-text-on-action']:c['color-text-body'],textAlign:'center'}}>{children}</Text></Pressable>;
+}
+export function ReflectionTaskError({errors}:{errors:Record<ReflectionSectionKey,string>}) {
+  const c=useInkColors(),message=[...new Set(Object.values(errors).filter(Boolean))].join(' | ');
+  return message?<Text accessibilityRole="alert" style={[s.body,{color:c['color-state-error']}]}>{message}</Text>:null;
 }
 export default function AnalysisView({timezone,authenticated,api,storage,onBack,onTimeline,transport,initialSection,onSectionConsumed,active=true}:Props) {
   const {t,i18n}=useTranslation(),c=useInkColors(),zh=i18n.language.startsWith('zh'),dateLocale=getDateLocale(i18n.language);
@@ -41,16 +46,17 @@ export default function AnalysisView({timezone,authenticated,api,storage,onBack,
           <Text style={muted}>{reportStats(report.stats)}</Text><View style={s.row}>{(['echoes','traits','patterns'] as const).filter(section=>report[section].length>0).map(section=><Text key={section} style={[s.badge,{color:c['color-text-body'],backgroundColor:c['color-bg-hover']}]}>{t(`analysis.reportCounts.${section}`,{count:report[section].length})}</Text>)}</View>
         </Pressable>)}
       </View>:null}
-      <View style={[s.group,{alignItems:'center'}]}><Action onPress={()=>void r.handleAnalyzeAll()} disabled={r.anyLoading}>{r.anyLoading?t('analysis.actions.generating'):t('analysis.actions.generate')}</Action>
+      <View style={[s.group,{alignItems:'center'}]}><Action onPress={()=>void r.handleAnalyzeAll()} disabled={r.anyLoading}>{r.anyLoading?t('analysis.actions.generating'):r.pendingSubmission?(zh?'恢复上次分析':'Recover previous analysis'):t('analysis.actions.generate')}</Action>
+        {r.pendingSubmission?<Text style={[s.body,muted]}>{zh?'恢复时使用上次提交的分析内容。':'Recovery uses the analysis content from the previous submission.'}</Text>:null}
         {!r.reanalysisDialog.open?<ReflectionAnalysisContentControls value={r.analysisContent} onChange={r.setAnalysisContent} authenticated={authenticated} api={api} transport={transport} active={active}/>:null}
-        {r.preparedTask&&!r.anyLoading?<View style={s.group}><Text style={muted}>{zh?'有一项分析尚未开始；继续时使用原分析内容。':'An analysis has not started. Continuing uses its original content.'}</Text><Action onPress={r.continuePreparedTask}>{zh?'继续未开始的分析':'Continue unstarted analysis'}</Action></View>:null}
+        {r.preparedTask&&!r.anyLoading&&!r.pendingSubmission?<View style={s.group}><Text style={muted}>{zh?'有一项分析尚未开始；继续时使用原分析内容。':'An analysis has not started. Continuing uses its original content.'}</Text><Action onPress={r.continuePreparedTask}>{zh?'继续未开始的分析':'Continue unstarted analysis'}</Action></View>:null}
         {r.taskStatus?<View accessibilityLiveRegion="polite" style={[s.report,{borderColor:c['color-border-paper'],backgroundColor:c['color-bg-paper']}]}><Text style={muted}>Live editorial analysis</Text><Text style={[s.heading,text]}>{r.taskStatus}</Text></View>:null}
       </View>
       {authenticated||r.anyLoading||r.anyError?<View style={s.group}>{(['echoes','traits','patterns'] as const).map(section=><View key={section} style={s.group}>
         <View style={[s.row,{justifyContent:'center'}]}><Text style={muted}>{section==='echoes'?'🔄':section==='traits'?'⭐':'🌀'} {t(`analysis.papers.${section}.title`)}</Text>{authenticated?<Action label={`${t(`analysis.papers.${section}.title`)} Configure analysis prompts`} onPress={()=>void r.handleOpenConfig(section)}>⚙</Action>:null}</View>
-        {r.loading[section]?<Text style={[s.body,muted]}>{r.streaming[section]?`${r.streaming[section].slice(-800)}▌`:'Waiting for backend Reflections task…'}</Text>:r.errors[section]?<Text style={error}>{r.errors[section]}</Text>:null}
+        {r.loading[section]?<Text style={[s.body,muted]}>{r.streaming[section]?`${r.streaming[section].slice(-800)}▌`:'Waiting for backend Reflections task…'}</Text>:null}
       </View>)}</View>:null}
-      {r.anyError&&!r.anyLoading?<Text accessibilityRole="alert" style={[s.body,error]}>{[r.errors.echoes,r.errors.traits,r.errors.patterns].filter(Boolean).join(' | ')}</Text>:null}
+      {r.anyError&&!r.anyLoading?<ReflectionTaskError errors={r.errors}/>:null}
       {r.reportSaveError&&!r.anyLoading?<View><Text accessibilityRole="alert" style={error}>{r.reportSaveError}</Text>{r.reportRetryTaskId?<Action disabled={r.reportSaving} onPress={()=>void r.retryReportSave(r.reportRetryTaskId!)}>{zh?'重试保存':'Retry save'}</Action>:null}</View>:null}
       {!r.hasAnyData&&!r.anyLoading?<View style={[s.group,{alignItems:'center',paddingVertical:48}]}><Text style={{fontSize:64,opacity:0.3}}>📖</Text><Text style={[s.heading,text]}>{t('analysis.empty.title')}</Text><Text style={[s.body,muted,{textAlign:'center'}]}>{t('analysis.empty.description')}</Text></View>:null}
     </ScrollView>

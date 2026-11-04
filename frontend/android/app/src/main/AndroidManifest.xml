@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: rename launcher display text; application and component identities remain. -->
 <!-- [Input] Android package components and least-privilege platform permissions. -->
 <!-- [Output] Launcher host, private runtime process, and internal file-sharing provider. -->
 <!-- [Pos] Android application component and permission manifest. -->
@@ -11,7 +12,7 @@
         android:name=".MainApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
-        android:label="Ink &amp; Memory"
+        android:label="Kastention"
         android:supportsRtl="true"
         android:theme="@style/Theme.InkMemory"
         android:usesCleartextTraffic="false">

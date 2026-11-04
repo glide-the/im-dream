@@ -1,3 +1,7 @@
+<!-- [Sync] 2026-11-02: 增加Apple真机开发调试工具及XCUITest任务入口。 -->
+<!-- [Sync] 2026-11-02: 增加 Mac SSH 临时代理反向转发说明，包含参数、阶段验证及单连接停止步骤。 -->
+<!-- [Sync] 2026-11-02: iOS文档按安装、上架和专项填写任务提供入口，历史核查及评审归执行记录。 -->
+<!-- [Sync] 2026-11-02: 增加独立iOS App Store手册入口，分列发布前提、操作、评审及文档验证。 -->
 <!-- [Sync] 2026-10-31: 索引端侧目标编译与原登录认证方案、排障指南和分平台资格；本轮仅文档维护。 -->
 <!-- [Sync] 2026-10-29: 本机Admin 3000传输、旧SSH转发卸载、Simulator普通env装配及原网页登录读取回执按范围登记。 -->
 <!-- [Sync] 2026-10-28: 登记 VS Code Chrome 调试实例的扩展隔离与 hydration mismatch 排查。 -->
@@ -27,11 +31,30 @@
 -->
 
 <!-- [Sync] 2026-10-30: 索引 iPhone 开发安装、临时包检查与商店发布操作手册。 -->
-# docs/deploy
+# ink-dream 部署与发布
 
+<a id="docsdeploy"></a>
+
+<!-- [Sync] 2026-11-02: 索引构建内存专项手册，发布前容量检查与原制品恢复单独维护。 -->
 ## 定位
 
 `docs/deploy/` 是 Ink & Memory 发布体系的文档入口，负责说明本地直跑、Docker 容器发布、Remote SSH（包含阿里云 ECS 配置）、AutoDL 直宿主和 Google Cloud 拓扑的边界、配置来源、操作顺序和验证方式。
+
+## iOS发布与安装
+
+发布ink-dream的iOS应用时，从上架手册开始；本地安装和专项字段按对应指南操作。
+
+| 需要完成的任务 | 操作文档 |
+| --- | --- |
+| 准备会员、签名、归档、TestFlight和商店发行 | [iOS App Store发布手册](ios-app-store-release.md) |
+| 在开发iPhone上构建、安装及排除启动失败 | [iPhone开发安装手册](ios-iphone-install-release.md) |
+| 检查设备、附加Dream进程、检查网页及通过XCUITest操作页面 | [Apple真机开发调试工具](ios-device-debugging.md) |
+| 公开隐私政策，填写App Privacy并核对权限 | [隐私与权限填写指南](ios-privacy-and-permissions.md) |
+| 填写收费、外部服务、AI共享和审核说明 | [商业与AI材料填写指南](ios-commercial-and-ai-materials.md) |
+
+## 服务部署入口
+
+各发布路径开始前先执行[构建内存与发布失败恢复](build-memory-and-recovery.md)中的容量、入口与恢复制品检查。AutoDL 脚本的内联堆值、成功后旧制品清理及 CI 历史产物差异在该手册中单列；资源不足时停止原地重试。
 
 当前可执行脚本按平台组织在 [`../../deploy/`](../../deploy/)：
 
@@ -48,6 +71,8 @@
 
 | 文档 | 作用 | 当前状态 |
 |------|------|----------|
+| [`build-memory-and-recovery.md`](build-memory-and-recovery.md) | 构建内存与发布失败恢复 | 仅文档约束；容量、兼容制品、故障识别和恢复前提按每次发布核对 |
+| [`mac-ssh-egress-relay.md`](mac-ssh-egress-relay.md) | Mac 临时 SSH 代理转发 | ECS Tinyproxy 经反向转发访问 Mac 代理；命令、验证、故障定位及停止，依赖 Mac 在线 |
 | [`overview.md`](overview.md) | Cloud Run 历史操作文档 | 前端镜像已走Next standalone，旧SQLite/GCS同步已退役；剩余配置漂移与发布验收尚未关闭 |
 | [`data-sync.md`](data-sync.md) | 历史 SQLite/GCS 回执说明 | 仅用于识别旧脚本行为；共享业务数据由 Admin PostgreSQL/Drizzle 管理，不得执行该 SQLite 同步作为当前发布步骤 |
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径；旧 SQLite 数据维护命令不属于当前业务数据合同 |
@@ -58,7 +83,6 @@
 | [`autodl-recovery.md`](autodl-recovery.md) | AutoDL 恢复与维护 | 说明实例重启后的 Admin-first 恢复、动态 WebUI origin、状态/日志、完整发布和失败处理 |
 | [`mobile-app-release.md`](mobile-app-release.md) | iOS/Android路线与打包发布设计 | 端侧采用现有关闭Claude命令沙箱配置；保留系统沙箱与业务权限，完整工具、真机、Android及发行继续验收 |
 | [`mobile-auth-troubleshooting.md`](mobile-auth-troubleshooting.md) | 端侧目标编译与登录认证排障 | 原env/回调/Cookie、503/504、平台差异、命令模板及后续验收；真机17失败保留 |
-| [`ios-iphone-install-release.md`](ios-iphone-install-release.md) | iPhone 实机操作手册 | 当前 RN 工程、开发签名、临时包、TestFlight 与 App Store 路径及回执 |
 | [`release-system-design.md`](release-system-design.md) | 历史发布体系设计 | 保留旧 Vite/npm/nginx/SQLite/GCS 判断；不是当前操作手册 |
 | [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md) | Claude SDK/Runtime 打包发布与 Dream 集成 | PyPI SDK、npm 五包、OIDC、精确版本/哈希、验证和回滚的中文执行手册 |
 | [`claude-registry-release-acceptance.md`](claude-registry-release-acceptance.md) | Claude registry 发布后验收 | provider-free 校验 PyPI/npm 制品身份、安装和 fail-closed 条件 |

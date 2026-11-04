@@ -1,6 +1,7 @@
 // [Input] Original Settings categories/search, App catalog/config callbacks and normal account actions.
 // [Output] Native six-category Settings, Work tabs and original resource destinations with retained drafts.
 // [Pos] Settings navigation composition; BackendRuntimeManager, authentication and business APIs retain their owners.
+// [Sync] 2026-11-03: forward existing About visibility for diagnostics sampling cleanup; navigation and retained drafts stay unchanged.
 // [Sync] 2026-10-29: adopt existing native content and one account-scoped resource owner, without ordinary Settings WebViews.
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {BackHandler,Keyboard,Platform,Pressable,ScrollView,StyleSheet,TextInput,View} from 'react-native';
@@ -62,7 +63,7 @@ export default function StoryWorkspaceSettingsPage({ownerId,origin,active,naviga
   {scene('subscription',<StoryWorkspaceSubscriptionPage onBack={root} transport={transport} onSessionExpired={onSessionExpired}/>)}
   {scene('behavior',<MemoryBehaviorSettings active={show('behavior')} onBack={root} transport={transport} onSessionExpired={onSessionExpired}/>)}
   {scene('model',<ModelConfigSection active={show('model')} onBack={root} transport={transport} onSessionExpired={onSessionExpired} onConfigSaved={onConfigSaved}/>)}
-  {scene('about',<AboutView onBack={root}/>)}
+  {scene('about',<AboutView active={show('about')} onBack={root}/>)}
   {scene('work',<>
    <View style={workTab==='resources'&&resourceDetail?s.hidden:undefined}>
     <View style={s.header}>{button(t('settings.workspace.preferences.back'),root)}<InkLabel accessibilityRole="header" style={[text,s.title]}>{t('settings.workspace.work.title')}</InkLabel></View>

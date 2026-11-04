@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: share original projection and PNG stitch/fallback preparation; retain DOM capture and Web downloads.
 // [Input] ChatExportSnapshot (messages + pendingConfirmation + toolChoice) + thread title +
 //         i18n labels from the ChatView share dialog.
@@ -10,6 +11,7 @@
 //                    ChatMessageList collapsed rows and Terminal cards) and the single
 //                    pending ToolConfirmationDock card pinned at the bottom of the image.
 // [Sync] 2026-08-23: resolve workspace:// image references through the existing authenticated Thread endpoint before capture.
+import { BRAND_FILE_PREFIX } from '../../constants/brand';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import ThreadImageCard from './ThreadImageCard';
@@ -644,7 +646,7 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     const safeTitle = title.replace(/[^\w一-龥-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'chat';
-    const fileName = `ink-memory-${safeTitle}-${threadId.slice(0, 8)}.png`;
+    const fileName = `${BRAND_FILE_PREFIX}-${safeTitle}-${threadId.slice(0, 8)}.png`;
     // 先出头部一段预览，避免用户空等 — 剩余切片在后台继续流式截取拼接。
     const partBlobs = await capturePartBlobs(node, host, {
       onFirstSlice: (firstSliceUrl) => {

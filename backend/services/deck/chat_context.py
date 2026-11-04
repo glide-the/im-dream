@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 """Resolve immutable Deck and plugin context for a ClaudeAgent chat thread.
 
 [Sync] 2026-09-16: remove the unused SQL resolver; consume only Admin DTO snapshots.
@@ -133,7 +134,7 @@ class DeckChatContextAssembler:
         if self.snapshot.deck.enabled is not True:
             raise DeckChatContextError(
                 "DECK_DISABLED",
-                "The selected Deck is disabled.",
+                "The selected Kastention is disabled.",
                 status_code=409,
             )
 
@@ -143,7 +144,7 @@ class DeckChatContextAssembler:
             if not voices:
                 raise DeckChatContextError(
                     "AGENT_ACCESS_DENIED",
-                    "Agent not found, disabled, or outside the selected Deck.",
+                    "Agent not found, disabled, or outside the selected Kastention.",
                     status_code=404,
                 )
 
@@ -154,7 +155,7 @@ class DeckChatContextAssembler:
             if ref.installation_status != "ready":
                 raise DeckChatContextError(
                     "DECK_PLUGIN_UNAVAILABLE",
-                    "The Deck's configured Claude plugin is not ready: "
+                    "The Kastention's configured Claude plugin is not ready: "
                     f"{ref.package_spec} (status={ref.installation_status}).",
                     status_code=409,
                 )

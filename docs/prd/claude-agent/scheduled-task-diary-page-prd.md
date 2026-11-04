@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 <!-- [Sync] 2026-10-06: current Calendar supplement uses selected snapshots and historical creation; preserve preceding task/Chat/history text. -->
 <!-- [Sync] 2026-10-05: update the Calendar supplement to its calendar business-module PRD. -->
 <!-- [Input] 用户目标截图、现有 Calendar/Chat/Tool/Thread 能力和 html-design-workflow v5 产物。 -->
@@ -6,7 +7,7 @@
 <!-- [Sync] 2026-09-29: v5 将 scheduled run Conversations 从通用 TaskSession 列表移入定时任务详情栏，并固定三段信息结构。 -->
 
 <!-- [Sync] 2026-10-04: index the Calendar right-panel tab proposal and preserve the complete preceding text beside this file. -->
-# Ink & Memory 定时任务完整交互 PRD v5（现行）
+# Kastention 定时任务完整交互 PRD v5（现行）
 
 > 2026-10-04 现行补充：[日历右侧页签设计](../calendar/calendar-right-panel-tabs-prd.md)。任务、结果、编辑、历史和 Chat 合同继续适用；Calendar 右侧同时显示任务与日记的布局由新稿取代。现行日历已采用互斥页签；2026-10-06 Notion 改用当前选择范围的连接器快照，历史展示当日创建、今天更新项单独校验。严格全集不属于用户最新范围，技术验证状态见现行日历回执。改动前的完整原文保存在[历史快照](./scheduled-task-diary-page-prd-v5-20261004-history.md)。
 

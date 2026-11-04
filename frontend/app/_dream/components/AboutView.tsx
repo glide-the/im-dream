@@ -1,9 +1,11 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-29: share static About content with Native; existing Web layout/hover behavior remains.
 // [Input] frontend/app/_dream/components/.folder.md (about-view node)
 // [Output] Static About page with project summary, team members, timeline, and repository links.
 // [Pos] about-view node
 // [Sync] 2026-06-13: add structured team member data and include glide-the as a contributor.
 
+import { BRAND_NAME } from '../constants/brand';
 import {teamMembers,developmentTimeline,ABOUT_REPOSITORY_URL,ABOUT_SUMMARY,ABOUT_DESCRIPTION} from './aboutPresentation';
 
 export default function AboutView() {
@@ -32,7 +34,7 @@ export default function AboutView() {
             marginBottom: 16,
             letterSpacing: '-0.5px'
           }}>
-            <span style={{ fontStyle: 'italic' }}>I</span>nk & <span style={{ fontStyle: 'italic' }}>M</span>emory
+            {BRAND_NAME}
           </h1>
           <p style={{
             fontSize: 18,

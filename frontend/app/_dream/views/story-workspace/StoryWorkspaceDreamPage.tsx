@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Optional run deep link plus the dedicated Dream launch module.
 // [Output] Workspace-file-driven Dream editor or the three-section Dream discovery/re-entry home.
 // [Pos] Canonical /story-workspace/dream business page (Task 3 F4)
@@ -351,7 +352,7 @@ export function StoryWorkspaceDreamPage({
     && confirmation.status !== 'confirming'
     && !runFailureNotice
   );
-  const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
+  const deckName = agentContextRun?.deck_plugin_display_name ?? '当前卡片结构';
   const agentRuntimeLockId = agentContextRun?.runtime_plugin_lock_id
     ?? files.data?.source.runtimePluginLockId
     ?? null;

@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-03: 补充Native Thread运行实例所有权、可见投影、正常/异常/状态图及验收。 -->
+<!-- [Sync] 2026-11-03: 追加页面重进、正文预览与当前状态核对增量，保留历史测量。 -->
 # Chat 历史消息稳定分页与首屏加载设计
 
 <!-- [Input] Chat 历史读取/保存链路、PostgreSQL chat_message 契约、前端 useChat/SSE/导出/工具确认消费者及只读性能证据。 -->
@@ -673,3 +675,202 @@ sequenceDiagram
 这些数字是分层证据，不是固定 SLA。数据库/网络层由真实 Admin-owned PostgreSQL 验证：变更前最近页需 Bitmap 扫描最大 Thread 的 105 行并 top-N Sort，执行 1.427ms；变更后最近页只 Index Scan 21 行、无 Sort，执行 0.015ms，older tuple-range 也只扫描 21 行、执行 0.013ms。初始 21 行仍有约 478,409 bytes 完整 `parts/metadata` JSON，因此索引不会消除单条 final 的 TOAST/传输成本；它消除的是全 Thread 扫描/排序，并与前端过程 DOM 卸载共同覆盖已定位的两个瓶颈。
 
 结论：Chat 历史首屏已不再因为全量读取和第二次全量复核而等待约 4 秒；历史过程型超大 JSON 的默认 DOM 秒级路径也已消除。若最近页中的 final 自身就是极大多节点 Markdown，现有完整 DTO/单列 TEXT Schema 仍会承担读取、传输、JSON.parse 与 final 渲染成本，这是明确保留的剩余限制，需真实 PostgreSQL 证据与 Admin-owned render projection capability 才能进一步根治。
+
+## 页面重进与正文预览（2026-11-03）
+
+本节定义当前增量。前文 2026-09-02 的全历史根因保留为历史测量；当前公开入口使用最近一页及 `known_latest_message_id`，运行状态读取与空闲稳定复核顺序保持。
+
+### 问题判断与最小方案评审
+
+当前原生 `openThread` 每次清空消息；`hydrateClaudeThreadSession` 完成消息、状态和空闲稳定复核后一次性返回。Web `StoryWorkspaceRouter` 按 route 切换 React 子树，Chat 组件、目录、列表和输入随之重新挂载。Native App 原本已持续持有 Chat 与 setup，复用该所有权即可。
+
+选定方案为：保留网页已访问 Chat，增加已读正文预览，并复用既有最新消息条件读取。预览仅挂载原消息组件的文本 part，工具宿主与执行控件在完整核对后由原 Chat 组件持有。持久离线库、完整会话组件池、跨账户共享数据和通用缓存平台均退出实现范围。首条消息提前展示与远端请求耗时分项测量，Admin 架构维持当前实现。
+
+### 所有者与失效
+
+| 模块 | 数据与作用域 | 刷新和失效 |
+| --- | --- | --- |
+| `StoryWorkspaceRouter` | 当前认证子树内首次访问的主 Chat | 栏目切换仅隐藏并设置 inert；App 按 user.id 挂载 Router，退出登录卸载；Writing 局部对话保持独立所有权。 |
+| `ChatView` / `useNativeChatThread` | 各自实例持有 `createThreadHistoryPreview`，正文预览保留当前和前一 Thread 的最近消息页；Native仍运行的数据实例按下节单独保留 | 与当前内存 CSRF 会话范围匹配；登录范围变化清除，迟到的旧范围回执拒绝写入；读取中范围更新清除预览并沿原失败重试，避免加载状态停留。 |
+| `threadHistoryPreview` | `thread/messages/dispatchStatusByMessageId/nextCursor/hasMore/latestMessageId/unchanged` | 未持久化；runtime running、确认集合、queue、Stop 和认证权限保持各自原所有者。预览只投影id、role与文本part，过程详情及执行相关metadata在预览中移除。 |
+| `hydrateClaudeThreadSession` | 当前 HTTP 消息、status、空闲稳定复核 | 先以旧页 latest ID 发条件 GET；unchanged 必须与旧页最新 ID 匹配；fresh history 可先通知阅读预览。完整 status 及稳定复核成功后才返回可交互状态；首次最终快照替换预览，已加载历史窗口沿原归并。 |
+| Native 提交 / 两端删除 | 原提交与原确认删除回执 | 提交前使目标预览失效；删除成功移除预览；读取 401/403/404 移除目标正文，网络失败保留当前可读正文。 |
+| Web 返回 Chat | 原目录与历史列表 | 刷新目录、历史列表和 ChatPanel 原system-config，当前 ChatPanel 与流保持；原设置事件、写入刷新和显式 Thread 交接继续有效。 |
+
+两页缓存对应当前及前一对话的 A→B→A 导航。每页沿已有 `CHAT_MESSAGE_PAGE_SIZE` 读取，完整导出、历史过程展开及更早页使用原公开入口。缓存仅提供阅读材料，最新 ID 条件读取继续执行服务器认证、资源归属和响应校验。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant View as ChatView或useNativeChatThread
+    participant Preview as threadHistoryPreview
+    participant Read as hydrateClaudeThreadSession
+    participant API as 既有消息与状态接口
+    User->>View: 选择目标对话
+    View->>Preview: 读取当前登录范围的目标页
+    Preview-->>View: 目标正文预览或空
+    View-->>User: 显示正文或原加载提示
+    View->>Read: 目标Thread及可用旧页
+    Read->>API: messages，携带可用latest ID
+    API-->>Read: 当前页或unchanged
+    Read-->>View: 当前正文预览
+    Read->>API: status
+    API-->>Read: 当前运行与确认状态
+    opt 当前为空闲
+      Read->>API: 原最新消息稳定复核
+      API-->>Read: 稳定消息页
+    end
+    Read-->>View: 完整当前快照
+    View->>Preview: 保存目标最近页
+    View-->>User: 原对话操作与消息，运行中沿原SSE连接
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant View as ChatView或useNativeChatThread
+    participant Preview as threadHistoryPreview
+    participant API as 既有消息与状态接口
+    User->>View: 重新进入目标对话
+    View-->>User: 同范围已读正文预览
+    View->>API: 当前消息与状态读取
+    alt 网络或状态读取失败
+      API-->>View: 原错误
+      View-->>User: 保留正文，原失败与重试入口
+      User->>View: 重试读取
+      View->>API: 沿原读取与稳定复核
+      API-->>View: 当前快照
+      View-->>User: 当前正文和操作
+    else 401、403或404
+      API-->>View: 登录、权限或目标错误
+      View->>Preview: 清理目标预览
+      View-->>User: 移除正文，显示原失败反馈
+    else 已切换对话或登录范围
+      API-->>View: 旧请求回执
+      View->>View: 按选择epoch或登录范围拒绝旧更新
+    end
+```
+
+### 页面状态
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading: 首次选择
+    Loading --> Preview: 首次消息读取成功
+    [*] --> Preview: 同登录目标缓存命中
+    Preview --> Ready: 状态与稳定复核成功
+    Loading --> Failed: 当前读取失败
+    Preview --> Failed: 当前读取失败，保留已读正文
+    Failed --> Loading: 原重试入口
+    Preview --> Loading: 选择未缓存的其他Thread
+    Ready --> Preview: 选择已缓存的其他Thread
+    Ready --> Ready: 重选当前Thread，保留原状态
+    Ready --> Hidden: 切换页面
+    Hidden --> Ready: 返回页面，复用组件并刷新列表与目录
+    Preview --> Cleared: 401、403、404或登录范围变化
+    Ready --> Cleared: 原确认删除成功或退出登录
+    Cleared --> [*]
+```
+
+### 验收边界
+
+技术验证覆盖首次进入、同对话与 A/B/A、栏目重进、分页游标、列表/正文更新、网络失败与重试、会话替换及权限失效。消息发送、SSE、Stop、队列、工具确认和原生相邻设置沿现有定向规格回归。性能只按实际测量的页面及 HTTP 阶段报告；fixture 结果归技术验证，Simulator、物理设备、真实模型和发布分别记录。
+
+### 原生进行中Thread保留与UI发布
+
+发现：`useNativeChatThread.openThread`原先对不同Thread递增读取代次、关闭当前reader并执行hydrate。上一轮两页正文预览覆盖静态阅读，运行中实例的连接和投影未保留。新增受控SSE基线两项失败分别显示：隐藏页面仍增加React提交；A→B导航取消A reader。
+
+选择在原Hook内部保留Thread数据实例，复用原hydrate、SSE reducer、队列、确认与Stop函数；React通过`useSyncExternalStore`订阅当前可见投影。完整会话UI组件池、离线存储、后台服务和新API退出方案。Web ChatPanel及后端执行保持。新增`visible`输入只表达原生主Chat是否显示，Native App按栏目和侧对话遮挡状态传入。
+
+| 模块或状态 | 所有权与生命周期 |
+| --- | --- |
+| `createNativeChatThreadSession` | 每Thread独立消息、epoch、reader、队列、停止与确认状态；沿原HTTP/SSE及AppState监听启动和释放。提交前编辑上下文仍接受原取消检查。 |
+| `createNativeChatThreadOwner` | 归单个原生业务页面及当前登录范围；持有当前实例和仍运行的非当前实例。当前Thread直接复用，未保留目标沿原hydrate；后台实例转为空闲后释放。 |
+| UI发布 | 仅当前且`visible`时通知React；隐藏时保留最后发布快照，继续收取事件；返回发布最新快照，复用原reader。 |
+| 会话范围 | Cookie/CSRF及账户边界保持；范围变更释放旧实例与正文预览，按当前目标重新读取；当前范围401清除对应显示并交原会话恢复；已释放实例的迟到401回执拒绝更新新会话。 |
+| 显式退出或系统前后台 | 业务页面卸载释放本地读取，服务端任务保持原状态。iOS AppState处理沿原生命周期，未扩展APP-04。 |
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant App as Native App Business
+    participant Owner as createNativeChatThreadOwner
+    participant A as createNativeChatThreadSession A
+    participant B as createNativeChatThreadSession B
+    participant API as 原HTTP与SSE接口
+    U->>App: 打开A，执行对话
+    App->>Owner: openThread(A)
+    Owner->>A: start / hydrateClaudeThreadSession
+    A->>API: GET messages、status、stream
+    API-->>A: SSE增量
+    A-->>Owner: 更新A快照
+    Owner-->>App: 发布当前可见快照
+    U->>App: 切换到B
+    App->>Owner: openThread(B)
+    Owner->>B: 启动或复用B
+    Note over Owner,A: A仍运行，保留reader与投影
+    API-->>A: 后续SSE增量
+    A-->>Owner: 更新A快照，无B页面通知
+    U->>App: 返回A
+    App->>Owner: openThread(A)
+    Owner-->>App: 直接发布A最新快照
+    Note over A,API: 复用同一reader，无重开stream或消息POST
+    U->>App: 隐藏Chat栏目
+    App->>Owner: visible=false
+    API-->>A: 继续接收事件
+    U->>App: 返回Chat栏目
+    App->>Owner: visible=true
+    Owner-->>App: 一次发布当前快照
+```
+
+```mermaid
+sequenceDiagram
+    participant API as 原HTTP与SSE接口
+    participant A as createNativeChatThreadSession A
+    participant Owner as createNativeChatThreadOwner
+    participant App as Native App Business
+    API--xA: 网络中断
+    A->>A: 原schedule / recover及原期限
+    A->>API: 原messages、status与stream恢复
+    alt 同登录范围且恢复成功
+        API-->>A: 当前消息与运行状态
+        A-->>Owner: 更新同Thread快照
+        Owner-->>App: 仅当前可见时发布
+    else 会话范围更换
+        Owner->>A: 释放旧reader与旧状态
+        Owner-->>App: 原登录范围重新读取
+        API-->>A: 旧实例迟到回执含401
+        A->>A: 拒绝已释放实例的更新与会话失效通知
+    else 当前会话401
+        A-->>Owner: 会话失效或范围更新
+        Owner->>A: 释放旧reader与旧状态
+        Owner-->>App: 清除旧正文，交原登录恢复
+    else 后台Thread已确认空闲
+        API-->>A: 原最终消息与idle
+        A-->>Owner: 完成状态
+        Owner->>A: 释放后台实例，保留原正文预览
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Reading: 首次打开未保留目标
+    Reading --> VisibleRunning: 原状态确认运行
+    VisibleRunning --> HiddenRunning: 隐藏栏目或切换其他Thread
+    HiddenRunning --> HiddenRunning: 收取SSE，UI发布暂停
+    HiddenRunning --> VisibleRunning: 返回同Thread，发布最新快照
+    HiddenRunning --> Released: 服务端确认idle
+    VisibleRunning --> VisibleIdle: 原任务完成或Stop核对idle
+    VisibleIdle --> Released: 选择其他Thread
+    HiddenRunning --> Recovering: 原流中断
+    Recovering --> HiddenRunning: 原恢复成功，页面仍隐藏
+    Recovering --> VisibleRunning: 原恢复成功，页面显示
+    HiddenRunning --> Released: 登录范围更换或业务页面卸载
+    Released --> Reading: 再次打开，沿原正文预览及读取
+```
+
+验收：进行中A切往B再返回，A的reader取消及重开数均为0；隐藏页收到SSE后React提交数不增加，返回显示最新正文；原发送/Stop/队列/确认、完成释放、断流恢复和登录范围隔离分别验证。静态方案评审通过；技术、Simulator、真机及真实模型状态按执行记录逐项填写。

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Deck workflow installations, selection state, permission, and lifecycle callback.
 // [Output] Loading/error/empty/list states for the workflow catalog.
 // [Pos] Plugin Admin catalog list.
@@ -49,7 +50,7 @@ export default function PluginAdminList({
     return <div className="plugin-admin-empty">暂无工作流安装记录。</div>;
   }
   return (
-    <div className="plugin-admin-list" aria-label="Deck 工作流目录">
+    <div className="plugin-admin-list" aria-label="卡片结构工作流目录">
       {error && (
         <div className="plugin-admin-inline-warning" role="status">
           刷新失败，当前显示上次成功结果。<button type="button" onClick={onRetry}>重试</button>

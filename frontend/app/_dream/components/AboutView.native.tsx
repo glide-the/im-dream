@@ -1,8 +1,11 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Original About content and explicit repository link action.
+// [Sync] 2026-11-03: pass actual settings visibility to diagnostics so hidden retained pages release CPU sampling.
 // [Output] Native project/team/timeline/links page with the original serif headings and system body font.
 // [Pos] Settings About destination; no backend or model lifecycle changes.
 // [Sync] 2026-11-01: route links through the shared system-browser action and recover synchronous failures.
 // [Sync] 2026-11-01: open the same read-only startup diagnostics leaf used before authentication.
+import { BRAND_NAME } from '../constants/brand';
 import {useState} from 'react';
 import {Keyboard,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import RuntimeDiagnostics from '../../../src/components/RuntimeDiagnostics.native';
@@ -12,15 +15,15 @@ import Svg,{Path} from 'react-native-svg';
 import InkLabel from '../../../src/components/InkLabel.native';
 import useInkColors from '../../../src/components/useInkColors.native';
 import {teamMembers,developmentTimeline,ABOUT_REPOSITORY_URL,ABOUT_SUMMARY,ABOUT_DESCRIPTION} from './aboutPresentation';
-export default function AboutView({onBack,openLink=openExternalLink}:{onBack:()=>void;openLink?:(url:string)=>Promise<unknown>}) {
+export default function AboutView({onBack,openLink=openExternalLink,active=true}:{onBack:()=>void;openLink?:(url:string)=>Promise<unknown>;active?:boolean}) {
   const {t,i18n}=useTranslation(),c=useInkColors(),[error,setError]=useState(false),text={color:c['color-text-primary']},secondary={color:c['color-text-secondary']};
   const [diagnostics,setDiagnostics]=useState(false);
-  if(diagnostics)return <RuntimeDiagnostics onBack={()=>setDiagnostics(false)}/>;
+  if(diagnostics)return <RuntimeDiagnostics active={active} onBack={()=>setDiagnostics(false)}/>;
   const heading=(label:string)=><Text accessibilityRole="header" style={[styles.heading,text]}>{label}</Text>;
   return <View style={[styles.fill,{backgroundColor:c['color-bg-app']}]}>
     <View style={styles.header}><Pressable accessibilityRole="button" onPress={onBack} style={styles.button}><InkLabel style={text}>{t('settings.workspace.preferences.back')}</InkLabel></Pressable><InkLabel accessibilityRole="header" style={[text,{fontSize:22}]}>{t('settings.workspace.navigation.about')}</InkLabel></View>
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.intro}><Text accessibilityRole="header" style={[styles.brand,text]}><Text style={{fontStyle:'italic'}}>I</Text>nk &amp; <Text style={{fontStyle:'italic'}}>M</Text>emory</Text><Text style={[styles.summary,secondary]}>{ABOUT_SUMMARY}</Text></View>
+      <View style={styles.intro}><Text accessibilityRole="header" style={[styles.brand,text]}>{BRAND_NAME}</Text><Text style={[styles.summary,secondary]}>{ABOUT_SUMMARY}</Text></View>
       <Pressable accessibilityRole="button" onPress={()=>{Keyboard.dismiss();setDiagnostics(true);}} style={styles.button}><InkLabel style={text}>开发者控制页</InkLabel></Pressable>
       <View style={styles.section}>{heading('About the Project')}{ABOUT_DESCRIPTION.map(paragraph=><Text key={paragraph} style={[styles.body,secondary]}>{paragraph}</Text>)}</View>
       <View style={styles.section}>{heading('The Team')}{teamMembers.map(member=><View key={member.name} style={[styles.card,{backgroundColor:c['color-bg-paper'],borderColor:c['color-border-paper']}]}><Text style={[styles.member,text]}>{member.name}</Text><Text style={[styles.role,secondary]}>{member.role}</Text><Text style={[styles.body,secondary]}>{member.description}</Text></View>)}</View>

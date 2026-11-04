@@ -1,5 +1,6 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Input] Production Native Deck manager/editor, original APIs/hooks and public-shape HTTP fixtures.
-// [Output] Create/blur-save/Agent/plugin/version/confirmation/recovery and narrow-page contracts.
+// [Output] Create/blur-save/Agent/plugin/version/named-confirmation/recovery and narrow-page contracts.
 // [Pos] Provider-free technical UI lane; no normal account, service, database or model writes.
 // Impact: Project/Episode/artifact/Run/Hook/DB are out of scope; Chat receives local draft intent only.
 import {expect,test,type Page} from '@playwright/test';
@@ -65,10 +66,10 @@ test.beforeAll(async()=>{
   await server.listen();const address=server.httpServer?.address();if(!address||typeof address==='string')throw Error('FIXTURE_LISTENER_MISSING');base='http://127.0.0.1:'+address.port+'/native-deck-manager-fixture';
 });
 test.afterAll(async()=>{await server?.close();});
-test.beforeEach(async({page})=>{const errors:string[]=[];diagnostics.set(page,errors);page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});await page.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());await page.setViewportSize({width:390,height:844});await page.goto(base);await expect(page.getByRole('button',{name:'Open Deck settings',exact:true})).toBeVisible();});
+test.beforeEach(async({page})=>{const errors:string[]=[];diagnostics.set(page,errors);page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});await page.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());await page.setViewportSize({width:390,height:844});await page.goto(base);await expect(page.getByRole('button',{name:"Open Kastention settings",exact:true})).toBeVisible();});
 test.afterEach(async({page})=>{expect(diagnostics.get(page)).toEqual([]);});
-async function work(page:Page){await page.getByRole('button',{name:'Open Deck settings',exact:true}).click();await expect(page.getByTestId('native-deck-management')).toBeVisible();}
-async function edit(page:Page){await work(page);await page.getByRole('button',{name:'Edit Published Notes',exact:true}).click();await expect(page.getByRole('textbox',{name:'Deck name',exact:true})).toHaveValue('Published Notes');await expect(page.getByRole('button',{name:'版本记录',exact:true})).toBeEnabled();}
+async function work(page:Page){await page.getByRole('button',{name:"Open Kastention settings",exact:true}).click();await expect(page.getByTestId('native-deck-management')).toBeVisible();}
+async function edit(page:Page){await work(page);await page.getByRole('button',{name:'Edit Published Notes',exact:true}).click();await expect(page.getByRole('textbox',{name:"Kastention name",exact:true})).toHaveValue('Published Notes');await expect(page.getByRole('button',{name:'版本记录',exact:true})).toBeEnabled();}
 async function calls(page:Page){return page.evaluate(()=>(window as any).__nativeDeckFixture.calls);}
 
 test('native Work preserves full inventory, system locks, filters and pagination without writes',async({page})=>{
@@ -76,17 +77,17 @@ test('native Work preserves full inventory, system locks, filters and pagination
   for(const name of ['System Notes','Default Notes']){await expect(page.getByRole('button',{name:'Edit '+name,exact:true})).toBeDisabled();await expect(page.getByRole('switch',{name:new RegExp(name)})).toHaveCount(0);}
   await expect(page.getByText('Dream Workspace',{exact:true})).toHaveCount(0);await expect(page.getByText('Page 1 of 2',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Next',exact:true}).click();await expect(page.getByText('Page 2 of 2',{exact:true})).toBeVisible();
-  await page.getByRole('textbox',{name:'Search managed Decks',exact:true}).fill('unpublished');await expect(page.getByRole('button',{name:'Edit Unpublished Notes',exact:true})).toBeVisible();
+  await page.getByRole('textbox',{name:"Search managed Kastention",exact:true}).fill('unpublished');await expect(page.getByRole('button',{name:'Edit Unpublished Notes',exact:true})).toBeVisible();
   await expect(page.getByText('Page 2 of 2',{exact:true})).toHaveCount(0);expect(await calls(page)).toEqual([]);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 test('native create retains original defaults and blur-save failure preserves the local draft for retry',async({page})=>{
-  await work(page);await page.getByRole('button',{name:'Create Deck',exact:true}).click();const field=page.getByRole('textbox',{name:'Deck name',exact:true});await expect(field).toHaveValue('New Deck');
-  expect((await calls(page)).find((call:any)=>call.path==='/api/decks'&&call.method==='POST').body).toEqual({name:'New Deck',description:'Describe your deck here',icon:'brain',color:'blue'});
-  await page.evaluate(()=>(window as any).__nativeDeckFixture.failUpdate=true);await field.fill('Notes for travel');await page.getByRole('heading',{name:'Deck information',exact:true}).click();
-  await expect(page.getByRole('button',{name:'重试保存 Deck name',exact:true})).toBeVisible();await expect(field).toHaveValue('Notes for travel');
-  await page.getByRole('tab',{name:/^Agents/}).click();await page.getByRole('tab',{name:'概览',exact:true}).click();await expect(field).toHaveValue('Notes for travel');await expect(page.getByRole('button',{name:'重试保存 Deck name',exact:true})).toBeVisible();
-  await page.evaluate(()=>(window as any).__nativeDeckFixture.failUpdate=false);await page.getByRole('button',{name:'重试保存 Deck name',exact:true}).click();
-  await expect(page.getByRole('button',{name:'重试保存 Deck name',exact:true})).toHaveCount(0);await expect(page.getByText('草稿 r2',{exact:false})).toBeVisible();expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.trials)).toEqual([]);
+  await work(page);await page.getByRole('button',{name:"Create Kastention",exact:true}).click();const field=page.getByRole('textbox',{name:"Kastention name",exact:true});await expect(field).toHaveValue("New Kastention");
+  expect((await calls(page)).find((call:any)=>call.path==='/api/decks'&&call.method==='POST').body).toEqual({name:"New Kastention",description:"Describe your Kastention here",icon:'brain',color:'blue'});
+  await page.evaluate(()=>(window as any).__nativeDeckFixture.failUpdate=true);await field.fill('Notes for travel');await page.getByRole('heading',{name:"Kastention information",exact:true}).click();
+  await expect(page.getByRole('button',{name:'重试保存 Kastention name',exact:true})).toBeVisible();await expect(field).toHaveValue('Notes for travel');
+  await page.getByRole('tab',{name:/^Agents/}).click();await page.getByRole('tab',{name:'概览',exact:true}).click();await expect(field).toHaveValue('Notes for travel');await expect(page.getByRole('button',{name:'重试保存 Kastention name',exact:true})).toBeVisible();
+  await page.evaluate(()=>(window as any).__nativeDeckFixture.failUpdate=false);await page.getByRole('button',{name:'重试保存 Kastention name',exact:true}).click();
+  await expect(page.getByRole('button',{name:'重试保存 Kastention name',exact:true})).toHaveCount(0);await expect(page.getByText('草稿 r2',{exact:false})).toBeVisible();expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.trials)).toEqual([]);
 });
 test('native Agent operations retain original default payload, visual options, switch and delete cancellation',async({page})=>{
   await edit(page);await page.getByRole('tab',{name:/^Agents/}).click();await page.getByRole('button',{name:'+ Add',exact:true}).click();const field=page.getByRole('textbox',{name:'Agent Name',exact:true});await expect(field).toHaveValue('New Voice');
@@ -96,6 +97,7 @@ test('native Agent operations retain original default payload, visual options, s
   await page.getByRole('radio',{name:'Agent Color Green',exact:true}).click();await expect(page.getByRole('radio',{name:'Agent Color Green',exact:true})).toBeChecked();
   await page.getByRole('switch',{name:'Toggle Travel writer',exact:true}).click();await expect(page.getByRole('switch',{name:'Toggle Travel writer',exact:true})).not.toBeChecked();await page.getByRole('button',{name:'Travel writer',exact:true}).click();
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'Delete',exact:true}).click();expect((await calls(page)).some((call:any)=>call.path.startsWith('/api/voices/')&&call.method==='DELETE')).toBe(false);
+  expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmations.at(-1))).toContain('Travel writer');
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);await page.getByRole('button',{name:'Delete',exact:true}).click();await expect(page.getByRole('button',{name:'Travel writer',exact:true})).toHaveCount(0);
 });
 test('native plugin refs retain ready eligibility, selection after failure and original retry payload',async({page})=>{
@@ -106,17 +108,17 @@ test('native plugin refs retain ready eligibility, selection after failure and o
   expect((await calls(page)).filter((call:any)=>call.path.startsWith('/api/claude-plugins/')&&call.method!=='GET')).toEqual([]);
 });
 test('native content version requires explicit diff confirmation, exact CAS and original immutable history',async({page})=>{
-  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Notes to keep');await page.getByRole('heading',{name:'Deck information',exact:true}).click();
+  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Notes to keep');await page.getByRole('heading',{name:"Kastention information",exact:true}).click();
   await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();await page.getByRole('button',{name:'提交 v2',exact:true}).click();await expect(page.getByRole('button',{name:'确认提交 v2',exact:true})).toBeVisible();
   expect((await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST')).toHaveLength(0);await page.getByRole('button',{name:'取消',exact:true}).click();
   await page.getByRole('button',{name:'提交 v2',exact:true}).click();await page.getByRole('textbox',{name:'版本说明（可选）',exact:true}).fill('First native notes');await page.getByRole('button',{name:'确认提交 v2',exact:true}).click();
-  await expect(page.getByRole('textbox',{name:'Deck name',exact:true})).toHaveValue('Published Notes');expect((await calls(page)).find((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST').body).toEqual({expected_draft_revision:2,expected_base_version:1,description:'First native notes'});
+  await expect(page.getByRole('textbox',{name:"Kastention name",exact:true})).toHaveValue('Published Notes');expect((await calls(page)).find((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST').body).toEqual({expected_draft_revision:2,expected_base_version:1,description:'First native notes'});
   await page.getByRole('button',{name:'版本记录',exact:true}).click();await expect(page.getByText(/First native notes/)).toBeVisible();await expect(page.getByText('v2',{exact:true}).first()).toBeVisible();
   for(const call of await calls(page)){if(call.path.startsWith('/api/decks/')||call.path.startsWith('/api/voices')){expect(call.headers['x-ink-csrf']).toHaveLength(43);expect(call.headers.authorization).toBeUndefined();}}
   expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.trials)).toEqual([]);
 });
 test('native preview conflict refreshes original state and creates no content version',async({page})=>{
-  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Changed draft');await page.getByRole('heading',{name:'Deck information',exact:true}).click();await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();
+  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Changed draft');await page.getByRole('heading',{name:"Kastention information",exact:true}).click();await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();
   await page.evaluate(()=>(window as any).__nativeDeckFixture.conflict=true);await page.getByRole('button',{name:'提交 v2',exact:true}).click();await expect(page.getByRole('button',{name:'确认提交 v2',exact:true})).toHaveCount(0);await expect(page.getByRole('alert')).toContainText('Draft changed. Read the current version.');
   expect((await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST')).toEqual([]);await expect(page.getByRole('textbox',{name:'Description',exact:true})).toHaveValue('Changed draft');
 });
@@ -130,13 +132,13 @@ test('native related Chat keeps original Deck filter, paging and delete confirma
 
 
 test('native commit conflict keeps reviewed CAS, requires a new preview and retains the draft',async({page})=>{
-  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Draft reviewed before conflict');await page.getByRole('heading',{name:'Deck information',exact:true}).click();
+  await edit(page);await page.getByRole('textbox',{name:'Description',exact:true}).fill('Draft reviewed before conflict');await page.getByRole('heading',{name:"Kastention information",exact:true}).click();
   await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();await page.getByRole('button',{name:'提交 v2',exact:true}).click();await expect(page.getByRole('button',{name:'确认提交 v2',exact:true})).toBeVisible();
   await page.evaluate(()=>{const row=(window as any).__nativeDeckFixture.decks.find((deck:any)=>deck.id==='notes');row.draft_revision++;});
   await page.getByRole('button',{name:'确认提交 v2',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Draft changed.');await expect(page.getByRole('button',{name:'确认提交 v2',exact:true})).toHaveCount(0);
   await expect(page.getByRole('textbox',{name:'Description',exact:true})).toHaveValue('Draft reviewed before conflict');expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.versions.notes??[])).toEqual([]);
   await page.getByRole('button',{name:'提交 v2',exact:true}).click();await expect(page.getByRole('button',{name:'确认提交 v2',exact:true})).toBeVisible();await page.getByRole('button',{name:'确认提交 v2',exact:true}).click();
-  await expect(page.getByRole('textbox',{name:'Deck name',exact:true})).toBeVisible();const commits=(await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST');
+  await expect(page.getByRole('textbox',{name:"Kastention name",exact:true})).toBeVisible();const commits=(await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/versions'&&call.method==='POST');
   expect(commits.map((call:any)=>call.body)).toEqual([{expected_draft_revision:2,expected_base_version:1,description:null},{expected_draft_revision:3,expected_base_version:1,description:null}]);
 });
 test('native Deck enable/delete/sync preserve original payloads and destructive cancellation',async({page})=>{
@@ -145,9 +147,10 @@ test('native Deck enable/delete/sync preserve original payloads and destructive 
   await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'More actions for Published Notes',exact:true}).click();await page.getByRole('button',{name:'Sync with Original',exact:true}).click();
   expect((await calls(page)).some((call:any)=>call.path.endsWith('/sync'))).toBe(false);await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);
   await page.getByRole('button',{name:'More actions for Published Notes',exact:true}).click();await page.getByRole('button',{name:'Sync with Original',exact:true}).click();await expect.poll(async()=>(await calls(page)).filter((call:any)=>call.path==='/api/decks/notes/sync').length).toBe(1);
-  await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:'Delete Deck',exact:true}).click();
+  await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=false);await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:"Delete Kastention",exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmations.at(-1))).toContain('Disabled Notes');
   expect((await calls(page)).some((call:any)=>call.path==='/api/decks/disabled'&&call.method==='DELETE')).toBe(false);await page.evaluate(()=>(window as any).__nativeDeckFixture.confirmResult=true);
-  await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:'Delete Deck',exact:true}).click();await expect(page.getByRole('button',{name:'Edit Disabled Notes',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'More actions for Disabled Notes',exact:true}).click();await page.getByRole('button',{name:"Delete Kastention",exact:true}).click();await expect(page.getByRole('button',{name:'Edit Disabled Notes',exact:true})).toHaveCount(0);
 });
 test('native related-history close rejects a late response from the old Deck',async({page})=>{
   await work(page);await page.evaluate(()=>(window as any).__nativeDeckFixture.holdRelated=true);await page.getByRole('button',{name:'More actions for Published Notes',exact:true}).click();await page.getByRole('button',{name:'Related conversations',exact:true}).click();
@@ -160,7 +163,7 @@ test('native related-history close rejects a late response from the old Deck',as
 test('native preview remains on the selected Deck after an edit makes it a dirty draft',async({page})=>{
   await page.getByRole('button',{name:'Edit Published Notes',exact:true}).click();await expect(page.getByTestId('native-deck-preview')).toBeVisible();
   await page.getByRole('button',{name:'Edit',exact:true}).click();await expect(page.getByRole('textbox',{name:'Description',exact:true})).toHaveValue('Original notes');
-  await page.getByRole('textbox',{name:'Description',exact:true}).fill('Keep this selected Deck open');await page.getByRole('heading',{name:'Deck information',exact:true}).click();await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();
+  await page.getByRole('textbox',{name:'Description',exact:true}).fill('Keep this selected Deck open');await page.getByRole('heading',{name:"Kastention information",exact:true}).click();await expect(page.getByRole('button',{name:'提交 v2',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Close',exact:true}).click();await expect(page.getByTestId('native-deck-preview')).toBeVisible();await expect(page.getByText('Published Notes',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:/Back to Decks/}).click();await expect(page.getByTestId('native-deck-home')).toBeVisible();await expect(page.getByRole('button',{name:'Edit Published Notes',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:/Back to Kastention/}).click();await expect(page.getByTestId('native-deck-home')).toBeVisible();await expect(page.getByRole('button',{name:'Edit Published Notes',exact:true})).toHaveCount(0);
 });

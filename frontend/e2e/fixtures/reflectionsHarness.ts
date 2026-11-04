@@ -2,6 +2,8 @@
 // [Output] One provider-free server fixture reused by Web and native component journeys.
 // [Pos] Technical harness only; normal services, CLI, models and data remain untouched.
 // [Sync] 2026-10-29: extract the existing fixture and serve the current bulk Deck catalog DTO.
+// [Sync] 2026-11-02: optionally return the existing post-create committed task identity for explicit read-recovery journeys.
+// [Sync] 2026-11-03: initialize the configured createError so explicit rejection fixtures reach the existing 422 branch.
 import type {Page} from '@playwright/test';
 import {installFixtures,isReflectionHistoryCancellation,isReflectionHistoryNavigationCancellation} from './calendarHarness';
 export type Section = 'echoes' | 'traits' | 'patterns';
@@ -230,6 +232,7 @@ export async function installReflectionFixtures(page: Page, options: {
   holdSse?: boolean;
   reportSaveFailureOnce?: boolean;
   creationUnknownOnce?: boolean;
+  committedTaskIdOnUnknown?: boolean;
   createError?: string;
   partial?: boolean;
   seedReport?: boolean;
@@ -252,6 +255,7 @@ export async function installReflectionFixtures(page: Page, options: {
     agentReadFailed: options.agentReadFailureOnce ?? false,
     noAnalyzableInput: options.noAnalyzableInputAfterSse ?? false,
     creationUnknownOnce: options.creationUnknownOnce ?? false,
+    createError: options.createError,
     createRequests: [], taskResponses: [], startRequests: [], eventRequests: [], reportRequests: [], reportApiRequests: [],
     reportSaveFailureOnce: options.reportSaveFailureOnce ?? false,
     reports: [], results: options.noAnalyzableInputAfterSse
@@ -418,7 +422,8 @@ export async function installReflectionFixtures(page: Page, options: {
     if (state.creationUnknownOnce) {
       state.creationUnknownOnce = false;
       allowHttpError(503, new URL(route.request().url()).pathname);
-      await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_UNAVAILABLE', outcome_unknown: true, creation_committed: true } } });
+      await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_UNAVAILABLE', outcome_unknown: true, creation_committed: true,
+        ...(options.committedTaskIdOnUnknown ? {task_id: state.taskId} : {}) } } });
       return;
     }
     state.taskStatus = 'RUNNING';

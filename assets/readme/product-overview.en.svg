@@ -1,9 +1,10 @@
+<!-- [Sync] 2026-11-03: Deck feature display label is Kastention / 卡片结构; geometry and business concepts retained. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 800" role="img" aria-labelledby="title desc" xml:lang="en">
 <!-- [Input] Notion product positioning, current module designs, README and frontend/app/_dream/styles/tokens.css. -->
 <!-- [Output] Static product overview; explanatory diagram, not a screenshot or implementation evidence. -->
 <!-- [Pos] Bilingual README illustration under assets/readme. -->
 <!-- [Sync] 2026-10-09: show thinking modes and nine concrete modules from the current product description. -->
-<title id="title">Ink &amp; Memory Dream</title><desc id="desc">Product overview: Decks organize thinking modes, Chat supports conversations and tasks, and Dream holds script and storyboard outputs. Supporting modules cover writing, reflection, files, progress, Calendar and resources.</desc>
+<title id="title">Kastention</title><desc id="desc">Product overview: Kastention organizes thinking modes, Chat supports conversations and tasks, and Dream holds script and storyboard outputs. Supporting modules cover writing, reflection, files, progress, Calendar and resources.</desc>
 <defs><style>
 text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; fill:#3f3429; }
 .brand { font-family: Georgia, 'Songti SC', serif; font-size:48px; font-weight:700; }
@@ -27,12 +28,12 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC'
 <text x="514" y="330" class="copy">Characters, scenes and Episodes</text>
 <path d="M926 207v137" stroke="#d8c7b3"/>
 <g transform="translate(964 203)" fill="none" stroke="#5f4a36" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="17" height="17" rx="3"/><rect x="28" y="4" width="17" height="17" rx="3"/><rect x="3" y="28" width="17" height="17" rx="3"/><rect x="28" y="28" width="17" height="17" rx="3"/></g>
-<text x="1029" y="239" class="heading">Decks</text>
+<text x="1029" y="239" class="heading">Kastention</text>
 <text x="964" y="292" class="copy">Personal thinking modes</text>
 <text x="964" y="330" class="copy">Agents, plugins and versions</text>
 <rect x="62" y="373" width="1316" height="62" rx="12" fill="#fffaf2"/>
 <circle cx="88" cy="404" r="5" fill="#7e9468"/>
-<text x="107" y="412" class="copy">Decks organize approaches. Chat runs tasks. Dream brings creative outputs together.</text>
+<text x="107" y="412" class="copy">Kastention organizes approaches. Chat runs tasks. Dream brings creative outputs together.</text>
 <text x="64" y="498" font-size="25" font-weight="650">Writing and diary</text>
 <text x="64" y="536" class="small">Text, manual suggestions and entries</text>
 <text x="514" y="498" font-size="25" font-weight="650">Reflection analysis</text>

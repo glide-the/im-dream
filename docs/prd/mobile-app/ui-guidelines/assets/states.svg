@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="520" height="190" preserveAspectRatio="xMinYMin meet" viewBox="0 0 520 190" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="520" height="190"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-190)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="117" width="150" height="58" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="12" y="154" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,308) scale(1,-1)">用户操作</text>
+			<text x="12" y="136" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,272) scale(1,-1)">原入口提交</text>
+			<rect x="185" y="117" width="150" height="58" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="197" y="154" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,308) scale(1,-1)">执行反馈</text>
+			<text x="197" y="136" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,272) scale(1,-1)">加载 / 运行 / 保存</text>
+			<rect x="370" y="117" width="150" height="58" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="382" y="154" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,308) scale(1,-1)">结果核对</text>
+			<text x="382" y="136" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,272) scale(1,-1)">原状态与历史</text>
+			<path d="M 154,146 L 180,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 176,149 L 180,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 176,143 L 180,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 339,146 L 365,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 361,149 L 365,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 361,143 L 365,146 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<rect x="185" y="17" width="150" height="58" rx="8" ry="8" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 0.85; fill: rgb(100%,99%,97%); fill-rule: evenodd;"/>
+			<text x="197" y="54" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 11px;fill: rgb(24%,20%,16%); stroke:none;" transform="translate(0,108) scale(1,-1)">失败与恢复</text>
+			<text x="197" y="36" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 8px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,72) scale(1,-1)">保留内容 / 原重试</text>
+			<path d="M 445,112 L 445,47 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 445,47 L 342,47 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 346,50 L 342,47 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 346,44 L 342,47 Z" style="stroke: rgb(47%,41%,34%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 185,47 L 76,47 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 76,47 L 76,108 Z" style="stroke: rgb(84%,78%,70%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="0" y="3" style="font-family: Arial Unicode MS, PingFang SC, sans-serif; font-size: 9px;fill: rgb(47%,41%,34%); stroke:none;" transform="translate(0,6) scale(1,-1)">恢复核对已有结果；重新提交沿原用户动作。</text>
+		</g>
+	</g>
+</svg>

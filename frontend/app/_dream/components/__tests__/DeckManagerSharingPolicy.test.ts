@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。
 // [Input] Enabled-only Deck home, Settings / Work management, original create flow, maintenance popup, constants, and APIs.
 // [Output] Lock home projection, Work ownership, related Chat cleanup, and Deck versions.
 // [Pos] Source-contract regression for Deck management scope.
@@ -36,8 +37,8 @@ const CONSTANTS = read('app/_dream/constants/deck.ts');
 const APP = read('app/_dream/App.tsx');
 const SETTINGS = read('app/_dream/views/story-workspace/StoryWorkspaceSettingsPage.tsx');
 const PATHS = read('app/_dream/router/storyWorkspacePath.ts');
-const PDF_TRACE = read('../docs/design/deck/deck-pdf-requirement-trace.md');
-const EVALUATOR_DESIGN = read('../docs/design/deck/deck-evaluator-interaction-draft.md');
+const PDF_TRACE = read('../docs/design/kastention/kastention-pdf-requirement-trace.md');
+const EVALUATOR_DESIGN = read('../docs/design/kastention/kastention-evaluator-interaction-draft.md');
 
 test('Deck home uses published-clean enabled shortcuts with system markers while full inventory stays in Work', () => {
   const launcher = PANELS.slice(

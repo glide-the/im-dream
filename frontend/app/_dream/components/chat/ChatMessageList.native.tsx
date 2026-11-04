@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: measure viewport-bound user previews and coalesce bottom movement after native layout; expansion retains reading intent.
 // [Sync] 2026-10-30: preserve the original source marker above the first user text or at the pagination boundary.
 // [Sync] 2026-10-30: share canonical process reads and keep validated MCP App document slots outside process disclosure across history/live projections.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
@@ -29,6 +30,8 @@ import {IconArrowDown,IconCheck,IconChevronRight,IconCopy} from './Icons';
 import {TaskSessionSourceMarker} from './TaskSessionNavigation.native';
 import type {TaskSessionLinksSnapshot} from './taskSessionLinks';
 const emptyIds:ReadonlySet<string>=new Set();
+// Presentation allocation from message-reading PRD; original text and submission have no length limit here.
+const userMessageLayout={fontSize:14.72,lineHeight:25.024,paddingVertical:14.4,actionHeight:44,previewViewportFraction:0.5};
 type Part=UIMessage['parts'][number];
 export interface NativeChatMessageListProps {
   messages:UIMessage[];threadId:string;isLoading:boolean;initialLoading?:boolean;origin?:string;
@@ -37,12 +40,22 @@ export interface NativeChatMessageListProps {
   sourceThread?:TaskSessionLinksSnapshot['source'];onNavigateThread?:(id:string)=>void;
   onOpenLink?:(url:string)=>void;onOpenWorkspace?:(uri:string)=>void;workspaceAvailability?:WorkspaceAvailability;workspaceResources?:WorkspaceResources;onAddImageMaterial?:(file:NativePickedFile)=>Promise<boolean>;
 }
-function MessageText({text,user,showActions,origin,onOpenLink,onOpenWorkspace,workspaceSessionId,workspaceAvailability,workspaceResources,onAddImageMaterial,leadingAction}:{text:string;user:boolean;showActions:boolean;origin?:string;workspaceSessionId?:string;workspaceAvailability?:WorkspaceAvailability;workspaceResources?:WorkspaceResources;onAddImageMaterial?:(file:NativePickedFile)=>Promise<boolean>;onOpenLink?:(url:string)=>void;onOpenWorkspace?:(uri:string)=>void;leadingAction?:ReactNode}){
-  const {copied,copy}=useCopy(),colors=useInkColors();
+function MessageText({text,user,showActions,origin,onOpenLink,onOpenWorkspace,workspaceSessionId,workspaceAvailability,workspaceResources,onAddImageMaterial,leadingAction,viewportHeight,onExpand}:{text:string;user:boolean;showActions:boolean;origin?:string;workspaceSessionId?:string;workspaceAvailability?:WorkspaceAvailability;workspaceResources?:WorkspaceResources;onAddImageMaterial?:(file:NativePickedFile)=>Promise<boolean>;onOpenLink?:(url:string)=>void;onOpenWorkspace?:(uri:string)=>void;leadingAction?:ReactNode;viewportHeight:number;onExpand:()=>void}){
+  const {t}=useTranslation(),{copied,copy}=useCopy(),colors=useInkColors();
+  const [expanded,setExpanded]=useState(false),[naturalHeight,setNaturalHeight]=useState(0);
+  const previewHeight=Math.max(userMessageLayout.lineHeight,viewportHeight*userMessageLayout.previewViewportFraction-userMessageLayout.paddingVertical*2-userMessageLayout.actionHeight);
+  const collapsible=user&&viewportHeight>0&&naturalHeight>previewHeight+userMessageLayout.actionHeight;
   return <View style={{alignItems:user?'flex-end':'stretch',gap:4,minWidth:0}}>
     {leadingAction}
     <View style={user?[styles.bubble,{backgroundColor:colors['color-bg-paper'],shadowColor:colors['color-shadow-soft']}]:styles.assistant}>
-      <ChatMarkdown text={text} origin={origin} color={colors[user?'color-text-primary':'color-text-body']} fontSize={user?14.72:15.2} lineHeight={user?25.024:26.6} onOpenLink={onOpenLink} onOpenWorkspace={onOpenWorkspace} workspaceSessionId={workspaceSessionId} workspaceAvailability={workspaceAvailability} workspaceResources={workspaceResources} onAddImageMaterial={onAddImageMaterial}/>
+      <View style={collapsible&&!expanded?{maxHeight:previewHeight,overflow:'hidden'}:undefined}>
+        <View onLayout={user?({nativeEvent})=>setNaturalHeight(nativeEvent.layout.height):undefined} style={styles.textBody}>
+          <ChatMarkdown text={text} origin={origin} color={colors[user?'color-text-primary':'color-text-body']} fontSize={user?userMessageLayout.fontSize:15.2} lineHeight={user?userMessageLayout.lineHeight:26.6} onOpenLink={onOpenLink} onOpenWorkspace={onOpenWorkspace} workspaceSessionId={workspaceSessionId} workspaceAvailability={workspaceAvailability} workspaceResources={workspaceResources} onAddImageMaterial={onAddImageMaterial}/>
+        </View>
+      </View>
+      {collapsible?<Pressable accessibilityRole="button" accessibilityLabel={t(expanded?'chat.message.collapse':'chat.message.expand')} accessibilityState={{expanded}} aria-expanded={expanded} onPress={()=>{if(!expanded)onExpand();setExpanded(value=>!value);}} style={styles.messageToggle}>
+        <InkLabel style={{fontSize:13.6,color:colors['color-action-link']}}>{t(expanded?'chat.message.collapse':'chat.message.expand')}</InkLabel>
+      </Pressable>:null}
     </View>
     {user||showActions?<Pressable accessibilityRole="button" accessibilityLabel={copied?'Copied!':'Copy'} onPress={()=>copy(text)} style={styles.copy}>
       {copied?<IconCheck width={15.2} height={15.2} color={colors['color-state-success']}/>:<IconCopy width={15.2} height={15.2} color={colors['color-text-muted']}/>}
@@ -59,7 +72,7 @@ function Reasoning({text,streaming,forceExpanded}:{text:string;streaming:boolean
     {open?<InkLabel selectable style={{marginTop:8,fontSize:13.6,lineHeight:23.12,color:colors['color-text-secondary']}}>{text}</InkLabel>:null}
   </View>;
 }
-function MessageRow({message:persisted,index,count,props,detail,load,sourceIndex}:{message:UIMessage;index:number;count:number;props:NativeChatMessageListProps;detail?:HistoricalProcessDetailState;load:()=>void;sourceIndex:number}){
+function MessageRow({message:persisted,index,count,props,detail,load,sourceIndex,viewportHeight,onExpand}:{message:UIMessage;index:number;count:number;props:NativeChatMessageListProps;detail?:HistoricalProcessDetailState;load:()=>void;sourceIndex:number;viewportHeight:number;onExpand:()=>void}){
   const {t,i18n}=useTranslation(),colors=useInkColors();
   const [expanded,setExpanded]=useState(false);
   const message=detail?.status==='loaded'?detail.message:persisted;
@@ -71,7 +84,7 @@ function MessageRow({message:persisted,index,count,props,detail,load,sourceIndex
     if(part.type==='text'){
       if(!part.text||(message.role==='assistant'&&isCompactionCompletionText(part.text,message.metadata)))return null;
       const firstSourceText=index===sourceIndex&&partIndex===message.parts.findIndex(candidate=>candidate.type==='text'&&Boolean(candidate.text));
-      return <MessageText key={key} text={part.text} user={message.role==='user'} showActions={!process&&partIndex===lastText&&(index<count-1||!props.isLoading)} origin={props.origin} onOpenLink={props.onOpenLink} onOpenWorkspace={props.onOpenWorkspace} workspaceSessionId={props.threadId} workspaceAvailability={props.workspaceAvailability} workspaceResources={props.workspaceResources} onAddImageMaterial={props.onAddImageMaterial} leadingAction={firstSourceText?<TaskSessionSourceMarker source={props.sourceThread??null} onNavigateThread={props.onNavigateThread}/>:undefined}/>;
+      return <MessageText key={key} text={part.text} user={message.role==='user'} showActions={!process&&partIndex===lastText&&(index<count-1||!props.isLoading)} origin={props.origin} onOpenLink={props.onOpenLink} onOpenWorkspace={props.onOpenWorkspace} workspaceSessionId={props.threadId} workspaceAvailability={props.workspaceAvailability} workspaceResources={props.workspaceResources} onAddImageMaterial={props.onAddImageMaterial} viewportHeight={viewportHeight} onExpand={onExpand} leadingAction={firstSourceText?<TaskSessionSourceMarker source={props.sourceThread??null} onNavigateThread={props.onNavigateThread}/>:undefined}/>;
     }
     if(part.type==='reasoning')return <Reasoning key={key} text={part.text} streaming={part.state==='streaming'} forceExpanded={process}/>;
     return <View key={key}>{props.renderOtherPart?.(part,message,partIndex,'tool-only')}</View>;
@@ -104,33 +117,40 @@ export default function ChatMessageList(props:NativeChatMessageListProps){
   const sourceIndex=props.sourceThread&&!props.historyHasMore?props.messages.findIndex(message=>message.role==='user'&&message.parts.some(part=>part.type==='text'&&Boolean(part.text))):-1;
   const process=useHistoricalChatProcess(props.threadId,props.messages,props.historicalMessageIds??emptyIds,props.transport??clientFetch);
   const scroll=useRef<ScrollView>(null),nearBottom=useRef(true),dragging=useRef(false),followingLayout=useRef(false),geometry=useRef({content:0,offset:0,viewport:0});
-  const [showJump,setShowJump]=useState(false);
-  function jump(animated=false){nearBottom.current=true;followingLayout.current=!chatScrollPosition(geometry.current.content,geometry.current.offset,geometry.current.viewport).isNearBottom;setShowJump(false);scroll.current?.scrollToEnd({animated});}
+  const [showJump,setShowJump]=useState(false),[viewportHeight,setViewportHeight]=useState(0);
+  const layoutFrame=useRef<number|null>(null);
+  function cancelMovement(){if(layoutFrame.current!==null){cancelAnimationFrame(layoutFrame.current);layoutFrame.current=null;}}
+  function jump(animated=false){
+    nearBottom.current=true;followingLayout.current=true;setShowJump(false);cancelMovement();
+    layoutFrame.current=requestAnimationFrame(()=>{layoutFrame.current=null;followingLayout.current=!chatScrollPosition(geometry.current.content,geometry.current.offset,geometry.current.viewport).isNearBottom;scroll.current?.scrollToEnd({animated});});
+  }
+  function readExpanded(){cancelMovement();nearBottom.current=false;followingLayout.current=false;}
+  function beginDrag(){cancelMovement();dragging.current=true;followingLayout.current=false;}
   function update(event:NativeScrollEvent){
     const before=geometry.current,changed=before.content!==event.contentSize.height||before.viewport!==event.layoutMeasurement.height;
     geometry.current={content:event.contentSize.height,offset:event.contentOffset.y,viewport:event.layoutMeasurement.height};
     const position=chatScrollPosition(geometry.current.content,geometry.current.offset,geometry.current.viewport);
     if(!dragging.current&&nearBottom.current&&(followingLayout.current||changed)){
-      if(position.isNearBottom)followingLayout.current=false;else if(changed)jump();
+      if(position.isNearBottom)followingLayout.current=false;else jump();
       setShowJump(false);return;
     }
     followingLayout.current=false;nearBottom.current=position.isNearBottom;setShowJump(position.showScrollToBottom);
     if(dragging.current&&event.contentOffset.y<=0&&props.historyHasMore&&!props.historyLoading)props.onLoadOlder?.();
   }
-  useEffect(()=>{nearBottom.current=true;followingLayout.current=false;setShowJump(false);},[props.threadId]);
+  useEffect(()=>{nearBottom.current=true;followingLayout.current=false;dragging.current=false;setShowJump(false);jump();return cancelMovement;},[props.threadId]);
   return <View style={[styles.fill,styles.viewport]}>
     <ScrollView ref={scroll} testID="native-chat-messages-scroll" style={styles.fill} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" scrollEventThrottle={16}
-      maintainVisibleContentPosition={{minIndexForVisible:1}} onScrollBeginDrag={()=>{dragging.current=true;followingLayout.current=false;}} onScrollEndDrag={()=>{dragging.current=false;}} onMomentumScrollBegin={()=>{dragging.current=true;}} onMomentumScrollEnd={()=>{dragging.current=false;}} onScroll={({nativeEvent})=>update(nativeEvent)}
-      onLayout={({nativeEvent})=>{geometry.current.viewport=nativeEvent.layout.height;if(nearBottom.current)jump();}}
-      onContentSizeChange={(_width,height)=>{geometry.current.content=height;if(nearBottom.current)jump();else setShowJump(chatScrollPosition(height,geometry.current.offset,geometry.current.viewport).showScrollToBottom);}}>
+      maintainVisibleContentPosition={{minIndexForVisible:1}} onScrollBeginDrag={beginDrag} onScrollEndDrag={()=>{dragging.current=false;}} onMomentumScrollBegin={beginDrag} onMomentumScrollEnd={()=>{dragging.current=false;}} onScroll={({nativeEvent})=>update(nativeEvent)}
+      onLayout={({nativeEvent})=>{geometry.current.viewport=nativeEvent.layout.height;setViewportHeight(nativeEvent.layout.height);if(nearBottom.current&&!dragging.current)jump();}}
+      onContentSizeChange={(_width,height)=>{geometry.current.content=height;if(nearBottom.current&&!dragging.current)jump();else setShowJump(chatScrollPosition(height,geometry.current.offset,geometry.current.viewport).showScrollToBottom);}}>
       <View style={styles.historyHeader}>
         {props.historyError?<View><InkLabel accessibilityRole="alert" style={{color:colors['color-text-muted']}}>{t('chat.historyTurn.loadFailed')}</InkLabel><Pressable accessibilityRole="button" onPress={props.onLoadOlder} style={styles.retry}><InkLabel style={{color:colors['color-action-link']}}>{t('chat.historyTurn.retry')}</InkLabel></Pressable></View>:props.historyLoading?<ActivityIndicator accessibilityLabel={t('chat.historyTurn.loadingEarlier')} color={colors['color-text-muted']}/>:props.historyHasMore?<Pressable accessibilityRole="button" onPress={props.onLoadOlder} style={styles.retry}><InkLabel style={{color:colors['color-text-muted']}}>{t('chat.historyTurn.loadEarlier')}</InkLabel></Pressable>:null}
         {props.initialLoading&&props.messages.length===0?<ActivityIndicator accessibilityLabel={t('chat.historyTurn.loading')} color={colors['color-text-muted']}/>:null}
       </View>
       {sourceIndex<0?<TaskSessionSourceMarker source={props.sourceThread??null} onNavigateThread={props.onNavigateThread}/>:null}
-      {props.messages.map((message,index)=><MessageRow key={`${props.threadId}:${messageMergeKey(message)}`} message={message} index={index} count={props.messages.length} props={{...props,historicalMessageIds:props.historicalMessageIds??emptyIds}} detail={process.details[`${props.threadId}:${message.id}`]} load={()=>void process.load(message)} sourceIndex={sourceIndex}/>)}
+      {props.messages.map((message,index)=><MessageRow key={`${props.threadId}:${messageMergeKey(message)}`} message={message} index={index} count={props.messages.length} props={{...props,historicalMessageIds:props.historicalMessageIds??emptyIds}} detail={process.details[`${props.threadId}:${message.id}`]} load={()=>void process.load(message)} sourceIndex={sourceIndex} viewportHeight={viewportHeight} onExpand={readExpanded}/>)}
     </ScrollView>
     {showJump?<Pressable accessibilityRole="button" accessibilityLabel={t('chat.panel.scrollToBottom')} onPress={()=>jump(true)} style={[styles.jump,{borderColor:colors['color-border-paper'],backgroundColor:colors['color-bg-surface-solid']}]}><IconArrowDown width={18} height={18} color={colors['color-text-primary']}/></Pressable>:null}
   </View>;
 }
-const styles=StyleSheet.create({fill:{flex:1,minHeight:0},viewport:{overflow:'hidden'},content:{padding:16,paddingBottom:24,gap:20},message:{minWidth:0,gap:16},parts:{gap:16},historyHeader:{alignItems:'center'},retry:{minHeight:44,paddingHorizontal:10,justifyContent:'center'},bubble:{maxWidth:'85%',minWidth:0,borderRadius:18,paddingVertical:14.4,paddingHorizontal:16,shadowOpacity:1,shadowRadius:4,shadowOffset:{width:0,height:1}},assistant:{width:'100%',minWidth:0},copy:{width:44,height:44,justifyContent:'center',alignItems:'center'},reasoning:{paddingLeft:13.6,borderLeftWidth:2},reasoningToggle:{minHeight:44,flexDirection:'row',alignItems:'center',gap:8},disclosure:{minHeight:44,flexDirection:'row',alignItems:'center',gap:5.6,borderBottomWidth:1,paddingHorizontal:4,paddingVertical:8.8},process:{gap:16,paddingTop:16},jump:{position:'absolute',bottom:8,alignSelf:'center',width:44,height:44,borderWidth:1,borderRadius:999,alignItems:'center',justifyContent:'center'}});
+const styles=StyleSheet.create({fill:{flex:1,minHeight:0},viewport:{overflow:'hidden'},content:{padding:16,paddingBottom:24,gap:20},message:{minWidth:0,gap:16},parts:{gap:16},historyHeader:{alignItems:'center'},retry:{minHeight:44,paddingHorizontal:10,justifyContent:'center'},bubble:{maxWidth:'85%',minWidth:0,borderRadius:18,paddingVertical:userMessageLayout.paddingVertical,paddingHorizontal:16,shadowOpacity:1,shadowRadius:4,shadowOffset:{width:0,height:1}},assistant:{width:'100%',minWidth:0},textBody:{minWidth:0,flexShrink:0},messageToggle:{minHeight:userMessageLayout.actionHeight,justifyContent:'center',alignItems:'flex-end'},copy:{width:44,height:44,justifyContent:'center',alignItems:'center'},reasoning:{paddingLeft:13.6,borderLeftWidth:2},reasoningToggle:{minHeight:44,flexDirection:'row',alignItems:'center',gap:8},disclosure:{minHeight:44,flexDirection:'row',alignItems:'center',gap:5.6,borderBottomWidth:1,paddingHorizontal:4,paddingVertical:8.8},process:{gap:16,paddingTop:16},jump:{position:'absolute',bottom:8,alignSelf:'center',width:44,height:44,borderWidth:1,borderRadius:999,alignItems:'center',justifyContent:'center'}});

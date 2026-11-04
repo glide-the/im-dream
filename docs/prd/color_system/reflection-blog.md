@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 # Reflection Blog Page — 颜色与主题规范
 
 > 本文记录 `ReflectionBlogPage` 和 `BlogResultCard` 组件的颜色体系。  
@@ -11,7 +12,7 @@
 
 Reflection Blog Page 是一个全页「博客阅读」视图，用于展示单条 Past Reflection 的详细内容。  
 视觉参考：杂志/音乐详情页风格——封面艺术块（左）、标题与元数据（右）、博客正文（下方内容区）。  
-**主视觉语言与整体 Ink & Memory 一致：温暖纸张、手写日记、静物台。**
+**主视觉语言与整体 Kastention 一致：温暖纸张、手写日记、静物台。**
 
 ---
 

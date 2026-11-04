@@ -1,3 +1,6 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
+// [Sync] 2026-11-02: restore the original composer text/completed attachment references; interrupted uploads require explicit selection.
+// [Sync] 2026-11-02: block source-dependent sending independently of draft editing and the original Stop action.
 // [Sync] 2026-10-31: forward owning-scene visibility to the retained editor for local keyboard dismissal.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Sync] 2026-10-28: apply the original attachment-size policy to explicit Workspace material copies as well as picker/sketch input.
@@ -7,6 +10,7 @@
 // [Sync] 2026-10-28: pass actual Deck/Thread/workspace context into shared Skill discovery and preserve draft-only menu selection.
 // [Sync] 2026-10-28: expose the existing attachment uploader to the root-owned sketch overlay through a component ref.
 // [Sync] 2026-10-28: let the editor shrink inside the current scene viewport while retaining native action controls.
+import { BRAND_NAME } from '../../constants/brand';
 import {forwardRef,useEffect,useImperativeHandle,useRef,useState,type ForwardedRef,type ReactNode} from 'react';
 import {ActivityIndicator,Image,Pressable,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {useTranslation} from 'react-i18next';
@@ -25,6 +29,7 @@ import ComposerSkillMenu from './ComposerSkillMenu.native';
 import {clientFetch} from '../../../../src/platform/transport';
 import type {ContextUsageSnapshot} from '../../lib/context-compaction';
 import {releaseNativeFiles,type NativePickedFile} from '../../../../src/platform/fileUpload.native';
+import type {NativeChatRecovery} from './nativeChatRecovery.native';
 export interface NativeAIInputDockHandle {addFile:(file:NativePickedFile)=>Promise<boolean>;}
 export interface NativeAIInputDockProps {
   origin:string;onSendMessage:(message:string,files?:UploadedFile[],toolChoice?:ToolChoice)=>void|Promise<void>;
@@ -33,14 +38,20 @@ export interface NativeAIInputDockProps {
   defaultToolChoice?:ToolChoice;workspaceSessionId?:string;prefill?:string;prefillNonce?:number;placeholder?:string;
   deckId?:string;threadId?:string;workspaceEnabled?:boolean;contextUsage?:ContextUsageSnapshot;
   active?:boolean;
+  recovery?:NativeChatRecovery;
+  sendBlocked?:boolean;
 }
-function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder='Ask Ink & Memory…',deckId,threadId,workspaceEnabled,contextUsage,active=true}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
+function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder=`Ask ${BRAND_NAME}…`,deckId,threadId,workspaceEnabled,contextUsage,active=true,recovery,sendBlocked=false}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
   const {t}=useTranslation();const colors=useInkColors();
   const narrow=useWindowDimensions().width<=767;
   const uploads=useFileAttachments(workspaceSessionId);
-  const [notice,setNotice]=useState<string|null>(null);
+  const [restoration]=useState(()=>recovery?.composer());
+  const [notice,setNotice]=useState<string|null>(()=>restoration?.initial?.interruptedFiles.length
+    ?t('chat.inputDock.uploadInterrupted',{names:restoration.initial.interruptedFiles.join('、')}):null);
   const [focused,setFocused]=useState(false);
-  const draft=useComposerDraft({onSendMessage,disabled,loading,onStop,fullAccessEnabled,defaultToolChoice,initialDraft:prefill,onUploadBlocked:()=>setNotice(t('chat.inputDock.waitForUpload')),releasePreview:uploads.releasePreview});
+  const draft=useComposerDraft({onSendMessage,disabled:disabled||sendBlocked,loading,onStop,fullAccessEnabled,defaultToolChoice:restoration?.initial?.toolChoice??defaultToolChoice,
+    initialDraft:prefill??restoration?.initial?.query,initialFiles:restoration?.initial?.uploadedFiles,onDraftChange:restoration?.write,
+    onUploadBlocked:()=>setNotice(t('chat.inputDock.waitForUpload')),releasePreview:uploads.releasePreview});
   useImperativeHandle(ref,()=>({addFile:async file=>{if(disabled){releaseNativeFiles([file.id]);return false;}if(file.size>MAX_UPLOAD_FILE_SIZE_BYTES){setNotice(t('chat.inputDock.fileTooLarge',{name:file.name,max:formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES)}));releaseNativeFiles([file.id]);return false;}return (await uploads.addFiles([file],draft.setUploadedFiles))[0]===true;}}));
   const skills=useComposerSkills({query:draft.query,setQuery:draft.setQuery,focused,deckId,threadId,workspaceEnabled,transport:clientFetch});
   const nonce=useRef<number|undefined>(undefined);

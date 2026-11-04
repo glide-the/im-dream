@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Input] Original Web panels, Native launcher and persisted-shape Deck/Voice fixtures.
 // [Output] Home eligibility, preview fields and draft-only Chat handoff regression evidence.
 // [Pos] Provider-free UI/selection qualification; no backend, account or model execution.
@@ -72,14 +73,14 @@ for(const native of [false,true]) {
     await expect(page.getByRole('button',{name:'Edit Published Notes',exact:true})).toBeVisible();
     await expect(page.getByRole('button',{name:'Edit Unpublished Notes',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit Disabled Deck',exact:true})).toHaveCount(0);
     if(native)await expect(page.getByText('Dream Workspace',{exact:true})).toHaveCount(0);
-    await page.getByRole(native?'textbox':'searchbox',{name:'Search available Decks'}).fill('NOTES');
+    await page.getByRole(native?'textbox':'searchbox',{name:"Search available Kastention"}).fill('NOTES');
     await page.getByRole('button',{name:'Edit Published Notes',exact:true}).click();
     await expect(page.getByText('Agents 4',{exact:true})).toBeVisible();await expect(page.getByText('0.1.12',{exact:true})).toBeVisible();
     const example=page.getByRole('button',{name:native?'Writer: Keep the original first line':/Writer.*Keep the original first line/});await example.click();
     expect(await page.evaluate(()=>(window as any).__deckLaunchFixture.trials)).toEqual([{deckId:'published',voiceId:'writer',input:'Keep the original first line'}]);
     await page.getByRole('button',{name:/Try now/}).click();
     expect(await page.evaluate(()=>(window as any).__deckLaunchFixture.trials)).toEqual([{deckId:'published',voiceId:'writer',input:'Keep the original first line'},{deckId:'published',voiceId:'writer'}]);
-    await page.getByRole('button',{name:/Back to Decks/}).click();await expect(page.getByRole('button',{name:'Edit Published Notes',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:/Back to Kastention/}).click();await expect(page.getByRole('button',{name:'Edit Published Notes',exact:true})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   });
 }

@@ -18,6 +18,9 @@ Deployment script presence is not production acceptance. The table below states
 what the checked-in scripts actually do at revision `54f3bbe5` and identifies
 known gaps that prevent an entry from being treated as current.
 
+<!-- [Sync] 2026-11-02: link required build-memory checks and verified-artifact recovery without changing deploy scripts. -->
+Before building or switching a release, follow the [build-memory and failure-recovery runbook](../docs/deploy/build-memory-and-recovery.md). Confirm capacity, inline heap overrides, compatible artifacts and an available recovery release; stop repeated builds when these conditions fail.
+
 ## Entry matrix
 
 | Platform | Entry | Current status |

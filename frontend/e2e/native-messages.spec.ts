@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: qualify viewport-bound user previews, intrinsic code geometry and layout/reading scroll ownership for APP-06.
 // [Input] Production native message renderer/Markdown and public process DTOs with explicit transport/clipboard fixtures.
 // [Output] Technical GFM, bottom-follow, user scroll, shared process prefetch/validation/retry/cancellation and copy receipts.
 // [Pos] Provider-free browser harness; Native/RNW presentation is real, backend/account/model/clipboard writes are fixtures.
@@ -6,7 +7,10 @@ import {createServer,transformWithEsbuild} from 'vite';
 import {createServer as netServer} from 'node:net';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
-const native=`export * from 'react-native-web';export const NativeModules={InkRuntime:{copyText:async text=>{window.__messagesFixture.copies.push(text);}}};`;
+// RNW emits a browser load Event; the native component consumes iOS ImageLoadEventData.
+const native=`export * from 'react-native-web';import {Image as WebImage} from 'react-native-web';import {forwardRef,createElement} from 'react';
+export const Image=forwardRef((props,ref)=>createElement(WebImage,{...props,ref,onLoad:event=>props.onLoad?.({nativeEvent:{source:{width:event.nativeEvent.target.naturalWidth,height:event.nativeEvent.target.naturalHeight}}})}));
+export const NativeModules={InkRuntime:{copyText:async text=>{window.__messagesFixture.copies.push(text);}}};`;
 const entry=String.raw`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {View,Text,Pressable} from 'react-native';
 import '/app/_dream/i18n.ts';import List from '/app/_dream/components/chat/ChatMessageList.native.tsx';
@@ -23,6 +27,7 @@ async function transport(input,init={}){
  return new Response(JSON.stringify({id:'history-summary',role:'assistant',parts:[{type:'reasoning',text:'Canonical stored reasoning.'},{type:'text',text:f.bad?'Conflicting final.':'Final authoritative reply.'}],metadata:{turnId:'history-turn',turnStatus:'completed',finalPartIndex:1,durationMs:1200},created_at:'2026-10-28T00:00:00Z'}));
 }
 function Harness(){const [messages,setMessages]=useState(rows),[thread,setThread]=useState('fixture-thread'),[history,setHistory]=useState(false),[more,setMore]=useState(false),[ready,setReady]=useState(false);
+ f.present=(rows,thread='fixture-thread')=>{setMessages(rows);setThread(thread);setHistory(false);setMore(false);};
  React.useEffect(()=>{void loadBrowserSession(transport).then(()=>setReady(true));},[]);
  const buttons=[['Append stream',()=>setMessages(current=>current.map((row,i)=>i===current.length-1?{...row,parts:[{type:'text',text:row.parts[0].text+'\n\n'+('Streamed final token. ').repeat(20)}]}:row))],['History summary',()=>{setMessages([summary]);setHistory(true);setMore(true);}],['Long conversation',()=>{setMessages(rows());setHistory(false);setMore(false);setThread(value=>value+'-next');}],['Mismatch process',()=>{f.bad=true;}],['Valid process',()=>{f.bad=false;}],['Hold process',()=>{f.hold=true;}],['Other Thread',()=>{setThread('other-thread');setMessages([{id:'other',role:'assistant',parts:[{type:'text',text:'Other Thread reply.'}]}]);setHistory(false);}]];
  return <View style={{height:'100vh'}}><View style={{flexDirection:'row',flexWrap:'wrap'}}>{buttons.map(([name,action])=><Pressable accessibilityRole="button" key={name} onPress={action} style={{padding:8}}><Text>{name}</Text></Pressable>)}</View>
@@ -47,6 +52,54 @@ test.beforeEach(async({page})=>{
 test.afterEach(async({page})=>{expect(errors.get(page)??[]).toEqual([]);});
 async function position(page:Page){return page.getByTestId('native-chat-messages-scroll').evaluate(element=>({top:element.scrollTop,height:element.scrollHeight,viewport:element.clientHeight}));}
 async function bottom(page:Page){const p=await position(page);return p.height-p.viewport-p.top;}
+test('long user text has a measured preview, full copy and per-Thread expansion without changing message text',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const text=Array.from({length:45},(_,i)=>`Paragraph ${i}: A long message preserves its original words and line breaks.`).join('\n\n');
+ await page.evaluate(text=>(window as any).__messagesFixture.present([{id:'same-id',role:'user',parts:[{type:'text',text}]},{id:'reply',role:'assistant',parts:[{type:'text',text:'The latest reply.'}]}]),text);
+ const row=page.getByTestId('native-chat-message-same-id'),toggle=row.getByRole('button',{name:'Expand message',exact:true});
+ await expect(toggle).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','false');
+ const preview=await row.boundingBox(),viewport=await page.getByTestId('native-chat-messages-scroll').boundingBox();expect(preview!.height).toBeLessThan(viewport!.height*.7);
+ await row.getByRole('button',{name:'Copy',exact:true}).click();expect(await page.evaluate(()=>(window as any).__messagesFixture.copies.at(-1))).toBe(text);
+ await toggle.click();await expect(row.getByRole('button',{name:'Collapse message',exact:true})).toHaveAttribute('aria-expanded','true');
+ await expect.poll(async()=>(await row.boundingBox())!.height).toBeGreaterThan(preview!.height);
+ await row.getByRole('button',{name:'Collapse message',exact:true}).click();await expect(toggle).toBeVisible();await expect.poll(()=>bottom(page)).toBeLessThan(2);
+ await toggle.click();
+ await page.evaluate(text=>(window as any).__messagesFixture.present([{id:'same-id',role:'user',parts:[{type:'text',text}]}],'other-thread'),text);
+ await expect(toggle).toHaveAttribute('aria-expanded','false');
+ await page.evaluate(()=>(window as any).__messagesFixture.present([{id:'short',role:'user',parts:[{type:'text',text:'A short message.'}]}]));
+ await expect(page.getByTestId('native-chat-message-short').getByRole('button',{name:/Expand message|Collapse message/})).toHaveCount(0);
+ await page.setViewportSize({width:320,height:200});
+ await expect(page.getByTestId('native-chat-message-short').getByRole('button',{name:/Expand message|Collapse message/})).toHaveCount(0);
+});
+test('code blocks use intrinsic height, contain long lines and retain the latest message after layout changes',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const code='const longLine = "'+'x'.repeat(240)+'";';
+ await page.evaluate(code=>(window as any).__messagesFixture.present([{id:'code-user',role:'user',parts:[{type:'text',text:'```js\n'+code+'\n```'}]},{id:'code-reply',role:'assistant',parts:[{type:'text',text:'Before code.\n\n```\n\n```\n\n- Nested item\n  - Child\n\n```js\nconst small = 1;\n```\n\nLatest visible reply.'}]}]),code);
+ await expect(page.getByText('Latest visible reply.',{exact:true})).toBeVisible();await expect.poll(()=>bottom(page)).toBeLessThan(2);
+ const small=page.getByText('const small = 1;', {exact:true});
+ const codeBox=await small.locator('..').locator('..').boundingBox();expect(codeBox!.height).toBeLessThan(100);
+ const long=page.getByText(code,{exact:true}),horizontal=long.locator('..').locator('..');
+ expect(await horizontal.evaluate(e=>e.scrollWidth>e.clientWidth)).toBe(true);
+ await horizontal.evaluate(e=>{e.scrollLeft=e.scrollWidth;});expect(await horizontal.evaluate(e=>e.scrollLeft)).toBeGreaterThan(0);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.setViewportSize({width:320,height:480});await expect.poll(()=>bottom(page)).toBeLessThan(2);
+ await expect(page.getByText('Latest visible reply.',{exact:true})).toBeInViewport();
+});
+test('late Markdown image height follows the latest reply and preserves an active historical reading position',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ let release:()=>void=()=>{};const ready=new Promise<void>(resolve=>{release=resolve;});let requested=false;
+ await page.route('**/app06-height.svg',async route=>{requested=true;await ready;await route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="800" height="80"><rect width="800" height="80" fill="orange"/></svg>'});});
+ const image=base.replace('/native-messages','/app06-height.svg');
+ await page.evaluate(image=>(window as any).__messagesFixture.present([{id:'late',role:'assistant',parts:[{type:'text',text:'Before image.\n\n![A late diagram]('+image+')\n\nLatest after image.'}]}]),image);
+ await expect.poll(()=>requested).toBe(true);await expect.poll(()=>bottom(page)).toBeLessThan(2);release();
+ await expect.poll(async()=>(await page.getByRole('img',{name:'A late diagram'}).boundingBox())!.height).toBeLessThan(100);
+ await expect.poll(()=>bottom(page)).toBeLessThan(2);
+ await page.getByRole('button',{name:'Long conversation',exact:true}).click();await expect.poll(()=>bottom(page)).toBeLessThan(2);
+ await page.getByTestId('native-chat-messages-scroll').hover();await page.mouse.wheel(0,-100000);await expect.poll(async()=>(await position(page)).top).toBe(0);
+ await page.getByRole('button',{name:'Append stream',exact:true}).click();await expect.poll(async()=>(await position(page)).top).toBe(0);
+ await page.setViewportSize({width:320,height:480});await expect.poll(async()=>(await position(page)).top).toBe(0);
+ await page.getByRole('button',{name:'Scroll to bottom',exact:true}).click();await expect.poll(()=>bottom(page)).toBeLessThan(2);
+});
 test('native components retain GFM, literal HTML, safe links, lists/table/code and original Copy text',async({page})=>{
  await expect.poll(()=>bottom(page)).toBeLessThan(2);
  await expect(page.getByRole('heading',{name:'Native heading'})).toBeVisible();

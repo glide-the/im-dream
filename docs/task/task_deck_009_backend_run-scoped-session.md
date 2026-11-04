@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_deck_009_backend_run-scoped-session
 
 ## 1. 任务标题
@@ -15,7 +16,7 @@ ClaudeAgent Run-Scoped Session、原子启动与远程交互限制
 - **标签**: `claude-agent`, `session`, `remote-interaction`, `readiness`
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §7.4、§7.5、§11、§13.3、§18
-  - `docs/design/deck/design_002_deck-plugin-decision-gates.md`，重点 `DECK-GATE-DEC-017/018/020`
+  - `docs/design/kastention/design_002_kastention-plugin-decision-gates.md`，重点 `DECK-GATE-DEC-017/018/020`
   - `docs/design/deck-claude-agent.md`
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 `DECK-009`
 - **Stage**: `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` v1.8，Stage 2 / Wave 4

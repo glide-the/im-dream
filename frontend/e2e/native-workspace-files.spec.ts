@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: retain native Alert decisions at the fixture boundary; cover named cancellation, stale identity and folder scope.
 // [Input] Production Native Workspace resources/hook/preview/Markdown and explicit native-file/AppState fixtures.
 // [Output] URI/permission/identity isolation, binary-handle ownership, document/image/material/export and cancellation contracts.
 // [Pos] Provider-free technical lane; native filesystem bytes are separately validated by XCTest, no real account/backend/model calls.
@@ -19,7 +20,7 @@ export const Image=React.forwardRef(({onLoad,...props},ref)=><WebImage {...props
 }}/>);
 `;
 const entry=`
-import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {AppState} from 'react-native';
+import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {Alert,AppState} from 'react-native';
 import FileSidebar from '/app/_dream/components/dashboard/FileSidebar.native.tsx';
 import WorkspaceFilePreview from '/app/_dream/components/chat/WorkspaceFilePreview.native.tsx';
 import ChatMarkdown from '/app/_dream/components/chat/ChatMarkdown.native.tsx';
@@ -32,6 +33,8 @@ const restoreSession=()=>loadBrowserSession(async()=>Response.json({user:{id:'1'
 Object.defineProperty(AppState,'currentState',{value:'active',writable:true,configurable:true});AppState.listeners=new Set();AppState.addEventListener=(_,fn)=>{AppState.listeners.add(fn);return {remove:()=>AppState.listeners.delete(fn)};};
 const png='data:image/png;base64,${fixtureImage}';
 const f=window.__workspaceFixture={acquired:[],released:[],copies:[],exports:[],added:[],held:[],exportHeld:[],hold:false,holdExport:false,failed:false,serial:0,rawOptions:[],rawReleases:[],rawCancels:[],rawStatus:null,rawHold:false,rawHeld:[],sessionExpirations:0,probe:null,external:[]};
+f.confirmations=[];f.confirmDelete=true;f.holdConfirmation=false;f.pendingConfirmations=[];
+Alert.alert=(title,message,buttons,options)=>{f.confirmations.push({title,message});const decide=()=>buttons.find(button=>f.confirmDelete?button.style==='destructive':button.style==='cancel')?.onPress?.();if(f.holdConfirmation)f.pendingConfirmations.push({decide,dismiss:()=>options?.onDismiss?.()});else decide();};
 const meta=(path)=>({id:'resource-'+(++f.serial),uri:path.endsWith('.png')?png:'file:///fixture/'+f.serial,name:path.split('/').at(-1)+(path==='files/folder'?'.zip':''),type:path.endsWith('.md')?'text/markdown':path.endsWith('.png')?'image/png':'application/zip',size:12});
 const io={
  async acquire(input,signal){f.acquired.push({...input,signal});if(f.failed)throw new WorkspaceFileRequestError('retryable');const file=meta(input.path);return f.hold?new Promise(resolve=>f.held.push({file,signal,release:()=>resolve(file)})):file;},
@@ -143,6 +146,30 @@ test('native original file delete retains failures and uses only an explicit ret
 });
 test('native file sidebar directory export uses download mode and releases its private handle on system cancellation',async({page})=>{
  await page.getByRole('button',{name:'Open files',exact:true}).click();await page.getByRole('button',{name:'Download project as ZIP',exact:true}).click();await expect.poll(async()=>(await data(page)).exports.length).toBe(1);const result=await data(page);expect(result.acquired.find((item:any)=>item.path==='project')).toMatchObject({threadId:'fixture-thread-a',download:true});await expect.poll(async()=>(await data(page)).released.includes(result.exports[0])).toBe(true);await expect(page.getByRole('button',{name:'Close files',exact:true})).toBeVisible();
+});
+test('native file deletion names the path and folder contents; cancelled decisions keep zero writes',async({page})=>{
+ await page.evaluate(()=>(window as any).__workspaceFixture.confirmDelete=false);await page.getByRole('button',{name:'Open files',exact:true}).click();
+ await page.getByRole('button',{name:'Delete report.md',exact:true}).click();await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeEnabled();
+ expect(await page.evaluate(()=>(window as any).__workspaceFixture.confirmations.at(-1).message)).toContain('“report.md”');expect((await data(page)).directoryWrites).toHaveLength(0);
+ await page.getByRole('button',{name:'Delete project',exact:true}).click();await expect(page.getByRole('button',{name:'Delete project',exact:true})).toBeEnabled();
+ expect(await page.evaluate(()=>(window as any).__workspaceFixture.confirmations.at(-1).message)).toContain('folder and its contents');expect((await data(page)).directoryWrites).toHaveLength(0);
+ await page.getByRole('button',{name:'Open project',exact:true}).click();await page.getByRole('button',{name:'Delete report.md',exact:true}).click();await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeEnabled();
+ expect(await page.evaluate(()=>(window as any).__workspaceFixture.confirmations.at(-1).message)).toContain('“project/report.md”');expect((await data(page)).directoryWrites).toHaveLength(0);
+});
+test('native file confirmation retires after a Thread change or panel close',async({page})=>{
+ await page.evaluate(()=>(window as any).__workspaceFixture.holdConfirmation=true);await page.getByRole('button',{name:'Open files',exact:true}).click();await page.getByRole('button',{name:'Delete report.md',exact:true}).click();
+ await page.evaluate(()=>(window as any).__workspaceFixture.setThread('fixture-thread-b'));await expect(page.getByRole('button',{name:'Delete other.md',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).__workspaceFixture.pendingConfirmations[0].decide());await expect(page.getByRole('button',{name:'Delete other.md',exact:true})).toBeEnabled();expect((await data(page)).directoryWrites).toHaveLength(0);
+ await page.getByRole('button',{name:'Delete other.md',exact:true}).click();await page.getByRole('button',{name:'Close files',exact:true}).click();await page.evaluate(()=>(window as any).__workspaceFixture.pendingConfirmations[1].decide());
+ await page.getByRole('button',{name:'Open files',exact:true}).click();await expect(page.getByRole('button',{name:'Delete other.md',exact:true})).toBeEnabled();expect((await data(page)).directoryWrites).toHaveLength(0);
+});
+test('returning to the same Thread or reopening the panel keeps the old confirmation retired',async({page})=>{
+ await page.evaluate(()=>(window as any).__workspaceFixture.holdConfirmation=true);await page.getByRole('button',{name:'Open files',exact:true}).click();await page.getByRole('button',{name:'Delete report.md',exact:true}).click();
+ await page.evaluate(()=>(window as any).__workspaceFixture.setThread('fixture-thread-b'));await expect(page.getByRole('button',{name:'Delete other.md',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).__workspaceFixture.setThread('fixture-thread-a'));await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).__workspaceFixture.pendingConfirmations[0].decide());await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeEnabled();expect((await data(page)).directoryWrites).toHaveLength(0);
+ await page.getByRole('button',{name:'Delete report.md',exact:true}).click();await page.getByRole('button',{name:'Close files',exact:true}).click();await page.getByRole('button',{name:'Open files',exact:true}).click();await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).__workspaceFixture.pendingConfirmations[1].decide());await expect(page.getByRole('button',{name:'Delete report.md',exact:true})).toBeEnabled();expect((await data(page)).directoryWrites).toHaveLength(0);
 });
 test('native directory reader ignores late previous-Thread results and suspends reads in the background',async({page})=>{
  await page.evaluate(()=>(window as any).__workspaceFixture.holdDirectory=true);await page.getByRole('button',{name:'Open files',exact:true}).click();await expect.poll(async()=>(await data(page)).directoryHeld.length).toBe(1);

@@ -8,6 +8,7 @@
 # [Sync] 2026-10-25: inject an old container UUID only into the owned fixture and verify native exclusive relocation before original SDK resume.
 # [Sync] 2026-10-25: verify a second container relocation without rewriting the fixture's original cwd records.
 # [Sync] 2026-10-26: report only closed failure types/errno and owned descriptor flags during physical-device qualification.
+# [Sync] 2026-11-03: exercise the original Grep/Glob tools through pinned guest ripgrep alongside Bash, permissions, interrupt and resume.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -139,14 +140,14 @@ def _handler(fixture):
                 self.wfile.write(data)
                 return
             fixture.requests.append(body)
-            assert len(fixture.requests) <= 16, "Bounded provider fixture request count"
+            assert len(fixture.requests) <= 20, "Bounded provider fixture request count"
             text = _latest_text(body)
-            case = next((name for name in ("IOS_WRITE", "IOS_READ", "IOS_BASH_STOP", "IOS_BASH", "IOS_MCP", "IOS_DENY", "IOS_RESUME", "IOS_SLOW", "IOS_RUNNER", "IOS_OWNED_MCP") if name in text), "unknown")
+            case = next((name for name in ("IOS_WRITE", "IOS_READ", "IOS_GREP", "IOS_GLOB", "IOS_BASH_STOP", "IOS_BASH", "IOS_MCP", "IOS_DENY", "IOS_RESUME", "IOS_SLOW", "IOS_RUNNER", "IOS_OWNED_MCP") if name in text), "unknown")
             fixture.tool_results = [block for message in body.get("messages", [])
                 for block in (message.get("content", []) if isinstance(message.get("content"), list) else [])
                 if isinstance(block, dict) and block.get("type") == "tool_result"]
             # A case marker occurs in its own user turn; track dispatched fixture tools.
-            if case in {"IOS_WRITE", "IOS_READ", "IOS_BASH", "IOS_BASH_STOP", "IOS_MCP", "IOS_DENY", "IOS_OWNED_MCP"} and case not in fixture.completed_tools:
+            if case in {"IOS_WRITE", "IOS_READ", "IOS_GREP", "IOS_GLOB", "IOS_BASH", "IOS_BASH_STOP", "IOS_MCP", "IOS_DENY", "IOS_OWNED_MCP"} and case not in fixture.completed_tools:
                 fixture.completed_tools.add(case)
                 name = "mcp__ios_qualification__echo" if case == "IOS_MCP" else "Write"
                 value = ({"text": "ios-mcp-result"} if case == "IOS_MCP" else {
@@ -157,6 +158,10 @@ def _handler(fixture):
                     name, value = "mcp__user__get_sessions_range", {"start_date": "2026-01-01", "end_date": "2026-01-02"}
                 if case == "IOS_READ":
                     name, value = "Read", {"file_path": "written.txt"}
+                if case == "IOS_GREP":
+                    name, value = "Grep", {"pattern": "实际写入", "path": str(fixture.workspace), "output_mode": "content"}
+                if case == "IOS_GLOB":
+                    name, value = "Glob", {"pattern": "*.txt", "path": str(fixture.workspace)}
                 if case == "IOS_BASH":
                     name, value = "Bash", {"command": "printf guest-shared > command-written.txt; cat command-written.txt; printf ios-platform-command", "description": "Verify packaged command execution and shared workspace files"}
                 if case == "IOS_BASH_STOP":
@@ -273,6 +278,12 @@ def run(endpoint_path):
             assert (workspace / "written.txt").read_text() == "iOS Runtime 实际写入\n"
             await collect(client, "IOS_READ")
             assert any("iOS Runtime 实际写入" in json.dumps(item, ensure_ascii=False) for item in fixture.tool_results), fixture.tool_results
+            await collect(client, "IOS_GREP")
+            assert not any(item.get("is_error") for item in fixture.tool_results), fixture.tool_results
+            assert any("实际写入" in json.dumps(item, ensure_ascii=False) for item in fixture.tool_results), fixture.tool_results
+            await collect(client, "IOS_GLOB")
+            assert not any(item.get("is_error") for item in fixture.tool_results), fixture.tool_results
+            assert any("written.txt" in json.dumps(item) for item in fixture.tool_results), fixture.tool_results
             await collect(client, "IOS_BASH")
             assert not any(item.get("is_error") for item in fixture.tool_results), fixture.tool_results
             assert any("ios-platform-command" in json.dumps(item) for item in fixture.tool_results), fixture.tool_results
@@ -343,6 +354,7 @@ def run(endpoint_path):
         _assert_workspace_files_closed(workspace)
         print("IOS_RUNTIME_PROTOCOL_PROOF " + json.dumps({"sameApplicationProcess": endpoint["pid"] == os.getpid(),
             "stream": True, "fileWrite": True, "relativeFileRead": True, "packagedBash": True, "sharedCommandFiles": True,
+            "originalGrep": True, "originalGlob": True,
             "sandboxEnabled": False, "sandboxFailIfUnavailable": False, "allowUnsandboxedCommands": True,
             "sdkMcp": True, "permissionDeny": True,
             "dreamResumeProbe": True, "containerRelocation": True, "repeatedContainerRelocation": True,

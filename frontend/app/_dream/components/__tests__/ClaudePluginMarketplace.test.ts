@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: Kastention plugin设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。
 // [Sync] 2026-10-29: retain existing ownership contracts at the extracted shared state/presentation paths; Web DOM assertions remain.
 // [Input] ClaudePlugin admin source/styles/API, Story Workspace Work/Layout wiring, and Marketplace interaction design.
 // [Output] Lock both plugin managers plus the Claude global Marketplace install, fail-closed capability, focus, and responsive presentation.
@@ -21,7 +22,7 @@ const STYLES = read('app/_dream/components/claude-plugin-admin/ClaudePluginAdmin
 const API = read('app/_dream/api/claudePluginAdminApi.ts');
 const SETTINGS = read('app/_dream/views/story-workspace/StoryWorkspaceSettingsPage.tsx');
 const LAYOUT = read('app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx');
-const DESIGN = read('../docs/design/deck-plugin/claude-plugin-marketplace-add.md');
+const DESIGN = read('../docs/design/kastention-plugin/claude-plugin-marketplace-add.md');
 
 test('Work / Plugins keeps the shared Settings layout and mounts both plugin domains', () => {
   expect(SETTINGS).toContain("workTab === 'plugins'");

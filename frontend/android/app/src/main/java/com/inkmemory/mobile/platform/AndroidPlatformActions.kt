@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: derive new export names and share labels from the application display name.
 // [Input] Bridge file/browser requests, Activity Result launchers, and application-private file handles.
 // [Output] Android document-picker, export, share-sheet, and HTTPS browser operations.
 // [Pos] MainActivity-owned implementation of MobilePlatformActions.
@@ -98,7 +99,7 @@ internal class AndroidPlatformActions(private val activity: ComponentActivity) :
         val suggestedName = params.optString("suggestedName")
             .replace(Regex("[\\r\\n/\\\\]"), "_")
             .take(240)
-            .ifBlank { "ink-memory-document" }
+            .ifBlank { "${activity.applicationInfo.loadLabel(activity.packageManager)}-document" }
         pendingSave = file to completion
         documentCreator.launch(suggestedName)
     }
@@ -112,7 +113,7 @@ internal class AndroidPlatformActions(private val activity: ComponentActivity) :
         val intent = Intent(Intent.ACTION_SEND)
             .setType(params.optString("mimeType").ifBlank { "application/octet-stream" })
             .putExtra(Intent.EXTRA_STREAM, uri)
-            .setClipData(ClipData.newRawUri("Ink & Memory file", uri))
+            .setClipData(ClipData.newRawUri("${activity.applicationInfo.loadLabel(activity.packageManager)} file", uri))
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return try {
             activity.startActivity(Intent.createChooser(intent, null))

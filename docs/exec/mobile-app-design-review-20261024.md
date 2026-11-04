@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-02: 原AppleScript任务包归历史快照，现行ios/tasks仅记录XCUITest E2E任务。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
 <!-- [Sync] 2026-11-01: 追加回顾详情手柄调整、共享吸附/取消恢复和桌面保持，分列触摸技术与设备资格。 -->
 <!-- [Sync] 2026-11-01: 追加Web窄屏与端侧更多共用图标卡片、用途指引、桌面保持及技术验证记录。 -->
@@ -2221,7 +2223,7 @@ Admin修订仅将领取资格判断移到`scopedRun`之前；满足条件后继�
 
 只读文件核对确认：当前App Data容器为095EAF97-0263-4C1C-A66C-3CDD095313AD，冻结manifest中的venv仍位于旧容器051B3767-F540-4CBE-94CF-05D53D8FA34F，解释器文件缺失。原packer会按当前runtime root重建派生venv，随后继续复制旧manifest地址至receipt，原launcher因此拒绝启动。用户文件及原Session保持。
 
-修订限定原`workspace_packer.py`冻结分支：从已验证的原制品profile取得修复后的实际venv路径，验证原runtime路径声明的类型、绝对路径和数量，路径变化时仅更新原manifest的`runtime.venv_dirs`及本次receipt。原插件版本/摘要/顺序、written_at、init步骤、surface及用户文件保持。原launcher继续检查解释器，不增加平台分支、初始化重放、UUID文本替换、协议、依赖或数据库。技术合同见[受管缓存根目录变化](../design/deck/drama-forge-workspace-init-design.md#受管缓存根目录变化)。
+修订限定原`workspace_packer.py`冻结分支：从已验证的原制品profile取得修复后的实际venv路径，验证原runtime路径声明的类型、绝对路径和数量，路径变化时仅更新原manifest的`runtime.venv_dirs`及本次receipt。原插件版本/摘要/顺序、written_at、init步骤、surface及用户文件保持。原launcher继续检查解释器，不增加平台分支、初始化重放、UUID文本替换、协议、依赖或数据库。技术合同见[受管缓存根目录变化](../design/kastention/drama-forge-workspace-init-design.md#受管缓存根目录变化)。
 
 | 实际命令或回执 | 退出码 | 关键结果 |
 | --- | --- | --- |
@@ -7024,9 +7026,11 @@ Mac既有usbmuxd后台枚举匹配同一设备序列号，当前仅ConnectionTyp
 
 ## 2026-11-01 AppleScript操作过程按任务归档
 
-本轮只整理文件，桌面、镜像、键鼠、设备、账户和模型操作0。采用一项业务任务一个目录及同名ZIP：本次[iPhone503任务包](../../frontend/e2e/ios/tasks/iphone-503-20261031/README.md)包含原始AppleScript逐字节副本、按步骤保存的AppleScript/OSA JavaScript命令、退出码、实际界面效果、失败、未完成项和SHA256摘要。原build生成物与既有记录保留。
+本轮只整理文件，桌面、镜像、键鼠、设备、账户和模型操作0。采用一项业务任务一个目录及同名ZIP：本次[iPhone503任务包原文](history/ios-debug-tasks-before-xcuitest-20261102.md)包含原始AppleScript逐字节副本、按步骤保存的AppleScript/OSA JavaScript命令、退出码、实际界面效果、失败、未完成项和SHA256摘要。原build生成物与既有记录保留。
 
 目录及[任务索引](../../frontend/e2e/ios/tasks/README.md)归frontend/e2e/ios/tasks；父级两份.folder.md同步。任务目录进入源码管理，同级ZIP为忽略Git的分发生成物。凭据、授权数据、业务正文、截图与全量进程清单退出归档；命令退出0、点击效果及真实业务资格分别登记，原完整真机目标保持未完成。
+
+2026-11-02迁移说明：用户要求清理原任务目录，仅记录XCUITest E2E。上述目录与ZIP规则归本节历史阶段；旧文件已归档校验后移除，完整原文与恢复包见[历史快照](history/ios-debug-tasks-before-xcuitest-20261102.md)。现行[任务索引](../../frontend/e2e/ios/tasks/README.md)使用XCUITest任务Markdown，工具操作归[独立手册](../deploy/ios-device-debugging.md)。
 
 
 ## 2026-11-01 USB后台采证与失败连接池修复

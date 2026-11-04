@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Sync] 2026-10-15: freeze owner memory settings and current message before each turn broker starts.
 #!/usr/bin/env python3
@@ -1188,7 +1189,7 @@ async def _claude_agent_stream_impl(
             status_code=409,
             detail={
                 "error_code": "CHAT_DECK_IMMUTABLE",
-                "message": "The Deck cannot be changed after the conversation starts.",
+                "message": "The Kastention cannot be changed after the conversation starts.",
             },
         )
     deck_context = None
@@ -1241,7 +1242,7 @@ async def _claude_agent_stream_impl(
                 status_code=409,
                 detail={
                     "error_code": "CHAT_DECK_IMMUTABLE",
-                    "message": "The conversation Deck changed concurrently.",
+                    "message": "The conversation Kastention changed concurrently.",
                 },
             )
         if requested_voice_id and requested_voice_id != persisted_voice_id and not (await _chat_invoke(current_user, chat.select_voice,

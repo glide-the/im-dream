@@ -8,6 +8,7 @@
 # [Sync] 2026-06-16: add configurable fuzzy retrieval parameters, label matching,
 #                    and a vector-query interface boundary without vector DB wiring.
 # [Sync] 2026-09-15: replace actor/database access with the turn-local Session projection broker.
+# [Sync] 2026-11-03: optional include_text returns the original authorized body; default previews and private broker ownership remain.
 
 """MCP tool handler for ``get_sessions_range``.
 
@@ -68,11 +69,8 @@ GET_SESSIONS_RANGE_TOOL_NAME = "get_sessions_range"
 
 GET_SESSIONS_RANGE_TOOL_SPEC = SessionsToolSpec(
     description=(
-        "按日期范围检索用户的历史日记 session，用于发现三天前的内容。\n"
-        "默认使用字符模糊匹配 query 检索 title、labels、excerpt 和正文文本；也可用 labels 过滤。\n"
-        "向量检索仅保留 vector_query 接口边界，当前未接入向量库。\n"
-        "返回匹配 session 的 id、title、labels、excerpt 和 match 信息，供 Agent 定位相关笔记。\n"
-        "仅在用户提到可能早于近期条目的主题或事件时调用此工具。"
+        "按日期、关键词和标签检索当前授权范围内的日记 Session。"
+        "返回标识、标题、标签、日期、摘要和匹配信息；显式请求时附带正文。"
     ),
     input_schema={
         "type": "object",
@@ -84,6 +82,11 @@ GET_SESSIONS_RANGE_TOOL_SPEC = SessionsToolSpec(
             "end_date": {
                 "type": "string",
                 "description": "查询截止日期（含），格式 YYYY-MM-DD",
+            },
+            "include_text": {
+                "type": "boolean",
+                "default": False,
+                "description": "是否在结果中附带日记正文 text；默认 false，仅返回摘要。",
             },
             "query": {
                 "type": "string",
@@ -290,7 +293,7 @@ def _score_fuzzy_session(
 
 
 def _session_response(
-    row: dict[str, Any], score: float, fields: list[str]
+    row: dict[str, Any], score: float, fields: list[str], *, include_text: bool = False
 ) -> dict[str, Any]:
     raw_date = str(row.get("updated_at") or row.get("created_at") or "")[:10]
     session = {
@@ -300,6 +303,8 @@ def _session_response(
         "date": raw_date,
         "excerpt": row.get("first_line") or "",
     }
+    if include_text:
+        session["text"] = row.get("text") or ""
     if fields:
         session["match"] = {
             "strategy": "fuzzy",
@@ -318,9 +323,13 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None, *, environment=N
     """Query sessions in [start_date, end_date] through the private broker.
 
     Returns a JSON string with a ``sessions`` list; each item contains:
-    ``sessionId``, ``name``, ``labels``, ``date``, ``excerpt``.
+    ``sessionId``, ``name``, ``labels``, ``date``, ``excerpt``; explicit
+    ``include_text=true`` adds the same authorized projection's ``text``.
     """
     args = arguments or {}
+    include_text = args.get("include_text", False)
+    if not isinstance(include_text, bool):
+        return _json_error("invalid_include_text", "include_text must be a boolean.")
     start_date: str = str(args.get("start_date") or "").strip()
     end_date: str = str(args.get("end_date") or "").strip()
     query = _normalize_text(args.get("query") or args.get("fuzzy_query") or "")
@@ -357,7 +366,7 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None, *, environment=N
         result = SessionProjectionBrokerClient.from_env(dict(os.environ if environment is None else environment)).list_sessions(
             start_date=start_date,
             end_date=end_date,
-            include_text=bool(query),
+            include_text=include_text or bool(query),
         )
         rows = [item.model_dump(mode="python") for item in result.sessions]
     except SessionProjectionProtocolError as error:
@@ -388,7 +397,7 @@ def handle_get_sessions_range(arguments: dict[str, Any] | None, *, environment=N
         score, fields = _score_fuzzy_session(row, query, requested_labels, label_match)
         if has_filter and score < min_score:
             continue
-        ranked.append((score, index, _session_response(row, score, fields)))
+        ranked.append((score, index, _session_response(row, score, fields, include_text=include_text)))
 
     if has_filter:
         ranked.sort(key=lambda item: (-item[0], item[1]))

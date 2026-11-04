@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 # [Input] Actual five Deck mutation routes/auth/DTO transport and controlled Admin responses.
 # [Output] Original results/policy/deletion messages, strict detail ownership and unknown receipt evidence.
 # [Pos] Provider-free Deck mutation harness; no copied transaction or normal business data.
@@ -90,13 +91,13 @@ def test_publish_keeps_toggle_result_without_deck_preread(boundary,published):
 @pytest.mark.parametrize('method,name',[('put','deck.update'),('delete','deck.delete')])
 def test_changed_false_keeps_original_404(boundary,method,name):
  browser,_,outputs,*_=boundary;outputs[name]={'changed':False};r=call(browser,method,'/api/decks/deck-1',{} if method=='put' else None)
- assert r.status_code==404 and r.json()=={'detail':'Deck not found or permission denied'}
+ assert r.status_code==404 and r.json()=={'detail':'Kastention not found or permission denied'}
 
 @pytest.mark.parametrize('reason,message',[
- ('child_decks','Deck cannot be deleted while derived Decks still reference it.'),
- ('related_threads','Deck cannot be deleted while related Chat conversations still exist.'),
- ('runtime_history','Deck cannot be deleted because it has immutable runtime history.'),
- ('referenced_records','Deck cannot be deleted because it is still referenced.')])
+ ('child_decks','Kastention cannot be deleted while derived Kastention still reference it.'),
+ ('related_threads','Kastention cannot be deleted while related Chat conversations still exist.'),
+ ('runtime_history','Kastention cannot be deleted because it has immutable runtime history.'),
+ ('referenced_records','Kastention cannot be deleted because it is still referenced.')])
 def test_four_closed_delete_reasons_keep_original_messages(boundary,reason,message):
  browser,_,outputs,*_=boundary;outputs['deck.delete']=(409,'DECK_DELETE_BLOCKED',{'reason':reason});r=call(browser,'delete','/api/decks/deck-1')
  assert r.status_code==409 and r.json()=={'detail':message} and 'private SQL' not in r.text
@@ -110,14 +111,14 @@ def test_error_details_are_closed_and_owned_by_code(boundary,code,details):
  assert 'private unknown' not in r.text
 
 @pytest.mark.parametrize('name,code,status,url,expected_status,message',[
- ('deck.toggle-publication','DEFAULT_DECK_PUBLISH_FORBIDDEN',409,'/api/decks/deck-1/publish',409,'System-initialized Decks cannot be published'),
- ('deck.collect','SELF_COLLECTION_FORBIDDEN',409,'/api/decks/deck-1/fork',409,'You cannot collect your own published Deck'),
- ('deck.collect','COLLECTION_SOURCE_UNAVAILABLE',404,'/api/decks/deck-1/fork',409,'Only system or published Decks can be collected'),
- ('deck.collect','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/fork',404,'Deck deck-1 not found'),
- ('deck.toggle-publication','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/publish',404,'Deck not found or not owned by user'),
- ('deck.sync-parent','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/sync',400,'Deck not found or permission denied'),
- ('deck.sync-parent','DECK_PARENT_MISSING',409,'/api/decks/deck-1/sync',400,'Deck is not a fork (no parent)'),
- ('deck.sync-parent','DECK_PARENT_MISSING',404,'/api/decks/deck-1/sync',400,'Parent deck not found')])
+ ('deck.toggle-publication','DEFAULT_DECK_PUBLISH_FORBIDDEN',409,'/api/decks/deck-1/publish',409,'System-initialized Kastention cannot be published'),
+ ('deck.collect','SELF_COLLECTION_FORBIDDEN',409,'/api/decks/deck-1/fork',409,'You cannot collect your own published Kastention'),
+ ('deck.collect','COLLECTION_SOURCE_UNAVAILABLE',404,'/api/decks/deck-1/fork',409,'Only system or published Kastention can be collected'),
+ ('deck.collect','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/fork',404,'Kastention deck-1 not found'),
+ ('deck.toggle-publication','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/publish',404,'Kastention not found or not owned by user'),
+ ('deck.sync-parent','DECK_ACCESS_DENIED',404,'/api/decks/deck-1/sync',400,'Kastention not found or permission denied'),
+ ('deck.sync-parent','DECK_PARENT_MISSING',409,'/api/decks/deck-1/sync',400,'Kastention is not a fork (no parent)'),
+ ('deck.sync-parent','DECK_PARENT_MISSING',404,'/api/decks/deck-1/sync',400,'Parent Kastention not found')])
 def test_known_policy_and_parent_errors_keep_original_feedback(boundary,name,code,status,url,expected_status,message):
  browser,_,outputs,*_=boundary;outputs[name]=(status,code,...);r=call(browser,'post',url)
  assert r.status_code==expected_status and r.json()=={'detail':message} and 'private SQL' not in r.text
@@ -150,7 +151,7 @@ def test_exact_four_schema_hash_gates_before_domain_io(boundary,mutation):
 @pytest.mark.parametrize('raw',['{"enabled":0}','{"user_id":42}','{"order_index":NaN}','{"order_index":9007199254740992}','{"name":3}'])
 def test_public_update_validation_safe_422_without_echo(boundary,raw):
  browser,calls,*_=boundary;r=browser.put('/api/decks/deck-1',headers={**HEADERS,'content-type':'application/json'},content=raw)
- assert r.status_code==422 and r.json()=={'detail':'Invalid Deck request'} and not calls
+ assert r.status_code==422 and r.json()=={'detail':'Invalid Kastention request'} and not calls
 
 @pytest.mark.parametrize('name,url,value',[
  ('deck.update','/api/decks/deck-1',{'changed':1}),
@@ -172,4 +173,4 @@ def test_malformed_write_results_keep_original_unknown_id(boundary,name,url,valu
 def test_optional_delete_details_keep_generic_original_conflict(boundary):
  browser,_,outputs,*_=boundary;outputs['deck.delete']=(409,'DECK_DELETE_BLOCKED',...)
  response=call(browser,'delete','/api/decks/deck-1')
- assert response.status_code==409 and response.json()=={'detail':'Deck cannot be deleted because it is still referenced.'}
+ assert response.status_code==409 and response.json()=={'detail':'Kastention cannot be deleted because it is still referenced.'}

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 """Authenticated Deck content-version state, preview, commit, and history routes.
 
 [Input] Original public version DTOs, explicit Admin request actor and typed domain consumer.
@@ -36,13 +37,13 @@ def _data(request: Request) -> AdminDeckVersionData:
 
 def _error(exc: AdminDataError, request_id: str) -> JSONResponse:
     messages = {
-        "DECK_VERSION_CONFLICT": "Deck draft changed. Refresh the preview before committing.",
-        "DECK_VERSION_NO_CHANGES": "Deck content has no changes to commit.",
-        "DECK_VERSION_ACCESS_DENIED": "Deck not found or permission denied.",
-        "DECK_VERSION_NOT_FOUND": "Deck version not found or permission denied.",
-        "ADMIN_CAPABILITY_UNAVAILABLE": "Deck content version capability is not available.",
+        "DECK_VERSION_CONFLICT": "Kastention draft changed. Refresh the preview before committing.",
+        "DECK_VERSION_NO_CHANGES": "Kastention content has no changes to commit.",
+        "DECK_VERSION_ACCESS_DENIED": "Kastention not found or permission denied.",
+        "DECK_VERSION_NOT_FOUND": "Kastention version not found or permission denied.",
+        "ADMIN_CAPABILITY_UNAVAILABLE": "Kastention content version capability is not available.",
     }
-    content = {"error_code": exc.code, "message": messages.get(exc.code, "Deck operation could not be completed."),
+    content = {"error_code": exc.code, "message": messages.get(exc.code, "Kastention operation could not be completed."),
         "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
     if exc.details is not None:
         content.update(exc.details.model_dump())
@@ -57,7 +58,7 @@ def _input(model, **values):
     try:
         return model(**values)
     except ValidationError:
-        raise HTTPException(status_code=422, detail="Invalid Deck version input") from None
+        raise HTTPException(status_code=422, detail="Invalid Kastention version input") from None
 
 
 @router.get("/{deck_id}/version-state", response_model=DeckVersionState)

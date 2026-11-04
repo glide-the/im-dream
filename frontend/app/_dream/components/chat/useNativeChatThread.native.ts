@@ -1,3 +1,7 @@
+// [Sync] 2026-11-03: retain running Thread readers across Native navigation and publish only the visible selection.
+// [Sync] 2026-11-03: reuse current/previous saved prose during navigation; fresh status exclusively enables execution controls.
+// [Sync] 2026-11-02: restore the selected Thread through original GETs; retire background work even before Thread creation completes.
+// [Sync] 2026-11-02: bind queued submission receipts to their selection owner across foreground reader replacement.
 // [Sync] 2026-10-31: retire an acknowledged Stop reader epoch and schedule canonical recovery independently of cancelled-reader completion.
 // [Sync] 2026-11-01: await cancellable Writing context preparation before any native user-message dispatch; selection changes reject late snapshots.
 // [Sync] 2026-10-30: expose original multi-part user DTO submission and document-bound editor result/settlement; composer queue behavior remains.
@@ -6,16 +10,17 @@
 // [Sync] 2026-10-28: preserve queue-edit receipts across reader replacement; selection changes and unmount still reject old UI writes.
 // [Sync] 2026-10-28: expose persisted message IDs for the original historical process presentation.
 // [Input] Original Chat DTO/context, canonical HTTP transport, native foreground events and caller-owned selection.
-// [Output] One active Thread using existing hydration, SSE projection, input queue, confirmation and submission-owned Stop.
-// [Pos] Native lifecycle adapter; the server owns tasks and permissions, navigation only cancels local readers.
+// [Output] Selected UI snapshot and retained running Thread data using existing hydration, SSE, queue, confirmation and Stop.
+// [Pos] Native lifecycle adapter; the server owns tasks and permissions, navigation retains live readers; AppState and explicit lifecycle release local readers.
 // [Sync] 2026-10-28: end the local reader on canonical finish, then reconcile persisted messages/status without waiting for HTTP EOF.
 // [Sync] 2026-10-28: retain original queue actions/revisions, edited-draft recovery and side-task receipts without changing the main task.
-import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useState,useSyncExternalStore} from 'react';
 import {AppState} from 'react-native';
 import {generateId,isToolUIPart,type UIMessage} from 'ai';
 import {clientFetch,openResponse,type OpenResponse} from '../../../../src/platform/transport.native';
 import {createChatThread} from '../../api/chatHistoryApi';
-import {browserRequestHeaders} from '../../lib/browserSession';
+import {browserRequestHeaders,getBrowserCsrfToken} from '../../lib/browserSession';
+import {createThreadHistoryPreview,threadHistoryPreviewMessages} from './threadHistoryPreview';
 import {buildClaudeChatRequest,type ClaudeChatRequestContext} from '../../lib/claude-chat-request';
 import {applyBackendEventToMessages,coalesceClaudeAgentSseEvents,drainClaudeAgentSseFrames,parseClaudeAgentSseBuffer,type BackendEvent} from '../../lib/claude-agent-sse-utils';
 import {toFileProxyUrl} from '../../lib/toFileProxyUrl';
@@ -28,8 +33,9 @@ import {chatStopMayAbortLocalReaders} from './chatRuntimeState';
 import {fetchThreadInputs,enqueueThreadInput,selectThreadInput,cancelThreadInput,moveThreadInputToSideTask,ThreadInputError,type ThreadInputEntry} from './threadInputQueue';
 import type {ChatUserMessage} from './chatUserMessageIngress';
 import {confirmToolCall,resolvePendingToolConfirmation,resolveToolName,resolveSandboxNetworkRequest,type PendingToolConfirmation} from './toolConfirmation';
+import type {NativeChatRecovery} from './nativeChatRecovery.native';
 
-const empty=()=>({threadId:null as string|null,thread:undefined as ClaudeThreadRecord|undefined,messages:[] as UIMessage[],historicalMessageIds:new Set<string>() as ReadonlySet<string>,running:false,posting:false,recovering:false,stopping:false,unknown:false,error:null as string|null,
+const empty=()=>({threadId:null as string|null,thread:undefined as ClaudeThreadRecord|undefined,messages:[] as UIMessage[],historicalMessageIds:new Set<string>() as ReadonlySet<string>,running:false,posting:false,recovering:false,stopping:false,previewing:false,unknown:false,error:null as string|null,
   nextCursor:null as string|null,hasMore:false,loadingOlder:false,queue:[] as ThreadInputEntry[],localOwner:false,queueError:null as string|null,queueChecking:false,editDraftRecovery:null as {id:string;text:string}|null,editRetrying:false,settled:new Set<string>() as ReadonlySet<string>,runtimePending:new Set<string>() as ReadonlySet<string>});
 function inputFailureKey(error:unknown):string {
   if(error instanceof ThreadInputError){
@@ -41,20 +47,32 @@ function inputFailureKey(error:unknown):string {
   }
   return error instanceof TypeError?'chat.inputQueue.unavailable':'chat.inputQueue.sendFailed';
 }
-export default function useNativeChatThread({context,prepareEditorState,onSettled,onSessionExpired,transport:rawTransport=clientFetch,stream=openResponse}:{context:ClaudeChatRequestContext;prepareEditorState?:(threadId:string|null,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>;onSettled?:()=>void;onSessionExpired?:()=>void;transport?:typeof fetch;stream?:typeof openResponse}) {
-  const [state,setState]=useState(empty),current=useRef(state);current.current=state;
-  const latest=useRef({context,prepareEditorState,onSettled,onSessionExpired});latest.current={context,prepareEditorState,onSettled,onSessionExpired};
-  const transport=useCallback<typeof fetch>(async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401)latest.current.onSessionExpired?.();return response;},[rawTransport]);
-  const mounted=useRef(true),epoch=useRef(0),selectionEpoch=useRef(0),connection=useRef<OpenResponse|null>(null),postLock=useRef<number|null>(null);
-  const livePresentedTurnIds=useRef(new Set<string>());
-  const acknowledgedReaderStops=useRef(new WeakSet<OpenResponse>());
-  const contextPreparations=useRef(new Set<AbortController>());
-  const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),attempt=useRef(0),queueIds=useRef(new Map<string,string>()),olderLock=useRef(false);
+type NativeChatThreadOptions={context:ClaudeChatRequestContext;prepareEditorState?:(threadId:string|null,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>;onSettled?:()=>void;onSessionExpired?:()=>void;recovery?:NativeChatRecovery;initialThreadId?:string;transport?:typeof fetch;stream?:typeof openResponse;visible?:boolean};
+const box=<T,>(current:T)=>({current});
+function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId:string|null,preview:ReturnType<typeof createThreadHistoryPreview>) {
+  let {context,prepareEditorState,onSettled,onSessionExpired,recovery,transport:rawTransport=clientFetch,stream=openResponse}=options;
+  let state={...empty(),threadId:initialId,recovering:Boolean(initialId),previewing:Boolean(initialId),unknown:Boolean(initialId),messages:threadHistoryPreviewMessages(initialId?preview.read(initialId):undefined)};
+  const current=box(state),historyPreview=box(preview);
+  const listeners=new Set<()=>void>();
+  let queueTimer:ReturnType<typeof setInterval>|undefined,queueInFlight=false;
+  function setState(patch:typeof state|((value:typeof state)=>typeof state)) {
+    const previousId=state.threadId;
+    state=typeof patch==='function'?patch(state):patch;current.current=state;snapshotCache=undefined;
+    if(previousId!==state.threadId&&mounted.current)restartQueue();
+    for(const notify of listeners)notify();
+  }
+  const latest=box({context,prepareEditorState,onSettled,onSessionExpired});latest.current={context,prepareEditorState,onSettled,onSessionExpired};
+  const transport:typeof fetch=async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401&&mounted.current){historyPreview.current?.clear();update({messages:[],thread:undefined,unknown:true});latest.current.onSessionExpired?.();}return response;};
+  const mounted=box(false),epoch=box(0),selectionEpoch=box(0),connection=box<OpenResponse|null>(null),postLock=box<number|null>(null);
+  const livePresentedTurnIds=box(new Set<string>());
+  const acknowledgedReaderStops=box(new WeakSet<OpenResponse>());
+  const contextPreparations=box(new Set<AbortController>());
+  const timer=box<ReturnType<typeof setTimeout>|undefined>(undefined),attempt=box(0),queueIds=box(new Map<string,string>()),olderLock=box(false);
   function update(patch:Partial<typeof state>|((value:typeof state)=>typeof state)) {if(!mounted.current)return;setState(value=>{const next=typeof patch==='function'?patch(value):{...value,...patch};current.current=next;return next;});}
   function active(id:string,version:number) {return mounted.current && epoch.current===version && current.current.threadId===id;}
   function ownsSelection(id:string,version:number) {return mounted.current && selectionEpoch.current===version && current.current.threadId===id;}
   function closeReader(acknowledgedStop=false) {for(const pending of contextPreparations.current)pending.abort();contextPreparations.current.clear();if(acknowledgedStop && connection.current)acknowledgedReaderStops.current.add(connection.current);connection.current?.cancel();connection.current=null;if(timer.current)clearTimeout(timer.current);timer.current=undefined;}
-  function newChat() {selectionEpoch.current++;epoch.current++;closeReader();queueIds.current.clear();livePresentedTurnIds.current.clear();update(empty());}
+  function newChat() {selectionEpoch.current++;epoch.current++;closeReader();queueIds.current.clear();livePresentedTurnIds.current.clear();recovery?.selectThread(null);update(empty());}
   async function refreshQueue(id=current.current.threadId) {
     if(!id)return;const version=epoch.current;
     const snapshot=await fetchThreadInputs(id,undefined,transport);
@@ -98,25 +116,38 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
     if(!active(id,version))return;
     update({recovering:true});
     try {
-      const snapshot=await hydrateClaudeThreadSession(id,transport);
+      const requestScope=getBrowserCsrfToken();
+      const snapshot=await hydrateClaudeThreadSession(id,transport,{
+        previousHistory:historyPreview.current?.read(id),
+        onHistory:history=>{
+          if(!active(id,version)||requestScope!==getBrowserCsrfToken())return;
+          // A live reader retains its richer current projection until reconciliation.
+          if(current.current.previewing)update({messages:threadHistoryPreviewMessages(history),thread:history.thread});
+        },
+      });
       if(!active(id,version))return;
+      if(requestScope!==getBrowserCsrfToken()){update({messages:[],thread:undefined});throw Error('CHAT_SESSION_CHANGED');}
+      historyPreview.current?.remember(id,snapshot,requestScope);
       const stopPending=claudeThreadStopPending(id);
-      update(value=>{const merged=mergeRecoveredLatestPage(value.messages,snapshot.messages,livePresentedTurnIds.current);return {...value,thread:snapshot.thread,messages:merged.messages,historicalMessageIds:new Set([...value.historicalMessageIds,...snapshot.messages.map(message=>message.id)]),running:snapshot.running || stopPending,
-        recovering:false,posting:false,unknown:stopPending,error:value.error==='chat.turnNavigation.status.failed'?value.error:null,settled:snapshot.settledToolCallIds,runtimePending:snapshot.runtimePendingToolCallIds,
-        nextCursor:merged.overlapsLoadedWindow?value.nextCursor:snapshot.nextCursor,hasMore:merged.overlapsLoadedWindow?value.hasMore:snapshot.hasMore};});
+      update(value=>{const merged=value.previewing?{messages:snapshot.messages,overlapsLoadedWindow:false}:mergeRecoveredLatestPage(value.messages,snapshot.messages,livePresentedTurnIds.current);return {...value,thread:snapshot.thread,messages:merged.messages,historicalMessageIds:new Set([...value.historicalMessageIds,...snapshot.messages.map(message=>message.id)]),running:snapshot.running || stopPending,
+        recovering:false,posting:false,previewing:false,unknown:stopPending,error:value.error==='chat.turnNavigation.status.failed'?value.error:null,settled:snapshot.settledToolCallIds,runtimePending:snapshot.runtimePendingToolCallIds,
+        nextCursor:!value.previewing&&merged.overlapsLoadedWindow?value.nextCursor:snapshot.nextCursor,hasMore:!value.previewing&&merged.overlapsLoadedWindow?value.hasMore:snapshot.hasMore};});
       void refreshQueue(id).catch(()=>{});
       if(snapshot.running) {
         await consume(id,version,await stream(`/api/claude-agent/threads/${encodeURIComponent(id)}/stream`,{headers:browserRequestHeaders()}));
         schedule(id,version);
       } else if(stopPending) {schedule(id,version);}
       else {attempt.current=0;update({stopping:false});latest.current.onSettled?.();}
-    } catch {
-      if(active(id,version)){update({recovering:false,unknown:true,error:'chat.inputQueue.stateUnknown'});schedule(id,version);}
+    } catch(cause) {
+      if(active(id,version)){historyPreview.current?.forget(id);const denied=Boolean(cause&&typeof cause==='object'&&'httpStatus' in cause&&[401,403,404].includes(Number(cause.httpStatus)));update({recovering:false,unknown:true,error:'chat.inputQueue.stateUnknown',...(denied?{messages:[],thread:undefined}:{})});schedule(id,version);}
     }
   }
   async function openThread(id:string) {
+    if(current.current.threadId===id && !current.current.unknown)return;
     selectionEpoch.current++;epoch.current++;closeReader();queueIds.current.clear();livePresentedTurnIds.current.clear();const version=epoch.current;
-    current.current={...empty(),threadId:id,recovering:true};setState(current.current);
+    recovery?.selectThread(id);
+    const preview=historyPreview.current?.read(id);
+    current.current={...empty(),threadId:id,recovering:true,previewing:true,unknown:true,messages:threadHistoryPreviewMessages(preview)};setState(current.current);
     await recover(id,version);
   }
   async function send(text:string,files:UploadedFile[]=[],toolChoice:ToolChoice='auto') {
@@ -128,12 +159,16 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
     if(before.threadId && (before.running || before.posting || before.localOwner)) {
       if(files.length){update({error:'chat.inputQueue.textOnly'});throw new Error('CHAT_INPUT_UNSUPPORTED_PAYLOAD');}
       const input=text.trim();if(!input)return;
+      const selectionVersion=selectionEpoch.current;
       const messageId=queueIds.current.get(input) ?? generateId();queueIds.current.set(input,messageId);
       try {
         const entry=await enqueueThreadInput(before.threadId,messageId,input,effective,selected.deckId,selected.voiceId,transport);
-        queueIds.current.delete(input);update(value=>({...value,error:null,queue:[...value.queue.filter(item=>item.message_id!==entry.message_id),entry]}));
-        void refreshQueue().catch(()=>{});return;
-      } catch(error){update({error:error instanceof ThreadInputError && error.outcomeUnknown?'chat.inputQueue.stateUnknown':'chat.inputQueue.sendFailed'});throw error;}
+        if(ownsSelection(before.threadId,selectionVersion)){
+          queueIds.current.delete(input);update(value=>({...value,error:null,queue:[...value.queue.filter(item=>item.message_id!==entry.message_id),entry]}));
+          void refreshQueue(before.threadId).catch(()=>{});
+        }
+        return;
+      } catch(error){if(ownsSelection(before.threadId,selectionVersion))update({error:error instanceof ThreadInputError && error.outcomeUnknown?'chat.inputQueue.stateUnknown':'chat.inputQueue.sendFailed'});throw error;}
     }
     const parts:UIMessage['parts']=files.filter(file=>file.storageKey).map(file=>({type:'file',url:toFileProxyUrl(file.storageKey!),mediaType:file.mimeType,filename:file.name}));
     if(text)parts.push({type:'text',text});if(!parts.length)return;
@@ -145,6 +180,7 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
     if((postLock.current===epoch.current&&!before.threadId)||before.stopping||(before.threadId&&claudeThreadStopPending(before.threadId)))throw Error('CHAT_STOP_PENDING');
     if(before.unknown||before.queue.some(entry=>entry.status==='state_unknown'))throw Error('CHAT_OUTCOME_UNKNOWN');
     const selected={...latest.current.context,currentToolChoice:toolChoice},effective=selected.imFullAccessEnabled?'auto':toolChoice;
+    if(before.threadId)historyPreview.current?.forget(before.threadId);
     postLock.current=epoch.current;update({posting:true,error:null});
     let id=before.threadId,dispatched=false,rejected=false,submission:ClaudeThreadSubmission|undefined;const version=epoch.current;
     const preparation=new AbortController();
@@ -156,10 +192,11 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
       }
       id ??= await createChatThread(selected.deckId,selected.voiceId,undefined,transport);
       if(!id)throw new Error('CHAT_THREAD_CREATE_FAILED');
-      if(epoch.current!==version || !mounted.current)return;
+      if(epoch.current!==version || !mounted.current)throw new Error('CHAT_SELECTION_CHANGED');
       const message:UIMessage={...outgoing,id:outgoing.id??generateId(),role:'user'};
       submission=beginClaudeThreadSubmission(id,message.id);
       current.current={...current.current,threadId:id,posting:true,running:true,messages:[...current.current.messages,message]};setState(current.current);
+      recovery?.rememberThread(id);
       const body=buildClaudeChatRequest({id,message,context:selected,attachments:files.map(toAttachment),toolChoice:effective});
       submission.dispatched=true;dispatched=true;
       const response=await stream('/api/claude-agent',{method:'POST',headers:{...browserRequestHeaders(),'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -206,15 +243,17 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
     } catch {if(active(before.threadId,version))update({error:'chat.activity.historyFailed'});}
     finally {olderLock.current=false;if(active(before.threadId,version))update({loadingOlder:false});}
   }
-  const confirmation=useMemo<PendingToolConfirmation|null>(()=>{
+  function readConfirmation():PendingToolConfirmation|null {
+
+    if(state.unknown)return null;
     for(const message of state.messages)for(const [index,part] of message.parts.entries())if(isToolUIPart(part)) {
       const kind=resolvePendingToolConfirmation(part,latest.current.context.imFullAccessEnabled?'auto':latest.current.context.currentToolChoice,state.settled,state.runtimePending);
       if(kind)return {kind,partKey:`${message.id}-${index}`,toolCallId:part.toolCallId,toolName:resolveToolName(part),input:'input' in part?part.input:undefined,networkRequest:kind==='sandbox-network'?resolveSandboxNetworkRequest(part):undefined};
     }
     return null;
-  },[state.messages,state.settled,state.runtimePending,context.imFullAccessEnabled,context.currentToolChoice]);
+  }
   async function confirm(approved:boolean,reason?:string,answers?:Record<string,unknown>) {
-    const id=current.current.threadId;if(!id || !confirmation)return;
+    const confirmation=readConfirmation();const id=current.current.threadId;if(!id || !confirmation)return;
     const version=epoch.current,result=await confirmToolCall(id,confirmation.toolCallId,approved,reason,answers,transport);
     if(!active(id,version))return;
     if(result.state==='error')throw new Error('TOOL_CONFIRMATION_FAILED');
@@ -260,18 +299,87 @@ export default function useNativeChatThread({context,prepareEditorState,onSettle
     try{const task=await moveThreadInputToSideTask(id,entry,transport);await refreshQueue(id);if(active(id,version))update({queueError:task.error_code?'chat.inputQueue.sideChatLaunchFailed':null});return task;}
     catch(error){if(active(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
   }
-  useEffect(()=>{
-    mounted.current=true;
-    const listener=AppState.addEventListener('change',next=>{const id=current.current.threadId;if(!id)return;
-      if(next==='active'){epoch.current++;closeReader();void recover(id,epoch.current);}
-      else if(next==='background'){epoch.current++;closeReader();update({posting:false,recovering:false,unknown:true});}
+  let listener:ReturnType<typeof AppState.addEventListener>|undefined;
+  function restartQueue() {
+    if(queueTimer)clearInterval(queueTimer);
+    const read=async()=>{if(queueInFlight||!mounted.current||AppState.currentState==='background')return;queueInFlight=true;try{await refreshQueue();}catch{/* Keep the last queue snapshot; explicit actions own failure feedback. */}finally{queueInFlight=false;}};
+    void read();queueTimer=setInterval(()=>void read(),2000);
+  }
+  function start() {
+    if(mounted.current)return;mounted.current=true;
+    const restored=current.current.threadId;if(restored)void recover(restored,epoch.current);
+    listener=AppState.addEventListener('change',next=>{const id=current.current.threadId;
+      if(next==='active'&&id){epoch.current++;closeReader();void recover(id,epoch.current);}
+      else if(next==='background'){epoch.current++;closeReader();update({posting:false,recovering:false,unknown:Boolean(id)});}
     });
-    return()=>{mounted.current=false;selectionEpoch.current++;epoch.current++;closeReader();listener.remove();};
-  },[]);
-  useEffect(()=>{
-    if(!state.threadId)return;let inFlight=false,live=true;const id=state.threadId;
-    const read=async()=>{if(inFlight || !live)return;inFlight=true;try{await refreshQueue(id);}catch{}finally{inFlight=false;}};
-    void read();const interval=setInterval(()=>void read(),2000);return()=>{live=false;clearInterval(interval);};
-  },[state.threadId]);
-  return {...state,confirmation,newChat,openThread,send,sendUserMessage:(message:ChatUserMessage,expectedThreadId=current.current.threadId)=>{if(current.current.threadId!==expectedThreadId)return Promise.reject(Error('CHAT_THREAD_CHANGED'));return submitMessage(message);},addToolResult,settleToolCall,stop,loadOlder,confirm,guide,cancelInput,editInput,retryEditedInput,checkQueue,sideTask,refreshQueue,retry:()=>{const id=current.current.threadId;if(id){epoch.current++;closeReader();void recover(id,epoch.current);}}};
+    restartQueue();
+  }
+  function dispose() {mounted.current=false;selectionEpoch.current++;epoch.current++;closeReader();listener?.remove();listener=undefined;if(queueTimer)clearInterval(queueTimer);queueTimer=undefined;}
+  function configure(next:NativeChatThreadOptions) {
+    const confirmationChanged=context.imFullAccessEnabled!==next.context.imFullAccessEnabled||context.currentToolChoice!==next.context.currentToolChoice;
+    ({context,prepareEditorState,onSettled,onSessionExpired,recovery,transport:rawTransport=clientFetch,stream=openResponse}=next);
+    latest.current={context,prepareEditorState,onSettled,onSessionExpired};if(confirmationChanged)snapshotCache=undefined;
+  }
+  const actions={invalidateHistory:(id:string)=>historyPreview.current?.forget(id),newChat,openThread,send,sendUserMessage:(message:ChatUserMessage,expectedThreadId=current.current.threadId)=>{if(current.current.threadId!==expectedThreadId)return Promise.reject(Error('CHAT_THREAD_CHANGED'));return submitMessage(message);},addToolResult,settleToolCall,stop,loadOlder,confirm,guide,cancelInput,editInput,retryEditedInput,checkQueue,sideTask,refreshQueue,retry:()=>{const id=current.current.threadId;if(id){epoch.current++;closeReader();void recover(id,epoch.current);}}};
+  type Snapshot=typeof state&typeof actions&{confirmation:PendingToolConfirmation|null};
+  let snapshotCache:Snapshot|undefined;
+  return {start,dispose,configure,subscribe:(notify:()=>void)=>{listeners.add(notify);return()=>{listeners.delete(notify);};},
+    snapshot:():Snapshot=>snapshotCache??=( {...state,confirmation:readConfirmation(),...actions}),
+    live:()=>state.running||state.stopping||connection.current!==null,
+    departSelection:()=>{selectionEpoch.current++;update({editDraftRecovery:null,editRetrying:false});},
+    expire:()=>{closeReader();update({messages:[],thread:undefined,unknown:true});}};
+}
+
+function createNativeChatThreadOwner(initial:NativeChatThreadOptions) {
+  type Session=ReturnType<typeof createNativeChatThreadSession>;
+  let options=initial,visible=initial.visible!==false,started=false,scope=getBrowserCsrfToken();
+  const preview=createThreadHistoryPreview(),sessions=new Set<Session>(),listeners=new Set<()=>void>();
+  let selected:Session;
+  function notify() {for(const listener of listeners)listener();}
+  function forget(session:Session) {sessions.delete(session);session.dispose();}
+  function owned(session:Session):NativeChatThreadOptions {
+    const recovery=options.recovery;
+    return {...options,recovery:recovery?{...recovery,selectThread:id=>{if(selected===session)recovery.selectThread(id);},rememberThread:id=>{if(selected===session)recovery.rememberThread(id);}}:undefined,
+      onSessionExpired:()=>{if(!sessions.has(session))return;for(const other of sessions)if(other!==selected)forget(other);preview.clear();selected.expire();options.onSessionExpired?.();}};
+  }
+  function create(id:string|null) {
+    const session=createNativeChatThreadSession(options,id,preview);sessions.add(session);session.configure(owned(session));
+    session.subscribe(()=>{if(synchronizeScope())return;if(session===selected){if(visible)notify();}else if(!session.live())forget(session);});
+    return session;
+  }
+  selected=create(initial.initialThreadId??initial.recovery?.read().threadId??null);
+  let base=selected.snapshot(),published={...base,newChat,openThread,invalidateHistory};
+  function synchronizeScope() {
+    const next=getBrowserCsrfToken();if(next===scope)return false;scope=next;
+    const id=selected.snapshot().threadId;
+    for(const session of sessions)session.dispose();sessions.clear();preview.clear();selected=create(id);base=selected.snapshot();published={...base,newChat,openThread,invalidateHistory};
+    if(started){const target=selected;queueMicrotask(()=>{if(selected===target&&started)target.start();});}
+    notify();return true;
+  }
+  function select(next:Session) {
+    const previous=selected;previous.departSelection();selected=next;
+    if(!previous.live())forget(previous);
+    if(started)next.start();notify();
+  }
+  function newChat() {synchronizeScope();select(create(null));options.recovery?.selectThread(null);}
+  async function openThread(id:string) {
+    synchronizeScope();const current=selected.snapshot();
+    if(current.threadId===id)return selected.snapshot().openThread(id);
+    const retained=[...sessions].find(session=>session.snapshot().threadId===id);
+    select(retained??create(id));options.recovery?.selectThread(id);
+  }
+  function invalidateHistory(id:string) {preview.forget(id);for(const session of sessions)if(session!==selected&&session.snapshot().threadId===id)forget(session);}
+  return {
+    configure(next:NativeChatThreadOptions) {options=next;const wasVisible=visible;visible=next.visible!==false;selected.configure(owned(selected));if(wasVisible&&!visible){base=selected.snapshot();published={...base,newChat,openThread,invalidateHistory};}},
+    snapshot() {synchronizeScope();if(!visible)return published;const next=selected.snapshot();if(next!==base){base=next;published={...next,newChat,openThread,invalidateHistory};}return published;},
+    subscribe(listener:()=>void) {listeners.add(listener);return()=>{listeners.delete(listener);};},
+    start() {started=true;selected.start();return()=>{started=false;for(const session of sessions)session.dispose();for(const session of sessions)if(session!==selected)sessions.delete(session);};},
+  };
+}
+
+export default function useNativeChatThread(options:NativeChatThreadOptions) {
+  const [owner]=useState(()=>createNativeChatThreadOwner(options));owner.configure(options);
+  const snapshot=useSyncExternalStore(owner.subscribe,owner.snapshot,owner.snapshot);
+  useEffect(()=>owner.start(),[owner]);
+  return snapshot;
 }

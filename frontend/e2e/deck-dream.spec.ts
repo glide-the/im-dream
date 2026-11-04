@@ -1,3 +1,8 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
+// [Input] Existing application fixture and visible Chat controls.
+// [Output] Original journey assertions with current application-name selectors.
+// [Pos] Retained E2E harness; authentication and runtime prerequisites keep their existing contract.
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = 'http://127.0.0.1:5173';
@@ -111,19 +116,19 @@ test('Dream selects one Deck and persists immutable thread provenance', async ({
 
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
   await expect(page).toHaveURL(/\/story-workspace\/dream$/);
-  const deckSelect = page.getByLabel('Select one Deck for this conversation');
+  const deckSelect = page.getByLabel("Select one Kastention for this conversation");
   await expect(deckSelect).toBeVisible();
   await deckSelect.click();
   const selectedDeckLabel = selectedDeck.name_en || selectedDeck.name;
   const prefix = selectedDeckLabel.slice(0, Math.min(3, selectedDeckLabel.length));
-  await page.getByPlaceholder('Type a prefix to filter Decks…').fill(prefix);
+  await page.getByPlaceholder('Type a prefix to filter Kastention…').fill(prefix);
   await page.getByRole('option', { name: selectedDeckLabel, exact: true }).click();
 
   const threadResponsePromise = page.waitForResponse((response) => (
     response.url().endsWith('/api/claude-agent/threads')
     && response.request().method() === 'POST'
   ));
-  await page.getByPlaceholder('Ask Ink & Memory…').fill('Create a short story premise.');
+  await page.getByPlaceholder('Ask Kastention…').fill('Create a short story premise.');
   await page.getByRole('button', { name: 'Send' }).click();
   const threadResponse = await threadResponsePromise;
   expect(threadResponse.ok()).toBeTruthy();
@@ -134,7 +139,7 @@ test('Dream selects one Deck and persists immutable thread provenance', async ({
   await expect(page.getByLabel(
     `Conversation Deck: ${selectedDeck.name_en || selectedDeck.name}`,
   )).toBeVisible();
-  await expect(page.getByLabel('Select one Deck for this conversation')).toHaveCount(0);
+  await expect(page.getByLabel("Select one Kastention for this conversation")).toHaveCount(0);
   await expect(page.getByText('雨夜电台', { exact: true })).toBeVisible();
   await expect(page.getByText('等待你的决定', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '确认提案并执行发布' })).toBeVisible();

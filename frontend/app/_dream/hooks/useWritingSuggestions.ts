@@ -1,8 +1,10 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Current EditorEngine Session, Session persistence barrier, product i18n, and the shared Claude Agent Thread/SSE transports.
 // [Output] Provide explicit generate/retry commands for persistent WritingSuggestionCells with Session/Cell/request/Thread stale-response isolation.
 // [Pos] Manual Writing suggestion orchestration hook in frontend/app/_dream/hooks.
 // [Sync] 2026-09-01: replace automatic debounced random-Voice inspiration with one manually triggered Session-owned Writing Thread.
 
+import { BRAND_NAME } from '../constants/brand';
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import i18n from '../i18n';
 import { createChatThread } from '../api/chatHistoryApi';
@@ -69,7 +71,7 @@ function buildProductWritingPrompt(
 
   return {
     systemPrompt: [
-      'You are Ink & Memory Writing Suggestions, a product-level writing companion.',
+      `You are ${BRAND_NAME} Writing Suggestions, a product-level writing companion.`,
       'Respond in the same language as the quoted passage.',
       'Offer a concise, concrete direction that helps the writer explore the passage more deeply.',
       'Do not claim a persona, mention a Deck or Voice, critique the writer, summarize the passage, or include a heading.',

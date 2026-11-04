@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Input] Backend common Skill catalog plus Deck Claude-plugin refs, receipts, and inventories.
 // [Output] Resolve safe common/Deck Skill suggestions and the built-in compact command for Chat.
 // [Pos] Pure Chat composer discovery helper; it does not execute commands or inspect workflow state.
@@ -9,6 +10,7 @@
 //                    composer opens the menu; the trailing space inserted after a
 //                    selection still closes the draft.
 
+import { BRAND_NAME } from '../../constants/brand';
 import {
   listCommonSkillCommands,
   type CommonSkillCommandDto,
@@ -36,7 +38,7 @@ export function withBuiltinCompact(commands: readonly AvailableSkillCommand[]): 
     { command: '/compact', name: 'compact', sourceLabel: 'builtin' }];
 }
 
-const COMMON_SKILL_SOURCE_LABEL = 'Ink & Memory';
+const COMMON_SKILL_SOURCE_LABEL = BRAND_NAME;
 
 function inventorySkills(raw: string | undefined): readonly string[] {
   if (!raw) return [];

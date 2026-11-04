@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Story Workspace Episodes 元信息渲染与审阅闭环 Issue 清单
 
 > **增量 Issue**: SUO-243
@@ -37,7 +38,7 @@
 
 - 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`
 - 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
-- 关联设计稿：`docs/design/deck/deck-integration-delta.md`
+- 关联设计稿：`docs/design/kastention/kastention-integration-delta.md`
 - 背景设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
 - 参考设计稿：`docs/design/story-workspace/README.md`
 

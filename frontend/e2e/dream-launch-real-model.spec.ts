@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 // [Input] The normal Chat-selected Dream Deck launch endpoint and an exact real Gateway model.
 // [Output] Headed-browser business proof plus a private content-free lifecycle receipt for failure diagnosis.
 // [Pos] Release harness only; it calls public production routes and never installs a test-only business branch.
@@ -108,8 +109,8 @@ async function approveExpectedToolConfirmation(
   const dialog = dialogs.first();
   const accessibleName = await dialog.getAttribute('aria-label');
   const tool = (['Write', 'Agent'] as const).find((candidate) => (
-    accessibleName?.startsWith(`是否允许 I&M 调用 ${candidate} 工具`)
-    || accessibleName?.startsWith(`Allow I&M to call the ${candidate} tool`)
+    accessibleName?.startsWith(`是否允许 卡片结构 调用 ${candidate} 工具`)
+    || accessibleName?.startsWith(`Allow Kastention to call the ${candidate} tool`)
   ));
   if (!tool) {
     throw new Error('An unreviewed tool confirmation blocked the Dream business journey.');

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。
 # [Input] Immutable plugin init profiles, requirements and the platform-owned Python executor.
 # [Output] Original workspace initialization, managed venv and requirements/version receipts.
 # [Pos] Shared plugin setup; platform binding changes command execution without changing init rules.
@@ -5,7 +6,7 @@
 # [Sync] 2026-10-26: support an explicitly bound guest Python executor; preserve the server subprocess default.
 """Workspace init profiles and managed per-plugin Python runtimes.
 
-Design: docs/design/deck/drama-forge-workspace-init-design.md §4/§5.
+Design: docs/design/kastention/drama-forge-workspace-init-design.md §4/§5.
 
 A plugin artifact may carry ``.ink/workspace-init.json`` (digest-pinned with
 the artifact).  When the workspace packer copies such an artifact into an

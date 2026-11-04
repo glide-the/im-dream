@@ -4,6 +4,7 @@
 // [Output] Original Runtime JSONL/control or original Next standalone HTTP in one application worker.
 // [Pos] Node worker entry; isolates module state without launching an OS process.
 // [Sync] 2026-11-01: forward original Next console errors to the existing host status without changing stderr.
+// [Sync] 2026-11-03: include stack locations for failed Reflections creation only; omit exception text, request URLs, headers and bodies.
 // [Sync] 2026-10-25: Runtime commands use the bundled interpreter; Next retains command denial and no Mac execution.
 // [Sync] 2026-10-25: use the packaged Bash as the default CLI shell; Simulator host zsh does not establish guest availability.
 // [Sync] 2026-10-25: report the original Next server's actual loopback listening event to the private host.
@@ -14,6 +15,7 @@
 // [Sync] 2026-10-25: restore original connection policy after fresh Admin connections reproduced session timeouts.
 // [Sync] 2026-10-26: let pending original filesystem promises close their handles before a Runtime Worker exits.
 // [Sync] 2026-10-26: preserve managed venv PATH precedence and execute plugin Python through the existing guest binding.
+// [Sync] 2026-11-03: bind Runtime ripgrep selection to the host-verified guest executable after session env projection.
 import { workerData, parentPort } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -30,6 +32,7 @@ const { installIOSProcessBoundary } = await import(workerData.processBoundaryURL
 // Both routes prevent Simulator from using Mac shell, git or MCP executables.
 installIOSProcessBoundary(workerData.commandRuntime);
 if (workerData.commandRuntime) {
+  process.env.INK_IOS_RIPGREP_PATH = workerData.commandRuntime.ripgrepExecutable;
   // Preserve the original plugin launcher's managed venv precedence. Missing
   // guest commands cannot execute desktop binaries outside the mounted App.
   process.env.PATH = (process.env.PATH ? process.env.PATH + ':' : '') + '/usr/local/bin:/usr/bin:/bin';
@@ -97,9 +100,14 @@ subscribe('undici:request:error', ({ request, error }) => {
       codes.push(typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(code) ? code : 'unavailable');
     }
     const observation = httpStarts.get(request);
+    const reflectionCreate = workerData.application === 'next' && request?.method === 'POST'
+      && String(request?.path).split('?')[0] === '/api/reflections/tasks';
+    const frames = reflectionCreate && typeof error?.stack === 'string'
+      ? error.stack.split('\n').filter(line => /^\s+at\s/.test(line)).slice(0, 4).map(line => line.trim()) : [];
     process.stderr.write('IOS_NODE_HTTP_FAILURE ' + JSON.stringify({
       application: workerData.application === 'next' ? 'next' : 'runtime',
       ...(observation?.operation ? {id: observation.id, operation: observation.operation} : {}),
+      ...(reflectionCreate ? {operation: 'reflection-create', frames} : {}),
       errorClass: typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(error.name) ? error.name : 'Error',
       codes, elapsedMs: observation === undefined ? null : Math.round(performance.now() - observation.started),
     }) + '\n');

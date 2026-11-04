@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # task_deck_sc_004_backend_runtime-digest-receipt
 
 ## 1. 任务标题
@@ -11,7 +12,7 @@ Runtime 物化后二次摘要校验与 Load Receipt 绑定
 | Task ID | `TASK-DECK-SC-004` |
 | 来源 Issue | `DECK-SC-004` |
 | Paperclip TaskDesign Issue | [SUO-275](/SUO/issues/SUO-275) |
-| Canonical design | `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2.1、§4.2.3 |
+| Canonical design | `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2.1、§4.2.3 |
 | Domain | `backend` |
 | 优先级 | P0 |
 | 下游 Stage 映射键 | `stage4.supply_chain.DECK-SC-004` |

@@ -3,6 +3,7 @@
 // [Pos] Provider-free iOS account adapter contracts; no system consent, normal account, Admin, model or Notion access.
 // [Sync] 2026-10-31: exercise App callback/local HTTP ownership and the retained login probe before platform adoption.
 // [Sync] 2026-10-31: drive the real WK callback through the production account adapter and an App-owned HTTP redirect fixture.
+// [Sync] 2026-11-02: preserve original OAuth values while carrying the explicit Google choice once.
 import XCTest
 import WebKit
 import Network
@@ -124,10 +125,13 @@ final class NativeAccountLoginTests: XCTestCase {
         for item in components.queryItems! { XCTAssertEqual(selected.queryItems!.filter { $0.name == item.name }, [item]) }
         XCTAssertEqual(result.state, state)
         XCTAssertEqual(selected.queryItems!.filter { $0.name == "prompt" }, [URLQueryItem(name: "prompt", value: "login")])
-        for name in ["redirect_uri", "client_id", "state", "nonce", "code_challenge", "code_challenge_method", "prompt"] {
+        XCTAssertEqual(selected.queryItems!.filter { $0.name == "identity_provider" }, [URLQueryItem(name: "identity_provider", value: "google")])
+        XCTAssertEqual(NativeAccountCallback.authorization(result.url.absoluteString, admin: admin, callback: callback)?.url, result.url)
+        for name in ["redirect_uri", "client_id", "state", "nonce", "code_challenge", "code_challenge_method", "prompt", "identity_provider"] {
             var repeated = components
             repeated.queryItems?.append(URLQueryItem(name: name, value: "duplicate"))
             if name == "prompt" { repeated.queryItems?.append(URLQueryItem(name: name, value: "login")) }
+            if name == "identity_provider" { repeated.queryItems?.append(URLQueryItem(name: "identity_provider", value: "google")) }
             XCTAssertNil(NativeAccountCallback.authorization(repeated.string!, admin: admin, callback: callback))
         }
         XCTAssertNil(NativeAccountCallback.authorization(components.string!, admin: URL(string: "https://other.example")!, callback: callback))

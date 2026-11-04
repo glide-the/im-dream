@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Structured workflow error code, safe summary, stage, and recovery callback.
 // [Output] Sanitized error explanation and actionable recovery control.
 // [Pos] Plugin Admin error boundary/card; never renders stack traces or local paths.
@@ -13,7 +14,7 @@ const ERROR_COPY: Record<string, { message: string; recovery: string }> = {
   CLAUDE_AGENT_INCOMPATIBLE: { message: '当前 Agent 无法执行此工作流版本。', recovery: '选择兼容的工作流版本' },
   STORY_SCHEMA_INCOMPATIBLE: { message: '插件输出无法被当前 Story Workspace 消费。', recovery: '选择兼容版本' },
   WORKFLOW_PERMISSION_DENIED: { message: '当前身份没有执行该管理动作的权限。', recovery: '申请插件管理员授权' },
-  DECK_PLUGIN_DISABLED: { message: '该 Deck 工作流插件已禁用。', recovery: '由管理员重新启用' },
+  DECK_PLUGIN_DISABLED: { message: '该卡片结构工作流插件已禁用。', recovery: '由管理员重新启用' },
   DECK_PLUGIN_UPGRADE_PENDING: { message: '升级新增能力，正在等待管理员审批。', recovery: '审阅能力差异' },
   RUNTIME_PLUGIN_NOT_READY: { message: '工作流所需文件尚未准备完成。', recovery: '等待准备完成或重试准备' },
   RUNTIME_PLUGIN_LOAD_FAILED: { message: '工作流所需文件已准备完成，但加载失败。', recovery: '使用新会话重试' },

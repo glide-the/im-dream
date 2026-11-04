@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Selected Deck workflow installation, server detail/readiness, permissions, and lifecycle callbacks.
 // [Output] Workflow information and status drawer with capabilities, history, runs, and recovery.
 // [Pos] Plugin Admin detail surface.
@@ -65,7 +66,7 @@ export default function PluginAdminDetail({
       <aside className="plugin-admin-detail" role="dialog" aria-modal="true" aria-labelledby="plugin-admin-detail-title">
         <header className="plugin-admin-detail__header">
           <div>
-            <span className="plugin-admin-eyebrow">Deck 工作流插件</span>
+            <span className="plugin-admin-eyebrow">卡片结构工作流插件</span>
             <h2 id="plugin-admin-detail-title">{item.displayName}</h2>
             <code>{item.deckPluginId} · {version}</code>
           </div>
@@ -114,7 +115,7 @@ export default function PluginAdminDetail({
                     <dl className="plugin-admin-detail-grid">
                       <div><dt>输入 schema</dt><dd>{installation.manifest?.inputSchemaVersion ?? <EmptyLine />}</dd></div>
                       <div><dt>输出 schema</dt><dd>{installation.manifest?.outputSchemaVersion ?? <EmptyLine />}</dd></div>
-                      <div className="plugin-admin-detail-grid__wide"><dt>Deck runtime contract</dt><dd>{installation.manifest?.deckRuntimeContract ?? <EmptyLine />}</dd></div>
+                      <div className="plugin-admin-detail-grid__wide"><dt>Kastention runtime contract</dt><dd>{installation.manifest?.deckRuntimeContract ?? <EmptyLine />}</dd></div>
                     </dl>
                     {installation.manifest?.workflowReferences.length ? (
                       <ul className="plugin-admin-code-list">

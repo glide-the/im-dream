@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # TASK-REQUIREMENT — task_238_shared_deck-task-contract-normalization
 
 Status: Filled Prompt for Model Execution  
@@ -28,7 +29,7 @@ Domain: `shared`（cross-cutting task 合同纠偏）
 
 按如下优先级消费：
 
-1. `docs/design/deck/deck-integration-delta.md` — Deck integration 唯一当前 canonical；
+1. `docs/design/kastention/kastention-integration-delta.md` — Deck integration 唯一当前 canonical；
 2. `docs/design/deck-plugin-voice-ink-dream-integration.md`；
 3. `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md`；
 4. `docs/issue/ISSUES_story-workspace.md` 及 Episodes 增量清单；
@@ -46,7 +47,7 @@ Domain: `shared`（cross-cutting task 合同纠偏）
 - 单次 run 固定 `deck_plugin_id + deck_plugin_version + deck_runtime_snapshot_id + runtime_plugin_lock_id`；默认重试沿用原来源并创建新 run/session，改选、升级或刷新快照创建新运行。
 - 规范错误码至少包含 `DECK_RUNTIME_CONFIG_INVALID`、`DECK_RUNTIME_CONFIG_INCOMPATIBLE`、`DECK_RUNTIME_CONFIG_UNAVAILABLE`、`OUTPUT_CONTRACT_INVALID`；移除旧配置域错误码。
 - `pending_review` 是唯一 API 审阅态；`awaiting review` 只能作为 UI 文案。
-- Deck integration 引用只能指向 `docs/design/deck/deck-integration-delta.md`，不得引用已迁移的旧 delta 路径。
+- Deck integration 引用只能指向 `docs/design/kastention/kastention-integration-delta.md`，不得引用已迁移的旧 delta 路径。
 - 当前业务语义中的旧独立配置域名称、字段前缀与组合名必须消除；历史审计若保留，必须显式标注“已废弃口径”。
 
 ### 4. 修订范围与方式

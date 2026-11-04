@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 """Deck publication and collection policy regressions.
 
 [Input] Persisted policy facts and current Admin public mutation harness.
@@ -135,7 +136,7 @@ def test_publish_route_returns_conflict_for_default_deck(boundary) -> None:
     outputs["deck.toggle-publication"] = (409, "DEFAULT_DECK_PUBLISH_FORBIDDEN", ...)
     response = browser.post("/api/decks/default/publish", headers={"authorization": "Bearer write-token"})
     assert response.status_code == 409
-    assert response.json() == {"detail": "System-initialized Decks cannot be published"}
+    assert response.json() == {"detail": "System-initialized Kastention cannot be published"}
 
 
 def test_fork_route_returns_conflict_for_self_collection(boundary) -> None:
@@ -143,4 +144,4 @@ def test_fork_route_returns_conflict_for_self_collection(boundary) -> None:
     outputs["deck.collect"] = (409, "SELF_COLLECTION_FORBIDDEN", ...)
     response = browser.post("/api/decks/mine/fork", headers={"authorization": "Bearer write-token"})
     assert response.status_code == 409
-    assert response.json() == {"detail": "You cannot collect your own published Deck"}
+    assert response.json() == {"detail": "You cannot collect your own published Kastention"}

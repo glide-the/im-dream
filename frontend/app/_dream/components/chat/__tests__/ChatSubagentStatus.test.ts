@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 // [Input] A Chat thread containing human Dream messages, a historical internal JSON
 //         envelope, and thread-owned subagents that outlive the main stream.
 // [Output] Browser regression proving message bodies remain visible while the
@@ -300,7 +301,7 @@ test('Chat preserves Dream message bodies and does not let stale subagent transc
     dreamConfirmationPending = true;
     await page.reload();
     const confirmationDock = page.getByRole('alertdialog', {
-      name: 'Allow I&M to call the Write tool',
+      name: 'Allow Kastention to call the Write tool',
     });
     await expect(confirmationDock).toBeVisible();
     await confirmationDock.getByRole('button', { name: 'Approve' }).click();

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # Exec Report: deck_001 - Deck Plugin Manifest 与发布版本模型
 
 ## 1. 执行上下文
@@ -15,7 +16,7 @@
 
 工作树基线包含以下既有、非本任务改动，执行过程中均未覆盖或清理：
 
-- `docs/design/deck/design_002_deck-plugin-decision-gates.md`
+- `docs/design/kastention/design_002_kastention-plugin-decision-gates.md`
 - `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md`
 - `docs/stage/stage_story-workspace.md`
 - `docs/task/SUO-238-completion-report.md`

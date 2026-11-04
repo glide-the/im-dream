@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-09-16: move agent-type clear/plan/prepare to Registry127-129 Admin DTOs plus local artifact verification.
 # [Input] Current Admin OAuth actor, shared default Workspace and typed Admin binding consumer.
 # [Output] Original authenticated binding/options/history/validation/Agent-type API projections.
@@ -89,7 +90,7 @@ def _access_denied() -> JSONResponse:
         status_code=404,
         content={
             "error_code": "DECK_ACCESS_DENIED",
-            "message": "Deck not found or permission denied.",
+            "message": "Kastention not found or permission denied.",
         },
     )
 
@@ -124,7 +125,7 @@ def _binding_admin_error(exc, request_id: str):
         if isinstance(details, BindingSelectionRejectedDetailsDTO):
             return JSONResponse(status_code=422, content={
                 "error_code": details.validation.reason_code,
-                "message": "The selected Deck Plugin release is not selectable.",
+                "message": "The selected Kastention Plugin release is not selectable.",
                 "validation": details.validation.model_dump(mode="json"),
             })
     if not exc.outcome_unknown and exc.code in {
@@ -136,7 +137,7 @@ def _binding_admin_error(exc, request_id: str):
             status_code=exc.status_code,
             content={
                 "error_code": exc.code,
-                "message": "The Dream Runtime is not ready for this Deck.",
+                "message": "The Dream Runtime is not ready for this Kastention.",
             },
         )
     raise HTTPException(status_code=exc.status_code, detail={
@@ -191,7 +192,7 @@ async def put_agent_type(
             status_code=503,
             content={
                 "error_code": "RUNTIME_PLUGIN_NOT_READY",
-                "message": "The Dream Runtime is not ready for this Deck.",
+                "message": "The Dream Runtime is not ready for this Kastention.",
             },
         )
     prepared = await invoke_admin_operation(

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: pass the displayed target title or existing excerpt to the caller-owned deletion confirmation.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Input] Original Chat history groups and caller-owned selection/delete/pagination state.
 // [Output] Original grouped titles, search excerpts, active marker and loading/retry/empty/end feedback.
@@ -22,7 +23,7 @@ export interface ChatHistoryListProps {
   moreError: boolean;
   hasMore: boolean;
   onSelectThread: (id: string) => void;
-  onDeleteThread: (id: string) => void;
+  onDeleteThread: (id: string, title?: string) => void;
   onReload: () => void;
   onLoadMore: () => void;
 }
@@ -62,7 +63,7 @@ export default function ChatHistoryList({header, groups, activeThreadId, deletin
           </Pressable>
           {/* Touch devices have no persistent hover; expose the same delete action in the trailing target. */}
           <Pressable accessibilityRole="button" accessibilityLabel={`${t('chat.history.deleteThread')}: ${title}`} accessibilityState={{disabled:deleting,busy:deleting}}
-            disabled={deleting} onPress={() => onDeleteThread(thread.id)} style={styles.delete}>
+            disabled={deleting} onPress={() => onDeleteThread(thread.id,thread.title?.trim()||excerpt||undefined)} style={styles.delete}>
             {deleting ? <ActivityIndicator size="small" color={colors['color-text-muted']} /> : <IconX width={12} height={12} color={colors['color-text-secondary']} />}
           </Pressable>
         </View>;

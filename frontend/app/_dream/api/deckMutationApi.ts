@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Original Deck/Voice mutation DTOs, Cookie/CSRF and optional platform HTTP.
 // [Output] Existing create/update/delete/fork/sync requests and original errors.
 // [Pos] Shared Deck mutation owner re-exported by voiceApi; native avoids unrelated editor/runtime imports.
@@ -24,7 +25,7 @@ export async function createDeck(data: DeckDetailsInput, transport: typeof fetch
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Create deck failed');
+    throw new Error(error.detail || 'Create Kastention failed');
   }
 
   return await response.json();
@@ -53,7 +54,7 @@ export async function updateDeck(deckId: string, data: {
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Update deck failed');
+    throw new Error(error.detail || 'Update Kastention failed');
   }
 }
 
@@ -68,7 +69,7 @@ export async function deleteDeck(deckId: string, transport: typeof fetch = fetch
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Delete deck failed');
+    throw new Error(error.detail || 'Delete Kastention failed');
   }
 }
 
@@ -83,7 +84,7 @@ export async function forkDeck(deckId: string, transport: typeof fetch = fetch):
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Fork deck failed');
+    throw new Error(error.detail || 'Fork Kastention failed');
   }
 
   return await response.json();
@@ -100,7 +101,7 @@ export async function syncDeck(deckId: string, transport: typeof fetch = fetch):
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Sync deck failed');
+    throw new Error(error.detail || 'Sync Kastention failed');
   }
 
   return await response.json();

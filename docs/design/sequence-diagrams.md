@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity. -->
 <!-- [Sync] 2026-09-15: route current-user picture history reads through Admin Registry103. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -497,7 +498,7 @@ sequenceDiagram
     User->>FE: 点击「发布到社区」
     FE->>API: POST /api/decks/{deck_id}/publish
     API->>DB: get_deck_with_voices(user_id, deck_id)
-    DB-->>API: deck 信息（含 published 状态）
+    DB-->>API: kastention 信息（含 published 状态）
 
     alt 当前未发布
         API->>DB: publish_deck(deck_id, user_id)
@@ -634,4 +635,4 @@ graph TB
     Backend --> External
 ```
 
-公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream pure projector保留empty text、解析合法JSON并把非法非空JSON映射为null，读取不heal或写库。无read retry或DB fallback。详见[Deck详情现行规则](deck/deck-detail-version-history.md)。
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；Admin Repository按原字节投影nullable/raw Memory文本，Dream pure projector保留empty text、解析合法JSON并把非法非空JSON映射为null，读取不heal或写库。无read retry或DB fallback。详见[Deck详情现行规则](kastention/kastention-detail-version-history.md)。

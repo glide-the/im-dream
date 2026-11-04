@@ -1,6 +1,7 @@
 <!-- [Input] 仓库工作边界、用户产品要求与现行文档维护合同。 -->
 <!-- [Output] Agent 必须遵守的设计、实现、数据、验证与工作区规则。 -->
 <!-- [Pos] 唯一根工作合同，统一维护仓库、产品设计、实现与验证规则。 -->
+<!-- [Sync] 2026-11-02: 增加发布构建容量检查、失败停止与原制品恢复约束。 -->
 <!-- [Sync] 2026-10-18: 文档按技术、产品及项目执行记录使用对应术语，直接定义对象与行为，禁止逻辑话术。 -->
 <!-- [Sync] 2026-10-15: 增加 Claude Agent workflow、Tool description 与 low-sensitivity 分类约束及规则入口。 -->
 <!-- [Sync] 2026-10-10: 删除非标准根 Agent.md 后，AGENTS.md 成为唯一根工作合同。 -->
@@ -34,6 +35,13 @@
 - Run requested validation commands after meaningful changes.
 - When touching docs, verify Markdown inventory and referenced paths remain valid.
 - Report concrete evidence (`command`, exit code, key output) in the final summary.
+
+## 发布构建与恢复约束
+
+- 发布前必须按[构建内存与发布失败恢复手册](docs/deploy/build-memory-and-recovery.md)核对目标、实际构建入口、物理可用内存、有效 cgroup 限额、所有 worker 预算及可恢复制品；检查脚本内联堆参数，禁止将单次事故限额作为通用默认值。
+- 业务服务器资源不足时优先使用已有入口可消费的目标兼容制品；容量未确认时不得在原服务目录构建、并行构建或反复重试。保留完整类型检查和既有依赖锁定。
+- SSH 超时、502/503 和 SIGKILL 只能作为诊断线索；OOM 判定须关联同一时间和目标的内核/cgroup 记录。发生失败时先停止本轮失败构建或重启循环，沿原平台流程恢复已验证制品，保留数据、认证及权限。
+- ECS 保持禁用 swap/zswap，禁止以交换绕过容量不足；服务重启、资源调整和恢复操作须遵循当次授权。构建完成、服务恢复、真实业务验收和发布分别留存证据。
 
 ### 浏览器 E2E 前置检查
 

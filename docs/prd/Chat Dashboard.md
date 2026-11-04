@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Input] Existing Chat landing, WorkspaceTabBar and the priority activity PRD. -->
 <!-- [Output] Chat dashboard layout and an auxiliary activity entry reference without changing the primary landing content switch. -->
 <!-- [Pos] Existing Chat dashboard contract; activity product rules and skeletons belong to docs/prd/chat/priority-activity.md. -->
@@ -233,7 +234,7 @@ ResourceConnectorTabPanel
 | 项 | 方案 |
 |---|---|
 | 根因 | Chat / Settings / Decks 的局部组件存在硬编码浅色背景或白字色。 |
-| 最小修复 | 替换确定影响暗色模式的硬编码浅色面为语义 token 或 `color-mix()`；Decks 页面使用单一虚线页边界、轻纸面 deck item 和小面积 accent，移除渐变图标、强彩色边框和普通 item 阴影。 |
+| 最小修复 | 替换确定影响暗色模式的硬编码浅色面为语义 token 或 `color-mix()`；Decks 页面使用单一虚线页边界、轻纸面 kastention item 和小面积 accent，移除渐变图标、强彩色边框和普通 item 阴影。 |
 | 非目标 | 不引入新的主题框架，不重做色彩系统。 |
 | 验收 | 暗色模式下页面背景、卡片、边框、按钮和文本均使用可读的语义色。 |
 

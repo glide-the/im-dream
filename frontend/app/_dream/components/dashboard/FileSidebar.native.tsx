@@ -2,11 +2,12 @@
 // [Input] Original Workspace file tree/API, selected Thread, platform file selection/batch upload/export and AppState.
 // [Output] Original file sidebar operations with one list scroller, current directory, upload queue and explicit failure recovery.
 // [Pos] RN presentation of FileSidebar; no new endpoints, workspace ownership rules, task execution or storage service.
+// [Sync] 2026-11-02: confirm the exact path before DELETE; closing/reopening or leaving/returning to a Thread retires the old confirmation.
 // [Sync] 2026-10-28: reuse the original tree and DELETE contract; isolate reader identity from in-flight mutations and file leases.
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {WorkspaceFileRequestError} from '../chat/workspaceFileAccess';
-import {ActivityIndicator,AppState,Pressable,SafeAreaView,ScrollView,StyleSheet,View} from 'react-native';
+import {ActivityIndicator,Alert,AppState,Pressable,SafeAreaView,ScrollView,StyleSheet,View} from 'react-native';
 import {readWorkspaceFileTree,deleteWorkspaceFile,flattenVisible,formatFileSize,normalizePath,type FileInfo} from '../../api/workspaceFilesApi';
 import {clientFetch} from '../../../../src/platform/transport';
 import {createNativeFileUploadAdapter,pickNativeFiles,type NativePickedFile} from '../../../../src/platform/fileUpload.native';
@@ -21,6 +22,8 @@ export default function FileSidebar({sessionId,open,availability,onClose,onSessi
  const {t}=useTranslation();
  const colors=useInkColors(),text={color:colors['color-text-primary']};
  const identity=JSON.stringify([sessionId,availability]),owner=useRef(identity);owner.current=identity;
+ const deletionScope=useRef({identity,open});
+ if(deletionScope.current.identity!==identity||deletionScope.current.open!==open)deletionScope.current={identity,open};
  const mounted=useRef(true),sessionExpired=useRef(onSessionExpired);sessionExpired.current=onSessionExpired;
  const adapter=useMemo(()=>files??createNativeFileUploadAdapter(),[files]);
  const accessTransport=useMemo<typeof fetch>(()=>async(input,init)=>{const response=await transport(input,init);if(response.status===401)sessionExpired.current?.();return response;},[transport]);
@@ -44,8 +47,15 @@ export default function FileSidebar({sessionId,open,availability,onClose,onSessi
  },[identity,open,foreground,enabled,sessionId,accessTransport,revision]);
  useEffect(()=>{if(!open||!foreground)download.current?.controller.abort();return()=>download.current?.controller.abort();},[identity,open,foreground]);
  async function remove(file:FileInfo){
-  if(!sessionId||!enabled||deletingRef.current)return;const key=identity,id=sessionId;deletingRef.current=true;setDeleting(file.path);
-  try{await deleteWorkspaceFile(id,file.path,accessTransport);if(alive(key))reload(value=>value+1);}catch(error){tell(key,error instanceof Error?error.message:'删除失败');}
+  if(!sessionId||!enabled||!open||deletingRef.current)return;const key=identity,id=sessionId,scope=deletionScope.current;deletingRef.current=true;setDeleting(file.path);
+  try{
+   const confirmed=await new Promise<boolean>(resolve=>Alert.alert(t('deck.related.delete'),t(file.isDirectory?'chat.workspaceFile.confirmDeleteFolder':'chat.workspaceFile.confirmDeleteFile',{path:file.path}),[
+    {text:t('deck.details.cancel'),style:'cancel',onPress:()=>resolve(false)},
+    {text:t('deck.related.delete'),style:'destructive',onPress:()=>resolve(true)},
+   ],{cancelable:true,onDismiss:()=>resolve(false)}));
+   if(!confirmed||!alive(key)||deletionScope.current!==scope||!deletionScope.current.open)return;
+   await deleteWorkspaceFile(id,file.path,accessTransport);if(alive(key))reload(value=>value+1);
+  }catch(error){tell(key,error instanceof Error?error.message:'删除失败');}
   finally{deletingRef.current=false;if(mounted.current)setDeleting(null);}
  }
  async function choose(directoryMode:boolean){

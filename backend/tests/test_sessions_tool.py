@@ -3,6 +3,7 @@
 # [Pos] Provider-free user MCP tool tests; production DB helpers must never participate.
 # [Sync] 2026-09-15: replace actor/DB fixtures with the private Session projection client boundary.
 # [Sync] 2026-10-06: regress >1 MiB full-text reads through Admin DTO HTTP, the configured broker and fuzzy retrieval.
+# [Sync] 2026-11-03: explicit include_text projects authorized bodies; default previews, filtering and broker failures remain.
 from __future__ import annotations
 
 import json
@@ -79,9 +80,38 @@ class TestGetSessionsRangeTool(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["sessions"][0]["sessionId"], "s1")
         self.assertNotIn("match", data["sessions"][0])
+        self.assertNotIn("text", data["sessions"][0])
         client.list_sessions.assert_called_once_with(
             start_date="2026-01-01", end_date="2026-01-31", include_text=False
         )
+
+    def test_explicit_full_text_uses_original_broker_and_preserves_limit(self):
+        body = "A short preview.\n\n完整正文包含原摘要之外的事实。"
+        data, client = self._call(
+            {"start_date": "2026-01-01", "end_date": "2026-01-31", "include_text": True, "limit": 1},
+            [{"id": "s1", "first_line": "A short preview.", "text": body}, {"id": "s2", "text": "other"}],
+        )
+        self.assertEqual(len(data["sessions"]), 1)
+        self.assertEqual(data["sessions"][0]["text"], body)
+        self.assertEqual(data["sessions"][0]["excerpt"], "A short preview.")
+        client.list_sessions.assert_called_once_with(start_date="2026-01-01", end_date="2026-01-31", include_text=True)
+
+    def test_preview_never_returns_body_even_when_projection_has_it(self):
+        for explicit in ({}, {"include_text": False}):
+            with self.subTest(explicit=explicit):
+                data, _ = self._call(
+                    {"start_date": "2026-01-01", "end_date": "2026-01-31", **explicit},
+                    [{"id": "s1", "first_line": "preview", "text": "private synthetic body"}],
+                )
+                self.assertNotIn("text", data["sessions"][0])
+
+    def test_full_text_flag_rejects_invalid_types_before_broker(self):
+        for value in (None, "true", 1, 0, [], {}):
+            with self.subTest(value=value), unittest.mock.patch.object(SessionProjectionBrokerClient, "from_env") as factory:
+                data = json.loads(handle_get_sessions_range({"start_date": "2026-01-01", "end_date": "2026-01-31", "include_text": value}))
+                self.assertFalse(data["ok"])
+                self.assertEqual(data["error"], "invalid_include_text")
+                factory.assert_not_called()
 
     def test_query_uses_full_text_fuzzy_match_and_filters_irrelevant_rows(self):
         data, client = self._call(
@@ -112,6 +142,7 @@ class TestGetSessionsRangeTool(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual([s["sessionId"] for s in data["sessions"]], ["semantic"])
         self.assertEqual(data["sessions"][0]["match"]["fields"], ["text"])
+        self.assertNotIn("text", data["sessions"][0])
         client.list_sessions.assert_called_once_with(
             start_date="2026-02-01", end_date="2026-02-28", include_text=True
         )
@@ -230,7 +261,7 @@ def _template_response_budget() -> int:
     return int(values["INK_ADMIN_DREAM_MAX_RESPONSE_BYTES"])
 
 
-def _large_session_tool_call(monkeypatch, budget: int, *, corrupt: str | None = None):
+def _large_session_tool_call(monkeypatch, budget: int, *, corrupt: str | None = None, include_text: bool = False):
     config = AdminDataConfig.from_env({
         "INK_ADMIN_DREAM_BASE_URL": "https://admin.example",
         "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth",
@@ -307,7 +338,7 @@ def _large_session_tool_call(monkeypatch, budget: int, *, corrupt: str | None = 
             monkeypatch.setattr(os, "environ", broker.child_env())
             result = json.loads(handle_get_sessions_range({
                 "start_date": "2020-01-01", "end_date": "2026-10-06",
-                "query": "needle", "limit": 1,
+                "query": "needle", "limit": 1, "include_text": include_text,
             }))
         finally:
             broker.close()
@@ -338,6 +369,24 @@ def test_larger_diary_capacity_preserves_strict_reply_checks(monkeypatch, corrup
         "ok": False, "error": "session_projection_unavailable",
         "service_error_code": "ADMIN_RESPONSE_INVALID",
     }
+    assert "synthetic-private-data" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("budget, expected_ok", [(1_048_576, False), (_template_response_budget(), True)])
+def test_explicit_body_uses_same_http_broker_budget_and_filtered_result(monkeypatch, budget, expected_ok):
+    result = _large_session_tool_call(monkeypatch, budget, include_text=True)
+    assert result["ok"] is expected_ok
+    if expected_ok:
+        assert [item["sessionId"] for item in result["sessions"]] == ["session-559"]
+        assert result["sessions"][0]["text"] == "x" * 2500 + " needle"
+    else:
+        assert result == {"ok": False, "error": "session_projection_unavailable", "service_error_code": "ADMIN_RESPONSE_INVALID"}
+
+
+@pytest.mark.parametrize("corrupt", ["extra-field", "request-id"])
+def test_explicit_body_retains_strict_reply_rejection(monkeypatch, corrupt):
+    result = _large_session_tool_call(monkeypatch, _template_response_budget(), corrupt=corrupt, include_text=True)
+    assert result == {"ok": False, "error": "session_projection_unavailable", "service_error_code": "ADMIN_RESPONSE_INVALID"}
     assert "synthetic-private-data" not in json.dumps(result)
 
 

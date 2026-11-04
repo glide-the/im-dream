@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-11-02: expect the renamed application display text; existing behavior checks remain.
 # [Input] Consume backend seo_content helpers.
 # [Output] Verify public SEO files use configured URLs, curated knowledge links, and private path exclusions.
 # [Pos] test node in backend/tests
@@ -70,7 +71,7 @@ class TestSeoContent(unittest.TestCase):
             "https://ink-backend.suoxya.com",
         )
 
-        self.assertIn("# Ink & Memory", llms)
+        self.assertIn("# Kastention", llms)
         self.assertIn("https://ink-frontend.suoxya.com/", llms)
         self.assertIn("https://ink-backend.suoxya.com/", llms)
         self.assertIn("https://ink-backend.suoxya.com/api/health", llms)

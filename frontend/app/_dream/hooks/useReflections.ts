@@ -2,6 +2,9 @@
 // [Output] One Reflections dashboard/report/reanalysis/config/task recovery state shared by Web/native.
 // [Pos] State extracted from AnalysisView; original Web markup and native controls remain separate.
 // [Sync] 2026-10-29: retain original task creation/recovery, diary selection and report saves; platform instances have stable owners.
+// [Sync] 2026-11-02: use the supplied account timezone for aggregates and diary dates; ignore superseded reads without restarting task/history observation.
+// [Sync] 2026-11-02: retain the completed task ID when report metadata fails so the existing save retry can recover its persisted history.
+// [Sync] 2026-11-02: pending submission recovery takes precedence over the same-day new-analysis chooser and preserves the original input.
 import {useState,useEffect,useCallback,useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as browserApi from '../api/reflectionsApi';
@@ -89,7 +92,7 @@ export default function useReflections(options:ReflectionsStateOptions){
   const {t,i18n}=useTranslation(),dateLocale=getDateLocale(i18n.language);
   const owners=useRef({api:options.api??browserApi,storage:options.storage??browserStorage,readSection:options.readRequestedSection??readBrowserSection,consumeSection:options.consumeRequestedSection??consumeBrowserSection});
   const {api,storage:localStorage,readSection:readRequestedSection,consumeSection:consumeRequestedSection}=owners.current;
-  const {ensureReflectionTaskReport,getAnalysisHistory,fetchSessionsAggregate,getLatestReflections,getReflectionTask,getReflectionsSectionConfig,resumeReflectionsTask,runReflectionsTask,saveReflectionsSectionConfig,resetReflectionsSectionConfig}=api;
+  const {hasPendingReflectionSubmission,ensureReflectionTaskReport,getAnalysisHistory,fetchSessionsAggregate,getLatestReflections,getReflectionTask,getReflectionsSectionConfig,resumeReflectionsTask,runReflectionsTask,saveReflectionsSectionConfig,resetReflectionsSectionConfig}=api;
   const {readActiveReflectionTask,writeActiveReflectionTask,clearActiveReflectionTask}=useRef(taskStore(localStorage)).current;
   // ── State ──
   const [echoes, setEchoes]       = useState<ReflectionResult[]>([]);
@@ -104,6 +107,7 @@ export default function useReflections(options:ReflectionsStateOptions){
   statsRef.current = stats;
   const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
   const [analysisContent, setAnalysisContent] = useState<ReflectionAnalysisContentOptions>({ include_notion: false });
+  const [pendingSubmission, setPendingSubmission] = useState(hasPendingReflectionSubmission);
   const submittingRef = useRef(false);
   const [reportSaveError, setReportSaveError] = useState('');
   const [reportRetryTaskId, setReportRetryTaskId] = useState<string>();
@@ -255,15 +259,12 @@ export default function useReflections(options:ReflectionsStateOptions){
   }, [isAuthenticated, dateLocale]);
 
   useEffect(() => {
-    if (isAuthLoading) {
-      setSavedReportsLoaded(false);
-      return;
-    }
+    if (isAuthLoading) return;
     let active = true;
     const loadStats = async () => {
       try {
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
-        const agg = await fetchSessionsAggregate(tz);
+        const agg = await fetchSessionsAggregate(timezone);
+        if (!active) return;
         setStats({ totalDays: agg.stats.total_days, totalWords: agg.stats.total_words, totalEntries: agg.stats.total_entries });
         setAnalyzableSessions((agg.sessions || [])
           .filter(session => session.has_text)
@@ -272,15 +273,25 @@ export default function useReflections(options:ReflectionsStateOptions){
             name: session.name,
             created_at: session.created_at,
             updated_at: session.updated_at,
-            date_key: undefined,
+            date_key: getLocalDayKey(session.updated_at || session.created_at, timezone),
             first_line: session.name,
             has_text: session.has_text,
             word_count: session.word_count,
           })));
-      } catch (e) { console.error(e); }
+      } catch (e) { if (active) console.error(e); }
     };
+    void loadStats();
+    return () => { active = false; };
+  }, [isAuthLoading, isAuthenticated, timezone]);
+
+  useEffect(() => {
+    if (isAuthLoading) {
+      setSavedReportsLoaded(false);
+      return;
+    }
+    let active = true;
     setSavedReportsLoaded(false);
-    void Promise.all([loadStats(), reloadSavedReports()]).finally(() => {
+    void reloadSavedReports().finally(() => {
       if (active) setHistoryLoading(false);
     });
     return () => { active = false; historyControllerRef.current?.abort(); historyRequestRef.current += 1; };
@@ -412,6 +423,7 @@ export default function useReflections(options:ReflectionsStateOptions){
         report = { ...entry, timestamp: new Date(task.created_at).getTime(), createdAt: task.created_at, taskId, failedSections: task.failed_sections, analysisContent: task.analysis_content };
       } catch (error) {
         setReportSaveError(error instanceof Error ? error.message : String(error));
+        setReportRetryTaskId(taskId);
         return;
       }
       await retryReportSave(taskId);
@@ -534,6 +546,7 @@ export default function useReflections(options:ReflectionsStateOptions){
       setErrors({ echoes: msg, traits: '', patterns: '' });
       if (!readActiveReflectionTask()) setTaskStatus('');
     } finally {
+      setPendingSubmission(hasPendingReflectionSubmission());
       setLoading({ echoes: false, traits: false, patterns: false });
       setStreaming({ echoes: '', traits: '', patterns: '' });
     }
@@ -610,6 +623,10 @@ export default function useReflections(options:ReflectionsStateOptions){
       }
     }
 
+    if (hasPendingReflectionSubmission()) {
+      await runAnalyzeAll();
+      return;
+    }
     const todayKey = getLocalDayKey(Date.now(), timezone);
     const hasTodayReport = savedReports.some(report => getLocalDayKey(report.timestamp, timezone) === todayKey);
     if (hasTodayReport) {
@@ -668,5 +685,5 @@ export default function useReflections(options:ReflectionsStateOptions){
     setLoading({echoes:preparedTask.sections.includes('echoes'),traits:preparedTask.sections.includes('traits'),patterns:preparedTask.sections.includes('patterns')});
     setActiveRecoveryTick(tick=>tick+1);
   };
-  return {continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError};
+  return {pendingSubmission,continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError};
 }

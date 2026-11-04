@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Deck Plugin binding/options/validation and capability-backed Agent-type responses.
@@ -109,7 +110,7 @@ export class DeckPluginApiError extends Error {
   readonly validation: DeckPluginSelectionSummary | null;
 
   constructor(status: number, payload: DeckPluginErrorPayload | null) {
-    super(`Deck Plugin request failed (${status})`);
+    super(`Kastention Plugin request failed (${status})`);
     this.name = 'DeckPluginApiError';
     this.status = status;
     this.errorCode = payload?.error_code ?? null;

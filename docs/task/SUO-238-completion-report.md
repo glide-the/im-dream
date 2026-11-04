@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # SUO-238 Completion Report
 
 ## 1. 交付结论
@@ -18,7 +19,7 @@ Requirement-first gate 已通过：先填充 `docs/task/TASK-REQUIREMENT-task_23
 | 配置错误码 | `DECK_RUNTIME_CONFIG_INVALID`、`DECK_RUNTIME_CONFIG_INCOMPATIBLE`、`DECK_RUNTIME_CONFIG_UNAVAILABLE` |
 | 输出错误码 | `OUTPUT_CONTRACT_INVALID` |
 | API 审阅态 | `pending_review`；“awaiting review”仅为 UI 文案 |
-| canonical design | `docs/design/deck/deck-integration-delta.md` |
+| canonical design | `docs/design/kastention/kastention-integration-delta.md` |
 
 ## 3. 修订文件
 
@@ -63,7 +64,7 @@ Requirement-first gate 已通过：先填充 `docs/task/TASK-REQUIREMENT-task_23
 4. Workflow Run 状态机补齐 `output_validating → pending_review → confirmed/rejected → completed`，并明确重试创建新 run。
 5. UI 状态、错误恢复、来源展示和 Episodes composer gate 同步使用 Deck 运行配置就绪语义。
 6. 不存在的旧编号 task 文件依赖改为已有 task，或显式标注 `SUO-226-*` canonical Issue gate；不再伪装成可直接读取的 task 文件。
-7. 三处旧 delta 路径引用统一到 `docs/design/deck/deck-integration-delta.md`。
+7. 三处旧 delta 路径引用统一到 `docs/design/kastention/kastention-integration-delta.md`。
 
 ## 5. 验收与验证
 

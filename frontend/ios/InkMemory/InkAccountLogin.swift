@@ -1,6 +1,8 @@
 // [Input] Original account form navigation, BFF start/callback/session and target account URI.
 // [Output] Operation-bound system authorization and original Cookie handoff to the retained login document.
 // [Pos] iOS account login adapter; Admin, Client ID, PKCE, credentials and permissions retain their original owners.
+// [Sync] 2026-11-02: report the failing account stage to the existing native diagnostics without replacing login completion.
+// [Sync] 2026-11-02: carry the explicit Google selection through Admin's signed OAuth continuation.
 // [Sync] 2026-10-31: use AuthenticationServices for Google and the original BFF for both system and password callbacks.
 import AuthenticationServices
 import UIKit
@@ -65,8 +67,11 @@ enum NativeAccountCallback {
               let scope = one("scope"), !scope.isEmpty, let resource = one("resource"), !resource.isEmpty,
               let state = one("state"), let nonce = one("nonce"), let challenge = one("code_challenge"),
               [state, nonce, challenge].allSatisfy({ $0.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil }),
-              items.filter({ $0.name == "prompt" }).isEmpty || one("prompt") == "login" else { return nil }
-        if one("prompt") == nil { value.queryItems = items + [URLQueryItem(name: "prompt", value: "login")] }
+              items.filter({ $0.name == "prompt" }).isEmpty || one("prompt") == "login",
+              items.filter({ $0.name == "identity_provider" }).isEmpty || one("identity_provider") == "google" else { return nil }
+        value.queryItems = items
+            + (one("prompt") == nil ? [URLQueryItem(name: "prompt", value: "login")] : [])
+            + (one("identity_provider") == nil ? [URLQueryItem(name: "identity_provider", value: "google")] : [])
         guard let selected = value.url else { return nil }
         return (selected, state)
     }
@@ -95,10 +100,14 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
     private var authorization: ASWebAuthenticationSession?
     private var stopped = false
     private var transport: URLSession?
+    private let diagnostic: ([String: Any]) -> Void
+    private var stage = "preparing"
+    private var lastReportedStage: String?
 
-    init(origin: URL, callback: URL?, navigation: UINavigationController, probe: NativeLoginSessionProbe, chinese: Bool, webReady: @escaping () -> Void) {
+    init(origin: URL, callback: URL?, navigation: UINavigationController, probe: NativeLoginSessionProbe, chinese: Bool, diagnostic: @escaping ([String: Any]) -> Void = { _ in }, webReady: @escaping () -> Void) {
         self.origin = origin; self.callback = NativeAccountCallback.localOrigin(origin) ? callback : nil
         self.navigation = navigation; self.probe = probe; self.chinese = chinese; self.webReady = webReady
+        self.diagnostic = diagnostic
     }
     func handles(_ action: WKNavigationAction, page: URL?) -> Bool {
         guard !stopped, action.targetFrame?.isMainFrame == true, let destination = action.request.url else { return false }
@@ -115,6 +124,8 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
               let page, let returnTo = NativeAccountCallback.returnLocation(page, origin: origin) else { return false }
         guard operation == nil else { return true }
         let id = UUID(); operation = id; probe.pause()
+        stage = "configuration"
+        lastReportedStage = nil
         guard let callback else { failure(id: id); return true }
         probe.copyWebCookies { [weak self] in
             guard let self, self.operation == id else { return }
@@ -122,11 +133,21 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
                 guard error == nil, let google = NativeAccountCallback.googleAction(data, response: response, origin: self.origin), google == destination else { self.failure(id: id); return }
                 var start = URLComponents(url: URL(string: "/auth/start", relativeTo: self.origin)!.absoluteURL, resolvingAgainstBaseURL: false)!
                 start.queryItems = [URLQueryItem(name: "return_to", value: returnTo)]
+                self.stage = "authorization-configuration"
                 self.fetch(start.url!, id: id) { _, response, error in
                     guard error == nil, response?.statusCode == 303, let received = response?.url,
                           NativeAccountCallback.sameOrigin(received, self.origin), received.path == "/auth/start",
                           let location = response?.value(forHTTPHeaderField: "Location"),
-                          let prepared = NativeAccountCallback.authorization(location, admin: google, callback: callback) else { self.failure(id: id); return }
+                          let prepared = NativeAccountCallback.authorization(location, admin: google, callback: callback) else {
+                        if error == nil, let location = response?.value(forHTTPHeaderField: "Location"),
+                           let components = URLComponents(string: location),
+                           let received = components.queryItems?.first(where: { $0.name == "redirect_uri" })?.value,
+                           received != callback.absoluteString {
+                            self.report(NSError(domain: "InkAccountLogin", code: 1, userInfo: [NSLocalizedDescriptionKey: "OAuth callback mismatch: BFF uses \(received); app expects \(callback.absoluteString)."]), stage: self.stage)
+                            self.failure(id: id, report: false)
+                        } else { self.failure(id: id, error: error) }
+                        return
+                    }
                     self.authorize(prepared.url, state: prepared.state, callback: callback, id: id)
                 }
             }
@@ -134,13 +155,14 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
         return true
     }
     private func authorize(_ url: URL, state: String, callback: URL, id: UUID) {
+        stage = "system-authorization"
         guard navigation?.viewIfLoaded?.window != nil else { failure(id: id); return }
         let completed: ASWebAuthenticationSession.CompletionHandler = { [weak self] url, error in
             DispatchQueue.main.async {
                 guard let self, self.operation == id, !self.stopped else { return }
                 self.authorization = nil
                 if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { self.restore(); return }
-                guard error == nil, let url else { self.failure(id: id); return }
+                guard error == nil, let url else { self.failure(id: id, error: error); return }
                 self.complete(url, id: id, state: state)
             }
         }
@@ -151,11 +173,12 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
         if !session.start() { authorization = nil; failure(id: id) }
     }
     private func complete(_ returned: URL, id: UUID, state: String?) {
+        stage = "callback"
         guard let callback, let url = NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: state) else { failure(id: id); return }
         fetch(url, id: id) { _, response, error in
             guard error == nil, response?.statusCode == 303, let received = response?.url,
                   NativeAccountCallback.sameOrigin(received, self.origin), received.path == "/auth/callback" else {
-                self.failure(id: id, retry: error != nil || (response?.statusCode ?? 503) >= 500 ? { [weak self] in self?.complete(returned, id: id, state: state) } : nil)
+                self.failure(id: id, error: error, retry: error != nil || (response?.statusCode ?? 503) >= 500 ? { [weak self] in self?.complete(returned, id: id, state: state) } : nil)
                 return
             }
             self.probe.copyNativeCookies {
@@ -172,15 +195,26 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
         task = session.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self, !self.stopped, self.operation == id else { return }
-                self.task = nil; completed(data, response as? HTTPURLResponse, error)
+                self.task = nil
+                if let error { self.report(error, stage: self.stage) }
+                else if let response = response as? HTTPURLResponse, response.statusCode >= 400 {
+                    self.report(NSError(domain: "InkAccountHTTP", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(response.statusCode) at \(self.stage)"]), stage: self.stage)
+                }
+                completed(data, response as? HTTPURLResponse, error)
             }
         }
         task?.resume()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { navigation?.view.window ?? ASPresentationAnchor() }
-    private func failure(id: UUID, retry: (() -> Void)? = nil) {
+    private func report(_ error: Error, stage: String) {
+        lastReportedStage = stage
+        let value = error as NSError
+        diagnostic(["source": "google", "error": ["phase": stage, "domain": value.domain, "code": value.code, "message": value.localizedDescription]])
+    }
+    private func failure(id: UUID, error: Error? = nil, report shouldReport: Bool = true, retry: (() -> Void)? = nil) {
         guard !stopped, operation == id else { return }
+        if shouldReport && (error != nil || lastReportedStage != stage) { report(error ?? NSError(domain: "InkAccountLogin", code: 2, userInfo: [NSLocalizedDescriptionKey: "Google login could not complete at \(stage)."]), stage: stage) }
         guard let navigation, navigation.presentedViewController == nil else { restore(); return }
         let alert = UIAlertController(title: chinese ? "登录未完成" : "Login incomplete", message: chinese ? "登录未完成，请重试。" : "Login could not be completed. Please try again.", preferredStyle: .alert)
         if let retry { alert.addAction(UIAlertAction(title: chinese ? "重试" : "Retry", style: .default) { [weak self] _ in guard self?.operation == id else { return }; retry() }) }

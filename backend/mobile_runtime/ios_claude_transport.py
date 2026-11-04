@@ -5,6 +5,7 @@
 # [Sync] 2026-10-25: retain the application container HOME when the original Runner supplies only its thread config home.
 # [Sync] 2026-10-25: qualify original Next through same-PID worker listening ownership and an actual page response.
 # [Sync] 2026-10-26: await Worker exit after bounded EOF grace before releasing the private socket and owned MCP scope.
+# [Sync] 2026-11-03: retain the server PATH default when SDK options omit it; explicit values and parent-secret isolation remain.
 from __future__ import annotations
 
 import base64
@@ -177,6 +178,10 @@ class IOSClaudeTransport(SubprocessCLITransport):
             cli_options = self._mcp_scope.enter_context(adapt_owned_mcp(self._sdk_options, workspace_root=self.endpoint["workspaceRoot"]))
             self._options = _configure_can_use_tool(cli_options)
             env = dict(self._options.env or {})
+            # The normal SDK inherits PATH before applying its explicit env.
+            # Keep that command lookup default without inheriting parent secrets.
+            if "PATH" not in env and "PATH" in os.environ:
+                env["PATH"] = os.environ["PATH"]
             env.setdefault("HOME", str(Path.home()))
             if not env.get("HOME"):
                 raise CLIConnectionError("IOS_RUNTIME_SESSION_HOME_REQUIRED")

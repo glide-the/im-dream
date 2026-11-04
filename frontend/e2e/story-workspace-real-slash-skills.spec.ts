@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: align visible application-name selectors with Kastention and localized 卡片结构.
 // [Input] Real local actor, persisted Dream Run, backend common catalog, and installed Deck plugin inventory.
 // [Output] Visible-browser evidence that shared Chat suggests common/Deck Skills without sending or workflow controls.
 // [Pos] Opt-in non-cloning Story Workspace real-data QA.
@@ -138,7 +139,7 @@ test('real Dream thread lists installed slash Skills without a recommendation st
       await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toBeVisible();
     }
     for (const skill of COMMON_SKILLS) {
-      await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toContainText('Ink & Memory');
+      await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toContainText('Kastention');
     }
     await expect(listbox.getByRole('option')).toHaveCount(18);
 

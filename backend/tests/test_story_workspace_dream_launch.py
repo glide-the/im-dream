@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: follow Kastention public error copy; preserve status, policy, DTO and fixture assertions.
 """Focused contract and orchestration tests for starting a Dream run."""
 
 from __future__ import annotations
@@ -308,7 +309,7 @@ class DreamLaunchApplicationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fixture.dispatcher.calls, [])
 
     async def test_binding_denial_creates_no_backing_source(self) -> None:
-        self.fixture.binding_error = PermissionError("Deck not found")
+        self.fixture.binding_error = PermissionError("Kastention not found")
 
         with self.assertRaises(PermissionError):
             await self.fixture.service.launch(

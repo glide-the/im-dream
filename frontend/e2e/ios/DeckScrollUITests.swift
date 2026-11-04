@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: follow renamed Kastention UI labels; retain fixture identities and native journey.
 // [Input] Explicit installed application bundle ID and the existing normal Deck preview.
 // [Output] Actual native drag, information visibility and navigation geometry evidence.
 // [Pos] Read-only XCTest UI acceptance; no login, message, model, file or business mutation.
@@ -48,7 +49,7 @@ final class DeckScrollUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: bundleID)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let name = app.textFields["Deck name"]
+        let name = app.textFields["Kastention name"]
         XCTAssertTrue(name.waitForExistence(timeout: 10), "Open an existing Deck maintenance form before this read-only test")
         XCTAssertTrue(name.isHittable)
         XCTAssertFalse((name.value as? String ?? "").isEmpty)
@@ -109,7 +110,7 @@ final class DeckScrollUITests: XCTestCase {
         afterImage.name = "deck-after-native-drag"
         afterImage.lifetime = .keepAlways
         add(afterImage)
-        let nav = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Decks")).firstMatch
+        let nav = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Kastention")).firstMatch
         let facts: [String: Any] = [
             "appWidth": app.frame.width, "appHeight": app.frame.height,
             "informationBeforeY": before.minY, "informationAfterY": information.frame.minY,

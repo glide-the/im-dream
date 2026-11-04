@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [输入] 2026-08-01 Story Workspace task 集、当时 Stage 编排和执行准入。 -->
 <!-- [输出] 历史依赖顺序、范围、安全 Gate 与实际回执索引。 -->
 <!-- [范围] 不作为当前派工、审批、checkout、assignee 或生产启用依据。 -->
@@ -24,7 +25,7 @@
 > **关联设计稿**:
 > - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
 > - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
-> - `docs/design/deck/deck-integration-delta.md` (SUO-215)
+> - `docs/design/kastention/kastention-integration-delta.md` (SUO-215)
 > **任务输入来源**:
 > - Issue 清单: `docs/issue/ISSUES_story-workspace.md` (SUO-201)
 > - 前端 task: `docs/task/task_202_frontend_story-workspace-overview.md` + task_202a ~ task_202h (9 份)

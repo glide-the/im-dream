@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Sync] 2026-10-28: require successful replacement reads for cancelled auth/session and connector lifecycle GETs.
 // [Sync] 2026-10-28: serve complete Deck/Agent catalogs through the additive bulk read endpoint.
 // [Sync] 2026-10-13: assert the current official Claude Code Plugins heading after changing language.
@@ -939,7 +940,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await page.getByRole('option', { name: '对白编辑' }).click();
   await expect(chatAgentSelector).toContainText('对白编辑');
 
-  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await navigation.getByRole('button', { name: "Kastention" }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
   await page.goBack();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/chat`);
@@ -949,8 +950,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page.getByRole('tab', { name: /Use Decks|Create Decks|使用 Deck|创作 Deck/ })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Voice Decks|声线卡组|My Decks|我的卡组/ })).toHaveCount(0);
   const deckLauncher = page.locator('[data-deck-manager-launcher]');
-  await expect(deckLauncher.getByRole('heading', { name: /^Decks?$|^思维模式$/ })).toBeVisible();
-  await expect(deckLauncher.getByText(/Open an available Deck|打开可用的思维模式/)).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /^Kastention$|^卡片结构$/ })).toBeVisible();
+  await expect(deckLauncher.getByText(/Open an available Kastention|打开可用的卡片结构/)).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-enabled__strip')).toBeVisible();
   const enabledShortcutList = deckLauncher.locator('.deck-manager-enabled__strip');
   await expect(enabledShortcutList.getByRole('listitem')).toHaveCount(14);
@@ -965,15 +966,15 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   );
   expect(wideShortcutRects.every(({ height, width }) => Math.abs(height - width) <= 1 && width === 44)).toBe(true);
   expect(new Set(wideShortcutRects.map(({ top }) => Math.round(top))).size).toBe(1);
-  await expect(enabledShortcutList.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ })).toHaveCount(0);
-  await expect(deckLauncher.locator('.deck-manager-section-heading').getByRole('button', { name: /Open Deck settings|打开思维模式设置/ })).toBeVisible();
+  await expect(enabledShortcutList.getByRole('button', { name: /Open Kastention settings|打开卡片结构设置/ })).toHaveCount(0);
+  await expect(deckLauncher.locator('.deck-manager-section-heading').getByRole('button', { name: /Open Kastention settings|打开卡片结构设置/ })).toBeVisible();
   await expect(deckLauncher.getByText(/14\s*\/\s*14/)).toHaveCount(0);
   await expect(deckLauncher.getByRole('switch')).toHaveCount(0);
-  await expect(deckLauncher.getByRole('searchbox', { name: /Search available Decks|搜索正式可用的思维模式/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('heading', { name: /Available Decks|可用思维模式/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('heading', { name: /System Decks|系统思维模式/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /User-created available Decks|用户创建的可用思维模式/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /System built-in Decks|系统内建思维模式/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('searchbox', { name: /Search available Kastention|搜索正式可用的卡片结构/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /Available Kastention|可用卡片结构/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /System Kastention|系统卡片结构/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /User-created available Kastention|用户创建的可用卡片结构/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /System built-in Kastention|系统内建卡片结构/ })).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-launch-card')).toHaveCount(14);
   await expect(deckLauncher.locator('.deck-manager-launch-card--system .deck-manager-chip')).toHaveText(/System|系统/);
   const systemLaunchCard = deckLauncher.locator('.deck-manager-launch-card--system').first();
@@ -984,7 +985,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(preview.getByRole('button', { name: /Try now|立即试用/ })).toBeVisible();
   await expect(preview.getByRole('heading', { name: /Information|信息/ })).toBeVisible();
   await expect(preview.getByText(/System built-in|系统内建/)).toBeVisible();
-  await expect(preview.getByRole('button', { name: /Edit Deck|编辑 Deck/ })).toHaveCount(0);
+  await expect(preview.getByRole('button', { name: /Edit Kastention|编辑 Deck/ })).toHaveCount(0);
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/deck-preview-system-wide.png',
     fullPage: true,
@@ -1004,7 +1005,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page).toHaveURL(/\/story-workspace\/chat\?deck=managed-deck-1&agent=system-chat-agent-e2e/);
   await expect(page.getByRole('textbox', { name: /Chat input|聊天输入/ })).toHaveText('系统 Chat Agent 示例。');
   expect(chatThreadCreates, 'Chat preview examples must remain unsent drafts').toBe(0);
-  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await navigation.getByRole('button', { name: "Kastention" }).click();
   await expect(deckLauncher).toBeVisible();
   await expect(deckLauncher).toBeVisible();
   const screenplayLaunchCard = deckLauncher.locator(
@@ -1037,7 +1038,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     fullPage: true,
   });
   expect(chatThreadCreates, 'Dream preview examples must not create an ordinary Chat thread').toBe(0);
-  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await navigation.getByRole('button', { name: "Kastention" }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
   await expect(deckLauncher).toBeVisible();
   await expect(deckLauncher.getByText(/草稿\s*r/)).toHaveCount(0);
@@ -1070,7 +1071,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   await page.setViewportSize({ width: 1200, height: 760 });
 
-  await deckLauncher.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ }).click();
+  await deckLauncher.getByRole('button', { name: /Open Kastention settings|打开卡片结构设置/ }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
   let settingsNavigation = page.getByRole('navigation', { name: 'Settings categories navigation' });
   await expect(settingsNavigation.getByRole('button', { name: 'Work', exact: true })).toBeVisible();
@@ -1085,32 +1086,32 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await settingsNavigation.getByRole('button', { name: 'General', exact: true }).click();
   await page.getByRole('button', { name: '中文 (Chinese)', exact: true }).click();
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
-  await expect(navigation.getByRole('button', { name: '思维模式', exact: true })).toBeVisible();
-  await navigation.getByRole('button', { name: '思维模式', exact: true }).click();
+  await expect(navigation.getByRole('button', { name: "卡片结构", exact: true })).toBeVisible();
+  await navigation.getByRole('button', { name: "卡片结构", exact: true }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
-  await expect(deckLauncher.getByRole('heading', { name: '思维模式', exact: true })).toBeVisible();
-  await deckLauncher.getByRole('button', { name: '打开思维模式设置', exact: true }).click();
+  await expect(deckLauncher.getByRole('heading', { name: "卡片结构", exact: true })).toBeVisible();
+  await deckLauncher.getByRole('button', { name: "打开卡片结构设置", exact: true }).click();
   settingsNavigation = page.getByRole('navigation', { name: '设置分类导航' });
   await settingsNavigation.getByRole('button', { name: '工作台', exact: true }).click();
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('tab', { name: '思维模式', exact: true })).toHaveAttribute('aria-selected', 'true');
-  const chineseDeckList = page.getByRole('list', { name: '思维模式设置列表', exact: true });
+  await expect(page.getByRole('tab', { name: "卡片结构", exact: true })).toHaveAttribute('aria-selected', 'true');
+  const chineseDeckList = page.getByRole('list', { name: "卡片结构设置列表", exact: true });
   await expect(chineseDeckList).toBeVisible();
   await chineseDeckList.locator('[data-deck-card-id="screenplay-default-user-deck"] .deck-manager-list__identity').click();
   const chineseEditor = page.locator('.deck-editor');
-  await expect(chineseEditor.getByRole('heading', { name: '思维模式信息', exact: true })).toBeVisible();
-  await expect(chineseEditor.getByLabel('思维模式名称', { exact: true })).toHaveValue('剧本创作团队');
+  await expect(chineseEditor.getByRole('heading', { name: "卡片结构信息", exact: true })).toBeVisible();
+  await expect(chineseEditor.getByLabel("卡片结构名称", { exact: true })).toHaveValue('剧本创作团队');
   await expect(chineseEditor.getByLabel('说明', { exact: true })).toHaveValue(screenplayDeck.description);
   await chineseEditor.getByRole('button', { name: '版本记录', exact: true }).click();
-  await expect(chineseEditor.getByText('当前思维模式内容', { exact: true })).toBeVisible();
-  await expect(chineseEditor.getByLabel('思维模式内容版本历史', { exact: true })).toBeVisible();
+  await expect(chineseEditor.getByText("当前卡片结构内容", { exact: true })).toBeVisible();
+  await expect(chineseEditor.getByLabel("卡片结构内容版本历史", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 780 });
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
   )).toBe(true);
   await chineseEditor.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByRole('tab', { name: '思维模式', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: "卡片结构", exact: true })).toBeVisible();
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
   )).toBe(true);
@@ -1124,7 +1125,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   settingsNavigation = page.getByRole('navigation', { name: 'Settings categories navigation' });
   await settingsNavigation.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Deck', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: "Kastention", exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Resource links' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Plugins' })).toBeVisible();
   await page.getByRole('tab', { name: 'Resource links' }).click();
@@ -1135,13 +1136,13 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=plugins`);
   await expect(page.getByRole('tabpanel', { name: 'Plugins' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude Code Plugins', exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Deck', exact: true }).click();
+  await page.getByRole('tab', { name: "Kastention", exact: true }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work?tab=deck`);
   const deckSettingsManager = page.locator('.deck-manager-shell--settings');
-  const deckSettingsList = page.getByRole('list', { name: /Deck settings|思维模式设置列表/ });
+  const deckSettingsList = page.getByRole('list', { name: /Kastention settings|卡片结构设置列表/ });
   await expect(deckSettingsList).toBeVisible();
   await expect(deckSettingsList.locator(':scope > li')).toHaveCount(10);
-  await expect(page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: /Kastention list pages|卡片结构列表分页/ })).toBeVisible();
   await expect(page.locator('.deck-manager-home--settings thead, .deck-manager-home--settings [role="columnheader"]')).toHaveCount(0);
   await expect(deckSettingsList.getByRole('switch')).toHaveCount(9);
   await expect(deckSettingsList.locator('.deck-manager-chip').filter({ hasText: /System|系统/ })).toHaveCount(1);
@@ -1163,11 +1164,11 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   });
   await page.setViewportSize({ width: 1200, height: 760 });
 
-  await page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })
+  await page.getByRole('navigation', { name: /Kastention list pages|卡片结构列表分页/ })
     .getByRole('button', { name: /^(Next|下一页)$/ }).click();
   await expect(page.getByText('管理 Deck 11', { exact: true })).toBeVisible();
   await expect(page.getByText('剧本创作团队', { exact: true })).toHaveCount(0);
-  await page.getByRole('navigation', { name: /Deck list pages|思维模式列表分页/ })
+  await page.getByRole('navigation', { name: /Kastention list pages|卡片结构列表分页/ })
     .getByRole('button', { name: /^(Previous|上一页)$/ }).click();
   await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
 
@@ -1179,9 +1180,9 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(deckSettingsManager.getByRole('alert')).toContainText('Deck refresh temporarily unavailable');
   await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
 
-  const creatorSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的思维模式/ });
+  const creatorSearch = page.getByRole('searchbox', { name: /Search managed Kastention|搜索可管理的卡片结构/ });
   await creatorSearch.fill('不存在的 Deck');
-  await expect(page.getByText(/No Deck matches these filters|没有符合当前条件的思维模式/)).toBeVisible();
+  await expect(page.getByText(/No Kastention matches these filters|没有符合当前条件的卡片结构/)).toBeVisible();
   await page.getByRole('button', { name: /Clear filters|清除筛选/ }).click();
   await expect(creatorSearch).toHaveValue('');
   await creatorSearch.fill('管理 Deck 14');
@@ -1219,7 +1220,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(relatedDialog.locator('.deck-manager-related-list__item')).toHaveCount(2);
   await expect(relatedDialog.getByText('雨夜开场讨论', { exact: true })).toBeVisible();
   await expect(relatedDialog.getByText('第二幕人物关系', { exact: true })).toBeVisible();
-  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeDisabled();
+  await expect(relatedDialog.getByRole('button', { name: /Delete Kastention|删除卡片结构/ })).toBeDisabled();
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/deck-related-conversations-wide.png',
     fullPage: true,
@@ -1248,7 +1249,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await relatedDialog.getByRole('button', { name: /Delete conversation 第二幕人物关系|删除对话 第二幕人物关系/ }).click();
   await expect(relatedDialog.locator('.deck-manager-related-list__item')).toHaveCount(0);
   await expect(relatedDialog.getByText(/No related conversations|没有相关对话/)).toBeVisible();
-  await expect(relatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeEnabled();
+  await expect(relatedDialog.getByRole('button', { name: /Delete Kastention|删除卡片结构/ })).toBeEnabled();
   expect(relatedThreadDeletes).toEqual(['thread-screenplay-one', 'thread-screenplay-two']);
   await relatedDialog.getByRole('button', { name: /Close|关闭/ }).last().click();
   await expect(relatedDialog).toHaveCount(0);
@@ -1259,21 +1260,21 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await page.getByRole('menuitem', { name: /Related conversations|相关对话/ }).click();
   const failedRelatedDialog = page.getByRole('dialog', { name: /Related conversations|相关对话/ });
   await expect(failedRelatedDialog.getByRole('alert')).toContainText('Related conversations temporarily unavailable');
-  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeDisabled();
+  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Kastention|删除卡片结构/ })).toBeDisabled();
   await failedRelatedDialog.getByRole('button', { name: /Retry|重试/ }).click();
   await expect(failedRelatedDialog.getByText(/No related conversations|没有相关对话/)).toBeVisible();
-  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Deck|删除思维模式/ })).toBeEnabled();
+  await expect(failedRelatedDialog.getByRole('button', { name: /Delete Kastention|删除卡片结构/ })).toBeEnabled();
   await failedRelatedDialog.getByRole('button', { name: /Close|关闭/ }).last().click();
 
   await screenplayCreatorRow.locator('.deck-manager-list__identity').click();
   const detailsDialog = page.locator('.deck-editor');
   await expect(detailsDialog).toBeVisible();
-  await expect(detailsDialog.getByLabel('Deck name')).toHaveValue('剧本创作团队');
+  await expect(detailsDialog.getByLabel("Kastention name")).toHaveValue('剧本创作团队');
   await expect(detailsDialog.locator('.deck-version-panel')).toHaveCount(0);
   await expect(detailsDialog.getByRole('button', { name: '版本记录' })).toHaveAttribute('aria-expanded', 'false');
   await detailsDialog.getByRole('button', { name: '版本记录' }).click();
   await expect(detailsDialog.locator('.deck-version-panel')).toBeVisible();
-  await expect(detailsDialog.getByText('Current Deck content', { exact: true })).toBeVisible();
+  await expect(detailsDialog.getByText("Current Kastention content", { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v2', { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v2 · 当前', { exact: true })).toBeVisible();
   await expect(detailsDialog.getByText('v1.0.1', { exact: true })).toBeVisible();
@@ -1295,7 +1296,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await detailsDialog.getByRole('tab', { name: /Agents/ }).click();
   await expect(detailsDialog.getByText('Agent Prompt')).toBeVisible();
   await detailsDialog.getByRole('tab', { name: 'Claude 插件' }).click();
-  await expect(detailsDialog.getByLabel('Deck Claude plugins')).toBeVisible();
+  await expect(detailsDialog.getByLabel("Kastention Claude plugins")).toBeVisible();
   await expect(detailsDialog.getByText(/Workflow|工作流/)).toHaveCount(0);
   expect(defaultReconcileCalls).toBeGreaterThanOrEqual(1);
   expect(screenplaySelectedInstallationIds).toEqual([dramaInstallation.id]);
@@ -1309,15 +1310,15 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     path: 'output/playwright/story-workspace-chat-first/deck-pdf-create-menu-wide.png',
     fullPage: true,
   });
-  await createMenu.getByRole('menuitem', { name: /Create Deck|创建思维模式/ }).click();
+  await createMenu.getByRole('menuitem', { name: /Create Kastention|创建卡片结构/ }).click();
   const createDialog = page.locator('.deck-editor');
   await expect(createDialog).toBeVisible();
   await expect.poll(() => createWrites.length).toBe(1);
-  await expect(createDialog.getByLabel('Deck name')).toHaveValue(/New Deck|新建思维模式/);
+  await expect(createDialog.getByLabel("Kastention name")).toHaveValue(/New Kastention|新建卡片结构/);
   await expect(createDialog.getByRole('button', { name: '版本记录' })).toBeVisible();
   await expect(createDialog.getByText(/内容版本未提交/)).toBeVisible();
-  await createDialog.getByLabel('Deck name').fill('雨夜剧作团队');
-  await createDialog.getByLabel('Deck name').press('Tab');
+  await createDialog.getByLabel("Kastention name").fill('雨夜剧作团队');
+  await createDialog.getByLabel("Kastention name").press('Tab');
   await expect.poll(() => deckWrites.some(
     (write) => write.name === '雨夜剧作团队',
   )).toBe(true);
@@ -1392,10 +1393,10 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await createDialog.getByRole('button', { name: '在 Chat 中使用 →' }).click();
   await expect(page).toHaveURL(new RegExp('/story-workspace/chat\\?deck=created-screenplay-deck&agent=created-screenplay-agent'));
   await expect(navigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
-  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await navigation.getByRole('button', { name: "Kastention" }).click();
   await expect(page.locator('[data-deck-manager-launcher]')).toBeVisible();
-  await expect(page.getByRole('list', { name: /Deck settings|思维模式设置列表/ })).toHaveCount(0);
-  await page.getByRole('button', { name: /Open Deck settings|打开思维模式设置/ }).click();
+  await expect(page.getByRole('list', { name: /Kastention settings|卡片结构设置列表/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /Open Kastention settings|打开卡片结构设置/ }).click();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
   await creatorSearch.fill('雨夜剧作团队');
   const createdCreatorCard = page.locator(
@@ -1441,15 +1442,15 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
 
   await page.reload();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/settings/work`);
-  await expect(page.getByRole('list', { name: /Deck settings|思维模式设置列表/ })).toBeVisible();
+  await expect(page.getByRole('list', { name: /Kastention settings|卡片结构设置列表/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /Use Decks|Create Decks|使用 Deck|创作 Deck/ })).toHaveCount(0);
-  const refreshedSearch = page.getByRole('searchbox', { name: /Search managed Decks|搜索可管理的思维模式/ });
+  const refreshedSearch = page.getByRole('searchbox', { name: /Search managed Kastention|搜索可管理的卡片结构/ });
   await refreshedSearch.fill('雨夜剧作团队');
   await page.locator(
     `[data-deck-card-kind="owned"][data-deck-card-id="${createdDeck.id}"]`,
   ).locator('.deck-manager-list__identity').click();
   const refreshedDetailsDialog = page.locator('.deck-editor');
-  await expect(refreshedDetailsDialog.getByLabel('Deck name')).toHaveValue('雨夜剧作团队');
+  await expect(refreshedDetailsDialog.getByLabel("Kastention name")).toHaveValue('雨夜剧作团队');
   await expect(refreshedDetailsDialog.getByLabel('Description', { exact: true })).toHaveValue('用于雨夜剧本创作的完整维护');
   await refreshedDetailsDialog.getByRole('tab', { name: /Agents/ }).click();
   await expect(refreshedDetailsDialog.getByLabel('Agent Name')).toHaveValue('雨夜连续性 Agent');
@@ -1494,8 +1495,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   expect(expectedHttpFailures.get(503)).toBe(0);
   expect(expectedHttpFailures.get(409)).toBe(0);
   expect(createWrites).toEqual([expect.objectContaining({
-    name: expect.stringMatching(/New Deck|新建思维模式/),
-    description: expect.stringMatching(/Describe your deck here|请描述这个思维模式的用途和解决问题的方式/),
+    name: expect.stringMatching(/New Kastention|新建卡片结构/),
+    description: expect.stringMatching(/Describe your Kastention here|请描述这个卡片结构的用途和解决问题的方式/),
     icon: 'brain',
     color: 'blue',
   })]);

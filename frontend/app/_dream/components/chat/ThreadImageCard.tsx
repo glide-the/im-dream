@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: retain the original card DOM/CSS while sharing its export DTO definitions.
 // [Input] ExportChatMessage blocks (text/reasoning/tool), resolved Workspace image data,
 //         thread title, i18n labels, and optional ExportPendingConfirmation.
@@ -12,6 +13,7 @@
 // [Sync] 2026-08-03: render reasoning/tool blocks and the bottom pending-confirmation card.
 // [Sync] 2026-08-23: preserve explicit workspace:// images for authenticated export prefetch and render failures as inert placeholders.
 // [Sync] 2026-09-06: narrow React Markdown image sources before applying the Workspace URI boundary.
+import { BRAND_NAME } from '../../constants/brand';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { isWorkspaceUri } from './workspaceUri';
@@ -358,7 +360,7 @@ export default function ThreadImageCard({ title, messages, labels, dateText, pen
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem' }}>
         <div>
           <div style={{ fontSize: '1.9rem', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.1 }}>
-            Ink &amp; Memory
+            {BRAND_NAME}
           </div>
           <div style={{
             marginTop: '0.35rem',

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Input] Actual four Admin Voice contracts and original public Voice request/response fields. -->
 <!-- [Output] Current Voice creation/update/delete/collection, Memory and revision behavior. -->
@@ -40,7 +41,7 @@ Memory对象用Python JSON转rawstring，保留float、negativezero、bigint词�
 
 ### 失败反馈与未知提交
 
-create的closed DECK_ACCESS_DENIED保留400 `Deck not found or permission denied`；collect目标拒绝保留400 `Target deck not found or permission denied`，source拒绝保留原Voice ID not found反馈。update/delete changed:false保留404 `Voice not found or permission denied`。其他entity/reference/capability/config错误按原安全code/status返回，丢弃上游message。Admin校验thread_id归属、引用冲突不通过raw数据库异常暴露。
+create的closed DECK_ACCESS_DENIED保留400 `Deck not found or permission denied`；collect目标拒绝保留400 `Target kastention not found or permission denied`，source拒绝保留原Voice ID not found反馈。update/delete changed:false保留404 `Voice not found or permission denied`。其他entity/reference/capability/config错误按原安全code/status返回，丢弃上游message。Admin校验thread_id归属、引用冲突不通过raw数据库异常暴露。
 
 write timeout/断连/错误响应保留original UUID/outcome_unknown。恢复只查同operation、原UUID的status/result receipt；absent不能当rollback或触发新写，committed还原原闭集结果。无新公开恢复端点、确认、quota或重试路径。
 

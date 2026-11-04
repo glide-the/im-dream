@@ -1,4 +1,6 @@
+// [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Sync] 2026-10-28: serve complete Agent catalogs and assert the selector creates no per-Deck GET requests.
+// [Sync] 2026-11-02: expect the renamed application display text; existing behavior checks remain.
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
 //          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
@@ -595,12 +597,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('历史思考链仅在展开后挂载。')).toHaveCount(0);
   await expect(agentSelector).toHaveCount(0);
-  const historicalDeckContext = page.getByRole('button', { name: '思维模式信息' });
+  const historicalDeckContext = page.getByRole('button', { name: "卡片结构信息" });
   await expect(historicalDeckContext).toBeVisible();
   await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await expect(historicalDeckContext).not.toContainText('drama-forge');
   await historicalDeckContext.click();
-  const deckMetadataDialog = page.getByRole('dialog', { name: '思维模式信息' });
+  const deckMetadataDialog = page.getByRole('dialog', { name: "卡片结构信息" });
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
   await expect(deckMetadataDialog.getByRole('button', { name: '故事导演，当前 Agent' })).toBeDisabled();
   await deckMetadataDialog.getByRole('button', { name: '切换到 结构顾问' }).click();
@@ -617,7 +619,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   const commonSkillListbox = page.getByRole('listbox', { name: '聊天指令' });
   await expect(commonSkillListbox).toBeVisible();
   await expect(commonSkillListbox.getByRole('option')).toHaveCount(6);
-  await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Ink & Memory/ })).toBeVisible();
+  await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Kastention/ })).toBeVisible();
   await expect(commonSkillListbox.getByRole('option', { name: /\/compact\b/ })).toBeVisible();
   await page.screenshot({ path: '../output/playwright/common-skills-slash-menu.png' });
   await commonSkillListbox.getByRole('option', { name: /\/asr\b/ }).click();

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: publish fresh reading previews before runtime reconciliation and revalidate remembered pages by latest message ID.
 // [Sync] 2026-10-28: explicit full-history sharing accepts the native HTTP owner; Web keeps its original default.
 // [Sync] 2026-10-28: message-process reads accept the same optional native HTTP adapter as history; Web default remains fetch.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
@@ -346,9 +347,20 @@ export function claudeThreadExpectedDispatchIsTerminal(
 export async function hydrateClaudeThreadSession(
   threadId: string,
   transport: typeof fetch = fetch,
+  options: {previousHistory?:ClaudeThreadHistorySnapshot;onHistory?:(history:ClaudeThreadHistorySnapshot)=>void} = {},
 ): Promise<ClaudeThreadHydrationSnapshot> {
   const { history, status } = await loadChatHistoryThenRuntimeStatus(
-    () => fetchClaudeThreadMessages(threadId, {}, transport),
+    async () => {
+      const previous=options.previousHistory;
+      const next=await fetchClaudeThreadMessages(threadId, {
+        ...(previous?.latestMessageId?{knownLatestMessageId:previous.latestMessageId}:{}),
+      }, transport);
+      if(next.thread && next.thread.id!==threadId)throw new ClaudeThreadHydrationUnknownError('messages','Thread history identity mismatch.');
+      if(next.unchanged && (!previous || next.latestMessageId!==previous.latestMessageId))throw new ClaudeThreadHydrationUnknownError('messages','Thread history revision mismatch.');
+      const history=next.unchanged && previous?{...previous,thread:next.thread??previous.thread}:next;
+      options.onHistory?.(history);
+      return history;
+    },
     () => fetchClaudeThreadStatus(threadId, transport),
     async (current) => {
       if (!current.latestMessageId) return fetchClaudeThreadMessages(threadId, {}, transport);
@@ -358,6 +370,7 @@ export async function hydrateClaudeThreadSession(
       return stabilized.unchanged ? current : stabilized;
     },
   );
+  if(history.thread && history.thread.id!==threadId)throw new ClaudeThreadHydrationUnknownError('messages','Thread history identity mismatch.');
   return {
     ...history,
     status,

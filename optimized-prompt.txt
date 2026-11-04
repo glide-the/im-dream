@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 Optimized Prompt:
 
 你是一名资深软件架构师、Claude Code CLI/Plugin 专家和全栈工程师。请在以下仓库中纠正当前插件架构，并完成设计、实现和真实执行测试：
@@ -533,7 +534,7 @@ package installation path
 更新唯一 canonical 文档：
 
 ```text
-docs/design/deck/deck-integration-delta.md
+docs/design/kastention/kastention-integration-delta.md
 ```
 
 设计稿必须明确：

@@ -4,6 +4,7 @@
 # [Output] Deterministic contract-shape, receipt, event-bound and workspace tests without Admin/PG/model.
 # [Pos] Reflections Admin consumer unit boundary; literal pins identify the reviewed Admin source.
 # [Sync] 2026-09-15: cover all sixteen bindings, task-scoped receipt recovery and int4 event limits.
+# [Sync] 2026-11-03: cover iOS task-locator mapping, foreign/traversal rejection and unchanged local workspace protection.
 
 from __future__ import annotations
 
@@ -453,6 +454,50 @@ class ReflectionTaskConsumerTest(unittest.TestCase):
                 )
             self.assertEqual(memory, Path(advertised))
             self.assertEqual(memory.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_ios_maps_authenticated_task_locator_to_owned_root(self):
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as advertised_root:
+            root = Path(temporary).resolve()
+            advertised = str(Path(advertised_root).resolve() / TASK_ID / "memory")
+            with patch("services.admin_data.reflection_task_runtime.sys.platform", "ios"), patch.dict(os.environ, {
+                "AGENT_CWD": str(root), "DREAM_REFLECTIONS_WORKSPACE_ROOT": str(root),
+            }, clear=False):
+                memory = prepare_reflection_memory_workspace(identifier=TASK_ID, advertised_path=advertised)
+                write_reflection_workspace_text(memory / "owned.txt", "synthetic fixture")
+            self.assertEqual(memory, root / TASK_ID / "memory")
+            self.assertEqual(memory.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((memory / "owned.txt").read_text(), "synthetic fixture")
+            self.assertEqual(list(Path(advertised_root).iterdir()), [])
+            with patch("services.admin_data.reflection_task_runtime.sys.platform", "linux"):
+                with self.assertRaises(AdminDataError) as caught:
+                    canonical_reflection_workspace(task_id=TASK_ID, advertised_path=advertised, workspace_root=str(root))
+            self.assertEqual(caught.exception.code, "REFLECTION_WORKSPACE_BINDING_CONFLICT")
+
+    def test_ios_task_locator_rejects_foreign_identity_and_traversal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            invalid = [
+                f"relative/{TASK_ID}/memory", f"/remote/other/memory",
+                f"/remote/{TASK_ID}/other", f"/remote/../outside/{TASK_ID}/memory",
+                f"/remote//{TASK_ID}/memory", f"/remote/{TASK_ID}/memory/",
+            ]
+            with patch("services.admin_data.reflection_task_runtime.sys.platform", "ios"):
+                for advertised in invalid:
+                    with self.subTest(advertised=advertised), self.assertRaises(AdminDataError) as caught:
+                        canonical_reflection_workspace(task_id=TASK_ID, advertised_path=advertised, workspace_root=str(root))
+                    self.assertEqual(caught.exception.code, "REFLECTION_WORKSPACE_BINDING_CONFLICT")
+
+    def test_ios_mapped_workspace_preserves_local_symlink_rejection(self):
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as outside:
+            root = Path(temporary).resolve()
+            (root / TASK_ID).symlink_to(Path(outside).resolve(), target_is_directory=True)
+            with patch("services.admin_data.reflection_task_runtime.sys.platform", "ios"), patch.dict(os.environ, {
+                "AGENT_CWD": str(root), "DREAM_REFLECTIONS_WORKSPACE_ROOT": str(root),
+            }, clear=False):
+                with self.assertRaises(AdminDataError) as caught:
+                    prepare_reflection_memory_workspace(identifier=TASK_ID, advertised_path=f"/remote/{TASK_ID}/memory")
+            self.assertEqual(caught.exception.code, "REFLECTION_WORKSPACE_SYMLINK_FORBIDDEN")
+            self.assertEqual(list(Path(outside).iterdir()), [])
 
     def test_workspace_root_rejects_missing_or_mismatched_configuration(self):
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:

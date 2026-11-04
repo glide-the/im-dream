@@ -1,7 +1,9 @@
+// [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-09-27: use one trailing action: Send for a draft, Stop for an empty active turn.
 // [Sync] 2026-09-26: allow a running turn to accept a new draft and restore it after queue rejection.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { BRAND_NAME } from '../../constants/brand';
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Consume SketchInputDialog, file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
 // [Output] Render the Markdown-aware chat input, slash suggestions, file/sketch attachments, and message submit/stop actions.
@@ -129,7 +131,7 @@ function shouldSendWithKeyboard(
 
 export default function AIInputDock({
   onSendMessage,
-  placeholder = 'Ask Ink & Memory…',
+  placeholder = `Ask ${BRAND_NAME}…`,
   disabled = false,
   loading = false,
   loadingLabel,

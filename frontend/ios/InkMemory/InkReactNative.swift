@@ -12,7 +12,10 @@
 // [Sync] 2026-10-28: existing file picker accepts directory intent; original Workspace batches acquire and release each selected private handle.
 // [Sync] 2026-10-28: expose GET-only binary Workspace leases, text reads and system export without passing binary bytes through JS.
 // [Sync] 2026-10-28: message Copy writes caller-selected text to UIPasteboard without a service request.
+// [Sync] 2026-11-03: share native-verified account Thread presence with the idle view and Live Activity.
 // [Input] React Native lifecycle calls and relative original BFF HTTP requests.
+// [Sync] 2026-11-03: sample own-process CPU and existing native activity on demand; no background timer or extra runtime.
+// [Sync] 2026-11-02: retain one scene-local diagnostics overlay on the existing bridge; never create a second backend or key window.
 // [Output] App-owned runtime, incremental HTTP reads and normal Web authentication.
 // [Pos] iOS platform adapter; React Native owns main application screens.
 // [Sync] 2026-10-28: import user-selected file handles and upload bytes through the original BFF or signed direct URL; retain Cookie/CSRF ownership and request cancellation.
@@ -23,6 +26,7 @@ import Darwin
 import WebKit
 import OSLog
 import AuthenticationServices
+// [Sync] 2026-11-02: forward original account and login-document failures to the existing runtime diagnostics page.
 
 @objc(InkRuntime)
 final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegate, ASWebAuthenticationPresentationContextProviding {
@@ -38,6 +42,7 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
     private var fileStore: NativePickedFileStore?
     private var filePicker: NativeFilePicker?
     private var observing = false
+    private var threadPresence: NativeThreadPresence?
     private var workspaceReads: [String: NativeWorkspaceFileRead] = [:]
     private var exportingFile = false
     private var preparingUploads = Set<String>()
@@ -46,10 +51,134 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
     private var mcpAuthorizationID: String?
     private var mcpAuthorizationReject: RCTPromiseRejectBlock?
     private var mcpAuthorizationAnchor: UIWindow?
+    private var diagnosticsOverlay: NativeDiagnosticsOverlay?
+    private var diagnosticsOptions: NSDictionary = [:]
+    private var diagnosticsSceneObserver: NSObjectProtocol?
+    private let performanceQueue = DispatchQueue(label: "com.inkmemory.diagnostics.cpu", qos: .utility)
+    private var performanceReading = false
     @objc override static func requiresMainQueueSetup() -> Bool { true }
-    override func supportedEvents() -> [String]! { ["InkUploadProgress"] }
+    override func supportedEvents() -> [String]! { ["InkUploadProgress", "InkAccountError", "InkThreadPresence"] }
     override func startObserving() { DispatchQueue.main.async { self.observing = true } }
     override func stopObserving() { DispatchQueue.main.async { self.observing = false } }
+
+    @objc(configureThreadPresence:resolver:rejecter:)
+    func configureThreadPresence(_ ownerId: String?, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            if self.threadPresence == nil {
+                let presence = NativeThreadPresence()
+                presence.changed = { [weak self] value in
+                    guard let self, self.observing else { return }
+                    self.sendEvent(withName: "InkThreadPresence", body: value)
+                }
+                self.threadPresence = presence
+            }
+            self.threadPresence?.configure(expected: ownerId, origin: self.origin) { result in
+                switch result {
+                case .success(let value): resolve(value)
+                case .failure(let error): reject("THREAD_PRESENCE_UNAVAILABLE", error.localizedDescription, error)
+                }
+            }
+        }
+    }
+
+    @objc(canShowIdleOverlay:resolver:rejecter:)
+    func canShowIdleOverlay(_ inModal: Bool, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            guard UIApplication.shared.applicationState == .active,
+                  let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows }).first(where: { $0.isKeyWindow }),
+                  window.windowLevel < .alert,
+                  !(window.rootViewController is UIAlertController) else { resolve(false); return }
+            var documents: [WKWebView] = []
+            func editing(_ view: UIView) -> Bool {
+                // WKContentView can remain first responder after DOM blur. Observe the
+                // visible document's active element rather than that UIKit responder.
+                guard !view.isHidden, view.alpha > 0, !view.bounds.isEmpty else { return false }
+                if let document = view as? WKWebView { documents.append(document); return false }
+                return (view.isFirstResponder && view is UITextInput) || view.subviews.contains(where: editing)
+            }
+            let presented = window.rootViewController?.presentedViewController
+            let allowed = presented == nil || (inModal && presented?.presentedViewController == nil && NSStringFromClass(type(of: presented!)).contains("RCTModalHost"))
+            guard allowed && !editing(window) && self.login == nil && self.accountLogin == nil && self.mcpAuthorization == nil && self.diagnosticsOverlay?.isOpen != true else { resolve(false); return }
+            guard !documents.isEmpty else { resolve(true); return }
+            var pending = documents.count
+            var occupied = false
+            for document in documents {
+                document.evaluateJavaScript("Boolean(document.activeElement && (document.activeElement.isContentEditable || document.activeElement.matches('input,textarea,select')))") { value, error in
+                    occupied = occupied || error != nil || value as? Bool != false
+                    pending -= 1
+                    if pending == 0 {
+                        resolve(!occupied && window.isKeyWindow && UIApplication.shared.applicationState == .active && window.rootViewController?.presentedViewController === presented && self.diagnosticsOverlay?.isOpen != true)
+                    }
+                }
+            }
+        }
+    }
+
+    @objc(readPerformanceSample:rejecter:)
+    func readPerformanceSample(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            guard !self.performanceReading else { reject("CPU_SAMPLE_BUSY", "采样仍在执行。", nil); return }
+            self.performanceReading = true
+            var mainID: UInt64 = 0
+            pthread_threadid_np(nil, &mainID)
+            let selected = self.requests.prefix(NativeRuntimePerformance.requestLimit)
+            let activity = selected.compactMap { $0.value.performanceActivity(id: $0.key) }
+            let truncated = self.requests.count > selected.count
+            let sampledMainID = mainID
+            self.performanceQueue.async {
+                let result = Result { try NativeRuntimePerformance.collect(mainThreadID: sampledMainID, requests: activity, requestsTruncated: truncated) }
+                DispatchQueue.main.async {
+                    self.performanceReading = false
+                    switch result {
+                    case .success(let sample): resolve(sample)
+                    case .failure(let error): reject("CPU_SAMPLE_UNAVAILABLE", "当前CPU采样不可用。", error)
+                    }
+                }
+            }
+        }
+    }
+
+    @objc(configureDiagnosticsOverlay:)
+    func configureDiagnosticsOverlay(_ options: NSDictionary) {
+        DispatchQueue.main.async {
+            self.diagnosticsOptions = options
+            if options["enabled"] as? Bool == true {
+                if self.diagnosticsSceneObserver == nil {
+                    self.diagnosticsSceneObserver = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in self?.applyDiagnosticsOverlay() }
+                }
+            } else if let observer = self.diagnosticsSceneObserver {
+                NotificationCenter.default.removeObserver(observer); self.diagnosticsSceneObserver = nil
+            }
+            self.applyDiagnosticsOverlay()
+        }
+    }
+
+    private func applyDiagnosticsOverlay() {
+        guard diagnosticsOptions["enabled"] as? Bool == true else { diagnosticsOverlay?.setEnabled(false); return }
+        guard let bridge,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive && $0.windows.contains(where: { $0.isKeyWindow }) }) else { return }
+        if diagnosticsOverlay?.scene !== scene {
+            diagnosticsOverlay?.dispose()
+            diagnosticsOverlay = NativeDiagnosticsOverlay(scene: scene, bridge: bridge)
+        }
+        diagnosticsOverlay?.configure(diagnosticsOptions)
+        diagnosticsOverlay?.setEnabled(true)
+    }
+
+    @objc(dismissRuntimeDiagnostics)
+    func dismissRuntimeDiagnostics() {
+        DispatchQueue.main.async { self.diagnosticsOverlay?.close() }
+    }
+
+    override func invalidate() {
+        super.invalidate()
+        DispatchQueue.main.async {
+            if let observer = self.diagnosticsSceneObserver { NotificationCenter.default.removeObserver(observer); self.diagnosticsSceneObserver = nil }
+            self.diagnosticsOptions = [:]
+            self.diagnosticsOverlay?.dispose(); self.diagnosticsOverlay = nil
+        }
+    }
 
     @objc(randomUUID:rejecter:)
     func randomUUID(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
@@ -398,10 +527,13 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
             let schemes = (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? [])
                 .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
             let account = NativeAccountLogin(origin: origin, callback: callback.flatMap { schemes.contains($0.scheme ?? "") ? $0 : nil },
-                navigation: navigation, probe: probe, chinese: language.hasPrefix("zh")) { [weak controller] in controller?.reloadAccountDocument() }
+                navigation: navigation, probe: probe, chinese: language.hasPrefix("zh"), diagnostic: { [weak self] value in
+                    self?.sendEvent(withName: "InkAccountError", body: value)
+                }) { [weak controller] in controller?.reloadAccountDocument() }
             self.accountLogin = account
             controller.accountNavigation = { [weak account] action, page in account?.handles(action, page: page) ?? false }
-            controller.hostStateDidChange = { state in
+            controller.hostStateDidChange = { [weak self] state in
+                if let error = state["authError"] as? [String: Any] { self?.sendEvent(withName: "InkAccountError", body: error) }
                 if state["authenticated"] as? Bool == true || state["loading"] as? Bool == false { probe.check() }
             }
             presenter.present(navigation, animated: true) { probe.check() }
@@ -540,6 +672,13 @@ enum NativeMcpOAuthCallback {
 }
 
 final class NativeHTTPResponse: NSObject, URLSessionDataDelegate {
+    // Reuse the original request owner; omit URL parameters, body, headers and response content.
+    func performanceActivity(id: String) -> [String: Any]? {
+        guard !finished else { return nil }
+        let path = request.url?.path ?? ""
+        let label = path.hasPrefix("/api/claude-agent") ? "Chat请求" : path.hasPrefix("/api/reflections") ? "回顾请求" : "其他本地请求"
+        return ["id": "http:\(id)", "kind": "request", "label": label, "phase": head == nil ? "reading" : "waiting_head"]
+    }
     private(set) var readableHeaders: [String: String] = [:]
     private let request: URLRequest
     private var head: ((Int) -> Void)?

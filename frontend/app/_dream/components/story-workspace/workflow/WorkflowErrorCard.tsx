@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] A structured workflow error code and authorized recovery callbacks.
 // [Output] Safe user copy, diagnostic ids, and bounded recovery actions without raw server detail.
 // [Pos] Story Workspace workflow error recovery card.
@@ -31,17 +32,17 @@ const WORKFLOW_ERROR_PRESENTATIONS: Record<string, WorkflowErrorPresentation> = 
     actions: ['choose_version'],
   },
   DECK_RUNTIME_CONFIG_INVALID: {
-    title: 'Deck 运行配置未就绪',
+    title: '卡片结构运行配置未就绪',
     message: '运行配置缺失、未激活或已经过期。',
     actions: ['view_config'],
   },
   DECK_RUNTIME_CONFIG_INCOMPATIBLE: {
-    title: 'Deck 运行配置不兼容',
+    title: '卡片结构运行配置不兼容',
     message: '当前运行快照与工作流合同不兼容。',
     actions: ['choose_compatible_config'],
   },
   DECK_RUNTIME_CONFIG_UNAVAILABLE: {
-    title: 'Deck 运行配置暂不可用',
+    title: '卡片结构运行配置暂不可用',
     message: '服务暂时无法读取运行配置，你的输入已保留。',
     actions: ['retry'],
   },
@@ -131,7 +132,7 @@ export function WorkflowErrorCard({
         <h3 className="workflow-panel__title">{presentation.title}</h3>
         <p className="workflow-panel__message">{presentation.message}</p>
         {deckOwner && (
-          <p className="workflow-panel__meta">Deck owner：{deckOwner}</p>
+          <p className="workflow-panel__meta">Kastention owner：{deckOwner}</p>
         )}
         <div className="workflow-panel__actions">
           {presentation.actions.map((action, index) => (

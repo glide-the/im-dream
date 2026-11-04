@@ -1,3 +1,4 @@
+# [Sync] 2026-11-03: expose account-scoped read-only running presence to local host observers; task ownership and dispatch remain unchanged.
 # [Sync] 2026-10-26: retain current SDK observation while a verified committed reply completes its original queue lifecycle.
 # [Sync] 2026-09-28: use the Admin-bound scheduled turn ID under the ordinary Thread lock before entering the shared Service.
 # [Sync] 2026-10-25: accept a composition-owned Runner constructor for the iOS in-process transport.
@@ -263,6 +264,7 @@ class ClaudeAgentThreadFactory:
     ) -> None:
         self._runner_factory = runner_factory
         self._pool = AgentRunStatePool()
+        self._presence_observers: dict[object, tuple[str, Callable[[bool], None]]] = {}
         self._observers = SessionObserverRegistry()
         self._service = ClaudeAgentService(
             claude_code_runtime_env_provider=claude_code_runtime_env_provider,
@@ -328,6 +330,7 @@ class ClaudeAgentThreadFactory:
         # The same turn can still be present in the pool and close tracker.
         running_tasks = list(dict.fromkeys(running_tasks))
         destroyed = self._pool.destroy_all()
+        self._notify_thread_presence()
         if running_tasks:
             for task in running_tasks:
                 task.cancel()
@@ -471,6 +474,7 @@ class ClaudeAgentThreadFactory:
                     if not owner_completion.done() else None
                 )
             state.bg_task = bg_task
+            self._notify_thread_presence()
             # _run_turn_task releases the lock when the turn ends (or on early
             # disconnect the task keeps running and still owns lock release).
             release_lock_on_exit = False
@@ -492,6 +496,7 @@ class ClaudeAgentThreadFactory:
                     state.event_bus = None
                     if state.lifecycle == AgentRunLifecycle.RUNNING:
                         state.mark_idle()
+                    self._notify_thread_presence()
                 lock.release()
                 if owner_completion is not None and not owner_completion.done():
                     owner_completion.set_result(None)
@@ -970,6 +975,7 @@ class ClaudeAgentThreadFactory:
             state.bg_task = None
             if state.lifecycle == AgentRunLifecycle.RUNNING:
                 state.mark_idle()
+            self._notify_thread_presence()
             try:
                 if session_started:
                     await self._observers.emit_after_session_started(session_id)
@@ -1040,6 +1046,7 @@ class ClaudeAgentThreadFactory:
                 bg_task.cancel()
                 self._track_owned_task(self._closing_turn_tasks, bg_task)
         self._pool.destroy(session_id)
+        self._notify_thread_presence()
         phase4_task = asyncio.create_task(
             self._fire_session_ended(
                 session_id,
@@ -1180,6 +1187,36 @@ class ClaudeAgentThreadFactory:
 
     def list_session_snapshots(self) -> list[dict[str, Any]]:
         return self._pool.snapshot_all()
+
+    def observe_thread_presence(self, actor_id: str, callback: Callable[[bool], None]) -> Callable[[], None]:
+        """Observe this actor's complete local running set on the Factory event loop.
+
+        Internal composition only. No public diagnostic DTO includes turn identity.
+        Register and deliver the initial value without yielding between them.
+        """
+        key = object()
+        self._presence_observers[key] = (actor_id, callback)
+        self._notify_thread_presence(key)
+        return lambda: self._presence_observers.pop(key, None)
+
+    def _notify_thread_presence(self, only: object | None = None) -> None:
+        if not self._presence_observers:
+            return
+        active = {
+            state.current_user_id
+            for session_id in self._pool.list_session_ids()
+            if (state := self._pool.get(session_id)) is not None
+            and state.lifecycle == AgentRunLifecycle.RUNNING
+            and state.current_user_id is not None
+        }
+        for key, (actor_id, callback) in tuple(self._presence_observers.items()):
+            if only is not None and key is not only:
+                continue
+            try:
+                callback(actor_id in active)
+            except Exception:
+                # A display observer must never change admission, task or Stop outcomes.
+                logger.warning("Local Thread presence observer failed")
 
     def sweep_stats(self) -> dict[str, Any]:
         stats = self._sweeper.sweep_stats()

@@ -1,8 +1,12 @@
+<!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-03: Deck功能展示名统一为Kastention与卡片结构；原概念、接口、数据及历史定义保持。 -->
 <!-- [Input] Story Workspace routes and ChatView's existing landing tab, search and grouped history list. -->
 <!-- [Output] Product scope, navigation and visible content hierarchy. -->
 <!-- [Pos] Current Story Workspace navigation and page-composition design. -->
 <!-- [Sync] 2026-10-07: Chat history landing uses the existing tab label without a duplicate title/description block. -->
 # Product scope and navigation
+
+> 命名说明（2026-11-03）：Deck 功能的英文展示名称统一为 **Kastention**，中文统一为 **卡片结构**。本文保留 Deck 的原有概念定义、业务规则与技术标识；页面文字按[现行命名规则](../../prd/kastention/kastention.md#当前功能名称)显示。
 
 ## Product goal
 

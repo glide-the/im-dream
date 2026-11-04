@@ -24,6 +24,7 @@ const crypto = require('node:crypto');
 const { Worker } = require('node:worker_threads');
 const { pathToFileURL } = require('node:url');
 
+// [Sync] 2026-11-03: stage pinned ripgrep and accept canonical direct-thread Notion homes for the existing Read hook.
 const [endpointFile, workspaceRoot, runtimeEntry, applicationDataRoot] = process.argv.slice(2);
 if (!endpointFile || !workspaceRoot || !runtimeEntry || !applicationDataRoot) throw new Error('IOS_RUNTIME_CONFIGURATION_REQUIRED');
 const resourcesRoot = fs.realpathSync(path.dirname(__dirname));
@@ -49,7 +50,8 @@ if (!fs.existsSync(path.join(guestRoot, '.ready'))) {
   }
   fs.writeFileSync(path.join(guestRoot, '.ready'), guestManifest.rootDigest, {mode: 0o600});
 }
-const commandRuntime = Object.freeze({root: guestRoot, data: dataRoot, resources: resourcesRoot});
+const commandRuntime = Object.freeze({root: guestRoot, data: dataRoot, resources: resourcesRoot,
+  ripgrepExecutable: path.join(guestRoot, 'usr/local/bin/rg')});
 function refreshGuestResolver() {
   const servers = new Resolver().getServers().filter(address => net.isIP(address));
   const directory = path.join(fs.realpathSync(guestRoot), 'etc');
@@ -84,6 +86,20 @@ if (!fs.existsSync(notionExecutable) || crypto.createHash('sha256').update(fs.re
   fs.writeFileSync(temporary, notionSource, {mode: 0o700, flag: 'wx'}); fs.renameSync(temporary, notionExecutable);
 }
 fs.chmodSync(notionExecutable, 0o755);
+// Restore executable mode for the exact Linux resource consumed by the guest.
+const ripgrepManifest = JSON.parse(fs.readFileSync(path.join(resourcesRoot, 'node/ripgrep/manifest.json'), 'utf8'));
+const ripgrepSource = fs.readFileSync(path.join(resourcesRoot, 'node/ripgrep/rg'));
+if (ripgrepManifest.guestPath !== 'usr/local/bin/rg' ||
+    crypto.createHash('sha256').update(ripgrepSource).digest('hex') !== ripgrepManifest.binarySha256)
+  throw new Error('IOS_RIPGREP_DIGEST_MISMATCH');
+const ripgrepExecutable = commandRuntime.ripgrepExecutable;
+if (fs.lstatSync(ripgrepExecutable, {throwIfNoEntry: false})?.isSymbolicLink())
+  throw new Error('IOS_RIPGREP_PATH_INVALID');
+if (!fs.existsSync(ripgrepExecutable) || crypto.createHash('sha256').update(fs.readFileSync(ripgrepExecutable)).digest('hex') !== ripgrepManifest.binarySha256) {
+  const temporary = ripgrepExecutable + '.preparing-' + crypto.randomBytes(8).toString('hex');
+  fs.writeFileSync(temporary, ripgrepSource, {mode: 0o700, flag: 'wx'}); fs.renameSync(temporary, ripgrepExecutable);
+}
+fs.chmodSync(ripgrepExecutable, 0o755);
 const root = fs.realpathSync(workspaceRoot);
 const defaultDirectory = fs.realpathSync(path.join(__dirname, '..', 'app'));
 const nextRoot = fs.realpathSync(path.join(__dirname, '..', 'next'));
@@ -187,7 +203,8 @@ const server = net.createServer(socket => {
         const notionCLI = message.purpose === 'notion-cli';
         const notionRoot = path.join(path.dirname(root), 'notion-runtime');
         const notionDirectory = notionCLI && typeof message.cwd === 'string' &&
-          message.cwd.startsWith(notionRoot + path.sep);
+          (message.cwd.startsWith(notionRoot + path.sep) ||
+           (path.basename(message.cwd) === '.notion-home' && path.dirname(path.dirname(message.cwd)) === root));
         const pluginDirectory = ['plugin-management', 'plugin-python'].includes(message.purpose) && typeof message.cwd === 'string'
           && (message.cwd === pluginRoot || message.cwd.startsWith(pluginRoot + path.sep));
         try { canonicalDirectory = (withinRoot(message.cwd) || message.cwd === defaultDirectory || pluginDirectory || notionDirectory) && fs.realpathSync(message.cwd) === message.cwd && fs.statSync(message.cwd).isDirectory(); }

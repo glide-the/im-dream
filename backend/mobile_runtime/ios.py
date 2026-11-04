@@ -1,5 +1,7 @@
+# [Sync] 2026-11-03: bind one native-verified account to event-driven local Thread presence without HTTP or polling.
 # [Sync] 2026-10-31: bind configured Admin JSON HTTP to the existing native URLSession transport.
 # [Sync] 2026-10-30: bind the pinned Notion CLI process adapter beside existing plugin/runtime owners.
+# [Sync] 2026-11-02: use the existing backend display-name constant for API metadata.
 # [Input] Bundled CPython, pinned dependencies, production business routers and shared transport policy.
 # [Output] One in-process ASGI application, native pull transport and application-owned HTTP for original Next.
 # [Pos] iOS backend composition; data authority and Claude execution require qualified owners.
@@ -12,15 +14,19 @@
 # [Sync] 2026-10-25: bind the existing plugin runtime root to the same application data container as workspaces/files.
 # [Sync] 2026-10-26: restore bundled immutable plugin artifacts and bind original CLI checks to the native Runtime.
 # [Sync] 2026-10-26: bind the original confirmation worker for explicit message dispatch without a global claim scan.
+# [Sync] 2026-11-02: emit startup-only wall/process-CPU phase metadata while retaining original owners and exceptions.
 
+from seo_content import APP_NAME
 import asyncio
 import base64
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import platform
 import sys
 import threading
+import time
 import tomllib
 from uuid import uuid4
 
@@ -48,6 +54,69 @@ _admin_request_owner = None
 _http_owner = None
 _web_origin = None
 _startup_lock = threading.Lock()
+_presence_subscription = None
+_presence_generation = None
+
+
+def thread_presence(payload: str) -> str:
+    """Native-only account binding; actor comes from the host's original session read."""
+    async def configure():
+        global _presence_subscription, _presence_generation
+        value = json.loads(payload)
+        generation = value["generation"]
+        if value.get("release"):
+            if _presence_generation == generation and _presence_subscription is not None:
+                _presence_subscription()
+                _presence_subscription = None
+                _presence_generation = None
+            return "{}"
+        if _factory_owner is None:
+            raise RuntimeError("Dream Factory has not started")
+        actor = value["actorId"]
+        if not isinstance(actor, str) or not actor or not isinstance(generation, str) or not generation:
+            raise ValueError("Invalid local Thread presence scope")
+        if _presence_subscription is not None:
+            _presence_subscription()
+        _presence_generation = generation
+        sequence = 0
+        previous = None
+        from _dream_native import thread_presence as publish
+
+        def changed(active):
+            nonlocal sequence, previous
+            if _presence_generation != generation or active is previous:
+                return
+            previous = active
+            sequence += 1
+            publish(json.dumps({"ownerId": actor, "generation": generation,
+                "sequence": sequence, "hasActiveThread": active,
+                "observedAt": time.time() * 1000}))
+
+        _presence_subscription = _factory_owner.factory.observe_thread_presence(actor, changed)
+        return "{}"
+
+    return _submit(configure())
+
+
+@contextmanager
+def _startup_phase(phase):
+    """Measure fixed startup operations; process CPU includes concurrent native threads."""
+    wall, cpu = time.perf_counter_ns(), time.process_time_ns()
+    succeeded = False
+    try:
+        yield
+        succeeded = True
+    finally:
+        # Diagnostic output cannot replace an original startup result or exception.
+        try:
+            print("DREAM_STARTUP " + json.dumps({
+                "layer": "python", "phase": phase, "outcome": "ok" if succeeded else "failed",
+                "elapsedMs": (time.perf_counter_ns() - wall) / 1_000_000,
+                "processCpuMs": (time.process_time_ns() - cpu) / 1_000_000,
+                "timestampMs": time.time_ns() // 1_000_000, "pid": os.getpid(),
+            }), file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
 
 def _submit(coroutine):
@@ -65,7 +134,7 @@ async def _initialize():
         os.chdir(Path(__file__).parents[1])
     with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as source:
         version = tomllib.load(source)["project"]["version"]
-    _app = FastAPI(title="Ink & Memory API", docs_url=None, redoc_url=None, openapi_url=None)
+    _app = FastAPI(title=f"{APP_NAME} API", docs_url=None, redoc_url=None, openapi_url=None)
     _app.include_router(create_public_router(backend_version=version, cors_allow_origins=[],
                                               public_base_url="/", backend_public_base_url="/"))
     _lifespan = _app.router.lifespan_context(_app)
@@ -90,51 +159,58 @@ async def _bind_runtime(endpoint):
         os.chmod(storage, 0o700)
         os.environ["FILE_STORAGE_LOCAL_DIR"] = str(storage)
         os.environ["INK_CLAUDE_PLUGIN_RUNTIME_ROOT"] = str(root.parent / "claude-plugin-runtime")
-        from .ios_plugin_runtime import prepare_plugin_runtime
-        prepare_plugin_runtime(endpoint)
-        from .ios_notion_runtime import prepare_notion_runtime
-        prepare_notion_runtime(endpoint)
+        with _startup_phase("plugin_prepare"):
+            from .ios_plugin_runtime import prepare_plugin_runtime
+            prepare_plugin_runtime(endpoint)
+        with _startup_phase("notion_prepare"):
+            from .ios_notion_runtime import prepare_notion_runtime
+            prepare_notion_runtime(endpoint)
         if _admin_request_owner is None:
-            from services.admin_data import AdminDataConfig
-            from services.admin_data.request_auth import create_production_admin_request_auth
-            from claude_mcp.service import configure_default_claude_mcp_service
-            admin_config = AdminDataConfig.from_env()
-            if sys.platform == "ios":
-                from _dream_native import admin_http
-                from .ios_admin_http import install_admin_http
-                install_admin_http(admin_config, admin_http)
-            owner = create_production_admin_request_auth(admin_config)
-            try:
-                configure_default_claude_mcp_service(owner.client)
-            except BaseException:
-                owner.close()
-                raise
-            _admin_request_owner = owner
-            _app.state.admin_request_auth = owner
-        from .ios_factory import IOSFactoryOwner
-        from claude_agent.runtime_owner import bind_thread_factory
-        from routers import load_business_routers
-        if _factory_owner is None:
-            _factory_owner = IOSFactoryOwner(endpoint)
-            bind_thread_factory(_factory_owner.factory)
-        if _factory_owner.endpoint != endpoint:
-            raise RuntimeError("DREAM_AGENT_OWNER_ALREADY_BOUND")
-        modules = load_business_routers()
-        for module in modules:
-            _app.include_router(module.router)
-        from services.deck.story_workflow_application import story_workspace_get_dream_confirmation_coordinator
-        story_workspace_get_dream_confirmation_coordinator().bind_worker(
-            _admin_request_owner.story_workspace_confirmation_worker()
-        )
-        _factory_owner.start()
+            with _startup_phase("admin_auth_prepare"):
+                from services.admin_data import AdminDataConfig
+                from services.admin_data.request_auth import create_production_admin_request_auth
+                from claude_mcp.service import configure_default_claude_mcp_service
+                admin_config = AdminDataConfig.from_env()
+                if sys.platform == "ios":
+                    from _dream_native import admin_http
+                    from .ios_admin_http import install_admin_http
+                    install_admin_http(admin_config, admin_http)
+                owner = create_production_admin_request_auth(admin_config)
+                try:
+                    configure_default_claude_mcp_service(owner.client)
+                except BaseException:
+                    owner.close()
+                    raise
+                _admin_request_owner = owner
+                _app.state.admin_request_auth = owner
+        with _startup_phase("factory_prepare"):
+            from .ios_factory import IOSFactoryOwner
+            from claude_agent.runtime_owner import bind_thread_factory
+            if _factory_owner is None:
+                _factory_owner = IOSFactoryOwner(endpoint)
+                bind_thread_factory(_factory_owner.factory)
+            if _factory_owner.endpoint != endpoint:
+                raise RuntimeError("DREAM_AGENT_OWNER_ALREADY_BOUND")
+        with _startup_phase("business_routes_prepare"):
+            from routers import load_business_routers
+            modules = load_business_routers()
+            for module in modules:
+                _app.include_router(module.router)
+            from services.deck.story_workflow_application import story_workspace_get_dream_confirmation_coordinator
+            story_workspace_get_dream_confirmation_coordinator().bind_worker(
+                _admin_request_owner.story_workspace_confirmation_worker()
+            )
+            _factory_owner.start()
         _business_routers = modules
         _claude_endpoint = endpoint
-    from .ios_http import IOSHTTPServer
-    if _http_owner is None:
-        _http_owner = IOSHTTPServer(_app)
-    await _http_owner.start()
-    from .ios_claude_transport import start_native_web
-    _web_origin = await start_native_web(endpoint, _http_owner.origin)
+    with _startup_phase("asgi_listener_start"):
+        from .ios_http import IOSHTTPServer
+        if _http_owner is None:
+            _http_owner = IOSHTTPServer(_app)
+        await _http_owner.start()
+    with _startup_phase("next_web_ready"):
+        from .ios_claude_transport import start_native_web
+        _web_origin = await start_native_web(endpoint, _http_owner.origin)
 
 
 async def _complete(value):
@@ -159,19 +235,22 @@ def start(payload: str | None = None) -> str:
             _loop = asyncio.new_event_loop()
             threading.Thread(target=_loop.run_forever, name="DreamASGI", daemon=True).start()
             try:
-                _submit(_initialize())
+                with _startup_phase("public_app_initialize"):
+                    _submit(_initialize())
             except BaseException:
                 _loop.call_soon_threadsafe(_loop.stop)
                 _loop = None
                 raise
-    health = _submit(_complete({"method": "GET", "path": "/api/health"}))
-    if health["status"] != 200:
-        raise RuntimeError("Dream health handler did not return HTTP 200")
+    with _startup_phase("public_health_read"):
+        health = _submit(_complete({"method": "GET", "path": "/api/health"}))
+        if health["status"] != 200:
+            raise RuntimeError("Dream health handler did not return HTTP 200")
     runtime = None
     if payload is not None:
         from .ios_claude_transport import query_native_status
         endpoint = json.loads(payload)["runtimeEndpoint"]
-        runtime = _submit(query_native_status(endpoint))
+        with _startup_phase("node_status_read"):
+            runtime = _submit(query_native_status(endpoint))
         with _startup_lock:
             _submit(_bind_runtime(endpoint))
     return json.dumps({

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shared path source: frontend/src/assets/startup-artwork.json. Transparent face and canvas. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 854 303 C 734 245 578 224 443 251 C 284 282 188 393 165 559 C 139 741 182 895 320 974 C 438 1042 627 1053 790 1016 C 971 975 1083 871 1102 716 C 1116 603 1095 496 1035 418" fill="none" stroke="#3f3429" stroke-width="30"/>
+  <path d="M 397 284 C 533 235 705 253 853 309 L 787 369 C 666 352 529 316 397 284 Z" fill="#79a9d3" stroke="none" stroke-width="0"/>
+  <path d="M 556 374 C 653 391 781 353 859 291 C 908 250 920 207 954 198 C 996 185 1012 218 1004 251 C 994 299 949 329 906 353 C 1015 350 1064 330 1098 352 C 1131 376 1109 411 1071 432 C 998 474 858 484 749 459 C 664 440 591 407 556 374 Z" fill="#6095ca" stroke="#3f3429" stroke-width="28"/>
+  <path d="M 570 379 C 684 393 827 359 917 330 C 939 337 953 349 961 365 C 859 429 715 445 570 379 Z" fill="#fffaf2" stroke="#3f3429" stroke-width="14"/>
+  <path d="M 413 532 C 438 532 446 554 438 582 C 432 605 411 620 394 608 C 378 598 381 573 387 554 C 392 540 402 532 413 532 Z" fill="#3f3429" stroke="none" stroke-width="0"/>
+  <path d="M 788 609 C 810 609 820 631 815 655 C 811 681 795 696 777 689 C 759 683 758 661 763 640 C 768 620 777 609 788 609 Z" fill="#3f3429" stroke="none" stroke-width="0"/>
+  <path d="M 495 676 C 527 726 587 748 648 709" fill="none" stroke="#3f3429" stroke-width="38"/>
+</svg>

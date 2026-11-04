@@ -6,6 +6,7 @@
 # [Sync] 2026-10-25: separate generated RuntimeArtifacts from tracked runtime sources on case-insensitive volumes.
 # [Sync] 2026-10-25: retain original SandboxManager; the existing deployment setting disables the command sandbox.
 # [Sync] 2026-10-30: package only the pinned official Linux ARM64 ntn executable and its MIT notice for the existing command interpreter.
+# [Sync] 2026-11-03: include the same-version Runtime Linux ARM64 ripgrep and bind only its iOS command selection to the verified guest executable.
 import base64
 import hashlib
 import json
@@ -52,6 +53,27 @@ def prepare_notion_cli(runtime, generated):
     (destination / "manifest.json").write_text(json.dumps(record, indent=2) + "\n")
 
 
+def prepare_ripgrep(runtime, generated):
+    record = LOCK["ripgrep"]
+    if record["version"] != LOCK["runtime"]["version"]:
+        raise RuntimeError("Ripgrep must come from the pinned Runtime version")
+    archive = runtime / f"runtime-{record['version']}-linux-arm64.tgz"
+    download(record, archive)
+    destination = generated / "ripgrep"
+    destination.mkdir(parents=True)
+    with tarfile.open(archive) as bundle:
+        for source, name, expected in ((record["binaryMember"], "rg", record["binarySha256"]),
+                (record["licenseMember"], "COPYING", record["licenseSha256"])):
+            member = bundle.getmember(source)
+            if not member.isfile():
+                raise RuntimeError("Ripgrep resource must be a regular file")
+            data = bundle.extractfile(member).read()
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise RuntimeError("Ripgrep resource digest mismatch")
+            (destination / name).write_bytes(data)
+    (destination / "manifest.json").write_text(json.dumps(record, indent=2) + "\n")
+
+
 def prepare():
     node = IOS / "Node"
     node.mkdir(exist_ok=True)
@@ -82,12 +104,25 @@ def prepare():
             if count != 1:
                 raise RuntimeError("Unexpected Bun require adapter inventory")
             data = data.replace(marker, 'import { createRequire as __iosCreateRequire } from "node:module";\nvar __require = __iosCreateRequire(import.meta.url);')
+        ripgrep_marker = 'getRipgrepConfig2 = memoize_default(() => {\n'
+        ripgrep_count = data.count(ripgrep_marker)
+        if ripgrep_count:
+            if ripgrep_count != 1:
+                raise RuntimeError("Unexpected Runtime ripgrep selector inventory")
+            data = data.replace(ripgrep_marker, ripgrep_marker + '''    if (process.platform === "ios") {
+      const command = process.env.INK_IOS_RIPGREP_PATH;
+      if (!command) throw Error("IOS_RIPGREP_EXECUTABLE_REQUIRED");
+      return { mode: "builtin", command, args: [] };
+    }
+''')
         target.write_text(data)
         receipt.append({"path": str(relative), "sourceSha256": hashlib.sha256(original.read_bytes()).hexdigest(),
                         "sha256": hashlib.sha256(target.read_bytes()).hexdigest(), "nodeRequireAdapter": bool(count),
-                        "iosCommandSandboxAdapter": False})
+                        "iosCommandSandboxAdapter": False, "iosRipgrepAdapter": bool(ripgrep_count)})
     if sum(item["nodeRequireAdapter"] for item in receipt) != 1:
         raise RuntimeError("The pinned Runtime must contain exactly one Bun require adapter")
+    if sum(item["iosRipgrepAdapter"] for item in receipt) != 1:
+        raise RuntimeError("The pinned Runtime must contain exactly one ripgrep selector")
     (core / "package.json").write_text('{"type":"module"}\n')
     for name in ("host.cjs", "worker.mjs", "ios-process-boundary.mjs", "ios-admin-http.mjs"):
         shutil.copy2(IOS / "runtime" / name, generated / name)
@@ -101,6 +136,7 @@ def prepare():
             name = "-".join(original.relative_to(runtime / "package").parts)
             shutil.copy2(original, licenses / name)
     prepare_notion_cli(runtime, generated)
+    prepare_ripgrep(runtime, generated)
     (generated / "runtime-adaptation.json").write_text(json.dumps({"runtime": LOCK["runtime"], "files": receipt}, indent=2) + "\n")
     print(f"Prepared Node {LOCK['node']['version']} and {len(receipt)} original Runtime JavaScript files; desktop binaries excluded.")
 

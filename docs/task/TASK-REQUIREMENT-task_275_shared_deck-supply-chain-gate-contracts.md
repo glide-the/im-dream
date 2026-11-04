@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 # TASK-REQUIREMENT — task_275_shared_deck-supply-chain-gate-contracts
 
 Status: Filled Prompt for Task Design  
@@ -26,7 +27,7 @@ Domain: `shared`（覆盖 governance、backend 与 full-stack/shared 边界）
 
 ### 2. 权威输入与优先级
 
-1. `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.2、§5.2、§9 中的 `DECK-GATE-DEC-017`；
+1. `docs/design/kastention/design_002_kastention-plugin-decision-gates.md` §4.2、§5.2、§9 中的 `DECK-GATE-DEC-017`；
 2. `docs/issue/ISSUES_deck-plugin-stage4-supply-chain.md` 中 `DECK-SC-001..009`；
 3. `docs/task/task_deck_001_backend_manifest-model.md`、`task_deck_002_backend_runtime-lock.md`、`task_deck_003_backend_installation-lifecycle.md`、`task_deck_008_backend_reconcile-load-receipt.md`、`task_deck_013_backend_events-audit.md`、`task_deck_014_backend_api-error-codes.md`、`task_211_frontend_plugin_admin_ui.md` 的稳定 task 约定；
 4. 当前仓库真实路径与测试入口：`backend/models/`、`backend/services/deck_plugin/`、`backend/tests/`、`frontend/app/_dream/`、`backend/pyproject.toml`、`frontend/package.json`。

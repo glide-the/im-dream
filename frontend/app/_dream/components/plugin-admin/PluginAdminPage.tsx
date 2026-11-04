@@ -1,3 +1,4 @@
+// [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Deck workflow query/mutation hooks and server-owned installation contracts.
 // [Output] Workflow purpose, Dream Story Workflow scope, catalog, lifecycle controls, and detail drawer.
 // [Pos] Plugin Admin root page mounted incrementally inside the existing Settings view.
@@ -174,7 +175,7 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
 
   const loadInstallPreview = useCallback(async () => {
     if (!installInput.deckPluginId.trim() || !EXACT_VERSION_PATTERN.test(installInput.deckPluginVersion.trim())) {
-      setPreviewError(new Error('请输入 Deck Plugin ID 和精确 SemVer 版本。'));
+      setPreviewError(new Error('请输入 Kastention Plugin ID 和精确 SemVer 版本。'));
       return;
     }
     setPreviewLoading(true);
@@ -212,7 +213,7 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
   const handleAction = useCallback(async (action: PluginMutationAction, item: DeckPluginInstallation) => {
     const deckPluginId = item.deckPluginId;
     if (!catalog.permissions.canManage) return;
-    if (action === 'uninstall' && !window.confirm('确认软卸载该 Deck 工作流插件？历史 run 引用与来源元数据将由服务端保留。')) return;
+    if (action === 'uninstall' && !window.confirm('确认软卸载该卡片结构工作流插件？历史 run 引用与来源元数据将由服务端保留。')) return;
     if (action === 'rollback' && !window.confirm('确认回滚默认版本？当前和历史运行不会被改绑。')) return;
     if (action === 'reject-upgrade' && !window.confirm('确认拒绝本次能力扩张升级？旧 ready 版本将保持可用。')) return;
     const targetVersion = action === 'upgrade'
@@ -234,8 +235,8 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
       <header className="plugin-admin__header">
         <div>
           <span className="plugin-admin-eyebrow">Settings · Plugins</span>
-          <h2 id="plugin-admin-title">Deck 工作流插件</h2>
-          <p>为 Dream 类型 Deck 提供创作 Skill、阶段指引和工作台内容结构。在 Deck 维护中选择工作流版本，后续新 Run 使用所选版本。</p>
+          <h2 id="plugin-admin-title">卡片结构工作流插件</h2>
+          <p>为 Dream 类型卡片结构提供创作 Skill、阶段指引和工作台内容结构。在卡片结构维护中选择工作流版本，后续新 Run 使用所选版本。</p>
         </div>
         {catalog.permissions.canManage && (
           <button type="button" className="plugin-admin-button plugin-admin-button--primary" onClick={openInstall}>
@@ -297,10 +298,10 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
         }}>
           <form className="plugin-admin-install" onSubmit={(event) => { event.preventDefault(); void submitInstall(); }}>
             <div className="plugin-admin-section-heading">
-              <div><h3>安装 Deck 工作流插件</h3><p>读取工作流信息并审阅所需权限后，提交安装。</p></div>
+              <div><h3>安装卡片结构工作流插件</h3><p>读取工作流信息并审阅所需权限后，提交安装。</p></div>
               <button type="button" className="plugin-admin-icon-button" aria-label="关闭安装对话框" onClick={() => setInstallOpen(false)}>×</button>
             </div>
-            <label className="plugin-admin-field">Deck Plugin ID
+            <label className="plugin-admin-field">Kastention Plugin ID
               <input required value={installInput.deckPluginId} placeholder="工作流 ID" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginId: event.target.value })); setInstallPreview(null); }} />
             </label>
             <label className="plugin-admin-field">精确版本

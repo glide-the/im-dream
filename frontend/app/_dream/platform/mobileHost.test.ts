@@ -1,3 +1,4 @@
+// [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Browser and RN-host route intents against the actual route resolver.
 // [Output] Mobile scope, canonical-route preservation and credential-free state contract evidence.
 // [Pos] Provider-free RN navigation regression tests.
@@ -37,9 +38,11 @@ test('host reports path and authenticated boolean without session data', () => {
   }});
   reportMobileHostRoute(true);
   reportMobileHostRoute(false);
+  reportMobileHostRoute(false,true,{source:'registration',error:'AUTH_REGISTRATION_INCOMPLETE'});
   assert.deepEqual(values, [
     {path: '/story-workspace/chat', authenticated: true, authFailure: false},
     {path: '/story-workspace/chat', authenticated: false, authFailure: false},
+    {path: '/story-workspace/chat', authenticated: false, authFailure: true,authError:{source:'registration',error:'AUTH_REGISTRATION_INCOMPLETE'}},
   ]);
   Reflect.deleteProperty(globalThis, 'window');
 });
