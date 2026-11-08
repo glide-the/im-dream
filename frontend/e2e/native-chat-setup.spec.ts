@@ -105,6 +105,6 @@ for(const [mode,workspace] of [['empty-config',true],['partial-config',false]] a
  await open(page,mode);await settled(page);
  expect(await state(page)).toMatchObject({configLoaded:true,error:'',config:{workspace_enabled:workspace,im_full_access_enabled:false}});
  await expect(page.getByRole('button',{name:'Send readiness'})).toBeEnabled();
- expect(await page.evaluate(()=>(window as any).__setupFixture.calls.every(c=>c.method==='GET'))).toBe(true);
+ expect(await page.evaluate(()=>(window as Window & {__setupFixture:{calls:ReadonlyArray<{method:string}>}}).__setupFixture.calls.every(c=>c.method==='GET'))).toBe(true);
  await expect(page.getByRole('textbox',{name:'Source draft'})).toHaveValue('Existing unsent draft');
 });
