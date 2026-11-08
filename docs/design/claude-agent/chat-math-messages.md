@@ -197,4 +197,8 @@ stateDiagram-v2
 
 中间回执保留的修正项：首轮跨行token触发解析错误，最终容器、定界符、正文及换行事件合同通过；长公式原先按运算符换行，最终KaTeX视觉层使用局部横滚；原生主题fixture曾落入默认拒绝写入边界，最终接回既有iOS Settings适配器及独立平台fixture。截图复核发现Native局部文档的白色底色，最终由消息背景参数同步HTML和WebView底色，并增加背景一致性断言。中间合同运行包含超时与中止回执，最终11项合同具有完整退出0记录。
 
-截图位于`frontend/output/playwright/chat-math/`，包含`1100-light.png`、`1100-dark.png`、`390-light.png`、`390-dark.png`。目录属于忽略的技术输出。完整发布构建、iPhone安装包、物理设备/WebKit、真实账户和真实模型验收未执行；当前Codex客户端观察受到上述工具访问限制。正式发布和已安装App的采用状态各自保留验证资格。
+截图位于`frontend/output/playwright/chat-math/`，包含`1100-light.png`、`1100-dark.png`、`390-light.png`、`390-dark.png`。目录属于忽略的技术输出。正式发布制品、iPhone安装包、物理设备/WebKit、真实账户和真实模型验收未执行；当前Codex客户端观察受到上述工具访问限制。正式发布和已安装App的采用状态各自保留验证资格。
+
+### PR提交隔离复核
+
+[PR #98](https://github.com/glide-the/im-dream/pull/98)仅包含本轮数学消息文件及对应目录增量。独立worktree的Web/Native类型检查、11项公式合同与8项Chrome交互通过。浏览器fixture固定依赖预构建并合并React单例解析，首次加载保持同一运行时。首个PR提交的[GitHub Frontend CI](https://github.com/glide-the/im-dream/actions/runs/42481832143)完成锁定依赖安装与Next生产构建，结果为success；后续提交的合并门禁以该PR最新检查为准。

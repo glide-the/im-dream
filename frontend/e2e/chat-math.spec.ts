@@ -1,6 +1,7 @@
 // [Input] Real production Web/Native message components, installed Chrome and a WebView transport facade.
 // [Output] Formula, layout, source-copy, stream/history, native document and Markdown regression evidence.
 // [Pos] Provider-free browser qualification. All business data, Project/Episode/artifacts/Run/Hook are out of scope.
+// [Sync] 2026-11-08: freeze fixture dependency discovery and deduplicate React for clean worktree startup.
 // [Sync] 2026-11-08: keep synthetic data and an owned ephemeral Vite server; no existing service changes.
 import {test,expect,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild,type ViteDevServer} from 'vite';
@@ -24,7 +25,7 @@ export function WebView(props){const frame=useRef(null),latest=useRef(props);lat
 }`;
 test.beforeAll(async()=>{
   runtime=await mkdtemp(path.join(tmpdir(),'ink-chat-math-'));
-  server=await createServer({root,configFile:false,logLevel:'silent',cacheDir:path.join(runtime,'cache'),server:{host:'127.0.0.1',port:0,hmr:false},plugins:[{
+  server=await createServer({root,configFile:false,logLevel:'silent',cacheDir:path.join(runtime,'cache'),resolve:{dedupe:['react','react-dom']},optimizeDeps:{noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','i18next','react-i18next','react-markdown','remark-gfm','katex','mermaid']},server:{host:'127.0.0.1',port:0,hmr:false},plugins:[{
     name:'chat-math-platform-boundaries',enforce:'pre',
     resolveId(id,importer){if(id==='react-native')return '\0math-native';if(id==='react-native-webview')return '\0math-webview';if(id.endsWith('/interfaceSettings')&&importer&&!importer.endsWith('interfaceSettings.ios.ts'))return root+'src/platform/interfaceSettings.ios.ts';},
     async load(id){if(id==='\0math-native')return native;if(id==='\0math-webview')return transformWithEsbuild(webview,'math-webview.tsx',{loader:'tsx',jsx:'automatic'});},
