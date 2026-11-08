@@ -1,6 +1,7 @@
-<!-- [Input] APP-06消息阅读PRD、原Native Markdown、消息列表与滚动实现。 -->
-<!-- [Output] 消息预览测量、局部横滚、底部跟随的交互和状态合同。 -->
-<!-- [Pos] Native Chat消息展示交互；原Web、业务Hook和HTTP协议保持。 -->
+<!-- [Sync] 2026-11-08: 补充共享Markdown输入的剪贴板解析、原插入事务、失败恢复及状态图。 -->
+<!-- [Input] 消息阅读PRD、原Native Markdown、消息列表、共享MarkdownInputEditor与复制实现。 -->
+<!-- [Output] 消息预览测量、局部横滚、底部跟随及共享输入粘贴的交互和状态合同。 -->
+<!-- [Pos] Native Chat消息展示及共享Markdown输入交互；业务Hook和HTTP协议保持。 -->
 # Native对话消息阅读交互
 
 ## 背景与问题
@@ -113,3 +114,104 @@ stateDiagram-v2
 | 范围 | UI层最小修复；复用原业务Hook及公开协议 | provider-free完整旅程；真实模型、真机及发布独立登记 |
 
 方案通过最小范围评审。实现、技术验证、Simulator结果及剩余资格由[独立执行记录](../../exec/app-experience-chat-rendering-20261103.md)维护；PRD页面骨架归[消息阅读PRD](../../prd/chat/message-reading.md)。
+
+## 消息复制与输入区粘贴
+
+### 发现与方案选择
+
+`UserMessagePart → useCopy → navigator.clipboard.writeText(text)`已经复制完整Markdown。`MarkdownInputEditor`的初始化与外部草稿回写显式指定`contentType: 'markdown'`；普通剪贴板文本沿Tiptap默认粘贴，格式标记进入文字节点并在`getMarkdown()`中转义。
+
+修复入口选为原编辑器的`editorProps.handlePaste`，复用现有Markdown解析器及ProseMirror粘贴事务。消息复制继续输出原文。排除修改复制载荷、替换整份草稿及新增解析器：这些方案分别扩大剪贴板协议、覆盖选区外内容或重复维护已有语法。`insertContent`采用闭合块插入；段落中间粘贴使用原开放切片和选区替换，保持原段落。
+
+### 调用与边界
+
+1. 编辑器可编辑、剪贴板含文本、文件及HTML载荷为空、当前选择位于普通正文时，由`editor.markdown.parse`解析原文，按原编辑器schema生成并校验文档节点。
+2. `Slice.maxOpen(document.content)`生成开放切片；原`replaceSelection`事务插入节点，保留段落中选区外文字和原块结构。`closeHistory`将本次粘贴与之前编辑分组，事务携带原`paste/uiEvent`元数据，触发原`onUpdate → getMarkdown → onChange`。原草稿状态与发送入口接收序列化Markdown，撤销沿Tiptap历史执行。
+3. `transformPastedText`记录原ProseMirror的显式纯文本标记，文本内容保持原样。文件粘贴返回原`AIInputDock.handlePaste`附件处理；显式纯文本、HTML、代码块和行内代码沿原Tiptap粘贴。只读编辑器保持原内容。
+4. 先用同一marked实例识别table、image和task list item；对应schema节点缺失时交还原文字粘贴，保留整份原文。解析或选区替换抛错时沿同一恢复方式处理。新增处理没有错误弹窗、额外提交或业务接口。
+5. Web及`MarkdownInputDocument`共用此组件；Native桥接、文档身份、revision和草稿所有权保持。桌面与窄屏使用同一插入逻辑。
+6. `@tiptap/pm`声明为直接依赖，复用锁文件已有版本；ProseMirror schema、切片和历史均来自原Tiptap运行库。
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Bubble as UserMessagePart
+  participant Copy as useCopy
+  participant Clipboard as 系统剪贴板
+  participant Editor as MarkdownInputEditor
+  participant Markdown as Tiptap Markdown
+  participant Dock as AIInputDock
+  User->>Bubble: 点击复制
+  Bubble->>Copy: copy(text)
+  Copy->>Clipboard: writeText(完整Markdown)
+  Clipboard-->>Copy: 成功
+  Copy-->>User: 原已复制图标
+  User->>Editor: 普通正文选区粘贴
+  Editor->>Clipboard: 读取paste事件文本
+  Editor->>Markdown: parse(text)
+  Markdown-->>Editor: 文档节点
+  Editor->>Editor: schema校验与原选区粘贴事务
+  Editor->>Dock: onChange(getMarkdown())
+  Editor-->>User: 可编辑格式
+  User->>Dock: 编辑并点击Send
+  Dock->>Dock: 原onSendMessage入口
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Copy as useCopy
+  participant Clipboard as 系统剪贴板
+  participant Editor as MarkdownInputEditor
+  participant Tiptap as 原Tiptap粘贴
+  participant Dock as AIInputDock
+  User->>Copy: 点击复制
+  Copy->>Clipboard: writeText(text)
+  alt 复制失败
+    Clipboard-->>Copy: rejected
+    Copy-->>User: 原复制图标，消息与草稿保留
+    User->>Copy: 再次点击复制
+  else 已取得复制内容
+    User->>Editor: 粘贴
+    alt 文件载荷
+      Editor-->>Dock: 交还原附件粘贴
+      Dock-->>User: 原附件状态
+    else 显式纯文本、HTML或代码内文字
+      Editor-->>Tiptap: 原格式与文字插入
+    else schema缺少节点或Markdown解析及插入失败
+      Editor-->>Tiptap: 返回未处理
+      Tiptap-->>User: 普通文字草稿
+      User->>Editor: 编辑、撤销或重新粘贴
+    end
+  end
+```
+
+### 草稿状态转换
+
+以下状态描述原编辑器的内容变化，运行时沿原草稿与Tiptap历史持有状态。
+
+```mermaid
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Formatted: 普通正文粘贴Markdown成功
+  Draft --> Literal: 显式纯文本、代码、schema缺少节点或解析失败
+  Draft --> RichText: HTML沿原富文本粘贴
+  Draft --> Draft: 复制失败或只读
+  Formatted --> Draft: 撤销
+  Literal --> Draft: 撤销
+  RichText --> Draft: 撤销
+  Formatted --> Submitted: 原发送入口成功
+  Literal --> Submitted: 原发送入口成功
+  RichText --> Submitted: 原发送入口成功
+  Submitted --> Draft: 原输入区清空
+```
+
+### 验证归属
+
+`AIInputDockSlashMenuRegression.test.ts`以生产`UserMessagePart`和`AIInputDock`执行系统剪贴板旅程，覆盖1440px、390px、再次复制后的序列化稳定性、选区替换、撤销、显式纯文本、代码原文与HTML，以及表格、图片和任务列表的原文保留。其mock边界仅含原配置、存储能力及Skill目录读取，业务数据库与模型退出验证范围。移动应用设备剪贴板及正式发布需独立取得证据。
+
+本机headless Chrome普通粘贴由系统快捷键触发。显式纯文本使用按住Shift后的受控paste事件和系统剪贴板内容，核对原ProseMirror纯文本解析分支；本机headless Chrome的纯文本快捷键未产生paste事件，系统菜单快捷键资格独立保留。

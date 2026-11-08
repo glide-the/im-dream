@@ -34,6 +34,7 @@
     "@tiptap/extension-highlight": "^3.6.2",
     "@tiptap/extension-placeholder": "^3.7.2",
     "@tiptap/markdown": "^3.27.1",
+    "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.6.2",
     "@tiptap/starter-kit": "^3.6.2",
     "ai": "^6.0.191",
