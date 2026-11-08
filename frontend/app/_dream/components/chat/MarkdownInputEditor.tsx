@@ -1,3 +1,4 @@
+// [Sync] 2026-11-08: parse supported Markdown into native paste/undo transactions; retain unsupported source and explicit plain/HTML/file/code paste.
 // [Sync] 2026-10-29: skip effects for a destroyed Tiptap instance during placeholder-driven recreation and initial native prefill.
 // [Input] User-authored rich text, Markdown value, and composer keyboard/focus callbacks.
 // [Output] Accessible Tiptap composer that round-trips user input to Markdown and exposes optional autocomplete semantics.
@@ -12,6 +13,8 @@
 import { useEffect, useRef, type FocusEventHandler, type KeyboardEventHandler } from 'react';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from '@tiptap/markdown';
+import { closeHistory } from '@tiptap/pm/history';
+import { Slice } from '@tiptap/pm/model';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import './MarkdownInputEditor.css';
@@ -49,6 +52,7 @@ export default function MarkdownInputEditor({
 }: MarkdownInputEditorProps) {
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const pasteAsPlainTextRef = useRef(false);
   valueRef.current = value;
   onChangeRef.current = onChange;
 
@@ -102,6 +106,52 @@ export default function MarkdownInputEditor({
     }
     editor.setOptions({
       editorProps: {
+        transformPastedText: (text, plainText) => {
+          pasteAsPlainTextRef.current = plainText;
+          return text;
+        },
+        handlePaste: (view, event) => {
+          const clipboard = event.clipboardData;
+          if (
+            event.defaultPrevented
+            || !editor.isEditable
+            || pasteAsPlainTextRef.current
+            || !clipboard
+            || clipboard.files.length > 0
+            || clipboard.getData('text/html')
+            || editor.isActive('codeBlock')
+            || editor.isActive('code')
+          ) {
+            return false;
+          }
+          const text = clipboard.getData('text/plain');
+          if (!text || !editor.markdown) return false;
+          const transaction = closeHistory(view.state.tr);
+          try {
+            let unsupportedContent = false;
+            editor.markdown.instance.walkTokens(editor.markdown.instance.lexer(text), (token) => {
+              if (
+                (token.type === 'table' && !editor.schema.nodes.table)
+                || (token.type === 'image' && !editor.schema.nodes.image)
+                || (token.type === 'list_item' && token.task && !editor.schema.nodes.taskItem)
+              ) {
+                unsupportedContent = true;
+              }
+            });
+            if (unsupportedContent) return false;
+            const document = editor.schema.nodeFromJSON(editor.markdown.parse(text));
+            document.check();
+            transaction.replaceSelection(Slice.maxOpen(document.content))
+              .scrollIntoView()
+              .setMeta('paste', true)
+              .setMeta('uiEvent', 'paste');
+          } catch {
+            // Let Tiptap retain the clipboard text when Markdown parsing fails.
+            return false;
+          }
+          view.dispatch(transaction);
+          return true;
+        },
         attributes: {
           id,
           role: 'textbox',
