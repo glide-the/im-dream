@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: record the creating execution end through versioned origin creation.
 # [Sync] 2026-09-27: bind returning task creation to Admin's separate operation without changing side-task defaults.
 # [Sync] 2026-09-27: bind task-session source/created navigation to its exact Admin operation hash.
 # [Sync] 2026-09-27: bind task-session create/get/launch to exact Admin operation hashes.
@@ -12,6 +13,7 @@ from .client import AdminDataClient, DomainOperation
 from .models import OperationCapabilityDTO
 from .errors import invalid_response
 from . import chat_models as dto
+from .continuation_data import CONTINUATION_OPERATIONS
 
 CREATE_THREAD = DomainOperation(
     OperationCapabilityDTO(name='chat-thread.create', kind='write', user_scope='dream:write',
@@ -146,7 +148,7 @@ LAUNCH_TASK_SESSION = DomainOperation(
     dto.TaskSessionLaunchInputDTO, dto.TaskSessionLaunchResultDTO,
 )
 
-CHAT_OPERATIONS = (CREATE_THREAD, GET_THREAD, LIST_THREADS, SEARCH_THREADS, DELETE_THREAD, BIND_DECK, SELECT_VOICE, UPDATE_TITLE, UPDATE_SESSION, PERSIST_MESSAGE, LIST_MESSAGES, MESSAGE_PAGE, PROCESS_DETAIL, LATEST_MESSAGE, ENQUEUE_INPUT, LIST_INPUTS, TRANSITION_INPUT, CREATE_TASK_SESSION, CREATE_RETURNING_TASK_SESSION, GET_TASK_SESSION, LIST_TASK_SESSION_LINKS, LAUNCH_TASK_SESSION,)
+CHAT_OPERATIONS = (CREATE_THREAD, GET_THREAD, LIST_THREADS, SEARCH_THREADS, DELETE_THREAD, BIND_DECK, SELECT_VOICE, UPDATE_TITLE, UPDATE_SESSION, PERSIST_MESSAGE, LIST_MESSAGES, MESSAGE_PAGE, PROCESS_DETAIL, LATEST_MESSAGE, ENQUEUE_INPUT, LIST_INPUTS, TRANSITION_INPUT, CREATE_TASK_SESSION, CREATE_RETURNING_TASK_SESSION, GET_TASK_SESSION, LIST_TASK_SESSION_LINKS, LAUNCH_TASK_SESSION,) + CONTINUATION_OPERATIONS
 
 
 class AdminChatData:
@@ -161,7 +163,8 @@ class AdminChatData:
         self._client = client
 
     def create_thread(self, input_dto: dto.ThreadCreateInputDTO, request_id: str, *, access_token: str) -> dto.ThreadCreateResultDTO:
-        return self._client.execute(CREATE_THREAD, input_dto, request_id, access_token=access_token)
+        from .continuation_data import CREATE_WITH_ORIGIN, OriginCreateInput, execution_origin, execute
+        return execute(self._client, CREATE_WITH_ORIGIN, OriginCreateInput(**input_dto.model_dump(), created_execution_origin=execution_origin()), request_id, access_token=access_token)
 
     def get_thread(self, input_dto: dto.ThreadIdInputDTO, request_id: str, *, access_token: str) -> dto.ThreadResultDTO:
         return self._client.execute(GET_THREAD, input_dto, request_id, access_token=access_token)

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: register exact continuation operations.
 # [Sync] 2026-10-23: register the five task-scoped Reflections Notion v2 operations in the shared production client.
 # [Sync] 2026-10-15: register additive memory artifact/settings contracts.
 # [Sync] 2026-10-14: register additive history-page without requiring it for unrelated operations.

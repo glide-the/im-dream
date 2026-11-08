@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: inject explicit continuation fixtures for legacy Service unit contracts.
 # [Sync] 2026-10-26: a committed confirmation retries the original Hook with no model or assistant write; Hook errors retain the existing terminal failure.
 # [Sync] 2026-10-23: ordinary turn fixtures return no task-owned Notion runtime, preserving Chat projection coverage.
 # [Sync] 2026-10-07: scheduled tool-only completions persist a visible final receipt for durable result settlement.
@@ -259,6 +260,9 @@ class _LegacyTurnPersistence(
         )
 
 
+from tests.fixtures.continuation_persistence import UnitContinuationStorage as _UnitContinuationStorage, bind_continuation_fixture
+
+
 class ClaudeAgentService(_ProductionClaudeAgentService):
     """Test-only DI for historical fixtures without a real Admin server."""
 
@@ -267,7 +271,14 @@ class ClaudeAgentService(_ProductionClaudeAgentService):
             "system_config_reader",
             lambda user_id: _db.get_system_config(int(user_id)),
         )
+        kwargs.setdefault("continuation_storage_factory", _UnitContinuationStorage)
         super().__init__(*args, **kwargs)
+
+    async def execute_session(self, execution):
+        if execution.request.admin_turn_persistence is None:
+            execution.request.admin_turn_persistence = _LegacyTurnPersistence()
+        bind_continuation_fixture(execution, persist_user=not isinstance(self._persist_user_message, unittest.mock.AsyncMock))
+        return await super().execute_session(execution)
 
     async def assemble_context(self, request, **kwargs):
         if request.admin_turn_persistence is None:
@@ -590,7 +601,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         }
         for resume, stored, located, expected, failure in (
             (True, {}, None, False, None),
-            (True, row, None, False, "CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE"),
+            (True, row, None, True, None),
             (True, row, "/verified-transcript", True, None),
             (False, row, "/verified-transcript", False, "CLAUDE_RESUME_REQUIRED_FOR_BOUND_THREAD"),
             (True, {**row, "agent_contract_version": "old"}, None, False, "CLAUDE_RESUME_SESSION_UNAVAILABLE"),

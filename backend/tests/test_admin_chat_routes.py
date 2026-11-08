@@ -1,3 +1,5 @@
+# [Sync] 2026-11-08: same-ID pending preparation retry retains owner/claim gates and rejects uncertain dispatch.
+# [Sync] 2026-11-04: versioned origin creation and deferred continuation persistence.
 # [Input] Public production Chat routes with the real Admin DTO transport and explicit fake auth/runtime providers.
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
@@ -29,6 +31,7 @@ from fastapi.testclient import TestClient
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError, OAuthPrincipalClaims
 from services.admin_data.chat_data import CHAT_OPERATIONS
+from services.admin_data.continuation_data import CONTINUATION_SCHEMA
 from services.admin_data.profile_data import CURRENT_PROFILE
 from services.admin_data.request_auth import AdminRequestAuth
 from services.admin_data.workflow_data import RESOLVE_WORKFLOW_CONTEXT, WORKFLOW_SCHEMA_REQUIREMENTS
@@ -98,7 +101,7 @@ def boundary(monkeypatch):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     summary = {key: value for key, value in thread_value().items() if key in {"id", "title", "deck_id", "voice_id", "created_at", "updated_at"}}
     outputs = {
-        "chat-thread.get": {"thread": thread_value()}, "chat-thread.create": {"thread_id": "created-thread", "deck_id": None, "voice_id": None},
+        "chat-thread.get": {"thread": thread_value()}, "chat-thread.create-with-origin": {"thread_id": "created-thread", "deck_id": None, "voice_id": None},
         "chat-thread.list": {"threads": [summary]}, "chat-thread.search": {"threads": [{**summary, "messages_text": "Saved conversation"}]},
         "chat-thread.delete": {"changed": True}, "chat-message.list": {"messages": [message_value()]},
         "chat-message.persist": {"message_id": "public-message-1"},
@@ -127,7 +130,7 @@ def boundary(monkeypatch):
             assert "x-ink-dream-service-authorization" not in request.headers
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": [item.model_dump() for item in DELEGATION_CAPABILITIES]},
-                "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
+                "schema_capabilities": [item.model_dump() for item in (*RUNTIME_SCHEMA_REQUIREMENTS, CONTINUATION_SCHEMA)], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
         elif request.url.path.endswith("/principal"):
             value = {
                 "subject": "opaque-subject",
@@ -578,10 +581,10 @@ def request(client, method, path, **kwargs):
 
 def test_create_thread_uses_admin_owned_deck_voice_transaction(boundary):
     client, outputs, calls, _ = boundary
-    outputs["chat-thread.create"] = {"thread_id": "created-thread", "deck_id": "owned-deck", "voice_id": "owned-voice"}
+    outputs["chat-thread.create-with-origin"] = {"thread_id": "created-thread", "deck_id": "owned-deck", "voice_id": "owned-voice"}
     response = request(client, "POST", "/api/claude-agent/threads", json={"deckId": "owned-deck", "voiceId": "owned-voice", "title": "Title"})
-    assert response.status_code == 200 and response.json() == outputs["chat-thread.create"]
-    assert calls[0][:2] == ("chat-thread.create", {"deck_id": "owned-deck", "voice_id": "owned-voice", "title": "Title"})
+    assert response.status_code == 200 and response.json() == outputs["chat-thread.create-with-origin"]
+    assert calls[0][:2] == ("chat-thread.create-with-origin", {"deck_id": "owned-deck", "voice_id": "owned-voice", "title": "Title", "created_execution_origin": "web_cloud"})
 
 
 def test_voice_without_deck_preserves_422_before_domain_write(boundary):
@@ -754,22 +757,22 @@ def test_owner_absence_and_readonly_scope_fail_closed(boundary):
 @pytest.mark.parametrize("failure,status", [((409, "CHAT_MESSAGE_IDENTITY_CONFLICT"), 409), (httpx.ReadTimeout("safe timeout"), 504)])
 def test_writes_do_not_retry_and_report_original_unknown_request(boundary, failure, status):
     client, outputs, calls, _ = boundary
-    outputs["chat-thread.create"] = failure
+    outputs["chat-thread.create-with-origin"] = failure
     response = request(client, "POST", "/api/claude-agent/threads", json={})
     assert response.status_code == status and len(calls) == 1
     assert response.json()["detail"]["request_id"] == calls[0][2]
     assert response.json()["detail"]["outcome_unknown"] is (status == 504)
 
 
-def test_stream_reserves_original_user_identity_through_admin_before_runtime(boundary):
+def test_stream_retains_original_identity_for_service_claim(boundary):
     client, _, calls, factory = boundary
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
     assert response.text == ": explicit-fake-runtime\n\n"
-    assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create", "chat-user-message.persist"]
-    assert calls[-3][1] == {"purpose": "gateway-cli", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["messages:create", "messages:count_tokens", "models:list"]}
-    assert calls[-2][1] == {"purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["dream:read", "dream:write"]}
-    assert calls[-1][1] == {"thread_id": "owned-thread", "message_id": "public-message-1", "parts_json": '[{"type":"text","text":"Original user message"}]', "metadata_json": None, "title_candidate": "Original user message"}
+    assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create"]
+    assert calls[-2][1] == {"purpose": "gateway-cli", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["messages:create", "messages:count_tokens", "models:list"]}
+    assert calls[-1][1] == {"purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["dream:read", "dream:write"]}
+    assert all(call[0] != "chat-user-message.persist" for call in calls)
     assert len(factory.run_requests) == 1 and factory.run_requests[0].message_id == "public-message-1"
     resolution = factory.run_requests[0].admin_workflow_resolution
     assert resolution is not None and resolution.context_for(actor_id="42", thread_id="owned-thread") is None
@@ -791,6 +794,25 @@ def test_orphaned_queue_blocks_new_chat_turn_before_runtime(boundary):
     assert response.json()["detail"]["error_code"] == "CHAT_INPUT_RECONCILIATION_REQUIRED"
     assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list"]
     assert not factory.run_requests
+
+
+@pytest.mark.parametrize("status,turn_id,allowed", [
+    ("queued", None, True), ("selected", None, True),
+    ("dispatching", "existing-attempt", False), ("state_unknown", None, False),
+])
+def test_same_pending_message_may_retry_only_before_durable_claim(boundary, status, turn_id, allowed):
+    client, outputs, _, factory = boundary
+    outputs["chat-input.list"] = {"entries": [{"message_id": "original-pending", "thread_id": "owned-thread",
+        "queue_sequence": "1", "status": status, "revision": 1, "dispatch_turn_id": turn_id,
+        "created_at": "2026-09-26T00:00:00Z", "text": "waiting"}]}
+    response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "resume": True,
+        "message": {"id": "original-pending", "parts": [{"type": "text", "text": "waiting"}]}})
+    assert response.status_code == (200 if allowed else 409)
+    assert len(factory.run_requests) == int(allowed)
+    if allowed:
+        assert factory.run_requests[0].message_id == "original-pending"
+    else:
+        assert response.json()["detail"]["error_code"] == "CHAT_INPUT_RECONCILIATION_REQUIRED"
 
 
 @pytest.mark.parametrize("method,path,json_body", [
@@ -823,7 +845,7 @@ def test_queue_routes_require_authenticated_user(boundary, method, path, json_bo
     assert not calls and not factory.run_requests
 
 
-def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
+def test_route_defers_identity_conflict_until_service_claim(
     boundary, monkeypatch
 ):
     from services.admin_data.editor_runtime import AdminEditorRuntime
@@ -835,14 +857,13 @@ def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
     monkeypatch.setattr(AdminEditorRuntime, "close", lambda self: closed.append("editor"))
     outputs["chat-user-message.persist"] = (409, "CHAT_MESSAGE_IDENTITY_CONFLICT")
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "conflicting value"}]}})
-    assert response.status_code == 409 and not factory.run_requests
-    assert response.json()["detail"]["error_code"] == "CHAT_MESSAGE_IDENTITY_CONFLICT"
-    assert response.json()["detail"]["message"] == "The message identifier is already bound."
-    assert len(calls) == 7 and calls[-1][0] == "chat-user-message.persist"
-    assert closed == ["turn", "editor"]
+    assert response.status_code == 200 and len(factory.run_requests) == 1
+    assert all(item[0] != "chat-user-message.persist" for item in calls)
+    assert "private" not in response.text
 
 
-def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
+
+def test_editor_grant_is_exact_and_precedes_service_claim(boundary):
     client, outputs, calls, factory = boundary
 
     def created(input_dto, _request_id):
@@ -869,7 +890,6 @@ def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
         "runtime-delegation.create",
         "runtime-delegation.create",
         "runtime-delegation.create",
-        "chat-user-message.persist",
     ]
     assert calls[6][1] == {
         "purpose": "editor-stdio",
@@ -942,11 +962,10 @@ def test_server_grant_failure_precedes_message_or_runtime(boundary):
     assert [item[0] for item in calls] == ["chat-thread.get", "chat-input.list", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "runtime-delegation.create"]
 
 
-def test_atomic_reservation_unknown_is_not_retried_or_started(boundary):
+def test_route_never_calls_legacy_reservation_before_preparation(boundary):
     client, outputs, calls, factory = boundary
     outputs["chat-user-message.persist"] = httpx.ReadTimeout("synthetic private diagnostic")
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
-    assert response.status_code == 504 and response.json()["detail"]["error_code"] == "ADMIN_TIMEOUT"
-    assert response.json()["detail"]["outcome_unknown"] is True
-    assert not factory.run_requests and sum(item[0] == "chat-user-message.persist" for item in calls) == 1
+    assert response.status_code == 200 and len(factory.run_requests) == 1
+    assert all(item[0] != "chat-user-message.persist" for item in calls)
     assert "private" not in response.text

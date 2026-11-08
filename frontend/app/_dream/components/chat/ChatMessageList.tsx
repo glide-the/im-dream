@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: show user-facing continuation failures through the existing error card.
 // [Sync] 2026-10-30: share original pure tool projections with Native; original DOM render tree and event handlers remain.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -63,7 +64,7 @@
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
 // [Sync] 2026-10-07: render durable task markers when persisted Tool output and final prose occupy separate assistant messages.
 // [Sync] 2026-10-14: replace exact Reflections Analyze user prompts with one section-navigation tag.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -244,6 +245,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   const {details:historicalProcessDetails,load:loadHistoricalProcess}=useHistoricalChatProcess(threadId,messages,historicalMessageIds);
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
+  const isContinuationFailure = Boolean(errorCode?.startsWith('CLAUDE_RESUME_') || errorCode?.startsWith('CHAT_CONTINUATION_'));
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
   const isDreamAutoRepairFailure = errorCode === 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED';
   const isDreamArtifactSyncFailure = (
@@ -804,7 +806,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
         >
           <div style={{ fontWeight: 700 }}>
             {t(
-              isDreamBindingConflict
+              isContinuationFailure ? 'chat.continuation.title' : isDreamBindingConflict
                 ? 'chat.turnError.bindingConflictTitle'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedTitle'
@@ -819,7 +821,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
           </div>
           <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
             {dreamAutoRepairFailureText ?? t(
-              isDreamBindingConflict
+              isContinuationFailure ? (errorCode?.includes('HISTORY_UNSUPPORTED') ? 'chat.continuation.unsupported' : errorCode === 'CHAT_CONTINUATION_BUSY' ? 'chat.continuation.busy' : errorCode?.includes('ALREADY_CLAIMED') || errorCode?.includes('RESULT_UNKNOWN') ? 'chat.inputQueue.stateUnknown' : 'chat.continuation.failed') : isDreamBindingConflict
                 ? 'chat.turnError.bindingConflictDescription'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedDescription'

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: show same-conversation preparation in the existing native composer area.
 // [Sync] 2026-11-03: retain business views behind an idle clock and share native account Thread presence.
 // [Sync] 2026-11-03: pause hidden Chat UI publication while its live Thread readers remain account-owned.
 // [Sync] 2026-11-03: retain the current Thread composer on reselection and discard previews after confirmed deletion.
@@ -227,6 +228,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
           sendUserMessage={value=>{setToolChoice('auto');return session.sendUserMessage(value,thread??null);}} addToolResult={value=>session.addToolResult(value,thread??null)} onConfirmationSettled={id=>session.settleToolCall(id,thread??null)} onSessionExpired={()=>void refreshSession()}
           onEditorJump={detail=>{setEditorJump({nonce:++editorJumpNonce.current,detail});openSection('more');}}/>:part.type==='file'?<FileMessagePart part={part} origin={origin} isUserMessage={message.role==='user'} resources={messageFiles} onOpenLink={url=>void openExternalLink(url).catch(()=>setError('链接暂时无法打开。'))}/>:null} />}
       composer={<View style={styles.shrink}>
+      {session.preparing?<InkLabel accessibilityRole="text" style={{color:foreground,padding:8}}>{t('chat.continuation.preparing')}</InkLabel>:null}
       {session.queue.some(isThreadInputQueueCard)?<ScrollView accessibilityLabel={t('chat.inputQueue.region')} style={styles.queue} contentContainerStyle={{gap:4.8}} keyboardShouldPersistTaps="handled">
         {session.queue.filter(isThreadInputQueueCard).map(entry=><ThreadInputQueueCard key={entry.message_id} entry={entry} localOwner={session.localOwner} onGuide={session.guide} onCancel={session.cancelInput} onEdit={session.editInput} onSideChat={openSideChat}/>)}
       </ScrollView>:null}

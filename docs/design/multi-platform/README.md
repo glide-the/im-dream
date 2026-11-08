@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-04: 索引同一Thread与原Claude会话的跨端继续文档方案，实施及业务验收待完成。 -->
 <!-- [Sync] 2026-11-03: APP-04补应用内屏保静态动画与iOS系统组件，共享活跃Thread有／无；实现保持暂停。 -->
 <!-- [Sync] 2026-11-03: APP-04入口分为产品交互与开发文档，新增iOS/Android拓扑及对象关系，Web保持。 -->
 <!-- [Sync] 2026-11-03: APP-04导航同步双后台执行适配、真实进度、系统到期与原恢复；新增接口建议未实现。 -->
@@ -46,6 +47,7 @@
 APP-04分为[产品交互设计](mobile-recovery-interaction.md)与[开发文档](mobile-background-execution-technical.md)。产品稿定义手机本机计算、按需播放、失败反馈和恢复；开发稿直接包含iOS/Android拓扑、适配器类图、运行期对象关系、接口及正常/异常时序。Web沿原路径。新增实现均为建议、未实现，持续计算缺口和平台前置明确列出。[前稿及原六幅图](history/mobile-recovery-mixed-draft-20261103.md)完整保留，[执行记录](../../exec/app-experience-foreground-recovery-20261102.md)维护实施状态与验证证据。
 
 新增[应用内静态动画与系统组件](mobile-recovery-interaction.md#应用内静态动画与系统组件2026-11-03)：App前台25秒无操作显示原页面上方屏保，iOS锁屏／灵动岛提供系统入口；两处共享当前账户本机Thread“有／无”。原任务及后台许可保持原所有权，具体聚合、计时、虚化与扩展接线归开发文档。
+
 
 当前名称规则见[应用名称需求](../../prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
@@ -115,3 +117,8 @@ iPhone Notion安装提示的触发条件、资源入口和失败恢复见[现行
 端侧网页链接与Notion授权恢复见[iOS现行交互](mobile-ios-interaction.md#端侧网页链接与notion授权恢复2026-11-01)，[本轮执行记录](../../exec/ios-notion-links-20261101.md)区分模拟器技术、七项Web及真实授权资格。
 
 APP-06消息展示按[消息阅读交互](chat-message-reading.md)和[PRD骨架](../../prd/chat/message-reading.md)执行；[独立记录](../../exec/app-experience-chat-rendering-20261103.md)分别登记原失败、技术、Simulator与剩余资格。
+
+
+[同一对话跨端继续](cross-platform-chat-continuation.md)定义mobile创建的原Thread在Web恢复原Claude会话的规则与实现；[Chat PRD](../../prd/chat/cross-platform-continuation.md)持有产品规则及页面骨架。Dream与Admin源码、安装Runtime 0.1.12的fake provider恢复及隔离PostgreSQL合同通过；评审为“待满足明确前提后通过”，Admin已正常发布，客户端已采用；中断回归修订与跨端真实业务验收进行中。
+
+2026-11-04源码进展：[同一会话跨端继续](cross-platform-chat-continuation.md#2026-11-04代码实现)已接入Dream与Admin；[实施记录](../../exec/cross-platform-chat-continuation-20261104.md)维护技术验证、0086正常发布及客户端采用前提。

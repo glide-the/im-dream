@@ -1,3 +1,5 @@
+# [Sync] 2026-11-04: avoid a second terminal transition for Service-owned continuation claims.
+# [Sync] 2026-11-08: queued input stays pending through setup; Service alone claims it after transcript preparation.
 # [Sync] 2026-11-03: expose account-scoped read-only running presence to local host observers; task ownership and dispatch remain unchanged.
 # [Sync] 2026-10-26: retain current SDK observation while a verified committed reply completes its original queue lifecycle.
 # [Sync] 2026-09-28: use the Admin-bound scheduled turn ID under the ordinary Thread lock before entering the shared Service.
@@ -625,12 +627,9 @@ class ClaudeAgentThreadFactory:
             selected = [pair for pair in candidates if pair[1].status == "selected"]
             item, entry = min(selected or candidates, key=lambda pair: pair[0].queue_sequence)
             turn_id = str(uuid4())
-            claim = await asyncio.to_thread(
-                persistence.transition_queued_input,
-                actor_id=request.user_id, thread_id=thread_id,
-                message_id=item.message_id, expected_revision=entry.revision,
-                action="claim", dispatch_turn_id=turn_id,
-            )
+            # Reserve only the local attempt identity. Service's atomic
+            # continuation claim owns the durable transition after prepare.
+            claim = entry.model_copy(update={"dispatch_turn_id": turn_id})
             queued.remove(item)
             return item, claim
 
@@ -733,6 +732,7 @@ class ClaudeAgentThreadFactory:
         admission_lease: AgentAdmissionLease | None = None
         current_request = request
         active_queue_claim: chat_dto.QueueEntryDTO | None = None
+        execution = None
         try:
             admission_lease = self._admission.try_acquire(session_id)
             if request.admin_turn_persistence is not None:
@@ -759,6 +759,7 @@ class ClaudeAgentThreadFactory:
                 runner = state.runner
             first_execution = True
             while True:
+                execution = None
                 state.current_message_metadata = (
                     dict(current_request.message_metadata)
                     if isinstance(current_request.message_metadata, dict)
@@ -793,10 +794,14 @@ class ClaudeAgentThreadFactory:
                     )
                     session_started = True
                     first_execution = False
-                continuation: ClaudeAgentTurnContinuation | None = (
-                    await self._service.execute_session(execution)
-                )
-                if active_queue_claim is not None:
+                try:
+                    continuation: ClaudeAgentTurnContinuation | None = (
+                        await self._service.execute_session(execution)
+                    )
+                finally:
+                    if getattr(execution, "continuation_managed", False):
+                        active_queue_claim = None
+                if active_queue_claim is not None and active_queue_claim.status == "dispatching":
                     if execution.user_response_committed:
                         queue_action = "consume"
                     elif execution.queue_result_failed:
@@ -926,14 +931,21 @@ class ClaudeAgentThreadFactory:
                         session_id,
                     )
         finally:
-            if active_queue_claim is not None and request.admin_turn_persistence is not None:
+            if active_queue_claim is not None and active_queue_claim.status == "dispatching" and request.admin_turn_persistence is not None:
                 try:
+                    # Service owns every possible SDK invocation after its
+                    # continuation handoff. A legacy queue claim left here
+                    # failed during assembly/preparation, before that handoff.
+                    action = ("fail" if execution is None or (
+                        not getattr(execution, "continuation_managed", False)
+                        and not getattr(execution, "continuation_armed", False)
+                    ) else "mark_unknown")
                     await asyncio.to_thread(
                         request.admin_turn_persistence.transition_queued_input,
                         actor_id=request.user_id, thread_id=session_id,
                         message_id=active_queue_claim.message_id,
                         expected_revision=active_queue_claim.revision,
-                        action="mark_unknown",
+                        action=action,
                         dispatch_turn_id=active_queue_claim.dispatch_turn_id,
                     )
                 except Exception:

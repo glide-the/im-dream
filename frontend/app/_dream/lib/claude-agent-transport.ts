@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: forward transient continuation preparation feedback without history bubbles.
 // [Sync] 2026-10-12: carry actual context-use snapshots through original assistant metadata assembly.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-12: observe each POST admission from production SSE, not response headers, for submission-owned Stop.
@@ -267,6 +268,7 @@ export function readClaudeAgentErrorText(error: unknown): string | null {
 }
 
 type BackendEvent =
+  | { type: 'data-continuation'; state: 'preparing' | 'ready' }
   | BackendMessageMetadata
   | BackendTextStart
   | BackendTextDelta
@@ -334,6 +336,10 @@ function convertEvent(
   };
 
   switch (event.type) {
+    case 'data-continuation': {
+      chunks.push({ type: 'data-continuation', data: { state: event.state }, transient: true });
+      break;
+    }
     // -----------------------------------------------------------------------
     // Text streaming
     // -----------------------------------------------------------------------

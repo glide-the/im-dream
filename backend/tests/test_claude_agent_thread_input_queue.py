@@ -5,6 +5,7 @@
 # [Sync] 2026-09-28: verify a result-owned Factory turn drains a queued user input before owner completion.
 # [Sync] 2026-09-28: verify wait_threads can wake on a newly accepted source input without claiming consumption.
 # [Sync] 2026-09-28: verify selection records only an acknowledged, turn-scoped interrupt.
+# [Sync] 2026-11-08: queued setup preserves pending input until Service's single continuation claim.
 from __future__ import annotations
 
 import asyncio
@@ -96,13 +97,17 @@ async def test_queue_claims_one_message_in_sequence_and_replays_same_id():
     second = await add("message-b", "two")
     assert (first.queue_sequence, second.queue_sequence, provider.sequence) == ("1", "2", 2)
     item, claim = await factory._claim_next_input(request, state)
-    assert (item.message_id, claim.status) == ("message-a", "dispatching")
+    assert (item.message_id, claim.status) == ("message-a", "queued")
+    assert provider.entries["message-a"].status == "queued"
     assert len(factory._input_queues[request.thread_id]) == 1
+    claim = provider.transition_queued_input(actor_id="42", thread_id=request.thread_id,
+                                              message_id="message-a", expected_revision=claim.revision,
+                                              action="claim", dispatch_turn_id=claim.dispatch_turn_id)
     provider.transition_queued_input(actor_id="42", thread_id=request.thread_id,
                                      message_id="message-a", expected_revision=claim.revision,
                                      action="consume", dispatch_turn_id=claim.dispatch_turn_id)
     item, claim = await factory._claim_next_input(request, state)
-    assert (item.message_id, claim.status) == ("message-b", "dispatching")
+    assert (item.message_id, claim.status) == ("message-b", "queued")
 
 
 @pytest.mark.asyncio
@@ -152,7 +157,8 @@ async def test_selection_signals_current_owner_and_failed_interrupt_does_not_cla
     assert (selected.status, signalled, provider.interrupted) == ("selected", True, 1)
     assert state.guide_interrupt_turn_id == state.current_turn_id
     item, claim = await factory._claim_next_input(request, state)
-    assert (item.message_id, claim.status) == ("message-a", "dispatching")
+    assert (item.message_id, claim.status) == ("message-a", "selected")
+    assert provider.entries["message-a"].status == "selected"
 
     failing_factory = ClaudeAgentThreadFactory()
     failing_provider = QueueProvider()
@@ -193,8 +199,14 @@ async def test_task_result_owner_finishes_queued_user_input_before_releasing_gra
             first_started.set()
             await release_first.wait()
         else:
+            claim = execution.request.queued_input_claim
+            claimed = provider.transition_queued_input(actor_id="42", thread_id=execution.request.thread_id,
+                message_id=message_id, expected_revision=claim.revision, action="claim", dispatch_turn_id=claim.dispatch_turn_id)
+            execution.continuation_managed = True
             second_started.set()
             await release_second.wait()
+            provider.transition_queued_input(actor_id="42", thread_id=execution.request.thread_id,
+                message_id=message_id, expected_revision=claimed.revision, action="consume", dispatch_turn_id=claimed.dispatch_turn_id)
         await execution.bus.publish(NormalizedAgentEvent.create(
             "message-final", {"text": "completed"},
         ))
@@ -244,3 +256,50 @@ async def test_task_result_owner_finishes_queued_user_input_before_releasing_gra
 
 async def _collect_stream(stream):
     return [frame async for frame in stream]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["assembly", "preparation"])
+async def test_queued_setup_failure_keeps_query_uncertainty_separate(monkeypatch, failure_stage):
+    factory = ClaudeAgentThreadFactory()
+    provider = QueueProvider()
+    first_started, release_first = asyncio.Event(), asyncio.Event()
+
+    async def assemble(request, *, state, bus, runner):
+        if request.message_id == "queued-follow-up" and failure_stage == "assembly":
+            raise RuntimeError("fixture context assembly failed")
+        state.system_prompt = "isolated source context"
+        return SimpleNamespace(request=request, state=state, bus=bus, dream_context=None,
+                               sdk_terminal_received=False, user_response_committed=False, queue_result_failed=False,
+                               continuation_managed=False, continuation_armed=False)
+
+    async def execute(execution):
+        if execution.request.message_id == "queued-follow-up":
+            raise RuntimeError("fixture transcript preparation failed")
+        first_started.set()
+        await release_first.wait()
+        execution.sdk_terminal_received = True
+        execution.user_response_committed = True
+        await execution.bus.publish_terminal(NormalizedAgentEvent.create("finish", {"finishReason": "stop"}))
+
+    monkeypatch.setattr(factory._service, "assemble_context", assemble)
+    monkeypatch.setattr(factory._service, "execute_session", execute)
+    monkeypatch.setattr("claude_agent.thread_factory.ClaudeAgentRunner", lambda: object())
+    request = ClaudeAgentRunRequest(user_id="42", thread_id="source-setup-failure", message_id="initial",
+                                   message_parts=[{"type": "text", "text": "initial"}], admin_turn_persistence=provider)
+    stream = factory.run_streaming(request)
+    collector = asyncio.create_task(_collect_stream(stream))
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await factory.enqueue_input(thread_id=request.thread_id, user_id="42", message_id="queued-follow-up",
+                                    parts=[{"type": "text", "text": "retained follow-up"}], title_candidate="follow-up",
+                                    tool_choice="auto", chat=provider, access_token="owned-token")
+        release_first.set()
+        await asyncio.wait_for(collector, timeout=1)
+        await asyncio.wait_for(stream.owner_completion, timeout=1)
+        row = provider.entries["queued-follow-up"]
+        assert row.status == "queued"
+        assert row.text == "retained follow-up" and row.dispatch_turn_id is None
+    finally:
+        release_first.set()
+        await factory.aclose()
