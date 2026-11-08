@@ -1,0 +1,29 @@
+/* [Input] KaTeX markup and existing message font/color variables. */
+/* [Output] Formula-local horizontal scrolling with natural mathematical height. */
+/* [Pos] Chat math layout; message-list scrolling stays with its original owner. */
+/* [Sync] 2026-11-08: keep long inline/display formulas within the message width. */
+.chat-markdown { min-width: 0; }
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-math {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: middle;
+  padding-block: 0.2em;
+  color: inherit;
+  line-height: normal;
+  white-space: pre-wrap;
+}
+.chat-math--display {
+  display: block;
+  margin-block: 0.9em;
+  text-align: center;
+}
+.chat-math .katex { color: inherit; }
+.chat-math .katex-html { white-space: nowrap; }
+.chat-math .katex-display { margin: 0; }
+.chat-math .katex-display > .katex {
+  display: table;
+  min-width: 100%;
+}

@@ -4,12 +4,16 @@
 // [Sync] 2026-10-28: render original Workspace image/reference capabilities through native private-file leases and the bound Thread.
 // [Sync] 2026-10-28: align each native Markdown table column to its widest measured cell; original Web table/CSS remain unchanged.
 // [Input] Original Markdown/GFM text, current theme and caller-owned link/file navigation.
-// [Output] Native text, lists, tables and code using the existing react-markdown/remark-gfm parser.
-// [Pos] Markdown presentation adapter; original Web ChatMarkdown/CSS and third-party source remain unchanged.
+// [Output] Native text, lists, tables, math and code using the existing react-markdown parser.
+// [Sync] 2026-11-08: share explicit math syntax and isolate only formula-containing inline text in restricted MathML documents.
+// [Pos] Native Markdown presentation adapter; shared syntax and platform math leaves retain their own owners.
 import {Children,createContext,isValidElement,lazy,Suspense,useCallback,useContext,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ActivityIndicator,Image,ScrollView,StyleSheet,Text,View,useWindowDimensions,type TextProps,type TextStyle} from 'react-native';
 import Markdown,{defaultUrlTransform,type Components,type ExtraProps} from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkChatMath from './remarkChatMath';
+import {hasMath,type MathTextNode} from './chatMathRender';
+const ChatMath=lazy(()=>import('./ChatMath.native'));
 import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
 import {isWorkspaceUri,resolveWorkspaceDocumentReference,WORKSPACE_URI_PREFIX} from './workspaceUri';
@@ -17,9 +21,10 @@ import WorkspaceImage from './WorkspaceImage.native';
 const MermaidBlock=lazy(()=>import('./MermaidBlock.native'));
 import type {WorkspaceAvailability,WorkspaceResources} from '../../../../src/platform/workspaceFiles.native';
 import type {NativePickedFile} from '../../../../src/platform/fileUpload.native';
-const plugins=[remarkGfm];
+const plugins=[remarkGfm,remarkChatMath];
 const ListContext=createContext(false);
 const TextStyleContext=createContext<TextStyle>({fontSize:15.2,lineHeight:26.6});
+const MathDocumentContext=createContext<{onOpenLink?:(href:string)=>void;backgroundColor?:string}>({});
 const blockTags=new Set(['p','h1','h2','h3','h4','h5','h6','ul','ol','pre','blockquote','table','thead','tbody','tr','th','td','hr','div','section','img']);
 type Node={type:string;value?:string;children?:Node[];tagName?:string;properties?:Record<string,unknown>};
 // Native View cannot own bare formatting newlines; preserve literal root HTML as text.
@@ -31,6 +36,12 @@ function nativeRootText(){return (tree:unknown)=>{const root=tree as Node;root.c
 const rehypePlugins=[nativeRootText];
 function plain(children:ReactNode):string{return Children.toArray(children).map(child=>typeof child==='string'||typeof child==='number'?String(child):isValidElement<{children?:ReactNode}>(child)?plain(child.props.children):'').join('');}
 function RichText({children,style,...props}:Omit<TextProps,'children'>&{children?:ReactNode}){
+  const body=useContext(TextStyleContext),math=useContext(MathDocumentContext);
+  const nodes=Children.toArray(children).flatMap<MathTextNode>(child=>{
+    if(typeof child==='string'||typeof child==='number')return [{type:'text',value:String(child)}];
+    return isValidElement<ExtraProps>(child)&&child.props.node?[child.props.node]:[];
+  });
+  if(hasMath(nodes))return <Suspense fallback={<Text {...props} style={style}>{plain(children)}</Text>}><ChatMath nodes={nodes} textStyle={{backgroundColor:math.backgroundColor,...body,...StyleSheet.flatten(style)}} onLayout={props.onLayout} onOpenLink={math.onOpenLink}/></Suspense>;
   return <Text {...props} style={style}>{Children.map(children,(child,index)=>typeof child==='string'||typeof child==='number'?<InkLabel key={index}>{String(child)}</InkLabel>:child)}</Text>;
 }
 function flow(children:ReactNode,textStyle?:TextStyle):ReactNode[]{
@@ -69,8 +80,8 @@ function MarkdownImage({uri,alt}:{uri:string;alt?:string}){
     onLoad={({nativeEvent})=>{const {width:w,height:h}=nativeEvent.source;if(w>0&&h>0)setRatio(w/h);}} onError={()=>setFailed(true)}
     style={{width:Math.min(448,width-32),maxWidth:'100%',aspectRatio:ratio}}/>;
 }
-export interface NativeChatMarkdownProps{text:string;fontSize?:number;lineHeight?:number;color?:string;origin?:string;workspaceSessionId?:string;workspaceAvailability?:WorkspaceAvailability;workspaceResources?:WorkspaceResources;onAddImageMaterial?:(file:NativePickedFile)=>Promise<boolean>;workspaceDocumentPath?:string;onOpenLink?:(url:string)=>void;onOpenWorkspace?:(uri:string)=>void;}
-export default function ChatMarkdown({text,fontSize=15.2,lineHeight=26.6,color,origin,workspaceSessionId,workspaceAvailability='disabled',workspaceResources,workspaceDocumentPath,onOpenLink,onOpenWorkspace,onAddImageMaterial}:NativeChatMarkdownProps){
+export interface NativeChatMarkdownProps{text:string;fontSize?:number;lineHeight?:number;color?:string;backgroundColor?:string;origin?:string;workspaceSessionId?:string;workspaceAvailability?:WorkspaceAvailability;workspaceResources?:WorkspaceResources;onAddImageMaterial?:(file:NativePickedFile)=>Promise<boolean>;workspaceDocumentPath?:string;onOpenLink?:(url:string)=>void;onOpenWorkspace?:(uri:string)=>void;}
+export default function ChatMarkdown({text,fontSize=15.2,lineHeight=26.6,color,backgroundColor,origin,workspaceSessionId,workspaceAvailability='disabled',workspaceResources,workspaceDocumentPath,onOpenLink,onOpenWorkspace,onAddImageMaterial}:NativeChatMarkdownProps){
   const colors=useInkColors();
   const callbacks=useRef({onOpenLink,onOpenWorkspace,onAddImageMaterial});callbacks.current={onOpenLink,onOpenWorkspace,onAddImageMaterial};
   const canOpenLink=Boolean(onOpenLink),canOpenWorkspace=Boolean(onOpenWorkspace&&workspaceSessionId&&workspaceAvailability==='enabled'),canAddImageMaterial=Boolean(onAddImageMaterial);
@@ -82,6 +93,7 @@ export default function ChatMarkdown({text,fontSize=15.2,lineHeight=26.6,color,o
     const heading=(scale:number)=>({children}:{children?:ReactNode})=><RichText accessibilityRole="header" selectable style={[body,{fontSize:fontSize*scale,lineHeight:lineHeight*scale,fontWeight:'600',marginTop:fontSize*1.2,marginBottom:fontSize*0.5}]}>{children}</RichText>;
     return {
       p:paragraph,div:block,section:block,h1:heading(2),h2:heading(1.5),h3:heading(1.17),h4:heading(1),h5:heading(0.83),h6:heading(0.67),
+      span:({children})=><RichText>{children}</RichText>,
       strong:({children})=><RichText style={{fontWeight:'600',color:colors['color-text-primary']}}>{children}</RichText>,
       em:({children})=><RichText style={{fontStyle:'italic'}}>{children}</RichText>,del:({children})=><RichText style={{textDecorationLine:'line-through'}}>{children}</RichText>,
       br:()=> <Text>{'\n'}</Text>,sup:({children})=><RichText style={{fontSize:fontSize*0.75}}>{children}</RichText>,
@@ -92,12 +104,18 @@ export default function ChatMarkdown({text,fontSize=15.2,lineHeight=26.6,color,o
       code:({children,className})=>className==='language-mermaid'?<Suspense fallback={<ActivityIndicator/>}><MermaidBlock chart={plain(children)} origin={origin}/></Suspense>:<Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,color:colors['color-text-primary'],backgroundColor:colors['color-code-inline-bg']}}>{plain(children)}</Text>,
       pre:({children})=>{const child=Children.toArray(children)[0];return isValidElement<{className?:string}>(child)&&child.props.className==='language-mermaid'?<>{children}</>:<ScrollView testID="native-chat-markdown-code" horizontal style={[styles.code,{backgroundColor:colors['color-code-bg']}]} contentContainerStyle={[styles.horizontalContent,{padding:fontSize}]}><Text selectable style={{fontFamily:'Menlo',fontSize:fontSize*0.92,lineHeight,color:colors['color-code-text']}}>{plain(children)}</Text></ScrollView>;},
       a:({href,children})=>{const workspace=isWorkspaceUri(href),enabled=Boolean(href&&!href.startsWith('#')&&(workspace?canOpenWorkspace:canOpenLink));return <RichText accessibilityRole="link" aria-disabled={!enabled} accessibilityState={{disabled:!enabled}} onPress={enabled&&href?()=>{(workspace?callbacks.current.onOpenWorkspace:callbacks.current.onOpenLink)?.(href);}:undefined} style={{color:colors['color-action-link'],textDecorationLine:'underline'}}>{children}</RichText>;},
-      img:({src,alt})=>{if(typeof src==='string'&&src.startsWith(WORKSPACE_URI_PREFIX))return <WorkspaceImage uri={src} alt={alt} threadId={workspaceSessionId} availability={workspaceAvailability} resources={workspaceResources} onAddImageMaterial={canAddImageMaterial?file=>callbacks.current.onAddImageMaterial!(file):undefined}/>;let uri:string|undefined;if(typeof src==='string'&&src.length>0){try{uri=new URL(src,origin).href;}catch{}}return uri?<MarkdownImage key={uri} uri={uri} alt={alt}/>:<RichText>{alt ?? ''}</RichText>;},
+      img:({src,alt})=>{if(typeof src==='string'&&src.startsWith(WORKSPACE_URI_PREFIX))return <WorkspaceImage uri={src} alt={alt} threadId={workspaceSessionId} availability={workspaceAvailability} resources={workspaceResources} onAddImageMaterial={canAddImageMaterial?file=>callbacks.current.onAddImageMaterial!(file):undefined}/>;let uri:string|undefined;if(typeof src==='string'&&src.length>0){try{uri=new URL(src,origin).href;}catch{/* Invalid image URLs retain the original alt text. */}}return uri?<MarkdownImage key={uri} uri={uri} alt={alt}/>:<RichText>{alt ?? ''}</RichText>;},
       table:MarkdownTable,thead:block,tbody:block,tr:MarkdownTableRow,
       th:({children})=><MarkdownTableCell header>{children}</MarkdownTableCell>,td:MarkdownTableCell,
     };
   },[fontSize,lineHeight,bodyColor,colors,origin,canOpenLink,canOpenWorkspace,workspaceSessionId,workspaceAvailability,workspaceResources,canAddImageMaterial]);
-  return <TextStyleContext.Provider value={{fontSize,lineHeight,color:bodyColor}}><View style={{minWidth:0}}><Markdown remarkPlugins={plugins} rehypePlugins={rehypePlugins} components={components}
-    urlTransform={value=>{const resolved=resolveWorkspaceDocumentReference(value,workspaceDocumentPath);return isWorkspaceUri(resolved)?resolved:defaultUrlTransform(resolved);}}>{text}</Markdown></View></TextStyleContext.Provider>;
+  const openMathLink=useCallback((value:string)=>{
+    const resolved=resolveWorkspaceDocumentReference(value,workspaceDocumentPath);
+    if(isWorkspaceUri(resolved)){if(canOpenWorkspace)callbacks.current.onOpenWorkspace?.(resolved);return;}
+    const safe=defaultUrlTransform(resolved);
+    if(safe&&!safe.startsWith('#'))callbacks.current.onOpenLink?.(safe);
+  },[workspaceDocumentPath,canOpenWorkspace]);
+  return <TextStyleContext.Provider value={{fontSize,lineHeight,color:bodyColor}}><MathDocumentContext.Provider value={{onOpenLink:openMathLink,backgroundColor:backgroundColor??colors['color-bg-app']}}><View style={{minWidth:0}}><Markdown remarkPlugins={plugins} rehypePlugins={rehypePlugins} components={components}
+    urlTransform={value=>{const resolved=resolveWorkspaceDocumentReference(value,workspaceDocumentPath);return isWorkspaceUri(resolved)?resolved:defaultUrlTransform(resolved);}}>{text}</Markdown></View></MathDocumentContext.Provider></TextStyleContext.Provider>;
 }
 const styles=StyleSheet.create({block:{minWidth:0},paragraph:{marginBottom:13.68},list:{marginBottom:13.68,gap:3.8},listItem:{flexDirection:'row',alignItems:'flex-start',gap:8,marginBottom:3.8},bullet:{fontSize:15.2,lineHeight:26.6,minWidth:16},listBody:{flex:1,minWidth:0},quote:{borderLeftWidth:4,paddingVertical:11.4,paddingHorizontal:15.2,marginBottom:13.68},horizontalContent:{alignItems:'flex-start'},code:{flexGrow:0,flexShrink:0,maxWidth:'100%',marginBottom:13.68,borderRadius:5.6},table:{flexGrow:0,flexShrink:0,maxWidth:'100%',marginBottom:13.68},row:{flexDirection:'row'},cell:{paddingVertical:6.4,paddingHorizontal:12,borderWidth:1,minWidth:80,maxWidth:300}});
