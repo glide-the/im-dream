@@ -1,3 +1,4 @@
+// [Sync] 2026-11-08: pass each message surface color to formula-containing text documents.
 // [Sync] 2026-11-03: measure viewport-bound user previews and coalesce bottom movement after native layout; expansion retains reading intent.
 // [Sync] 2026-10-30: preserve the original source marker above the first user text or at the pagination boundary.
 // [Sync] 2026-10-30: share canonical process reads and keep validated MCP App document slots outside process disclosure across history/live projections.
@@ -50,7 +51,7 @@ function MessageText({text,user,showActions,origin,onOpenLink,onOpenWorkspace,wo
     <View style={user?[styles.bubble,{backgroundColor:colors['color-bg-paper'],shadowColor:colors['color-shadow-soft']}]:styles.assistant}>
       <View style={collapsible&&!expanded?{maxHeight:previewHeight,overflow:'hidden'}:undefined}>
         <View onLayout={user?({nativeEvent})=>setNaturalHeight(nativeEvent.layout.height):undefined} style={styles.textBody}>
-          <ChatMarkdown text={text} origin={origin} color={colors[user?'color-text-primary':'color-text-body']} fontSize={user?userMessageLayout.fontSize:15.2} lineHeight={user?userMessageLayout.lineHeight:26.6} onOpenLink={onOpenLink} onOpenWorkspace={onOpenWorkspace} workspaceSessionId={workspaceSessionId} workspaceAvailability={workspaceAvailability} workspaceResources={workspaceResources} onAddImageMaterial={onAddImageMaterial}/>
+          <ChatMarkdown text={text} origin={origin} backgroundColor={colors[user?'color-bg-paper':'color-bg-app']} color={colors[user?'color-text-primary':'color-text-body']} fontSize={user?userMessageLayout.fontSize:15.2} lineHeight={user?userMessageLayout.lineHeight:26.6} onOpenLink={onOpenLink} onOpenWorkspace={onOpenWorkspace} workspaceSessionId={workspaceSessionId} workspaceAvailability={workspaceAvailability} workspaceResources={workspaceResources} onAddImageMaterial={onAddImageMaterial}/>
         </View>
       </View>
       {collapsible?<Pressable accessibilityRole="button" accessibilityLabel={t(expanded?'chat.message.collapse':'chat.message.expand')} accessibilityState={{expanded}} aria-expanded={expanded} onPress={()=>{if(!expanded)onExpand();setExpanded(value=>!value);}} style={styles.messageToggle}>

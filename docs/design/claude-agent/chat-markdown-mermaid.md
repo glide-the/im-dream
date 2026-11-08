@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-08: 数学token接入同一ChatMarkdown；公式交互见chat-math-messages.md，Mermaid职责保持。 -->
 > [Input] Chat 页面报错堆栈（`[<pre /> in Markdown (at react-markdown) in AssistMessagePart ...]`）、`frontend/app/_dream/components/chat/AssistMessagePart.tsx`、`frontend/app/_dream/components/chat/UserMessagePart.tsx`、`frontend/app/_dream/components/chat/PlanPanel.tsx`
 > [Output] 定义 Chat 会话 Markdown 中 Mermaid 代码块的 SVG 渲染方案，并消除 `<pre>` 内嵌块级元素导致的 React DOM 嵌套报错。
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
@@ -94,3 +95,7 @@ PNG 导出实现要点：
 - 当前共享链由 `ChatMarkdown.tsx` 统一承载 Mermaid 与 exact Workspace URI component routing；Workspace 解析组件不复制 `ReactMarkdown`。
 - 不影响后端与 SSE 事件契约。
 - 验证：`pnpm --dir frontend build` 与 `pnpm --dir frontend lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。
+
+## 数学消息兼容
+
+共享Markdown增加[数学公式渲染](chat-math-messages.md)。公式通过span节点展示，原Mermaid的code/pre分派、图表操作和错误恢复继续由本文模块所有。

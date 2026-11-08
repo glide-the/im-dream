@@ -1,6 +1,7 @@
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
-// [Output] Shared GFM/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
+// [Output] Shared GFM/math/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
+// [Sync] 2026-11-08: add explicit math tokens and source-preserving selection copying to the original renderer.
 // [Pos] chat-markdown component node in frontend/app/_dream/components/chat
 // [Sync] 2026-07-20: created per docs/design/claude-agent/chat-markdown-mermaid.md — consolidates the
 //                    three local ReactMarkdown+remarkGfm call sites; `pre` override unwraps Mermaid
@@ -16,8 +17,12 @@ import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import MermaidBlock from './MermaidBlock';
 import { WorkspaceFileLink, WorkspaceImage } from './WorkspaceFileReference';
 import { isWorkspaceUri, resolveWorkspaceDocumentReference } from './workspaceUri';
+import remarkChatMath from './remarkChatMath';
+import ChatMath from './ChatMath';
+import {mathSource} from './chatMathRender';
+import {projectMathSelection} from './chatMathSelection';
 
-const REMARK_PLUGINS = [remarkGfm];
+const REMARK_PLUGINS = [remarkGfm, remarkChatMath];
 
 function extractText(node: ReactNode): string {
   if (typeof node === 'string') {
@@ -30,6 +35,12 @@ function extractText(node: ReactNode): string {
 }
 
 const BASE_COMPONENTS: Components = {
+  span({node, children, ...props}) {
+    const source = node && mathSource(node);
+    return source !== undefined
+      ? <ChatMath source={source} display={node?.properties.dataMathDisplay === 'true'} closed={node?.properties.dataMathClosed === 'true'}/>
+      : <span {...props}>{children}</span>;
+  },
   code({ className, children }) {
     if (className === 'language-mermaid') {
       return <MermaidBlock chart={extractText(children)} />;
@@ -89,8 +100,17 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
   }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial]);
 
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} urlTransform={(value) => workspaceUrlTransform(resolveWorkspaceDocumentReference(value, workspaceDocumentPath))}>
-      {text}
-    </ReactMarkdown>
+    <div className="chat-markdown" onCopy={event => {
+      if (event.defaultPrevented) return;
+      const projection = projectMathSelection(event.currentTarget);
+      if (!projection) return;
+      event.clipboardData.setData('text/plain', projection.text);
+      event.clipboardData.setData('text/html', projection.html);
+      event.preventDefault();
+    }}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} urlTransform={(value) => workspaceUrlTransform(resolveWorkspaceDocumentReference(value, workspaceDocumentPath))}>
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 });
