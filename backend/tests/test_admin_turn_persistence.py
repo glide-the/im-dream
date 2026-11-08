@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: inject continuation responses while testing existing Admin receipt and SSE contracts.
 # [Sync] 2026-09-26: unknown SDK init persistence fails before cancellation is reported as a terminal result.
 # [Sync] 2026-09-16: validate Registry169 settlement on the shared unknown-write barrier.
 # [Sync] 2026-09-15: validate Registry109 strict DTO, exact grant and unknown original receipt recovery.
@@ -1255,7 +1256,8 @@ def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fen
     from claude_agent.tool_confirmation_store import ToolConfirmationStore
     from claude_agent_sdk.types import SystemMessage
     value, calls, _ = holder(lose_operation=UPDATE_SESSION.capability.name if lose_session else None)
-    service = ClaudeAgentService(dream_artifact_turn_hook=Mock())
+    from tests.fixtures.continuation_persistence import UnitContinuationStorage, bind_continuation_fixture
+    service = ClaudeAgentService(dream_artifact_turn_hook=Mock(), continuation_storage_factory=UnitContinuationStorage)
     # Inject partial persistence while executing the real service callbacks,
     # cancellation and SSE path through the bound Admin owner.
     partial = AsyncMock()
@@ -1274,10 +1276,10 @@ def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fen
             dream_artifact_turn_ticket=Mock())
         if lose_session:
             with pytest.raises(AdminDataError, match="ADMIN_TIMEOUT"):
-                await service.execute_session(execution)
+                await _execute_with_continuation_fixture(service, execution)
         else:
             with pytest.raises(asyncio.CancelledError):
-                await service.execute_session(execution)
+                await _execute_with_continuation_fixture(service, execution)
         frames = []
         while not queue.empty():
             frames.append(queue.get_nowait())
@@ -1484,8 +1486,8 @@ def test_public_execute_session_persists_original_assistant_parts_with_SQL_fence
         execution = service_module._TurnExecution(request=request,state=AgentRunState(session_id="thread-1"),runner=Runner(),run_options=Mock(),
             turn_context=service_module._TurnContext(queue=asyncio.Queue(),confirmation_store=ToolConfirmationStore()))
         if outcome == "cancelled":
-            with pytest.raises(asyncio.CancelledError): await service.execute_session(execution)
-        else: await service.execute_session(execution)
+            with pytest.raises(asyncio.CancelledError): await _execute_with_continuation_fixture(service, execution)
+        else: await _execute_with_continuation_fixture(service, execution)
         return execution
     execution = asyncio.run(scenario())
     assistant = [item for item in calls if item.url.path.endswith(PERSIST_MESSAGE.capability.name)]
@@ -1502,3 +1504,10 @@ def test_public_execute_session_persists_original_assistant_parts_with_SQL_fence
         assert dto["metadata"]["is_partial"] is True
         assert (dto["history_final_text"],dto["history_process_available"],dto["history_projection_version"])==(None,False,None)
 # [Sync] 2026-09-17: verify turn domains reuse the prevalidated capability snapshot without duplicate discovery I/O.
+
+
+async def _execute_with_continuation_fixture(service, execution):
+    from tests.fixtures.continuation_persistence import UnitContinuationStorage, bind_continuation_fixture
+    service._continuation_storage_factory = UnitContinuationStorage
+    bind_continuation_fixture(execution)
+    return await service.execute_session(execution)

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: show preparation inline and retain rejected drafts with stable retry message IDs.
 // [Sync] 2026-11-03: refresh original system configuration when the retained Chat route returns.
 // [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
 // [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
@@ -485,8 +486,16 @@ export default function ChatPanel({
     settingsSystemPrompt: systemConfig?.system_prompt,
   };
 
+  const [continuationPreparing, setContinuationPreparing] = useState(false);
+  const continuationErrorRef = useRef<Error | null>(null);
+  const continuationMessageIds = useRef(new Map<string, string>());
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop, clearError } = useChat({
     id: threadId,
+    onError: (failure) => { continuationErrorRef.current = failure; setContinuationPreparing(false); },
+    onData: (part) => {
+      if (part.type === 'data-continuation') setContinuationPreparing((part.data as { state?: string })?.state === 'preparing');
+    },
+    onFinish: () => setContinuationPreparing(false),
     transport: new ClaudeAgentChatTransport({
       threadId,
       api: `${API_BASE}/api/claude-agent`,
@@ -533,9 +542,21 @@ export default function ChatPanel({
       setPendingData: (value) => { pendingDataRef.current = value; },
       ensureEditorSessionPersisted: editorState ? ensureEditorSessionPersisted : undefined,
       incrementTurnGeneration: () => { turnGenerationRef.current += 1; },
-      dispatch: sendMessage,
+      dispatch: async (outgoing) => {
+        const identity = JSON.stringify([threadId, outgoing.parts, options.rawAttachments, options.toolChoice]);
+        const id = outgoing.id ?? continuationMessageIds.current.get(identity) ?? crypto.randomUUID();
+        continuationMessageIds.current.set(identity, id);
+        continuationErrorRef.current = null;
+        await sendMessage({ ...outgoing, id });
+        const failure = continuationErrorRef.current as Error | null;
+        if (failure) {
+          if ('retryable' in failure && failure.retryable === true) setMessages(current => current.filter(item => item.id !== id));
+          throw failure;
+        }
+        continuationMessageIds.current.delete(identity);
+      },
     });
-  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage, threadId]);
+  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage, setMessages, threadId]);
 
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
@@ -1555,6 +1576,9 @@ export default function ChatPanel({
             ))}
           </div>
         ) : null}
+        {continuationPreparing ? <div role="status" aria-live="polite" style={{ padding: '0.45rem 0.75rem', color: 'var(--color-text-secondary)' }}>
+          {t('chat.continuation.preparing')}
+        </div> : null}
         {threadInputError || queueOutcomeUnknown ? (
           <div role="alert" className="chat-input-queue-error" style={{
             boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center',

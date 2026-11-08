@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: localize cross-platform preparation and retained-draft feedback.
 // [Sync] 2026-11-03: name the existing Deck feature Kastention / 卡片结构; preserve translation keys, interpolation parameters and business concepts.
 // [Sync] 2026-11-03: label full user-message expansion and collapse in the existing Chat locale scope.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
@@ -980,6 +981,7 @@ const resources = {
           }
         },
         writingContextUnavailable: 'This note could not be prepared. Return to Writing and try again. Your input is kept.',
+        continuation: { title: 'Conversation preparation', unsupported: 'This device cannot restore all required conversation data yet. You can continue on the original device.', busy: 'This conversation is being processed on another device. Your draft is saved.', preparing: 'Preparing this conversation', failed: 'The conversation could not be prepared. Your draft is saved; try again.' },
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
           consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
@@ -2124,6 +2126,7 @@ const resources = {
           }
         },
         writingContextUnavailable: '当前笔记暂时无法用于对话。请返回写作后重试，输入内容已保留。',
+        continuation: { title: '暂时无法继续对话', unsupported: '此端暂时无法恢复所需的对话数据，可以回原端继续。', busy: '此对话正在其他端处理，输入已保留，请稍后继续。', preparing: '正在准备对话', failed: '暂时无法准备对话。输入已保留，请重试。' },
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
           consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',

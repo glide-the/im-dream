@@ -1,4 +1,7 @@
 // [Input] Original account form navigation, BFF start/callback/session and target account URI.
+// [Sync] 2026-11-08: accept the same callback with an empty serialized authority; preserve the registered URI and original query.
+// [Sync] 2026-11-08: classify every rejected callback component using booleans without recording authorization values.
+// [Sync] 2026-11-08: accept an empty response fragment delimiter; reject fragment data and retain the original query.
 // [Output] Operation-bound system authorization and original Cookie handoff to the retained login document.
 // [Pos] iOS account login adapter; Admin, Client ID, PKCE, credentials and permissions retain their original owners.
 // [Sync] 2026-11-02: report the failing account stage to the existing native diagnostics without replacing login completion.
@@ -23,8 +26,12 @@ enum NativeAccountCallback {
     }
     static func targetMatches(_ url: URL, callback: URL) -> Bool {
         guard let value = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
-        return configuration(callback.absoluteString) != nil && value.scheme == callback.scheme && value.host == nil
-            && value.port == nil && value.user == nil && value.password == nil && value.fragment == nil
+        // System web authentication can serialize the same hostless callback with three slashes.
+        // Only the empty-authority spelling is accepted; the registered redirect stays unchanged.
+        let emptyAuthority = value.host == "" && url.absoluteString.hasPrefix((callback.scheme ?? "") + ":///")
+        // An empty response fragment carries no data; localRequest removes the delimiter before HTTP.
+        return configuration(callback.absoluteString) != nil && value.scheme == callback.scheme && (value.host == nil || emptyAuthority)
+            && value.port == nil && value.user == nil && value.password == nil && (value.fragment == nil || value.fragment == "")
             && value.percentEncodedPath == "/auth/callback"
     }
     static func localRequest(_ url: URL, callback: URL, origin: URL, state: String? = nil) -> URL? {
@@ -174,11 +181,33 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
     }
     private func complete(_ returned: URL, id: UUID, state: String?) {
         stage = "callback"
-        guard let callback, let url = NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: state) else { failure(id: id); return }
+        guard let callback, let url = NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: state) else {
+            let items = URLComponents(url: returned, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let counts = ["code", "state", "iss"].map { name in "\(name)=\(items.filter { $0.name == name }.count)" }.joined(separator: ",")
+            let returnedError = items.first { $0.name == "error" }?.value
+            let standardErrors = ["access_denied", "invalid_request", "invalid_scope", "unauthorized_client", "unsupported_response_type", "login_required", "consent_required", "server_error", "temporarily_unavailable"]
+            let oauthError = returnedError.map { standardErrors.contains($0) ? $0 : "present" } ?? "absent"
+            let target = callback.map { NativeAccountCallback.targetMatches(returned, callback: $0) } ?? false
+            let matchingState = state == nil || items.first { $0.name == "state" }?.value == state
+            let components = URLComponents(url: returned, resolvingAgainstBaseURL: false)
+            let schemeMatches = returned.scheme == callback?.scheme
+            let hostAbsent = components?.host == nil, hostEmpty = components?.host == ""
+            let pathMatches = components?.percentEncodedPath == "/auth/callback"
+            let configured = callback.map { NativeAccountCallback.configuration($0.absoluteString) != nil } ?? false
+            let portAbsent = components?.port == nil, userAbsent = components?.user == nil, passwordAbsent = components?.password == nil
+            let fragmentAbsent = components?.fragment == nil, fragmentEmpty = components?.fragment == ""
+            let message = "Callback validation failed: target=\(target), configured=\(configured), schemeMatches=\(schemeMatches), hostAbsent=\(hostAbsent), hostEmpty=\(hostEmpty), portAbsent=\(portAbsent), userAbsent=\(userAbsent), passwordAbsent=\(passwordAbsent), pathMatches=\(pathMatches), fragmentAbsent=\(fragmentAbsent), fragmentEmpty=\(fragmentEmpty), \(counts), stateMatches=\(matchingState), oauthError=\(oauthError)."
+            failure(id: id, error: NSError(domain: "InkAccountLogin", code: 3, userInfo: [NSLocalizedDescriptionKey: message]))
+            return
+        }
         fetch(url, id: id) { _, response, error in
             guard error == nil, response?.statusCode == 303, let received = response?.url,
                   NativeAccountCallback.sameOrigin(received, self.origin), received.path == "/auth/callback" else {
-                self.failure(id: id, error: error, retry: error != nil || (response?.statusCode ?? 503) >= 500 ? { [weak self] in self?.complete(returned, id: id, state: state) } : nil)
+                let localOrigin = response?.url.map { NativeAccountCallback.sameOrigin($0, self.origin) } ?? false
+                let callbackPath = response?.url?.path == "/auth/callback"
+                let failure = error ?? NSError(domain: "InkAccountHTTP", code: response?.statusCode ?? 0,
+                    userInfo: [NSLocalizedDescriptionKey: "Callback response rejected: HTTP \(response?.statusCode ?? 0), localOrigin=\(localOrigin), callbackPath=\(callbackPath)."])
+                self.failure(id: id, error: failure, retry: error != nil || (response?.statusCode ?? 503) >= 500 ? { [weak self] in self?.complete(returned, id: id, state: state) } : nil)
                 return
             }
             self.probe.copyNativeCookies {

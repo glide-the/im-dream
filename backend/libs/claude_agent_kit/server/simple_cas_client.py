@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: bound resume disables automatic interrupted-input replay.
 # [Sync] 2026-10-12: cancellation owns SDK interrupt and disconnect through repeated task cancellation.
 # [Sync] 2026-10-25: accept an application-owned SDK transport factory without changing query/control ownership.
 # [Sync] 2026-09-26: queued resumes reject missing-session fallback and expose active-client interrupt.
@@ -95,6 +96,10 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
         )
         if not isinstance(prompt, (AsyncIterable, str)):
             raise TypeError("ClaudeSDKClient requires a string or async iterable prompt")
+        if self.require_existing_session:
+            # Historical interrupted inputs remain data. Only the caller's new
+            # query may schedule work, including after an acknowledged Stop.
+            effective_options.env = {**(getattr(effective_options, "env", None) or {}), "CLAUDE_CODE_RESUME_INTERRUPTED_TURN": ""}
         resume_id = getattr(effective_options, "resume", None)
         original_stderr = getattr(effective_options, "stderr", None)
         missing_reported = False

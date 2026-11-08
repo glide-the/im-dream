@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-08: 区分41回调校验现场与Google密码／短信后再次要求通行密钥，空fragment候选及真实闭环单列。 -->
+<!-- [Sync] 2026-11-08: Google成功后未返回主界面先分辨callback目标校验与本人验证，原URI及会话校验保持。 -->
 <!-- [Sync] 2026-11-02: Google网页后invalid_code先检查Admin独立出口，新增Docker代理与真机工具信任边界。 -->
 <!-- [Sync] 2026-11-01: 20实际密码303及PKCE回调、会话/配置/历史200、真实任务完成并结算；保留先前503及UI缺口。 -->
 <!-- [Sync] 2026-11-01: 追加19复用连接残余超时与20失败池处理，桌面停止约束和真机独立资格保持。 -->
@@ -379,3 +381,21 @@ Google网页身份验证后，Admin通过`https://oauth2.googleapis.com/token`�
 5. iOS拒绝测试runner时，将签名、profile、设备信任及UI工具状态单列。工具错误退出业务缺陷判定；后续真机闭环以可见主页与原会话共同确认。
 
 2026-11-02独立出口采用后，用户确认真机复验通过。该结果登记为用户手工验收，自动化runner限制及逐阶段证据缺口分别保留。本轮实际结果与限制见[账号执行记录](../exec/ios-account-entry-fix-20261102.md#google回调兑换与独立出口2026-11-02后续)。
+
+
+## Google系统窗口关闭后App仍显示登录表单（2026-11-08）
+
+先查看原开发者控制页的Google错误阶段。`callback`、target=false且stateMatches=true表示App尚未把系统结果交给本机BFF；code/state/iss字段齐全仅证明参数存在，产品会话仍需原exchange／session确认。先前Google本人验证／通行密钥等待单独记录。
+
+Foundation把同一路径的单斜杠回调解析为host=nil，把三斜杠形式解析为host为空。当前修订只在原目标接收处兼容两种表示；Admin登记URI、token exchange参数、Cookie／CSRF及scope保持。非空host、端口、userinfo、fragment、路径与原state不符继续拒绝。具体规则与图示见[回调兼容设计](../design/multi-platform/mobile-runtime-architecture.md#google系统回调地址兼容修订2026-11-08)。
+
+按顺序核对：当前App build与callback配置；callback结构判断；本机callback的303及Cookie；原session200与user／CSRF；登录弹层dismiss；RN主界面和原账户。全程排除授权code、state、Cookie值及完整回调query。新的本人验证由账户持有人完成，禁止复用先前失败／过期code或绕过Google验证。
+
+Simulator构建、覆盖安装、偏好保持、真实Google结果分别归[当前执行记录](../exec/cross-platform-chat-continuation-20261104.md)。技术用例和构建通过单列，窗口闭环须以可见主界面与正常Admin会话共同确认。
+
+
+### 2026-11-08密码与短信路径复核
+
+Simulator41的23:28回执为target=false、schemeMatches=true、hostAbsent=true、pathMatches=true、stateMatches=true；该次失败发生在原生目标校验，空authority兼容未解决现场问题。源码补齐配置、端口、userinfo及fragment存在／空值诊断，并仅接纳空fragment分隔符，非空fragment继续拒绝。该修订的真实回调与主界面结果待验收，技术测试与安装回执分别归执行记录。
+
+密码登录操作采用Google“使用其他帐号”，手动填写原账户及密码。系统自动填充会额外唤起设备解锁页，用户说明当前模拟器无密码，相关窗口已取消。Google密码及短信提交后再次显示通行密钥，当前“更多验证方法”只列通行密钥；系统提示已关闭，授权已取消，蓝牙保持关闭。后续验证沿Google公开可用的非蓝牙方式完成，原账户验证要求保持。

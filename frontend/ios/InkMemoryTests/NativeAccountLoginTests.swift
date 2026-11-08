@@ -3,6 +3,8 @@
 // [Pos] Provider-free iOS account adapter contracts; no system consent, normal account, Admin, model or Notion access.
 // [Sync] 2026-10-31: exercise App callback/local HTTP ownership and the retained login probe before platform adoption.
 // [Sync] 2026-10-31: drive the real WK callback through the production account adapter and an App-owned HTTP redirect fixture.
+// [Sync] 2026-11-08: qualify empty-authority system callbacks without changing registered redirects, PKCE or cookies.
+// [Sync] 2026-11-08: qualify the empty fragment delimiter and reject fragment data while preserving query bytes.
 // [Sync] 2026-11-02: preserve original OAuth values while carrying the explicit Google choice once.
 import XCTest
 import WebKit
@@ -103,7 +105,7 @@ final class NativeAccountLoginTests: XCTestCase {
         for suffix in ["&code=duplicate", "&state=duplicate", "&iss=duplicate", "&error=access_denied", "#fragment"] {
             XCTAssertNil(NativeAccountCallback.localRequest(URL(string: raw + suffix)!, callback: callback, origin: origin))
         }
-        for bad in ["com.other.app.auth:/auth/callback", "com.inkmemory.example.mcp:/oauth/callback", "com.inkmemory.example.auth://auth/callback", "com.inkmemory.example.auth:///auth/callback", "com.inkmemory.example.auth:/auth/%63allback"] {
+        for bad in ["com.other.app.auth:/auth/callback", "com.inkmemory.example.mcp:/oauth/callback", "com.inkmemory.example.auth://auth/callback", "com.inkmemory.example.auth:/auth/%63allback"] {
             XCTAssertNil(NativeAccountCallback.localRequest(URL(string: bad + "?" + raw.components(separatedBy: "?")[1])!, callback: callback, origin: origin))
         }
         for bad in ["https://dream.example", "https://localhost", "http://device.lan:5173"] {
@@ -111,6 +113,51 @@ final class NativeAccountLoginTests: XCTestCase {
         }
         for bad in ["com.app.mcp:/oauth/callback", "com.app.auth:/auth/../auth/callback", callback.absoluteString + "?code=x", callback.absoluteString + "#fragment"] {
             XCTAssertNil(NativeAccountCallback.configuration(bad))
+        }
+    }
+
+    func testSystemCallbackEmptyAuthorityPreservesTheOriginalQueryAndHTTPReceiver() throws {
+        let query = "code=fixture%2Bcode&state=" + state + "&iss=https%3A%2F%2Fadmin.example%2Fapi%2Fauth"
+        let serialized = callback.absoluteString.replacingOccurrences(of: ":/", with: ":///")
+        let returned = try XCTUnwrap(URL(string: serialized + "?" + query))
+        XCTAssertEqual(URLComponents(url: returned, resolvingAgainstBaseURL: false)?.host, "")
+        XCTAssertTrue(NativeAccountCallback.targetMatches(returned, callback: callback))
+        XCTAssertEqual(NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: state)?.absoluteString,
+                       origin.absoluteString + "/auth/callback?" + query)
+        XCTAssertEqual(callback.absoluteString, "com.inkmemory.example.auth:/auth/callback")
+        XCTAssertNil(NativeAccountCallback.configuration(serialized))
+        XCTAssertNil(NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: String(repeating: "x", count: 43)))
+        for suffix in ["&code=duplicate", "&state=duplicate", "&iss=duplicate", "&error=access_denied", "#fragment"] {
+            XCTAssertNil(URL(string: serialized + "?" + query + suffix).flatMap {
+                NativeAccountCallback.localRequest($0, callback: callback, origin: origin, state: state)
+            })
+        }
+        for bad in ["com.inkmemory.example.auth://auth/callback", "com.inkmemory.example.auth://:/auth/callback",
+                    "com.inkmemory.example.auth://user@/auth/callback", "com.inkmemory.example.auth:////auth/callback",
+                    "com.inkmemory.example.auth:///auth/callback/", "com.inkmemory.example.auth:///auth/%63allback",
+                    "com.other.app.auth:///auth/callback"] {
+            XCTAssertNil(URL(string: bad + "?" + query).flatMap {
+                NativeAccountCallback.localRequest($0, callback: callback, origin: origin, state: state)
+            })
+        }
+    }
+
+    func testSystemCallbackEmptyFragmentPreservesTheOriginalQueryAndHTTPReceiver() throws {
+        let query = "code=fixture%2Bcode&state=" + state + "&iss=https%3A%2F%2Fadmin.example%2Fapi%2Fauth"
+        for target in [callback.absoluteString, callback.absoluteString.replacingOccurrences(of: ":/", with: ":///")] {
+            let returned = try XCTUnwrap(URL(string: target + "?" + query + "#"))
+            XCTAssertEqual(URLComponents(url: returned, resolvingAgainstBaseURL: false)?.fragment, "")
+            XCTAssertTrue(NativeAccountCallback.targetMatches(returned, callback: callback))
+            let local = try XCTUnwrap(NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: state))
+            XCTAssertEqual(local.absoluteString, origin.absoluteString + "/auth/callback?" + query)
+            XCTAssertNil(local.fragment)
+            XCTAssertNil(NativeAccountCallback.configuration(target + "#"))
+            XCTAssertNil(NativeAccountCallback.localRequest(returned, callback: callback, origin: origin, state: String(repeating: "x", count: 43)))
+            for suffix in ["&code=duplicate#", "&state=duplicate#", "&iss=duplicate#", "&error=access_denied#", "#fragment", "#%00", "#%23", "#/auth/callback", "#code=x"] {
+                XCTAssertNil(URL(string: target + "?" + query + suffix).flatMap {
+                    NativeAccountCallback.localRequest($0, callback: callback, origin: origin, state: state)
+                })
+            }
         }
     }
 
@@ -197,6 +244,18 @@ final class NativeAccountLoginTests: XCTestCase {
     }
 
     @MainActor func testRealWKCallbackUsesManualHTTPRedirectCookiesAndOriginalSessionBeforeCompletion() throws {
+        try runRealWKCallback(serializedCallback: callback.absoluteString)
+    }
+
+    @MainActor func testRealWKSystemCallbackEmptyAuthorityUsesTheOriginalSessionBeforeCompletion() throws {
+        try runRealWKCallback(serializedCallback: callback.absoluteString.replacingOccurrences(of: ":/", with: ":///"))
+    }
+
+    @MainActor func testRealWKSystemCallbackEmptyFragmentUsesTheOriginalSessionBeforeCompletion() throws {
+        try runRealWKCallback(serializedCallback: callback.absoluteString, emptyFragment: true)
+    }
+
+    @MainActor private func runRealWKCallback(serializedCallback: String, emptyFragment: Bool = false) throws {
         let server = try AccountHTTPFixture()
         defer { server.stop() }
         var local: URL?
@@ -224,7 +283,7 @@ final class NativeAccountLoginTests: XCTestCase {
         let web = WKWebView(frame: .zero, configuration: configuration); web.navigationDelegate = delegate
         web.loadHTMLString("<html><body>Account callback transport qualification</body></html>", baseURL: origin)
         wait(for: [loaded], timeout: 5)
-        let returned = callback.absoluteString + "?code=fixture%2Bcode&state=" + state + "&iss=https%3A%2F%2Fadmin.example%2Fapi%2Fauth"
+        let returned = serializedCallback + "?code=fixture%2Bcode&state=" + state + "&iss=https%3A%2F%2Fadmin.example%2Fapi%2Fauth" + (emptyFragment ? "#" : "")
         let encoded = String(data: try JSONSerialization.data(withJSONObject: [returned]), encoding: .utf8)!
         web.evaluateJavaScript("window.location.href = \(encoded)[0]") { _, _ in }
         wait(for: [transferred, authenticated], timeout: 10)

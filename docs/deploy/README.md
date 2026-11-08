@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-08: Admin发布分流至其GitHub手动Actions与当前服务手册，阿里云旧Compose原文保留。 -->
 <!-- [Sync] 2026-11-02: 增加Apple真机开发调试工具及XCUITest任务入口。 -->
 <!-- [Sync] 2026-11-02: 增加 Mac SSH 临时代理反向转发说明，包含参数、阶段验证及单连接停止步骤。 -->
 <!-- [Sync] 2026-11-02: iOS文档按安装、上架和专项填写任务提供入口，历史核查及评审归执行记录。 -->
@@ -60,6 +61,7 @@
 
 | 发布方式 | 脚本入口 | 说明 |
 |----------|----------|------|
+| Admin ECS发布 | [Admin手动Actions](https://github.com/glide-the/dream-im-platform/actions/workflows/deploy-admin.yml) | main手动Run workflow；Admin仓库打包完整制品，原systemd／PostgreSQL保持；步骤归[Admin指南](../../../ink-admin-memory/docs/deploy.md) |
 | 本地发布 | [`../../deploy/local/deploy.sh`](../../deploy/local/deploy.sh) | 包装本地 backend/frontend 启动与验证；尚未投影 Browser Voice WS base，stop/clean 也未强校验 PID/容器所有权 |
 | Docker 发布 | [`../../deploy/docker/deploy.sh`](../../deploy/docker/deploy.sh) | 包装根目录 Compose 构建、启动、验证和清理；backend 出站默认通过 Mihomo TUN |
 | Remote SSH 发布（含阿里云 ECS） | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh) | Dream-only Compose；overlay只通过Admin HTTPS origin访问Gateway/Product API，不连接PostgreSQL network，并从mode-0600 topology配置backend block-device read budget |
@@ -78,7 +80,7 @@
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径；旧 SQLite 数据维护命令不属于当前业务数据合同 |
 | [`natapp-edge-relay.md`](natapp-edge-relay.md) | NATAPP 边缘转发文档 | 说明现有公开域名到显式 Dream/Admin relay origins 的原子切换、验证、上游降级识别与回滚 |
 | [`natapp-macos-services.md`](natapp-macos-services.md) | macOS Natapp 服务维护 | 已有两个服务的启动、重启、停止、恢复加载、状态查询和日志检查 |
-| [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
+| [`aliyun.md`](aliyun.md) | 阿里云 ECS 发布分流 | 当前Admin手动Actions、Dream应用职责与数据保持；旧Admin Compose原文标记退役并保留 |
 | [`autodl.md`](autodl.md) | AutoDL 直宿主部署文档 | 说明 frozen pnpm/standalone Next、Node MCP Apps、FastAPI、固定 sandbox capability、验证与回滚 |
 | [`autodl-recovery.md`](autodl-recovery.md) | AutoDL 恢复与维护 | 说明实例重启后的 Admin-first 恢复、动态 WebUI origin、状态/日志、完整发布和失败处理 |
 | [`mobile-app-release.md`](mobile-app-release.md) | iOS/Android路线与打包发布设计 | 端侧采用现有关闭Claude命令沙箱配置；保留系统沙箱与业务权限，完整工具、真机、Android及发行继续验收 |
