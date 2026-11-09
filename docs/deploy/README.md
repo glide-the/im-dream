@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-09: 本机前端新增独立.env.online及线上Admin调试入口，完整组合复用Backend的.env.mobile。 -->
 <!-- [Sync] 2026-11-08: Admin发布分流至其GitHub手动Actions与当前服务手册，阿里云旧Compose原文保留。 -->
 <!-- [Sync] 2026-11-02: 增加Apple真机开发调试工具及XCUITest任务入口。 -->
 <!-- [Sync] 2026-11-02: 增加 Mac SSH 临时代理反向转发说明，包含参数、阶段验证及单连接停止步骤。 -->
@@ -160,6 +161,10 @@ capability）单列在 [AutoDL 手册](autodl.md)，不混入下表的通用容�
 React hydration mismatch 表示服务端 HTML 与客户端首次渲染的 DOM 存在差异。错误包含 `body` 的 `mpa-version`、`mpa-extension-id`、`mpa-installed-at` 属性时，检查扩展在 React 初始化前注入的属性。页面根布局、SSR、认证及业务接口保持现有实现，继续检测应用自身的渲染差异。
 
 `.vscode/` 由当前 Git 规则忽略；上述配置示例随本部署说明保存，供其他工作区复用。仅启动 Frontend 配置时，后端需已运行；完整本机调试使用现有 `Full Stack: Backend + Frontend` 复合入口。
+
+本机前端按Admin目标保留两份配置：普通`pnpm dev`读取私有`frontend/.env.local`；`pnpm dev:online`通过Node `--import`预加载[环境模块](../../frontend/scripts/load-online-env.mjs)，模块调用`loadEnvFile`读取私有`frontend/.env.online`，随后运行同一Next CLI。Next开发入口会将Node启动参数传入子进程的`NODE_OPTIONS`，预加载使用该变量允许的`--import`参数。线上配置采用`https://ink-admin.suoxya.com`的Admin公开地址与服务端传输地址、对应issuer、resource及已登记服务凭据，保留本机Dream来源、回调和原Cookie Secret。[完整线上模板](../../frontend/.env.online.example)的凭据留空；实际文件加入Git忽略并使用`0600`权限。进程环境中已有值优先，Next随后读取`.env.local`时保留线上文件已提供的值。
+
+VS Code新增`Frontend: Next.js + Chrome (线上 Admin)`，预启动任务为`frontend: dev:online`，沿用原浏览器地址、独立Chrome目录和禁用扩展配置。`Full Stack: Backend + Frontend (线上 Admin)`组合选择该前端入口及原`Backend: Python (server.py, Admin)`，后者读取`backend/.env.mobile`。两套前端共用原端口，切换前停止当前前端任务，再启动所选配置。iOS打包继续读取原`.env.local`，按其发布手册选择配置。
 
 官方资料，查阅日期 2026-10-28：[Next.js hydration error](https://nextjs.org/docs/messages/react-hydration-error)、[VS Code browser debugging](https://code.visualstudio.com/docs/nodejs/browser-debugging)、[JavaScript debugger options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md)。
 
