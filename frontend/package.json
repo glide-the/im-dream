@@ -6,6 +6,7 @@
   "packageManager": "pnpm@10.28.1",
   "scripts": {
     "dev": "next dev",
+    "dev:online": "node --import ./scripts/load-online-env.mjs node_modules/next/dist/bin/next dev",
     "build": "next build --webpack",
     "native:typecheck": "tsc --noEmit --pretty false -p tsconfig.native.json",
     "native:check-ui": "node --experimental-strip-types native-scripts/check-original-ui-contract.mjs",
