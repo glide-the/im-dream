@@ -1,3 +1,4 @@
+# [Sync] 2026-11-11: cover data-source reads through the existing Dream guard, confirmation and disabled-network policy.
 # [Sync] 2026-10-15: exact user MCP inventory includes the three owner-bound memory Tools.
 # [Sync] 2026-10-12: callback cancellation must close the owned SDK generator before returning.
 # [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
@@ -128,6 +129,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -2998,6 +3000,56 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "用户取消 Notion 查询",
         )
 
+    async def test_dream_notion_data_source_query_keeps_permission_policy(self):
+        command = 'ntn api v1/data_sources/source-1/query --data \'{"page_size":20}\''
+        cases = (
+            # mode, full access, bound, network, response, decision, confirmations
+            ("auto", False, True, "allowlist", True, "allow", 1),
+            ("auto", False, True, "allowlist", False, "deny", 1),
+            ("manual", False, True, "allowlist", True, "allow", 1),
+            ("manual", False, True, "allowlist", False, "deny", 1),
+            ("auto", True, True, "allowlist", False, "allow", 0),
+            ("manual", True, True, "allowlist", False, "allow", 0),
+            ("auto", True, True, "disabled", True, "deny", 0),
+            ("auto", True, False, "allowlist", True, "deny", 0),
+            ("auto", False, True, "allowlist", None, "deny", 0),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, notion_home = self._create_notion_bound_dream_workspace(temp_dir)
+            for mode, full_access, bound, network, approved, decision, count in cases:
+                with self.subTest(mode=mode, full_access=full_access, bound=bound,
+                                  network=network, approved=approved):
+                    requests: list[dict] = []
+
+                    async def confirm(payload: dict):
+                        requests.append(payload)
+                        return {"approved": approved, "reason": "fixture rejection"}
+
+                    hook = await self._capture_pre_tool_use_hook(
+                        cwd=str(workspace), tool_choice=mode,
+                        notion_credential_home=str(notion_home) if bound else None,
+                        im_full_access_enabled=full_access,
+                        sandbox_network_mode=network,
+                        on_tool_confirmation_request=confirm if approved is not None else None,
+                    )
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-notion-data-source", _SDK_HOOK_CONTEXT(),
+                    )
+                    specific = _hook_specific(result, {})
+                    self.assertEqual(specific.get("permissionDecision"), decision)
+                    self.assertEqual(len(requests), count)
+                    if count:
+                        self.assertEqual(requests[0]["input"], {"command": command})
+                    if network == "disabled":
+                        self.assertIn("代理网络访问已关闭", specific["permissionDecisionReason"])
+                    elif not bound:
+                        self.assertIn("controlled by Story Workspace", specific["permissionDecisionReason"])
+                    elif approved is None:
+                        self.assertEqual(specific["permissionDecisionReason"], "需要用户确认但未收到响应")
+                    elif count and not approved:
+                        self.assertEqual(specific["permissionDecisionReason"], "fixture rejection")
+
     async def test_dream_notion_cli_api_confirmation_cancellation_propagates(self):
         async def cancel(_payload: dict):
             raise asyncio.CancelledError()
@@ -3039,6 +3091,13 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "ntn api v1/users",
             "ntn api v1/search --data '[]'",
             "ntn api v1/pages/page-1 --data '{}'",
+            "ntn api v1/data_sources/source-1 --data '{}'",
+            "ntn api v1/data_sources --data '{}'",
+            "ntn api v1/data_sources/source-1/query --method PATCH --data '{}'",
+            "ntn api v1/data_sources/source-1/query --data '[]'",
+            "ntn api v1/data_sources/source-1/query --data '{bad}'",
+            "ntn api v1/data_sources/source-1/query --data '{\"page_size\":20}’",
+            "ntn api v1/data_sources/source-1/query --data '{}'; touch .dream/pwned",
             'ntn api v1/search --data "{\\"query\\":\\"$HOME\\"}"',
             "ntn api v1/search; rm -rf files",
             "ntn api v1/search $(touch files/pwned)",
@@ -3198,6 +3257,9 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "ntn api v1/search --data '{\"query\":\"R&D; $(literal)\"}'",
             "ntn api v1/databases/database-1",
             "ntn api v1/databases/database-1/query --data '{}'",
+            "ntn api v1/data_sources/source-1",
+            "ntn api v1/data_sources/source-1/query",
+            "ntn api v1/data_sources/source-1/query --data '{\"page_size\":20}'",
             "ntn api v1/pages/page-1",
             "ntn api v1/pages/page-1/markdown",
             "ntn api v1/pages/page-1/properties/property%3A1",
@@ -3209,6 +3271,21 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 self.assertTrue(
                     agent_runner_module._is_notion_cli_read_api_command(command)
                 )
+
+    def test_notion_cli_query_reference_commands_reach_permission_classifier(self):
+        guide = (Path(__file__).resolve().parents[1] / "builtin_skills" / "notion"
+                 / "notion-cli" / "references" / "notion-db-query.md")
+        examples = re.findall(r"```bash\n(.*?)```", guide.read_text(encoding="utf-8"), re.S)
+        self.assertTrue(examples)
+        for example in examples:
+            for line in example.splitlines():
+                if not line.strip() or line.startswith("#"):
+                    continue
+                command = line.replace("<data_source_id>", "source-fixture")
+                command = command.replace("<next_cursor>", "cursor-fixture")
+                with self.subTest(command=command):
+                    self.assertTrue(command.startswith("ntn api v1/data_sources/"))
+                    self.assertTrue(agent_runner_module._is_notion_cli_read_api_command(command))
 
     async def test_auto_bash_low_sensitivity_commands_get_query_allow(self):
         """Bash read-only/navigation commands bypass confirmation in auto mode."""

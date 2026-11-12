@@ -5,6 +5,10 @@ tools: ["Bash"]
 ---
 
 <!-- [Source] glide-the/ink-and-memory develop e3523db9; renamed from notion-session to notion-cli on 2026-08-30. -->
+<!-- [Input] Current actor/thread Notion projection and ntn API read commands. -->
+<!-- [Output] Search, page-read and data-source query usage. -->
+<!-- [Pos] Backend-owned notion-cli Skill entrypoint. -->
+<!-- [Sync] 2026-11-11: query selected data-source IDs through the current API endpoint. -->
 
 # Notion CLI 工作空间数据助手
 
@@ -46,7 +50,7 @@ cat .notion/databases/<database_id>.json
 |------|------|---------|
 | 搜索内容 | `ntn api v1/search` | `references/notion-search.md` |
 | 读取页面 | `ntn api v1/pages/<id>/markdown` | `references/notion-page-read.md` |
-| 查询数据库 | `ntn api v1/databases/<id>/query` | `references/notion-db-query.md` |
+| 查询数据库 | `ntn api v1/data_sources/<data_source_id>/query` | `references/notion-db-query.md` |
 
 ## 核心命令速查
 
@@ -65,8 +69,10 @@ ntn api v1/pages/<page_id>/markdown
 ### 查询数据库
 
 ```bash
-ntn api v1/databases/<database_id>/query --data '{}'
+ntn api v1/data_sources/<data_source_id>/query --data '{}'
 ```
+
+连接器索引中的 `database_id` 保存所选 Data source ID；查询和属性 Schema 读取均使用该 ID。`--data` 使用单引号包裹的单行 JSON 对象。
 
 ## 参考文档
 

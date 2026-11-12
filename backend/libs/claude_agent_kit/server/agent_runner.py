@@ -1,3 +1,4 @@
+# [Sync] 2026-11-11: recognize actor-bound data-source query/schema reads before the existing network and confirmation policy.
 # [Sync] 2026-10-25: composition may bind the exact in-process Runtime entry; default CLI resolution and Agent semantics remain unchanged.
 # [Sync] 2026-10-23: forward the bound Notion reader into the existing page Read hook.
 # [Sync] 2026-10-15: allow the three exact user memory Tools.
@@ -606,13 +607,13 @@ _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
 _NOTION_CLI_API_SEGMENT_PATTERN = r"[A-Za-z0-9_%~-]+"
 _NOTION_CLI_API_NO_DATA_ENDPOINT_RE = re.compile(
     rf"^v1/(?:"
-    rf"databases/{_NOTION_CLI_API_SEGMENT_PATTERN}|"
+    rf"(?:databases|data_sources)/{_NOTION_CLI_API_SEGMENT_PATTERN}|"
     rf"pages/{_NOTION_CLI_API_SEGMENT_PATTERN}(?:/markdown|/properties/{_NOTION_CLI_API_SEGMENT_PATTERN})?|"
     rf"blocks/{_NOTION_CLI_API_SEGMENT_PATTERN}/children"
     rf")$"
 )
 _NOTION_CLI_API_DATA_ENDPOINT_RE = re.compile(
-    rf"^v1/(?:search|databases/{_NOTION_CLI_API_SEGMENT_PATTERN}/query)$"
+    rf"^v1/(?:search|(?:databases|data_sources)/{_NOTION_CLI_API_SEGMENT_PATTERN}/query)$"
 )
 _NOTION_CLI_API_COMMAND_RE = re.compile(
     r"^[ \t]*ntn[ \t]+api[ \t]+"
