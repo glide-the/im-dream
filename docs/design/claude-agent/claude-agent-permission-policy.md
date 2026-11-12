@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-11: add current data-source query/schema endpoints to actor-bound CLI routing; retain Bash classification and decision order. -->
 > [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, actor/thread Notion projection, frontend tool confirmation flow.
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
@@ -129,6 +130,18 @@ missing binding remain inside the conservative Dream-surface deny. Matching
 only means “not a `.dream` mutation”; it does not grant Bash permission. The
 command then reaches disabled-network enforcement and the ordinary
 full-access/Auto/manual confirmation rules.
+
+The endpoint inventory includes `v1/search`, `v1/data_sources/<id>/query`,
+`v1/data_sources/<id>`, `v1/databases/<id>`, the legacy
+`v1/databases/<id>/query`, page metadata/Markdown/property reads, and block-child
+reads. Search and query accept a single-line JSON object inside ASCII single
+quotes. Metadata reads omit `--data`. The connector's `database_id` field holds
+the selected data-source ID, matching `NotionOperations.query_database`.
+Data-source query and schema reads retain the existing Bash high-sensitivity
+classification and confirmation policy. Malformed quotes/JSON, method
+overrides, write endpoints and composed commands remain hard denials in a
+workspace containing `.dream/`. The current flow and recovery contract are in
+[the Notion CLI remediation design](../notion-session/runtime-bash-env-remediation.md#2026-11-11-data-source-query-权限修复).
 
 Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
 
