@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: localize Writing model-selection, active-turn and pending-input recovery.
 // [Sync] 2026-11-04: localize cross-platform preparation and retained-draft feedback.
 // [Sync] 2026-11-03: name the existing Deck feature Kastention / 卡片结构; preserve translation keys, interpolation parameters and business concepts.
 // [Sync] 2026-11-03: label full user-message expansion and collapse in the existing Chat locale scope.
@@ -115,6 +116,8 @@ const resources = {
         loading: 'Going deeper…',
         refresh: 'Refresh',
         retry: 'Retry',
+        checkSubscription: 'Check subscription and allowance',
+        checkModel: 'Check model settings',
         regionLabel: 'Writing suggestion',
         threadTitle: 'Writing suggestions',
         failed: 'The suggestion was interrupted. Your writing is unchanged.',
@@ -122,7 +125,10 @@ const resources = {
         errors: {
           threadCreate: 'The suggestion conversation could not be started. Try again.',
           threadPersist: 'The suggestion conversation could not be saved. Try again.',
-          interrupted: 'The suggestion was interrupted. Your writing is unchanged.'
+          interrupted: 'The suggestion was interrupted. Your writing is unchanged.',
+          modelSelection: 'The selected model is unavailable. Check your subscription and allowance or choose an available model in Settings, then retry.',
+          busy: 'This conversation is still generating a reply. Wait for it to finish, then retry.',
+          pendingInput: 'This conversation has pending messages. Open it in Chat to check their status, then retry.'
         }
       },
       settings: {
@@ -1262,6 +1268,8 @@ const resources = {
         loading: '正在深入…',
         refresh: '重新生成',
         retry: '重试',
+        checkSubscription: '查看订阅与额度',
+        checkModel: '查看模型设置',
         regionLabel: '写作建议',
         threadTitle: '写作建议',
         failed: '建议生成中断，你的正文未受影响。',
@@ -1269,7 +1277,10 @@ const resources = {
         errors: {
           threadCreate: '无法开始建议对话，请重试。',
           threadPersist: '无法保存建议对话，请重试。',
-          interrupted: '建议生成中断，你的正文未受影响。'
+          interrupted: '建议生成中断，你的正文未受影响。',
+          modelSelection: '当前模型不可用。请检查订阅与额度，或在设置中选择可用模型后重试。',
+          busy: '当前对话仍在生成回复，请等待完成后重试。',
+          pendingInput: '当前对话有待处理的消息，请在对话页面确认消息状态后重试。'
         }
       },
       settings: {
