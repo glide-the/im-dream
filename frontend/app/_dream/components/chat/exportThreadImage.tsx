@@ -243,7 +243,7 @@ interface ExportFontPlan {
 
 let exportFontPlanPromise: Promise<ExportFontPlan | null> | null = null;
 
-async function blobToBase64(blob: Blob): Promise<string> {
+export async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';
   const CHUNK = 0x8000;
@@ -563,7 +563,8 @@ export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElemen
   return collector.finish();
 }
 
-async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
+// [Sync] 2026-11-12: share the bounded tiled/legacy capture owner with note image exports.
+export async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   try {
     return await capturePartBlobsTiled(node, host, hooks);
   } catch {

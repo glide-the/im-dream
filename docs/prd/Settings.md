@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-12: 设置新增统一AI/笔记外部链接入口。 -->
 <!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 # Settings PRD
 
@@ -406,3 +407,7 @@ Settings 页面通过以下入口访问：
 - 建议后续在 `GET /api/system-config` 路由层对 `ANTHROPIC_AUTH_TOKEN` 返回掩码，避免前端 JS 中出现明文密钥。
 
 后续如需扩展 Settings 页面，建议将整个 Settings 视图提取为独立 `SettingsView.tsx` 组件，与 `App.tsx` 解耦。
+
+## 外部链接
+
+设置增加“外部链接”，按AI对话和笔记查看有效地址与已失效记录，支持复制、公开打开、查看原内容和单条失效。完整规则及桌面/窄屏骨架见[外部链接PRD](sharing/external-links.md)。源码已接入，正常服务采用与验证状态见[改造记录](../exec/external-share-refactor-20261112.md)。
