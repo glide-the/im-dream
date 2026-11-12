@@ -1,4 +1,6 @@
+// [Sync] 2026-11-12: localize unified external-share publication and Settings revocation/recovery.
 // [Sync] 2026-11-12: localize Writing model-selection, active-turn and pending-input recovery.
+// [Sync] 2026-11-12: localize note image/link sharing, saved-content conflicts and clipboard recovery.
 // [Sync] 2026-11-04: localize cross-platform preparation and retained-draft feedback.
 // [Sync] 2026-11-03: name the existing Deck feature Kastention / 卡片结构; preserve translation keys, interpolation parameters and business concepts.
 // [Sync] 2026-11-03: label full user-message expansion and collapse in the existing Chat locale scope.
@@ -84,6 +86,8 @@ const LANGUAGE_STORAGE_KEY = 'ink-language';
 const resources = {
   en: {
     translation: {
+      externalShare: {title:'External links', description:'Manage shared AI conversations and notes', publishFailed:'The conversation could not be shared. Please retry.', changed:'The conversation has changed. Close sharing and open it again.', linkHint:'Anyone with this link can read the text snapshot. You can revoke it in Settings → External links.', chat:'AI conversations', note:'Notes', active:'Active', revoked:'Revoked', status:'Status', activeCount:'Active links', content:'Content', link:'Share link', published:'Published', revokedAt:'Revoked at', revokedReason:'Revoked by the owner.', more:'Actions for {{title}}', open:'Open public page', source:'View original', revoke:'Revoke link', details:'Link details', refresh:'Refresh status', loading:'Loading links…', loadMore:'Load more', emptyActive:'No active links', emptyRevoked:'No revoked links', sourceDeleted:'Original content deleted', loadFailed:'Links could not be refreshed. Your last confirmed records are retained.', revokeFailed:'The link could not be revoked. Please retry.', unknown:'The result is not confirmed. Refresh the status.', revoking:'Revoking this link…', revokeSucceeded:'Link revoked.', noLongerActive:'This link has been revoked.', revokedCopy:'This link has been revoked. Click again to create a new link.', openFailed:'The content could not be opened. Refresh and retry.'},
+      noteShare: {imageHint: 'Save the complete note as a long image', shareImage: 'Share image', title: 'Share note', creating: 'Creating link…', copied: 'Link copied', link: 'Shared note link', linkHint: 'Anyone with the link can read this snapshot. It remains available after the original note is edited or deleted.', copyManually: 'Select the link below to copy it.', changed: 'This note has changed. Close sharing and open it again.', failed: 'The note could not be shared. Please retry.', publicUrlRequired: 'A public application address is required to share a link from this device.'},
       brand: { name: BRAND_NAME },
       nav: {
         writing: 'Writing',
@@ -1236,6 +1240,8 @@ const resources = {
   },
   zh: {
     translation: {
+      externalShare: {title:'外部链接', description:'管理已分享的AI对话和笔记', publishFailed:'对话分享失败，请重试。', changed:'对话已有更新，请关闭后重新打开分享。', linkHint:'持有链接的人可以阅读这份文字快照。你可以在设置的外部链接中使链接失效。', chat:'AI对话', note:'笔记', active:'有效', revoked:'已失效', status:'状态', activeCount:'有效链接', content:'内容', link:'分享链接', published:'发布时间', revokedAt:'失效时间', revokedReason:'失效原因：用户主动使链接失效。', more:'{{title}}的操作', open:'打开公开页面', source:'查看原内容', revoke:'使链接失效', details:'查看链接信息', refresh:'刷新状态', loading:'正在读取链接…', loadMore:'加载更多', emptyActive:'暂无有效链接', emptyRevoked:'暂无已失效链接', sourceDeleted:'原内容已删除', loadFailed:'链接更新失败，已保留上次确认的记录。', revokeFailed:'链接失效操作失败，请重试。', unknown:'操作结果待确认，请刷新状态。', revoking:'正在使此链接失效…', revokeSucceeded:'链接已失效。', noLongerActive:'此链接已失效。', revokedCopy:'此链接已失效，再次点击可创建新链接。', openFailed:'内容暂时无法打开，请刷新后重试。'},
+      noteShare: {imageHint: '将完整笔记保存为长图', shareImage: '分享图片', title: '分享笔记', creating: '正在创建链接…', copied: '链接已复制', link: '笔记分享链接', linkHint: '持有链接的人可以阅读这份快照。原笔记修改或删除后，快照继续保留。', copyManually: '请选中下方链接手动复制。', changed: '笔记已有更新，请关闭后重新打开分享。', failed: '笔记分享失败，请重试。', publicUrlRequired: '请配置公开应用地址后，再从此设备分享链接。'},
       brand: { name: BRAND_NAME_ZH },
       nav: {
         writing: '写作',

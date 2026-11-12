@@ -1,18 +1,28 @@
+// [Sync] 2026-11-12: retain the link option owner while image progress/preview is hidden, preserving publication identity.
+// [Sync] 2026-11-12: Chat and notes inject the shared active link option; image behavior remains owned by each caller.
 // [Input] open/exporting/exportFailed state, optional rendered preview, and callbacks from
 //         ChatView; i18n labels.
 // [Output] Share dialog (Ink & Memory UI Design v2.1 轻纸面弹层): Solid Cream 不透明浮层、
-//          虚线 Border Paper 条目边界、Memory Yellow 角标；提供「复制链接」（暂未实现，置灰）
+//          虚线 Border Paper 条目边界、Memory Yellow 角标；由调用方提供可创建和复制的链接入口
 //          与「导出图片」两个选项。导出后切换到预览视图 — 长图定宽展示、超高内部滚动，
 //          底部提供「下载图片 / 返回」操作。
 // [Pos] chat share dialog node in frontend/app/_dream/components/chat
 // [Sync] 2026-08-03: created — replaces the direct copy-link share action with an options dialog.
 // [Sync] 2026-08-03: add the scrollable long-image preview view with download/back actions.
-import { useEffect, type CSSProperties } from 'react';
+// [Sync] 2026-11-12: share note-specific heading/link/export labels and optional focus ownership; retain Chat defaults.
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconCopy, IconDownload, IconImage, IconLoader, IconShare, IconX } from './Icons';
 import type { RenderedThreadImage } from './exportThreadImage';
 
 interface ChatShareDialogProps {
+  title?: string;
+  linkOption?: ReactNode;
+  zIndex?: number;
+  manageFocus?: boolean;
+  imageHint?: string;
+  exportCloseLabel?: string;
+  downloadLabel?: string;
   open: boolean;
   threadTitle?: string | null;
   exporting: boolean;
@@ -31,6 +41,13 @@ interface ChatShareDialogProps {
 }
 
 export default function ChatShareDialog({
+  title,
+  linkOption,
+  zIndex = 60,
+  manageFocus = false,
+  imageHint,
+  exportCloseLabel,
+  downloadLabel,
   open,
   threadTitle,
   exporting,
@@ -45,6 +62,23 @@ export default function ChatShareDialog({
   onDiscardPreview,
 }: ChatShareDialogProps) {
   const { t } = useTranslation();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open || !manageFocus) return;
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.querySelector<HTMLButtonElement>('button')?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !dialog) return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]')).filter(control => !control.closest('[hidden]') && control.getClientRects().length > 0);
+      const first = controls[0], last = controls.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {event.preventDefault(); last.focus();}
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {event.preventDefault(); first.focus();}
+    };
+    window.addEventListener('keydown', trapFocus);
+    return () => {window.removeEventListener('keydown', trapFocus); if (previous instanceof HTMLElement && previous.isConnected) previous.focus();};
+  }, [open, manageFocus]);
 
   const progressPercent = progress && progress.total > 0
     ? Math.min(100, Math.round((progress.done / progress.total) * 100))
@@ -100,7 +134,7 @@ export default function ChatShareDialog({
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 60,
+        zIndex,
         display: 'grid',
         placeItems: 'center',
         background: 'color-mix(in srgb, var(--color-text-primary) 30%, transparent)',
@@ -109,9 +143,10 @@ export default function ChatShareDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={t('chat.share.title')}
+        aria-label={title ?? t('chat.share.title')}
         onClick={(event) => event.stopPropagation()}
         style={{
           width: '100%',
@@ -132,7 +167,7 @@ export default function ChatShareDialog({
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <IconShare style={{ width: '1rem', height: '1rem', color: 'var(--color-text-primary)', flexShrink: 0 }} />
               <span style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                {preview ? t('chat.share.previewTitle') : t('chat.share.title')}
+                {preview ? t('chat.share.previewTitle') : title ?? t('chat.share.title')}
               </span>
             </div>
             <div style={{ marginTop: '0.3rem', width: '2.6rem', height: '0.28rem', borderRadius: '999px', background: 'var(--color-voice-yellow)', transform: 'rotate(-1deg)', opacity: 0.9 }} />
@@ -145,7 +180,7 @@ export default function ChatShareDialog({
           <button
             type="button"
             onClick={onClose}
-            title={exporting ? t('chat.share.closeToBackground') : t('chat.history.close')}
+            title={exporting ? exportCloseLabel ?? t('chat.share.closeToBackground') : t('chat.history.close')}
             style={{
               width: '1.8rem',
               height: '1.8rem',
@@ -165,6 +200,7 @@ export default function ChatShareDialog({
           </button>
         </div>
 
+        {linkOption ? <div hidden={Boolean(preview) || exporting} style={{marginTop: '1rem'}}>{linkOption}</div> : null}
         {preview ? (
           <>
             {/* 预览视图 — 长图定宽展示，超出高度内部滚动；超长对话为多张满分辨率分图无缝堆叠 */}
@@ -231,7 +267,7 @@ export default function ChatShareDialog({
                 ) : (
                   <IconDownload style={{ width: '0.95rem', height: '0.95rem' }} />
                 )}
-                {downloading ? t('chat.share.merging') : t('chat.share.download')}
+                {downloading ? t('chat.share.merging') : downloadLabel ?? t('chat.share.download')}
               </button>
               <button
                 type="button"
@@ -260,7 +296,7 @@ export default function ChatShareDialog({
             </div>
           </>
         ) : exporting ? (
-          /* 点分享即触发生成 — 首片预览未就绪前的占位加载视图（带进度条） */
+          /* 点击导出图片后显示生成进度，保留本次链接回执。 */
           <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.7rem', padding: '2.2rem 1rem', borderRadius: '0.85rem', border: '1px dashed color-mix(in srgb, var(--color-border-paper) 88%, transparent)', background: 'var(--color-bg-app)' }}>
             <IconLoader style={{ width: '1.3rem', height: '1.3rem', color: 'var(--color-text-secondary)', animation: 'spin 1s linear infinite' }} />
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{t('chat.share.preparingPreview')}</span>
@@ -270,8 +306,8 @@ export default function ChatShareDialog({
           <>
         {/* 选项列表 — 虚线纸边界条目，hover 才出现轻阴影（无卡片设计规则） */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginTop: '1rem' }}>
-          {/* 复制链接 — 需求暂未实现，置灰 + 即将上线角标 */}
-          <div
+          {/* 未提供链接操作的独立图片调用方保留默认占位。 */}
+          {!linkOption ? <div
             aria-disabled="true"
             title={t('chat.share.comingSoon')}
             style={{ ...optionRowStyle, opacity: 0.55, cursor: 'not-allowed' }}
@@ -291,7 +327,7 @@ export default function ChatShareDialog({
             }}>
               {t('chat.share.comingSoon')}
             </span>
-          </div>
+          </div> : null}
 
           {/* 导出图片 — 渲染后的长图 */}
           <button
@@ -325,19 +361,15 @@ export default function ChatShareDialog({
                 {exporting ? t('chat.share.exporting') : t('chat.share.exportImage')}
               </span>
               <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-                {t('chat.share.exportImageHint')}
+                {imageHint ?? t('chat.share.exportImageHint')}
               </span>
             </span>
           </button>
         </div>
 
-        {exportFailed ? (
-          <div style={{ marginTop: '0.7rem', fontSize: '0.76rem', color: 'var(--color-state-error)', textAlign: 'center' }}>
-            {t('chat.share.exportFailed')}
-          </div>
-        ) : null}
           </>
         )}
+        {exportFailed ? <div role="alert" style={{marginTop: '0.7rem', fontSize: '0.76rem', color: 'var(--color-state-error)', textAlign: 'center'}}>{t('chat.share.exportFailed')}</div> : null}
       </div>
     </div>
   );

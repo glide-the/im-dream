@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: expose explicit AI conversation link publication beside the original image option.
 // [Sync] 2026-11-03: retain saved-prose previews across Thread selection and keep runtime controls behind fresh reconciliation.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
@@ -142,6 +143,8 @@ import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ChatShareDialog from './ChatShareDialog';
+import ShareLinkOption from '../sharing/ShareLinkOption';
+import {publishChatShare} from '../../api/externalShareApi';
 import { renderThreadImage, downloadThreadImage, releaseThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
 import { getChatExportSnapshot } from '../../lib/chat-export-registry';
 import { IconBell, IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconSparkles, IconX } from './Icons';
@@ -374,6 +377,7 @@ function ChatViewContent({
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareLinkBusy, setShareLinkBusy] = useState(false);
   const [shareExporting, setShareExporting] = useState(false);
   const [shareExportFailed, setShareExportFailed] = useState(false);
   const [sharePreview, setSharePreview] = useState<RenderedThreadImage | null>(null);
@@ -1348,9 +1352,9 @@ function ChatViewContent({
                     <button
                       type="button"
                       onClick={() => {
-                        // 点分享直接触发生成 — 弹窗立即进入预览流程（先出头部一段）。
+                        // 分享先展示链接与图片两个明确选项。
                         handleOpenShareDialog();
-                        void handleExportShareImage();
+
                         setMoreMenuOpen(false);
                       }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
@@ -1868,11 +1872,13 @@ function ChatViewContent({
         /> : null}
 
         <ChatShareDialog
+          manageFocus
           open={shareDialogOpen}
+          linkOption={<ShareLinkOption key={activeThreadId ?? 'none'} sourceId={activeThreadId ?? ''} onBusyChange={setShareLinkBusy} disabled={!activeThreadId || shareExporting || shareDownloading} create={(key, signal) => publishChatShare(activeThreadId!, key, fetch, signal)}/>}
           threadTitle={threads.find((thread) => thread.id === activeThreadId)?.title ?? null}
           exporting={shareExporting}
           exportFailed={shareExportFailed}
-          canExport={Boolean(activeThreadId)}
+          canExport={Boolean(activeThreadId) && !shareLinkBusy}
           preview={sharePreview}
           downloading={shareDownloading}
           progress={shareProgress}

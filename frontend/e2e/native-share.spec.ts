@@ -1,3 +1,5 @@
+// [Sync] 2026-11-12: scope Vite optimization artifacts to this isolated share validation.
+// [Sync] 2026-11-12: choose the explicit image option before exercising native capture contracts.
 // [Sync] 2026-10-28: prebundle the full capture fixture dependency graph so Vite discovery cannot reload an active share job.
 // [Input] Production native share owner and actual DOM capture document, with explicit platform/file/HTTP fixtures.
 // [Output] Full-history/capture handoff, background-dialog completion, stale ownership and system-cancel cleanup evidence.
@@ -37,7 +39,7 @@ createRoot(document.querySelector('#root')).render(<App/>);
 let server:Awaited<ReturnType<typeof createServer>>,base:string;
 const diagnostics=new WeakMap<Page,string[]>();
 test.beforeAll(async()=>{
- server=await createServer({root:fileURLToPath(new URL('../',import.meta.url)),configFile:false,logLevel:'silent',server:{host:'127.0.0.1',port:0},optimizeDeps:{noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','react-markdown','remark-gfm','ai','zod','i18next','react-i18next','html-to-image']},plugins:[{
+ server=await createServer({root:fileURLToPath(new URL('../',import.meta.url)),configFile:false, cacheDir: fileURLToPath(new URL('../test-results/external-sharing/cache/native-share', import.meta.url)),logLevel:'silent',server:{host:'127.0.0.1',port:0},optimizeDeps:{noDiscovery:true,include:['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime','react-native-web','react-markdown','remark-gfm','ai','zod','i18next','react-i18next','html-to-image']},plugins:[{
   name:'native-share-integration',enforce:'pre',resolveId(id){if(id==='react-native')return '\0share-native';if(id==='react-native-webview')return '\0share-webview';if(id==='/share-harness.tsx')return '\0share-harness';},
   async load(id){const source=id==='\0share-native'?native:id==='\0share-webview'?webview:id==='\0share-harness'?entry:null;return source?(await transformWithEsbuild(source,'share-harness.tsx',{loader:'tsx',jsx:'automatic'})).code:null;},
   configureServer(vite){vite.middlewares.use(async(req,res,next)=>{
@@ -56,7 +58,7 @@ test.beforeEach(async({page})=>{
 });
 test.afterEach(async({page},info)=>{await info.attach('share-platform-diagnostics',{body:JSON.stringify(await facts(page)),contentType:'application/json'});expect(diagnostics.get(page)).toEqual([]);});
 async function facts(page:Page){return page.evaluate(()=>{const f=(window as any).__shareFixture;return {imports:f.imports,released:f.released,exports:f.exports,commands:f.commands,events:f.events.map(({base64,images,...value}:any)=>({...value,images:images?.map(({base64,...image}:any)=>image)})),requests:f.requests.map(({signal,...value}:any)=>({...value,aborted:signal?.aborted})),acquired:f.acquired,resourceReleases:f.resourceReleases,imageReads:f.imageReads,files:f.files.size};});}
-const open=(page:Page)=>page.getByRole('button',{name:'Open share',exact:true}).click();
+const open=async(page:Page)=>{await page.getByRole('button',{name:'Open share',exact:true}).click();await page.getByRole('button',{name:'Export as image',exact:true}).click();};
 const download=(page:Page)=>page.getByRole('button',{name:'Download image',exact:true});
 test('actual DOM capture receives complete original snapshot and system cancellation preserves retryable preview',async({page})=>{
  await open(page);await expect(download(page)).toBeEnabled({timeout:60000});let data=await facts(page);const render=data.commands.find((event:any)=>event.type==='render');

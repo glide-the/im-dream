@@ -1,3 +1,5 @@
+// [Sync] 2026-11-12: open a managed share's original Chat or Writing entity through the existing native navigation.
+import {clientFetch as shareSourceFetch} from './platform/transport';
 // [Sync] 2026-11-04: show same-conversation preparation in the existing native composer area.
 // [Sync] 2026-11-03: retain business views behind an idle clock and share native account Thread presence.
 // [Sync] 2026-11-03: pause hidden Chat UI publication while its live Thread readers remain account-owned.
@@ -259,7 +261,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       {moreVisited?<MoreNavigator onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
         onOpenThread={(id,writingContext)=>{recovery.rememberSideChat({threadId:id,writingSessionId:writingContext?.sessionId});setSideChat({threadId:id,writingContext,documentOwner:{}});}} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
-        renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
+        renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage onOpenShareSource={async share=>{if(share.kind==='chat'){await selectThread(share.source_id);openSection('chat');return;}const response=await shareSourceFetch('/api/sessions/'+encodeURIComponent(share.source_id));if(!response.ok)throw Error('SHARE_SOURCE_UNAVAILABLE');const session=await response.json() as {editor_state:{cells:{id:string;type:string}[]}};const cell=session.editor_state.cells.find(value=>value.type==='text');if(!cell)throw Error('SHARE_SOURCE_UNAVAILABLE');setEditorJump({nonce:++editorJumpNonce.current,detail:{cellId:cell.id,editorSessionId:share.source_id}});openSection('more');}} ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
           onSessionExpired={()=>void refreshSession()} onConfigSaved={()=>void setup.refreshConfig().catch(()=>setError('配置暂时无法读取，请重试。'))}/>}/>:null}
     </View>

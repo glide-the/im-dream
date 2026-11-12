@@ -18,22 +18,26 @@ import {getShowEnergyBar} from '../../../src/platform/interfacePreferences.nativ
 import {readWritingEvent,writingDocumentUrl,WritingContextRequests,type WritingDocumentState,type WritingChooserView,type WritingContextRequest,type WritingThreadContext} from './Editor/WritingDocument.protocol';
 import type {EditorJumpToCellDetail} from './chat/editorWriteTools';
 import {idleMood} from '../../../src/runtime/idleMood';
+// [Sync] 2026-11-12: execute original note clipboard/file actions with exact document ownership.
+import {performNoteShare} from '../../../src/platform/noteShare.native';
+import type {WritingShareResult} from './Editor/WritingShare.protocol';
 type Props={ownerId?:string;onIdleBlocked?:(blocked:boolean)=>void;onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};origin:string;active:boolean;onBack:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;onSessionExpired:()=>void};
 export default function WritingView({ownerId,onIdleBlocked,onEditorJumpDispatched,editorJump,origin,active,onBack,onOpenThread,onPrepareChat,onOpenResources,onSessionExpired}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),theme=useNativeThemeMode(),view=useRef<WebView<object>>(null),id=useRef(''),revision=useRef(0);
  const chooserRevision=useRef(0),openChooserNonce=useRef(0);
  const contextRequest=useRef<WritingContextRequest|undefined>(undefined);
+ const shareResult=useRef<WritingShareResult|undefined>(undefined),shareBusy=useRef(false);
  const [contextRequests]=useState(()=>new WritingContextRequests(request=>{contextRequest.current=request;sync();}));
  const [chooser,setChooser]=useState<WritingChooserView|null>(null);
  const [ready,setReady]=useState(false),[error,setError]=useState(false);
  useEffect(()=>{onIdleBlocked?.(active&&Boolean(chooser?.expanded));return()=>onIdleBlocked?.(false);},[active,chooser?.expanded,onIdleBlocked]);
  const url=writingDocumentUrl(origin),latest=useRef({active,theme,language:i18n.language.startsWith('zh')?'zh' as const:'en' as const,showEnergyBar:getShowEnergyBar(),editorJump});latest.current={active,theme,language:i18n.language.startsWith('zh')?'zh':'en',showEnergyBar:getShowEnergyBar(),editorJump};
  const callbacks=useRef({onOpenThread,onPrepareChat,onOpenResources,onSessionExpired,onEditorJumpDispatched});callbacks.current={onOpenThread,onPrepareChat,onOpenResources,onSessionExpired,onEditorJumpDispatched};
- function sync(){if(!id.current)return;const state:WritingDocumentState={...latest.current,type:'state',documentId:id.current,revision:++revision.current,...(openChooserNonce.current?{openChooserNonce:openChooserNonce.current}:{}),...(contextRequest.current?{contextRequest:contextRequest.current}:{})};view.current?.injectJavaScript(`window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(JSON.stringify(state))}}));true;`);}
+ function sync(){if(!id.current)return;const state:WritingDocumentState={...latest.current,type:'state',documentId:id.current,revision:++revision.current,...(shareResult.current?{shareResult:shareResult.current}:{}),...(openChooserNonce.current?{openChooserNonce:openChooserNonce.current}:{}),...(contextRequest.current?{contextRequest:contextRequest.current}:{})};view.current?.injectJavaScript(`window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(JSON.stringify(state))}}));true;`);}
  useEffect(()=>sync(),[active,theme,i18n.language,latest.current.showEnergyBar,editorJump,ready]);
  useEffect(()=>{if(!active)contextRequests.cancel();},[active,contextRequests]);
  useEffect(()=>()=>contextRequests.attach(''),[contextRequests]);
- function resetDocument(){id.current='';contextRequests.attach('');chooserRevision.current=0;openChooserNonce.current=0;setChooser(null);setReady(false);}
+ function resetDocument(){id.current='';shareResult.current=undefined;contextRequests.attach('');chooserRevision.current=0;openChooserNonce.current=0;setChooser(null);setReady(false);}
  function failed(){resetDocument();setError(true);}
  function receive(event:WebViewMessageEvent){
   if(event.nativeEvent.url!==url)return;
@@ -45,6 +49,11 @@ export default function WritingView({ownerId,onIdleBlocked,onEditorJumpDispatche
   if(message.type==='chooser-view'){if(message.revision>chooserRevision.current){chooserRevision.current=message.revision;setChooser(message);if(!message.loading&&latest.current.active)idleMood.observe(ownerId,message.selectedStateId,message.createdAt);}return;}
   if(message.type==='editor-jump-dispatched'){if(message.nonce===latest.current.editorJump?.nonce)callbacks.current.onEditorJumpDispatched?.(message.nonce);return;}
   if(!latest.current.active)return;
+  if(message.type==='note-share'){
+   if(shareBusy.current)return;
+   const documentId=id.current;shareBusy.current=true;
+   void performNoteShare(message.request,()=>id.current===documentId&&latest.current.active).then(result=>{if(id.current===documentId){shareResult.current=result;sync();}}).finally(()=>{shareBusy.current=false;});return;
+  }
   if(message.type==='open-thread'){
    const documentId=id.current,sessionId=message.editorSessionId;
    callbacks.current.onOpenThread(message.threadId,sessionId?{sessionId,prepareEditorState:signal=>latest.current.active?contextRequests.prepare(documentId,sessionId,signal):Promise.reject(new Error('WRITING_CONTEXT_INACTIVE'))}:undefined);

@@ -1,9 +1,11 @@
+// [Sync] 2026-11-12: add the current-note share action beside the original save control.
 // [Input] React icons (FaAlignRight, FaMicrophone), parent props for toolbar actions.
 // [Output] Floating left toolbar with tool buttons and hover tooltips.
 // [Pos] left-toolbar component in frontend/app/_dream/components
 // [Sync] 2026-05-29: replace all hardcoded colors (#fff, #e3f2fd, #1976d2 etc.) with CSS tokens for theme support.
 import React, { useState } from 'react';
 import { FaAlignRight, FaMicrophone } from 'react-icons/fa';
+import {IconShare} from './chat/Icons';
 
 // @@@ Hover-label tool button lives outside to avoid re-creation on each render
 function ToolButton({
@@ -85,6 +87,8 @@ type Props = {
   onToggleAlign: () => void;
   onShowCalendar: () => void;
   onSaveToday: () => void;
+  onShareNote: () => void;
+  shareLabel: string;
   onToggleTalking: () => void;
   isAligned: boolean;
   isTalking: boolean;
@@ -95,6 +99,8 @@ export default function LeftToolbar({
   onToggleAlign,
   onShowCalendar,
   onSaveToday,
+  onShareNote,
+  shareLabel,
   onToggleTalking,
   isAligned,
   isTalking,
@@ -141,6 +147,8 @@ export default function LeftToolbar({
           </svg>
         }
       />
+
+      <ToolButton label={shareLabel} onClick={onShareNote} icon={<IconShare style={{width:18,height:18}}/>}/>
 
       <ToolButton
         label="Insert chat"

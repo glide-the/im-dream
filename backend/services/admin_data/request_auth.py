@@ -1,3 +1,4 @@
+# [Sync] 2026-11-12: register exact external-share operations; unavailable capabilities fail closed per request.
 # [Sync] 2026-11-04: register exact continuation operations.
 # [Sync] 2026-10-23: register the five task-scoped Reflections Notion v2 operations in the shared production client.
 # [Sync] 2026-10-15: register additive memory artifact/settings contracts.
@@ -96,6 +97,7 @@ from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 from .workspace_data import ENSURE_DEFAULT_WORKSPACE
 from .system_config_data import SYSTEM_CONFIG_OPERATIONS
 from .image_turn_data import IMAGE_TURN_OPERATIONS
+from .external_share_data import EXTERNAL_SHARE_OPERATIONS
 from .reflections_config_data import REFLECTIONS_SECTION_CONFIG_OPERATIONS
 from .local_data_import import LOCAL_DATA_IMPORT_OPERATIONS
 from .picture_history_data import PICTURE_HISTORY_OPERATIONS
@@ -173,6 +175,7 @@ class AdminRequestAuth:
                 *PREFERENCES_OPERATIONS,
                 *SYSTEM_CONFIG_OPERATIONS,
                 *IMAGE_TURN_OPERATIONS,
+                *EXTERNAL_SHARE_OPERATIONS,
                 *REFLECTIONS_SECTION_CONFIG_OPERATIONS,
                 *ANALYSIS_CONTENT_OPERATIONS,
                 *SCOPE_OPERATIONS,

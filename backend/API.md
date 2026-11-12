@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-12: 统一AI/笔记数据库快照、匿名阅读和当前用户失效管理接口。 -->
+<!-- [Sync] 2026-11-12: 记录认证笔记发布与独立匿名快照读取。 -->
 <!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Deck功能展示名统一为Kastention与卡片结构；原概念、接口、数据及历史定义保持。 -->
@@ -1311,3 +1313,24 @@ GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dre
 返回 `reports` 和 `next_cursor`。每份记录包含字符串 `id`、`report_type`、`report_data`、报告保存时的 `created_at`、服务器外键 `task_id`（可空）及实际 `analysis_created_at`。任务关联报告用本账户 task.created_at；无关联旧分析用其记录自己的创建时间。排序为分析创建时间/id倒序；下一页严格早于末尾游标。没有更多记录时 next_cursor=null。读取不会生成、补存或修改报告。
 
 Admin 的追加 `analysis-report.history-page` 使用已有三项 identity/unified/reflection-task-persistence capabilities 和 `dream:read`，旧冻结 list/save DTO不改变。契约和流程见 [分析历史设计](../docs/design/memory/reflections-history-design.md)。本接口要求对应 Admin 代码及精确 operation capability 可用；本轮未部署。
+
+
+## AI与笔记外部分享
+
+创建、列表、状态与失效沿原Bearer/Browser CSRF边界；读取要求`dream:read`，写入要求`dream:write`。所有者由当前OAuth主体决定。
+
+| 接口 | 输入与结果 |
+| --- | --- |
+| `POST /api/sessions/{session_id}/share` | `{"content_sha256":"<正文SHA-256>","request_key":"<UUID>"}`。按当前主体读取已保存Session，仅投影TextCell，比较UTF-8双换行连接正文的摘要。 |
+| `POST /api/claude-agent/threads/{thread_id}/share` | `{"request_key":"<UUID>"}`。读取已保存对话，投影可见用户正文与最终回复。 |
+| 创建响应 | 201，`{share,path,url}`；path为`/share/<43字符token>`，公开origin缺失时url为null。空/缺失/笔记变化分别400/404/409，Admin能力缺失或服务异常503。 |
+| `GET /api/shares` | kind=`chat`或`note`，status默认`active`，可为`revoked`；limit默认20、范围1..100，成对`before_created_at/before_id`翻页。返回shares、chat/note有效counts、next_cursor和public_origin。 |
+| `GET /api/shares/{id}` | 当前用户单条最新记录，跨账户或缺失404。 |
+| `POST /api/shares/{id}/revoke` | `{"request_key":"<UUID>"}`，返回`{share}`，已提交记录status为revoked。重复操作保持终态。 |
+| `GET /api/public/shares/{token}` | 匿名读取当前active记录。响应仅为note/chat判别的严格正文DTO；缺失或已失效404，能力/服务/DTO异常503。 |
+
+元数据含id、kind、source_id、title、path、status、source_available、created_at、revoked_at。原内容编辑或删除后保留快照；source_available单独表示原内容存在性。公开正文退出所有者、原内容ID、工具、附件和账户元数据。
+
+写操作采用Admin操作回执及稳定request_key。相同key相同输入返回原结果，相同key异值409；复制前读取最新状态。公开API和`/share/[token]`页面均禁止缓存与索引，设置no-referrer。Next独立匿名API和页面共用服务端读取器，均不转发访客Cookie或Bearer。
+
+Admin前向0087及`dream.external-share.v1`为新增能力依赖，缺失时fail closed。旧`/api/public/note-shares/{token}`返回404，旧无归属文件token结束公开读取，原文件保留。详情见[统一分享设计](../docs/design/sharing/external-links.md)及[改造状态](../docs/exec/external-share-refactor-20261112.md)。

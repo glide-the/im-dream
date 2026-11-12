@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: expose frozen text-only note sharing from the original Writing toolbars.
 // [Sync] 2026-11-03: scope retained Chat to the authenticated user and refresh its reads on route return.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
@@ -62,6 +63,9 @@
 import { BRAND_NAME, BRAND_BANNER_PATH } from './constants/brand';
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import NoteShareDialog, {type NoteShareActions} from './components/notes/NoteShareDialog';
+import {projectNote, type NoteShareSource} from './components/notes/noteShare';
+import {IconShare} from './components/chat/Icons';
 import type { Commentor, EditorState, TextCell, WritingSuggestionCell as WritingSuggestionCellData } from './engine/EditorEngine';
 import { ChatWidget } from './engine/ChatWidget';
 import type { ChatWidgetData } from './engine/ChatWidget';
@@ -251,6 +255,7 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 
 // @@@ Main App Component
 export interface WritingDocumentHost {
+  noteShareActions?: NoteShareActions;
   active:boolean;showEnergyBar:boolean;openChooserNonce?:number;onChooserView?:(view:WritingChooserView)=>void;
   contextRequest?:WritingContextRequest;onContextResult?:(result:WritingContextResult)=>void;
   onOpenThread:(threadId:string,editorSessionId?:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
@@ -389,6 +394,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     }
   }, []);
   const [stateConfig, setStateConfig] = useState(() => getStateConfig());
+  const [noteShare, setNoteShare] = useState<NoteShareSource | null>(null);
 
   const {
     engineRef,
@@ -1232,6 +1238,12 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     if(writingDocument && !writingDocument.active){setShowCalendarPopup(false);setDropdownVisible(false);setExpandedCommentId(null);if(document.activeElement instanceof HTMLElement)document.activeElement.blur();}
   },[writingDocument?.active]);
 
+  const openNoteShare = () => {
+    const current = engineRef.current?.getState();
+    if (current) setNoteShare(projectNote(current));
+  };
+  useEffect(() => {setNoteShare(null);}, [state?.id, user?.id, writingRouteActive, writingDocument?.active]);
+
   // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
   const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     if(writingDocument){writingDocument.onOpenThread(threadId,engineRef.current?.getState().id);return;}
@@ -1812,6 +1824,14 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
             renderSettings={(section, onNavigate) => (
               <StoryWorkspaceSettingsPage
                 activeSection={section}
+                onOpenShareSource={async share => {
+                  if (share.kind === 'chat') {handleStoryWorkspaceChatThreadRequest(share.source_id); onNavigate('/story-workspace/chat'); return;}
+                  await ensureSessionPersistedForAgent();
+                  const {getSession} = await import('./api/voiceApi');
+                  const session = await getSession(share.source_id);
+                  if (!session.editor_state || !loadPersistedEditorSession({sessionId: session.id, editorState: session.editor_state, labels: session.labels})) throw Error('SHARE_SOURCE_UNAVAILABLE');
+                  onNavigate('/story-workspace/writing');
+                }}
                 claudeMcpDetailServerName={claudeMcpDetailServerName}
                 connectorSettingsFocusNonce={connectorSettingsFocusNonce}
                 currentLanguage={currentLanguage}
@@ -1916,6 +1936,8 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                 onToggleAlign={handleToggleAlign}
                 onShowCalendar={() => setShowCalendarPopup(true)}
                 onSaveToday={handleSaveToday}
+                onShareNote={openNoteShare}
+                shareLabel={i18n.t('noteShare.title')}
                 onToggleTalking={handleToggleTalking}
                 isAligned={commentsAligned}
                 isTalking={userTalking}
@@ -1933,6 +1955,9 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
               gap: '8px',
               zIndex: 1000
             }}>
+              <button type="button" onClick={openNoteShare} aria-label={i18n.t('noteShare.title')} title={i18n.t('noteShare.title')} style={{width:44,height:44,border:'none',borderRadius:'50%',background:'var(--color-bg-surface-solid)',color:'var(--color-text-secondary)',display:'grid',placeItems:'center',boxShadow:'0 2px 6px var(--color-shadow-medium)'}}>
+                <IconShare style={{width:20,height:20}}/>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowCalendarPopup(true)}
@@ -2506,6 +2531,8 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
       )}
 
       {/* Calendar Popup */}
+      {noteShare && state?.id === noteShare.sessionId && <NoteShareDialog key={noteShare.sessionId} source={noteShare} save={() => ensureSessionPersistedForAgent(noteShare.sessionId)} onClose={() => setNoteShare(null)} actions={writingDocument?.noteShareActions}/>}
+
       {showCalendarPopup && (
         <CalendarPopup
           onLoadEntry={handleLoadEntry}
