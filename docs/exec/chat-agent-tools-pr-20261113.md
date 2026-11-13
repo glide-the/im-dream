@@ -21,6 +21,7 @@
 | `INK_MORE_EVIDENCE_DIR=output/chat-pr/screenshots pnpm exec playwright test --config=e2e/chat-tools.config.ts e2e/chat-composer-zh.spec.ts e2e/chat-tools.spec.ts e2e/chat-route-cache.spec.ts e2e/more-navigation.spec.ts e2e/native-more-navigation.spec.ts app/_dream/components/chat/__tests__/AIInputDockSlashMenuRegression.test.ts app/_dream/components/chat/__tests__/ThreadInputQueue.test.ts --output=output/chat-pr/browser` | 0 | 55项：8中文、18工具／模型、4正常路由与缓存、13导航、5输入栏、7队列 |
 | `PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_admin_chat_routes.py backend/tests/test_claude_mcp_runtime_snapshot.py backend/tests/test_claude_agent_service.py backend/tests/test_claude_agent_thread_input_queue.py backend/tests/test_mobile_clock_audio.py backend/tests/test_claude_agent_runner.py` | 0 | 297 passed、1 skipped、217 subtests passed |
 | `PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_mobile_mcp.py` | 0 | 7 passed，原MCP内存适配、媒体问答和投影恢复 |
+| `node frontend/output/chat-pr-20261113/docs/check-docs-selected.mjs`（原工作区运行，目标为独立工作区） | 0 | 54份Markdown库存、140处链接、24个Mermaid图及6张版本化截图通过；3份MIT来源快照Git blob一致 |
 
 后端六份规格使用SDK stub；原生MCP规格使用实际SDK类型并运行独立Python进程。首次将两类规格放入同一进程时，集合阶段的`_KwargsBase`替换了MCP配置类型，产生7项失败。独立进程分别通过，失败日志保留于本机`frontend/output/chat-pr-20261113/backend/`，最终日志位于`backend-final/`。前端原始日志位于同一目录下的`frontend/`。
 
