@@ -1,4 +1,8 @@
 <!-- [Sync] 2026-11-12: 设置新增统一AI/笔记外部链接入口。 -->
+<!-- [Input] 现行Settings业务、资源连接管理与Chat工具选择归属。 -->
+<!-- [Output] 设置入口、资源管理职责及各专项产品规则链接。 -->
+<!-- [Pos] Settings总PRD，连接卡片与Chat输入栏分别由业务专项维护。 -->
+<!-- [Sync] 2026-11-13: 工作台通过设置管理资源，Chat按当前对话选择工具。 -->
 <!-- [Sync] 2026-11-02: 现行应用称谓更新为Kastention，业务规则与来源链接保持。 -->
 # Settings PRD
 
@@ -408,6 +412,19 @@ Settings 页面通过以下入口访问：
 
 后续如需扩展 Settings 页面，建议将整个 Settings 视图提取为独立 `SettingsView.tsx` 组件，与 `App.tsx` 解耦。
 
+
+## 2026-11-12 Web与App工具连接卡片
+
+本节保留当日布局记录，现行入口与Chat归属见下方2026-11-13修订。
+
+现有资源链接入口采用[共用MCP管理设计](resource-connections/mcp-tool-management.md)：远程区域保留原Notion/飞书入口并以真实服务卡片展示MCP连接，提供连接工具、管理及后续任务使用的启用／停用操作；本地区域按设备能力展示App音频工具卡，默认关闭，Web仅显示App可用。
+
+产品规则、桌面／窄屏骨架归上述专项；Agent、MCP、原管理API、设备选择和播放器的接线及时序归[前端设计](../design/claude-agent/mcp-tool-management-frontend.md)。原工具权限设置、AskUserQuestion、MCP Apps使用策略和认证入口分别保持。新卡片与音频前端接线当前为设计状态。
+
 ## 外部链接
 
 设置增加“外部链接”，按AI对话和笔记查看有效地址与已失效记录，支持复制、公开打开、查看原内容和单条失效。完整规则及桌面/窄屏骨架见[外部链接PRD](sharing/external-links.md)。源码已接入，正常服务采用与验证状态见[改造记录](../exec/external-share-refactor-20261112.md)。
+
+## 2026-11-13 工作台资源入口修订
+
+工作台通过“设置”进入原资源管理页面；窄屏与App的更多菜单保留写作、时间线、回顾、主题、设置五项。原设置资源路由和内部管理跳转继续可用。连接卡片见[资源专项](resource-connections/mcp-tool-management.md)，Chat的Agent、工具和输入栏见[Chat专项](chat/agent-tool-composer.md)。上方历史布局记录保持留存。

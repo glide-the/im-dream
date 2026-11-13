@@ -1,3 +1,4 @@
+# [Sync] 2026-11-13: verify selected and empty Chat MCP snapshots independently of global connections.
 # [Sync] 2026-11-04: inject explicit continuation fixtures for legacy Service unit contracts.
 # [Sync] 2026-10-26: a committed confirmation retries the original Hook with no model or assistant write; Hook errors retain the existing terminal failure.
 # [Sync] 2026-10-23: ordinary turn fixtures return no task-owned Notion runtime, preserving Chat projection coverage.
@@ -1500,6 +1501,96 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 }
             },
         )
+
+    async def test_chat_selects_remote_names_and_never_inherits_unselected_connections(self):
+        managed_loader = _managed_loader({
+            "other": {"type": "http", "url": "https://other.example.test/mcp"},
+            "remote-readonly": {
+                "type": "http",
+                "url": "https://mcp.example.test/mcp",
+            }
+        })
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            managed_mcp_runtime_snapshot_loader=managed_loader,
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            mcp_server_names=("remote-readonly",),
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_workspace_disabled_mcp"),
+            ),
+        ):
+            execution = await service.assemble_context(
+                request,
+                state=AgentRunState(session_id=request.thread_id),
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        managed_loader.load.assert_awaited_once_with("7", None, server_names=("remote-readonly",))
+        self.assertEqual(
+            execution.run_options.claude_mcp_servers,
+            {
+                "remote-readonly": {
+                    "type": "http",
+                    "url": "https://mcp.example.test/mcp",
+                }
+            },
+        )
+
+    async def test_chat_empty_selection_skips_remote_credentials_and_loader(self):
+        managed_loader = _managed_loader({
+            "remote-readonly": {
+                "type": "http",
+                "url": "https://mcp.example.test/mcp",
+            }
+        })
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            managed_mcp_runtime_snapshot_loader=managed_loader,
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            mcp_server_names=(),
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_workspace_disabled_mcp"),
+            ),
+        ):
+            execution = await service.assemble_context(
+                request,
+                state=AgentRunState(session_id=request.thread_id),
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        managed_loader.load.assert_not_awaited()
+        self.assertEqual(execution.run_options.claude_mcp_servers, {})
+        self.assertEqual(execution.turn_context.managed_mcp_server_keys, ())
 
     async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):
         builder = _FakeContextBuilder()

@@ -1,3 +1,5 @@
+// [Sync] 2026-11-13: distinguish Settings connection/auth operations from Chat Thread tool choices.
+// [Sync] 2026-11-13: connected-service cards and shared revision-aware quick enable/disable.
 // [Sync] 2026-10-29: share original MCP list state with native and retain Web markup/focus.
 // [Input] Database-managed Claude MCP capability/CRUD/server/operation DTOs plus the shared accessible Modal with an explicit initial-focus target and design tokens/icons.
 // [Output] Fast DB-backed server list, modal transport-safe creation, detail navigation, OAuth handoff, logout, and removal UI.
@@ -45,6 +47,7 @@ import './ClaudeMcpResourceSection.css';
 
 import {OPERATION_POLL_INTERVAL_MS,CAPABILITY_RETRY_INTERVAL_MS,CAPABILITY_UNAVAILABLE,ACTIVE_STATES,STATE_LABELS,SCOPE_LABELS,AUTH_STATE_LABELS,authStateOf,serverStatusLabel,canLogout,canDetectConnection,safeApiErrorMessage,safeOperationError,messageForCapability,operationFor} from './mcpResourcePresentation';
 import useClaudeMcpResources from '../../hooks/useClaudeMcpResources';
+import {mcpServerToggleChanges} from './mcpServerToggle';
 
 function actionButton(primary = false): React.CSSProperties {
   return {
@@ -64,7 +67,7 @@ export default function ClaudeMcpResourceSection({
 }: {
   onOpenServerDetail?: (serverName: string) => void;
 }) {
-  const {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove}=useClaudeMcpResources();
+  const {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove,toggle}=useClaudeMcpResources();
   const serverNameInputRef=useRef<HTMLInputElement>(null);
 
   return (
@@ -72,10 +75,10 @@ export default function ClaudeMcpResourceSection({
       <div className="claude-mcp-resource__header">
         <div>
           <h3 id="claude-mcp-heading" style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-            Claude MCP 资源
+            MCP工具连接
           </h3>
           <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-            Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后会自动加载 Tools、Resources 与 Prompts。
+            配置服务连接与认证。当前对话使用的工具在Chat输入栏选择。进入详情可查看工具、资源与提示。
           </p>
         </div>
         {capability?.enabled ? (
@@ -90,7 +93,7 @@ export default function ClaudeMcpResourceSection({
             type="button"
           >
             <IconPlus />
-            添加 MCP 服务
+            连接工具
           </button>
         ) : null}
       </div>
@@ -219,7 +222,8 @@ export default function ClaudeMcpResourceSection({
         </div>
       ) : null}
 
-      <div style={{ display: 'grid', gap: '0.72rem' }}>
+      {capability?.enabled ? <p style={{margin:0,color:'var(--color-text-secondary)',fontSize:'.8rem'}}>已连接 {servers.filter(server=>server.state==='connected').length} · 已启用 {servers.filter(server=>server.enabled).length}</p> : null}
+      <div className="claude-mcp-resource__cards">
         {servers.map((server) => {
           const operation = operationFor(operations, server);
           const state = operation && ACTIVE_STATES.includes(operation.state)
@@ -233,13 +237,13 @@ export default function ClaudeMcpResourceSection({
                     type="button"
                     aria-label={`管理与工具 ${server.name}`}
                     onClick={() => onOpenServerDetail(server.name)}
-                    style={{ flex: '1 1 18rem', display: 'flex', alignItems: 'center', gap: '0.68rem', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', padding: 0, textAlign: 'left', cursor: 'pointer' }}
+                    style={{ flex: '1 1 10rem', display: 'flex', alignItems: 'center', gap: '0.68rem', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', padding: 0, textAlign: 'left', cursor: 'pointer' }}
                   >
                     <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.75rem', display: 'grid', placeItems: 'center', background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', flexShrink: 0 }}>
                       <IconDatabase style={{ width: '1rem', height: '1rem' }} />
                     </span>
                     <span style={{ minWidth: 0, flex: 1 }}>
-                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
+                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.display_name || server.name}</strong>
                       <span style={{ marginTop: '0.25rem', display: 'flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : state === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)' }}>
                         {state === 'connected' ? <IconCheck style={{ width: '0.78rem', height: '0.78rem' }} /> : state === 'failed' ? <IconX style={{ width: '0.78rem', height: '0.78rem' }} /> : null}
                         {serverStatusLabel(server, state)} · {SCOPE_LABELS[server.config_scope || 'unknown']}
@@ -256,12 +260,13 @@ export default function ClaudeMcpResourceSection({
                       <IconDatabase style={{ width: '1rem', height: '1rem' }} />
                     </span>
                     <div style={{ minWidth: 0 }}>
-                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
+                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.display_name || server.name}</strong>
                       <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{serverStatusLabel(server, state)} · {SCOPE_LABELS[server.config_scope || 'unknown']}</div>
                     </div>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                  {mcpServerToggleChanges(server,!server.enabled) ? <button type="button" role="switch" aria-checked={server.enabled} aria-label={`启用 ${server.display_name||server.name}`} disabled={loading||busyServer!==null} onClick={()=>void toggle(server,!server.enabled)} style={actionButton(server.enabled)}>{busyServer===server.name?'正在保存…':server.enabled?'停用':'启用'}</button> : null}
                   {canLogout(server, state) ? (
                     <button type="button" onClick={() => void logout(server.name)} disabled={busyServer === server.name} style={actionButton()}>
                       退出认证

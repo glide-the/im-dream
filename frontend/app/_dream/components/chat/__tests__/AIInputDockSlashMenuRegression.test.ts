@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: scope the single Send/Stop assertion separately from the migrated model selector.
 // [Sync] 2026-10-12: builtin compact survives catalog failure while existing keyboard selection stays intact.
 // [Input] Real Chromium input against the production AIInputDock module with mocked Skill catalog and system-config APIs.
 // [Output] Regression coverage for the user-visible slash shortcut menu: draft trigger, listbox rendering, keyboard selection, dismissal, and silent catalog-failure degrade.
@@ -127,6 +128,7 @@ async function startHarness(page: Page, options: {
   await page.route('**/api/system-config', async (route) => {
     await route.fulfill({ json: { data: { im_full_access_enabled: false, workspace_enabled: true } } });
   });
+  await page.route('**/api/gateway/models', route => route.fulfill({json:{data:[{modelAlias:'fixture-composer-model',displayName:'Composer model',protocol:'anthropic',capabilities:{chat:true},contextWindow:128000,maxOutputTokens:16000,enabled:true,callable:true,availability:'included',requiredPlanCode:null,upgradeHint:null}],defaultModelAlias:'fixture-composer-model'}}));
   await page.route('**/api/claude-agent/skill-commands', async (route) => {
     if (options.catalogStatus !== 200) {
       await route.fulfill({
@@ -196,7 +198,7 @@ test('accepts a second draft during an active turn and restores it when queue su
     const stop = page.getByRole('button', { name: 'Stop generating' });
     await expect(stop).toBeVisible();
     await expect(send).toHaveCount(0);
-    await expect(page.locator('.ai-input-dock__trailing-actions button')).toHaveCount(1);
+    await expect(page.locator('.ai-input-dock__trailing-actions .ai-input-dock__send-button')).toHaveCount(1);
     await editor.fill('queued while running');
     await expect(send).toBeEnabled();
     await expect(stop).toHaveCount(0);
@@ -234,7 +236,7 @@ test('accepts a second draft during an active turn and restores it when queue su
     await send.click();
     await expect(editor).toHaveText('keep my queued draft');
     await expect(send).toBeVisible();
-    await expect(page.locator('.ai-input-dock__trailing-actions button')).toHaveCount(1);
+    await expect(page.locator('.ai-input-dock__trailing-actions .ai-input-dock__send-button')).toHaveCount(1);
     await expect(page.getByTestId('sent-count')).toHaveText('1');
   } finally {
     await server.close();

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-13: selection precedes credential reads and rejects disabled or out-of-scope connections.
 """Managed MCP Runtime snapshot loader contracts.
 
 [Input] Enabled user/workspace rows, encrypted fake credentials, and injected stdio profiles.
@@ -384,4 +385,27 @@ def test_single_server_expired_oauth_fails_when_record_revision_does_not_advance
         assert "stale-secret" not in str(raised.value)
         assert "fresh-secret" not in str(raised.value)
 
+    asyncio.run(scenario())
+
+
+def test_chat_selection_filters_before_credentials_or_discovery():
+    async def scenario():
+        selected = _server("selected", "research")
+        unselected_oauth = _server("unselected", "shared")
+        repository = _Repository([selected, unselected_oauth])
+        loader = ManagedMcpRuntimeSnapshotLoader(repository, None,
+            stdio_profiles=StdioProfileResolver({}), max_servers=8)
+        # The unrelated OAuth connection has no decryptable credential. It cannot block this choice.
+        snapshot = await loader.load("7", None, server_names=("research",))
+        assert set(snapshot) == {"research"}
+        assert await loader.load("7", None, server_names=()) == {}
+        for names in (("missing",), ("research", "missing")):
+            with pytest.raises(ClaudeMcpError):
+                await loader.load("7", None, server_names=names)
+        repository.rows = [replace(selected, enabled=False)]
+        with pytest.raises(ClaudeMcpError):
+            await loader.load("7", None, server_names=("research",))
+        repository.rows = [replace(selected, scope="workspace", workspace_id="other-workspace")]
+        with pytest.raises(ClaudeMcpError):
+            await loader.load("7", None, server_names=("research",))
     asyncio.run(scenario())

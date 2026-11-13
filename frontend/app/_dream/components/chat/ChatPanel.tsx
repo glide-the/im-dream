@@ -1,3 +1,6 @@
+// [Sync] 2026-11-13: ordinary and queued messages capture current Thread tools without global MCP saves.
+// [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
+// [Sync] 2026-11-13: preserve caller Agent context in the combined menu and refresh original model config after confirmed saves.
 // [Sync] 2026-11-04: show preparation inline and retain rejected drafts with stable retry message IDs.
 // [Sync] 2026-11-03: refresh original system configuration when the retained Chat route returns.
 // [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
@@ -19,6 +22,7 @@
 // [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
+import {readThreadTools} from '../../hooks/useChatToolSelection';
 import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
 import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
@@ -120,6 +124,7 @@ import {
   toAttachment,
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
+import type {DeckChatSelectorProps} from '../deck/deckAgentSelection';
 import { latestContextUsage } from '../../lib/context-compaction';
 import ChatMessageList from './ChatMessageList';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
@@ -201,6 +206,8 @@ interface SystemConfigResponse {
 }
 
 interface ChatPanelProps {
+  active?: boolean;
+  agentSelection?:DeckChatSelectorProps;
   threadId: string;
   initialMessages?: UIMessage[];
   readRefreshNonce?: number;
@@ -226,6 +233,7 @@ interface ChatPanelProps {
   queuedPrompt?: string;
   queuedAttachments?: Attachment[];
   queuedToolChoice?: ToolChoice;
+  queuedTools?:readonly import('../../lib/chat-schema').ChatToolDescriptor[];
   queuedPromptNonce?: number;
   /**
    * Parent-owned at-most-once gate for queued sends. ChatPanel-local refs do not
@@ -288,6 +296,7 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
 }
 
 export default function ChatPanel({
+  active = true,
   threadId,
   initialMessages,
   readRefreshNonce = 0,
@@ -304,6 +313,7 @@ export default function ChatPanel({
   queuedPrompt,
   queuedAttachments = [],
   queuedToolChoice = 'auto',
+  queuedTools = [],
   queuedPromptNonce,
   claimQueuedPrompt,
   openFileDialogSignal,
@@ -320,6 +330,7 @@ export default function ChatPanel({
   voiceSystemPrompt,
   deckId,
   voiceId,
+  agentSelection,
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const submissionStopPending = useSyncExternalStore(
@@ -330,6 +341,7 @@ export default function ChatPanel({
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
+    tools?: readonly import('../../lib/chat-schema').ChatToolDescriptor[];
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
   const [imageMaterial, setImageMaterial] = useState<{ threadId: string; file: File } | null>(null);
@@ -345,6 +357,7 @@ export default function ChatPanel({
   const [queueCheckPending, setQueueCheckPending] = useState(false);
   const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
   const pendingInputIdsRef = useRef(new Map<string, string>());
+  const [modelConfigRefresh,setModelConfigRefresh]=useState(0);
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -450,7 +463,7 @@ export default function ChatPanel({
     return () => {
       active = false;
     };
-  }, [readRefreshNonce]);
+  }, [readRefreshNonce,modelConfigRefresh]);
 
   useEffect(() => {
     return subscribeImFullAccessChanged((enabled) => {
@@ -508,7 +521,7 @@ export default function ChatPanel({
         const requestContext = requestContextRef.current;
 
         const pending=getPendingData();
-        const requestBody:ChatApiSchemaRequestBody=buildClaudeChatRequest({id,message:lastMessage,context:requestContext,attachments:pending?.rawAttachments,toolChoice:pending?.toolChoice});
+        const requestBody:ChatApiSchemaRequestBody=buildClaudeChatRequest({id,message:lastMessage,context:{...requestContext,tools:pending?.tools??readThreadTools(threadId)},attachments:pending?.rawAttachments,toolChoice:pending?.toolChoice});
 
         setTimeout(() => {
           pendingDataRef.current = null;
@@ -539,11 +552,11 @@ export default function ChatPanel({
     await sendCoordinatedChatUserMessage(message, options, {
       onConversationStart,
       setToolChoice: setCurrentToolChoice,
-      setPendingData: (value) => { pendingDataRef.current = value; },
+      setPendingData: (value) => { pendingDataRef.current = {...value,tools:value.tools??readThreadTools(threadId)}; },
       ensureEditorSessionPersisted: editorState ? ensureEditorSessionPersisted : undefined,
       incrementTurnGeneration: () => { turnGenerationRef.current += 1; },
       dispatch: async (outgoing) => {
-        const identity = JSON.stringify([threadId, outgoing.parts, options.rawAttachments, options.toolChoice]);
+        const identity = JSON.stringify([threadId, outgoing.parts, options.rawAttachments, options.toolChoice, options.tools??readThreadTools(threadId)]);
         const id = outgoing.id ?? continuationMessageIds.current.get(identity) ?? crypto.randomUUID();
         continuationMessageIds.current.set(identity, id);
         continuationErrorRef.current = null;
@@ -697,10 +710,10 @@ export default function ChatPanel({
       }
       await sendUserMessage(
         { role: 'user', parts: queuedMessageParts },
-        { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice },
+        { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice, tools:queuedTools },
       );
     })();
-  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendUserMessage, submissionStopPending, threadId]);
+  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, queuedTools, sendUserMessage, submissionStopPending, threadId]);
 
   const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
@@ -1612,7 +1625,7 @@ export default function ChatPanel({
             onSettled={markToolConfirmationSettled}
           />
         ) : null}
-        <AIInputDock
+        <AIInputDock active={active} agentSelection={agentSelection} onModelConfigSaved={()=>setModelConfigRefresh(value=>value+1)}
             contextUsage={latestContextUsage(messages, systemConfig?.model, chatLoading)}
             deckId={deckId}
             threadId={threadId}
@@ -1621,7 +1634,7 @@ export default function ChatPanel({
             imageMaterial={imageMaterial?.threadId === threadId ? imageMaterial.file : undefined}
             onImageMaterialConsumed={() => setImageMaterial(null)}
             fullAccessEnabled={imFullAccessEnabled}
-            onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
+            onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto', tools = []) => {
               if (isStopping || claudeThreadStopPending(threadId)) {
                 setThreadInputError(t('chat.inputDock.stopping'));
                 throw new Error('CHAT_STOP_PENDING');
@@ -1636,7 +1649,7 @@ export default function ChatPanel({
                 const id = pendingInputIdsRef.current.get(text) ?? crypto.randomUUID();
                 pendingInputIdsRef.current.set(text, id);
                 try {
-                  const entry = await enqueueThreadInput(threadId, id, text, toolChoice, deckId, voiceId);
+                  const entry = await enqueueThreadInput(threadId, id, text, toolChoice, deckId, voiceId, undefined, tools);
                   pendingInputIdsRef.current.delete(text);
                   setThreadInputs((current) => current.some((item) => item.message_id === entry.message_id)
                     ? current.map((item) => item.message_id === entry.message_id ? entry : item)
@@ -1664,7 +1677,7 @@ export default function ChatPanel({
               }
               await sendUserMessage(
                 { role: 'user', parts },
-                { rawAttachments: uploadedFiles.map(toAttachment), toolChoice },
+                { rawAttachments: uploadedFiles.map(toAttachment), toolChoice, tools },
               );
             }}
             placeholder={inputPlaceholder}

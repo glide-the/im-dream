@@ -1,3 +1,6 @@
+// [Sync] 2026-11-13: pass native composer tool selection to the existing session send/queue path.
+// [Sync] 2026-11-13: current-Agent tools trigger and migrated model picker reuse App-owned Agent/config callbacks.
+// [Sync] 2026-11-13: Chat tools navigate to the existing resource page through the native More owner.
 // [Sync] 2026-11-12: open a managed share's original Chat or Writing entity through the existing native navigation.
 import {clientFetch as shareSourceFetch} from './platform/transport';
 // [Sync] 2026-11-04: show same-conversation preparation in the existing native composer area.
@@ -45,7 +48,7 @@ import type {ToolChoice} from '../app/_dream/lib/chat-schema';
 import type {Deck,Voice} from '../app/_dream/api/voiceApi';
 import {getDeck} from '../app/_dream/api/deckReadApi';
 import useNativeChatSetup,{type NativeChatConfig} from '../app/_dream/components/chat/useNativeChatSetup.native';
-import DeckChatSelector,{type DeckAgentSelection} from '../app/_dream/components/deck/DeckChatSelector.native';
+import type {DeckAgentSelection} from '../app/_dream/components/deck/deckAgentSelection';
 import useNativeChatThread from '../app/_dream/components/chat/useNativeChatThread.native';
 import {createNativeChatRecovery} from '../app/_dream/components/chat/nativeChatRecovery.native';
 import ToolConfirmationDock from '../app/_dream/components/chat/ToolConfirmationDock.native';
@@ -244,12 +247,12 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       {origin ? <View style={styles.shrink}>
         <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
           active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
-          onSendMessage={(text,files,choice)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice);}}
+          onSendMessage={(text,files,choice,tools)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice,tools);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}
           onStop={thread && canStop?stop:undefined} stopPending={stopping} loadingLabel={t(session.recovering?'chat.historyTurn.loading':'chat.inputDock.generating')} onOpenSketch={()=>setSketchOpen(true)}
           deckId={boundContext.threadId?boundContext.deckId:selection?.deckId} threadId={thread ?? undefined}
           workspaceEnabled={configLoaded && config.workspace_enabled!==false} workspaceSessionId={configLoaded && config.workspace_enabled ? thread ?? undefined : undefined}
-          contextControl={!thread?<DeckChatSelector decks={decks.filter(deck=>deck.enabled && deck.agent_type!=='dream')} selectedAgentId={selection?.agentId} onChange={setSelection} />:undefined} />
+          agentSelection={{loading:setup.loading,error:setup.error||null,decks:thread?(selectedDeck?[selectedDeck]:[]):decks.filter(deck=>deck.enabled && deck.agent_type!=='dream'),selectedAgentId:thread?selectedVoice?.id:selection?.agentId,allowNone:!thread,onChange:value=>{if(thread){if(value&&selectedDeck?.voices?.some(voice=>voice.enabled&&voice.id===value.agentId))setBoundContext(current=>current.threadId===thread?{...current,voiceId:value.agentId}:current);}else setSelection(value);}}} onModelConfigSaved={()=>{void setup.refreshConfig().catch(()=>setError('配置暂时无法读取，请重试。'));}} onModelSessionExpired={()=>void refreshSession()} />
       </View>:null}
       </View>}
     /></View>

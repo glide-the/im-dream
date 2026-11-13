@@ -1,3 +1,4 @@
+# [Sync] 2026-11-13: verify MCP selection replacement through the live queue drain and empty defaults.
 # [Input] Production ThreadFactory queue methods and strict Admin queue DTOs with isolated fake provider responses.
 # [Output] Verify stable enqueue, input-arrival wake, ordered single claim, selection interrupt and fail-closed interrupt failure.
 # [Pos] Provider-free queue contract tests; no model, HTTP service or database.
@@ -195,6 +196,7 @@ async def test_task_result_owner_finishes_queued_user_input_before_releasing_gra
     async def execute(execution):
         message_id = execution.request.message_id
         executed.append(message_id)
+        assert execution.request.mcp_server_names == (("initial-tools",) if len(executed) == 1 else ("research",))
         if len(executed) == 1:
             first_started.set()
             await release_first.wait()
@@ -226,7 +228,7 @@ async def test_task_result_owner_finishes_queued_user_input_before_releasing_gra
         message_metadata={"kind": "task-session-result", "sourceTurnId": "source-result-turn",
                           "taskResultNotificationId": "notice-1", "claimId": "claim-1"},
         user_message_pre_persisted=True, task_result_turn_id="source-result-turn",
-        admin_turn_persistence=provider,
+        admin_turn_persistence=provider, mcp_server_names=("initial-tools",),
     )
     stream = factory.run_streaming(request)
     collector = asyncio.create_task(_collect_stream(stream))
@@ -235,7 +237,7 @@ async def test_task_result_owner_finishes_queued_user_input_before_releasing_gra
         queued = await factory.enqueue_input(
             thread_id=request.thread_id, user_id="42", message_id="queued-user-input",
             parts=[{"type": "text", "text": "follow-up"}], title_candidate="follow-up",
-            tool_choice="auto", chat=provider, access_token="owned-token",
+            tool_choice="auto", chat=provider, access_token="owned-token", mcp_server_names=("research",),
         )
         assert queued.status == "queued"
         release_first.set()
@@ -303,3 +305,19 @@ async def test_queued_setup_failure_keeps_query_uncertainty_separate(monkeypatch
     finally:
         release_first.set()
         await factory.aclose()
+
+
+@pytest.mark.asyncio
+async def test_queue_freezes_each_messages_mcp_selection_and_default_is_empty():
+    factory = ClaudeAgentThreadFactory()
+    provider = QueueProvider()
+    request, state = owner(factory, provider, "thread-tools-queue")
+    request.mcp_server_names = ("previous-turn",)
+    for message_id, selection in (("selected-message", ("research",)), ("empty-message", ())):
+        await factory.enqueue_input(thread_id=request.thread_id, user_id="42", message_id=message_id,
+            parts=[{"type": "text", "text": message_id}], title_candidate=message_id,
+            tool_choice="auto", chat=provider, access_token="owned-token", mcp_server_names=selection)
+    selected, empty = factory._input_queues[request.thread_id]
+    assert selected.mcp_server_names == ("research",)
+    assert empty.mcp_server_names == ()
+    assert request.mcp_server_names == ("previous-turn",)

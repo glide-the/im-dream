@@ -1,3 +1,7 @@
+// [Sync] 2026-11-13: keep attachment, truncated Chinese Agent/model and action controls on one line.
+// [Sync] 2026-11-13: forward Thread tool selection to the grouped native Agent/tools sheet.
+// [Sync] 2026-11-13: one Agent/tools entry and a separate migrated model selector.
+// [Sync] 2026-11-13: replace segmented mode controls with the native Chat tools menu.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Input] Shared original composer state, attachment/sketch callbacks and the caller's Agent context control.
 // [Output] Original attachment choices, Full access or Auto/Manual and one trailing Send/Stop/loading action.
@@ -7,10 +11,15 @@ import {ActivityIndicator,BackHandler,Platform,Pressable,StyleSheet,View} from '
 import {useTranslation} from 'react-i18next';
 import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
-import useComposerDraft,{buildToolChoiceOptions} from './useComposerDraft';
+import useComposerDraft from './useComposerDraft';
+import ComposerToolsMenu from './ComposerToolsMenu.native';
+import ComposerModelSelector from './ComposerModelSelector.native';
+import type {ComposerToolsMenuProps} from './ComposerToolsMenu.types';
+import type {DeckChatSelectorProps} from '../deck/deckAgentSelection';
 import {IconArrowUp,IconStop} from './Icons';
 
 export interface AIInputDockControlsProps {
+  tools?:ComposerToolsMenuProps['tools'];onToolsChange?:ComposerToolsMenuProps['onToolsChange'];
   draft:Pick<ReturnType<typeof useComposerDraft>,'toolChoice'|'setToolChoice'|'handleSend'|'showStopAction'|'canSend'|'hasUploadingFiles'>;
   disabled:boolean;
   loading:boolean;
@@ -21,9 +30,15 @@ export interface AIInputDockControlsProps {
   onStop?:() => void | Promise<void>;
   onChooseFiles:() => void;
   onOpenSketch:() => void;
+  onManageTools?:()=>void;
+  active?:boolean;
+  agentSelection?:DeckChatSelectorProps;
+  onModelConfigSaved?:()=>void;
+  onModelSessionExpired?:()=>void;
+  onModelBlocked?:(blocked:boolean)=>void;
 }
 
-export default function AIInputDockControls({draft,disabled,loading,fullAccessEnabled,stopPending=false,loadingLabel,contextControl,onStop,onChooseFiles,onOpenSketch}:AIInputDockControlsProps) {
+export default function AIInputDockControls({tools,onToolsChange,draft,disabled,loading,fullAccessEnabled,stopPending=false,loadingLabel,contextControl,onStop,onChooseFiles,onOpenSketch,onManageTools,active,agentSelection,onModelConfigSaved,onModelSessionExpired,onModelBlocked}:AIInputDockControlsProps) {
   const {t} = useTranslation();
   const colors = useInkColors();
   const [addOpen,setAddOpen] = useState(false);
@@ -44,7 +59,7 @@ export default function AIInputDockControls({draft,disabled,loading,fullAccessEn
       <View style={styles.add}>
         <Pressable accessibilityRole="button" accessibilityLabel={t('chat.inputDock.addAttachmentAria')} accessibilityState={{expanded:addOpen,disabled}} disabled={disabled}
           onPress={() => setAddOpen(value => !value)} style={[styles.addButton,{borderColor:colors['color-border-paper'],backgroundColor:colors['color-bg-app']}]}>
-          <InkLabel style={[styles.addLabel,{color:colors['color-text-secondary']}]}>{t('chat.inputDock.addAttachment')}</InkLabel>
+          <InkLabel style={[styles.addLabel,{color:colors['color-text-secondary']}]}>{'+'}</InkLabel>
         </Pressable>
         {addOpen ? <View accessibilityLabel={t('chat.inputDock.addAttachmentAria')} style={[styles.addOptions,{borderColor:colors['color-border-paper'],backgroundColor:colors['color-bg-app']}]}>
           <Pressable accessibilityRole="button" disabled={disabled} accessibilityState={{disabled}} onPress={() => {setAddOpen(false);onChooseFiles();}} style={styles.addOption}>
@@ -56,35 +71,26 @@ export default function AIInputDockControls({draft,disabled,loading,fullAccessEn
         </View> : null}
       </View>
       {contextControl}
-      {fullAccessEnabled ? <View accessibilityLabel={t('chat.inputDock.toolAccessAria')} style={[styles.fullAccess,{borderColor:colors['color-border-paper'],backgroundColor:colors['color-text-primary']}]}>
-        <InkLabel style={[styles.modeLabel,{fontWeight:'600',color:colors['color-bg-paper']}]}>{t('chat.inputDock.fullAccess')}</InkLabel>
-      </View> : <View accessibilityLabel={t('chat.inputDock.toolModeAria')} style={[styles.modes,{borderColor:colors['color-border-paper'],backgroundColor:colors['color-bg-app']}]}>
-        {buildToolChoiceOptions(t).map(option => {
-          const selected = option.value === draft.toolChoice;
-          return <Pressable key={option.value} accessibilityRole="button" accessibilityLabel={option.label} accessibilityHint={option.title} accessibilityState={{selected,disabled:disabled || loading}}
-            disabled={disabled || loading} hitSlop={{top:8,bottom:8}} onPress={() => draft.setToolChoice(option.value)} style={[styles.mode,{backgroundColor:selected ? colors['color-text-primary'] : 'transparent'}]}>
-            <InkLabel style={[styles.modeLabel,{fontWeight:selected ? '600' : '400',color:selected ? colors['color-bg-paper'] : colors['color-text-muted']}]}>{option.label}</InkLabel>
-          </Pressable>;
-        })}
-      </View>}
+      <ComposerToolsMenu tools={tools} onToolsChange={onToolsChange} agentSelection={agentSelection} toolChoice={draft.toolChoice} onToolChoice={draft.setToolChoice} fullAccessEnabled={fullAccessEnabled} disabled={disabled} loading={loading} onManageTools={onManageTools} active={active}/>
+
     </View>
+    <View style={styles.trailing}><ComposerModelSelector disabled={disabled} active={active} onConfigSaved={onModelConfigSaved} onSessionExpired={onModelSessionExpired} onBlockedChange={onModelBlocked}/>
     <Pressable accessibilityRole="button" accessibilityLabel={actionLabel} accessibilityHint={!draft.showStopAction && draft.hasUploadingFiles ? t('chat.inputDock.waitingUpload') : undefined}
       accessibilityState={{disabled:actionDisabled,busy:draft.showStopAction ? stopPending : passiveLoading}} disabled={actionDisabled}
       onPress={() => {if (draft.showStopAction) {void onStop?.();} else if (!passiveLoading) draft.handleSend();}}
       style={[styles.action,{backgroundColor:background}]}>
       {(draft.showStopAction && stopPending) || passiveLoading ? <ActivityIndicator size="small" color={foreground} />
         : draft.showStopAction ? <IconStop width={14.4} height={14.4} color={foreground} /> : <IconArrowUp width={17.6} height={17.6} color={foreground} />}
-    </Pressable>
+    </Pressable></View>
   </View>;
 }
 
 const styles = StyleSheet.create({
+  trailing:{flexDirection:'row',alignItems:'flex-end',gap:4,maxWidth:'65%'},
   row:{flexDirection:'row',alignItems:'flex-end',justifyContent:'space-between',gap:12,marginTop:10.4,minWidth:0},
-  leading:{flex:1,flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:7.2,minWidth:0},add:{maxWidth:'100%'},
+  leading:{flex:1,flexDirection:'row',alignItems:'center',flexWrap:'nowrap',gap:7.2,minWidth:0},add:{maxWidth:'100%'},
   addButton:{minHeight:44,borderWidth:1,borderRadius:999,paddingVertical:6.72,paddingHorizontal:13.6,justifyContent:'center',alignSelf:'flex-start'},
-  addLabel:{fontSize:12.8},addOptions:{flexDirection:'row',flexWrap:'wrap',gap:5.6,marginTop:6.4,padding:5.6,borderWidth:1,borderRadius:10.4},
+  addLabel:{fontSize:22},addOptions:{flexDirection:'row',flexWrap:'wrap',gap:5.6,marginTop:6.4,padding:5.6,borderWidth:1,borderRadius:10.4},
   addOption:{minHeight:44,paddingVertical:6.4,paddingHorizontal:10.4,justifyContent:'center',borderRadius:6.4},
-  fullAccess:{minHeight:28,paddingHorizontal:12,borderWidth:1,borderRadius:999,justifyContent:'center'},
-  modes:{flexDirection:'row',borderWidth:1,borderRadius:999,overflow:'hidden'},mode:{minHeight:28,paddingVertical:5.6,paddingHorizontal:11.2,justifyContent:'center'},
-  modeLabel:{fontSize:12.16},action:{width:44,height:44,flexShrink:0,borderRadius:999,alignItems:'center',justifyContent:'center'},
+  action:{width:44,height:44,flexShrink:0,borderRadius:999,alignItems:'center',justifyContent:'center'},
 });

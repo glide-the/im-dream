@@ -1,6 +1,8 @@
+# [Sync] 2026-11-04: 音频命名空间发布ask_user，问答语义独立于原Editor写工具批准。
+# [Sync] 2026-11-04: 增加独立mobile_clock_audio工厂，原Editor工具清单与broker保持。
 # [Sync] 2026-10-25: accept an explicit per-server broker context for embedded MCP; default stdio behavior and tool schemas remain unchanged.
-# [Input] Existing Editor tool schemas/handlers and an optional turn-owned broker environment.
-# [Output] Provide the original write-only Editor MCP server with one broker client per explicit server context.
+# [Input] Existing Editor schemas/handlers, optional broker context and mobile audio question schema.
+# [Output] Original Editor MCP factory plus the opt-in mobile_clock_audio AskUserQuestion factory.
 # [Pos] mcp-server node in libs/claude_agent_kit/server
 # [Sync] 2026-05-28: initial implementation — read-only EditorState MCP server.
 # [Sync] 2026-05-29: update [Input] header to trace the editor_index.py mapping origin.
@@ -16,6 +18,7 @@ from mcp import types as mcp_types
 from mcp.server import Server as McpServer
 
 from .editor_tool import EDITOR_WRITE_TOOL_SPECS, handle_editor_write_tool
+from .mobile_clock_audio import MobileClockAudioInput, handle_mobile_clock_audio
 from services.admin_data.editor_runtime import EditorBrokerClient
 
 
@@ -52,5 +55,27 @@ def create_editor_mcp_server(*, environment=None) -> McpServer:
             raise ValueError(f"Unknown tool: {name!r}")
         result_text = handle_editor_write_tool(name, arguments, **context)
         return [mcp_types.TextContent(type="text", text=result_text)]
+
+    return server
+
+
+def create_mobile_clock_audio_mcp_server(*, environment=None) -> McpServer:
+    """Create the opt-in audio namespace on the original AskUserQuestion channel."""
+
+    server = McpServer("mobile_clock_audio")
+
+    @server.list_tools()
+    async def list_tools() -> list[mcp_types.Tool]:
+        return [mcp_types.Tool(
+            name="ask_user",
+            description="询问用户是否在App时钟播放器中播放指定音频，返回用户选择与媒体信息。",
+            inputSchema=MobileClockAudioInput.model_json_schema(),
+        )]
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: Optional[dict[str, Any]]) -> list[mcp_types.TextContent]:
+        if name != "ask_user":
+            raise ValueError(f"Unknown tool: {name!r}")
+        return [mcp_types.TextContent(type="text", text=handle_mobile_clock_audio(arguments))]
 
     return server

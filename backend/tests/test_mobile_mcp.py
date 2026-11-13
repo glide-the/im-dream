@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: 验证音频MCP经原iOS内存适配list/call并恢复原投影。
 # [Input] Original owned MCP factories, private projections, production broker and real DTOs.
 # [Output] Per-server context isolation, original schema/results, projection restoration and input rejection.
 # [Pos] Provider-free iOS MCP adapter tests; only disposable local files and broker sockets.
@@ -109,3 +110,24 @@ def test_projection_is_restored_after_connect_failure(tmp_path):
             assert isinstance(options.mcp_servers, dict)
             raise RuntimeError("fixture connection failure")
     assert source.read_bytes() == original and options.mcp_servers == source
+
+
+def test_mobile_clock_audio_uses_original_embedded_mcp_and_restores_projection(tmp_path):
+    from libs.claude_agent_kit.server.agent_runner import _mobile_clock_audio_mcp_stdio_config
+    path = _write_mcp_config_projection(
+        {"mobile_clock_audio": _mobile_clock_audio_mcp_stdio_config()},
+        thread_workspace=str(tmp_path),
+    )
+    original = path.read_bytes()
+    options = Options(path)
+    with adapt_owned_mcp(options, workspace_root=str(tmp_path)):
+        server = options.mcp_servers["mobile_clock_audio"]["instance"]
+        async def call():
+            async with create_connected_server_and_client_session(server) as client:
+                tools = await client.list_tools()
+                assert [tool.name for tool in tools.tools] == ["ask_user"]
+                result = await client.call_tool("ask_user", {"items": [{"title": "fixture audio", "resource_uri": "workspace://files/audio.m4a"}], "reason": "fixture playback request", "answers": {"是否在这台设备播放以下音频？": "播放"}})
+                assert not result.isError
+                assert json.loads(result.content[0].text)["status"] == "playback_requested"
+        asyncio.run(call())
+    assert path.read_bytes() == original and options.mcp_servers == path

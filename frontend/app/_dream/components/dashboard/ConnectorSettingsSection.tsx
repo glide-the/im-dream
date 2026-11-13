@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: Settings owns connections/auth; Chat owns per-Thread tool selection.
 // [Sync] 2026-10-29: share original actor-scoped resource summary state; preserve Web render tree and focus behavior.
 import useConnectorSummary from '../../hooks/useConnectorSummary';
 import type {ConnectorTone} from './connectorSummaryPresentation';
@@ -228,7 +229,7 @@ export default function ConnectorSettingsSection({
             资源链接
           </h2>
           <p style={{ margin: '0.35rem 0 0', maxWidth: '42rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-            在这里管理 Notion 和 MCP 资源连接，并查看尚未开放的飞书与本地 CLI 接入位置；Chat 只展示真实状态摘要和管理入口。
+            在这里管理 Notion 和 MCP 资源连接，并查看尚未开放的飞书与本地 CLI 接入位置；Chat输入栏为当前对话选择工具；连接启用与认证在设置中管理。
           </p>
         </div>
       </header>

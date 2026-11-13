@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: retain the five More peers; resource management stays inside Settings.
 // [Input] Existing Writing, Timeline, Reflections, theme and Settings entry points.
 // [Output] The same ordered, single-level More navigation for narrow Web and native.
 // [Pos] Presentation metadata; route, theme, authentication and business state stay with their owners.

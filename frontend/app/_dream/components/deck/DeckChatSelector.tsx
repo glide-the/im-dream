@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: compact Agent icon trigger and paper selection panel; original grouping and callbacks remain.
 // [Sync] 2026-10-13: allow analysis-specific labels and restore trigger focus after keyboard selection.
 // [Input] Enabled Decks hydrated with their Agents and the current Agent selection.
 // [Output] Render a Deck-grouped, Agent-selecting cascade for Chat and Dream.
@@ -149,6 +150,8 @@ export default function DeckChatSelector({
     }
   };
 
+  const SelectedIcon = selected ? (iconMap[selected.agent.icon as keyof typeof iconMap] || iconMap.brain) : iconMap.brain;
+
   const trigger = (
     <button
       ref={triggerRef}
@@ -161,14 +164,14 @@ export default function DeckChatSelector({
       className={variant === 'dream' ? 'deck-agent-selector deck-agent-selector--dream' : undefined}
       onClick={() => (isOpen ? setIsOpen(false) : openPopup())}
       style={variant === 'compact' ? {
-        display: 'inline-flex', minHeight: '1.8rem', maxWidth: '15rem', alignItems: 'center', gap: '0.35rem',
+        display: 'inline-flex', minHeight: '44px', maxWidth: '15rem', alignItems: 'center', gap: '0.35rem',
         border: `1px solid ${error ? 'var(--color-state-error)' : 'var(--color-border-paper)'}`,
-        borderRadius: '999px', background: 'var(--color-bg-app)',
+        borderRadius: '999px', background: 'transparent',
         color: error ? 'var(--color-state-error)' : 'var(--color-text-secondary)', padding: '0 0.7rem',
         fontSize: '0.76rem', cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
       } : undefined}
     >
-      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>{triggerLabel ?? 'Agent'}</span>
+      {variant === 'compact' && !triggerLabel ? <SelectedIcon aria-hidden="true" size={14} style={{flexShrink:0}}/> : <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>{triggerLabel ?? 'Agent'}</span>}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '10rem', color: 'var(--color-text-primary)' }}>
         {loading ? t('chat.deck.loadingAgents') : selectedLabel}
       </span>
@@ -183,7 +186,7 @@ export default function DeckChatSelector({
         <div role="listbox" aria-label={t('chat.deck.agentListAria')} style={{
           position: 'fixed', top: popupLayout.top, bottom: popupLayout.bottom, left: popupLayout.left,
           width: popupLayout.width, background: 'var(--color-bg-surface-solid)', border: '1px solid var(--color-border-neutral)',
-          borderRadius: '8px', boxShadow: '0 4px 12px var(--color-shadow-medium)', padding: '6px', zIndex: 1000,
+          borderRadius: '16px', boxShadow: '0 4px 12px var(--color-shadow-medium)', padding: '6px', zIndex: 1000,
           display: 'flex', flexDirection: 'column', gap: '4px', boxSizing: 'border-box',
         }}>
           <input

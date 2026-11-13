@@ -1,8 +1,11 @@
+// [Sync] 2026-11-13: connection mutation owner remains Settings; Chat reads through useChatMcpCatalog.
 // [Input] Original managed MCP index state and concrete platform HTTP/operation handoff.
 // [Output] One list, create form, operation recovery and mutation state for Web/native.
 // [Pos] State extracted from ClaudeMcpResourceSection; callers own navigation and controls.
 // [Sync] 2026-10-29: extract original state for Web/native reuse; HTTP, business payloads and permissions keep their owners.
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+// [Sync] 2026-11-13: share revision-aware service toggles within resource management.
+import {mcpServerToggleChanges} from '../components/claude-mcp/mcpServerToggle';
 import * as browserApi from '../api/claudeMcpApi';
 import {ClaudeMcpApiError,type ClaudeMcpCapability,type ClaudeMcpAuthState,type ClaudeMcpConfigScope,type ClaudeMcpOperation,type ClaudeMcpServer,type ClaudeMcpServerInventory,type ClaudeMcpState,type ClaudeMcpTool,type ClaudeMcpAppSettings,type ClaudeMcpApi} from '../api/claudeMcpApi';
 import {rememberClaudeMcpOAuthOperation as browserRemember,forgetClaudeMcpOAuthOperation as browserForget} from '../components/claude-mcp/oauthHandoff';
@@ -60,8 +63,8 @@ const {getClaudeMcpCapability,listClaudeMcpServers,getClaudeMcpServer,getClaudeM
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (active) void load();
+  }, [active, load]);
 
   useEffect(() => {
     if (!active || capability?.reason_code !== CAPABILITY_UNAVAILABLE) return undefined;
@@ -203,5 +206,22 @@ const {getClaudeMcpCapability,listClaudeMcpServers,getClaudeMcpServer,getClaudeM
   };
 
 
-return {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove};
+  const toggling = useRef(false);
+  const toggle = async (server:ClaudeMcpServer,enabled:boolean) => {
+    const changes=mcpServerToggleChanges(server,enabled);
+    if (!changes || loading || busyServer || toggling.current) return;
+    toggling.current=true;
+    setBusyServer(server.name);setError(null);
+    try {
+      const saved=await updateClaudeMcpServer(server,changes);
+      setServers(current=>current.map(item=>item.id===saved.id?saved:item));
+    } catch (cause) {
+      if (cause instanceof ClaudeMcpApiError && cause.status === 409) {
+        await load();
+        setError('服务配置已更新，请核对当前状态后重新选择。');
+      } else setError(safeApiErrorMessage(cause,'服务启用状态保存失败，请重试。'));
+    } finally {toggling.current=false;setBusyServer(null);}
+  };
+
+return {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove,toggle};
 }

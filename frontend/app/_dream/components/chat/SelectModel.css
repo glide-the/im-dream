@@ -1,0 +1,37 @@
+/* [Input] Migrated SelectModel hierarchy and IM theme tokens. */
+/* [Output] Compact current-model trigger, searchable grouped rows and bounded responsive menu. */
+/* [Pos] IM presentation adaptation of Better Chatbot SelectModel; data remains in existing model hooks. */
+/* [Sync] 2026-11-13: match the Agent menu UI font, Chinese line height and fixed selection/default columns. */
+.model-selector{min-width:0;max-width:100%;}
+.model-selector__trigger{display:inline-flex;align-items:center;gap:6px;min-height:44px;max-width:180px;padding:0 12px;border:0;border-radius:999px;background:transparent;color:var(--color-text-primary);font:inherit;font-size:12px;cursor:pointer;}
+.model-selector__trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.model-selector__trigger svg{width:14px;height:14px;flex-shrink:0;}
+.model-selector__trigger:hover{background:var(--color-bg-hover);}
+.model-selector__panel header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;gap:8px;}
+.model-selector__panel button{border:0;border-radius:8px;min-height:36px;background:transparent;color:var(--color-text-primary);font:inherit;padding:8px;cursor:pointer;}
+.model-selector__panel button:disabled{opacity:.5;cursor:default;}
+.model-selector__search{padding:0 12px 12px;}
+.model-selector__search input{width:100%;min-height:44px;box-sizing:border-box;border:1px solid var(--color-border-paper);border-radius:10px;padding:10px;background:var(--color-bg-paper);color:var(--color-text-primary);font:inherit;}
+.model-selector__list{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 12px;}
+.model-selector__list h4{margin:8px;padding:4px;color:var(--color-text-muted);font-size:11px;font-weight:500;}
+.model-selector__list [role=option]{width:100%;display:flex;align-items:center;gap:8px;min-height:48px;text-align:left;}
+.model-selector__list [role=option][data-active=true],.model-selector__list [role=option][aria-selected=true]{background:var(--color-bg-hover);}
+.model-selector__check{width:15px;flex-shrink:0;}.model-selector__check svg{width:14px;height:14px;}
+.model-selector__identity{min-width:0;flex:1;display:grid;gap:4px;overflow-wrap:anywhere;}
+.model-selector__identity strong{font-size:13px;font-weight:500;}
+.model-selector__identity small,.model-selector__default{font-size:11px;color:var(--color-text-muted);}
+.model-selector__feedback{margin:4px 0;font-size:12px;color:var(--color-text-secondary);line-height:1.5;max-width:24rem;overflow-wrap:anywhere;}
+.model-selector__feedback button{border:0;border-radius:8px;min-height:36px;padding:6px 8px;background:var(--color-bg-hover);color:var(--color-text-primary);font:inherit;}
+.model-selector__panel p{padding:0 8px;color:var(--color-text-secondary);font-size:12px;line-height:1.5;}
+.model-selector button:focus-visible,.model-selector__panel button:focus-visible,.model-selector__panel input:focus-visible{outline:2px solid var(--color-border-focus);outline-offset:2px;}
+@media(max-width:767px){.model-selector__trigger{max-width:132px;padding:0 8px;}.model-selector__panel button{min-height:44px;}}
+.model-selector__trigger{font-family:var(--font-family-ui);font-size:13px;font-weight:400;line-height:20px;}
+.model-selector__panel header>strong{font-size:16px;font-weight:600;line-height:24px;}
+.model-selector__panel header>button{display:grid;place-items:center;width:36px;padding:0;flex-shrink:0;}
+.model-selector__list h4{font-size:12px;line-height:20px;}
+.model-selector__identity strong{font-size:14px;font-weight:400;line-height:22px;}
+.model-selector__identity small,.model-selector__default{font-size:12px;line-height:20px;}
+.model-selector__default{flex-shrink:0;align-self:center;white-space:nowrap;}
+.model-selector__list [role=option]{align-items:center;min-width:0;}
+.model-selector__panel input{font-size:14px;line-height:22px;}
+@media(max-width:767px){.model-selector__panel header>button{width:44px;}}

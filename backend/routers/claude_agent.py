@@ -1,4 +1,6 @@
+# [Sync] 2026-11-13: public Chat tools project platform types and explicit MCP names per message and queue input.
 # [Sync] 2026-11-08: only the same sole unclaimed pending input may explicitly retry preparation; uncertain dispatch stays blocked.
+# [Sync] 2026-11-04: 默认空tools仅选择后端平台工具类型；普通发送与排队传递选择，scheduled不启用端侧工具。
 # [Sync] 2026-11-04: defer ordinary user persistence until continuation preparation.
 # [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
@@ -136,6 +138,7 @@ from claude_agent.thread_retrieval import (
     search_chat_threads,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
+from claude_agent.request_tools import ChatToolDescriptor
 from libs.claude_agent_kit.server.builtin_skill_packages import (
     COMMON_SKILL_NAMESPACE,
     BuiltinSkillPackageError,
@@ -941,6 +944,7 @@ class ClaudeAgentRequestBody(BaseModel):
         default="auto",
         validation_alias=AliasChoices("tool_choice", "toolChoice"),
     )
+    tools: list[ChatToolDescriptor] = Field(default_factory=list)
     chatModel: Optional[dict] = None
     model: Optional[str] = None
     max_turns: int = 100
@@ -1492,6 +1496,8 @@ async def _claude_agent_stream_impl(
         thread_id=thread_id,
         resume=body.resume,
         tool_choice=("auto" if scheduled_dispatch is not None else body.tool_choice),
+        tools=(() if scheduled_dispatch is not None else tuple(dict.fromkeys(tool.type for tool in body.tools if tool.type != "mcp"))),
+        mcp_server_names=(None if scheduled_dispatch is not None else tuple(dict.fromkeys(tool.server_name for tool in body.tools if tool.type == "mcp"))),
         tool_approval_policy=(scheduled_dispatch.tool_approval_policy if scheduled_dispatch is not None else None),
         tool_approval_violation=(scheduled_dispatch.tool_approval_violation if scheduled_dispatch is not None else None),
         model=platform_model_alias,
@@ -2024,6 +2030,8 @@ async def claude_agent_thread_enqueue_input(
             thread_id=thread_id, user_id=str(current_user["user_id"]),
             message_id=message_id, parts=parts, title_candidate=text,
             tool_choice=body.tool_choice, chat=chat, access_token=actor.access_token,
+            tools=tuple(dict.fromkeys(tool.type for tool in body.tools if tool.type != "mcp")),
+            mcp_server_names=tuple(dict.fromkeys(tool.server_name for tool in body.tools if tool.type == "mcp")),
         )
     except AdminDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail={
