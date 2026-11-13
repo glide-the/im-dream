@@ -1,3 +1,9 @@
+// [Input] Existing bilingual product strings and locale initialization.
+// [Output] Shared translations including current-conversation tool selection.
+// [Pos] Dream application locale owner.
+// [Sync] 2026-11-13: Chat tools copy defines per-conversation, per-message selection.
+// [Sync] 2026-11-13: localize combined current-Agent trigger and migrated model picker.
+// [Sync] 2026-11-13: localize Chat tools panel and the Workbench resources peer.
 // [Sync] 2026-11-12: localize unified external-share publication and Settings revocation/recovery.
 // [Sync] 2026-11-12: localize Writing model-selection, active-turn and pending-input recovery.
 // [Sync] 2026-11-12: localize note image/link sharing, saved-content conflicts and clipboard recovery.
@@ -100,7 +106,8 @@ const resources = {
         more: 'More',
         theme: 'Theme',
         friends: 'Friends',
-        settings: 'Settings'
+        settings: 'Settings',
+        resources: 'Remote resources'
       },
       morePage: {
         intro: 'Write today. Look back when you need to.',
@@ -109,6 +116,7 @@ const resources = {
         currentTheme: 'Current: {{appearance}}',
         themeAction: 'Current: {{appearance}}. Tap to switch to {{next}}.',
         guidance: {
+          resources: 'Connect services and manage their tools',
           writing: 'Capture thoughts and everyday moments',
           timeline: 'Browse entries and past reports',
           analysis: 'Review patterns across your entries',
@@ -920,6 +928,51 @@ const resources = {
           accept: 'Accept'
         },
         imageTool: { generate: 'Generate image', edit: 'Edit image', prepare: 'Check image request', running: 'In progress', completed: 'Completed', failed: 'Failed', incomplete: 'Not completed' },
+        agentTools: {
+          "title": "Agent & tools",
+          "trigger": "Agent and tools: {{name}}",
+          "select": "Select Agent",
+          "back": "Back to Agent & tools",
+          "unavailable": "Agent unavailable"
+        },
+        modelMenu: {
+          "title": "Select model",
+          "trigger": "Select model: {{name}}",
+          "loading": "Loading models…",
+          "search": "Search models…",
+          "close": "Close model selection",
+          "reload": "Reload models",
+          "recommended": "Recommended",
+          "unavailable": "Currently unavailable",
+          "savedUnavailable": "Saved model {{model}} is unavailable. Select a callable model.",
+          "empty": "No matching models",
+          "protocols": {
+            "anthropic": "Anthropic compatible",
+            "openai": "OpenAI compatible"
+          }
+        },
+        toolsMenu: {
+          title: "Tools",
+          close: "Close tools",
+          services: "MCP services",
+          search: "Search services",
+          scope: "Choose tools for this conversation. Each message uses its submitted selection.",
+          loading: "Loading tools…",
+          unavailable: "Tool connections are unavailable.",
+          enabled: "Enabled",
+          disabled: "Disabled",
+          enable: "Enable",
+          disable: "Disable",
+          saving: "Saving…",
+          managedElsewhere: "Managed at source",
+          noMatch: "No matching services",
+          empty: "No services configured",
+          retry: "Retry",
+          audio: "Audio player",
+          appOnly: "Available in the App",
+          audioUnavailable: "Playback capability is not ready. Audio tool selection is unavailable.",
+          manage: "Manage remote resources",
+        },
         inputDock: {
           commandMenu: 'Chat commands',
           compactDescription: 'Compact this conversation’s context',
@@ -1254,7 +1307,8 @@ const resources = {
         more: '更多',
         theme: '主题',
         friends: '好友',
-        settings: '设置'
+        settings: '设置',
+        resources: '远程资源链接'
       },
       morePage: {
         intro: '记录此刻，也回看走过的日子。',
@@ -1266,7 +1320,8 @@ const resources = {
           writing: '记下想法与日常点滴',
           timeline: '浏览日记与历史报告',
           analysis: '回看一段时间的变化',
-          settings: '管理账户、模型与资源'
+          settings: '管理账户、模型与资源',
+          resources: '连接服务并管理可用工具'
         }
       },
       writingSuggestion: {
@@ -2073,6 +2128,51 @@ const resources = {
           accept: '接受'
         },
         imageTool: { generate: '生成图片', edit: '编辑图片', prepare: '检查图片请求', running: '进行中', completed: '已完成', failed: '失败', incomplete: '未完成' },
+        agentTools: {
+          "title": "Agent与工具",
+          "trigger": "Agent与工具：{{name}}",
+          "select": "选择Agent",
+          "back": "返回Agent与工具",
+          "unavailable": "Agent暂不可用"
+        },
+        modelMenu: {
+          "title": "选择模型",
+          "trigger": "选择模型：{{name}}",
+          "loading": "正在读取模型…",
+          "search": "搜索模型…",
+          "close": "关闭模型选择",
+          "reload": "重新读取模型",
+          "recommended": "推荐",
+          "unavailable": "暂不可用",
+          "savedUnavailable": "已保存的模型{{model}}暂不可用，请选择可调用模型。",
+          "empty": "没有匹配的模型",
+          "protocols": {
+            "anthropic": "Anthropic兼容",
+            "openai": "OpenAI兼容"
+          }
+        },
+        toolsMenu: {
+          title: "工具",
+          close: "关闭工具菜单",
+          services: "MCP服务",
+          search: "搜索服务",
+          scope: "选择当前对话使用的工具，每条消息按提交时的选择执行。",
+          loading: "正在读取工具…",
+          unavailable: "工具连接暂不可用。",
+          enabled: "已启用",
+          disabled: "已停用",
+          enable: "启用",
+          disable: "停用",
+          saving: "正在保存…",
+          managedElsewhere: "由来源管理",
+          noMatch: "没有匹配的服务",
+          empty: "尚未配置服务",
+          retry: "重试",
+          audio: "音频播放器",
+          appOnly: "仅App可用",
+          audioUnavailable: "播放能力尚未就绪，音频工具暂不可选择。",
+          manage: "管理远程资源链接",
+        },
         inputDock: {
           commandMenu: '聊天指令',
           compactDescription: '压缩此聊天的上下文',

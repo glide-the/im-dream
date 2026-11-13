@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-11-11: add current data-source query/schema endpoints to actor-bound CLI routing; retain Bash classification and decision order. -->
+<!-- [Sync] 2026-11-04: mobile_clock_audio精确工具列为low-sensitivity，AskUserQuestion问答独立保留，full-access不替代回答。 -->
 > [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, actor/thread Notion projection, frontend tool confirmation flow.
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
@@ -58,7 +59,7 @@ It describes the product policy, not Claude Code's internal classifier.
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
 
-When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, commands rejected by the Dream-surface write guard, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; Dream-surface mutation, out-of-workspace file/search, and disabled-network decisions are hard denials before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`, `mcp__mobile_clock_audio__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, commands rejected by the Dream-surface write guard, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; Dream-surface mutation, out-of-workspace file/search, and disabled-network decisions are hard denials before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
 
 Settings `system_config.workspace_enabled=true` additionally enables the
 per-thread Claude Code Bash sandbox described in
@@ -95,10 +96,13 @@ Current auto-allow inventory:
 | Reflections memory query and response-action resolution | `mcp__user__list_memory_distillations`, `mcp__user__read_memory_distillation`, `mcp__user__resolve_memory_behavior` |
 | Necklace query | `mcp__necklace__*` names returned by `allowed_necklace_tool_names()` |
 | Editor context switch | `mcp__editor__switch_editor` |
+| App audio question | `mcp__mobile_clock_audio__ask_user`; metadata and user choice only, no media I/O or player execution |
 | Skill invocation | `Skill` |
 | Plan Mode session state | `EnterPlanMode`, `ExitPlanMode` **[2026-07-20]** |
 | Todo / task list session state | `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` **[2026-07-20]** |
 | Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
+
+`mcp__mobile_clock_audio__ask_user` is an explicit low-sensitivity exception for the App audio request. It only validates audio metadata, collects a playback choice through the existing AskUserQuestion form, and returns `playback_requested` or `declined`. It performs no file read, network access, player execution or task control. The exact tool is enabled only by the per-request `mobile_clock_audio` selector. No namespace wildcard is allowed. Low-sensitivity and full-access remove a separate tool-authorization prompt; the original `ask_user` answer form remains mandatory. Agent-supplied answers are discarded before asking. Missing answers, cancellation or unavailable question transport fail closed. Actual App media reads retain session and Thread resource authorization.
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
 
@@ -209,7 +213,7 @@ Deny decisions use:
 7. If `im_full_access_enabled` is true, tools are exposed, and the tool is not
    an answer-form tool: explicit allow.
 8. In `auto` only: workspace `files/` built-in file permission.
-9. In `auto` only: explicit low-sensitivity tool allow.
+9. In `auto` only: explicit low-sensitivity tool allow. Answer-form tools continue to the original callback to collect answers; `mobile_clock_audio` retains its low-sensitivity classification.
 10. Frontend confirmation callback.
 11. Deny by default when confirmation is required but unavailable.
 
@@ -226,7 +230,7 @@ Sandbox network confirmations additionally carry `confirmationKind="sandbox_netw
 Approval returns explicit `permissionDecision:"allow"`.
 Rejection returns explicit `permissionDecision:"deny"` with the user-visible reason.
 
-AskUserQuestion-style tools additionally merge frontend `answers` into `updatedInput`.
+AskUserQuestion-style tools merge frontend `answers` into `updatedInput`. The low-sensitivity `mcp__mobile_clock_audio__ask_user` uses this answer channel in auto/manual/full-access. Its payload is classified as `ask_user` by the existing exact suffix rule. Submitting `approved:true` with the answer “不播放” records a valid user answer and returns `declined`; it does not request playback. `approved:false` cancels the question. No second tool approval or playback approval is added.
 This remains true in full-access mode.
 
 ## 8. Matrix

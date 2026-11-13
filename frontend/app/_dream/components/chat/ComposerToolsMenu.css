@@ -1,0 +1,80 @@
+/* [Input] Chat tool-panel markup and semantic theme tokens. */
+/* [Output] Compact trigger and bounded paper panel with one independent scroll area. */
+/* [Pos] Chat tools presentation; resource and runtime state belong to existing owners. */
+/* [Sync] 2026-11-13: align Chinese text, fixed icon columns, service switches and independently scrolling Agent lists. */
+/* [Sync] 2026-11-13: desktop/narrow menu, service switches and accessible focus treatment. */
+.composer-tools-trigger {display:inline-flex;align-items:center;gap:.4rem;min-height:44px;padding:0 .7rem;border:0;border-radius:999px;background:var(--color-bg-app);color:var(--color-text-secondary);font:inherit;font-size:.8rem;cursor:pointer;}
+.composer-tools-panel {position:fixed;z-index:1100;width:min(336px,calc(100vw - 16px));box-sizing:border-box;display:flex;flex-direction:column;border:1px solid var(--color-border-paper);border-radius:16px;background:var(--color-bg-surface-solid);color:var(--color-text-primary);box-shadow:0 12px 36px var(--color-shadow-medium);font-size:13px;overflow:hidden;}
+.composer-tools-panel header,.composer-tools-panel footer {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;flex-shrink:0;}
+.composer-tools-panel header {border-bottom:1px solid var(--color-border-paper);}
+.composer-tools-panel footer {border-top:1px solid var(--color-border-paper);}
+.composer-tools-panel button {min-height:36px;border:0;border-radius:9px;padding:6px 10px;background:var(--color-bg-hover);color:var(--color-text-primary);font:inherit;cursor:pointer;}
+.composer-tools-panel button:disabled,.composer-tools-trigger:disabled {opacity:.5;cursor:default;}
+.composer-tools-panel button[role=switch][aria-checked=true] {background:var(--color-text-primary);color:var(--color-bg-paper);}
+.composer-tools-panel__body {overflow-y:auto;min-height:0;padding:12px 14px;overscroll-behavior:contain;}
+.composer-tools-panel fieldset {border:0;padding:0;margin:0 0 14px;display:flex;flex-wrap:wrap;gap:10px;}
+.composer-tools-panel legend {padding:0;margin-bottom:8px;color:var(--color-text-secondary);}
+.composer-tools-panel label {display:flex;align-items:center;gap:6px;}
+.composer-tools-panel input[type=search] {width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--color-border-paper);border-radius:9px;padding:10px;background:var(--color-bg-paper);color:var(--color-text-primary);font:inherit;}
+.composer-tools-panel .composer-tools-panel__search {display:flex;align-items:stretch;flex-direction:column;gap:8px;}
+.composer-tools-panel p,.composer-tools-panel small {color:var(--color-text-muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere;}
+.composer-tools-panel__service {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--color-border-paper);}
+.composer-tools-panel__service>div {display:grid;gap:3px;min-width:0;overflow-wrap:anywhere;}
+.composer-tools-panel__service>button {flex-shrink:0;}
+.composer-tools-panel__device {display:grid;gap:4px;padding:14px 0 4px;}
+.composer-tools-panel button:focus-visible,.composer-tools-panel input:focus-visible,.composer-tools-trigger:focus-visible {outline:2px solid var(--color-border-focus);outline-offset:2px;}
+@media(max-width:767px){.composer-tools-panel button,.composer-tools-panel label{min-height:44px;}}
+
+/* [Sync] 2026-11-13: upstream Agent menu grouping and current-Agent trigger replace the separate Tools button. */
+.composer-agent-trigger__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:10rem;}
+.composer-tools-trigger{max-width:100%;border:1px solid var(--color-border-paper);}
+.composer-tools-panel .composer-agent-selector__entry{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:14px;font-weight:600;}
+.composer-agent-selector{display:grid;gap:10px;}
+.composer-agent-selector input{width:100%;box-sizing:border-box;border:1px solid var(--color-border-paper);border-radius:9px;padding:10px;background:var(--color-bg-paper);color:var(--color-text-primary);font:inherit;}
+.composer-agent-selector h4{font-size:11px;color:var(--color-text-muted);margin:12px 0 6px;}
+.composer-agent-selector [role=option]{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;min-height:44px;}
+.composer-agent-selector [role=option][data-active=true],.composer-agent-selector [role=option][aria-selected=true]{background:var(--color-bg-hover);}
+.composer-agent-selector [role=option]>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.composer-agent-selector__check{width:14px;flex-shrink:0;}
+
+/* [Sync] 2026-11-13: grouped menu, desktop Agent flyout and Thread-only switches. */
+.composer-tools-panel{overflow:visible;}
+.composer-tools-panel__body{border-radius:0 0 16px 16px;}
+.composer-tools-panel .composer-tools-panel__service>button[role=switch]{background:transparent;min-width:52px;padding:4px;}
+.composer-tools-switch{display:block;width:36px;height:22px;border-radius:999px;background:var(--color-text-muted);padding:3px;box-sizing:border-box;}
+.composer-tools-switch:after{content:'';display:block;width:16px;height:16px;border-radius:50%;background:var(--color-bg-paper);transition:transform .12s;}
+[aria-checked=true]>.composer-tools-switch{background:var(--color-text-primary);}
+[aria-checked=true]>.composer-tools-switch:after{transform:translateX(14px);}
+.composer-agent-flyout{position:fixed;z-index:1151;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--color-border-paper);border-radius:14px;background:var(--color-bg-surface-solid);box-shadow:0 12px 36px var(--color-shadow-medium);}
+.composer-tools-panel .composer-agent-selector__entry{background:transparent;border-radius:8px;margin-bottom:8px;min-height:44px;}
+.composer-tools-panel .composer-agent-selector__entry:hover,.composer-tools-panel .composer-agent-selector__entry[aria-expanded=true]{background:var(--color-bg-hover);}
+
+.composer-tools-trigger{font-family:var(--font-family-ui);font-size:13px;font-weight:400;line-height:20px;min-width:0;}
+.composer-tools-trigger>svg{width:16px;height:16px;display:block;flex-shrink:0;}
+.composer-tools-trigger>.composer-agent-trigger__name{flex:1 1 auto;}
+.composer-popover.composer-tools-panel{font-size:14px;line-height:22px;overflow:visible;}
+.composer-tools-panel header>strong{font-size:16px;font-weight:600;line-height:24px;}
+.composer-tools-panel header>button{display:grid;place-items:center;width:36px;padding:0;flex-shrink:0;}
+.composer-tools-panel .composer-agent-selector__entry{font-weight:400;gap:12px;text-align:left;}
+.composer-tools-panel fieldset{min-width:0;column-gap:16px;row-gap:0;}
+.composer-tools-panel legend,.composer-tools-panel .composer-tools-panel__search{font-size:13px;font-weight:400;line-height:20px;}
+.composer-tools-panel label{min-width:0;line-height:22px;}
+.composer-tools-panel input[type=radio]{margin:0;flex:0 0 14px;width:14px;height:14px;accent-color:var(--color-text-primary);}
+.composer-tools-panel p{margin:8px 0 12px;font-size:12px;line-height:20px;}
+.composer-tools-panel__service{min-height:48px;padding:4px 0;gap:12px;}
+.composer-tools-panel__service strong,.composer-tools-panel__device strong{font-size:14px;font-weight:400;line-height:22px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.composer-tools-panel__service>div{flex:1 1 auto;}
+.composer-tools-panel .composer-tools-panel__service>button[role=switch]{display:grid;place-items:center;flex:0 0 44px;min-width:44px;min-height:44px;padding:4px;}
+.composer-tools-switch{flex-shrink:0;}
+.composer-tools-panel small{font-size:12px;line-height:20px;}
+.composer-agent-selector{display:flex;flex-direction:column;min-height:0;flex:1;gap:8px;}
+.composer-agent-selector>button{display:flex;align-items:center;gap:8px;flex-shrink:0;align-self:flex-start;}
+.composer-agent-selector>input{flex-shrink:0;min-height:44px;}
+.composer-agent-selector>[role=listbox]{min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+.composer-agent-selector h4{font-size:12px;font-weight:500;line-height:20px;margin:8px 0 4px;}
+.composer-agent-selector [role=option]{font-weight:400;gap:8px;}
+.composer-agent-selector [role=option]>span:last-child{min-width:0;flex:1;}
+.composer-agent-selector__check{display:grid;place-items:center;width:16px;flex:0 0 16px;}
+.composer-agent-flyout{display:flex;min-height:0;overflow:hidden;font:inherit;}
+.composer-tools-panel__body--agents{display:flex;overflow:hidden;}
+@media(max-width:767px){.composer-popover.composer-tools-panel{overflow:hidden;}.composer-tools-panel header>button{width:44px;}.composer-agent-trigger__name{max-width:100%;}}

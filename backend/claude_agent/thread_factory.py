@@ -1,3 +1,5 @@
+# [Sync] 2026-11-13: queued inputs replace MCP names with their own submission selection, including empty.
+# [Sync] 2026-11-04: 排队输入独立保存tools选择并按本次消息传递，缺省不继承上一条端侧工具。
 # [Sync] 2026-11-04: avoid a second terminal transition for Service-owned continuation claims.
 # [Sync] 2026-11-08: queued input stays pending through setup; Service alone claims it after transcript preparation.
 # [Sync] 2026-11-03: expose account-scoped read-only running presence to local host observers; task ownership and dispatch remain unchanged.
@@ -249,6 +251,8 @@ class _QueuedThreadInput:
     metadata: dict[str, Any] | None
     tool_choice: str
     queue_sequence: int
+    tools: tuple[str, ...] = ()
+    mcp_server_names: tuple[str, ...] = ()
 
 
 class ClaudeAgentThreadFactory:
@@ -516,6 +520,8 @@ class ClaudeAgentThreadFactory:
         self, *, thread_id: str, user_id: str, message_id: str,
         parts: list[dict[str, Any]], title_candidate: str, tool_choice: str,
         chat: AdminChatData, access_token: str,
+        tools: tuple[str, ...] = (),
+        mcp_server_names: tuple[str, ...] = (),
     ) -> chat_dto.QueueEntryDTO:
         """Atomically persist a message before notifying its local owner."""
 
@@ -553,7 +559,8 @@ class ClaudeAgentThreadFactory:
                 if not any(item.message_id == message_id for item in queue):
                     queue.append(_QueuedThreadInput(
                         message_id=message_id, parts=parts,
-                        metadata=metadata, tool_choice=tool_choice,
+                        metadata=metadata, tool_choice=tool_choice, tools=tools,
+                        mcp_server_names=mcp_server_names,
                         queue_sequence=int(entry.queue_sequence),
                     ))
                     self._input_generations[thread_id] = (
@@ -842,6 +849,8 @@ class ClaudeAgentThreadFactory:
                         message_parts=item.parts,
                         message_metadata=item.metadata,
                         tool_choice=item.tool_choice,
+                        tools=item.tools,
+                        mcp_server_names=item.mcp_server_names,
                         user_message_pre_persisted=True,
                         queued_input_claim=active_queue_claim,
                         attachments=None,

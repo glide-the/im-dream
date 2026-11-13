@@ -1,3 +1,4 @@
+# [Sync] 2026-11-13: optional Chat selection filters actor/workspace connections before credential/discovery work.
 """In-memory Runtime projection of managed MCP configuration.
 
 [Input] Enabled actor user/workspace Server rows, stdio policy profiles, and encrypted credential references.
@@ -172,6 +173,7 @@ class ManagedMcpRuntimeSnapshotLoader:
         self,
         actor_id: str,
         workspace_id: str | None,
+        *, server_names: tuple[str, ...] | None = None,
     ) -> dict[str, dict[str, Any]]:
         if not await self.repository.capability_available():
             raise ClaudeMcpError(
@@ -189,6 +191,14 @@ class ManagedMcpRuntimeSnapshotLoader:
         # User scope is projected first; the current actor-owned workspace row
         # with the same stable server_key intentionally replaces it.
         ordered = sorted(enabled, key=lambda row: 0 if row.scope == "user" else 1)
+        if server_names is not None:
+            selected = set(server_names)
+            ordered = [row for row in ordered if row.server_key in selected]
+            if {row.server_key for row in ordered} != selected:
+                raise ClaudeMcpError(
+                    ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID,
+                    "Selected Chat MCP connection is unavailable.",
+                )
         # Credential reads use actor-bound Admin DTO operations. Expired OAuth rows may
         # trigger discovery, whose coordinator owns the bounded semaphore and
         # per-Server timeout.  A single refresh failure aborts this Chat turn

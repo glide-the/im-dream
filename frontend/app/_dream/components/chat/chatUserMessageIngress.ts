@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: capture per-message tools before asynchronous Editor preparation.
 // [Input] One user message plus Chat-owned attachment, tool-choice, Editor, and turn callbacks.
 // [Output] A single ordered ingress path shared by the composer, queued prompts, and MCP Apps UI messages.
 // [Pos] Chat orchestration seam; raw useChat.sendMessage stays behind this module's caller-provided boundary.
@@ -5,13 +6,14 @@
 
 import type { CreateUIMessage, UIMessage } from 'ai';
 
-import type { ToolChoice } from '../../lib/chat-schema';
+import type { ChatToolDescriptor, ToolChoice } from '../../lib/chat-schema';
 
 export type ChatUserMessage = CreateUIMessage<UIMessage>;
 
 export type CoordinatedChatSendOptions<TAttachment> = Readonly<{
   rawAttachments?: TAttachment[];
   toolChoice?: ToolChoice;
+  tools?: readonly ChatToolDescriptor[];
 }>;
 
 export type CoordinatedChatSendDependencies<TAttachment> = Readonly<{
@@ -20,6 +22,7 @@ export type CoordinatedChatSendDependencies<TAttachment> = Readonly<{
   setPendingData: (value: Readonly<{
     rawAttachments: TAttachment[];
     toolChoice: ToolChoice;
+    tools?: readonly ChatToolDescriptor[];
   }>) => void;
   ensureEditorSessionPersisted?: () => Promise<void>;
   incrementTurnGeneration: () => void;
@@ -38,6 +41,7 @@ export async function sendCoordinatedChatUserMessage<TAttachment>(
   dependencies.setPendingData({
     rawAttachments: options.rawAttachments ?? [],
     toolChoice,
+    tools: options.tools?.map(tool=>({...tool})),
   });
   await dependencies.ensureEditorSessionPersisted?.();
   dependencies.incrementTurnGeneration();

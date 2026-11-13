@@ -1,8 +1,9 @@
+// [Sync] 2026-11-13: keep internal resource-management intents while the More menu exposes only five peers.
 // [Sync] 2026-11-03: pass the existing public account owner to the Writing mood projection.
 // [Sync] 2026-10-30: reuse the Writing destination for original session/cell jump intents from historical editor tool results.
 // [Sync] 2026-11-01: forward the original Writing Session context preparer with its exact linked Thread.
 // [Input] Authenticated public owner, App-owned origin/catalog and existing Settings/Chat callbacks.
-// [Output] One native five-item More page and persistent Writing/Timeline/Reflections/Settings destinations.
+// [Output] One native ordered More page and persistent Writing/Timeline/Reflections/Settings destinations.
 // [Pos] Navigation composition only; normal login, permissions, task execution and backend lifecycle remain App/server owned.
 // [Sync] 2026-10-29: adopt the existing five-item menu; account-scoped Reflections observer is disposed only with its owner.
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
@@ -22,8 +23,8 @@ import MoreNavigationPage from './MoreNavigationPage.native';
 import type {EditorJumpToCellDetail} from '../../chat/editorWriteTools';
 import type {MoreNavigationDestination} from './moreNavigation';
 import type {WritingThreadContext} from '../../Editor/WritingDocument.protocol';
-interface Props {onIdleBlocked?:(blocked:boolean)=>void;onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
-export default function MoreNavigator({ownerId,onIdleBlocked,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched}:Props){
+interface Props {resourceRequestNonce?:number;onIdleBlocked?:(blocked:boolean)=>void;onEditorJumpDispatched?:(nonce:number)=>void;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};ownerId:string;origin:string;decks:Deck[];active:boolean;resetNonce:number;onClose:()=>void;onSessionExpired:()=>void;onOpenThread:(id:string,context?:WritingThreadContext)=>void;onPrepareChat:(input:string)=>void;renderSettings:(onBack:()=>void,active:boolean)=>ReactNode;onSettingsOpen:()=>void;onResources:()=>void}
+export default function MoreNavigator({ownerId,onIdleBlocked,origin,decks,active,resetNonce,onClose,onSessionExpired,onOpenThread,onPrepareChat,renderSettings,onSettingsOpen,onResources,editorJump,onEditorJumpDispatched,resourceRequestNonce=0}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),callbacks=useRef({onSessionExpired,onClose});callbacks.current={onSessionExpired,onClose};
  const [page,setPage]=useState<MoreNavigationDestination|'menu'>('menu'),[visited,setVisited]=useState<Set<MoreNavigationDestination>>(()=>new Set());
  const [timezone,setTimezone]=useState(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch{return 'UTC';}}),[timezoneError,setTimezoneError]=useState(false),[prefsRevision,setPrefsRevision]=useState(0);
@@ -34,7 +35,8 @@ export default function MoreNavigator({ownerId,onIdleBlocked,origin,decks,active
   void getPreferences(read).then(preferences=>{if(abort.signal.aborted)return;if(preferences.timezone){new Intl.DateTimeFormat('en',{timeZone:preferences.timezone});setTimezone(preferences.timezone);}setTimezoneError(false);}).catch(()=>{if(!abort.signal.aborted)setTimezoneError(true);});return()=>abort.abort();
  },[prefsRevision]);
  const root=()=>{Keyboard.dismiss();setPage('menu');};
- const navigate=(destination:MoreNavigationDestination)=>{Keyboard.dismiss();setVisited(previous=>new Set(previous).add(destination));if(destination==='settings')onSettingsOpen();setPage(destination);};
+ const navigate=(destination:MoreNavigationDestination|'resources')=>{Keyboard.dismiss();const target=destination==='resources'?'settings':destination;setVisited(previous=>new Set(previous).add(target));if(destination==='resources')onResources();else if(destination==='settings')onSettingsOpen();setPage(target);};
+ useEffect(()=>{if(resourceRequestNonce>0)navigate('resources');},[resourceRequestNonce]);
  useEffect(()=>{if(!active||page==='settings'||Platform.OS!=='android')return;const listener=BackHandler.addEventListener('hardwareBackPress',()=>{if(page==='menu')callbacks.current.onClose();else root();return true;});return()=>listener.remove();},[active,page]);
  const voices=useMemo<Record<string,VoiceConfig>>(()=>Object.fromEntries(decks.flatMap(deck=>(deck.voices??[]).map(voice=>[voice.name,{name:voice.name,systemPrompt:voice.system_prompt,enabled:voice.enabled,icon:voice.icon,color:voice.color}]))),[decks]);
  useEffect(()=>{if(editorJump){setVisited(previous=>new Set(previous).add('writing'));setPage('writing');}},[editorJump?.nonce]);

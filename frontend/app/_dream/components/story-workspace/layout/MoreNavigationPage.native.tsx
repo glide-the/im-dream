@@ -1,6 +1,7 @@
+// [Sync] 2026-11-13: keep resource management within Settings and restore the five navigation peers.
 // [Sync] 2026-11-01: reuse the shared RN/RNW cards while retaining native header, scroll and theme ownership.
 // [Sync] 2026-10-30: group the same five peers into illustrated journal navigation and preferences; show the actual local theme.
-// [Input] Shared five-item More definition and caller-owned navigation/theme callbacks.
+// [Input] Shared ordered More definition and caller-owned navigation/theme callbacks.
 // [Output] One native More page with Writing/Timeline/Reflections/Theme/Settings peers.
 // [Pos] Narrow navigation presentation; destination pages retain their existing business owners.
 // [Sync] 2026-10-29: keep model fields and account actions inside Settings rather than the More item list.

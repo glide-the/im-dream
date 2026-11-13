@@ -1,4 +1,6 @@
+# [Sync] 2026-11-13: cover explicit MCP names and rejection of client connection configuration.
 # [Sync] 2026-11-08: same-ID pending preparation retry retains owner/claim gates and rejects uncertain dispatch.
+# [Sync] 2026-11-04: 增加公开tools默认关闭、显式选择与非法平台定义拒绝合同。
 # [Sync] 2026-11-04: versioned origin creation and deferred continuation persistence.
 # [Input] Public production Chat routes with the real Admin DTO transport and explicit fake auth/runtime providers.
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
@@ -969,3 +971,54 @@ def test_route_never_calls_legacy_reservation_before_preparation(boundary):
     assert response.status_code == 200 and len(factory.run_requests) == 1
     assert all(item[0] != "chat-user-message.persist" for item in calls)
     assert "private" not in response.text
+
+
+@pytest.mark.parametrize("selection", [None, [], [{"type": "mobile_clock_audio"}]])
+def test_public_chat_platform_tools_default_off_and_explicit_opt_in(boundary, selection):
+    client, _, _, factory = boundary
+    payload = {"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Describe this audio"}]}}
+    if selection is not None:
+        payload["tools"] = selection
+    response = request(client, "POST", "/api/claude-agent", json=payload)
+    assert response.status_code == 200
+    assert factory.run_requests[0].tools == (("mobile_clock_audio",) if selection else ())
+
+
+@pytest.mark.parametrize("selection", [[{"type": "web_search"}], [{"type": "mobile_clock_audio", "command": "other"}], None])
+def test_public_chat_rejects_unknown_or_untyped_platform_tools(boundary, selection):
+    client, _, _, factory = boundary
+    response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": "play", "tools": selection})
+    assert response.status_code == 422
+    assert not factory.run_requests
+
+
+@pytest.mark.parametrize("selection, expected", [
+    ([], ()),
+    ([{"type": "mcp", "server_name": "research"}], ("research",)),
+    ([{"type": "mcp", "server_name": "research"}, {"type": "mobile_clock_audio"},
+      {"type": "mcp", "server_name": "research"}], ("research",)),
+])
+def test_public_chat_mcp_tools_are_explicit_per_message_names(boundary, selection, expected):
+    client, _, calls, factory = boundary
+    response = request(client, "POST", "/api/claude-agent", json={
+        "id": "owned-thread", "tools": selection,
+        "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Use my chosen tools"}]},
+    })
+    assert response.status_code == 200
+    assert factory.run_requests[0].mcp_server_names == expected
+    assert factory.run_requests[0].tools == (("mobile_clock_audio",) if any(t["type"] == "mobile_clock_audio" for t in selection) else ())
+    assert not any("mcp" in call[0] for call in calls)
+
+
+@pytest.mark.parametrize("descriptor", [
+    {"type": "mcp", "server_name": "research", "url": "https://example.test/mcp"},
+    {"type": "mcp", "server_name": "research", "env": {"TOKEN": "client"}},
+    {"type": "mcp", "server_name": "research", "command": "run"},
+    {"type": "mcp", "server_name": "../other"},
+    {"type": "mcp", "server_name": 12},
+])
+def test_chat_mcp_descriptors_reject_configuration_and_invalid_names(boundary, descriptor):
+    client, _, _, factory = boundary
+    response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": "tools", "tools": [descriptor]})
+    assert response.status_code == 422
+    assert not factory.run_requests

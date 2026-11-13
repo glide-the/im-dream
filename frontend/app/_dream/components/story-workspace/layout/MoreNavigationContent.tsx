@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: share the five-item More order on narrow Web and native.
 // [Input] Shared More entries, platform labels/icons/colors and existing navigation/theme callbacks.
 // [Output] The same journal cards, preference rows, guidance and theme feedback on native and narrow Web.
 // [Pos] Shared RN/RNW presentation; callers own headers, scrolling, routes and persisted preferences.

@@ -1,4 +1,5 @@
 # [Sync] 2026-11-11: cover data-source reads through the existing Dream guard, confirmation and disabled-network policy.
+# [Sync] 2026-11-04: 增加平台音频工具显式启用与原确认/拒绝/缺回调/full-access合同。
 # [Sync] 2026-10-15: exact user MCP inventory includes the three owner-bound memory Tools.
 # [Sync] 2026-10-12: callback cancellation must close the owned SDK generator before returning.
 # [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
@@ -5213,3 +5214,79 @@ class TestRunnerQueryOwnership(_RunnerBase):
         )
         self.assertTrue(result.success)
         self.assertEqual(deltas, ["compatible"])
+
+
+class TestMobileClockAudioPlatformTool(_RunnerBase):
+    """Opt-in discovery and the original Editor approval hook, without a model."""
+
+    async def capture(self, *, tools=(), tool_choice="auto", allowed_tools=None, full_access=False, confirm=None):
+        self.set_query([])
+        with tempfile.TemporaryDirectory() as workspace:
+            await self.make_runner().run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="audio-tool-fixture", user_message="play the selected audio",
+                    cwd=workspace, claude_tmp_workspace=workspace,
+                    tools=tools, tool_choice=tool_choice,
+                    allowed_tools=allowed_tools, im_full_access_enabled=full_access,
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda value: None, on_tool_confirmation_request=confirm),
+            )
+        options = self._mock_client.last_options
+        return options, options.hooks["PreToolUse"][0].hooks[0]
+
+    def test_audio_is_low_sensitivity_and_answer_form(self):
+        tool = "mcp__mobile_clock_audio__ask_user"
+        self.assertIn(tool, agent_runner_module._LOW_SENSITIVITY_QUERY_TOOL_NAMES)
+        self.assertIn(tool, agent_runner_module._ANSWER_FORM_TOOL_NAMES)
+        self.assertNotIn(tool, agent_runner_module._ALWAYS_CONFIRM_TOOL_NAMES)
+        self.assertIsNone(agent_runner_module._apply_low_sensitivity_query_permission(tool))
+
+    async def test_default_and_none_do_not_load_audio_mcp(self):
+        tool = "mcp__mobile_clock_audio__ask_user"
+        for selection, choice in [((), "auto"), (("mobile_clock_audio",), "none")]:
+            with self.subTest(selection=selection, choice=choice):
+                options, _ = await self.capture(tools=selection, tool_choice=choice, allowed_tools=[tool])
+                self.assertNotIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+                self.assertNotIn(tool, options.allowed_tools)
+
+    async def test_opt_in_loads_exact_mcp_without_editor_context(self):
+        options, _ = await self.capture(tools=("mobile_clock_audio",))
+        self.assertIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+        self.assertIn("mcp__mobile_clock_audio__ask_user", options.allowed_tools)
+        self.assertNotIn("editor", self._mock_client.captured_mcp_servers())
+
+    async def test_server_allowlist_still_limits_opt_in(self):
+        options, _ = await self.capture(tools=("mobile_clock_audio",), allowed_tools=[])
+        self.assertNotIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+
+    async def test_unknown_platform_tool_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported platform tool"):
+            await self.capture(tools=("unknown",))
+
+    async def test_audio_asks_and_merges_user_answer_in_every_permission_mode(self):
+        from libs.claude_agent_kit.server.mobile_clock_audio import AUDIO_PLAYBACK_QUESTION
+        media = {"items": [{"title": "fixture", "resource_uri": "workspace://files/audio.m4a"}], "reason": "fixture"}
+        for mode in ("auto", "manual"):
+            for full_access in (False, True):
+                for choice in ("播放", "不播放"):
+                    requests = []
+                    async def answer(payload):
+                        requests.append(payload)
+                        return {"approved": True, "answers": {AUDIO_PLAYBACK_QUESTION: choice}}
+                    _, hook = await self.capture(tools=("mobile_clock_audio",), tool_choice=mode, full_access=full_access, confirm=answer)
+                    result = await hook({"tool_name": "mcp__mobile_clock_audio__ask_user", "tool_input": {**media, "answers": {AUDIO_PLAYBACK_QUESTION: "播放"}}}, "audio-ask", _SDK_HOOK_CONTEXT())
+                    specific = _hook_specific(result)
+                    self.assertEqual(specific["permissionDecision"], "allow")
+                    self.assertEqual(specific["updatedInput"]["answers"], {AUDIO_PLAYBACK_QUESTION: choice})
+                    self.assertEqual(len(requests), 1)
+                    self.assertNotIn("answers", requests[0]["input"])
+                    self.assertEqual(requests[0]["input"]["questions"][0]["question"], AUDIO_PLAYBACK_QUESTION)
+
+    async def test_missing_answer_or_cancel_denies_even_with_full_access(self):
+        media = {"items": [{"title": "fixture", "resource_uri": "workspace://files/audio.m4a"}], "reason": "fixture"}
+        for response in (None, {"approved": True}, {"approved": False}):
+            async def answer(payload):
+                return response
+            _, hook = await self.capture(tools=("mobile_clock_audio",), full_access=True, confirm=answer if response is not None else None)
+            result = await hook({"tool_name": "mcp__mobile_clock_audio__ask_user", "tool_input": media}, "audio-no-answer", _SDK_HOOK_CONTEXT())
+            self.assertEqual(_hook_specific(result)["permissionDecision"], "deny")

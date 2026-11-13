@@ -1,7 +1,8 @@
+// [Sync] 2026-11-13: verify five menu peers and Settings selection for the preserved resource deep link.
 // [Sync] 2026-11-01: verify shared Web/native cards, guidance, responsive geometry and retained Modal behavior.
 // [Sync] 2026-10-30: keep exact accessible navigation names while qualifying native icon guidance and local theme status.
 // [Input] Production sidebar/layout/Modal and native More presentation with existing navigation callbacks.
-// [Output] Narrow five-peer menu, desktop preservation, close/focus/draft and exact destination intents.
+// [Output] Narrow ordered-peer menu, desktop preservation, close/focus/draft and exact destination intents.
 // [Pos] Provider-free presentation fixture; no real account, database, model or business mutation.
 // Impact: route intent/theme presentation change; Project/Episode/Run/Hook/data and underlying draft remain unchanged.
 import {expect,test,type Page} from '@playwright/test';
@@ -18,7 +19,7 @@ import i18n from '/app/_dream/i18n.ts';import {initTheme} from '/app/_dream/util
 import '/app/_dream/styles/tokens.css';import '/app/_dream/index.css';
 const query=new URLSearchParams(location.search);await i18n.changeLanguage(query.get('lang')||'zh');initTheme();
 const f=window.__moreFixture={paths:[],themes:0,closes:0};
-function Harness(){const [path,setPath]=useState('/story-workspace/chat'),[draft,setDraft]=useState('Keep the current unsent input'),[collapsed,setCollapsed]=useState(false);
+function Harness(){const [path,setPath]=useState(query.get('path')||'/story-workspace/chat'),[draft,setDraft]=useState('Keep the current unsent input'),[collapsed,setCollapsed]=useState(false);
  const navigate=path=>{f.paths.push(path);setPath(path);};
  return query.has('native')?<div style={{height:'100dvh',display:'flex',flexDirection:'column'}}><MoreNative onNavigate={id=>f.paths.push(id)} onToggleTheme={()=>f.themes++} onClose={()=>f.closes++}/></div>
  :<AuthProvider><StoryWorkspaceLayout sidebar={<StoryWorkspaceSidebar collapsed={collapsed} currentPath={path} onNavigate={navigate} onToggleCollapse={()=>setCollapsed(v=>!v)}/> }>
@@ -38,7 +39,7 @@ test.afterEach(async({page})=>{expect(errors.get(page)).toEqual([]);});
 const nav=(page:Page)=>page.getByRole('navigation',{name:'Story Workspace 导航',exact:true});
 const more=(page:Page)=>nav(page).getByRole('button',{name:'更多',exact:true});
 async function open(page:Page,width=390,lang='zh'){await page.setViewportSize({width,height:844});await page.goto(base+'?lang='+lang);await expect(page.getByRole('textbox',{name:'Existing unsent input',exact:true})).toHaveValue('Keep the current unsent input');}
-test('narrow Web More is one full-page menu with five ordered peer entries',async({page})=>{
+test('narrow Web More is one full-page menu with five ordered peers',async({page})=>{
  await open(page);await more(page).click();const dialog=page.getByRole('dialog',{name:'更多',exact:true});await expect(dialog).toBeVisible();const list=dialog.getByRole('navigation',{name:'更多',exact:true});expect(await list.getByRole('button').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('aria-label')))).toEqual(['写作','时间线','回顾','主题','设置']);await expect(list.getByText('记下想法与日常点滴',{exact:true})).toBeVisible();await expect(list.getByRole('heading',{name:'记录与回顾',exact:true})).toBeVisible();await expect(list.getByRole('heading',{name:'应用偏好',exact:true})).toBeVisible();await expect(list.getByRole('button',{name:'主题',exact:true})).toContainText('当前：跟随系统');
  const box=await dialog.boundingBox();expect(box).not.toBeNull();expect(box!.x).toBe(0);expect(box!.y).toBe(0);expect(box!.width).toBe(390);expect(box!.height).toBe(844);await page.screenshot({path:evidenceRoot+'/web-more-zh-light.png'});
  await expect(nav(page).getByRole('group',{name:'更多',exact:true})).toHaveCount(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -56,11 +57,18 @@ test('desktop More keeps its existing disclosure, theme and Settings while resiz
  await open(page,1280,'en');const button=nav(page).getByRole('button',{name:'More',exact:true});await button.click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(nav(page).getByRole('group',{name:'More',exact:true}).getByRole('button')).toHaveText(['Writing','Timeline','Reflections']);await expect(page.getByRole('button',{name:'设置',exact:true})).toBeVisible();await expect.poll(()=>nav(page).getByRole('group',{name:'More',exact:true}).evaluate(el=>getComputedStyle(el).opacity)).toBe('1');await page.screenshot({path:evidenceRoot+'/web-more-desktop-en.png'});
  await page.setViewportSize({width:390,height:844});await nav(page).getByRole('button',{name:'More',exact:true}).click();await expect(page.getByRole('dialog',{name:'More',exact:true})).toBeVisible();await page.screenshot({path:evidenceRoot+'/web-more-en-light.png'});await page.setViewportSize({width:1280,height:844});await expect(page.getByRole('dialog')).toHaveCount(0);await expect(nav(page).getByRole('group',{name:'More',exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Existing unsent input'})).toHaveValue('Keep the current unsent input');
 });
+test('desktop Settings owns the preserved resources deep link without an independent sidebar entry',async({page})=>{
+ await page.setViewportSize({width:1280,height:844});await page.goto(base+'?lang=zh&path='+encodeURIComponent('/story-workspace/settings/resources'));
+ await expect(page.getByRole('button',{name:'远程资源链接',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'设置',exact:true})).toHaveAttribute('aria-current','page');
+ await expect(page.getByRole('status',{name:'Current route',exact:true})).toHaveText('/story-workspace/settings/resources');
+ await expect(page.getByRole('textbox',{name:'Existing unsent input'})).toHaveValue('Keep the current unsent input');
+});
 test('narrow keyboard close contains focus and restores the original input without navigation',async({page})=>{
  await open(page);await page.getByRole('textbox',{name:'Existing unsent input'}).fill('An unfinished message');await more(page).click();await expect(page.getByRole('button',{name:'关闭',exact:true})).toBeFocused();await page.keyboard.press('Shift+Tab');await expect(page.getByRole('dialog').getByRole('button',{name:'Logout',exact:true})).toBeFocused();await page.keyboard.press('Tab');await expect(page.getByRole('button',{name:'关闭',exact:true})).toBeFocused();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);expect(await page.evaluate(()=>(window as any).__moreFixture.paths)).toEqual([]);await expect(page.getByRole('textbox',{name:'Existing unsent input'})).toHaveValue('An unfinished message');
  await page.evaluate(()=>history.pushState({},'',location.pathname+'?lang=zh&navigation=1'));await more(page).click();await expect(page.getByRole('dialog')).toBeVisible();await page.goBack();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByRole('textbox',{name:'Existing unsent input'})).toHaveValue('An unfinished message');
 });
-test('native More renderer uses the same five peers and distinct navigation/theme callbacks',async({page})=>{
+test('native More renderer uses the same ordered peers and distinct navigation/theme callbacks',async({page})=>{
  await page.setViewportSize({width:390,height:844});await page.goto(base+'?native=1&lang=zh');expect(await page.getByRole('button').filter({hasNotText:'关闭'}).evaluateAll(nodes=>nodes.map(node=>node.getAttribute('aria-label')))).toEqual(['写作','时间线','回顾','主题','设置']);await expect(page.getByText('记下想法与日常点滴',{exact:true})).toBeVisible();
  for(const name of ['写作','时间线','回顾','主题','设置'])await page.getByRole('button',{name,exact:true}).click();await page.getByRole('button',{name:'关闭',exact:true}).click();expect(await page.evaluate(()=>(window as any).__moreFixture)).toEqual({paths:['writing','timeline','analysis','settings'],themes:1,closes:1});
 });

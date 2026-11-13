@@ -1,3 +1,7 @@
+// [Sync] 2026-11-13: capture current Thread tools as the fourth send argument; no connection mutation.
+// [Sync] 2026-11-13: forward retained Chat visibility to Agent/tools and model controls for close/reload on navigation.
+// [Sync] 2026-11-13: merge Agent/tools trigger and migrate model selection over original IM data and send state.
+// [Sync] 2026-11-13: compact attachment/Agent/tools toolbar; service selection uses the original MCP management API.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Sync] 2026-09-27: use one trailing action: Send for a draft, Stop for an empty active turn.
@@ -39,7 +43,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -51,7 +54,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
-import type { ToolChoice } from '../../lib/chat-schema';
+import type { ChatToolDescriptor, ToolChoice } from '../../lib/chat-schema';
 import { contextUsagePercentage, type ContextUsageSnapshot } from '../../lib/context-compaction';
 import { IconArrowUp, IconFile, IconLoader, IconStop, IconX } from './Icons';
 import {
@@ -67,7 +70,11 @@ import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
 import SketchInputDialog from './SketchInputDialog';
 import './AIInputDock.css';
-import useComposerDraft, {buildToolChoiceOptions} from './useComposerDraft';
+import ComposerToolsMenu from './ComposerToolsMenu';
+import {useChatToolSelection} from '../../hooks/useChatToolSelection';
+import ComposerModelSelector from './ComposerModelSelector';
+import type {DeckChatSelectorProps} from '../deck/deckAgentSelection';
+import useComposerDraft from './useComposerDraft';
 import {readWorkspaceUploadResponse} from '../../api/workspaceFileUpload';
 import {MAX_UPLOAD_FILE_SIZE_BYTES,formatFileSize} from './AIInputDock.helpers';
 import useComposerSkills from './useComposerSkills';
@@ -75,10 +82,13 @@ import useComposerSkills from './useComposerSkills';
 type AIInputDockMode = 'simple' | 'full';
 
 interface AIInputDockProps {
+  /** Whether the retained Chat surface is currently visible. */
+  active?: boolean;
   onSendMessage: (
     message: string,
     files?: UploadedFile[],
     toolChoice?: ToolChoice,
+    tools?: readonly ChatToolDescriptor[],
   ) => void | Promise<void>;
   placeholder?: string;
   disabled?: boolean;
@@ -96,6 +106,9 @@ interface AIInputDockProps {
   fullAccessEnabled?: boolean;
   /** Optional business context control rendered with the composer controls. */
   contextControl?: ReactNode;
+  agentSelection?:DeckChatSelectorProps;
+  onModelConfigSaved?:()=>void;
+  onModelSessionExpired?:()=>void;
   /** Immutable Deck whose enabled plugin Skills may be suggested. */
   deckId?: string;
   /** Existing thread whose frozen plugin receipt narrows suggestions. */
@@ -130,6 +143,7 @@ function shouldSendWithKeyboard(
 }
 
 export default function AIInputDock({
+  active = true,
   onSendMessage,
   placeholder = `Ask ${BRAND_NAME}…`,
   disabled = false,
@@ -145,6 +159,9 @@ export default function AIInputDock({
   workspaceSessionId,
   fullAccessEnabled,
   contextControl,
+  agentSelection,
+  onModelConfigSaved,
+  onModelSessionExpired,
   deckId,
   threadId,
   workspaceEnabled = true,
@@ -153,7 +170,7 @@ export default function AIInputDock({
   prefillNonce,
 }: AIInputDockProps) {
   const { t } = useTranslation();
-  const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
+  const [modelBlocked,setModelBlocked]=useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -163,8 +180,9 @@ export default function AIInputDock({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
+  const toolSelection=useChatToolSelection(threadId);
   const {query,setQuery,uploadedFiles,setUploadedFiles,toolChoice,setToolChoice,handleSend,hasUploadingFiles,showStopAction,canSend} = useComposerDraft({
-    onSendMessage,disabled,loading,onStop,fullAccessEnabled:resolvedFullAccessEnabled,defaultToolChoice,initialDraft:prefill,
+    onSendMessage:(text,files,choice)=>onSendMessage(text,files,choice,toolSelection.tools),disabled:disabled||modelBlocked,loading,onStop,fullAccessEnabled:resolvedFullAccessEnabled,defaultToolChoice,initialDraft:prefill,
     onUploadBlocked:() => setUploadError(t('chat.inputDock.waitForUpload')),releasePreview:revokeObjectPreviewUrl,
   });
   const skills=useComposerSkills({query,setQuery,focused:isInputFocused,workspaceEnabled,deckId,threadId});
@@ -659,7 +677,7 @@ export default function AIInputDock({
               transition: 'background 0.15s ease, color 0.15s ease',
             }}
           >
-            {t('chat.inputDock.addAttachment')}
+            <span aria-hidden="true" style={{fontSize:'1.35rem',lineHeight:1}}>+</span>
           </button>
           {addMenuOpen ? (
             <div id={addOptionsId} className="ai-input-dock__add-options" role="group" aria-label={t('chat.inputDock.addAttachmentAria')}>
@@ -679,68 +697,12 @@ export default function AIInputDock({
 
           {contextControl}
 
-          {resolvedFullAccessEnabled ? (
-            <div
-              aria-label={t('chat.inputDock.toolAccessAria')}
-              title={t('chat.inputDock.fullAccess')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                minHeight: '1.75rem',
-                borderRadius: '999px',
-                border: '1px solid var(--color-border-paper)',
-                padding: '0 0.75rem',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                background: 'var(--color-text-primary)',
-                color: 'var(--color-bg-paper)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {t('chat.inputDock.fullAccess')}
-            </div>
-          ) : (
-            <div
-              role="group"
-              aria-label={t('chat.inputDock.toolModeAria')}
-              style={{
-                display: 'flex',
-                borderRadius: '999px',
-                border: '1px solid var(--color-border-paper)',
-                overflow: 'hidden',
-                fontSize: '0.76rem',
-                background: 'var(--color-bg-app)',
-              }}
-            >
-              {toolChoiceOptions.map((option) => {
-                const isActive = toolChoice === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    title={option.title}
-                    disabled={disabled || loading}
-                    onClick={() => setToolChoice(option.value)}
-                    style={{
-                      border: 'none',
-                      padding: '0.35rem 0.7rem',
-                      background: isActive ? 'var(--color-text-primary)' : 'transparent',
-                      color: isActive ? 'var(--color-bg-paper)' : 'var(--color-text-muted)',
-                      cursor: disabled || loading ? 'not-allowed' : 'pointer',
-                      fontWeight: isActive ? 600 : 400,
-                      transition: 'background 0.15s ease, color 0.15s ease',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <ComposerToolsMenu tools={toolSelection.tools} onToolsChange={toolSelection.setTools} active={active} agentSelection={agentSelection} toolChoice={toolChoice} onToolChoice={setToolChoice} fullAccessEnabled={resolvedFullAccessEnabled} disabled={disabled} loading={loading}/>
+
         </div>
 
         <div className="ai-input-dock__trailing-actions">
+        <ComposerModelSelector active={active} disabled={disabled} onConfigSaved={onModelConfigSaved} onSessionExpired={onModelSessionExpired} onBlockedChange={setModelBlocked}/>
         {showStopAction ? (
           <button
             className="ai-input-dock__send-button"

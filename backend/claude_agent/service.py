@@ -1,3 +1,6 @@
+# [Sync] 2026-11-13: explicit Chat MCP names filter each turn snapshot; empty selection skips remote credentials.
+# [Sync] 2026-11-04: 端侧tools选择透传；音频ask_user沿原Store问题/选项/answers通道。
+# [Sync] 2026-11-04: 将本次平台tools选择传至原Runner，确认与工具结果沿原通道。
 # [Sync] 2026-11-04: same-ID history preparation, durable claim/arm and local transcript lifecycle.
 # [Sync] 2026-10-30: place the bound image-material marker immediately before the original ordered image/reference pairs, preserving leading context.
 # [Sync] 2026-10-28: align resume documentation with the existing local-transcript guard; runtime behavior unchanged.
@@ -1465,6 +1468,10 @@ class ClaudeAgentRunRequest:
     reconnect: bool = False
     resume: bool = False
     tool_choice: str = "auto"
+    # Per-request platform tool selection; omission never inherits a device tool.
+    tools: tuple[str, ...] = ()
+    # Public Chat always supplies an explicit selection, including empty. None is server-owned execution.
+    mcp_server_names: tuple[str, ...] | None = None
     # Server-only execution policy; unlike tool_choice, this decides whether a
     # selected exact tool executes automatically or requires a human.
     tool_approval_policy: ToolApprovalPolicy | None = field(default=None, repr=False)
@@ -2062,7 +2069,11 @@ class ClaudeAgentService:
 
         managed_workspace_id: str | None = None
         try:
+            from claude_mcp.runtime_snapshot import ManagedMcpRuntimeSnapshot
+            selected_mcp_names = () if request.tool_choice == "none" else request.mcp_server_names
             snapshot = request.managed_mcp_runtime_snapshot
+            if selected_mcp_names == ():
+                snapshot = ManagedMcpRuntimeSnapshot()
             if snapshot is not None:
                 from claude_mcp.runtime_snapshot import (  # noqa: PLC0415
                     ManagedMcpRuntimeSnapshot,
@@ -2117,19 +2128,26 @@ class ClaudeAgentService:
                     )
                 ):
                     snapshot = await loader.load(
-                        str(request.user_id),
-                        managed_workspace_id,
+                        str(request.user_id), managed_workspace_id,
+                        **({"server_names": selected_mcp_names} if selected_mcp_names is not None else {}),
                     )
             claude_mcp_servers = {
                 str(name): dict(config)
                 for name, config in snapshot.items()
                 if isinstance(name, str) and isinstance(config, dict)
+                and (selected_mcp_names is None or name in selected_mcp_names)
             }
+            if selected_mcp_names is not None and set(selected_mcp_names) != set(claude_mcp_servers):
+                raise RuntimeError("Selected Chat MCP connection is unavailable.")
             managed_mcp_app_resource_bindings = deepcopy(
                 getattr(snapshot, "mcp_app_resource_bindings", {})
             )
             if not isinstance(managed_mcp_app_resource_bindings, dict):
                 managed_mcp_app_resource_bindings = {}
+            managed_mcp_app_resource_bindings = {
+                key: value for key, value in managed_mcp_app_resource_bindings.items()
+                if key in claude_mcp_servers
+            }
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 "Managed Claude MCP snapshot loading failed safely."
@@ -2344,6 +2362,7 @@ class ClaudeAgentService:
             notion_page_reader=notion_page_reader,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
+            tools=request.tools,
             tool_approval_policy=request.tool_approval_policy,
             tool_approval_violation=request.tool_approval_violation,
             im_full_access_enabled=im_full_access_enabled,

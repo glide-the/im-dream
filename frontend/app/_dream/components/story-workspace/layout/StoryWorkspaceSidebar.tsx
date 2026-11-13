@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: resource routes select Settings; remove the standalone resource navigation entry.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: let the Writing page reuse the existing narrow More menu and report its open state.
 // [Sync] 2026-11-01: narrow More shares native cards and guidance; existing Modal, desktop and route owners remain.
