@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: settle shared Chat diagrams before capturing the preview.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: share original projection and PNG stitch/fallback preparation; retain DOM capture and Web downloads.
 // [Input] ChatExportSnapshot (messages + pendingConfirmation + toolChoice) + thread title +
@@ -572,6 +573,24 @@ export async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hoo
   }
 }
 
+function waitForRenderedDiagrams(node: HTMLElement): Promise<void> {
+  const pending = () => Boolean(node.querySelector('[data-markdown-media-kind="mermaid"][data-render-state="pending"]'));
+  if (!pending()) return Promise.resolve();
+  return new Promise(resolve => {
+    const observer = new MutationObserver(() => {
+      if (!pending()) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+    observer.observe(node, {subtree: true, attributes: true, attributeFilter: ['data-render-state'], childList: true});
+    if (!pending()) {
+      observer.disconnect();
+      resolve();
+    }
+  });
+}
+
 /**
  * Render the conversation off-screen and return the long PNG (or PNG parts for very
  * long conversations) as blob object URLs — the share dialog shows them as a scrollable
@@ -642,6 +661,7 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
       }
     }
     await document.fonts.ready;
+    await waitForRenderedDiagrams(node);
     // Give the off-screen tree two frames to settle layout before capture.
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));

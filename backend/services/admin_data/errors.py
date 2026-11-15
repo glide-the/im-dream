@@ -24,9 +24,11 @@ class AdminDataError(Exception):
     request_id: str | None = None
     outcome_unknown: bool = False
     details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | BindingRevisionConflictDetailsDTO | BindingSelectionRejectedDetailsDTO | None = None
+    remote: str | None = None
 
     def __str__(self) -> str:
-        return f"{self.code} ({self.status_code})"
+        suffix = f" remote={self.remote}" if self.remote else ""
+        return f"{self.code} ({self.status_code}){suffix}"
 
 
 def unavailable(request_id: str | None = None, *, write: bool = False) -> AdminDataError:

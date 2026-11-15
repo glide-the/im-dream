@@ -1,7 +1,9 @@
+<!-- [Sync] 2026-11-13: 操作浮层与共享设置接入原状态合同，补充正常、失败恢复和界面状态图。 -->
 <!-- [Input] AI与笔记分享需求、设置PRD、现行Chat/Session实现和better-chatbot代码。 -->
 <!-- [Output] 统一快照与状态合同、公开阅读、正常/异常业务时序和状态转换。 -->
 <!-- [Pos] 分享业务现行正式设计；Admin数据库已采用，服务发布与各层验证由执行记录登记。 -->
 <!-- [Sync] 2026-11-12: 统一Admin持久化、公开页面、Web/Native分享及设置管理。 -->
+<!-- [Sync] 2026-11-13: 分享复用原Chat消息组件与几何，图片捕获等待图表完成或源码回退。 -->
 # 外部链接分享与管理设计
 
 ## 背景与问题
@@ -61,17 +63,158 @@ Admin事务内重新检查原Thread/Session归属、持有源行共享锁后插�
 
 1. Admin每次按token与active查库。Dream仅从配置的Admin transport origin读取，Next仅请求配置的Python origin。代理禁止重定向和浏览器凭证转发；Dream沿原配置限制超时及响应字节。
 2. API与页面使用`no-store`、`noindex, nofollow`、`no-referrer`。Next使用`force-dynamic`，每次页面读取核对当前状态。已完成读取与访客已保存副本保留既有结果。
-3. 笔记沿`NoteContent`文字节点呈现。AI沿`ChatMarkdown publicView`呈现Markdown、数学和Mermaid；工作区引用与图片仅显示文字，HTTP(S)链接由访客主动打开。
+3. 笔记沿`NoteContent`文字节点呈现。AI沿`UserMessagePart`和`AssistMessagePart readonly`呈现，向`ChatMarkdown`传入`publicView`；工作区引用与图片仅显示文字，HTTP(S)链接由访客主动打开。
 4. `INK_PUBLIC_SITE_URL`或`INK_PUBLIC_BASE_URL`提供公开origin。Web可回退当前页面origin；Native拒绝loopback分享地址。公开服务须能访问同一Admin记录。
 5. `useShareLink`持有本次稳定key、回执和复制恢复。关闭或切换来源时中止读取；复制失败保留可选中URL。
 6. `useExternalLinks`统一Web/Native列表、翻页、数量、操作和账户代次。两端`ExternalLinksSettings`承接呈现，系统复制、打开和图片文件沿原平台接口。
 7. 旧`/api/public/note-shares/{token}`统一404；旧`/share/notes/{token}`仅将新格式token导航到规范页。原无归属文件token结束公开读取，原文件保留。归属推断和正文回填未纳入改造。
 
+### Chat分享呈现
+
+用户要求分享预览与`ChatMessageList`相同。实现核对发现：公开页使用独立消息区块，图片使用独立Markdown组件与手写字体。目标收敛为共用消息布局、正文与主题，公开访问和图片资源读取继续执行各自权限边界。
+
+| 方案 | 判断 |
+| --- | --- |
+| 为分享复制Chat样式 | 后续消息样式调整需要同步维护多个组件。 |
+| 公开页直接挂载完整ChatMessageList | 组件包含历史分页、过程读取和工具交互，超出快照阅读范围。 |
+| 共用消息组件与消息列表几何 | `UserMessagePart`、`AssistMessagePart`和`chatMessageLayout.ts`提供同一呈现，读取和导出继续由原模块所有。采用此方案。 |
+
+- `ChatMessageList`、`PublicShareContent`与`ThreadImageCard`共用列表间距和单条分组样式。用户与AI正文沿原消息组件，消息组件导入`styles/markdown.css`。字体来自`--font-family-ui`。
+- `PublicShareContent`保留标题、品牌、日期和公开文字快照；`readonly`及缺省模型元数据仅保留复制。`ChatMarkdown publicView`优先执行原链接与图片限制，导出媒体适配器在此模式下关闭。
+- `ThreadImageCard`保留品牌框架、固定720 CSS px和原分片捕获。工作区图片适配器只替换`a/img`，复用原认证字节读取和占位；正文、代码、数学与Mermaid复用`ChatMarkdown`。`ChatShareImage.css`仅为图片中的长代码行启用换行。
+- `MermaidBlock`通过`data-render-state`提供`pending/ready/failed`。`exportThreadImage`在字体就绪后观察当前捕获节点，全部图表进入`ready`或`failed`后按原流程捕获；失败图表沿原组件显示源码。捕获结束沿原`finally`卸载节点，文件与原生句柄沿原生命周期释放。
+- `AssistMessagePart`的memo比较包含`publicView`与媒体适配器，工作区图片读取完成后更新同一导出节点。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant D as ChatShareDialog
+    participant E as exportThreadImage
+    participant C as ThreadImageCard
+    participant M as MermaidBlock
+    U->>D: 导出图片
+    D->>E: 当前分享投影
+    E->>C: 挂载共用Chat消息组件
+    C->>M: Markdown图表源码
+    M-->>E: pending
+    M-->>E: ready与SVG
+    E->>E: 字体和图表就绪后捕获PNG
+    E-->>D: 图片预览URL
+    D-->>U: 预览与下载或系统分享
+```
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant D as ChatShareDialog
+    participant E as exportThreadImage
+    participant M as MermaidBlock
+    U->>D: 导出包含图表的图片
+    D->>E: 当前分享投影
+    E->>M: 挂载图表
+    M->>M: 图表解析或绘制失败
+    M-->>E: failed与源码视图
+    E-->>D: 捕获包含源码的PNG
+    D-->>U: 显示完整预览
+    opt 用户修改原内容后重新分享
+        U->>D: 重新导出
+        D->>E: 新投影
+        E->>M: 重新绘制并捕获
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: 图表挂载
+    Pending --> Ready: SVG绘制完成
+    Pending --> Failed: 绘制失败，显示源码
+    Ready --> Captured: 全部图表与字体就绪
+    Failed --> Captured: 全部图表与字体就绪
+    Captured --> [*]: 卸载捕获节点
+```
+
 ### 管理交互
 
-设置路径为`/story-workspace/settings/external-links`。概览提供两类有效数量、最近标题和剩余条数。进入分类默认有效，支持已失效视图，按时间与ID倒序翻页。桌面为表格行，窄屏为纵向信息行；行内菜单和详情共用设置滚动区域。
+设置路径为`/story-workspace/settings/external-links`。概览提供两类有效数量、最近标题和剩余条数。进入分类默认有效，支持已失效视图，按时间与ID倒序翻页。桌面为表格行，窄屏为纵向信息行；行内详情共用设置滚动区域。操作菜单按按钮定位，设置使用原Modal。
 
-有效行提供复制、公开打开、可用的原内容入口和失效。已失效行保留详情和原内容入口。失效直接提交，提交中锁定当前行；未知失败保留最后状态和数量，提供刷新状态。服务端确认后移出有效列表并更新数量。账户切换中止旧操作与反馈。
+有效行菜单为拷贝链接、查看、分隔线及设置；已失效行菜单为设置。共享设置展示完整标题、访问范围和只读权限，提供可用的原内容与链接信息；访问范围下拉提交失效。失效直接提交，提交中锁定当前行；未知失败保留最后状态和数量，提供刷新状态。服务端确认后移出有效列表并更新数量。账户切换中止旧操作与反馈。
+
+### 操作浮层与共享设置
+
+发现阶段核对用户两张参考图、现行Web/Native菜单和`useExternalLinks`。核心任务收敛为“更多菜单提供拷贝、查看、设置；共享设置管理单条链接访问”。比较行内按钮展开与浮层加设置弹窗后，采用参考图层级；共享访问继续使用现行`active/revoked`和只读快照合同。
+
+| 模块 | 职责 |
+| --- | --- |
+| `ExternalShareMenu` | Portal浮层、按钮锚点测量、视口内定位、方向键及外部点击/Esc/滚动/尺寸变化收起。 |
+| `ExternalShareSettingsDialog` | 复用`Modal`的遮罩、焦点与滚动锁，显示范围、只读权限、进度/错误、原内容及链接信息。 |
+| Web `ExternalLinksSettings` | 选择当前记录、连接原copy/open/revoke/refresh回调，确认失效移除记录后关闭弹窗并恢复列表焦点。 |
+| Native `ExternalLinksSettings` | 一个原生Modal承接操作菜单与共享设置；系统复制和打开沿原平台模块。 |
+| `useExternalLinks` | 继续持有归属代次、稳定request_key、pending、服务端读取、单条失效和数量刷新。 |
+
+访问范围当前值为持有链接的任何人，阅读权限为只读文字快照。选择“使链接失效”执行原POST；确认revoked后旧URL持续失效。已失效设置关闭范围操作。UI采用原主题token，公开DTO、数据库Schema、API和服务端权限保持原合同。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant M as ExternalShareMenu
+    participant D as ExternalShareSettingsDialog
+    participant H as useExternalLinks
+    participant A as shares API
+    U->>M: 当前行更多
+    M-->>U: 拷贝链接、查看、设置
+    U->>M: 设置
+    M->>D: 当前分享记录
+    D-->>U: 通用访问权限、可以查看
+    U->>D: 范围下拉中使链接失效
+    D->>H: revoke当前记录
+    H->>A: POST revoke与稳定request_key
+    A-->>H: 确认revoked
+    H->>A: GET当前列表与数量
+    A-->>H: 当前结果
+    H-->>D: 当前记录移出有效列表
+    D-->>U: 关闭弹窗、显示成功、恢复列表焦点
+```
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant D as ExternalShareSettingsDialog
+    participant H as useExternalLinks
+    participant A as shares API
+    U->>D: 使链接失效
+    D->>H: revoke
+    H->>A: POST revoke
+    alt 明确拒绝
+        A-->>H: 4xx
+        H-->>D: 错误、原状态、解除pending
+        D-->>U: 失败反馈与可重试范围
+        U->>D: 重试
+        D->>H: 相同记录与原request_key
+    else 结果待确认
+        A-->>H: 连接失败或5xx
+        H-->>D: pending unknown，保留记录
+        D-->>U: 禁用范围并提供刷新状态
+        U->>D: 刷新状态
+        D->>H: refreshShare
+        H->>A: GET当前状态
+        A-->>H: active或revoked
+        H-->>D: active恢复操作，revoked刷新并关闭
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> List
+    List --> Actions: 当前行更多
+    Actions --> List: 外部点击或Esc或滚动或尺寸变化
+    Actions --> Settings: 设置
+    Settings --> Access: 打开访问范围
+    Access --> Settings: 当前范围或Esc或外部点击
+    Access --> Settings: 提交失效，pending由Hook持有
+    Settings --> List: 关闭或确认失效
+    List --> [*]: 账户切换或页面退出
+    Settings --> [*]: 账户切换或页面退出
+```
 
 ## 正常业务时序
 
@@ -225,3 +368,7 @@ Admin `packages/db/src/schema/dream.ts`为唯一表定义。前向`0087_external
 统一分享源码与前向迁移已交付。Admin正常数据库已完成0087与精确能力登记；完整隔离迁移、权限、回执和匿名HTTP技术检查通过。用户要求部署并验证后，本次技术检查由主Agent执行，luna-test-stage保持暂停。Admin制品已采用并完成线上只读接口检查；Dream制品、公开应用origin及真实账户/设备验收由执行记录继续登记。回退应用代码须保留新增表、快照、终态、回执和逐次状态校验；旧文件token直接读取继续关闭。
 
 执行状态见[统一分享改造记录](../../exec/external-share-refactor-20261112.md)。
+
+本轮样式验证、限制和交付状态见[Chat分享呈现记录](../../exec/chat-share-layout-20261113.md)。
+
+操作浮层与共享设置实现、隔离技术验证和采用边界见[弹窗改造记录](../../exec/external-links-popup-20261113.md)。

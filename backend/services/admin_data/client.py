@@ -109,7 +109,13 @@ class AdminDataClient:
             result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
             auth = result.auth
             if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
-                raise invalid_response(request_id)
+                error = invalid_response(request_id)
+                error.remote = (
+                    f"{self._config.transport_origin}{ADMIN_INTERNAL_PREFIX}/capabilities"
+                    f" advertised(issuer={auth.issuer}, jwks_uri={auth.jwks_uri}, resource={auth.resource})"
+                    f" expected(issuer={self._config.issuer}, jwks_uri={self._config.jwks_uri}, resource={self._config.resource})"
+                )
+                raise error
             advertised = {item.name: item for item in result.operations}
             schemas = {
                 item.capability: item for item in result.schema_capabilities

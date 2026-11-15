@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-04: 低敏音频MCP通过AskUserQuestion获取answers，成功播放请求与后台许可分别处理。 -->
+<!-- [Sync] 2026-11-04: 独立链接iOS播放器开发合同，媒体准备窄引用与原后台方法保持统一。 -->
+<!-- [Sync] 2026-11-04: 音频交接链接独立系统播放器组件，区分现有任务观察与待开发媒体能力。 -->
 <!-- [Sync] 2026-11-03: v4.2角色时钟采用单一共享组件及iOS原生关键帧，避免JS逐帧计算。 -->
 <!-- [Sync] 2026-11-03: 落实Factory账户只读观察、RN屏保及Widget候选；后台计算适配继续暂停。 -->
 <!-- [Sync] 2026-11-03: 补应用内无操作屏保及iOS Live Activity，共用只读Thread二值聚合；新增接线建议未实现。 -->
@@ -6,7 +9,11 @@
 <!-- [Pos] APP-04开发文档；新增适配器及接口均为建议、未实现；Web沿原路径。 -->
 <!-- [Sync] 2026-11-03: 从混合稿拆出技术职责，补iOS/Android平台实现、拓扑/类图/对象关系及先计算后播放时序。 -->
 
+<!-- [Sync] 2026-11-15: 追加iOS第一阶段宿主、许可、保存和重开合同；路线二TS迁移后续接入，保留原正文与图示。 -->
+
 # 本机 Agent 后台执行开发文档
+
+本轮iOS实施范围采用[2026-11-15宿主与恢复合同](#2026-11-15-ios第一阶段宿主与恢复合同)。前文保留原双平台、适配器和媒体方案；第一阶段在既有宿主内接线，持续后台任务与媒体接入分别延后。
 
 ## 背景与问题
 
@@ -212,16 +219,20 @@ erDiagram
 
 ### 计算到音频：独立所有权与交接
 
-音频输入为原任务实际生成、当前账户可读取的音频资源引用及输出身份。语音合成/生成能力按原任务与已配置能力核对；本文不增加语音模型或把文本直接当作可播放资源。当前尚无本文要求的原生播放实现，音频生成来源、格式与资源交接为开发前置。
+iOS播放器的独立开发合同归[iOS系统播放器开发文档](ios-system-player-technical.md)，直接定义原生播放器、Now Playing/Remote Command、ActivityKit仲裁、资源引用、桥接DTO和正常/异常时序。本文继续维护跨平台后台许可合同；新增native_media_prepare工作与AcceptedWork窄引用扩展按该专项共同实现，均为建议、未实现。
+
+2026-11-04默认角色、媒体确认提示与确认后播放器规则归[独立iOS系统播放器设计](../../prd/mobile-app/ios-system-player.md)。原ThreadActivityWidget继续承担前版任务观察；新的媒体信息、系统播放控制、接收队列及终端推送保持建议、未实现，后续在原宿主职责内单独核对。
+
+音频输入为原任务实际生成、当前账户可读取的音频资源引用及输出身份。Agent调用显式启用的mobile_clock_audio低敏工具，原AskUserQuestion与ToolConfirmationStore收集并校验answers；用户选择播放后，MCP返回playback_requested，再由前端创建媒体会话。后端入口已接入，前端与原生播放器待实现，详见[问答与权限合同](ios-system-player-technical.md#low-sensitivity与askuserquestion)。待确认期间只展示原提示，v4.2角色保持；无新播放器、媒体字节读取和Now Playing发布。语音合成/生成能力按原任务与已配置能力核对；本文不增加语音模型或把文本直接当作可播放资源。当前尚无本文要求的原生播放实现，音频生成来源、格式与资源交接为开发前置。
 
 | 平台 | 播放启动与存续（建议、未实现） | 计算与音频的结束条件 |
 | --- | --- | --- |
-| iOS | 原宿主持有AVPlayer；音频资源验证后激活AVAudioSession.Category.playback，Info.plist按实际播放声明UIBackgroundModes=audio；处理音频中断与路由变化 | 播放实际开始确认后可释放已完成计算的句柄，音频独立继续；播放结束或用户停止时释放播放器及会话 |
-| Android | 建议由专门TaskPlaybackService继承MediaSessionService持有Player与MediaSession，真实播放使用mediaPlayback声明与权限；独立于Activity及计算Service | 计算Service与播放Service分别持有自身前台状态；播放就绪后才退出已完成计算的引用，播放结束释放Player/MediaSession |
+| iOS | 用户播放回答对应的工具成功请求到达后，原宿主持有AVPlayer；音频资源验证后激活AVAudioSession.Category.playback，Info.plist按实际播放声明UIBackgroundModes=audio；处理音频中断与路由变化 | 播放实际开始确认后可释放已完成计算的句柄，音频独立继续；播放结束或用户停止时释放播放器及会话 |
+| Android | 用户播放回答对应的工具成功请求到达后，建议由专门TaskPlaybackService继承MediaSessionService持有Player与MediaSession，真实播放使用mediaPlayback声明与权限；独立于Activity及计算Service | 计算Service与播放Service分别持有自身前台状态；播放就绪后才退出已完成计算的引用，播放结束释放Player/MediaSession |
 
-Android新增播放Service仅承载实际媒体与系统播放控制，计算继续由原DreamRuntimeService持有。控制入口需校验当前输出归属及允许的媒体控制客户端，资源引用沿原权限；不放宽私有计算Service的exported边界。 Android从后台启动或提升播放Service仍须满足当前系统的启动条件，计算前台Service存活不直接证明新增播放Service已获准。前台任务声明音频输出时可预先准备播放连接；实际资源就绪后再次核对启动资格，拒绝时保留待播放结果并沿原页面反馈。
+Android新增播放Service仅承载实际媒体与系统播放控制，计算继续由原DreamRuntimeService持有。控制入口需校验当前输出归属及允许的媒体控制客户端，资源引用沿原权限；不放宽私有计算Service的exported边界。 Android从后台启动或提升播放Service仍须满足当前系统的启动条件，计算前台Service存活不直接证明新增播放Service已获准。本次playback_requested核验成功后才准备播放连接；实际资源就绪后再次核对启动资格，拒绝时保留待播放结果并沿原页面反馈。
 
-交接顺序为：音频资源就绪 → 当前运行代次及原turn/输出校验 → 平台播放准备与开始确认 → 释放已完成的计算许可。播放启动失败时保存原结果并反馈播放失败，及时结束已完成计算的许可。系统已挂起或结束运行进程时，禁止宣称音频能由未执行的本地回调自行启动。
+交接顺序为：Agent调用低敏音频MCP → 原AskUserQuestion展示媒体与选项 → 原Store校验用户answers并回填 → MCP返回playback_requested → 前端匹配当次工具结果 → 展示播放器准备 → 实际可播后播放。选择不播放时返回declined，取消或缺回答保持不可播放。原计算许可在计算结束时释放；等待用户期间释放无实际进展的系统许可，原待确认业务状态沿原Store保存。用户回前台确认后，媒体准备按native_media_prepare独立申请适用许可。播放启动失败时保存原结果并反馈播放失败，及时结束已完成计算的许可。系统已挂起或结束运行进程时，禁止宣称音频能由未执行的本地回调自行启动。
 
 暂停播放不取消原计算；原Stop继续处理任务。任务仍在计算时，计算许可与音频许可分别保持。完整结果已保存而音频仍播放时，计算许可可独立释放。音频缓冲耗尽、用户暂停或播放结束后，无音频期间的计算继续依赖计算适配器。[iOS播放能力](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playback)、[Apple用途规则](https://developer.apple.com/app-store/review/guidelines/#software-requirements)与[Android媒体后台服务](https://developer.android.com/media/media3/session/background-playback)分别约束对应平台。
 
@@ -236,6 +247,7 @@ sequenceDiagram
     participant A as BackgroundWorkAdapter（建议未实现）
     participant OS as 平台后台API
     participant F as 原Factory与生产者
+    participant Q as 原AskUserQuestion与Store
     participant P as 原生播放（建议未实现）
     U->>C: 前台启动原任务
     C->>M: request，原校验后且长工作前
@@ -259,9 +271,22 @@ sequenceDiagram
     F-->>H: 原进度与原结果
     H->>A: report真实进度
     A->>OS: 适用时更新进度或通知
-    opt 原任务要求音频且资源就绪
-        H->>P: 校验原输出后准备并播放
-        P-->>H: 实际播放开始或失败
+    opt Agent调用已启用的低敏音频MCP
+        F->>Q: 原调用identity、questions及媒体上下文
+        Q-->>U: 播放／不播放，无额外工具授权
+        H->>A: 等待用户时释放无进展许可
+        Note over H,P: 保持v4.2角色，不创建本次播放器
+        alt 用户选择播放并提交
+            U->>Q: 原问答answers
+            Q-->>F: 原答案校验与updatedInput回填
+            F-->>H: 音频MCP原结果playback_requested
+            H->>H: 校验原调用、媒体及代次
+            H->>A: 原前台操作申请native_media_prepare
+            H->>P: 展示播放器并准备资源
+            P-->>H: 实际播放开始或失败
+        else 不播放、取消、超时或Stop
+            Q-->>H: declined或原取消，维持原呈现
+        end
     end
     F-->>H: 原终态与保存确认
     H->>A: finish并释放本次计算引用
@@ -447,3 +472,149 @@ flowchart LR
 - [Android用户停止前台服务](https://developer.android.com/develop/background-work/services/fgs/handle-user-stopping)：系统停止与回调限制。
 - [Apple Live Activities](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities)：2026-11-03查阅；Widget扩展及SwiftUI呈现、ActivityKit请求／更新／结束、系统保留期限和重开核对。官方Markdown通过同源`.md`地址读取。
 - [Apple Activity.update](https://developer.apple.com/documentation/activitykit/activity/update(_:))与[ActivityState.stale](https://developer.apple.com/documentation/activitykit/activitystate/stale)：2026-11-03查阅；前后台可执行期间更新及陈旧数据语义。组件展示、应用内屏保与系统后台执行资格分别处理。
+
+## 2026-11-15 iOS第一阶段宿主与恢复合同
+
+### 背景与问题
+
+本节按[本轮架构决策](ios-app-architecture-decision.md)补充iOS第一阶段。前文保留原日期正文与图示；本轮实施边界采用本节，Android、播放器和持续后台任务的具体实现延后。当前已存在账户范围的Thread presence观察，本节只补精确到本轮执行的关联、许可与恢复合同。
+
+### 目标与边界
+
+先保留当前Python Factory与CLI路径，完成iOS挂起和重开接入。路线二后续把Agent执行责任整体迁到现有Node host，产品状态和持久化身份保持。系统后台执行时间独立于语言、页面和媒体。新增代码均为建议、未实现。
+
+### 概念与规则
+
+执行归属为`账户 + thread_id + message_id + dispatch_turn_id + 当前宿主代次 + 原生产者引用`。业务Thread及SDK会话保存在原记录中；生产者引用、系统句柄和当前代次只存在于运行内存。运行代次重建后，旧系统句柄与旧生产者引用全部失效。
+
+本节的许可专指iOS系统后台句柄。资源准入、admission lease及其释放顺序继续由原Factory处理，等待用户和语言迁移均不改变原资源算法。
+
+`BackendRuntimeManager`继续合并启动与投影状态。`EmbeddedDreamBackend`持有本次系统许可和绑定信息；`InkRuntime`转发已有请求与观察；`ClaudeAgentThreadFactory`持有当前生产者、锁和停止。后续TS执行归属由现有`host.cjs`承接，迁移后Python移动入口转发业务调用，原移动Python Factory退出生产者职责。
+
+#### 推荐拓扑
+
+第一阶段复用实线中的现有模块。虚线包含建议、未实现的精确关联、后台接线及路线二TS迁移。所有端侧运行环境处于同一App进程，系统挂起同时影响这些线程。
+
+```mermaid
+flowchart TB
+    OS["iOS系统：执行许可、挂起、终止"]
+    subgraph APP["iOS App进程"]
+        subgraph NATIVE["Swift / Objective-C"]
+            I["InkRuntime / EmbeddedDreamBackend"]
+            B["建议、未实现：宿主内许可方法与精确执行关联"]
+        end
+        subgraph UI["RN Hermes运行环境"]
+            G["SessionGate / BackendRuntimeManager"]
+            C["useNativeChatThread：页面订阅"]
+        end
+        subgraph PY["CPython运行环境"]
+            H["mobile_runtime.ios / IOSHTTPServer / FastAPI"]
+            F["ClaudeAgentThreadFactory / ClaudeAgentService"]
+            D["AdminTurnPersistence / Python业务服务"]
+        end
+        subgraph NODE["嵌入式Node运行环境"]
+            HOST["host.cjs：应用持有"]
+            NEXT["Next Worker：登录、BFF、局部页面"]
+            TS["建议、未实现：host.cjs持有TS Agent执行"]
+            RUN["ClaudeAgentRunner：demo基础，IM适配待实现"]
+            CLI["worker.mjs / 原Runtime入口"]
+            CMD["ios-process-boundary / 包内guest工具"]
+        end
+    end
+    ADMIN["远端Admin → 原PostgreSQL"]
+    GW["原Gateway / 当前模型服务"]
+    FILES["App容器：原thread workspace、transcript、草稿"]
+    G --> I
+    C -->|原Native HTTP| I
+    I --> NEXT
+    NEXT -->|原本地HTTP| H
+    H --> F
+    F --> D
+    F -->|原ios_claude_transport| HOST
+    HOST --> CLI
+    CLI --> CMD
+    D --> ADMIN
+    CLI --> GW
+    I -.-> B
+    F -. 精确接受与终态观察 .-> B
+    B -. 申请和释放 .-> OS
+    HOST -. 后续整体接管Agent .-> TS
+    TS -.-> RUN
+    RUN -. SDK自定义spawn适配 .-> CLI
+    TS -. 原认证DTO调用Python业务 .-> H
+    CLI --> FILES
+    D --> FILES
+```
+
+TS Agent执行Worker复用嵌入式Node。SDK 0.2.20的`spawnClaudeCodeProcess`适配器实现stdin、stdout、退出、错误和kill合同，映射到当前私有Runtime Worker控制；不使用桌面默认spawn寻找iOS系统CLI。CLI内部Bash等命令继续由原guest边界处理，`CLAUDE_CODE_TMPDIR`继续由服务端按原thread workspace绑定并校验。模型、资源策略和工具权限沿原拥有者，页面无法覆盖。
+
+当前host.cjs在私有控制socket关闭时结束对应Runtime Worker。TS执行所有者必须在整轮执行期间持有该SDK控制连接；页面事件订阅单独释放，禁止把页面断连传递为关闭控制连接。执行完成、显式停止或受控到期收尾后，执行所有者才按原顺序释放CLI与文件资源。
+
+#### 接受与许可
+
+1. 用户发起工作时，原生宿主在开始耗时操作前申请`beginBackgroundTask`，记录有效identifier；失败记denied。多个任务共享系统给予App的可用时间，重复申请无法累计时间。
+2. 原发送操作持有稳定message ID。`InkRuntime`记录原发送关联提示，经过原账户校验的Factory接受事件补齐Thread、turn和生产者引用。提示仅用于匹配，权限和真实生产者由Factory提供。原HTTP请求ID、业务message ID、SDK session ID分别使用。
+3. 精确接受观察建议扩展原Factory观察边界，经当前`mobile_runtime.ios`与原生绑定接线。关联由已认证账户、message及当前宿主代次匹配，保持现有公开业务DTO。无需引入新的跨进程队列、恢复服务或通用Manager。
+4. 页面切后台发生在接受之前时，原生请求所有者保留本次提交读取，直到取得接受或拒绝回执；随后可释放页面reader。许可到期而接受仍未核实时结束本次本地请求，保留结果待核实；不推断提交失败，不自动重发。
+5. 接受只说明宿主已持有生产者。Service在SDK query前沿原continuation snapshot、claim和`arm_query`取得保存回执；缺少capability或回执不明时禁止进入query。
+6. 页面离开只释放观察；原Factory锁、生产者和宿主终态观察继续。停止必须走原stop入口；后台系统到期使用同一内部停止边界，附带原turn与生产者校验，避免迟到回调停止新一轮。有限许可到期处理先核对最新应用状态，已返回前台时只释放旧许可，原任务沿前台路径执行；已经进入收尾的任务继续核实其结束结果。
+7. 原生回调串行检查绑定代次、完成标记和当前turn。已完成、已释放、已替换或账户变更的回调只结束自己的句柄。
+
+第一阶段只实现有限后台时间。持续后台任务保留条件接口：编译SDK和系统版本满足要求，原工作具备准确工作总量、实际进度、终态与有界收尾时再接入；使用前台用户操作、`.fail`策略和原任务绑定。请求提交与系统handler交付分别表示requested与active，回调不重新创建Thread或query。普通开放式Agent缺少准确进度时保持有限路径，时长、token数与工具次数不换算总体百分比。
+
+#### 系统生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> Launching
+    Launching --> Foreground: 创建新宿主并读取原记录
+    Foreground --> Inactive: 切应用或锁屏
+    Inactive --> Foreground: 返回当前应用
+    Inactive --> BackgroundAllowed: 持有有效后台许可
+    Inactive --> BackgroundClosing: 未获许可或仅做必要收尾
+    BackgroundAllowed --> Foreground: 返回前台
+    BackgroundAllowed --> BackgroundClosing: 许可到期或系统回收
+    BackgroundClosing --> Suspended: 系统停止调度
+    BackgroundClosing --> Foreground: 收尾期间返回并核对
+    Suspended --> Foreground: 同进程恢复调度后核对
+    Foreground --> Terminated: 进程被结束
+    BackgroundAllowed --> Terminated: 系统或用户结束进程
+    BackgroundClosing --> Terminated: 系统直接结束进程
+    Suspended --> Terminated: 系统回收进程
+    Terminated --> Launching: 用户重新打开
+```
+
+本图为系统状态，业务执行状态由原生产者、claim和消息决定。App无法在真正挂起时继续执行保存代码，进程结束也缺少必达的最后回调。进入后台时主动保存已知状态，每个关键业务边界及时保存，避免依赖退出时统一保存。
+
+#### 保存与重开核对
+
+| 内容 | 当前来源与保存时机 | 重开处理与缺口 |
+| --- | --- | --- |
+| Thread、账户、SDK会话与历史 | 原Admin记录、session更新与transcript；沿原授权和提交回执 | 先验证账户，读取同一Thread，核对session及history digest；缺失或不一致时停止接续 |
+| 本次用户输入和query进入状态 | 原continuation claim及`arm_query`在query前持久化 | 读取原message/dispatch turn的队列状态和revision；已armed且无完成记录保留不明，禁止重放 |
+| 已生成正文与工具调用 | 原消息parts、`turnId/turnStatus/is_partial/finalPartIndex`及Runtime transcript；现有代码主要在结束或受控收尾保存 | 强杀时只能恢复已保存部分；增量事件未保存部分无法保证重建，不把文本结束或transcript单独视为业务成功 |
+| 待确认操作与用户决定 | 原消息卡片和当前ToolConfirmationStore；当前Future/已决缓存属于内存 | 第一阶段补关键确认内容的原消息保存边界。返回同进程须核对活跃pending ID；进程重开把旧卡设为失效，只展示历史，禁止重建批准Future |
+| 外部工具副作用 | 有幂等键或查询接口的业务工具沿原request ID/receipt；任意Bash/第三方工具未必具备查询能力 | 已保存结果可展示；结果缺失保持待核实。无自动重试、无自动重建query、无通用恰好一次执行承诺 |
+| 停止请求与终态 | 原stop回执、Factory观察、消息及continuation progress | 只收到stopRequested时保持停止中；新进程核对原claim和保存终态，无法确认结果时显示中断/待核实 |
+| 草稿、主/侧选择与附件 | 原nativeChatRecovery及账户范围存储；编辑变化和进入后台前保存有效引用 | 原草稿可恢复；未完成上传提示重新选择。恢复草稿不启动任务、不上传 |
+| 系统许可、生产者、Future | 只归当前宿主内存 | 新进程不恢复旧对象；创建新宿主后只读取记录 |
+
+不新增离线业务数据库或通用执行日志库。现有Admin DTO可承载的状态沿原消息与队列合同；新增结果核对字段若超出现有合同，先在Admin Drizzle发布前向migration与capability，并按原expand/兼容顺序接入。当前线上capability发布和服务器行为本轮未检查。
+
+消息存在且带同一turn的completed/finalPartIndex、结果保存回执已确认、claim已完成时，才能把本轮展示为完成；存在当前代次生产者时仍可显示运行。`/status`返回not_found、SSE EOF、HTTP200、系统许可结束和SDK result成功各自只代表其边界事实。
+
+#### 收尾、等待和失败
+
+- 许可到期且应用仍在后台时，拒绝该turn的新工具执行，调用原精确停止并保存已收集部分；系统句柄必须及时结束，不等待无期限网络。未能保存时保留“结果待核实”，下次按原身份读取。有限许可只提供到期事实；未来持续任务的expirationHandler还可能源于系统界面取消，原因展示按实际可确认粒度处理。
+- 等待用户回答时先保存已取得的卡片内容并释放计算许可；原生产者可以在同进程等待。系统随后可挂起或回收App。返回时核对Future仍存在、turn仍有效和等待是否超时；失效卡只展示历史，禁止补交旧批准。
+- 受控停止成功时保存部分结果和原停止终态；只发出停止请求而缺少完成回执时保留停止中。新进程缺少原生产者时，展示中断/待核实，继续读取原保存记录。
+- 网络中断或Admin保存结果不明时，复用原`AdminTurnPersistence`receipt核对。当前pending request ID在内存中，进程重开无法直接复用丢失的内存pending；先读持久化message/claim和原业务记录，缺少跨进程关联时保留不明。未来需扩展关联字段时进入原Admin合同，禁止通过重复写入推测结果。
+- 任意外部工具执行与其结果保存之间存在中断窗口。第一阶段通过禁止自动query/工具重放避免恢复引起重复副作用；工具级幂等只对实际支持的接口生效。
+
+#### 音频边界
+
+本阶段只保留`thread/turn/toolCall/output/resource`关联及“已保存媒体结果交给原播放器合同”的边界。播放器、媒体问答和锁屏控制后续接入，实际播放许可与Agent计算许可分别申请和释放。音频、静音播放、心跳与系统组件显示均不承担通用计算保活。
+
+### 第一阶段验收条件
+
+验收聚焦单次提交、接受前后台窗口、页面断连、到期精确停止、确认失效、写入不明和进程重开。后续合同验证走原公开入口和真实DTO，使用隔离provider；真机锁屏和真实账户/模型分别留证。本轮只完成设计与文档检查，尚未实现上述新增接线。

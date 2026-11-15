@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: reuse Chat typography for sharing and accept only export-owned media components.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
 // [Output] Shared GFM/math/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
@@ -61,6 +62,8 @@ const BASE_COMPONENTS: Components = {
 };
 
 interface ChatMarkdownProps {
+  /** Authenticated image exports supply resolved media; publicView keeps inert references. */
+  mediaComponents?: Pick<Components, 'a' | 'img'>;
   publicView?: boolean;
   text: string;
   workspaceSessionId?: string;
@@ -73,7 +76,7 @@ function workspaceUrlTransform(value: string): string {
 }
 
 // [Sync] 2026-11-12: public snapshots reuse Markdown/math/Mermaid with inert file/image references.
-export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath, onAddImageMaterial, publicView = false }: ChatMarkdownProps) {
+export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath, onAddImageMaterial, publicView = false, mediaComponents }: ChatMarkdownProps) {
   const { activeSessionId, workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const threadId = workspaceSessionId ?? activeSessionId ?? undefined;
   const workspaceAvailability = workspaceConfigLoaded
@@ -101,7 +104,8 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
       }
       return <img src={src} alt={alt} {...props} />;
     },
-  }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial, publicView]);
+    ...(publicView ? {} : mediaComponents),
+  }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial, publicView, mediaComponents]);
 
   return (
     <div className="chat-markdown" style={publicView ? {maxWidth: '100%', overflowX: 'auto'} : undefined} onCopy={event => {

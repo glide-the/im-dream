@@ -121,6 +121,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   useEffect(()=>()=>{currentSideChat.current=null;},[]);
   const [section, setSection] = useState<'chat' | 'decks' | 'more'>('chat');
   const [moreVisited,setMoreVisited]=useState(false),[moreNonce,setMoreNonce]=useState(0),moreSource=useRef<'chat'|'decks'>('chat');
+  const [resourceRequestNonce,setResourceRequestNonce]=useState(0);
   const [settingsNavigation,setSettingsNavigation]=useState<NativeSettingsNavigation>({nonce:0,target:'menu'});
   const [selection,setSelection] = useState<DeckAgentSelection>();
   const [deckPrefill,setDeckPrefill]=useState<{text:string;nonce:number}>();
@@ -245,7 +246,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       </View>:null}
       {session.confirmation ? <ToolConfirmationDock key={session.confirmation.partKey} confirmation={session.confirmation} onConfirm={session.confirm} /> : null}
       {origin ? <View style={styles.shrink}>
-        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
+        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} onManageTools={()=>{openSection('more');setResourceRequestNonce(value=>value+1);}} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
           active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
           onSendMessage={(text,files,choice,tools)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice,tools);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}
@@ -261,7 +262,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
         onTryDeck={tryDeck} />
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
-      {moreVisited?<MoreNavigator onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
+      {moreVisited?<MoreNavigator resourceRequestNonce={resourceRequestNonce} onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
         onOpenThread={(id,writingContext)=>{recovery.rememberSideChat({threadId:id,writingSessionId:writingContext?.sessionId});setSideChat({threadId:id,writingContext,documentOwner:{}});}} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
         renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage onOpenShareSource={async share=>{if(share.kind==='chat'){await selectThread(share.source_id);openSection('chat');return;}const response=await shareSourceFetch('/api/sessions/'+encodeURIComponent(share.source_id));if(!response.ok)throw Error('SHARE_SOURCE_UNAVAILABLE');const session=await response.json() as {editor_state:{cells:{id:string;type:string}[]}};const cell=session.editor_state.cells.find(value=>value.type==='text');if(!cell)throw Error('SHARE_SOURCE_UNAVAILABLE');setEditorJump({nonce:++editorJumpNonce.current,detail:{cellId:cell.id,editorSessionId:share.source_id}});openSection('more');}} ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}

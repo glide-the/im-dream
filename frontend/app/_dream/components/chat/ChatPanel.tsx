@@ -2,6 +2,7 @@
 // [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
 // [Sync] 2026-11-13: preserve caller Agent context in the combined menu and refresh original model config after confirmed saves.
 // [Sync] 2026-11-04: show preparation inline and retain rejected drafts with stable retry message IDs.
+// [Sync] 2026-11-09: retain the composer while history loads; gate submissions and runtime controls until reconciliation completes.
 // [Sync] 2026-11-03: refresh original system configuration when the retained Chat route returns.
 // [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
 // [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
@@ -99,7 +100,7 @@ import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSess
 // [Sync] 2026-09-07: keep live turn identities in a ref so metadata replay cannot
 //                    recreate the recovery callback and abort an active reconnect stream.
 // [Sync] 2026-09-29: pair a compact full-Thread turn index with the paged message scroller and left navigation rail.
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -212,6 +213,8 @@ interface ChatPanelProps {
   initialMessages?: UIMessage[];
   readRefreshNonce?: number;
   isLoading?: boolean;
+  /** Reading-only history surface while the mounted composer retains an editable draft. */
+  historyLoadingContent?: ReactNode;
   /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
   reconnectStreamNonce?: number;
   /** Exact historical tool calls proven absent from the runtime confirmation store. */
@@ -236,8 +239,7 @@ interface ChatPanelProps {
   queuedTools?:readonly import('../../lib/chat-schema').ChatToolDescriptor[];
   queuedPromptNonce?: number;
   /**
-   * Parent-owned at-most-once gate for queued sends. ChatPanel-local refs do not
-   * survive the history-load remount that follows lazy thread creation.
+   * Parent-owned at-most-once gate for queued sends across child remounts.
    */
   claimQueuedPrompt?: (nonce: number) => boolean;
   openFileDialogSignal?: number;
@@ -301,6 +303,7 @@ export default function ChatPanel({
   initialMessages,
   readRefreshNonce = 0,
   isLoading = false,
+  historyLoadingContent,
   reconnectStreamNonce = 0,
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
@@ -333,6 +336,7 @@ export default function ChatPanel({
   agentSelection,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const historyPending = historyLoadingContent !== undefined;
   const submissionStopPending = useSyncExternalStore(
     useCallback((listener: () => void) => subscribeClaudeThreadStop(threadId, listener), [threadId]),
     useCallback(() => claudeThreadStopPending(threadId), [threadId]),
@@ -548,6 +552,7 @@ export default function ChatPanel({
     message: ChatUserMessage,
     options: CoordinatedChatSendOptions<Attachment> = {},
   ) => {
+    if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
     if (claudeThreadStopPending(threadId)) throw new Error('CHAT_STOP_PENDING');
     await sendCoordinatedChatUserMessage(message, options, {
       onConversationStart,
@@ -569,7 +574,7 @@ export default function ChatPanel({
         continuationMessageIds.current.delete(identity);
       },
     });
-  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage, setMessages, threadId]);
+  }, [editorState, ensureEditorSessionPersisted, historyPending, onConversationStart, sendMessage, setMessages, threadId]);
 
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
@@ -652,15 +657,14 @@ export default function ChatPanel({
   }, [initialToolConfirmationKnown]);
 
   useEffect(() => {
+    if (!initialMessages) {
+      hasInitializedRef.current = false;
+      return;
+    }
     if (hasInitializedRef.current) {
       return;
     }
-    if (!initialMessages) {
-      return;
-    }
-    if (initialMessages.length > 0) {
-      setMessages(initialMessages);
-    }
+    setMessages(initialMessages);
     setHistoryPage(initialHistoryPage);
     setHistoricalMessageIds(new Set(initialMessages.map((message) => message.id)));
     hasInitializedRef.current = true;
@@ -679,6 +683,7 @@ export default function ChatPanel({
   }, [historicalMessageIds, messages, runtimeRunning, status]);
 
   useEffect(() => {
+    if (historyPending) return;
     if (submissionStopPending || claudeThreadStopPending(threadId)) return;
     if (!queuedPromptNonce || queuedPromptNonce === lastQueuedNonceRef.current) {
       return;
@@ -713,7 +718,7 @@ export default function ChatPanel({
         { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice, tools:queuedTools },
       );
     })();
-  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, queuedTools, sendUserMessage, submissionStopPending, threadId]);
+  }, [claimQueuedPrompt, historyPending, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, queuedTools, sendUserMessage, submissionStopPending, threadId]);
 
   const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
@@ -870,6 +875,7 @@ export default function ChatPanel({
   }, [recoverLocalCompletion, status]);
 
   useEffect(() => {
+    if (historyPending) return;
     const reconnectClaim = claimChatReconnect(
       runtimeRunning,
       reconnectStreamNonce,
@@ -1018,11 +1024,11 @@ export default function ChatPanel({
         setIsReconnecting(false);
       }
     };
-  }, [reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
+  }, [historyPending, reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
 
   const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting) || submissionStopPending;
   const agentBusy = canStopMainTurn || isStopping || submissionStopPending;
-  const chatLoading = agentBusy || isLoading;
+  const chatLoading = agentBusy || isLoading || historyPending;
   const visibleTurnNavigation = useMemo(
     () => projectVisibleTurnNavigation(visibleMessages, agentBusy),
     [visibleMessages, agentBusy],
@@ -1472,7 +1478,7 @@ export default function ChatPanel({
 
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
-      {shouldShowMessageSurface ? (
+      {historyPending ? historyLoadingContent : shouldShowMessageSurface ? (
         <div className="chat-turn-reading">
           <div className="chat-turn-reading__layout">
             <TurnNavigation
@@ -1547,7 +1553,7 @@ export default function ChatPanel({
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)',
         }}
       >
-        {shouldShowMessageSurface && showScrollToBottom ? (
+        {!historyPending && shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
             aria-label={t('chat.panel.scrollToBottom')}
@@ -1574,7 +1580,7 @@ export default function ChatPanel({
             <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
           </button>
         ) : null}
-        {queueCardEntries.length > 0 ? (
+        {!historyPending && queueCardEntries.length > 0 ? (
           <div aria-label={t('chat.inputQueue.region')} style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0 0.75rem', display: 'grid', gap: '0.3rem' }}>
             {queueCardEntries.map((entry) => (
               <ThreadInputQueueCard
@@ -1611,12 +1617,12 @@ export default function ChatPanel({
             ) : null}
           </div>
         ) : null}
-        {editDraftRecovery ? <div role="status" style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', color: 'var(--color-text-primary)' }}>
+        {!historyPending && editDraftRecovery ? <div role="status" style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', color: 'var(--color-text-primary)' }}>
           <span>{t('chat.inputQueue.editDraftSaved')}</span>
           <p style={{ margin: '0.3rem 0', whiteSpace: 'pre-wrap' }}>{editDraftRecovery.text}</p>
           <button type="button" onClick={() => { void retryEditedInput(); }}>{t('chat.inputQueue.retryEdit')}</button>
         </div> : null}
-        {pendingConfirmation ? (
+        {!historyPending && pendingConfirmation ? (
           <ToolConfirmationDock
             key={`${pendingConfirmation.partKey}-${pendingConfirmation.toolCallId}`}
             confirmation={pendingConfirmation}
@@ -1629,12 +1635,13 @@ export default function ChatPanel({
             contextUsage={latestContextUsage(messages, systemConfig?.model, chatLoading)}
             deckId={deckId}
             threadId={threadId}
-            workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
+            workspaceEnabled={!historyPending && workspaceConfigLoaded && workspaceEnabled}
             openFileDialogSignal={openFileDialogSignal}
             imageMaterial={imageMaterial?.threadId === threadId ? imageMaterial.file : undefined}
             onImageMaterialConsumed={() => setImageMaterial(null)}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto', tools = []) => {
+              if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
               if (isStopping || claudeThreadStopPending(threadId)) {
                 setThreadInputError(t('chat.inputDock.stopping'));
                 throw new Error('CHAT_STOP_PENDING');
@@ -1682,9 +1689,10 @@ export default function ChatPanel({
             }}
             placeholder={inputPlaceholder}
             loading={chatLoading}
-            onStop={canStopMainTurn ? handleStop : undefined}
+            loadingLabel={historyPending ? t('chat.historyTurn.loading') : undefined}
+            onStop={!historyPending && canStopMainTurn ? handleStop : undefined}
             stopPending={isStopping || submissionStopPending}
-            workspaceSessionId={workspaceEnabled ? threadId : undefined}
+            workspaceSessionId={!historyPending && workspaceEnabled ? threadId : undefined}
             mode="full"
         />
       </div>

@@ -1,4 +1,6 @@
 // [Input] A ChatView opened on a Dream-owned source thread while its turn is running.
+// [Sync] 2026-11-09: require a later successful same-URL list read for each navigation-aborted list request.
+// [Sync] 2026-11-09: scope Vite dependency discovery to the virtual entry's imports and isolate its optimizer cache.
 // [Output] Browser proof that refresh reattaches the same running turn, recovers
 //          terminal history once, and sends only the next turn through Chat POST.
 // [Pos] Dream -> Chat interoperability regression seam.
@@ -16,7 +18,7 @@
 // [Sync] 2026-09-28: source Chat renders its created-task list inside the assistant reply and the
 //                    separate task-activity popover while Deck metadata remains unchanged.
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -69,6 +71,8 @@ test('refresh reconnects the same running turn without duplicate POST or message
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
+    cacheDir: fileURLToPath(new URL('../../../../../node_modules/.vite/chat-dream-reconnect/', import.meta.url)),
+    optimizeDeps: { entries: [], include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
     server: { host: '127.0.0.1', port: harnessPort, strictPort: true },
     plugins: [{
       name: 'chat-dream-reconnect-browser-harness',
@@ -389,6 +393,9 @@ test('refresh reconnects the same running turn without duplicate POST or message
 
   const diagnostics: string[] = [];
   const observedApiRequests: string[] = [];
+  const requestOrder = new Map<PlaywrightRequest, number>();
+  const cancelledListReads: { url: string; order: number }[] = [];
+  const completedListReads: { url: string; order: number }[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (reconnectFinished
@@ -398,6 +405,12 @@ test('refresh reconnects the same running turn without duplicate POST or message
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
     const requestPath = new URL(request.url()).pathname;
+    if (request.method() === 'GET'
+      && requestPath === '/api/claude-agent/threads'
+      && request.failure()?.errorText === 'net::ERR_ABORTED') {
+      cancelledListReads.push({ url: request.url(), order: requestOrder.get(request)! });
+      return;
+    }
     if (
       requestPath === '/api/claude-agent/threads/thread-dream-chat/stream'
       && request.failure()?.errorText === 'net::ERR_ABORTED'
@@ -405,9 +418,17 @@ test('refresh reconnects the same running turn without duplicate POST or message
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
   page.on('request', (request) => {
+    requestOrder.set(request, requestOrder.size);
     const url = new URL(request.url());
     if (url.pathname.startsWith('/api/')) {
       observedApiRequests.push(`${request.method()} ${url.pathname}`);
+    }
+  });
+  page.on('response', (response) => {
+    if (response.status() === 200
+      && response.request().method() === 'GET'
+      && new URL(response.url()).pathname === '/api/claude-agent/threads') {
+      completedListReads.push({ url: response.url(), order: requestOrder.get(response.request())! });
     }
   });
   await page.addInitScript(() => {
@@ -477,6 +498,9 @@ test('refresh reconnects the same running turn without duplicate POST or message
     await expect(page.getByRole('region', { name: 'Task result' })).toHaveCount(0);
     expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
       .toHaveLength(1);
+    await expect.poll(() => cancelledListReads.every(cancelled => completedListReads.some(completed => (
+      completed.url === cancelled.url && completed.order > cancelled.order
+    )))).toBe(true);
     expect(diagnostics).toEqual([]);
   } finally {
     await page.close();

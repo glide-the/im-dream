@@ -2,6 +2,7 @@
 // [Sync] 2026-11-13: pass isVisible to landing and existing-Thread composers for menu dismissal and model rereads.
 // [Sync] 2026-11-13: supply original current/legacy Agent projection and selection to the combined Agent/tools composer trigger.
 // [Sync] 2026-11-12: expose explicit AI conversation link publication beside the original image option.
+// [Sync] 2026-11-09: mount the existing composer during history reconciliation and preserve its draft through loading and retry.
 // [Sync] 2026-11-03: retain saved-prose previews across Thread selection and keep runtime controls behind fresh reconciliation.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
@@ -326,9 +327,8 @@ function ChatViewContent({
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
   const [queuedTools,setQueuedTools]=useState<readonly ChatToolDescriptor[]>([]);
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
-  // This ref belongs to ChatView, which remains mounted while the child ChatPanel
-  // is temporarily removed for active-thread history loading. A ChatPanel-local
-  // useRef resets during that remount and cannot provide request-level de-duplication.
+  // ChatView owns the queued-send claim across keyed Thread panel lifecycles.
+  // A child-local ref resets on remount and cannot provide request-level de-duplication.
   const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
@@ -1387,25 +1387,35 @@ function ChatViewContent({
 
           <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {activeThreadId && landingTab === 'history' && threadMessages === null ? (
-                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                  {messageHydrationError ? (
-                    <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
-                      <p>{t('chat.historyTurn.initialLoadFailed')}</p>
-                      <button type="button" onClick={() => setThreadReloadNonce((value) => value + 1)}>
-                        {t('chat.historyTurn.retry')}
-                      </button>
-                    </div>
-                  ) : previewMessages.length===0 ? <SkeletonList rows={3} /> : null}
-                  {previewMessages.length>0?<div aria-busy={isLoadingMessages} data-testid="chat-history-preview" style={{overflowY:'auto',flex:1,minHeight:0}}>
-                    <ChatMessageList messages={previewMessages} threadId={activeThreadId} isLoading={false} readonly addToolResult={()=>{}} historicalMessageIds={new Set(previewMessages.map(message=>message.id))}/>
-                  </div>:null}
-                </div>
-              ) : activeThreadId && landingTab === 'history' ? (
+              {activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
                   active={isVisible}
                   key={activeThreadId}
                   threadId={activeThreadId}
+                  historyLoadingContent={threadMessages === null ? (
+                    <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      {messageHydrationError ? (
+                        <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
+                          <p>{t('chat.historyTurn.initialLoadFailed')}</p>
+                          <button type="button" onClick={() => setThreadReloadNonce((value) => value + 1)}>
+                            {t('chat.historyTurn.retry')}
+                          </button>
+                        </div>
+                      ) : previewMessages.length === 0 ? <SkeletonList rows={3} /> : null}
+                      {previewMessages.length > 0 ? (
+                        <div aria-busy={isLoadingMessages} data-testid="chat-history-preview" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+                          <ChatMessageList
+                            messages={previewMessages}
+                            threadId={activeThreadId}
+                            isLoading={false}
+                            readonly
+                            addToolResult={() => {}}
+                            historicalMessageIds={new Set(previewMessages.map(message => message.id))}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : undefined}
                   initialMessages={threadMessages ?? undefined}
                   readRefreshNonce={catalogRefresh}
                   isLoading={isLoadingMessages}

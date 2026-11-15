@@ -2,6 +2,7 @@
 // [Input] Production StoryWorkspaceRouter/ChatView and explicit synthetic session/catalog/history HTTP boundaries.
 // [Output] Desktop/narrow retained Chat mount, draft, catalog refresh and prose-before-status evidence.
 // [Pos] Provider-free browser qualification; no normal account, database, model or native runtime writes.
+// [Sync] 2026-11-09: prove composer availability before history/status, draft continuity, failure recovery and one same-Thread send.
 // [Sync] 2026-11-13: qualify the combined Agent/model controls through production ChatView, ChatPanel and retained routing.
 // Impact: Chat presentation and fixture preferences change; Thread identity and original send DTO remain.
 // Project/Episode, canonical artifacts, Run-private publication, after-turn Hook and PostgreSQL are out of scope.
@@ -130,8 +131,10 @@ for(const width of [1200,390])test(`normal Chat wires Agent and model selection 
  await page.keyboard.press('Escape');expect(errors).toEqual([]);expect(unexpected).toEqual([]);
 });
 test.afterAll(async()=>{await server?.close();});
-for(const width of [1200,390])test('retained Chat route and fresh reading at '+width+'px',async({page},testInfo)=>{
- await page.setViewportSize({width,height:800});const calls:string[]=[],errors:string[]=[],unexpected:string[]=[];let releaseStatus:()=>void=()=>{},statusHeld=true;
+for(const width of [1200,390])for(const failFirst of [false,true])test('retained Chat route and fresh reading at '+width+'px'+(failFirst?' with status retry':''),async({page},testInfo)=>{
+ await page.setViewportSize({width,height:800});const calls:string[]=[],errors:string[]=[],unexpected:string[]=[];
+ let releaseStatus:()=>void=()=>{},releaseMessages:()=>void=()=>{},statusHeld=true,messagesHeld=true,statusFailed=failFirst;
+ const sends:Record<string,unknown>[]=[];
  page.on('pageerror',cause=>errors.push(cause.message));
  page.on('console',message=>{if(message.type()==='error')console.log('CACHE_ROUTE_CONSOLE '+message.text());});
  page.on('response',async response=>{if(response.url().startsWith(base)&&response.status()>=400)console.log('CACHE_ROUTE_HTTP '+response.status()+' '+response.url()+' '+(await response.text().catch(()=>'' )).slice(0,1200));});
@@ -141,6 +144,16 @@ for(const width of [1200,390])test('retained Chat route and fresh reading at '+w
   if(url.origin!==base)return route.abort();
   if(path==='/auth/session')return json({user:{id:'1',email:'fixture@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'a'.repeat(43)});
   if(!path.startsWith('/api/'))return route.continue();calls.push(path);
+  if(path==='/api/claude-agent'&&route.request().method()==='POST'){
+   sends.push(route.request().postDataJSON() as Record<string,unknown>);
+   return route.fulfill({status:200,contentType:'text/event-stream',body:[
+    'data: {"type":"start","messageId":"fixture-reply"}',
+    'data: {"type":"text-start","id":"reply-text"}',
+    'data: {"type":"text-delta","id":"reply-text","delta":"Continued answer"}',
+    'data: {"type":"text-end","id":"reply-text"}',
+    'data: {"type":"finish","finishReason":"stop"}','data: [DONE]','',
+   ].join('\n\n')});
+  }
   if(path==='/api/storage')return json({type:'unknown',supportsDirectUpload:false,isConfigured:false});
   if(path.endsWith('/plugin-load-receipt'))return json({thread_id:'fixture-A',deck_id:null,workspace_found:false,receipt:null,launch_manifest:null});
   if(path.endsWith('/scheduled-tasks'))return json({source:null,created:[]});
@@ -150,8 +163,11 @@ for(const width of [1200,390])test('retained Chat route and fresh reading at '+w
   if(path==='/api/gateway/models')return json({data:composerModels,defaultModelAlias:'fixture-model-a'});
   if(path==='/api/story-workspace/dream-runs')return json({runs:[]});
   if(path==='/api/claude-agent/threads')return json({threads:[{id:'fixture-A',title:'Existing A',created_at:'2026-11-03T00:00:00Z',updated_at:'2026-11-03T00:00:00Z'}]});
-  if(path.endsWith('/messages'))return json({thread:{id:'fixture-A',title:'Existing A'},messages:[{id:'a1',role:'assistant',parts:[{type:'text',text:'Saved browser answer\n\n'+Array.from({length:40},(_,index)=>'Saved paragraph '+index+'. A complete reading position stays with this conversation.').join('\n\n')}],created_at:'2026-11-03T00:00:00Z'}],has_more:false,next_cursor:null,latest_message_id:'a1',unchanged:false});
-  if(path.endsWith('/status')){if(statusHeld)await new Promise<void>(resolve=>{releaseStatus=resolve;});return json({running:false,lifecycle:'idle',turn_count:1,pending_tool_call_ids:[],tool_confirmation_observation:'known'});}
+  if(path.endsWith('/messages')){
+   if(messagesHeld)await new Promise<void>(resolve=>{releaseMessages=resolve;});
+   return json({thread:{id:'fixture-A',title:'Existing A'},messages:[{id:'a1',role:'assistant',parts:[{type:'text',text:'Saved browser answer\n\n'+Array.from({length:40},(_,index)=>'Saved paragraph '+index+'. A complete reading position stays with this conversation.').join('\n\n')}],created_at:'2026-11-03T00:00:00Z'}],has_more:false,next_cursor:null,latest_message_id:'a1',unchanged:false});
+  }
+  if(path.endsWith('/status')){if(statusHeld)await new Promise<void>(resolve=>{releaseStatus=resolve;});if(statusFailed)return route.fulfill({status:503,contentType:'application/json',body:'{"detail":"Synthetic status outage"}'});return json({running:false,lifecycle:'idle',turn_count:1,pending_tool_call_ids:[],tool_confirmation_observation:'known'});}
   if(path.endsWith('/inputs'))return json({entries:[],local_owner:false});
   if(path==='/api/claude-agent/skill-commands')return json({commands:[]});
   if(/\/(turns|task-links|plan|todos|subagents)$/.test(path))return json(path.endsWith('/turns')?{turns:[]}:path.endsWith('/task-links')?{source:null,created:[]}:path.endsWith('/subagents')?{subagents:[]}:{});
@@ -163,11 +179,28 @@ for(const width of [1200,390])test('retained Chat route and fresh reading at '+w
  const editor=page.locator('[contenteditable="true"]').first();await editor.fill('Retained draft text');
  await page.getByRole('button',{name:'Navigate timeline',exact:true}).click();await expect(page.getByText('Timeline fixture',{exact:true})).toBeVisible();await expect(page.getByTestId('retained-chat-route')).toBeHidden();
  const deckReads=calls.filter(path=>path==='/api/decks/catalog').length;
- await page.getByRole('button',{name:'Navigate chat',exact:true}).click();await expect(editor).toContainText('Retained draft text');expect(await page.evaluate(()=>(window as any).__routeCache.mounts)).toBe(1);
+ await page.getByRole('button',{name:'Navigate chat',exact:true}).click();await expect(editor).toContainText('Retained draft text');expect(await page.evaluate(()=>window.__routeCache.mounts)).toBe(1);
  await expect.poll(()=>calls.filter(path=>path==='/api/decks/catalog').length).toBeGreaterThan(deckReads);
- await page.getByRole('button',{name:'Existing A',exact:true}).click();await expect(page.getByTestId('chat-history-preview')).toContainText('Saved browser answer');
+ await page.getByRole('button',{name:'Existing A',exact:true}).click();
+ // History and status remain unresolved: the production composer accepts a draft and blocks Enter.
+ await expect.poll(()=>calls.some(path=>path.endsWith('/messages'))).toBe(true);
+ await expect(editor).toBeVisible();await editor.fill('Continue this conversation');
+ await expect(page.getByRole('button',{name:'Loading conversation…',exact:true})).toBeDisabled();
+ const composer=await editor.elementHandle();
+ await editor.press('Enter');await expect(editor).toContainText('Continue this conversation');expect(sends).toHaveLength(0);
+ messagesHeld=false;releaseMessages();await expect(page.getByTestId('chat-history-preview')).toContainText('Saved browser answer');
  await expect.poll(()=>calls.some(path=>path.endsWith('/status'))).toBe(true);expect(calls.filter(path=>path==='/api/claude-agent').length).toBe(0);
+ if(failFirst){
+  statusHeld=false;releaseStatus();await expect(page.getByRole('alert')).toContainText('could not');
+  await expect(editor).toContainText('Continue this conversation');await editor.press('Enter');expect(sends).toHaveLength(0);
+  statusHeld=true;statusFailed=false;
+  const statusReads=calls.filter(path=>path.endsWith('/status')).length;
+  await page.getByRole('button',{name:'Retry',exact:true}).click();
+  await expect.poll(()=>calls.filter(path=>path.endsWith('/status')).length).toBeGreaterThan(statusReads);
+ }
  statusHeld=false;releaseStatus();await expect(page.getByTestId('chat-history-preview')).toHaveCount(0);await expect(page.getByText('Saved browser answer',{exact:true})).toBeVisible();
+ await expect(editor).toContainText('Continue this conversation');expect(await composer!.evaluate(element=>element.isConnected)).toBe(true);
+ await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeEnabled();expect(sends).toHaveLength(0);
  const scroller=page.locator('[data-chat-scroll-region="messages"]');
  console.log('CACHE_ROUTE_GEOMETRY '+JSON.stringify(await scroller.evaluate(element=>({scroll:element.scrollHeight,client:element.clientHeight,body:document.body.scrollHeight,viewport:innerHeight}))));
  await expect.poll(()=>scroller.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
@@ -180,4 +213,8 @@ for(const width of [1200,390])test('retained Chat route and fresh reading at '+w
  await expect.poll(()=>scroller.evaluate(element=>Math.abs(element.scrollTop-120))).toBeLessThan(3);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);expect(unexpected).toEqual([]);
  await page.screenshot({path:testInfo.outputPath('chat-cache-'+width+'.png')});
+ await page.getByRole('button',{name:'Send message',exact:true}).click();await expect.poll(()=>sends.length).toBe(1);
+ expect(sends[0].id).toBe('fixture-A');expect(sends[0].resume).toBe(true);
+ await expect(page.getByText('Continue this conversation',{exact:true})).toBeVisible();
+ expect(errors).toEqual([]);expect(unexpected).toEqual([]);
 });

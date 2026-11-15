@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: expose render completion so share capture waits for a diagram or its source fallback.
 // [Input] Mermaid chart source text extracted from a ```mermaid fenced code block in chat Markdown.
 // [Sync] 2026-10-30: optional concrete copy/PNG operations and controlled preview connect the native document; Web defaults remain.
 // [Sync] 2026-10-30: rasterize a self-contained SVG data URI so the original HTML labels remain exportable without tainting the canvas.
@@ -210,7 +211,7 @@ export default memo(function MermaidBlock({ chart, copyText, savePNG, preview }:
 
   return (
     <>
-      <div className="markdown-media-block" data-markdown-media-kind="mermaid">
+      <div className="markdown-media-block" data-markdown-media-kind="mermaid" data-render-state={failed ? 'failed' : svg ? 'ready' : 'pending'}>
         <div className="markdown-media-block__toolbar">
           <span className="markdown-media-block__label">
             {failed ? t('chat.mermaid.renderFailed') : svg ? 'Mermaid' : t('chat.mermaid.rendering')}

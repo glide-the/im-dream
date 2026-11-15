@@ -64,6 +64,8 @@
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
 // [Sync] 2026-10-07: render durable task markers when persisted Tool output and final prose occupy separate assistant messages.
 // [Sync] 2026-10-14: replace exact Reflections Analyze user prompts with one section-navigation tag.
+// [Sync] 2026-11-13: share message-stack geometry with read-only share surfaces.
+import {CHAT_MESSAGE_LIST_STYLE, CHAT_MESSAGE_GROUP_STYLE} from './chatMessageLayout';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -285,7 +287,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   };
 
   return (
-    <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
+    <div style={CHAT_MESSAGE_LIST_STYLE}>
       <div style={{ alignSelf: 'center', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
         {historyError ? (
           <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
@@ -721,7 +723,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
             data-chat-message-id={message.id}
             data-chat-user-message-id={isNavigableUserMessage(message) ? message.id : undefined}
             className={locatedMessageId === message.id ? 'chat-turn-message--located' : undefined}
-            style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}
+            style={CHAT_MESSAGE_GROUP_STYLE}
           >
             {projection ? (
               <AssistantTurnGroup

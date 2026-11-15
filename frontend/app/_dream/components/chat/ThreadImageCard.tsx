@@ -1,9 +1,9 @@
+// [Sync] 2026-11-13: render Chat message components and shared stack geometry in image previews.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: retain the original card DOM/CSS while sharing its export DTO definitions.
 // [Input] ExportChatMessage blocks (text/reasoning/tool), resolved Workspace image data,
 //         thread title, i18n labels, and optional ExportPendingConfirmation.
-// [Output] The warm-paper long-image card (Ink & Memory UI Design v2.1 tokens: Warm Canvas bg,
-//          dashed Border Paper dividers, Action Brown user bubbles, Memory Yellow accents).
+// [Output] Original share framing with the same Chat message bubbles, typography and Markdown.
 //          Mirrors ChatMessageList visuals: italic left-border reasoning blocks, collapsed
 //          tool rows with amber pending badges, dark Terminal output cards — plus a static
 //          ToolConfirmationDock-style card pinned at the bottom when a confirmation awaits.
@@ -14,72 +14,15 @@
 // [Sync] 2026-08-23: preserve explicit workspace:// images for authenticated export prefetch and render failures as inert placeholders.
 // [Sync] 2026-09-06: narrow React Markdown image sources before applying the Workspace URI boundary.
 import { BRAND_NAME } from '../../constants/brand';
-import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import type {Components} from 'react-markdown';
+import UserMessagePart from './UserMessagePart';
+import AssistMessagePart from './AssistMessagePart';
+import {CHAT_MESSAGE_LIST_STYLE, CHAT_MESSAGE_GROUP_STYLE} from './chatMessageLayout';
+import './ChatShareImage.css';
 import { isWorkspaceUri } from './workspaceUri';
 
-import type {ExportToolBlock, ExportBlock, ExportChatMessage, ExportConfirmationQuestionOption, ExportConfirmationQuestion, ExportPendingConfirmation, ExportImageLabels} from './chatImageProjection';
+import type {ExportToolBlock, ExportChatMessage, ExportPendingConfirmation, ExportImageLabels} from './chatImageProjection';
 export type {ExportToolBlock, ExportBlock, ExportChatMessage, ExportConfirmationQuestionOption, ExportConfirmationQuestion, ExportPendingConfirmation, ExportImageLabels} from './chatImageProjection';
-
-const EXPORT_MARKDOWN_COMPONENTS: Components = {
-  p: ({ children }) => <p style={{ margin: '0 0 0.65em', lineHeight: 1.75 }}>{children}</p>,
-  h1: ({ children }) => <h1 style={{ margin: '0.7em 0 0.4em', fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{children}</h1>,
-  h2: ({ children }) => <h2 style={{ margin: '0.7em 0 0.4em', fontSize: '1.15rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{children}</h2>,
-  h3: ({ children }) => <h3 style={{ margin: '0.7em 0 0.35em', fontSize: '1.02rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{children}</h3>,
-  h4: ({ children }) => <h4 style={{ margin: '0.6em 0 0.3em', fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{children}</h4>,
-  ul: ({ children }) => <ul style={{ margin: '0 0 0.65em', paddingLeft: '1.25em' }}>{children}</ul>,
-  ol: ({ children }) => <ol style={{ margin: '0 0 0.65em', paddingLeft: '1.35em' }}>{children}</ol>,
-  li: ({ children }) => <li style={{ margin: '0.2em 0', lineHeight: 1.7 }}>{children}</li>,
-  a: ({ children, href }) => <a href={href} style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</a>,
-  strong: ({ children }) => <strong style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{children}</strong>,
-  blockquote: ({ children }) => (
-    <blockquote style={{ margin: '0 0 0.65em', padding: '0.1em 0 0.1em 0.9em', borderLeft: '3px solid var(--color-voice-yellow)', color: 'var(--color-text-secondary)' }}>
-      {children}
-    </blockquote>
-  ),
-  hr: () => <hr style={{ border: 'none', borderTop: '1px dashed var(--color-border-paper)', margin: '1em 0' }} />,
-  code: ({ className, children }) => (
-    <code
-      className={className}
-      style={className ? { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.86em' } : {
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: '0.86em',
-        background: 'color-mix(in srgb, var(--color-border-paper) 34%, transparent)',
-        borderRadius: '0.3rem',
-        padding: '0.08em 0.35em',
-      }}
-    >
-      {children}
-    </code>
-  ),
-  pre: ({ children }) => (
-    <pre style={{
-      margin: '0 0 0.8em',
-      padding: '0.8rem 1rem',
-      background: 'var(--color-bg-paper)',
-      border: '1px dashed var(--color-border-paper)',
-      borderRadius: '0.85rem',
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
-      lineHeight: 1.65,
-    }}>
-      {children}
-    </pre>
-  ),
-  table: ({ children }) => (
-    <table style={{ borderCollapse: 'collapse', margin: '0 0 0.8em', width: '100%', fontSize: '0.85em' }}>{children}</table>
-  ),
-  th: ({ children }) => (
-    <th style={{ border: '1px solid var(--color-border-paper)', padding: '0.35em 0.6em', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', textAlign: 'left' }}>{children}</th>
-  ),
-  td: ({ children }) => (
-    <td style={{ border: '1px solid var(--color-border-paper)', padding: '0.35em 0.6em' }}>{children}</td>
-  ),
-};
-
-function exportUrlTransform(value: string): string {
-  return isWorkspaceUri(value) ? value : defaultUrlTransform(value);
-}
 
 const workspaceImageFrameStyle = {
   display: 'block',
@@ -95,9 +38,8 @@ const workspaceImageFrameStyle = {
 function createExportMarkdownComponents(
   workspaceImageSources: ReadonlyMap<string, string>,
   workspaceImageUnavailable: string,
-): Components {
+): Pick<Components, 'a' | 'img'> {
   return {
-    ...EXPORT_MARKDOWN_COMPONENTS,
     a({ children, href }) {
       if (isWorkspaceUri(href)) {
         return <span style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</span>;
@@ -347,16 +289,16 @@ export default function ThreadImageCard({ title, messages, labels, dateText, pen
     labels.workspaceImageUnavailable,
   );
   return (
-    <div style={{
+    <div className="chat-share-image" style={{
       width: '720px',
       boxSizing: 'border-box',
       padding: '2.9rem 2.75rem 2.5rem',
       background: 'var(--color-bg-app)',
       color: 'var(--color-text-body)',
-      fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
+      fontFamily: 'var(--font-family-ui)',
       fontSize: '0.92rem',
     }}>
-      {/* 品牌头部 — 手写感 Logo + Memory Yellow 手绘下划线 + 导出日期 */}
+      {/* 品牌头部、Memory Yellow 下划线与导出日期 */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem' }}>
         <div>
           <div style={{ fontSize: '1.9rem', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.1 }}>
@@ -382,69 +324,51 @@ export default function ThreadImageCard({ title, messages, labels, dateText, pen
       {/* 单一虚线纸边界（轻纸面分区规则） */}
       <div style={{ borderTop: '1.5px dashed var(--color-border-paper)', margin: '1.2rem 0 1.8rem' }} />
 
-      {messages.map((message, index) => (
-        message.role === 'user' ? (
-          <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', margin: '0 0 1.35rem' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>{labels.you}</span>
-            {message.files.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.35rem', marginBottom: '0.45rem', maxWidth: '82%' }}>
-                {message.files.map((name, fileIndex) => (
-                  <span key={fileIndex} style={{
-                    fontSize: '0.72rem',
-                    color: 'var(--color-text-secondary)',
-                    border: '1px dashed var(--color-border-paper)',
-                    borderRadius: '999px',
-                    padding: '0.18rem 0.6rem',
-                    background: 'var(--color-bg-paper)',
-                  }}>
-                    {name}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {message.blocks.some((block) => block.kind === 'text' && block.text) ? (
-              <div style={{
-                maxWidth: '82%',
-                boxSizing: 'border-box',
-                background: 'var(--color-export-action-bg)',
-                color: 'var(--color-export-action-text, #FFFFFF)',
-                borderRadius: '1.1rem 1.1rem 0.3rem 1.1rem',
-                padding: '0.7rem 1rem',
-                lineHeight: 1.7,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}>
-                {message.blocks
-                  .filter((block): block is { kind: 'text'; text: string } => block.kind === 'text')
-                  .map((block) => block.text)
-                  .join('\n\n')}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div key={index} style={{ margin: '0 0 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-              <span style={{ width: '0.55rem', height: '0.55rem', borderRadius: '999px', background: 'var(--color-voice-yellow)', flexShrink: 0 }} />
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{labels.assistant}</span>
-            </div>
-            {message.blocks.map((block, blockIndex) => {
+      <div style={CHAT_MESSAGE_LIST_STYLE}>
+        {messages.map((message, index) => (
+          <div key={index} style={CHAT_MESSAGE_GROUP_STYLE}>
+            {message.role === 'user' ? (
+              <>
+                {message.files.length > 0 ? (
+                  <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.35rem'}}>
+                    {message.files.map((name, fileIndex) => (
+                      <span key={fileIndex} style={{fontSize: '0.72rem', color: 'var(--color-text-secondary)', border: '1px dashed var(--color-border-paper)', borderRadius: '999px', padding: '0.18rem 0.6rem', background: 'var(--color-bg-paper)'}}>
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {message.blocks.some(block => block.kind === 'text' && block.text) ? (
+                  <UserMessagePart
+                    text={message.blocks
+                      .filter((block): block is {kind: 'text'; text: string} => block.kind === 'text')
+                      .map(block => block.text)
+                      .join('\n\n')}
+                    mediaComponents={markdownComponents}
+                  />
+                ) : null}
+              </>
+            ) : message.blocks.map((block, blockIndex) => {
               if (block.kind === 'reasoning') {
-                return <ReasoningBlock key={blockIndex} text={block.text} label={labels.thinking} />;
+                return <ReasoningBlock key={blockIndex} text={block.text} label={labels.thinking}/>;
               }
               if (block.kind === 'tool') {
-                return <ToolBlockView key={blockIndex} block={block} truncatedLabel={labels.truncated} />;
+                return <ToolBlockView key={blockIndex} block={block} truncatedLabel={labels.truncated}/>;
               }
               return (
-                <div key={blockIndex} style={{ lineHeight: 1.75, wordBreak: 'break-word' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={exportUrlTransform}>
-                    {block.text}
-                  </ReactMarkdown>
-                </div>
+                <AssistMessagePart
+                  key={blockIndex}
+                  part={{type: 'text', text: block.text}}
+                  message={{id: String(index), role: 'assistant', parts: [{type: 'text', text: block.text}]}}
+                  showActions={blockIndex === message.blocks.length - 1}
+                  readonly
+                  mediaComponents={markdownComponents}
+                />
               );
             })}
           </div>
-        )
-      ))}
+        ))}
+      </div>
 
       {/* 待确认窗口 — 整图只有一个，固定放在最下方（镜像 ToolConfirmationDock） */}
       {pendingConfirmation ? (

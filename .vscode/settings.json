@@ -8,5 +8,11 @@
   "python.terminal.activateEnvironment": true,
   "inkDream.frontendHost": "localhost",
   "inkDream.frontendPort": 5173,
-  "inkDream.backendUrl": "http://127.0.0.1:8765"
+  "inkDream.backendUrl": "http://127.0.0.1:8765",
+  "chat.tools.terminal.autoApprove": {
+    "/^git check-ignore -v backend/\\.env backend/\\.env\\.mobile; git ls-files --error-unmatch backend/\\.env\\.mobile >/dev/null 2>&1 && echo '\\.env\\.mobile tracked' \\|\\| echo '\\.env\\.mobile untracked'$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
 }

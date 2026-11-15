@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: align resource heading and connect action with the reviewed card UI; modal submit keeps its original label.
 // [Input] Named existing actor, normal Dream/PostgreSQL/frontend services, and explicit sample/budget policy.
 // [Output] Read-only visible MCP Resources fresh-entry/reload/re-entry latency distributions plus zero-discovery/zero-mutation evidence.
 // [Pos] Opt-in real-account MCP list performance acceptance; it never opens inventory or changes Server configuration.
@@ -71,7 +72,7 @@ function distribution(values: number[]) {
 }
 
 async function waitForDatabaseList(page: Page, expectedServerNames: string[]): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'MCP工具连接' })).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: '读取 Claude MCP 状态…' })).toHaveCount(0);
   await expect(page.getByText('安全门禁已关闭此能力')).toHaveCount(0);
   for (const name of expectedServerNames) {

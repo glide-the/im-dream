@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: share the original message presentation with public and image read-only surfaces.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Assistant text message part from the chat message stream/history and optional post-reply content.
 // [Output] Assistant Markdown, post-reply content, and message actions in one aligned column.
@@ -11,6 +12,8 @@
 //                    workspace:// references resolve without persisted credentials.
 // [Sync] 2026-09-06: route retry sends through the same Chat-owned user-message coordinator.
 // [Sync] 2026-09-27: place created-task navigation between a settled reply and its action row.
+import type {Components} from 'react-markdown';
+import '../../styles/markdown.css';
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -21,6 +24,8 @@ import ChatMarkdown from './ChatMarkdown';
 import type { ChatUserMessage } from './chatUserMessageIngress';
 
 interface AssistMessagePartProps {
+  publicView?: boolean;
+  mediaComponents?: Pick<Components, 'a' | 'img'>;
   part: { type: 'text'; text: string };
   isLast?: boolean;
   isLoading?: boolean;
@@ -70,6 +75,8 @@ export const AssistMessagePart = memo(function AssistMessagePart({
   workspaceSessionId,
   onAddImageMaterial,
   afterContent,
+  publicView = false,
+  mediaComponents,
 }: AssistMessagePartProps) {
   const { copied, copy } = useCopy();
   const [isRetrying, setIsRetrying] = useState(false);
@@ -135,7 +142,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', opacity: isError ? 0.6 : 1, minHeight: isLast && isStreamLoading ? '2rem' : undefined }}>
       <div style={{ color: 'var(--color-text-primary)', fontSize: '0.95rem', lineHeight: 1.75 }}>
         <div className="prose prose-chat">
-          <ChatMarkdown text={part.text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} />
+          <ChatMarkdown text={part.text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} publicView={publicView} mediaComponents={mediaComponents} />
         </div>
       </div>
 
@@ -163,7 +170,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
       ) : null}
     </div>
   );
-}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly && prev.workspaceSessionId === next.workspaceSessionId && prev.afterContent === next.afterContent);
+}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly && prev.workspaceSessionId === next.workspaceSessionId && prev.afterContent === next.afterContent && prev.publicView === next.publicView && prev.mediaComponents === next.mediaComponents);
 
 function ActionButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
