@@ -35,3 +35,32 @@ Admin 对应记录：[批量校验执行记录](../../../ink-admin-memory/docs/e
 | `.venv/bin/python -m compileall -q services/admin_data/client.py services/admin_data/request_auth.py` | 0 | 无错误输出 |
 
 初次 305 项、补充目录漂移后 309 项均通过；最终加入具名操作缺失和普通实体 404 对照后为 311 项。既有后台 CI 仅执行远端构建，仓库无独立 Python lint/typecheck 配置。本机无 Docker 构建或业务服务操作。原始日志为 `/tmp/ink-capability-dream-validation-20261116/`。
+
+### 扩展检查与基线
+
+`PYTHONPATH=. .venv/bin/python -m pytest tests/test_admin_*.py -q` 退出 1：1586 passed、6 subtests passed、4 failed。失败节点为：
+
+- `test_admin_deck_default_workspace.py::test_profile_failure_stops_instead_of_defaulting_role[result4-504]`
+- `test_admin_deck_version_routes.py::test_capability_refresh_failure_can_recover_on_next_authenticated_request`
+- `test_admin_picture_history_routes.py::test_admin_transport_failure_is_explicit_and_never_uses_database`
+- `test_admin_preflight_routes.py::test_timeout_keeps_same_request_id_without_retry`
+
+在自有 detached worktree `/tmp/ink-dream-capability-baseline-20261116`、原 `origin/develop / 37a07dab79d5312e1126116e15bb886ff9bf1a3c` 的 `backend` 下执行：
+
+```bash
+PYTHONPATH=. /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest tests/test_admin_deck_default_workspace.py::test_profile_failure_stops_instead_of_defaulting_role tests/test_admin_deck_version_routes.py::test_capability_refresh_failure_can_recover_on_next_authenticated_request tests/test_admin_picture_history_routes.py::test_admin_transport_failure_is_explicit_and_never_uses_database tests/test_admin_preflight_routes.py::test_timeout_keeps_same_request_id_without_retry -q
+```
+
+退出 1：相同 4 failed、4 passed in 1.13s。日志 `baseline-four.log` 与 `admin-consumers.log` 对照确认：profile/picture/preflight 的只读失败保留同 request ID 后有界重试一次；目录 ConnectError 在第二次只读请求成功。上述测试原有单次断言保持本轮范围之外，未修改传输重试或业务合同。
+
+### 文档与原改动保留
+
+`python3 /tmp/ink-admin-request-audit-20261115/docs/inventory-links-check.py` 退出 0：5 文件、62 条引用、零失效；`node /tmp/ink-admin-request-audit-20261115/docs/mermaid-browser-check.mjs` 退出 0：3 幅 Mermaid 解析和渲染通过。使用本机 Chrome 后关闭自有浏览器。
+
+11月15日评审原文完整保留，仅追加 Sync 和本轮实施段；两份既有 `docs/design/claude-agent/` 文档改动与交接前 patch 完全一致，继续留在工作区。两仓源码头、目录索引与执行记录路径已核对。
+
+Dream 拉取请求：[PR #106](https://github.com/glide-the/im-dream/pull/106)。Admin 完整本地 unit 为 2660 passed、37 skipped；目录/事务定向为 22 passed；TypeScript 与 2 项既有 API-only Playwright 通过。CI 状态及合并提交以对应拉取请求为准。
+
+Admin 拉取请求：[PR #57](https://github.com/glide-the/dream-im-platform/pull/57)，目标 `main`；Dream PR #106 目标 `develop`。Admin 先合并，Dream 随后合并；两者保持协议兼容。合并与本地默认分支同步由本次授权执行，提交与实时检查见拉取请求。
+
+最终 `python3 /tmp/ink-capability-docs-final-20261116.py` 退出 0：原评审 62 条引用及两份执行记录 11 条引用均有效，目录索引与原分析全文保留检查通过；Mermaid 原文保持。
