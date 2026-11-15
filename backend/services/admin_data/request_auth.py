@@ -1,3 +1,4 @@
+# [Sync] 2026-11-16: use client-owned catalog readiness and invalidate only explicit capability failures across all four composition paths.
 # [Sync] 2026-11-12: register exact external-share operations; unavailable capabilities fail closed per request.
 # [Sync] 2026-11-04: register exact continuation operations.
 # [Sync] 2026-10-23: register the five task-scoped Reflections Notion v2 operations in the shared production client.
@@ -61,7 +62,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from threading import RLock
 
 from .chat_data import CHAT_OPERATIONS
 from .task_session_result_data import TASK_RESULT_OPERATIONS, AdminTaskResultWorkerData
@@ -231,14 +231,9 @@ class AdminRequestAuth:
             timeout_seconds=self._runtime_http_config.timeout_seconds,
             max_bytes=self._runtime_http_config.max_response_bytes,
         )
-        self._capabilities_ready = False
-        self._lock = RLock()
 
     def _ensure_capabilities(self, request_id: str) -> None:
-        with self._lock:
-            if not self._capabilities_ready or not self.client.capabilities_ready:
-                self.client.capabilities(request_id)
-                self._capabilities_ready = True
+        self.client.capabilities_snapshot(request_id)
 
     def authenticate(self, access_token: str, request_id: str, *, required_scopes: frozenset[str]) -> AdminRequestActor:
         claims = self._verifier.verify(access_token, required_scopes=required_scopes)
@@ -276,12 +271,8 @@ class AdminRequestAuth:
             raise AdminDataError("INSUFFICIENT_SCOPE", 403, request_id)
         try:
             return self._workflow.resolve(thread_id, request_id, access_token=actor.access_token, canonical_user_id=actor.canonical_user_id)
-        except AdminDataError:
-            # A failed fresh capability fetch clears the client's advertisement.
-            # The next request must initialize it again instead of keeping an
-            # obsolete ready flag for other Chat/profile operations.
-            with self._lock:
-                self._capabilities_ready = False
+        except AdminDataError as error:
+            self.client.invalidate_capabilities_for(error)
             raise
 
     def turn_persistence(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution, request_id: str) -> AdminTurnPersistence:
@@ -293,9 +284,8 @@ class AdminRequestAuth:
             scopes=["dream:read", "dream:write"])
         try:
             grant = self._delegations.create(requested, access_token=actor.access_token, request_id=request_id)
-        except AdminDataError:
-            with self._lock:
-                self._capabilities_ready = False
+        except AdminDataError as error:
+            self.client.invalidate_capabilities_for(error)
             raise
         return AdminTurnPersistence(
             resolution,
@@ -334,9 +324,8 @@ class AdminRequestAuth:
                 access_token=actor.access_token,
                 request_id=request_id,
             )
-        except AdminDataError:
-            with self._lock:
-                self._capabilities_ready = False
+        except AdminDataError as error:
+            self.client.invalidate_capabilities_for(error)
             raise
         return AdminGatewayRuntime(
             grant,
@@ -396,9 +385,8 @@ class AdminRequestAuth:
                 initial_session_id=initial_session_id,
                 initial_request_id=request_id,
             )
-        except AdminDataError:
-            with self._lock:
-                self._capabilities_ready = False
+        except AdminDataError as error:
+            self.client.invalidate_capabilities_for(error)
             raise
 
 
