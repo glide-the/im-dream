@@ -292,3 +292,12 @@ corepack pnpm exec eslint app/_dream/components/chat/NotionWorkspacePreview.tsx 
 正常页面只读复核：用户指出的临时记事本-11-8宽576px、高99.6px，border为0、shadow为none、背景透明；标题右侧两个原操作可用。展开后原NotionRenderer可见，关闭后19张卡片保持、弹层0、焦点恢复。截图为`/tmp/ink-notion-compact-real-20261118/preview.png`与同目录context.png。未发送消息、调用模型或修改业务数据。原Notion参考图复核完成后清理本轮下载临时文件。
 
 根目录文档与工作区检查沿`python3 /tmp/ink-notion-preview-doc-check.py`及`git diff --check`，结果单独留存。本轮未执行构建或部署。
+
+
+## PR合并前的干净CI类型依赖修订
+
+用户授权创建PR并合并默认主分支develop。Notion相关31项单独提交至codex/notion-workspace-preview-20261118，[PR #107](https://github.com/glide-the/im-dream/pull/107)用于本轮集成；原iPhone启动修复、Claude迁移文档及共享执行目录中的无关条目保持工作区。
+
+[首次前端CI](https://github.com/glide-the/im-dream/actions/runs/44332459320)完成frozen安装和webpack编译，类型检查在notionRecordMapAdapter.ts的mdast类型导入处失败：Cannot find module mdast。根package缺少直接类型声明依赖，本机安装树中的间接类型声明覆盖了该缺口。
+
+修订在frontend根devDependencies显式锁定@types/mdast 4.0.4，复用锁文件已有版本；原依赖版本与业务代码保持。后续完整类型检查与PR前端构建验证该修订，合并使用已检查的准确head SHA。
