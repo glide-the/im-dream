@@ -4,6 +4,8 @@
 // [Sync] 2026-09-14: preserve stream/body behavior while removing ambient browser/server credentials.
 // [Sync] 2026-10-13: source preparation may wait past the fetch header deadline; preserve caller cancellation.
 // [Sync] 2026-10-13: sparse Reflections events wait for the task/caller lifetime instead of a response-body idle deadline.
+// [Sync] 2026-11-18: strip public trace input and sign server-owned W3C handoff.
+import { traceFetch } from './_trace.ts';
 import { Agent, type Dispatcher } from 'undici';
 
 // A finite mounted-page read completes before task creation sends response headers.
@@ -30,7 +32,7 @@ export function configuredBackendOrigin(environment: NodeJS.ProcessEnv = process
 }
 
 function privateHeader(name: string): boolean {
-  return ['cookie', 'set-cookie', 'authorization', 'x-new-access-token', 'forwarded', 'host'].includes(name)
+  return ['traceparent', 'tracestate', 'baggage', 'x-trace-id', 'x-trace-sampled', 'x-trace-linked', 'cookie', 'set-cookie', 'authorization', 'x-new-access-token', 'forwarded', 'host'].includes(name)
     || /^(?:x-ink-|x-admin-|x-auth-|x-user-|x-forwarded-|x-real-ip$|true-client-ip$)/.test(name);
 }
 
@@ -50,7 +52,7 @@ function forwardResponseHeaders(upstream: Response): Headers {
   const headers = new Headers();
   const connectionHeaders = new Set((upstream.headers.get('connection') ?? '').toLowerCase().split(',').map(name => name.trim()));
   for (const [name, value] of upstream.headers) {
-    if (HOP_BY_HOP_HEADERS.has(name) || connectionHeaders.has(name) || privateHeader(name) || name === 'content-encoding') continue;
+    if (HOP_BY_HOP_HEADERS.has(name) || connectionHeaders.has(name) || (privateHeader(name) && !['x-trace-id', 'x-trace-sampled'].includes(name)) || name === 'content-encoding') continue;
     headers.append(name, value);
   }
   if (headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
@@ -79,6 +81,6 @@ export async function forwardBackendRequest(request: Request, origin: URL, autho
     init.body = request.body;
     init.duplex = 'half';
   }
-  const upstream = await transport(upstreamUrl, init);
+  const upstream = await traceFetch(transport, upstreamUrl, init, true);
   return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: forwardResponseHeaders(upstream) });
 }

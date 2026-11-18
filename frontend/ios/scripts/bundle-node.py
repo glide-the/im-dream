@@ -1,6 +1,7 @@
 # [Sync] 2026-11-04: packaged public origin follows the native host config so Simulator and Web coexist.
 # [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 # [Sync] 2026-10-31: include the private native Admin HTTP adapter and its exact resource digest.
+# [Sync] 2026-11-18: reject server trace configuration before copying mobile env resources.
 #!/usr/bin/env python3
 # [Input] Prepared original Runtime resources and Xcode target build settings.
 # [Output] App-local Node, original Runtime and original Next standalone resources with provenance receipts.
@@ -23,6 +24,8 @@ import plistlib
 import re
 import subprocess
 import sys
+
+from mobile_env_policy import validate_mobile_environment
 
 ios = Path(__file__).resolve().parents[1]
 source = ios / "RuntimeArtifacts/generated"
@@ -73,6 +76,9 @@ for source, target in (
     (ios.parents[1] / "frontend/.env.local", (next_root / next_entry).parent / ".env.local"),
 ):
     if source.is_file():
+        # Fail before copying: OTLP endpoints may embed authorization keys. Server
+        # configuration belongs in private process EnvironmentFiles, outside mobile inputs.
+        validate_mobile_environment(source.read_text())
         shutil.copy2(source, target)
         target.chmod(0o600)
     else:

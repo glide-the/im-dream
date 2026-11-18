@@ -5,6 +5,8 @@
 // [Sync] 2026-10-11: use the same request origin for cookie/CSRF and Admin handle resolution.
 // [Sync] 2026-09-17: reuse the process-owned Admin client instead of exchanging a service token per API request.
 // [Sync] 2026-10-13: renew only definite pre-create Notion authorization rejection once, replaying the original request/key.
+// [Sync] 2026-11-18: trace shared BFF entry and authentication before streaming.
+import { traceApiRequest, traceAuthentication } from '../_trace.ts';
 import { randomUUID } from 'node:crypto';
 import { configuredBackendOrigin, forwardBackendRequest } from '../_http-proxy.ts';
 import { AdminBffClient, configuredAdminBffClient } from './admin-client.ts';
@@ -39,12 +41,12 @@ export function apiRequestBoundary(request: Request, environment: Readonly<Recor
 }
 
 export function createApiProxy(boundary: BffLoginBoundary, admin: Pick<AdminBffClient, 'resolve'>, origin: URL, transport: typeof fetch = fetch) {
-  return async (request: Request): Promise<Response> => {
+  return async (request: Request): Promise<Response> => traceApiRequest(request, async () => {
     try {
       const incoming = new URL(request.url);
       if (!incoming.pathname.startsWith('/api/') && incoming.pathname !== '/api' && incoming.pathname !== '/auth/me') throw new BffBoundaryError('BFF_API_PATH_INVALID', 400);
       if (incoming.searchParams.has('token') || incoming.searchParams.has('access_token')) throw new BffBoundaryError('BFF_TOKEN_QUERY_DENIED', 400);
-      const authorization = await apiAuthorization(request, boundary, admin);
+      const authorization = await traceAuthentication(() => apiAuthorization(request, boundary, admin));
       const canReplay = request.method.toUpperCase() === 'POST' && incoming.pathname === '/api/reflections/tasks'
         && boundary.hasHandleCookie(request);
       const replay = canReplay ? request.clone() : undefined;
@@ -63,7 +65,7 @@ export function createApiProxy(boundary: BffLoginBoundary, admin: Pick<AdminBffC
           && rejection.creation_committed !== true && rejection.task_id === undefined
           && typeof submission?.request_key === 'string' && submission.request_key.length > 0
           && submission.analysis_content?.include_notion === true) {
-          const renewed = await apiAuthorization(replay, boundary, admin);
+          const renewed = await traceAuthentication(() => apiAuthorization(replay, boundary, admin));
           // This is a definite rejection before any task write, using the same
           // handle, bytes and idempotency key. No other operation is retried.
           return await forwardBackendRequest(replay, origin, renewed, transport);
@@ -74,7 +76,7 @@ export function createApiProxy(boundary: BffLoginBoundary, admin: Pick<AdminBffC
     } catch (error) {
       return bffFailure(error instanceof BffBoundaryError ? error : new BffBoundaryError('BFF_BACKEND_UNAVAILABLE', 502));
     }
-  };
+  });
 }
 
 export async function proxyApiRequest(request: Request): Promise<Response> {
@@ -85,5 +87,5 @@ export async function proxyApiRequest(request: Request): Promise<Response> {
     // Explicit native Bearer verification belongs to Python; only Browser handles
     // require the private Admin service transport/configuration here.
     return await createApiProxy(boundary, admin, origin)(request);
-  } catch (error) { return bffFailure(error); }
+  } catch (error) { return traceApiRequest(request, async () => bffFailure(error)); }
 }

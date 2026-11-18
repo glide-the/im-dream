@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: trace complete ASGI requests with safe OTLP metadata and response correlation.
 # [Sync] 2026-10-15: own the capability-gated Reflections memory worker and behavior router.
 #!/usr/bin/env python3
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
@@ -138,7 +139,7 @@ import json
 import logging
 from datetime import datetime
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
+from fastapi import HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -177,7 +178,9 @@ CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
 
 # ========== FastAPI Application ==========
 
-app = FastAPI(
+from observability import TracedFastAPI
+
+app = TracedFastAPI(
     title=f"{APP_NAME} API",
     description="Writing, Story Workspace, and Claude Agent API",
     version="2.0.0",
@@ -207,7 +210,7 @@ app.add_middleware(
     allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-New-Access-Token", "ETag"],
+    expose_headers=["X-New-Access-Token", "ETag", "X-Trace-Id", "X-Trace-Sampled"],
 )
 
 # ========== Claude Agent Factory ==========

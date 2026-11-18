@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: package the dependency-optional shared observability facade.
 #!/usr/bin/env python3
 # [Input] Prepared, hash-pinned Python dependencies and Xcode's target build settings.
 # [Output] Target-specific Python sources and signed extension frameworks in the app bundle.
@@ -59,7 +60,7 @@ for name in ("mobile_runtime/__init__.py", "mobile_runtime/ios.py", "mobile_runt
              "routers/sessions.py", "routers/reports.py", "routers/pictures.py", "routers/friends.py",
              "routers/deck_versions.py", "routers/memory.py", "routers/oauth.py", "routers/device_oauth.py",
              "routers/voices.py", "services/deck/__init__.py", "services/deck/defaults.py",
-             "config.py", "session_events.py", "chat_message_projection.py", "voice_projection.py",
+             "config.py", "observability.py", "session_events.py", "chat_message_projection.py", "voice_projection.py",
              "models/workflow_run.py", "models/workflow_preflight.py", "models/deck_version.py", "libs/__init__.py",
              "story_workspace/__init__.py", "story_workspace/contracts.py",
              "services/story_workspace/dream_launch_application_service.py",

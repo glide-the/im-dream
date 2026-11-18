@@ -7,6 +7,8 @@
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 // [Sync] 2026-09-17: share the client across Next route invocations so token cache/flight coalescing are effective.
+// [Sync] 2026-11-18: propagate W3C child context across the existing bounded Admin transport.
+import { traceFetch } from '../_trace.ts';
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -143,7 +145,7 @@ export class AdminBffClient {
       try {
         const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
         const authorization = Buffer.from(`${encodeURIComponent(this.#config.serviceId)}:${encodeURIComponent(this.#config.serviceSecret)}`, 'utf8').toString('base64');
-        response = await this.#fetch(this.#config.transportOrigin + '/api/auth/oauth2/token', {
+        response = await traceFetch(this.#fetch, this.#config.transportOrigin + '/api/auth/oauth2/token', {
           method: 'POST',
           headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${authorization}` },
           body: new URLSearchParams({ grant_type: 'client_credentials', resource: this.resource }),
@@ -175,7 +177,7 @@ export class AdminBffClient {
     let raw: string;
     try {
       const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
-      response = await this.#fetch(this.#config.transportOrigin + '/api/internal/dream/v1' + path, {
+      response = await traceFetch(this.#fetch, this.#config.transportOrigin + '/api/internal/dream/v1' + path, {
         method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body),
         cache: 'no-store', redirect: 'manual', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });

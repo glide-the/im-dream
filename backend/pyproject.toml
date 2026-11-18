@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: pin official metadata-only OTLP trace SDK and HTTP exporter.
 # [Sync] 2026-10-10: Pillow validates actual generated/reference image decoding.
 # [Input] Dream backend project metadata and exact Python dependency contract.
 # [Output] Backend package identity and uv dependency resolution input.
@@ -40,6 +41,13 @@ dependencies = [
   "json-repair>=0.35,<1",
   "pyyaml>=6,<7",
   "redis>=5,<8",
+]
+
+[project.optional-dependencies]
+tracing = [
+  "opentelemetry-api==1.45.2",
+  "opentelemetry-sdk==1.45.2",
+  "opentelemetry-exporter-otlp-proto-http==1.45.2",
 ]
 
 [dependency-groups]
