@@ -28,7 +28,7 @@
 ## 交付与验收状态
 
 - 实施：源码、运维说明和隔离验证已进入本轮工作区；最终验证与远程收据追加于下方。
-- 远程交付：按仓库默认主分支 `develop` 创建 PR，保留现行 GitHub 检查与正常合并流程。
+- 远程交付：[PR #108](https://github.com/glide-the/im-dream/pull/108) 目标为默认主分支 `develop`；本记录提交时原后端与前端 GitHub 检查已开始，最终合并提交由本会话交付收据记录。
 - 云端验收：待后续单独授权部署与配置；本轮未部署、未重启、未修改服务器或 ARMS 云配置，未触发真实 reconcile 或模型调用。
 - ARMS 到达：待部署后按同一 Trace ID 查到 Dream BFF、Python、Admin 与实际 pg 子段；本机 exporter 和替身接收结果归隔离集成证据。
 
@@ -48,3 +48,10 @@
 跨语言用例通过原 Cookie/CSRF 和 AdminBffClient handle 解析，HTTP 进入隔离 Python，继续普通认证依赖、Deck 路由与实际 Admin DTO 构包，确认 BFF client → Python server → Admin receive 替身的 Trace ID 和父子关系。另覆盖无签名、错误签名、过期、路径不匹配、重复头、未采样、401、插件409、未处理500、关闭时缺少可选 SDK，以及移动包环境防护。
 
 本轮没有发起真实账户、真实数据库或真实模型操作；测试自建进程、随机端口和 collector 均已结束。原音乐插件资源缺失项保持明确失败记录，未引入替代数据，也未调整其断言。
+
+## 服务端凭据子进程边界
+
+安全复核补充 `sdk_env.py` 原有 `ADMIN_AUTH_SERVER_ONLY_ENV_NAMES`：服务追踪开关、签名密钥、OTLP 接入点、授权头和预算配置继续通过原空值覆盖/stdio 过滤机制排除。原 Runner、工具权限、CLI 配置与模型行为保持。
+
+- `.venv/bin/python -m pytest -q tests/test_claude_agent_runner.py -k 'tombstone or server_only or admin_auth or user_mcp_child_env'`：exit 0，1 passed、173 deselected，覆盖实际 MCP 子进程环境清理与继承凭据覆盖。
+- `.venv/bin/python -m pytest -q tests/test_sdk_env.py`：exit 0，31 passed、13 subtests passed。

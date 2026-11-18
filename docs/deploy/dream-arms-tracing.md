@@ -44,7 +44,7 @@ BFF 为每次公开请求创建根 Span，忽略浏览器提供的 `traceparent`
 
 Python 对直接客户端、过期签名、密钥不匹配和无签名请求创建根 Trace。服务间须保持时钟同步；BFF 与 Python 使用同一个入口路径。`tracestate` 与 `baggage` 在 Dream 边界丢弃。向 Admin 仅传播当前服务端 `traceparent`；Admin 已有探针负责生成 HTTP、pg 子段。原 `x-request-id`、DTO `request_id` 和业务幂等键保持原有生成与校验，Trace ID 用于诊断关联。
 
-只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 路由模板包含 `/api/decks/defaults/reconcile`，BFF 共享入口模板为 `/api/[[...path]]`。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。
+只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 路由模板包含 `/api/decks/defaults/reconcile`，BFF 共享入口模板为 `/api/[[...path]]`。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。原 CLI/MCP 子进程配置过滤器排除服务端追踪开关、签名密钥、接入点和授权头，凭据保留在服务端进程。
 
 ## 一次请求的耗时结构
 
