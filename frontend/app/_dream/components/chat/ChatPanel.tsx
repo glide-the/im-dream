@@ -1,3 +1,4 @@
+// [Sync] 2026-11-18: expose the current conversation bounds for local Notion reading overlays.
 // [Sync] 2026-11-13: ordinary and queued messages capture current Thread tools without global MCP saves.
 // [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
 // [Sync] 2026-11-13: preserve caller Agent context in the combined menu and refresh original model config after confirmed saves.
@@ -1477,7 +1478,7 @@ export default function ChatPanel({
   }, [messages, status, shouldShowMessageSurface, updateActiveTurn, updateScrollToBottomVisibility]);
 
   return (
-    <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
+    <div data-chat-preview-container className={className} style={{ position: 'relative', display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {historyPending ? historyLoadingContent : shouldShowMessageSurface ? (
         <div className="chat-turn-reading">
           <div className="chat-turn-reading__layout">

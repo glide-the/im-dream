@@ -1,3 +1,4 @@
+// [Sync] 2026-11-18: localize Notion card reading/details actions, JSON and renderer/image recovery.
 // [Input] Existing bilingual product strings and locale initialization.
 // [Output] Shared translations including current-conversation tool selection.
 // [Pos] Dream application locale owner.
@@ -634,6 +635,7 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        notionPreview: {read:'Read page', details:'View details', untitled:'Notion page', loading:'Reading Notion page…', empty:'This page has no body content.', expand:'Expand {{title}}', close:'Close page preview', download:'Download JSON', json:'JSON details', body:'Page content', access:'Access to this page is unavailable. Restore the Notion connection or page permissions in Settings, then ask the Agent to read it again.', scope:'This page is outside the selected resources. Update Resource Links and sync the index, then ask the Agent to read it again.', failed:'This page could not be read. Ask the Agent to read it again.', downloadFailed:'The JSON could not be downloaded. Please retry.', renderFailed:'Page preview could not be displayed. Please retry or inspect JSON details.', retry:'Retry', imageFailed:'Image could not be loaded.', openOriginal:'Open original'},
         reflectionAnalysisPreview: {
           label: 'Reflections · {{mode}}',
           openAria: 'Open Reflections: {{mode}}',
@@ -1835,6 +1837,7 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        notionPreview: {read:'阅读页面', details:'查看详情', untitled:'Notion 页面', loading:'正在显示 Notion 页面…', empty:'此页面暂无正文。', expand:'展开{{title}}', close:'关闭页面预览', download:'下载 JSON', json:'JSON 详情', body:'页面正文', access:'当前无法访问此页面。请在设置中恢复 Notion 连接或页面权限，再请 Agent 重新读取。', scope:'此页面超出已选择的资源范围。请在资源链接中更新范围并同步索引，再请 Agent 重新读取。', failed:'页面读取失败，请在对话中请 Agent 重新读取。', downloadFailed:'JSON 下载失败，请重试。', renderFailed:'页面预览暂时无法显示，请重试或查看 JSON 详情。', retry:'重试', imageFailed:'图片暂时无法加载。', openOriginal:'打开原图'},
         reflectionAnalysisPreview: {
           label: '回顾分析 · {{mode}}',
           openAria: '打开回顾分析：{{mode}}',

@@ -5,12 +5,14 @@
 // [Pos] Next Server Component root; no browser globals are accessed here.
 // [Sync] 2026-09-06: resolve global presentation from the private canonical app/_dream source tree.
 // [Sync] 2026-09-06: load the user-installed Grab inspector only in the local development document.
+// [Sync] 2026-11-18: load Notion base styles before the scoped Kastention reader overrides.
 
 import { BRAND_NAME, BRAND_BANNER_PATH } from './_dream/constants/brand';
 import type { Metadata } from 'next';
 import Script from 'next/script';
 import type { ReactNode } from 'react';
 
+import 'react-notion-x/styles.css';
 import '@/_dream/index.css';
 
 const PRODUCT_TITLE = `${BRAND_NAME} | AI Journaling Studio for Reflective Writing`;

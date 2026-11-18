@@ -1,3 +1,4 @@
+// [Sync] 2026-11-18: present existing Notion Read results outside loaded process disclosures with on-demand reading.
 // [Sync] 2026-11-04: show user-facing continuation failures through the existing error card.
 // [Sync] 2026-10-30: share original pure tool projections with Native; original DOM render tree and event handlers remain.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
@@ -78,6 +79,8 @@ import { isCompactionCompletionText, readContextCompactions } from '../../lib/co
 import { CreatedTaskSessionList, TaskSessionSourceMarker } from './TaskSessionNavigation';
 import type { TaskSessionLink, TaskSessionLinksSnapshot } from './taskSessionLinks';
 import ToolMessagePart from './ToolMessagePart';
+import NotionWorkspacePreview from './NotionWorkspacePreview';
+import {resolveNotionWorkspacePreview} from './notionPreviewProjection';
 import { EditorWriteCompletedCard } from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
@@ -350,6 +353,11 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
           if (marker && !tasks.some((task) => task.id === marker.id && task.revision === marker.revision)) tasks.push(marker);
           return tasks;
         }, []);
+        const notionPreviews = new Map(message.role === 'assistant' ? message.parts.flatMap((part, partIndex) => {
+          if (!isToolUIPart(part)) return [];
+          const preview = resolveNotionWorkspacePreview(part);
+          return preview ? [[partIndex, preview] as const] : [];
+        }) : []);
         const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'outside-app' | 'final') => {
               const part = message.parts?.[partIndex];
               if (!part) return null;
@@ -492,6 +500,8 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
 
               if (isToolUIPart(part)) {
                 const toolPart = part as ToolUIPart | DynamicToolUIPart;
+                const notionPreview = notionPreviews.get(partIndex);
+                if (notionPreview) return partKind === 'process' ? null : <NotionWorkspacePreview key={`${threadId}:${partKey}`} data={notionPreview} threadId={threadId}/>;
                 const toolStatus = getToolStatus(toolPart, isLoading);
                 const isCompleted = toolStatus !== 'executing';
                 const isError = toolStatus === 'error';
@@ -698,6 +708,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
         };
         const outsideMcpAppPartIndexes = projection
           ? projection.processPartIndexes.filter((partIndex) => {
+              if (notionPreviews.has(partIndex)) return true;
               const part = message.parts?.[partIndex];
               if (!part || !isToolUIPart(part)) return false;
               const toolPart = part as ToolUIPart | DynamicToolUIPart;
