@@ -3,6 +3,7 @@
 // [Pos] Server-only startup and request bridge; disabled processes skip SDK import.
 // [Sync] 2026-11-19: register the web probe through the Next startup hook.
 // [Sync] 2026-11-19: load the private Web trace settings from ordinary Next startup.
+// [Sync] 2026-11-19: share route and preflight tracing across local API handlers.
 import { openSync, closeSync, fstatSync, readFileSync, constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -42,9 +43,16 @@ export async function startTracing() {
   const owner = await configuredRuntime();
   owner?.recordStartup();
 }
-export async function traceApiRequest(request: Request, handler: () => Promise<Response>): Promise<Response> {
+export async function traceApiRequest(request: Request, handler: () => Response | Promise<Response>, route?: string): Promise<Response> {
   const owner = await configuredRuntime();
-  return owner ? owner.traceApiRequest(request, handler) : handler();
+  return owner ? owner.traceApiRequest(request, handler, route) : handler();
+}
+export function withApiTrace<Args extends unknown[]>(route: string, handler: (request: Request, ...args: Args) => Response | Promise<Response>) {
+  return (request: Request, ...args: Args) => traceApiRequest(request, () => handler(request, ...args), route);
+}
+export function tracedOptions(route: string, methods: readonly string[]) {
+  const allow = [...methods, 'OPTIONS', ...(methods.includes('GET') ? ['HEAD'] : [])].sort().join(', ');
+  return withApiTrace(route, () => new Response(null, { status: 204, headers: { allow } }));
 }
 export async function traceFetch(transport: typeof fetch, input: URL | RequestInfo, init?: RequestInit, privateBackend = false): Promise<Response> {
   const owner = await configuredRuntime();

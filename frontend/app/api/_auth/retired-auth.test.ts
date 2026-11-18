@@ -2,6 +2,7 @@
 // [Output] Explicit410 before generic auth; no password/code/body/key forwarding or cookie mutation.
 // [Pos] Provider-free public Next issuer-retirement contracts; actual Admin OAuth is separate.
 // [Sync] 2026-09-14: preserve all eight Next legacy methods and safe503 configuration failure.
+// [Sync] 2026-11-19: exercise the traced asynchronous Route Handler without local export.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { retiredAuthentication } from './retired-auth.ts';
@@ -14,13 +15,14 @@ import { GET as deviceGet, POST as devicePost } from '../../oauth/device/verify/
 import { POST as token } from '../../oauth/token/route.ts';
 
 const config = { INK_ADMIN_DREAM_BASE_URL: 'https://admin.example', INK_ADMIN_AUTH_ISSUER: 'https://admin.example/api/auth', INK_DREAM_API_RESOURCE: 'https://dream.example/api' };
+process.env.INK_TRACE_ENABLED = 'false';
 
 for (const [name, handler] of Object.entries({ login, register, googleLogin, googleCallback, deviceCode, deviceGet, devicePost, token })) {
   test(name + ' returns configured410 without a session or service credential', async () => {
     const previous = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));
     Object.assign(process.env, config);
     try {
-      const response = handler();
+      const response = await handler(new Request('https://dream.example/api/' + name));
       assert.equal(response.status, 410);
       assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal(response.headers.get('set-cookie'), null);

@@ -65,6 +65,7 @@ def test_reconcile_signed_parent_and_original_dto_flow(boundary, tracing):
     assert response.status_code == 200
     assert response.headers['x-trace-id'] == 'a' * 32
     assert response.headers['x-trace-sampled'] == '1'
+    assert response.headers['x-ink-trace-route'] == '/api/decks/defaults/reconcile'
     assert [call[0] for call in state['calls']] == ['deck.default-plugin.resolve', 'deck.reconcile-default']
     assert [call[0] for call in verifiers] == ['artifact', 'cli']
     spans = tracing.get_finished_spans()
@@ -95,6 +96,7 @@ def test_public_trace_headers_never_select_parent(boundary, tracing, change):
     response = traced_client(browser).post('/api/decks/defaults/reconcile', headers=header_items)
     assert response.status_code == 200
     assert response.headers['x-trace-id'] != 'a' * 32
+    assert 'x-ink-trace-route' not in response.headers
     root = next(s for s in tracing.get_finished_spans() if s.name.startswith('POST /api/'))
     assert root.parent is None
 

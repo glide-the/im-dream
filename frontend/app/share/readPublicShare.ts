@@ -1,7 +1,9 @@
 // [Input] Opaque token and server-configured Python origin/HTTP transport bounds.
 // [Output] One credential-free, bounded, dynamic public snapshot or closed error status.
 // [Pos] Shared server reader for the public page and anonymous Next API route.
+// [Sync] 2026-11-19: propagate the active API Trace across the private Python lookup.
 import {configuredBackendOrigin} from '../api/_http-proxy';
+import {traceFetch} from '../api/_trace';
 import {publicShareSnapshot, type PublicShareSnapshot} from '../_dream/api/publicShareSchema';
 export const publicShareHeaders = {'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer'};
 type Result = {status: 200; snapshot: PublicShareSnapshot} | {status: 404 | 503};
@@ -13,7 +15,7 @@ export async function readPublicShare(token: string, signal?: AbortSignal): Prom
   if (!origin || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2_147_483_647 || !Number.isSafeInteger(maximum) || maximum < 1) return {status: 503};
   try {
     const deadline = AbortSignal.timeout(timeout);
-    const response = await fetch(new URL('/api/public/shares/' + token, origin), {cache: 'no-store', redirect: 'error', signal: signal ? AbortSignal.any([signal, deadline]) : deadline});
+    const response = await traceFetch(fetch, new URL('/api/public/shares/' + token, origin), {cache: 'no-store', redirect: 'error', signal: signal ? AbortSignal.any([signal, deadline]) : deadline}, true);
     if (response.status === 404 || response.status === 410) {await response.body?.cancel(); return {status: 404};}
     if (!response.ok || !response.body) {await response.body?.cancel(); return {status: 503};}
     const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;

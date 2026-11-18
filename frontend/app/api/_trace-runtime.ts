@@ -5,12 +5,14 @@
 // [Sync] 2026-11-19: report Next as its own Web service and identify HTTP dependency targets.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomUUID } from 'node:crypto';
-import { ROOT_CONTEXT, trace, SpanKind, SpanStatusCode, type Context, type Span } from '@opentelemetry/api';
+import { createContextKey, ROOT_CONTEXT, trace, SpanKind, SpanStatusCode, type Context, type Span } from '@opentelemetry/api';
 import { AlwaysOnSampler, BasicTracerProvider, BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, type SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 
 const contexts = new AsyncLocalStorage<Context>();
+const backendRouteKey = createContextKey('dream.backend.route');
+const apiTemplate = /^\/api(?:\/[A-Za-z0-9_{}:.-]+)*\/?$/;
 let provider: BasicTracerProvider | undefined;
 let secret = '';
 let pythonService = 'ink-memory-dream-web-python';
@@ -98,16 +100,16 @@ function withBodyLifetime(response: Response, current: Span, finish: () => void)
   }, { highWaterMark: 0 });
   return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
-export async function traceApiRequest(request: Request, handler: () => Promise<Response>): Promise<Response> {
+export async function traceApiRequest(request: Request, handler: () => Response | Promise<Response>, routeTemplate?: string): Promise<Response> {
   if (!provider) return handler();
   const method = methods.has(request.method) ? request.method : 'OTHER';
-  const reconcile = '/api/decks/defaults/reconcile';
-  const route = method === 'POST' && new URL(request.url).pathname === reconcile ? reconcile : '/api/[[...path]]';
+  let route = routeTemplate ?? '/api/[[...path]]';
   // Public caller headers and ambient Next spans cannot select this root or sampling.
   const current = start(`${method} ${route}`, SpanKind.SERVER, ROOT_CONTEXT);
   current.setAttributes({ 'http.request.method': method, 'http.route': route });
   const identity = current.spanContext();
   const started = performance.now();
+  const backendRoute: { template?: string } = {};
   let status = 500;
   let finished = false;
   const finish = () => {
@@ -122,15 +124,21 @@ export async function traceApiRequest(request: Request, handler: () => Promise<R
   const aborted = () => { current.setStatus({ code: SpanStatusCode.ERROR }); finish(); };
   request.signal.addEventListener('abort', aborted, { once: true });
   try {
-    const response = await contexts.run(trace.setSpan(ROOT_CONTEXT, current), handler);
+    const response = await contexts.run(trace.setSpan(ROOT_CONTEXT, current).setValue(backendRouteKey, backendRoute), handler);
     status = response.status;
     if (status >= 500) current.setStatus({ code: SpanStatusCode.ERROR });
     const headers = new Headers(response.headers);
     // Python owns its root when handoff verification/configuration is unavailable.
     const downstream = headers.get('x-trace-id');
+    const linked = downstream === identity.traceId || backendRoute.template !== undefined;
+    if (!routeTemplate && backendRoute.template) {
+      route = backendRoute.template;
+      current.updateName(`${method} ${route}`);
+      current.setAttribute('http.route', route);
+    }
     headers.set('x-trace-id', identity.traceId);
     headers.set('x-trace-sampled', String(identity.traceFlags & 1));
-    headers.set('x-trace-linked', downstream === identity.traceId ? '1' : '0');
+    headers.set('x-trace-linked', linked ? '1' : '0');
     if (request.signal.aborted) aborted();
     return withBodyLifetime(new Response(response.body, { status, statusText: response.statusText, headers }), current, finish);
   } catch (error) { current.setStatus({ code: SpanStatusCode.ERROR }); finish(); throw error; }
@@ -162,6 +170,11 @@ export async function traceFetch(transport: typeof fetch, input: URL | RequestIn
   }
   try {
     const response = await transport(input, { ...init, headers });
+    if (privateBackend && response.headers.get('x-trace-id') === identity.traceId) {
+      const template = response.headers.get('x-ink-trace-route');
+      const route = contexts.getStore()?.getValue(backendRouteKey) as { template?: string } | undefined;
+      if (template && route && template.length <= 256 && apiTemplate.test(template)) route.template = template;
+    }
     current.setAttribute('http.response.status_code', response.status);
     if (response.status >= 400) current.setStatus({ code: SpanStatusCode.ERROR });
     return withBodyLifetime(response, current, () => current.end());

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-19: trace registered Next API handlers and use matched FastAPI templates on the BFF. -->
 <!-- [Sync] 2026-11-19: direct Web launch loads private settings and distinguishes Next.js, Python and Admin peers. -->
 <!-- [Input] Dream server instrumentation, W3C propagation and the existing Admin ARMS deployment contract. -->
 <!-- [Output] Private configuration, trace lookup, failure diagnosis and acceptance boundaries. -->
@@ -56,7 +57,7 @@ BFF 为每次公开请求创建根 Span，忽略浏览器提供的 `traceparent`
 
 Python 对直接客户端、过期签名、密钥不匹配和无签名请求创建根 Trace。服务间须保持时钟同步；BFF 与 Python 使用同一个入口路径。`tracestate` 与 `baggage` 在 Dream 边界丢弃。向 Admin 仅传播当前服务端 `traceparent`；Admin 已有探针负责生成 HTTP、pg 子段。原 `x-request-id`、DTO `request_id` 和业务幂等键保持原有生成与校验，Trace ID 用于诊断关联。
 
-只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 路由模板包含 `/api/decks/defaults/reconcile`，BFF 对 Deck 对账使用固定模板 `/api/decks/defaults/reconcile`，其它共享入口使用 `/api/[[...path]]`。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。原 CLI/MCP 子进程配置过滤器排除服务端追踪开关、签名密钥、接入点和授权头，凭据保留在服务端进程。
+只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 在已验签的 BFF 请求上返回匹配的路由模板。BFF 在同一 Trace ID 且模板符合 `/api` 规则时用它命名入口 Span。路由元数据保留在内部，响应给浏览器前过滤。BFF 本地处理的健康检查、MCP Apps、公开分享和旧认证入口直接使用固定模板，覆盖已处理的请求方法及 OPTIONS。网关预先拒绝、下游未匹配路由或未返回可用模板时，通用入口使用 `/api/[[...path]]`。Next 框架在处理函数调用前生成的 405 处于该探针的入口外。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。原 CLI/MCP 子进程配置过滤器排除服务端追踪开关、签名密钥、接入点和授权头，凭据保留在服务端进程。
 
 在「调用链分析」用 `X-Trace-Id` 展开同一请求。`X-Trace-Linked=1` 表示 BFF 与 Python 的 Trace ID 一致。Admin HTTP 与 PostgreSQL 客户端 Span 由 Admin 当前探针上报，需在同一 Trace ID 下确认。启动 Span 与业务请求各自有独立 Trace ID。
 
@@ -141,7 +142,7 @@ sequenceDiagram
 
 1. 在开发者工具 Network 找到 `POST /api/decks/defaults/reconcile`，记录请求时间、状态及响应头 `X-Trace-Id`、`X-Trace-Sampled`、`X-Trace-Linked`。`linked=1` 表示 Python 响应与 BFF Trace ID 相同；该字段覆盖已到达 Python 的共享代理请求，BFF 提前拒绝会返回 `0`。
 2. 服务日志以 `trace_id` 检索。BFF 输出 `dream.request` JSON；Python 的 `dream.trace` 输出 `trace_id`、`span_id`、`sampled`、方法、路由模板、状态和 `duration_ms`。原 Uvicorn 单行访问日志只有路径和状态，无法反推唯一 Trace ID。
-3. 打开[北京 ARMS 应用列表](https://cmsnext.console.aliyun.com/next/region/cn-beijing/workspace/default-cms-1230976711767463-cn-beijing/app/apm/application-list)，选择实际 `OTEL_SERVICE_NAME`。在提供服务查 `POST /api/decks/defaults/reconcile`，或进入调用链分析按 Trace ID 和对应时间窗口查询。接口请求方法和路径应以 Python Span 的精确名称核对。操作参见[官方调用链查询说明](https://www.alibabacloud.com/help/zh/arms/application-monitoring/user-guide/trace-query)。
+3. 打开[北京 ARMS 应用列表](https://cmsnext.console.aliyun.com/next/region/cn-beijing/workspace/default-cms-1230976711767463-cn-beijing/app/apm/application-list)，选择实际 `OTEL_SERVICE_NAME`。在提供服务查 `POST /api/decks/defaults/reconcile`，或进入调用链分析按 Trace ID 和对应时间窗口查询。可按 `GET /api/claude-agent/scheduled-tasks/day` 或 `GET /api/claude-agent/scheduled-tasks/{task_id}/history` 查询 Next 与 Python 对应的入口 Span。操作参见[官方调用链查询说明](https://www.alibabacloud.com/help/zh/arms/application-monitoring/user-guide/trace-query)。
 4. 展开 BFF、Python 和 `ink-memory-admin` 的父子段，比较认证、插件解析、本地制品、CLI 校验、对账及 Admin pg 子段。连接申请可能包含排队与新连接成本，具体等待类型结合数据库统计判断。
 
 | 现象 | 判断与下一步 |
