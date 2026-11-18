@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: split default-plugin resolution and reconciliation timings.
 #!/usr/bin/env python3
 # [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-10-28: expose one authenticated Deck/Agent catalog read before the dynamic Deck route.
@@ -25,6 +26,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 import config
+from observability import span
 
 try:
     from services.deck.defaults import (
@@ -149,11 +151,10 @@ async def _verified_default_plugin(
     current_user: dict,
     data: AdminDeckDefaultData,
 ) -> DefaultPluginEvidenceDTO:
-    resolved = await invoke_admin_operation(
-        current_user,
-        data.resolve,
-        DefaultPluginResolveInputDTO(),
-    )
+    with span("dream.deck.default_plugin.resolve"):
+        resolved = await invoke_admin_operation(
+            current_user, data.resolve, DefaultPluginResolveInputDTO(),
+        )
     try:
         return resolve_default_deck_plugin_ref(resolved.installation)
     except DefaultDeckPluginUnavailable:
@@ -168,12 +169,12 @@ async def reconcile_deck_defaults(
     """Create a missing actor default or repair its empty verified plugin ref."""
 
     evidence = await _verified_default_plugin(current_user, data)
-    return await invoke_admin_operation(
-        current_user,
-        data.reconcile,
-        DeckDefaultInputDTO(default_plugin_evidence=evidence),
-        error_handler=_deck_default_error,
-    )
+    with span("dream.deck.reconcile"):
+        return await invoke_admin_operation(
+            current_user, data.reconcile,
+            DeckDefaultInputDTO(default_plugin_evidence=evidence),
+            error_handler=_deck_default_error,
+        )
 
 
 def _deck_detail_data(request: Request) -> AdminDeckDetailData:

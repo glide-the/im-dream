@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: time authentication across the original threadpool and Admin boundary.
 # [Sync] 2026-10-13: allow an original caller request ID at the existing Admin operation boundary.
 #!/usr/bin/env python3
 # [Input] Consume the Admin request-auth owner and common FastAPI dependency inputs.
@@ -30,6 +31,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from observability import span
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.workspace_data import AdminWorkspaceData, WorkspaceDefaultInputDTO
@@ -74,7 +76,8 @@ async def get_admin_current_user(
     request_id = str(uuid4())
     required_scopes = frozenset({"dream:read" if request.method in {"GET", "HEAD", "OPTIONS"} else "dream:write"})
     try:
-        actor = await run_in_threadpool(owner.authenticate, credentials.credentials, request_id, required_scopes=required_scopes)
+        with span("dream.authentication"):
+            actor = await run_in_threadpool(owner.authenticate, credentials.credentials, request_id, required_scopes=required_scopes)
     except AdminDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
     request.state.admin_request_actor = actor
