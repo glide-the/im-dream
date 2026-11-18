@@ -1,16 +1,19 @@
 // [Input] Private process OTLP endpoint, service name, queue budget and BFF signing key.
 // [Output] W3C parent spans, signed Python handoff and metadata-only batch export.
 // [Pos] Dedicated BFF provider; leaves Next/global/preloaded providers untouched.
+// [Sync] 2026-11-19: send OTLP HTTP/protobuf and report initialization on Next startup.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac } from 'node:crypto';
 import { ROOT_CONTEXT, trace, SpanKind, SpanStatusCode, type Context, type Span } from '@opentelemetry/api';
-import { BasicTracerProvider, BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, type SpanExporter } from '@opentelemetry/sdk-trace-base';
+import { AlwaysOnSampler, BasicTracerProvider, BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, type SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 
 const contexts = new AsyncLocalStorage<Context>();
 let provider: BasicTracerProvider | undefined;
 let secret = '';
+let startupRecorded = false;
+const probeStarted = Date.now();
 const methods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE']);
 function positive(key: string, fallback: number) {
   const value = Number(process.env[key] ?? fallback);
@@ -36,15 +39,29 @@ export function configureTracing() {
     },
     shutdown: () => rawExporter.shutdown(),
   };
+  const requests = new TraceIdRatioBasedSampler(ratio);
+  const startup = new AlwaysOnSampler();
   provider = new BasicTracerProvider({
     resource: resourceFromAttributes({ 'service.name': name }),
-    sampler: new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(ratio) }),
+    sampler: new ParentBasedSampler({ root: {
+      shouldSample(context, traceId, name) {
+        return name === 'dream.startup.web.next' ? startup.shouldSample() : requests.shouldSample(context, traceId);
+      },
+      toString: () => requests.toString(),
+    } }),
     spanLimits: { eventCountLimit: 0, linkCountLimit: 0, attributeCountLimit: 16, attributeValueLengthLimit: 256 },
     spanProcessors: [new BatchSpanProcessor(exporter, {
       maxQueueSize: queue, maxExportBatchSize: batch, scheduledDelayMillis: positive('OTEL_BSP_SCHEDULE_DELAY', 5000), exportTimeoutMillis: 3000,
     })],
   });
   process.once('beforeExit', () => { void provider?.shutdown().catch(() => {}); });
+}
+export function recordStartup() {
+  if (startupRecorded || !provider) return;
+  startupRecorded = true;
+  provider.getTracer('ink-memory-dream-bff').startSpan('dream.startup.web.next', {
+    kind: SpanKind.SERVER, startTime: probeStarted,
+  }, ROOT_CONTEXT).end();
 }
 function start(name: string, kind: SpanKind, parent = contexts.getStore() ?? ROOT_CONTEXT) {
   return provider!.getTracer('ink-memory-dream-bff').startSpan(name, { kind }, parent);

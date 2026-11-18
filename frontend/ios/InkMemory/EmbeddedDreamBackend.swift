@@ -7,6 +7,7 @@
 // [Sync] 2026-10-25: initialize the application-process original Runtime before binding Python startup.
 // [Sync] 2026-10-27: coalesce App/RN/WebView startup and retain ready facts for process lifetime.
 // [Sync] 2026-11-02: log fixed startup phases and cached/coalesced calls with monotonic durations; retain startup results.
+// [Sync] 2026-11-19: pass the native runtime launch time for the private APM startup span.
 import Foundation
 
 final class EmbeddedDreamBackend {
@@ -18,6 +19,7 @@ final class EmbeddedDreamBackend {
     private var startupWaiters: [(Result<[String: Any], Error>) -> Void] = []
     private var startupAttempt = 0
     private var startupTick: TimeInterval = 0
+    private var startupStartedNs: Int64 = 0
     private init() {}
 
     func start(completion: @escaping (Result<[String: Any], Error>) -> Void) {
@@ -36,6 +38,7 @@ final class EmbeddedDreamBackend {
             self.starting = true
             self.startupAttempt += 1
             self.startupTick = ProcessInfo.processInfo.systemUptime
+            self.startupStartedNs = Int64(Date().timeIntervalSince1970 * 1_000_000_000)
             self.observe("queue_wait", since: requested)
             self.initializeRuntime()
         }
@@ -96,7 +99,9 @@ final class EmbeddedDreamBackend {
                 }
                 observe(phase, since: tick)
                 phase = "python_runtime_bind"; tick = ProcessInfo.processInfo.systemUptime
-                let data = try JSONSerialization.data(withJSONObject: ["runtimeEndpoint": endpoint])
+                let data = try JSONSerialization.data(withJSONObject: [
+                    "runtimeEndpoint": endpoint, "runtimeStartedNs": startupStartedNs,
+                ])
                 let bindingTick = tick
                 self.call("start", payload: String(decoding: data, as: UTF8.self)) { result in
                     self.finishStartup(result, bindingTick: bindingTick)

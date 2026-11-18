@@ -1,6 +1,7 @@
 // [Input] Explicit server tracing switch and the existing BFF/fetch boundaries.
 // [Output] Lazy optional metadata tracing without changing request or stream results.
-// [Pos] Server-only bridge; disabled processes never import the OpenTelemetry SDK.
+// [Pos] Server-only startup and request bridge; disabled processes skip SDK import.
+// [Sync] 2026-11-19: register the web probe through the Next startup hook.
 type Runtime = typeof import('./_trace-runtime.ts');
 let runtime: Promise<Runtime | undefined> | undefined;
 async function configuredRuntime() {
@@ -8,6 +9,10 @@ async function configuredRuntime() {
   runtime ??= import('./_trace-runtime.ts').then(module => { module.configureTracing(); return module; })
     .catch(() => { console.warn('Tracing unavailable; continuing without trace export'); return undefined; });
   return runtime;
+}
+export async function startTracing() {
+  const owner = await configuredRuntime();
+  owner?.recordStartup();
 }
 export async function traceApiRequest(request: Request, handler: () => Promise<Response>): Promise<Response> {
   const owner = await configuredRuntime();

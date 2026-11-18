@@ -1,19 +1,22 @@
 // [Input] Production traced BFF factory with synthetic transports and a loopback OTLP receiver.
 // [Output] Enabled-stream, abort, rejection and privacy contracts.
 // [Pos] Deterministic Node test; no real Admin, database, user or model.
+// [Sync] 2026-11-19: check OTLP protobuf and startup sampling.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
+import { startTracing } from '../app/api/_trace.ts';
 import { createApiProxy } from '../app/api/_auth/api-proxy.ts';
 import { BffLoginBoundary } from '../app/api/_auth/login-boundary.ts';
 
 test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadata privacy', async () => {
-  const batches: unknown[] = [];
+  const batches: Buffer[] = [];
   const receiver = createServer((request, response) => {
-    let body = '';
-    request.on('data', chunk => { body += chunk; });
-    request.on('end', () => { batches.push(JSON.parse(body)); response.end('{}'); });
+    assert.equal(request.headers['content-type'], 'application/x-protobuf');
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => { chunks.push(chunk); });
+    request.on('end', () => { batches.push(Buffer.concat(chunks)); response.end(); });
   }).listen(0, '127.0.0.1');
   await once(receiver, 'listening');
   const address = receiver.address();
@@ -22,6 +25,7 @@ test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadat
     OTEL_SERVICE_NAME: 'isolated-stream-bff', OTEL_TRACES_SAMPLER_ARG: '1', OTEL_BSP_SCHEDULE_DELAY: '10',
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces` });
   try {
+    await startTracing();
     const origin = 'https://dream.example';
     const boundary = new BffLoginBoundary({ publicOrigin: origin, callbackUri: origin + '/auth/callback', cookieSecret: 's'.repeat(32) });
     const admin = { resolve: async () => { throw Error('native must not resolve'); } };
@@ -54,9 +58,11 @@ test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadat
       new Request(origin + '/api/decks', { headers: { authorization: 'Bearer private-token' } }));
     assert.equal(failed.status, 502); await failed.text();
     const deadline = Date.now() + 3000;
-    while (batches.length === 0 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    while (!Buffer.concat(batches).includes('dream.http') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
     assert.ok(batches.length > 0);
-    const serialized = JSON.stringify(batches);
+    const serialized = Buffer.concat(batches).toString();
+    assert.ok(serialized.includes('dream.startup.web.next'));
+    assert.ok(serialized.includes('dream.http'));
     for (const privateValue of ['private-query', 'private-value', 'private-token', 'private-thread', 'private-transport-error']) assert.ok(!serialized.includes(privateValue));
   } finally {
     receiver.closeAllConnections();
