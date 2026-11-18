@@ -2,6 +2,7 @@
 // [Output] Explicit paired math tokens with lossless source; code and escaped markers stay in Markdown.
 // [Pos] Shared Web/Native message syntax, matching the reference HT/UT delimiter set.
 // [Sync] 2026-11-08: add inline parentheses and display brackets/double dollars without single-dollar math.
+// [Sync] 2026-11-18: expose the same syntax to the Notion record-map adapter.
 import type {Plugin} from 'unified';
 import type {Construct, Extension, State, Token, Tokenizer} from 'micromark-util-types';
 import type {Extension as MdastExtension} from 'mdast-util-from-markdown';
@@ -96,6 +97,8 @@ const mdast: MdastExtension = {
   },
   exit: {chatMath(token) { this.exit(token); }},
 };
+
+export {syntax as chatMathSyntax, mdast as chatMathFromMarkdown};
 
 const remarkChatMath: Plugin = function() {
   const data = this.data() as {micromarkExtensions?: Extension[]; fromMarkdownExtensions?: MdastExtension[]};
