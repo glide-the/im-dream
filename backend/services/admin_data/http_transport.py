@@ -1,3 +1,4 @@
+# [Sync] 2026-11-19: attach the configured Admin HTTP peer to each attempt span.
 # [Sync] 2026-11-18: create one child span per original attempt and inject W3C context before every transport.
 # [Input] Explicit configured URL, per-request headers, strict DTO and bounded httpx client.
 # [Output] Correlated closed response with one bounded read-only transport recovery, preserving unknown write outcomes.
@@ -13,7 +14,7 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from observability import span, inject_trace, mark_error
+from observability import admin_http_attributes, span, inject_trace, mark_error
 
 from .errors import AdminDataError, invalid_response, unavailable
 from .models import ErrorEnvelopeDTO, RequestDTO, ResponseEnvelopeDTO
@@ -35,7 +36,7 @@ def request_admin_dto(http: httpx.Client, *, method: Literal["GET", "POST"], url
         # second full timeout. Writes remain single-dispatch.
         timeout = timeout_seconds if attempt == 0 else min(2.0, timeout_seconds)
         with span("admin.http", kind="CLIENT", attributes={
-            "http.request.method": method, "server.address": httpx.URL(url).host,
+            **admin_http_attributes(url, method),
             "dream.transport.attempt": attempt + 1,
         }) as current:
             request = httpx.Request(method, url, headers=inject_trace(headers), params=params,

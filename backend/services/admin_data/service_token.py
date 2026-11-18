@@ -1,3 +1,4 @@
+# [Sync] 2026-11-19: name the Admin peer and record response or transport failure per token attempt.
 # [Sync] 2026-11-18: propagate W3C context across cold service-token attempts.
 # [Input] Server-owned OAuth client ID/secret, Admin issuer/resource and bounded HTTP transport.
 # [Output] Cached short-lived client_credentials bearer with one bounded transport recovery or a redacted AdminDataError.
@@ -17,7 +18,7 @@ from urllib.parse import quote_plus, urlencode
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from observability import span, inject_trace
+from observability import admin_http_attributes, span, inject_trace, mark_error
 
 from .config import AdminDataConfig
 from .errors import AdminDataError
@@ -54,14 +55,15 @@ class OAuthClientCredentialsTokenSource:
             client_secret = quote_plus(self._config.service_secret, safe="")
             basic = b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
             raw: bytearray | None = None
+            url = self._config.transport_issuer + "/oauth2/token"
             for attempt in range(2):
                 # The second attempt only recovers a stale/closed pooled connection.
                 # It cannot extend an unavailable Admin by another full request timeout.
                 timeout = self._config.timeout_seconds if attempt == 0 else min(2.0, self._config.timeout_seconds)
-                with span("admin.oauth.token", kind="CLIENT"):
+                with span("admin.oauth.token", kind="CLIENT", attributes=admin_http_attributes(url, "POST")) as current:
                     request = httpx.Request(
                         "POST",
-                        self._config.transport_issuer + "/oauth2/token",
+                        url,
                         headers=inject_trace({
                             "accept": "application/json",
                             "content-type": "application/x-www-form-urlencoded",
@@ -76,6 +78,8 @@ class OAuthClientCredentialsTokenSource:
                     try:
                         response = self._client.send(request, stream=True, follow_redirects=False, auth=None)
                         try:
+                            if current is not None:
+                                current.set_attribute("http.response.status_code", response.status_code)
                             raw = bytearray()
                             for chunk in response.iter_bytes():
                                 raw.extend(chunk)
@@ -89,6 +93,7 @@ class OAuthClientCredentialsTokenSource:
                     except AdminDataError:
                         raise
                     except httpx.HTTPError:
+                        mark_error(current)
                         if attempt == 1:
                             raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503) from None
             if raw is None:

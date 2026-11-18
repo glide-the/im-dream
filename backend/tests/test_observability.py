@@ -1,3 +1,4 @@
+# [Sync] 2026-11-19: verify stable Deck route and the actual BFF-to-Python OTLP peer.
 # [Input] Production BFF, FastAPI dependencies, Deck route and Admin HTTP DTO assembly.
 # [Output] Isolated trace parentage, privacy, sampling and failure-path contracts.
 # [Pos] Provider-free verification; loopback listeners and synthetic Admin/plugin data only.
@@ -227,9 +228,13 @@ def test_bff_python_admin_handoff_over_loopback(boundary, tracing, monkeypatch):
         root_span = next(s for s in python_spans if s.name == 'POST /api/decks/defaults/reconcile')
         assert f'{root_span.context.trace_id:032x}' == output['id']
         js_spans = [span for batch in exports for resource in batch.resource_spans for scope in resource.scope_spans for span in scope.spans]
-        assert {'POST /api/[[...path]]', 'bff.authentication', 'dream.http', 'admin.http'} <= {s.name for s in js_spans}
+        assert {'POST /api/decks/defaults/reconcile', 'bff.authentication', 'dream.http', 'admin.http'} <= {s.name for s in js_spans}
         assert {s.trace_id.hex() for s in js_spans} == {output['id']}
         dream_client = next(s for s in js_spans if s.name == 'dream.http')
+        attributes = {field.key: field.value for field in dream_client.attributes}
+        assert attributes['server.address'].string_value == '127.0.0.1'
+        assert attributes['server.port'].int_value == listener.getsockname()[1]
+        assert attributes['peer.service'].string_value == 'ink-memory-dream-web-python'
         assert f'{root_span.parent.span_id:016x}' == dream_client.span_id.hex()
         assert all(r.headers.get('traceparent', '').split('-')[1] == output['id'] for r in admin_requests)
         assert all('tracestate' not in r.headers and 'baggage' not in r.headers for r in admin_requests)

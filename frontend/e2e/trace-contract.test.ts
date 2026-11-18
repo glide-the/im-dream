@@ -1,3 +1,4 @@
+// [Sync] 2026-11-19: qualify startup via a private file without process-exported credentials.
 // [Input] Production traced BFF factory with synthetic transports and a loopback OTLP receiver.
 // [Output] Enabled-stream, abort, rejection and privacy contracts.
 // [Pos] Deterministic Node test; no real Admin, database, user or model.
@@ -5,6 +6,9 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { startTracing } from '../app/api/_trace.ts';
 import { createApiProxy } from '../app/api/_auth/api-proxy.ts';
@@ -21,9 +25,11 @@ test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadat
   await once(receiver, 'listening');
   const address = receiver.address();
   assert.ok(address && typeof address !== 'string');
-  Object.assign(process.env, { INK_TRACE_ENABLED: 'true', INK_TRACE_CONTEXT_SECRET: 'synthetic-key-'.repeat(4),
-    OTEL_SERVICE_NAME: 'isolated-stream-bff', OTEL_TRACES_SAMPLER_ARG: '1', OTEL_BSP_SCHEDULE_DELAY: '10',
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces` });
+  const directory = mkdtempSync(join(tmpdir(), 'dream-trace-contract-'));
+  const path = join(directory, 'private.env');
+  delete process.env.INK_TRACE_ENABLED;
+  process.env.INK_DREAM_WEB_TRACE_ENV_FILE = path;
+  writeFileSync(path, `INK_TRACE_ENABLED=true\nINK_TRACE_CONTEXT_SECRET=${'synthetic-key-'.repeat(4)}\nOTEL_SERVICE_NAME=ink-memory-dream-web\nOTEL_TRACES_SAMPLER_ARG=1\nOTEL_BSP_SCHEDULE_DELAY=10\nOTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:${address.port}/v1/traces\nINK_TRACE_HOST_NAME=isolated-host\n`, { mode: 0o600 });
   try {
     await startTracing();
     const origin = 'https://dream.example';
@@ -63,8 +69,11 @@ test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadat
     const serialized = Buffer.concat(batches).toString();
     assert.ok(serialized.includes('dream.startup.web.next'));
     assert.ok(serialized.includes('dream.http'));
+    assert.ok(serialized.includes('ink-memory-dream-web-next'));
+    assert.ok(serialized.includes('isolated-host'));
     for (const privateValue of ['private-query', 'private-value', 'private-token', 'private-thread', 'private-transport-error']) assert.ok(!serialized.includes(privateValue));
   } finally {
+    rmSync(directory, { recursive: true });
     receiver.closeAllConnections();
     await new Promise<void>((resolve, reject) => receiver.close(error => error ? reject(error) : resolve()));
   }

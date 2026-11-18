@@ -11,7 +11,7 @@
 # [Sync] 2026-09-05: select the Next compatibility shell by default with an explicit Vite rollback runtime.
 # [Sync] 2026-09-05: remove source-built Vite rollback; only an explicitly named image may be selected.
 # [Sync] 2026-09-06: verify the canonical pnpm workspace marker after the npm transition lock is retired.
-# [Sync] 2026-11-19: load optional private Web trace settings before starting either server.
+# [Sync] 2026-11-19: let the Web runtimes read the private tracing configuration at startup.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -298,12 +298,6 @@ stop_vite_rollback() {
 
 command_start() {
   check_prereqs
-  local trace_env="${INK_DREAM_WEB_TRACE_ENV_FILE:-${HOME}/.config/ink-memory/dream-web-trace.env}"
-  if [[ -r "${trace_env}" ]]; then
-    set -a
-    source "${trace_env}"
-    set +a
-  fi
   local python_bin
   if [[ "${DRY_RUN}" == "1" ]]; then
     python_bin="${PYTHON_BIN:-python3}"

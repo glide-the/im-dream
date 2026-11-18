@@ -1,3 +1,4 @@
+# [Sync] 2026-11-19: configure the Web probe from the standard Python entry, including IDE debug launches.
 # [Sync] 2026-11-18: trace complete ASGI requests with safe OTLP metadata and response correlation.
 # [Sync] 2026-10-15: own the capability-gated Reflections memory worker and behavior router.
 #!/usr/bin/env python3
@@ -178,9 +179,10 @@ CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
 
 # ========== FastAPI Application ==========
 
-from observability import TracedFastAPI
+from observability import TracedFastAPI, web_trace_settings
 
 app = TracedFastAPI(
+    trace_settings=web_trace_settings(),
     title=f"{APP_NAME} API",
     description="Writing, Story Workspace, and Claude Agent API",
     version="2.0.0",

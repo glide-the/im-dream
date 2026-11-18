@@ -2,6 +2,7 @@
 # [Output] Bounded metadata-only spans, response IDs and correlated request timings.
 # [Pos] Web and embedded iOS ASGI, startup and Admin transport instrumentation.
 # [Sync] 2026-11-19: record real startup spans and accept isolated iOS exporter settings.
+# [Sync] 2026-11-19: read private Web settings at Python startup and identify real peer endpoints.
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -10,10 +11,14 @@ import hmac
 import logging
 import math
 import os
+from pathlib import Path
+import stat
 import threading
 import time
 from urllib.parse import urlsplit
+from uuid import uuid4
 
+from dotenv import dotenv_values
 from fastapi import FastAPI
 trace = None
 otel_context = None
@@ -27,6 +32,33 @@ _provider = None
 _configured = False
 _lock = threading.Lock()
 _METHODS = frozenset({'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE'})
+_WEB_PYTHON_SERVICE = 'ink-memory-dream-web-python'
+
+
+def web_trace_settings():
+    if 'INK_TRACE_ENABLED' in os.environ:
+        return os.environ
+    try:
+        path = os.environ.get('INK_DREAM_WEB_TRACE_ENV_FILE') or Path.home() / '.config/ink-memory/dream-web-trace.env'
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, encoding='utf-8') as source:
+            metadata = os.fstat(source.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_size > 16384:
+                raise ValueError('private settings')
+            return {key: value for key, value in dotenv_values(stream=source, interpolate=False).items() if value is not None}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        _logger.warning('Private Web tracing configuration unavailable')
+        return {}
+
+
+def admin_http_attributes(url: str, method: str) -> dict[str, str | int]:
+    parsed = urlsplit(url)
+    service = 'ink-memory-admin'
+    return {'http.request.method': method, 'server.address': parsed.hostname or '',
+            'server.port': parsed.port or (443 if parsed.scheme == 'https' else 80),
+            'server.service.name': service, 'peer.service': service}
 
 
 class _ExportLogFilter(logging.Filter):
@@ -62,7 +94,9 @@ def configure_tracing(settings=None, *, signed_parent=True) -> None:
             parsed = urlsplit(endpoint)
             if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
                 raise ValueError('endpoint')
-            service = settings['OTEL_SERVICE_NAME'].strip()
+            service = settings.get('OTEL_SERVICE_NAME', '').strip()
+            if signed_parent and service in {'', 'ink-memory-dream-web'}:
+                service = _WEB_PYTHON_SERVICE
             secret = settings.get('INK_TRACE_CONTEXT_SECRET', '').encode() if signed_parent else None
             if signed_parent and len(secret) < 32:
                 raise ValueError('context secret')
@@ -89,7 +123,11 @@ def configure_tracing(settings=None, *, signed_parent=True) -> None:
                         return ALWAYS_ON.should_sample(parent_context, trace_id, name, *args, **kwargs)
                     return super().should_sample(parent_context, trace_id, name, *args, **kwargs)
 
-            provider = TracerProvider(resource=Resource({'service.name': service}),
+            resource = {'service.name': service, 'service.namespace': 'ink-memory-dream',
+                        'service.instance.id': str(uuid4()), 'ink.dream.platform': 'web' if signed_parent else 'ios'}
+            if settings.get('INK_TRACE_HOST_NAME', '').strip():
+                resource['host.name'] = settings['INK_TRACE_HOST_NAME'].strip()
+            provider = TracerProvider(resource=Resource(resource),
                 sampler=ParentBased(StartupSampler(ratio)), span_limits=SpanLimits(max_events=0, max_links=0))
             provider.add_span_processor(BatchSpanProcessor(exporter, max_queue_size=queue,
                 max_export_batch_size=batch, schedule_delay_millis=delay, export_timeout_millis=3000))
@@ -237,9 +275,9 @@ class TraceMiddleware:
 
 class TracedFastAPI(FastAPI):
     """Keep the original FastAPI public interface and trace its complete ASGI call."""
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, trace_settings=None, **kwargs):
         super().__init__(*args, **kwargs)
-        configure_tracing()
+        configure_tracing(trace_settings)
         self._trace_app = TraceMiddleware(super().__call__)
 
     async def __call__(self, scope, receive, send):

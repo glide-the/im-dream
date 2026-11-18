@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-19: direct Web launch loads private settings and distinguishes Next.js, Python and Admin peers. -->
 <!-- [Input] Dream server instrumentation, W3C propagation and the existing Admin ARMS deployment contract. -->
 <!-- [Output] Private configuration, trace lookup, failure diagnosis and acceptance boundaries. -->
 <!-- [Pos] Dream server operations guide; deployment and cloud configuration require separate authorization. -->
@@ -15,16 +16,18 @@ Dream Web 的 Next.js BFF、Python HTTP 请求、Admin HTTP 调用和本地插�
 
 ## 服务端装配与配置
 
-Python 入口为 `backend/server.py` 的 `TracedFastAPI`，容器仍执行原 `uvicorn server:app`。普通 `uv sync --locked` 可运行关闭追踪的路径；启用服务使用 `uv sync --locked --extra tracing`。容器沿原带 hash 的 `requirements.txt` 安装，导出命令为 `uv export --extra tracing --no-dev --no-emit-project --output-file requirements.txt`。
+Python 入口为 `backend/server.py` 的 `TracedFastAPI`，容器仍执行原 `uvicorn server:app`。`uv sync --locked` 安装锁定的追踪 SDK。关闭追踪时运行时跳过 SDK 加载。容器沿原带 hash 的 `requirements.txt` 安装，导出命令为 `uv export --locked --no-dev --no-emit-project --output-file requirements.txt`。
 
 Next 的 `createApiProxy` 接入独立 provider，通过 `AsyncLocalStorage` 传递当前上下文，保持 Next 全局 provider 和已有 preload 的所有权。关闭追踪时桥接模块跳过 SDK import。Python 同样延迟加载可选依赖。Dream 手动接缝覆盖原认证和 HTTP DTO 边界，服务端无需叠加 FastAPI、httpx、Next 或 undici 自动探针。Admin 保留现有服务器探针，仓库无需修改。
 
-为 Web 的 Next.js 与 Python 进程设置相同的 `OTEL_SERVICE_NAME=ink-memory-dream-web` 和相同的签名密钥。部署方通过私有进程环境文件提供配置。本机 `deploy/local/deploy.sh start` 自动加载权限为 `0600` 的 `~/.config/ink-memory/dream-web-trace.env`，也支持通过 `INK_DREAM_WEB_TRACE_ENV_FILE` 指定私有文件。通过 README 中的独立命令启动时，先在服务终端导出同一文件里的设置。
+Web 的 Next.js 使用 `ink-memory-dream-web-next`，Python 使用 `ink-memory-dream-web-python`。两者用 `ink.dream.platform=web` 标记平台并共享签名密钥。普通 `pnpm dev`、`pnpm dev:online`、`uvicorn server:app`、VS Code Python 调试及本机 launcher 均由同一运行时入口读取权限为 `0600` 的 `~/.config/ink-memory/dream-web-trace.env`，也支持用 `INK_DREAM_WEB_TRACE_ENV_FILE` 指定同类配置。显式设置 `INK_TRACE_ENABLED` 时使用部署进程提供的配置。原 `ink-memory-dream-web` 名称按进程映射成对应 Web 服务，已有云端历史按旧名保留。
 
 | 配置 | 默认与约束 | 用途 |
 | --- | --- | --- |
 | `INK_TRACE_ENABLED` | 未设置时关闭；启用值为 `true` | 控制本进程追踪 |
-| `OTEL_SERVICE_NAME` | 启用时必填 | ARMS 应用名 |
+| `OTEL_SERVICE_NAME` | 各 Web 进程有独立默认名 | 部署可分别覆盖 ARMS 应用名 |
+| `INK_TRACE_PYTHON_SERVICE_NAME` | `ink-memory-dream-web-python` | Python 改应用名时同步设置 Next 的下游服务名 |
+| `INK_TRACE_HOST_NAME` | 可选的运维主机标签 | 为应用实例提供 `host.name`，可使用不含个人信息的标签 |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | 启用时必填，完整 HTTP(S) Trace 接入点 | 使用同一北京工作空间授权的 HTTP 接收入口；私有 URL 可含授权信息 |
 | `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | 按接入点要求配置 | 私有授权头；SDK 同时支持标准通用 OTLP headers |
 | `INK_TRACE_CONTEXT_SECRET` | 启用时必填，至少 32 字节，两服务相同 | BFF 到 Python 的上下文签名；专用随机密钥 |
@@ -33,7 +36,7 @@ Next 的 `createApiProxy` 接入独立 provider，通过 `AsyncLocalStorage` 传
 | `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | 512，正整数，至多等于队列 | 每批最大 Span 数 |
 | `OTEL_BSP_SCHEDULE_DELAY` | 5000 毫秒，正整数 | 批处理间隔 |
 
-导出超时为三秒，SDK 采用有界批处理。队列满时丢弃观测数据。每进程预算需要结合 worker 数和主机容量核对。配置启用时，Python 的 ASGI lifespan 就绪或失败时采集 `dream.startup.web.python`，Next.js 的 `instrumentation.ts` 初始化 Node 探针并采集 `dream.startup.web.next`。这两项启动 Span 独立于请求采样率。两者使用 OTLP HTTP/protobuf 并写入同一个 APM 应用。配置缺失、SDK 缺失或初始化失败时继续原业务路径，导出失败独立于业务响应。
+导出超时为三秒，SDK 采用有界批处理。队列满时丢弃观测数据。每进程预算需要结合 worker 数和主机容量核对。配置启用时，Python 的 ASGI lifespan 就绪或失败时采集 `dream.startup.web.python`，Next.js 的 `instrumentation.ts` 初始化 Node 探针并采集 `dream.startup.web.next`。这两项启动 Span 独立于请求采样率。两者使用 OTLP HTTP/protobuf 并写入各自的 APM 应用。客户端 Span 记录实际 `server.address`、`server.port` 和逻辑下游服务名。配置缺失、SDK 缺失或初始化失败时继续原业务路径，导出失败独立于业务响应。
 
 阿里云接入点按控制台地域、网络和 HTTP 协议获取，见[官方 Python 接入说明](https://www.alibabacloud.com/help/zh/opentelemetry/user-guide/use-managed-service-for-opentelemetry-to-submit-the-trace-data-of-python-applications)。部署方须核对该接入点与已有 ARMS 应用处于同一查询工作空间，使用同一个 Trace ID 在控制台确认跨应用拼接。通用 OTLP 接收成功与 ARMS 云端查询成功分别留存证据。
 
@@ -53,13 +56,15 @@ BFF 为每次公开请求创建根 Span，忽略浏览器提供的 `traceparent`
 
 Python 对直接客户端、过期签名、密钥不匹配和无签名请求创建根 Trace。服务间须保持时钟同步；BFF 与 Python 使用同一个入口路径。`tracestate` 与 `baggage` 在 Dream 边界丢弃。向 Admin 仅传播当前服务端 `traceparent`；Admin 已有探针负责生成 HTTP、pg 子段。原 `x-request-id`、DTO `request_id` 和业务幂等键保持原有生成与校验，Trace ID 用于诊断关联。
 
-只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 路由模板包含 `/api/decks/defaults/reconcile`，BFF 共享入口模板为 `/api/[[...path]]`。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。原 CLI/MCP 子进程配置过滤器排除服务端追踪开关、签名密钥、接入点和授权头，凭据保留在服务端进程。
+只记录固定阶段名、HTTP 方法、路由模板、状态、尝试次数、服务地址和耗时。Python 路由模板包含 `/api/decks/defaults/reconcile`，BFF 对 Deck 对账使用固定模板 `/api/decks/defaults/reconcile`，其它共享入口使用 `/api/[[...path]]`。导出内容排除 Cookie、Authorization、请求与响应正文、查询参数、用户标识、插件路径与摘要、SQL 参数、模型和工具正文；错误状态只保存状态码。应用日志只增加安全关联字段，不新增日志或指标 exporter。原 CLI/MCP 子进程配置过滤器排除服务端追踪开关、签名密钥、接入点和授权头，凭据保留在服务端进程。
+
+在「调用链分析」用 `X-Trace-Id` 展开同一请求。`X-Trace-Linked=1` 表示 BFF 与 Python 的 Trace ID 一致。Admin HTTP 与 PostgreSQL 客户端 Span 由 Admin 当前探针上报，需在同一 Trace ID 下确认。启动 Span 与业务请求各自有独立 Trace ID。
 
 ## 一次请求的耗时结构
 
 | Span | 含义 |
 | --- | --- |
-| `POST /api/[[...path]]` | BFF 从处理请求到响应流完成的总耗时 |
+| `POST /api/decks/defaults/reconcile`（Next.js） | BFF 从处理请求到响应流完成的总耗时 |
 | `bff.authentication` | Cookie/Origin/CSRF 检查与可选 Admin handle 解析；原生 Bearer 复用原分支 |
 | `admin.http`（BFF） | 原 Admin handle / capability / profile HTTP 与响应读取 |
 | `dream.http` | BFF 到 Python 的 HTTP 与响应流 |

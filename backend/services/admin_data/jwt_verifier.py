@@ -1,3 +1,4 @@
+# [Sync] 2026-11-19: attach the configured Admin HTTP peer and status to JWKS spans.
 # [Sync] 2026-11-18: propagate and time the existing bounded JWKS fetch.
 # [Input] AdminDataConfig, Admin OAuth ES256 access tokens and the fixed issuer JWKS.
 # [Output] Immutable verified OAuth claims; canonical users.id still requires Admin principal.
@@ -15,7 +16,7 @@ from threading import RLock
 import time
 from typing import Any, Callable
 
-from observability import span, inject_trace
+from observability import admin_http_attributes, span, inject_trace, mark_error
 
 import httpx
 import jwt
@@ -73,8 +74,11 @@ class _HttpJWKClient(jwt.PyJWKClient):
             raise PyJWKClientConnectionError("JWKS refresh is temporarily unavailable")
         self._last_fetch = now
         try:
-            with span("admin.jwks", kind="CLIENT"), self._http.stream("GET", self.uri, headers=inject_trace({"accept": "application/json"}), timeout=self._config.timeout_seconds, follow_redirects=False) as response:
+            with span("admin.jwks", kind="CLIENT", attributes=admin_http_attributes(self.uri, "GET")) as current, self._http.stream("GET", self.uri, headers=inject_trace({"accept": "application/json"}), timeout=self._config.timeout_seconds, follow_redirects=False) as response:
+                if current is not None:
+                    current.set_attribute("http.response.status_code", response.status_code)
                 if response.status_code != 200:
+                    mark_error(current)
                     raise PyJWKClientConnectionError("JWKS is unavailable")
                 chunks = bytearray()
                 for chunk in response.iter_bytes():
