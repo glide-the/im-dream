@@ -785,6 +785,8 @@ stateDiagram-v2
 
 `ChatView` 优先读取消息，收到后可展示只读正文，再依次核对运行状态与空闲时的最新消息。恢复成功后，`ChatPanel` 开始读取输入队列，活动入口完成一次摘要读取。打开活动面板或子 Agent 侧栏时启动对应轮询。Chat、计划与活动面板按会话、transport 和 Thread 共享进行中的任务链接读取，运行结束后的显式刷新取得新结果。带 Deck 的会话打开卡片信息时读取插件详情，旧会话在恢复后可读取一次回执以识别已有卡片信息。恢复失败沿用原重试和草稿保留流程。
 
+`ChatPanel` 和 `useModelConfig` 按浏览器会话共享进行中的 `GET /api/system-config` 及其解析结果。模型保存回执后发起独立读取，注入原生 transport 的读取继续传递取消信号。
+
 ### 原生进行中Thread保留与UI发布
 
 发现：`useNativeChatThread.openThread`原先对不同Thread递增读取代次、关闭当前reader并执行hydrate。上一轮两页正文预览覆盖静态阅读，运行中实例的连接和投影未保留。新增受控SSE基线两项失败分别显示：隐藏页面仍增加React提交；A→B导航取消A reader。

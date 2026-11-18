@@ -22,8 +22,10 @@
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 // [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
 // [Sync] 2026-11-19: start passive task-link and input observations after history restoration.
+// [Sync] 2026-11-19: share the composer configuration GET and reread independently after a model save.
 // [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
+import { readWebSystemConfig } from '../../api/systemConfigApi';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
 import {readThreadTools} from '../../hooks/useChatToolSelection';
 import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
@@ -364,6 +366,7 @@ export default function ChatPanel({
   const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
   const pendingInputIdsRef = useRef(new Map<string, string>());
   const [modelConfigRefresh,setModelConfigRefresh]=useState(0);
+  const lastModelConfigRefresh = useRef(0);
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -450,17 +453,13 @@ export default function ChatPanel({
 
   useEffect(() => {
     let active = true;
+    const fresh = lastModelConfigRefresh.current !== modelConfigRefresh;
+    lastModelConfigRefresh.current = modelConfigRefresh;
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { ...browserRequestHeaders() },
-        });
-        if (!response.ok) {
-          return;
-        }
-        const payload = (await response.json()) as SystemConfigResponse;
-        if (active) {
-          setSystemConfig(normalizeSystemConfig(payload));
+        const { payload } = await readWebSystemConfig({ fresh });
+        if (active && payload) {
+          setSystemConfig(normalizeSystemConfig(payload as SystemConfigResponse));
         }
       } catch {
         // ignore config fetch errors

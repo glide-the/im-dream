@@ -2,11 +2,13 @@
 // [Output] One shared read/save/recovery lifecycle for Web and native settings fields.
 // [Pos] Existing model-settings state owner; platform renderers retain their own controls.
 // [Sync] 2026-10-29: extract original handlers; optional native HTTP and saved-config notification retain original URLs/DTOs.
+// [Sync] 2026-11-19: reuse the concurrent Web configuration read in Chat and Settings; retain injected transport cancellation.
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {browserRequestHeaders} from '../lib/browserSession';
 import {emitImFullAccessChanged,emitWorkspaceModeChanged} from '../lib/system-config-events';
 import {API_BASE} from '../lib/apiBase';
 import {fetchGatewayModels,gatewayModelsErrorMessage,resolveGatewayModelSelection,type GatewayModel} from '../api/gatewayModelsApi';
+import {readWebSystemConfig} from '../api/systemConfigApi';
 export type SandboxNetworkMode = 'disabled' | 'allowlist' | 'open';
 
 interface EnvVar {
@@ -150,10 +152,15 @@ export default function useModelConfig({transport=fetch,onConfigSaved,onSessionE
     setConfigLoading(true);
     setConfigSaveError(null);
     void (async () => {
-      const configRequest = request(`${API_BASE}/api/system-config`, {
-        headers: { ...browserRequestHeaders() },
-        signal: controller.signal,
-      });
+      const configRequest = transport === fetch
+        ? readWebSystemConfig().then(({status, payload}) => {
+            if (active && status === 401) callbacks.current.onSessionExpired?.();
+            return payload as SystemConfigResponse | null;
+          })
+        : request(`${API_BASE}/api/system-config`, {
+            headers: { ...browserRequestHeaders() },
+            signal: controller.signal,
+          }).then(async response => response.ok ? (await response.json()) as SystemConfigResponse : null);
       const modelsRequest = fetchGatewayModels(controller.signal, request);
       try {
         const [configResult, modelsResult] = await Promise.allSettled([configRequest, modelsRequest]);
@@ -166,12 +173,11 @@ export default function useModelConfig({transport=fetch,onConfigSaved,onSessionE
         } else if (modelsResult.reason?.name !== 'AbortError') {
           setModelCatalogError(gatewayModelsErrorMessage(modelsResult.reason));
         }
-        if (configResult.status !== 'fulfilled' || !configResult.value.ok) {
+        if (configResult.status !== 'fulfilled' || !configResult.value) {
           setConfigReadError('模型设置读取失败，请重新加载后再选择。');
           return;
         }
-        const payload = (await configResult.value.json()) as SystemConfigResponse;
-        const config = readSystemConfigResponse(payload);
+        const config = readSystemConfigResponse(configResult.value);
         if (!active) return;
         setConfigReadError(null);
         setModelSaveUnconfirmed(false);
@@ -204,7 +210,7 @@ export default function useModelConfig({transport=fetch,onConfigSaved,onSessionE
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [modelLoadNonce, request]);
+  }, [modelLoadNonce, request, transport]);
 
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>): Promise<SystemConfigData | null> => {
     setSaving(true);
