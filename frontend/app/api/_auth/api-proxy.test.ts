@@ -9,6 +9,7 @@
 //                    and incomplete selections never retry.
 // [Sync] 2026-10-13: loopback Undici transport reproduces GET SSE body timeout after
 //                    an initial connected chunk while preserving non-SSE and abort semantics.
+// [Sync] 2026-11-19: isolate these transport tests from the developer's private OTLP settings.
 import { createServer } from 'node:http';
 import { Agent, fetch as undiciFetch } from 'undici';
 import assert from 'node:assert/strict';
@@ -17,6 +18,7 @@ import { createApiProxy, apiRequestBoundary } from './api-proxy.ts';
 import { BffLoginBoundary } from './login-boundary.ts';
 import { forwardBackendRequest } from '../_http-proxy.ts';
 
+process.env.INK_TRACE_ENABLED = 'false';
 const publicOrigin = 'https://dream.example';
 const handle = 'dbr_' + 'h'.repeat(43);
 const loopbackPort = 55177;

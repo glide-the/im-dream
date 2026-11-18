@@ -3,6 +3,7 @@
 # [Pos] Web and embedded iOS ASGI, startup and Admin transport instrumentation.
 # [Sync] 2026-11-19: record real startup spans and accept isolated iOS exporter settings.
 # [Sync] 2026-11-19: read private Web settings at Python startup and identify real peer endpoints.
+# [Sync] 2026-11-19: return the matched route template on an authenticated BFF trace handoff.
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -237,6 +238,7 @@ class TraceMiddleware:
         if scope['type'] != 'http' or _tracer is None:
             return await self.app(scope, receive, send)
         parent = _request_parent(scope)
+        from_bff = trace.get_current_span(parent).get_span_context().is_valid
         method = scope.get('method', '')
         method = method if method in _METHODS else 'OTHER'
         started, status = time.perf_counter(), 500
@@ -250,9 +252,11 @@ class TraceMiddleware:
                 if message['type'] == 'http.response.start':
                     status = message['status']
                     response_headers = [(key, value) for key, value in message.get('headers', [])
-                        if key.lower() not in {b'x-trace-id', b'x-trace-sampled'}]
+                        if key.lower() not in {b'x-trace-id', b'x-trace-sampled', b'x-ink-trace-route'}]
                     response_headers.extend([(b'x-trace-id', trace_id.encode()),
                         (b'x-trace-sampled', b'1' if identity.trace_flags.sampled else b'0')])
+                    if from_bff and (template := getattr(scope.get('route'), 'path', None)) and template.isascii():
+                        response_headers.append((b'x-ink-trace-route', template.encode('ascii')))
                     message = {**message, 'headers': response_headers}
                 await send(message)
 

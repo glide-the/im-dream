@@ -5,6 +5,7 @@
 // [Sync] 2026-09-06: intersect per-connection user choices with hidden deployment and server capabilities.
 // [Sync] 2026-09-13: return a relative Next sandbox URL so scheme/hostname/port follow the Browser entry without a second listener.
 // [Sync] 2026-09-14: resolve the BFF session before existing policy/settings reads.
+// [Sync] 2026-11-19: trace the fixed status route including authorization failures.
 
 import {
   readCurrentMcpAppsStaticView,
@@ -16,6 +17,7 @@ import {
 } from '@ink-dream/mcp-apps-runtime';
 import { MCP_APPS_HOST_MANIFEST, mcpAppsSandboxUrl } from '../../../_dream/components/chat/mcp-apps/host-policy';
 import { authorizeRuntimeRequest } from '../../_auth/runtime-request';
+import { tracedOptions, withApiTrace } from '../../_trace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,7 +74,8 @@ async function currentConnectionSettings(
   }
 }
 
-export async function GET(request: Request) {
+const route = '/api/mcp-apps/phase1-status';
+export const GET = withApiTrace(route, async request => {
   const authorized = await authorizeRuntimeRequest(request);
   if (authorized instanceof Response) return authorized;
   request = authorized;
@@ -220,4 +223,5 @@ export async function GET(request: Request) {
     },
     { headers: { 'cache-control': 'no-store' } },
   );
-}
+});
+export const OPTIONS = tracedOptions(route, ['GET']);

@@ -3,6 +3,7 @@
 // [Output] Enabled-stream, abort, rejection and privacy contracts.
 // [Pos] Deterministic Node test; no real Admin, database, user or model.
 // [Sync] 2026-11-19: check OTLP protobuf and startup sampling.
+// [Sync] 2026-11-19: verify named scheduled tasks, private headers and local preflight.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
@@ -10,7 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { startTracing } from '../app/api/_trace.ts';
+import { startTracing, tracedOptions, withApiTrace } from '../app/api/_trace.ts';
 import { createApiProxy } from '../app/api/_auth/api-proxy.ts';
 import { BffLoginBoundary } from '../app/api/_auth/login-boundary.ts';
 
@@ -63,15 +64,40 @@ test('enabled tracing keeps SSE first chunk, caller abort, rejection and metadat
     const failed = await createApiProxy(boundary, admin, new URL('http://backend.example'), async () => { throw Error('private-transport-error'); })(
       new Request(origin + '/api/decks', { headers: { authorization: 'Bearer private-token' } }));
     assert.equal(failed.status, 502); await failed.text();
+    const historyTemplate = '/api/claude-agent/scheduled-tasks/{task_id}/history';
+    const history = await createApiProxy(boundary, admin, new URL('http://backend.example'), async (_url, init) => {
+      const parent = new Headers(init?.headers).get('traceparent')!;
+      return Response.json({ triggers: [] }, { headers: {
+        'x-trace-id': parent.split('-')[1], 'x-ink-trace-route': historyTemplate,
+      } });
+    })(new Request(origin + '/api/claude-agent/scheduled-tasks/private-task/history?before_created_at=private-date', {
+      headers: { authorization: 'Bearer private-token', 'x-ink-trace-route': '/api/private-client-route' },
+    }));
+    assert.equal(history.headers.get('x-trace-linked'), '1');
+    assert.equal(history.headers.has('x-ink-trace-route'), false);
+    await history.text();
+    const shareTemplate = '/api/public/note-shares/{token}';
+    const closed = await withApiTrace(shareTemplate, () => Response.json({ error: 'SHARE_UNAVAILABLE' }, { status: 404 }))(
+      new Request(origin + '/api/public/note-shares/private-share-token'));
+    assert.equal(closed.status, 404);
+    assert.match(closed.headers.get('x-trace-id')!, /^[a-f0-9]{32}$/);
+    await closed.text();
+    const preflight = await tracedOptions('/api/health', ['GET'])(new Request(origin + '/api/health', { method: 'OPTIONS' }));
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('allow'), 'GET, HEAD, OPTIONS');
     const deadline = Date.now() + 3000;
-    while (!Buffer.concat(batches).includes('dream.http') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    while (!Buffer.concat(batches).includes('OPTIONS /api/health') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
     assert.ok(batches.length > 0);
     const serialized = Buffer.concat(batches).toString();
     assert.ok(serialized.includes('dream.startup.web.next'));
     assert.ok(serialized.includes('dream.http'));
     assert.ok(serialized.includes('ink-memory-dream-web-next'));
     assert.ok(serialized.includes('isolated-host'));
-    for (const privateValue of ['private-query', 'private-value', 'private-token', 'private-thread', 'private-transport-error']) assert.ok(!serialized.includes(privateValue));
+    assert.ok(serialized.includes(`GET ${historyTemplate}`));
+    assert.ok(serialized.includes(`GET ${shareTemplate}`));
+    assert.ok(serialized.includes('OPTIONS /api/health'));
+    for (const privateValue of ['private-query', 'private-value', 'private-token', 'private-thread', 'private-transport-error',
+      'private-task', 'private-date', 'private-share-token', 'private-client-route']) assert.ok(!serialized.includes(privateValue));
   } finally {
     rmSync(directory, { recursive: true });
     receiver.closeAllConnections();
