@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-19: link the local Web and private iOS startup trace guide. -->
 <!-- [Sync] 2026-11-03: Kastention产品需求目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Deck功能展示名称采用Kastention与卡片结构；原概念、技术身份和现有数据保持。 -->
@@ -220,7 +221,7 @@ cd ink-dream-memory/frontend
 INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
 
-Dream 地址为 [Dream](http://localhost:5173)，Admin 地址为 [Admin](http://localhost:3000/admin)。
+Dream 地址为 [Dream](http://localhost:5173)，Admin 地址为 [Admin](http://localhost:3000/admin)。本地入口 `./deploy/local/deploy.sh start` 自动加载已配置的 Web 探针。私有配置与 iOS 验证步骤见 [Dream ARMS 指南](docs/deploy/dream-arms-tracing.md)。
 
 ## 支持版本与所有权
 

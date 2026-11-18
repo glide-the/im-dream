@@ -1,6 +1,7 @@
 # [Input] Explicit process-owned OTLP configuration and W3C request context.
 # [Output] Bounded metadata-only spans, response IDs and correlated request timings.
-# [Pos] Server Web ASGI and Admin transport instrumentation; no business authority.
+# [Pos] Web and embedded iOS ASGI, startup and Admin transport instrumentation.
+# [Sync] 2026-11-19: record real startup spans and accept isolated iOS exporter settings.
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -35,7 +36,7 @@ class _ExportLogFilter(logging.Filter):
         return True
 
 
-def configure_tracing() -> None:
+def configure_tracing(settings=None, *, signed_parent=True) -> None:
     """Initialize once per process; unavailable observation leaves business operational."""
     global _configured, _provider, _tracer, _propagator, _context_secret
     global trace, otel_context, SpanKind, Status, StatusCode
@@ -43,7 +44,8 @@ def configure_tracing() -> None:
         if _configured:
             return
         _configured = True
-        if os.environ.get('INK_TRACE_ENABLED', '').lower() != 'true':
+        settings = os.environ if settings is None else settings
+        if settings.get('INK_TRACE_ENABLED', '').lower() != 'true':
             return
         try:
             from opentelemetry import context as otel_context, trace
@@ -53,22 +55,23 @@ def configure_tracing() -> None:
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider, SpanLimits
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
-            from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+            from opentelemetry.sdk.trace.sampling import ALWAYS_ON, ParentBased, TraceIdRatioBased
+            from opentelemetry.util.re import parse_env_headers
 
-            endpoint = os.environ['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
+            endpoint = settings['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
             parsed = urlsplit(endpoint)
             if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
                 raise ValueError('endpoint')
-            service = os.environ['OTEL_SERVICE_NAME'].strip()
-            secret = os.environ['INK_TRACE_CONTEXT_SECRET'].encode()
-            if len(secret) < 32:
+            service = settings['OTEL_SERVICE_NAME'].strip()
+            secret = settings.get('INK_TRACE_CONTEXT_SECRET', '').encode() if signed_parent else None
+            if signed_parent and len(secret) < 32:
                 raise ValueError('context secret')
-            queue = _positive_env('OTEL_BSP_MAX_QUEUE_SIZE', 2048)
-            batch = _positive_env('OTEL_BSP_MAX_EXPORT_BATCH_SIZE', 512)
-            delay = _positive_env('OTEL_BSP_SCHEDULE_DELAY', 5000)
+            queue = _positive_setting(settings, 'OTEL_BSP_MAX_QUEUE_SIZE', 2048)
+            batch = _positive_setting(settings, 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE', 512)
+            delay = _positive_setting(settings, 'OTEL_BSP_SCHEDULE_DELAY', 5000)
             if batch > queue:
                 raise ValueError('batch budget')
-            ratio = float(os.environ.get('OTEL_TRACES_SAMPLER_ARG', '0.1'))
+            ratio = float(settings.get('OTEL_TRACES_SAMPLER_ARG', '0.1'))
             if not service or not math.isfinite(ratio) or not 0 <= ratio <= 1:
                 raise ValueError('configuration')
             # Dream owns one explicit provider. Reject auto-instrumentation ownership
@@ -77,9 +80,17 @@ def configure_tracing() -> None:
                 raise ValueError('provider already installed')
             for name in ('opentelemetry.exporter.otlp.proto.http.trace_exporter', 'opentelemetry.sdk._shared_internal'):
                 logging.getLogger(name).addFilter(_ExportLogFilter())
-            exporter = OTLPSpanExporter(endpoint=endpoint, timeout=3)
+            header_text = settings.get('OTEL_EXPORTER_OTLP_TRACES_HEADERS', settings.get('OTEL_EXPORTER_OTLP_HEADERS', ''))
+            exporter = OTLPSpanExporter(endpoint=endpoint, timeout=3, headers=parse_env_headers(header_text, liberal=True))
+
+            class StartupSampler(TraceIdRatioBased):
+                def should_sample(self, parent_context, trace_id, name, *args, **kwargs):
+                    if name.startswith('dream.startup.'):
+                        return ALWAYS_ON.should_sample(parent_context, trace_id, name, *args, **kwargs)
+                    return super().should_sample(parent_context, trace_id, name, *args, **kwargs)
+
             provider = TracerProvider(resource=Resource({'service.name': service}),
-                sampler=ParentBased(TraceIdRatioBased(ratio)), span_limits=SpanLimits(max_events=0, max_links=0))
+                sampler=ParentBased(StartupSampler(ratio)), span_limits=SpanLimits(max_events=0, max_links=0))
             provider.add_span_processor(BatchSpanProcessor(exporter, max_queue_size=queue,
                 max_export_batch_size=batch, schedule_delay_millis=delay, export_timeout_millis=3000))
             _propagator, _context_secret = TraceContextTextMapPropagator(), secret
@@ -93,8 +104,8 @@ def configure_tracing() -> None:
             _logger.warning('Tracing unavailable; continuing without trace export')
 
 
-def _positive_env(key: str, default: int) -> int:
-    value = int(os.environ.get(key, str(default)))
+def _positive_setting(settings, key: str, default: int) -> int:
+    value = int(settings.get(key, str(default)))
     if not 1 <= value <= 2_147_483_647:
         raise ValueError('trace budget')
     return value
@@ -103,6 +114,8 @@ def _positive_env(key: str, default: int) -> int:
 def _request_parent(scope):
     # Browser/native callers start a root. Only the private BFF can sign a parent.
     parent = otel_context.Context()
+    if _context_secret is None:
+        return parent
     values = {}
     for key, value in scope.get('headers', []):
         name = key.decode('latin1').lower()
@@ -145,6 +158,20 @@ def mark_error(current) -> None:
         current.set_status(Status(StatusCode.ERROR))
 
 
+def record_startup(component, started_ns, *, ended_ns=None, failed=False):
+    """Record a completed launch using a fixed name and an explicit time window."""
+    if _tracer is None:
+        return
+    try:
+        current = _tracer.start_span(f'dream.startup.{component}', context=otel_context.Context(),
+                                     kind=SpanKind.SERVER, start_time=started_ns)
+        if failed:
+            mark_error(current)
+        current.end(end_time=ended_ns)
+    except Exception:
+        pass
+
+
 def inject_trace(headers: dict[str, str]) -> dict[str, str]:
     """Project only W3C trace context; preserve explicit authentication and request IDs."""
     projected = {key: value for key, value in headers.items() if key.lower() not in {'traceparent', 'tracestate', 'baggage'}}
@@ -160,6 +187,15 @@ class TraceMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        if scope['type'] == 'lifespan' and _tracer is not None:
+            started = time.time_ns()
+
+            async def startup_observed(message):
+                if message['type'] in {'lifespan.startup.complete', 'lifespan.startup.failed'}:
+                    record_startup('web.python', started, failed=message['type'] == 'lifespan.startup.failed')
+                await send(message)
+
+            return await self.app(scope, receive, startup_observed)
         if scope['type'] != 'http' or _tracer is None:
             return await self.app(scope, receive, send)
         parent = _request_parent(scope)

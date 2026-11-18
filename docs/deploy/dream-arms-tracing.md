@@ -1,6 +1,7 @@
 <!-- [Input] Dream server instrumentation, W3C propagation and the existing Admin ARMS deployment contract. -->
 <!-- [Output] Private configuration, trace lookup, failure diagnosis and acceptance boundaries. -->
 <!-- [Pos] Dream server operations guide; deployment and cloud configuration require separate authorization. -->
+<!-- [Sync] 2026-11-19: register separate Web and private iOS installations in Beijing APM from startup spans. -->
 
 # Dream 调用链查询与接入
 
@@ -18,7 +19,7 @@ Python 入口为 `backend/server.py` 的 `TracedFastAPI`，容器仍执行原 `u
 
 Next 的 `createApiProxy` 接入独立 provider，通过 `AsyncLocalStorage` 传递当前上下文，保持 Next 全局 provider 和已有 preload 的所有权。关闭追踪时桥接模块跳过 SDK import。Python 同样延迟加载可选依赖。Dream 手动接缝覆盖原认证和 HTTP DTO 边界，服务端无需叠加 FastAPI、httpx、Next 或 undici 自动探针。Admin 保留现有服务器探针，仓库无需修改。
 
-部署方将以下项注入两个服务进程的私有配置文件，保留受限权限、现有启动设置和回滚制品。服务分别设置应用名；建议值为 `ink-memory-dream-bff` 和 `ink-memory-dream-api`，云端验收使用实际配置值。
+为 Web 的 Next.js 与 Python 进程设置相同的 `OTEL_SERVICE_NAME=ink-memory-dream-web` 和相同的签名密钥。部署方通过私有进程环境文件提供配置。本机 `deploy/local/deploy.sh start` 自动加载权限为 `0600` 的 `~/.config/ink-memory/dream-web-trace.env`，也支持通过 `INK_DREAM_WEB_TRACE_ENV_FILE` 指定私有文件。通过 README 中的独立命令启动时，先在服务终端导出同一文件里的设置。
 
 | 配置 | 默认与约束 | 用途 |
 | --- | --- | --- |
@@ -32,11 +33,19 @@ Next 的 `createApiProxy` 接入独立 provider，通过 `AsyncLocalStorage` 传
 | `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | 512，正整数，至多等于队列 | 每批最大 Span 数 |
 | `OTEL_BSP_SCHEDULE_DELAY` | 5000 毫秒，正整数 | 批处理间隔 |
 
-导出超时为三秒，SDK 采用有界批处理；队列满时丢弃观测数据。每进程预算需要结合 worker 数和主机容量核对。Python 在装配时读取配置，BFF 在首次 API 调用时初始化；修改通过另行授权的原发布流程生效。配置缺失、SDK 缺失或初始化失败时记录固定诊断并继续原业务路径；导出失败独立于业务响应，凭据和异常正文保留在私有配置与原业务边界内。
+导出超时为三秒，SDK 采用有界批处理。队列满时丢弃观测数据。每进程预算需要结合 worker 数和主机容量核对。配置启用时，Python 的 ASGI lifespan 就绪或失败时采集 `dream.startup.web.python`，Next.js 的 `instrumentation.ts` 初始化 Node 探针并采集 `dream.startup.web.next`。这两项启动 Span 独立于请求采样率。两者使用 OTLP HTTP/protobuf 并写入同一个 APM 应用。配置缺失、SDK 缺失或初始化失败时继续原业务路径，导出失败独立于业务响应。
 
 阿里云接入点按控制台地域、网络和 HTTP 协议获取，见[官方 Python 接入说明](https://www.alibabacloud.com/help/zh/opentelemetry/user-guide/use-managed-service-for-opentelemetry-to-submit-the-trace-data-of-python-applications)。部署方须核对该接入点与已有 ARMS 应用处于同一查询工作空间，使用同一个 Trace ID 在控制台确认跨应用拼接。通用 OTLP 接收成功与 ARMS 云端查询成功分别留存证据。
 
-服务配置放在独立服务器环境文件，避开移动构建读取的 `backend/.env` 和 `frontend/.env.local`。iOS `bundle-node.py` 检测到 `OTEL_*`、`ARMS_*` 或 `INK_TRACE_*` 赋值时在复制前停止；`bundle-python.py` 包含可选依赖桥接模块。端侧 Python 使用原 FastAPI 装配，本次未启用设备追踪，也未进行设备构建或验收。
+服务配置放在独立环境文件。iOS `bundle-node.py` 检测到 `backend/.env` 或 `frontend/.env.local` 包含 `OTEL_*`、`ARMS_*` 或 `INK_TRACE_*` 赋值时停止打包。
+
+## iOS 私有安装与查询
+
+指定开发设备通过原 `devicectl device copy to` 将权限为 `0600` 的私有 JSON 放到应用数据容器的 `Library/Application Support/dream-otel.json`。文件包含完整 HTTPS OTLP `endpoint` 与上报 `headers`，按接入控制台提供的配置填写。凭据只保存在设备的私有安装配置中，禁止添加到 Xcode 资源、发布包或业务进程环境。普通安装缺少该配置时停用该探针。
+
+收到本次嵌入式运行时启动结果时，后台线程初始化同一 Python 导出器，采集 `dream.startup.ios.runtime` 到 `ink-memory-dream-native`。成功或完成绑定时的失败按实际结果上报。随后 Native ASGI 与嵌入式 Next 到 Python 的回环请求共享同一端侧服务名。端侧为请求建立本地 Trace，向 Admin 传播现有 W3C 上下文。探针的线程和网络导出均不作为启动就绪条件。
+
+打开[北京工作空间应用列表](https://cmsnext.console.aliyun.com/next/region/cn-beijing/workspace/default-cms-1230976711767463-cn-beijing/app/apm/application-list)。APM 在收到首笔 Span 后按 `service.name` 登记应用。启动 Trace 可按 `dream.startup.*` 对应的操作名查询。应用出现仅证明该服务名已有数据，Web BFF、Python 与 iPhone 各自的启动证据用对应操作名核对。
 
 ## 传播与采集规则
 

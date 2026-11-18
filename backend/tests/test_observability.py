@@ -1,6 +1,7 @@
 # [Input] Production BFF, FastAPI dependencies, Deck route and Admin HTTP DTO assembly.
 # [Output] Isolated trace parentage, privacy, sampling and failure-path contracts.
 # [Pos] Provider-free verification; loopback listeners and synthetic Admin/plugin data only.
+# [Sync] 2026-11-19: validate BFF-to-Python linkage using the OTLP protobuf wire format.
 from __future__ import annotations
 
 import hashlib
@@ -169,6 +170,7 @@ def test_configuration_failure_never_exposes_endpoint(monkeypatch, caplog):
 
 def test_bff_python_admin_handoff_over_loopback(boundary, tracing, monkeypatch):
     import uvicorn
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
     browser, state, _, _ = boundary
     http = browser.app.state.admin_request_auth.client._http
     original = http._transport.handle_request
@@ -193,8 +195,8 @@ def test_bff_python_admin_handoff_over_loopback(boundary, tracing, monkeypatch):
                     self.rfile.read(2)
             else:
                 body = self.rfile.read(int(self.headers['content-length']))
-            exports.append(json.loads(body))
-            self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+            exports.append(ExportTraceServiceRequest.FromString(bytes(body)))
+            self.send_response(200); self.end_headers()
         def log_message(self, *_): pass
     collector = ThreadingHTTPServer(('127.0.0.1', 0), Collector)
     collector_thread = threading.Thread(target=collector.serve_forever, daemon=True)
@@ -224,16 +226,16 @@ def test_bff_python_admin_handoff_over_loopback(boundary, tracing, monkeypatch):
         python_spans = tracing.get_finished_spans()
         root_span = next(s for s in python_spans if s.name == 'POST /api/decks/defaults/reconcile')
         assert f'{root_span.context.trace_id:032x}' == output['id']
-        js_spans = [span for batch in exports for resource in batch['resourceSpans'] for scope in resource['scopeSpans'] for span in scope['spans']]
-        assert {'POST /api/[[...path]]', 'bff.authentication', 'dream.http', 'admin.http'} <= {s['name'] for s in js_spans}
-        assert {s['traceId'] for s in js_spans} == {output['id']}
-        dream_client = next(s for s in js_spans if s['name'] == 'dream.http')
-        assert f'{root_span.parent.span_id:016x}' == dream_client['spanId']
+        js_spans = [span for batch in exports for resource in batch.resource_spans for scope in resource.scope_spans for span in scope.spans]
+        assert {'POST /api/[[...path]]', 'bff.authentication', 'dream.http', 'admin.http'} <= {s.name for s in js_spans}
+        assert {s.trace_id.hex() for s in js_spans} == {output['id']}
+        dream_client = next(s for s in js_spans if s.name == 'dream.http')
+        assert f'{root_span.parent.span_id:016x}' == dream_client.span_id.hex()
         assert all(r.headers.get('traceparent', '').split('-')[1] == output['id'] for r in admin_requests)
         assert all('tracestate' not in r.headers and 'baggage' not in r.headers for r in admin_requests)
         ids = {s.context.span_id for s in python_spans}
         assert all(s.parent.span_id in ids for s in python_spans if s.name == 'admin.fixture.request')
-        serialized = json.dumps(exports) + result.stdout + result.stderr
+        serialized = str(exports) + result.stdout + result.stderr
         for private in ('secret-query', 'private-cookie', 'write-token', 'fixture.service', 'private-body', 'foreign-state'):
             assert private not in serialized
     finally:
