@@ -1,4 +1,5 @@
 // [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
+// [Sync] 2026-11-19: verify the catalog is visible while one shared background repair is pending.
 // [Sync] 2026-10-28: require successful replacement reads for cancelled auth/session and connector lifecycle GETs.
 // [Sync] 2026-10-28: serve complete Deck/Agent catalogs through the additive bulk read endpoint.
 // [Sync] 2026-10-13: assert the current official Claude Code Plugins heading after changing language.
@@ -215,6 +216,8 @@ const secondaryInstallation = {
 };
 
 test('login → Deck list → create → Agent/Prompt/plugin maintenance → Chat → reopen', async ({ page }, testInfo) => {
+  let releaseInitialReconciliation!: () => void;
+  const initialReconciliation = new Promise<void>(resolve => { releaseInitialReconciliation = resolve; });
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
   const expectedLifecycleAborts: string[] = [];
@@ -550,6 +553,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     }
     if (pathname === '/api/decks/defaults/reconcile' && request.method() === 'POST') {
       defaultReconcileCalls += 1;
+      await initialReconciliation;
       const reconciled = screenplaySelectedInstallationIds.length === 0;
       if (reconciled) screenplaySelectedInstallationIds = [dramaInstallation.id];
       await route.fulfill({ json: {
@@ -951,6 +955,8 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page.getByRole('heading', { name: /Voice Decks|声线卡组|My Decks|我的卡组/ })).toHaveCount(0);
   const deckLauncher = page.locator('[data-deck-manager-launcher]');
   await expect(deckLauncher.getByRole('heading', { name: /^Kastention$|^卡片结构$/ })).toBeVisible();
+  await expect.poll(() => defaultReconcileCalls).toBe(1);
+  releaseInitialReconciliation();
   await expect(deckLauncher.getByText(/Open an available Kastention|打开可用的卡片结构/)).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-enabled__strip')).toBeVisible();
   const enabledShortcutList = deckLauncher.locator('.deck-manager-enabled__strip');

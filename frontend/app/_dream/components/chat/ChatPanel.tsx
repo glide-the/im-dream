@@ -21,6 +21,7 @@
 // [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 // [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
+// [Sync] 2026-11-19: start passive task-link and input observations after history restoration.
 // [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
@@ -1057,11 +1058,11 @@ export default function ChatPanel({
     return () => controller.abort();
   }, [threadId, latestVisibleMessageId, agentBusy, navigationIndexNonce]);
 
-  const refreshTaskSessionLinks = useCallback(async () => {
+  const refreshTaskSessionLinks = useCallback(async (fresh = false) => {
     const request = taskSessionLinksRequestRef.current + 1;
     taskSessionLinksRequestRef.current = request;
     try {
-      const next = await fetchTaskSessionLinks(threadId);
+      const next = await fetchTaskSessionLinks(threadId, { fresh });
       if (chatPanelMountedRef.current && taskSessionLinksRequestRef.current === request) {
         setTaskSessionLinks(next);
         setTaskSessionLinksFailed(false);
@@ -1074,17 +1075,19 @@ export default function ChatPanel({
   }, [threadId]);
 
   useEffect(() => {
+    if (historyPending || !active) return;
     setTaskSessionLinks({ source: null, created: [] });
     setTaskSessionLinksFailed(false);
     void refreshTaskSessionLinks();
-  }, [refreshTaskSessionLinks]);
+    return () => { taskSessionLinksRequestRef.current += 1; };
+  }, [active, historyPending, refreshTaskSessionLinks]);
 
   const previousTaskSessionBusyRef = useRef(agentBusy);
   useEffect(() => {
     const wasBusy = previousTaskSessionBusyRef.current;
     previousTaskSessionBusyRef.current = agentBusy;
-    if (wasBusy && !agentBusy) void refreshTaskSessionLinks();
-  }, [agentBusy, refreshTaskSessionLinks]);
+    if (active && !historyPending && wasBusy && !agentBusy) void refreshTaskSessionLinks(true);
+  }, [active, agentBusy, historyPending, refreshTaskSessionLinks]);
 
   const refreshThreadInputs = useCallback(async () => {
     const snapshot = await fetchThreadInputs(threadId);
@@ -1117,15 +1120,16 @@ export default function ChatPanel({
   }, [inputFailureText, refreshThreadInputs]);
 
   useEffect(() => {
-    let active = true;
+    if (historyPending || !active) return;
+    let observing = true;
     let inFlight = false;
     const cancellation = new AbortController();
     const load = async () => {
-      if (!active || inFlight) return;
+      if (!observing || inFlight || document.visibilityState !== 'visible') return;
       inFlight = true;
       try {
         const snapshot = await fetchThreadInputs(threadId, cancellation.signal);
-        if (active) {
+        if (observing) {
           setThreadInputs(snapshot.entries);
           setInputOwnerLocal(snapshot.local_owner);
         }
@@ -1138,11 +1142,11 @@ export default function ChatPanel({
     void load();
     const timer = window.setInterval(() => { void load(); }, 2000);
     return () => {
-      active = false;
+      observing = false;
       window.clearInterval(timer);
       cancellation.abort();
     };
-  }, [threadId]);
+  }, [active, historyPending, threadId]);
 
   const selectQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
     try {

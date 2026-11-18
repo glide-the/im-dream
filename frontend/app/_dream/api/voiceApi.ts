@@ -45,6 +45,7 @@ import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSessio
 
 import { API_BASE } from '../lib/apiBase';
 import {listDecks, getDeck, listDecksWithVoices} from './deckReadApi';
+import { createSessionRequestShare } from '../lib/shareSessionRequest';
 import {updateVoice} from './deckMutationApi';
 export {createDeck,updateDeck,deleteDeck,forkDeck,syncDeck,createVoice,updateVoice,deleteVoice,forkVoice} from './deckMutationApi';
 import type { EditorState } from '../engine/EditorEngine';
@@ -672,24 +673,29 @@ export {listDecks, getDeck, listDecksWithVoices};
  * Ensure the actor's screenplay default exists and reconcile empty plugin refs.
  * Existing Decks and user selections are preserved by the backend.
  */
-export async function reconcileDefaultDeckPlugin(): Promise<{
+type DefaultDeckReconciliation = {
   deck_id: string | null;
   reconciled: boolean;
   // `default_not_found` keeps the client compatible with an older backend
   // during a rolling restart; current servers create the missing default.
   reason: 'default_created' | 'missing_ref' | 'refs_preserved' | 'default_not_found';
-}> {
-  const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
+};
+const shareDefaultDeckReconciliation = createSessionRequestShare<DefaultDeckReconciliation>();
+
+// [Sync] 2026-11-19: share the active default repair within the browser session.
+export function reconcileDefaultDeckPlugin(): Promise<DefaultDeckReconciliation> {
+  return shareDefaultDeckReconciliation(fetch, 'default', async () => {
+    const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Reconcile default Kastention plugin failed');
+    }
+    return await response.json();
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Reconcile default Kastention plugin failed');
-  }
-
-  return await response.json();
 }
 
 /**
