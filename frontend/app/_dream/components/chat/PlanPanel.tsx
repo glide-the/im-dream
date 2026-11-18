@@ -36,6 +36,7 @@
 //                    missing content/active_form/blocked_by fields and the list
 //                    key falls back to the index when todo.id is absent.
 // [Sync] 2026-08-22: bind plan Markdown workspace:// references to the panel Thread.
+// [Sync] 2026-11-19: load activity presence after Chat restore and poll while the activity is open.
 
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -313,7 +314,7 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
   }>({ threadId, snapshot: null, loading: true, failed: false });
   const scheduledRequestRef = useRef<{ generation: number; controller: AbortController | null }>({ generation: 0, controller: null });
   const refreshScheduledActivity = useCallback(async () => {
-    scheduledRequestRef.current.controller?.abort();
+    if (scheduledRequestRef.current.controller) return;
     const controller = new AbortController();
     const generation = ++scheduledRequestRef.current.generation;
     scheduledRequestRef.current.controller = controller;
@@ -328,6 +329,8 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
       if (generation === scheduledRequestRef.current.generation && !controller.signal.aborted) {
         setScheduledActivity((current) => ({ ...current, loading: false, failed: true }));
       }
+    } finally {
+      if (scheduledRequestRef.current.controller === controller) scheduledRequestRef.current.controller = null;
     }
   }, [threadId]);
   const scheduledSnapshot = scheduledActivity.threadId === threadId ? scheduledActivity.snapshot : null;
@@ -349,42 +352,47 @@ export default function PlanButton({ threadId, subagentSidebarOpen, onToggleSuba
   useEffect(() => {
     const scheduledRequest = scheduledRequestRef.current;
     void refreshScheduledActivity();
-    const refreshVisible = () => { if (document.visibilityState === 'visible') void refreshScheduledActivity(); };
-    const timer = window.setInterval(refreshVisible, ACTIVITY_REFRESH_INTERVAL_MS);
-    document.addEventListener('visibilitychange', refreshVisible);
     return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refreshVisible);
       scheduledRequest.controller?.abort();
+      scheduledRequest.controller = null;
       scheduledRequest.generation += 1;
     };
   }, [refreshScheduledActivity, scheduledRefreshKey]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setHasTaskSessions(false);
-    const refreshActivity = async () => {
-      const [links] = await Promise.allSettled([
-        fetchTaskSessionLinks(threadId),
-        hydrateThreadSubagents(threadId),
-      ]);
-      if (cancelled) return;
-      if (links.status === 'fulfilled') setHasTaskSessions(links.value.created.length > 0);
-    };
-    void refreshActivity();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshActivity();
-    }, ACTIVITY_REFRESH_INTERVAL_MS);
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void refreshActivity();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
+  const refreshActivity = useCallback(async () => {
+    const [links] = await Promise.allSettled([
+      fetchTaskSessionLinks(threadId),
+      hydrateThreadSubagents(threadId),
+    ]);
+    return links.status === 'fulfilled' ? links.value.created.length > 0 : null;
   }, [threadId]);
+
+  useEffect(() => {
+    let current = true;
+    void refreshActivity().then(hasLinks => {
+      if (current && hasLinks !== null) setHasTaskSessions(hasLinks);
+    });
+    return () => { current = false; };
+  }, [refreshActivity, scheduledRefreshKey]);
+
+  useEffect(() => {
+    if (!open && !subagentSidebarOpen) return;
+    let current = true;
+    const refreshVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (open) void refreshScheduledActivity();
+      void refreshActivity().then(hasLinks => {
+        if (current && hasLinks !== null) setHasTaskSessions(hasLinks);
+      });
+    };
+    const timer = window.setInterval(refreshVisible, ACTIVITY_REFRESH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  }, [open, subagentSidebarOpen, refreshScheduledActivity, refreshActivity]);
 
   // 点击弹层外部或按 Esc 收起。
   useEffect(() => {

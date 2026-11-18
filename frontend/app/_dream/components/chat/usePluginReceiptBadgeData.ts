@@ -1,6 +1,7 @@
 // [Input] Original Thread plugin receipt, Deck references and authenticated HTTP transport.
 // [Output] Shared receipt polling and ready configured-plugin snapshots for Web and native metadata.
 // [Pos] Read-only data lifecycle extracted from PluginReceiptBadge; plugin and Thread ownership stay on the server.
+// [Sync] 2026-11-19: allow an idle legacy Thread to check for a receipt without polling.
 import {useEffect,useState} from 'react';
 import {getThreadPluginLoadReceipt,listClaudePluginInstallations,type ClaudePluginInstallation,type PluginLoadReceipt} from '../../api/claudePluginAdminApi';
 import type {Deck} from '../../api/voiceApi';
@@ -10,7 +11,7 @@ import type {Deck} from '../../api/voiceApi';
 const RECEIPT_RETRY_MS=3000;
 const MAX_RECEIPT_ATTEMPTS=40;
 
-export default function usePluginReceiptBadgeData({threadId,deck,transport=fetch,enabled=true,abortReads=false}:{threadId:string|null;deck?:Deck;transport?:typeof fetch;enabled?:boolean;abortReads?:boolean}) {
+export default function usePluginReceiptBadgeData({threadId,deck,transport=fetch,enabled=true,abortReads=false,observePacking=true}:{threadId:string|null;deck?:Deck;transport?:typeof fetch;enabled?:boolean;abortReads?:boolean;observePacking?:boolean}) {
   const [receipt,setReceipt]=useState<PluginLoadReceipt|null>(null);
   const [configuredPlugins,setConfiguredPlugins]=useState<ClaudePluginInstallation[]|null>(null);
   useEffect(()=>{setReceipt(null);},[threadId]);
@@ -20,7 +21,7 @@ export default function usePluginReceiptBadgeData({threadId,deck,transport=fetch
     let retryTimer:ReturnType<typeof setTimeout>|undefined;
     const controller=abortReads?new AbortController():undefined;
     const read:typeof fetch=(input,init)=>transport(input,controller?{...init,signal:controller.signal}:init);
-    const retry=()=>{attempts++;if(!cancelled && attempts<MAX_RECEIPT_ATTEMPTS)retryTimer=setTimeout(load,RECEIPT_RETRY_MS);};
+    const retry=()=>{attempts++;if(observePacking && !cancelled && attempts<MAX_RECEIPT_ATTEMPTS)retryTimer=setTimeout(load,RECEIPT_RETRY_MS);};
     function load() {
       void getThreadPluginLoadReceipt(threadId!,read).then(payload=>{
         if(cancelled)return;
@@ -31,7 +32,7 @@ export default function usePluginReceiptBadgeData({threadId,deck,transport=fetch
     }
     load();
     return()=>{cancelled=true;controller?.abort();if(retryTimer!==undefined)clearTimeout(retryTimer);};
-  },[threadId,transport,enabled,abortReads]);
+  },[threadId,transport,enabled,abortReads,observePacking]);
   const hasReceiptPlugins=(receipt?.receipt?.plugins ?? receipt?.launch_manifest?.plugins ?? []).length>0;
   useEffect(()=>{
     if(!deck || hasReceiptPlugins || !enabled)return;

@@ -1,5 +1,6 @@
 <!-- [Sync] 2026-11-03: Kastention register设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
+<!-- [Sync] 2026-11-19: Web 保存目录优先显示，默认对齐后台执行。 -->
 # Chat-first 与剧本创作默认 Deck
 
 > 状态：有效；Deck 管理交互以 [`README.md`](./README.md) 为准。
@@ -28,13 +29,40 @@ Deck 发布/收藏、社区发现、插件选择器和详细工作台方案已�
 ## 3. 状态与异常
 
 - 根路径认证未完成：先完成身份恢复，不提前改写合法深链接。
-- 默认 Deck 对账失败：保留既有 Deck 数据并显示可恢复错误；不得伪造绑定或新建半成品。
-- Deck 列表为空：显示空状态和“创建 Deck”，不自动写入业务数据。
+- 默认 Deck 对账失败：保留已显示的目录，后续再次进入沿原对账入口尝试。
+- Deck 列表为空：默认对账期间显示加载提示。完成后显示新增卡片或原空状态和“创建 Deck”。
 - 权限不足：服务端返回 403，列表或详情不泄露不可访问 Deck。
 - Chat 选择失效 Deck：清除无效选择并保留 Chat 可恢复入口。
 - 市场、发布、安装：当前页面没有入口、状态、占位按钮或后台请求。
 
 ## 4. 关键流程
+
+### Web 目录首屏与默认对齐（2026-11-19）
+
+`DeckManager` 先读 `GET /api/decks/catalog`。已保存的卡片可立即操作。空目录在默认对齐期间沿用加载提示，失败或无新增时显示原空态。当前会话内并发进入同一页面时共享 `POST /api/decks/defaults/reconcile` 的在途请求，返回 `reconciled: true` 时刷新目录。后台失败保留已显示目录，离开页面或切换账号后丢弃旧页面结果。
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Manager as DeckManager
+    participant Catalog as listDecksWithVoices
+    participant Repair as reconcileDefaultDeckPlugin
+    User->>Manager: 打开卡片结构
+    Manager->>Catalog: 读取当前账号的目录
+    Catalog-->>Manager: 已保存目录
+    Manager-->>User: 显示卡片或准备提示
+    Manager->>Repair: 发起或共享后台对齐
+    alt 产生变更
+        Repair-->>Manager: reconciled 为 true
+        Manager->>Catalog: 重新读取
+        Catalog-->>User: 展示更新后的目录
+    else 无变更或失败
+        Repair-->>Manager: 结束本次尝试
+        Manager-->>User: 展示已保存目录或原空态
+    end
+```
+
+### Chat-first 入口
 
 ```mermaid
 sequenceDiagram

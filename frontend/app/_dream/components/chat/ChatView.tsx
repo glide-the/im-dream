@@ -6,6 +6,7 @@
 // [Sync] 2026-11-03: retain saved-prose previews across Thread selection and keep runtime controls behind fresh reconciliation.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
+// [Sync] 2026-11-19: enable Thread activity and plugin metadata after history and runtime restoration.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-27: extract the unchanged landing action translation model for native reuse; DOM layout and handlers stay intact.
 // [Sync] 2026-10-28: share original history date grouping/labels with native; retain the inline Web list and callbacks.
@@ -1277,6 +1278,8 @@ function ChatViewContent({
               deck={availableDecks.find((deck) => deck.id === badgeDeckId)}
               onSelectAgent={activeThreadId ? setSelectedAgentId : undefined}
               threadId={activeThreadId ?? null}
+                active={isVisible && !isLoadingMessages && (activeThreadId === null || threadMessages !== null)}
+                observePacking={initialRuntimeRunning}
             />
             {/* 新建对话 */}
             <button
@@ -1297,8 +1300,9 @@ function ChatViewContent({
               style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: threadSidebarOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
               <IconBell style={{ width: '1.1rem', height: '1.1rem' }} />
             </button>
-            {activeThreadId ? (
+            {isVisible && activeThreadId && !isLoadingMessages && threadMessages !== null ? (
               <PlanButton
+                key={activeThreadId}
                 threadId={activeThreadId}
                 scheduledRefreshKey={scheduledActivityRevision}
                 onOpenScheduledTask={openScheduledTask}

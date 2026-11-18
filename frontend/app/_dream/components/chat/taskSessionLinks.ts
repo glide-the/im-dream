@@ -6,8 +6,10 @@
 // [Sync] 2026-09-27: read each owned task's runtime status without inferring completion in Browser.
 // [Sync] 2026-09-27: accept optional completion-result fields but omit them from the information-card projection.
 // [Sync] 2026-09-27: accept the server's completed task status after final-result commit.
+// [Sync] 2026-11-19: share concurrent Thread link reads across Chat and activity panels.
 import { API_BASE } from '../../lib/apiBase';
 import { browserRequestHeaders } from '../../lib/browserSession';
+import { createSessionRequestShare } from '../../lib/shareSessionRequest';
 
 export type TaskSessionReadOptions = {transport?: typeof fetch; signal?: AbortSignal};
 
@@ -102,13 +104,19 @@ function parseSnapshot(value: unknown): TaskSessionLinksSnapshot {
   };
 }
 
-export async function fetchTaskSessionLinks(threadId: string, options: TaskSessionReadOptions = {}): Promise<TaskSessionLinksSnapshot> {
-  const response = await (options.transport ?? fetch)(
-    `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/task-links`,
-    { headers: { ...browserRequestHeaders() }, cache: 'no-store', ...(options.signal ? {signal: options.signal} : {}) },
-  );
-  if (!response.ok) throw new TaskSessionLinksError(response.status);
-  return parseSnapshot(await response.json().catch(() => null));
+const shareTaskSessionLinks = createSessionRequestShare<TaskSessionLinksSnapshot>();
+
+export function fetchTaskSessionLinks(threadId: string, options: TaskSessionReadOptions & { fresh?: boolean } = {}): Promise<TaskSessionLinksSnapshot> {
+  const transport = options.transport ?? fetch;
+  const request = async () => {
+    const response = await transport(
+      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/task-links`,
+      { headers: { ...browserRequestHeaders() }, cache: 'no-store', ...(options.signal ? {signal: options.signal} : {}) },
+    );
+    if (!response.ok) throw new TaskSessionLinksError(response.status);
+    return parseSnapshot(await response.json().catch(() => null));
+  };
+  return options.signal || options.fresh ? request() : shareTaskSessionLinks(transport, threadId, request);
 }
 
 export async function fetchTaskSessionDetail(sourceThreadId: string, taskId: string, options: TaskSessionReadOptions = {}): Promise<TaskSessionDetail> {
