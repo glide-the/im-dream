@@ -1,13 +1,40 @@
 // [Input] Same-origin browser requests, the private login boundary and Admin DTO transport.
-// [Output] Actual PKCE login/session/logout handlers plus request-selected Admin form actions, exposing no credential or token.
+// [Output] Web OAuth completion/refresh/profile, native handle handlers and configured Admin form actions.
 // [Pos] Server BFF product boundary shared by thin Next auth Route Handlers.
 // [Sync] 2026-11-08: a configured local Admin keeps its canonical browser authority and registered Google callback.
 // [Sync] 2026-10-25: send loopback Dream browser forms to the public Admin authority when its backchannel is public.
 // [Sync] 2026-10-11: select browser center from validated client access while keeping issuer and backchannel fixed.
 // [Sync] 2026-09-17: project Admin form actions while preserving recovery and server-only OAuth credentials.
+// [Sync] 2026-11-19: Web uses public OAuth tokens, Bearer profile reads and cookie-free refresh/revoke; native handles retain their owner.
 import { randomUUID } from 'node:crypto';
 import { AdminBffClient, configuredAdminBffClient } from './admin-client.ts';
 import { BffBoundaryError, BffLoginBoundary } from './login-boundary.ts';
+import { webCallbackDocument } from './web-callback.ts';
+import { z } from 'zod';
+
+const maximumCredentialLength = 16_384;
+const refreshInput = z.strictObject({ refresh_token: z.string().min(1).max(maximumCredentialLength) });
+const maximumRefreshEnvelopeBytes = JSON.stringify({ refresh_token: '\u0000'.repeat(maximumCredentialLength) }).length;
+
+async function webRefreshInput(request: Request, boundary: BffLoginBoundary) {
+  boundary.requireRequestOrigin(request);
+  if (request.headers.get('origin') !== boundary.publicOrigin || request.headers.get('content-type')?.split(';')[0] !== 'application/json') {
+    throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+  }
+  // Bound the credential envelope before JSON parsing, independently of Content-Length.
+  const reader = request.body?.getReader(); const decoder = new TextDecoder(); let raw = ''; let length = 0;
+  if (reader) {
+    try { for (;;) { const chunk = await reader.read(); if (chunk.done) break; length += chunk.value.length;
+      if (length > maximumRefreshEnvelopeBytes) { await reader.cancel(); throw new BffBoundaryError('BFF_REQUEST_INVALID', 400); }
+      raw += decoder.decode(chunk.value, { stream: true });
+    } } finally { reader.releaseLock(); }
+  }
+  raw += decoder.decode();
+  let input: unknown; try { input = JSON.parse(raw); } catch { throw new BffBoundaryError('BFF_REQUEST_INVALID', 400); }
+  const parsed = refreshInput.safeParse(input);
+  if (!parsed.success) throw new BffBoundaryError('BFF_REQUEST_INVALID', 400);
+  return parsed.data;
+}
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -92,8 +119,35 @@ export function createBffHandlers(boundary: BffLoginBoundary, admin: AdminBffCli
       }
     },
 
+    async webCallback(request: Request): Promise<Response> {
+      try {
+        const transaction = boundary.validateCallback(request, browserAdmin.issuer);
+        const tokens = await browserAdmin.oauthTokens({ grant_type: 'authorization_code', code: new URL(request.url).searchParams.get('code')!,
+          code_verifier: transaction.code_verifier, redirect_uri: boundary.callbackUri }, request.signal);
+        return webCallbackDocument(tokens, transaction.return_to, [boundary.clearTransactionCookie(), boundary.clearHandleCookie()]);
+      } catch (error) { return bffFailure(error); }
+    },
+
+    async refresh(request: Request): Promise<Response> {
+      try {
+        const input = await webRefreshInput(request, boundary);
+        const tokens = await browserAdmin.oauthTokens({ grant_type: 'refresh_token', refresh_token: input.refresh_token }, request.signal);
+        return json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token ?? input.refresh_token,
+          expires_at: tokens.expires_at });
+      } catch (error) { return bffFailure(error); }
+    },
+
     async session(request: Request): Promise<Response> {
       try {
+        const authorization = request.headers.get('authorization');
+        if (authorization !== null) {
+          boundary.requireRequestOrigin(request);
+          if (request.headers.has('origin') && request.headers.get('origin') !== boundary.publicOrigin) throw new BffBoundaryError('BFF_ORIGIN_DENIED', 403);
+          if (!/^Bearer [A-Za-z0-9._~-]+$/.test(authorization) || authorization.length > 16_391) throw new BffBoundaryError('BFF_SESSION_REQUIRED', 401);
+          const profile = await browserAdmin.profileForAccessToken(authorization.slice(7), randomUUID(), request.signal);
+          return json({ user: { id: profile.id, email: profile.email, display_name: profile.display_name,
+            avatar_url: profile.avatar_url, role: profile.role, created_at: profile.created_at } });
+        }
         const browserHandle = boundary.readHandle(request);
         const requestId = randomUUID();
         const resolution = await browserAdmin.resolve(browserHandle, requestId, request.signal);
@@ -108,6 +162,11 @@ export function createBffHandlers(boundary: BffLoginBoundary, admin: AdminBffCli
 
     async logout(request: Request): Promise<Response> {
       try {
+        if (request.headers.get('content-type')?.split(';')[0] === 'application/json') {
+          const input = await webRefreshInput(request, boundary);
+          await browserAdmin.revokeOAuth(input.refresh_token, request.signal);
+          return json({ success: true });
+        }
         const browserHandle = boundary.requireMutation(request);
         await browserAdmin.revoke(browserHandle, randomUUID(), request.signal);
         const response = json({ success: true });

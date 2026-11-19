@@ -1,3 +1,5 @@
+// [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
+import { AuthenticatedImage } from './AuthenticatedResource';
 // [Sync] 2026-11-13: capture current Thread tools as the fourth send argument; no connection mutation.
 // [Sync] 2026-11-13: forward retained Chat visibility to Agent/tools and model controls for close/reload on navigation.
 // [Sync] 2026-11-13: merge Agent/tools trigger and migrate model selection over original IM data and send state.
@@ -509,7 +511,7 @@ export default function AIInputDock({
                 }}
               >
                 {isImage && previewUrl ? (
-                  <img src={previewUrl} alt={file.name} style={{ display: 'block', width: '5rem', height: '5rem', objectFit: 'cover' }} />
+                  <AuthenticatedImage src={previewUrl} alt={file.name} style={{ display: 'block', width: '5rem', height: '5rem', objectFit: 'cover' }} />
                 ) : (
                   <div style={{ width: '7rem', height: '5rem', padding: '0.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: 'var(--color-bg-app)' }}>
                     <IconFile style={{ width: '1.4rem', height: '1.4rem', color: 'var(--color-text-muted)', marginBottom: '0.2rem' }} />

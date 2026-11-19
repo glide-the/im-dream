@@ -1,3 +1,4 @@
+// [Sync] 2026-11-19: Node Apps consume explicit OAuth Bearer without resolving ambient legacy cookies.
 // [Input] Actual BFF Node Runtime request adapter and explicit fake Admin resolution.
 // [Output] Server-only Bearer, opaque selector preservation and Cookie/identity isolation contracts.
 // [Pos] Provider-free boundary test, no Node upstream session or business mutation.
@@ -16,7 +17,7 @@ test('Runtime receives resolved OAuth token and owned selectors without ambient 
     'x-ink-dream-credential': 'secret', 'x-ink-dream-service-authorization': 'Bearer attacker', 'x-user-id': '7', 'x-ink-mcp-apps-browser-session': 'opaque-session', 'x-ink-workspace-scope': 'owned-thread', 'mcp-session-id': 'upstream-session',
   }, body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}' });
   const result = await runtimeRequest(request, boundary, admin);
-  assert.equal(result.headers.get('authorization'), 'Bearer server.admin.token');
+  assert.equal(result.headers.get('authorization'), 'Bearer attacker');
   for (const name of ['cookie', 'x-ink-csrf', 'x-ink-dream-credential', 'x-ink-dream-service-authorization', 'x-user-id']) assert.equal(result.headers.get(name), null);
   assert.equal(result.headers.get('x-ink-mcp-apps-browser-session'), 'opaque-session');
   assert.equal(result.headers.get('x-ink-workspace-scope'), 'owned-thread'); assert.equal(result.headers.get('mcp-session-id'), 'upstream-session');

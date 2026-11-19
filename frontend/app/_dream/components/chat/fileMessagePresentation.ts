@@ -1,5 +1,6 @@
+// [Sync] 2026-11-19: keep persisted file URLs independent of the current credential.
 // [Input] Original attachment metadata and stored keys/proxy URLs.
-// [Output] Original size labels and Cookie-based file URLs, plus a same-origin native storage path.
+// [Output] Original size labels and credential-free file URLs, plus a same-origin native storage path.
 // [Pos] File message presentation only; file ownership and byte access remain server/platform owned.
 import {toFileProxyUrl,withStorageAuthToken} from '../../lib/toFileProxyUrl';
 export function formatFileSize(bytes: number): string {
@@ -11,8 +12,8 @@ export function formatFileSize(bytes: number): string {
 export function resolveFileUrl(url?: string) {
   if (!url) return undefined;
   if (url.startsWith('/') || url.startsWith('http')) {
-    // Persisted proxy URLs carry no credentials; attach the current auth token
-    // so <img src> / download links pass backend storage auth.
+    // Persisted URLs carry no credentials. Web media adapters fetch protected
+    // bytes with Bearer; native byte access retains its platform owner.
     return withStorageAuthToken(url);
   }
   if (url.startsWith('blob:') || url.startsWith('data:')) {

@@ -1,11 +1,11 @@
-// [Input] Actual public Browser session/header/logout functions with explicit fake BFF fetch.
+// [Input] Native compatibility session/header/logout functions with explicit fake BFF fetch.
 // [Output] Exact decimal/time/CSRF DTO, no OAuth adoption and failure retention contracts.
 // [Pos] Provider-free Browser session tests; production helpers execute unchanged.
 // [Sync] 2026-09-14: verify real session state rather than a synthetic Bearer marker.
 // [Sync] 2026-09-15: deferred fetch/body reads verify abort, supersession and logout without stale CSRF/user adoption.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { browserRequestHeaders, clearBrowserSession, getBrowserCsrfToken, isBrowserSessionCurrent, loadBrowserSession, revokeBrowserSession } from './browserSession.ts';
+import { browserRequestHeaders, clearBrowserSession, getBrowserCsrfToken, isBrowserSessionCurrent, loadBrowserSession, revokeBrowserSession } from './cookieSession.ts';
 
 const csrf = 'c'.repeat(43);
 function session() {
