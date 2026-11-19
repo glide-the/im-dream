@@ -82,4 +82,3 @@ macOS arm64、Node v24.13.0、Next 16.1.6；物理内存16 GiB，可回收容量
 首次终端urllib健康探测经宿主代理得到502；`curl --noproxy '*' --max-time 15 -sS -o /dev/null -w '%{http_code}\n' http://localhost:5173/api/health`退出0、HTTP200，直接连接本机的`http.client`身份检查随后退出0。浏览器真实验收窗口HTTP错误计数保持0。
 
 独立文档验证：`python3 /tmp/web-bearer-doc-check.py`退出0，检查29个Markdown与131条本地引用，新增缺失0、继承缺失0、目录失败0；`git diff --check`退出0；`rg -n 'web-bearer-release-20261120\.md' docs/exec/.folder.md`退出0。两份执行记录的禁用逻辑话术计数为0。初始实现阶段文字已补充日期边界，最终采用状态归2026-11-20本机验收。代码保持未提交状态，源码清单与BUILD_ID定位当前采用制品。
-
