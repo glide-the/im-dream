@@ -2,6 +2,7 @@
 // [Input] Existing browser storage keys and App's login/local-import cleanup boundaries.
 // [Output] Central storage registry and explicit cleanup list that preserves browser display preferences.
 // [Pos] Frontend storage-key and local-data cleanup policy owner.
+// [Sync] 2026-11-19: register a sessionStorage-only Web OAuth credential key outside local-data import/cleanup.
 // [Sync] 2026-10-07: exclude language/theme from completed-login, migration and skip cleanup.
 /**
  * Storage keys constants
@@ -15,6 +16,7 @@
 export const STORAGE_KEYS = {
   // Auth
   AUTH_TOKEN: 'auth_token',
+  WEB_OAUTH: 'ink-dream-web-oauth',
   MIGRATION_COMPLETED: 'migration_completed',
 
   // Editor State

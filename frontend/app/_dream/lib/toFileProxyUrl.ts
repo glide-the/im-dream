@@ -1,5 +1,6 @@
+// [Sync] 2026-11-19: retain token-free URLs for the Web Blob/media adapter.
 // [Input] Stored file keys/proxy URLs and same-origin storage endpoint contract.
-// [Output] Cookie-authenticated file URLs with no OAuth credential query parameters.
+// [Output] Credential-free file URLs; Web media adapters fetch bytes using Bearer.
 // [Pos] Existing file URL helper/import boundary; server retains owner/path validation.
 // [Sync] 2026-09-14: remove historical URL tokens and resolve storage proxies at the current Next origin.
 import { apiUrl } from './apiBase.ts';

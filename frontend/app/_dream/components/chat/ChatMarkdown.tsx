@@ -1,3 +1,5 @@
+// [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
+import { AuthenticatedImage, AuthenticatedLink } from './AuthenticatedResource';
 // [Sync] 2026-11-13: reuse Chat typography for sharing and accept only export-owned media components.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
@@ -86,7 +88,7 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
     ...BASE_COMPONENTS,
     a({ href, children, node, ...props }) {
       void node;
-      if (publicView) return href && /^https?:\/\//i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
+      if (publicView) return href && /^https?:\/\//i.test(href) ? <AuthenticatedLink href={href} target="_blank" rel="noopener noreferrer">{children}</AuthenticatedLink> : <span>{children}</span>;
       if (isWorkspaceUri(href)) {
         return (
           <WorkspaceFileLink uri={href} threadId={threadId} workspaceAvailability={workspaceAvailability} allowDocumentPreview={!workspaceDocumentPath}>
@@ -94,7 +96,7 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
           </WorkspaceFileLink>
         );
       }
-      return <a href={href} {...props}>{children}</a>;
+      return <AuthenticatedLink href={href} {...props}>{children}</AuthenticatedLink>;
     },
     img({ src, alt, node, ...props }) {
       void node;
@@ -102,7 +104,7 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
       if (typeof src === 'string' && isWorkspaceUri(src)) {
         return <WorkspaceImage uri={src} alt={alt} threadId={threadId} workspaceAvailability={workspaceAvailability} onAddImageMaterial={onAddImageMaterial} />;
       }
-      return <img src={src} alt={alt} {...props} />;
+      return <AuthenticatedImage src={src} alt={alt} {...props} />;
     },
     ...(publicView ? {} : mediaComponents),
   }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial, publicView, mediaComponents]);

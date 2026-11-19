@@ -1,6 +1,7 @@
-// [Input] Same-origin BFF session/profile, in-memory CSRF and Admin-submitting Dream login forms.
+// [Input] OAuth Bearer profile state and Admin-submitting Dream login forms.
 // [Output] React public user/authentication state with success-only logout and safe failure feedback.
-// [Pos] Browser auth context; Admin/Dream servers own all OAuth credentials.
+// [Pos] Public authentication context; Web credentials stay in the private transport owner.
+// [Sync] 2026-11-19: reflect revoked/cleared Web credentials without exposing credentials to React consumers.
 // [Sync] 2026-09-17: let restored Dream forms submit directly to Admin while keeping browser state token-free.
 // [Sync] 2026-09-15: commit only the current Browser owner snapshot after asynchronous session loading.
 // [Sync] 2026-10-27: publish only authenticated state to the RN navigation owner.
@@ -28,8 +29,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isLoading, user, authError]);
   useEffect(() => {
     const abort = new AbortController();
+    const authChanged = () => { if (!abort.signal.aborted) setUser(null); };
+    window.addEventListener('ink:auth-state', authChanged);
     // Discard retired credentials without adopting or transmitting them.
-    try { localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN); } catch { /* Cookie auth does not depend on Browser storage. */ }
+    try { localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN); } catch { /* Retired localStorage credentials never participate in authentication. */ }
     if (new URLSearchParams(window.location.hash.slice(1)).has('access_token')) {
       window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
     }
@@ -38,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }).catch(() => {
       if (!abort.signal.aborted) setAuthError('Unable to check your session. Please try again.');
     }).finally(() => { if (!abort.signal.aborted) setIsLoading(false); });
-    return () => abort.abort();
+    return () => { abort.abort(); window.removeEventListener('ink:auth-state', authChanged); };
   }, []);
 
   const logout = useCallback(async () => {

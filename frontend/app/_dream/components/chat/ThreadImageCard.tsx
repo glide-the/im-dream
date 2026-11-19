@@ -1,3 +1,5 @@
+// [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
+import { AuthenticatedImage, AuthenticatedLink } from './AuthenticatedResource';
 // [Sync] 2026-11-13: render Chat message components and shared stack geometry in image previews.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: retain the original card DOM/CSS while sharing its export DTO definitions.
@@ -44,11 +46,11 @@ function createExportMarkdownComponents(
       if (isWorkspaceUri(href)) {
         return <span style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</span>;
       }
-      return <a href={href} style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</a>;
+      return <AuthenticatedLink href={href} style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</AuthenticatedLink>;
     },
     img({ src, alt }) {
       if (typeof src !== 'string' || !isWorkspaceUri(src)) {
-        return <img src={src} alt={alt ?? ''} style={{ display: 'block', maxWidth: '100%', height: 'auto', borderRadius: '8px' }} />;
+        return <AuthenticatedImage src={src} alt={alt ?? ''} style={{ display: 'block', maxWidth: '100%', height: 'auto', borderRadius: '8px' }} />;
       }
       const resolvedSource = workspaceImageSources.get(src);
       if (!resolvedSource) {
