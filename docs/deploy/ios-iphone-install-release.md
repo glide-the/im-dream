@@ -1,6 +1,7 @@
 <!-- [Input] ink-dream iOS工程、开发签名和目标设备。 -->
 <!-- [Output] 本地准备、构建、安装、启动及安装失败处理步骤。 -->
 <!-- [Pos] iPhone开发安装手册；商店发行归App Store上架手册。 -->
+<!-- [Sync] 2026-11-23: 登记公开 IP 证书、源站直连 transport、原打包输入和自动续期。 -->
 <!-- [Sync] 2026-11-04: 移动配置改为完整运行配置，说明.env复制、Admin连接选择及编辑器入口。 -->
 <!-- [Sync] 2026-11-03: 增加公网Admin配置片段及合并步骤，核对Product API地址和既有前端配置。 -->
 <!-- [Sync] 2026-11-02: 正文聚焦安装任务，逐版本设备回执移存执行历史。 -->
@@ -63,6 +64,14 @@ python3 frontend/ios/scripts/bundle-next.py --verify-sources
 4. 使用原Xcode流程重新打包。当前脚本读取`backend/.env`和`frontend/.env.local`；`.env.mobile`用于准备配置。打包时账户回调按实际Bundle ID写为`<Bundle ID>.auth:/auth/callback`，MCP回调写为`<Bundle ID>.mcp:/oauth/callback`；账户回调需在原Admin Client中精确登记。
 
 服务地址、账户回调和MCP回调分别管理。地址调整后重新生成并签名安装包；日志保留错误与配置键，密码、Cookie和service secret保存在受控配置中。具体认证问题按[认证排障指南](mobile-auth-troubleshooting.md)处理。
+
+### 2026-11-23 Admin 源站 HTTPS 直连配置
+
+当前源站已提供覆盖域名与 IP SAN 的公开 HTTPS 证书。`INK_ADMIN_DREAM_TRANSPORT_BASE_URL` 使用 `https://39.97.252.88`，认证 issuer 使用 `https://ink-admin.suoxya.com/api/auth`。iOS 现有 Node、Python 后通道适配继续调用系统 URLSession，由系统校验 IP 证书。
+
+`backend/.env.mobile`、`frontend/.env.online` 提供该连接配置。打包前将目标 Admin 的 authority、issuer 与 transport 合并到原 `backend/.env`、`frontend/.env.local`；原 `bundle-node.py` 从这两项输入复制包内配置。账户回调、MCP 回调和服务凭据仍按上文核对。当前工作区两项打包输入已采用 HTTPS IP。
+
+源站的 `ink-admin-certificate-renew.timer` 每日检查两次续期，成功后校验并 reload nginx。证书期限、续期演练与本机验证见[执行回执](../exec/admin-origin-direct-20261123.md)。设备安装及包内采用结果按每次安装记录单独核对。
 
 ### 开发构建与安装
 
