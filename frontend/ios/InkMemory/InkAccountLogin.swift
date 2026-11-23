@@ -1,4 +1,5 @@
 // [Input] Original account form navigation, BFF start/callback/session and target account URI.
+// [Sync] 2026-11-24: release the retained form's pending button when a native account operation returns to it.
 // [Sync] 2026-11-08: accept the same callback with an empty serialized authority; preserve the registered URI and original query.
 // [Sync] 2026-11-08: classify every rejected callback component using booleans without recording authorization values.
 // [Sync] 2026-11-08: accept an empty response fragment delimiter; reject fragment data and retain the original query.
@@ -101,8 +102,10 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
     private weak var navigation: UINavigationController?
     private let probe: NativeLoginSessionProbe
     private let webReady: () -> Void
+    private let formRestored: () -> Void
     private let chinese: Bool
     private var operation: UUID?
+    var isHandlingNavigation: Bool { operation != nil }
     private var task: URLSessionDataTask?
     private var authorization: ASWebAuthenticationSession?
     private var stopped = false
@@ -111,10 +114,11 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
     private var stage = "preparing"
     private var lastReportedStage: String?
 
-    init(origin: URL, callback: URL?, navigation: UINavigationController, probe: NativeLoginSessionProbe, chinese: Bool, diagnostic: @escaping ([String: Any]) -> Void = { _ in }, webReady: @escaping () -> Void) {
+    init(origin: URL, callback: URL?, navigation: UINavigationController, probe: NativeLoginSessionProbe, chinese: Bool, diagnostic: @escaping ([String: Any]) -> Void = { _ in }, formRestored: @escaping () -> Void = {}, webReady: @escaping () -> Void) {
         self.origin = origin; self.callback = NativeAccountCallback.localOrigin(origin) ? callback : nil
         self.navigation = navigation; self.probe = probe; self.chinese = chinese; self.webReady = webReady
         self.diagnostic = diagnostic
+        self.formRestored = formRestored
     }
     func handles(_ action: WKNavigationAction, page: URL?) -> Bool {
         guard !stopped, action.targetFrame?.isMainFrame == true, let destination = action.request.url else { return false }
@@ -250,6 +254,12 @@ final class NativeAccountLogin: NSObject, URLSessionTaskDelegate, ASWebAuthentic
         alert.addAction(UIAlertAction(title: chinese ? "关闭" : "Close", style: .cancel) { [weak self] _ in guard self?.operation == id else { return }; self?.restore() })
         navigation.present(alert, animated: true)
     }
-    private func restore() { operation = nil; task?.cancel(); task = nil; authorization?.cancel(); authorization = nil; probe.resume() }
+    private func restore() {
+        operation = nil
+        task?.cancel(); task = nil
+        authorization?.cancel(); authorization = nil
+        formRestored()
+        probe.resume()
+    }
     func cancel() { guard !stopped else { return }; stopped = true; operation = nil; task?.cancel(); task = nil; authorization?.cancel(); authorization = nil; transport?.invalidateAndCancel(); transport = nil }
 }
