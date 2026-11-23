@@ -1,3 +1,4 @@
+// [Sync] 2026-11-24: notify the retained local login document when it can accept a new submission.
 // [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Sync] 2026-10-30: the native login presentation opens the existing sign-in route; the RN root owns the authenticated home.
 // [Sync] 2026-10-31: route only the retained login document's explicit account navigation through its operation owner.
@@ -244,6 +245,16 @@ final class MobileHostViewController: UIViewController, WKScriptMessageHandler, 
     }
 
     func reloadAccountDocument() { webView?.reload() }
+
+    func restoreAccountForm(navigationFailed: Bool = false) {
+        guard let localWebOrigin else { return }
+        webView?.callAsyncJavaScript("""
+            if (location.origin === new URL(origin).origin) {
+                window.dispatchEvent(new CustomEvent('ink:account-form-restored', {detail: {navigationFailed}}));
+            }
+            """, arguments: ["origin": localWebOrigin, "navigationFailed": navigationFailed],
+            in: nil, in: .page) { _ in }
+    }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if accountNavigation?(action, webView.url) == true { decisionHandler(.cancel); return }

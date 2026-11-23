@@ -1,17 +1,25 @@
+// [Sync] 2026-11-24: show submission feedback in the iOS login sheet and restore the retained form after cancellation.
 // [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 // [Input] Server-projected Admin form actions, selected login/register mode and public auth feedback.
 // [Output] Restored Dream email/password/register/Google card using top-level Admin form navigation.
 // [Pos] Dream product login interaction; Admin remains the only credential validator and Session authority.
 // [Sync] 2026-09-18: submit authentication as first-party top-level navigation so state and Session cookies survive browser third-party-cookie blocking.
 // [Sync] 2026-10-25: let users reload failed session/options reads through the original page without resubmitting credentials.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FaGoogle } from 'react-icons/fa';
 import { z } from 'zod';
 import { useAuth } from '../../contexts/AuthContext';
-import {reportMobileHostRoute} from '../../platform/mobileHost';
+import { isReactNativeHost, reportMobileHostRoute } from '../../platform/mobileHost';
+import './AuthEntry.css';
 
 const optionsDto = z.strictObject({ password_action: z.url(), google_action: z.url() });
 type EntryMode = 'login' | 'register';
+type Submission = EntryMode | 'google';
+const pendingLabels: Record<Submission, string> = {
+  login: 'Signing in…',
+  register: 'Creating account…',
+  google: 'Connecting to Google…',
+};
 
 function currentReturnLocation() {
   const target = new URL(window.location.href);
@@ -41,6 +49,40 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
   const [entryError, setEntryError] = useState<string | null>(() => returnedError());
   const [returnedFailure] = useState(() => new URLSearchParams(window.location.search).get('auth_error'));
   const returnTo = currentReturnLocation();
+  const nativeSheet = isReactNativeHost();
+  const submitting = useRef<Submission | null>(null);
+  const [pending, setPending] = useState<Submission | null>(null);
+  const [navigationError, setNavigationError] = useState('');
+
+  function submit(event: FormEvent<HTMLFormElement>, action: Submission) {
+    if (!nativeSheet) return;
+    if (!options || submitting.current) {
+      event.preventDefault();
+      return;
+    }
+    submitting.current = action;
+    setPending(action);
+    setEntryError(null);
+    setNavigationError('');
+  }
+
+  useEffect(() => {
+    if (!nativeSheet) return;
+    function reset(failed: boolean) {
+      if (!submitting.current) return;
+      submitting.current = null;
+      setPending(null);
+      if (failed) setNavigationError('Could not connect. Please try again.');
+    }
+    const restore = (event: Event) => reset((event as CustomEvent).detail?.navigationFailed === true);
+    const pageShown = (event: PageTransitionEvent) => { if (event.persisted) reset(false); };
+    window.addEventListener('ink:account-form-restored', restore);
+    window.addEventListener('pageshow', pageShown);
+    return () => {
+      window.removeEventListener('ink:account-form-restored', restore);
+      window.removeEventListener('pageshow', pageShown);
+    };
+  }, [nativeSheet]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -75,25 +117,31 @@ export default function AuthEntry({ mode, onSwitch }: { mode: EntryMode; onSwitc
     }
   },[error,mode,optionsFailed,returnedFailure]);
 
-  return <div style={{ width: '100%', maxWidth: '400px', margin: '0 auto', padding: '32px', backgroundColor: 'var(--color-bg-paper)', border: '2px solid var(--color-border-paper)', borderRadius: '12px', boxShadow: '0 4px 12px var(--color-shadow-soft)', fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif" }}>
+  const disabled = !options || pending !== null;
+  return <div className={nativeSheet ? 'ios-account-form' : undefined} style={{ width: '100%', maxWidth: '400px', margin: '0 auto', padding: '32px', backgroundColor: 'var(--color-bg-paper)', border: '2px solid var(--color-border-paper)', borderRadius: '12px', boxShadow: '0 4px 12px var(--color-shadow-soft)', fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif" }}>
     <h2 style={{ margin: '0 0 24px', fontSize: '24px', fontWeight: 600, color: 'var(--color-text-body)', textAlign: 'center' }}>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-    {error && <div role="alert" style={{ padding: '12px', marginBottom: '16px', backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)', borderRadius: '6px', fontSize: '14px', color: 'var(--color-state-danger)' }}>
-      {error}
-      {(authError || optionsFailed) && <button type="button" onClick={() => window.location.reload()} style={{ display: 'block', marginTop: '8px', padding: '8px 0', border: 'none', background: 'none', color: 'var(--color-action-link)', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px', fontFamily: 'inherit' }}>Try again</button>}
+    {(navigationError || error) && <div role="alert" style={{ padding: '12px', marginBottom: '16px', backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)', borderRadius: '6px', fontSize: '14px', color: 'var(--color-state-danger)' }}>
+      {navigationError || error}
+      {(authError || optionsFailed) && <button type="button" disabled={pending !== null} onClick={() => window.location.reload()} style={{ display: 'block', marginTop: '8px', padding: '8px 0', border: 'none', background: 'none', color: 'var(--color-action-link)', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px', fontFamily: 'inherit' }}>Try again</button>}
     </div>}
-    <form action={options?.google_action} method="post">
+    <form action={options?.google_action} method="post" onSubmit={event => submit(event, 'google')}>
       <input name="return_to" type="hidden" value={returnTo} />
-      <button type="submit" disabled={!options} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '11px', border: '1px solid var(--color-border-paper)', borderRadius: '6px', backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)', fontSize: '15px', fontWeight: 600, cursor: options ? 'pointer' : 'not-allowed', fontFamily: 'inherit', marginBottom: '18px' }}><FaGoogle aria-hidden="true" />Continue with Google</button>
+      <button type="submit" disabled={disabled} aria-busy={pending === 'google' || undefined} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '11px', border: '1px solid var(--color-border-paper)', borderRadius: '6px', backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)', fontSize: '15px', fontWeight: 600, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', marginBottom: '18px' }}>
+        {pending === 'google' ? pendingLabels.google : <><FaGoogle aria-hidden="true" />Continue with Google</>}
+      </button>
     </form>
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px', color: 'var(--color-text-muted)', fontSize: '13px' }}><div style={{ flex: 1, height: '1px', backgroundColor: 'var(--color-border-paper)' }} /><span>or</span><div style={{ flex: 1, height: '1px', backgroundColor: 'var(--color-border-paper)' }} /></div>
-    <form action={options?.password_action} method="post">
+    <form action={options?.password_action} method="post" onSubmit={event => submit(event, mode)}>
       <input name="mode" type="hidden" value={mode} />
       <input name="return_to" type="hidden" value={returnTo} />
       {mode === 'register' && <label style={labelStyle}>Display Name (Optional)<input autoComplete="name" name="name" style={inputStyle} /></label>}
       <label style={labelStyle}>Email<input autoComplete="email" name="email" required type="email" style={inputStyle} /></label>
       <label style={{ ...labelStyle, marginBottom: '24px' }}>Password<input autoComplete={mode === 'register' ? 'new-password' : 'current-password'} minLength={mode === 'register' ? 6 : undefined} name="password" required type="password" style={inputStyle} />{mode === 'register' && <span style={{ display: 'block', marginTop: '4px', fontSize: '12px', color: 'var(--color-text-muted)' }}>At least 6 characters</span>}</label>
-      <button type="submit" disabled={!options} style={{ width: '100%', padding: '12px', border: 'none', borderRadius: '6px', backgroundColor: options ? 'var(--color-action-link)' : 'var(--color-disabled-bg)', color: 'var(--color-text-on-action)', fontSize: '16px', fontWeight: 600, cursor: options ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>{mode === 'login' ? 'Login' : 'Register'}</button>
+      <button type="submit" disabled={disabled} aria-busy={pending === mode || undefined} style={{ width: '100%', padding: '12px', border: 'none', borderRadius: '6px', backgroundColor: options ? 'var(--color-action-link)' : 'var(--color-disabled-bg)', color: 'var(--color-text-on-action)', fontSize: '16px', fontWeight: 600, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+        {pending === mode ? pendingLabels[mode] : mode === 'login' ? 'Login' : 'Register'}
+      </button>
     </form>
-    <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px', color: 'var(--color-text-secondary)' }}>{mode === 'login' ? "Don't have an account? " : 'Already have an account? '}<button type="button" onClick={onSwitch} style={{ background: 'none', border: 'none', color: 'var(--color-action-link)', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px', fontFamily: 'inherit' }}>{mode === 'login' ? 'Register' : 'Login'}</button></div>
+    <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px', color: 'var(--color-text-secondary)' }}>{mode === 'login' ? "Don't have an account? " : 'Already have an account? '}<button type="button" disabled={pending !== null} onClick={onSwitch} style={{ background: 'none', border: 'none', color: 'var(--color-action-link)', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px', fontFamily: 'inherit' }}>{mode === 'login' ? 'Register' : 'Login'}</button></div>
+    {nativeSheet && <span className="account-form-status" role="status">{pending ? pendingLabels[pending] : ''}</span>}
   </div>;
 }
