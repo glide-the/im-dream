@@ -1,6 +1,7 @@
 /**
  * EditorEngine.ts
  * [Sync] 2026-11-25: keep the confirmed Calendar title with its exact URL in the original text cell.
+ * [Sync] 2026-11-25: persist named Calendar links within the existing Session text contract.
  * Clean editor engine based on trace-based energy model
  * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
  *   even when inserting between two widgets (was only guarding the last-cell case).
@@ -12,6 +13,8 @@
  * [Sync] 2026-09-01: add persistent WritingSuggestionCell sequencing and a
  *   Session-owned Writing Thread while keeping all prose metrics TextCell-only.
  */
+
+import {findNotionArticleLinks, formatNotionArticleLink, recoverNotionArticleDraft} from '../components/notes/notionArticleLinks.ts';
 
 // @@@ Core data model - cells + commentors + tasks + WeightPath
 export interface EditorState {
@@ -34,7 +37,6 @@ export interface TextCell {
   id: string;
   type: 'text';
   content: string;  // Plain text content
-  notionArticleTitles?: Record<string, string>; // Calendar display titles keyed by the exact source URL.
 }
 
 export interface WidgetCell {
@@ -178,23 +180,19 @@ export class EditorEngine {
     // Kept for backward compatibility, but does nothing
   }
 
-  /** Save a confirmed Calendar reference; an existing link can acquire its article title without changing the prose. */
-  insertNotionArticle(href: string, title: string, existing?: TextCell) {
-    if (existing) {
-      if (existing.notionArticleTitles?.[href] !== title) {
-        existing.notionArticleTitles = {...existing.notionArticleTitles, [href]: title};
-        this.notifyChange();
-      }
-      return;
-    }
+  /** Keep a confirmed Calendar reference in the same text contract as ordinary writing. */
+  insertNotionArticle(href: string, title: string): 'present' | 'inserted' {
+    const present = this.state.cells.some(cell => cell.type === 'text' &&
+      findNotionArticleLinks(cell.content).some(link => link.href === href));
+    if (present) return 'present';
     let last = this.state.cells.at(-1);
     if (!last || last.type !== 'text') {
       last = {id: generateId(), type: 'text', content: ''};
       this.state.cells.push(last);
     }
-    last.notionArticleTitles = {...last.notionArticleTitles, [href]: title};
     const separator = last.content && !last.content.endsWith('\n') ? '\n' : '';
-    this.updateTextCell(last.id, last.content + separator + href);
+    this.updateTextCell(last.id, last.content + separator + formatNotionArticleLink(href, title));
+    return 'inserted';
   }
 
   // @@@ Update a specific text cell by ID
@@ -203,12 +201,6 @@ export class EditorEngine {
     if (!cell || cell.type !== 'text') return;
 
     cell.content = newText;
-    if (cell.notionArticleTitles) {
-      for (const href of Object.keys(cell.notionArticleTitles)) {
-        if (!newText.includes(href)) delete cell.notionArticleTitles[href];
-      }
-      if (Object.keys(cell.notionArticleTitles).length === 0) delete cell.notionArticleTitles;
-    }
     this.applyTextUpdate();
   }
 
@@ -611,6 +603,7 @@ export class EditorEngine {
     this.lastLoadSource = options.source ?? 'local';
     const restoredAt = new Date().toISOString();
     const cells = Array.isArray(state.cells) ? state.cells.map((cell) => {
+      if (cell.type === 'text') return recoverNotionArticleDraft(cell);
       if (cell.type !== 'writing-suggestion') return cell;
       const restored: WritingSuggestionCell = {
         ...cell,

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: recover rejected Calendar title metadata when retrying a still-open draft.
 // [Sync] 2026-11-12: preserve pre-stream HTTP error codes and retryability for Writing and historical comment turns.
 // [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-29: inject native HTTP into the original Timeline read helpers; Web signatures and defaults remain compatible.
@@ -49,6 +50,7 @@ import { createSessionRequestShare } from '../lib/shareSessionRequest';
 import {updateVoice} from './deckMutationApi';
 export {createDeck,updateDeck,deleteDeck,forkDeck,syncDeck,createVoice,updateVoice,deleteVoice,forkVoice} from './deckMutationApi';
 import type { EditorState } from '../engine/EditorEngine';
+import {recoverNotionArticleDraft} from '../components/notes/notionArticleLinks';
 import { consumeClaudeAgentSseStream } from '../lib/claude-agent-sse-utils';
 import { ClaudeAgentTransportError } from '../lib/claude-agent-transport';
 
@@ -458,7 +460,7 @@ export async function saveSession(sessionId: string, editorState: EditorState, n
     headers: getAuthHeaders(),
     body: JSON.stringify({
       session_id: sessionId,
-      editor_state: editorState,
+      editor_state: {...editorState, cells: editorState.cells.map(cell => cell.type === 'text' ? recoverNotionArticleDraft(cell) : cell)},
       name
     })
   });

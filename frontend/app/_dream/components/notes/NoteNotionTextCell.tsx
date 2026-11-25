@@ -1,4 +1,4 @@
-// [Input] Live TextCell, exact-URL Calendar titles, its original editor, and the normal text/IME update callbacks.
+// [Input] Live TextCell with bare URLs and named Calendar links, its original editor, and the normal text/IME update callbacks.
 // [Output] In-place article references, editable continuation rows and scoped reading.
 // [Pos] Logical lines are derived from the same plain text that the session saves.
 import {Fragment, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, type ReactNode, type Ref} from 'react';
@@ -16,7 +16,6 @@ export interface NoteWritingHandle {
 
 interface Props {
   content: string;
-  articleTitles?: Record<string, string>;
   documentActive: boolean;
   children: ReactNode;
   ref?: Ref<NoteWritingHandle>;
@@ -28,7 +27,7 @@ interface Props {
 // The suffix stays outside the editor even when a multiline paste grows the active passage.
 type Passage = {first: number; following: number};
 
-export default function NoteNotionTextCell({content, articleTitles, documentActive, children, ref, onTextChange, onCompositionStart, onCompositionCommit}: Props) {
+export default function NoteNotionTextCell({content, documentActive, children, ref, onTextChange, onCompositionStart, onCompositionCommit}: Props) {
   const {t} = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const rowInput = useRef<HTMLTextAreaElement>(null);
@@ -39,10 +38,7 @@ export default function NoteNotionTextCell({content, articleTitles, documentActi
   const [,refreshLinks] = useReducer((revision: number) => revision + 1, 0);
   const typingAt = typing.current;
   const [reading, setReading] = useState<NotionArticleLink | null>(null);
-  const links = useMemo(() => findNotionArticleLinks(content).map(link => {
-    const title = articleTitles?.[link.href];
-    return typeof title === 'string' && title.trim() ? {...link, label: title} : link;
-  }), [content, articleTitles]);
+  const links = useMemo(() => findNotionArticleLinks(content), [content]);
   const lines = useMemo(() => articleLines(content, links), [content, links]);
   const last = passage ? lines.length - 1 - passage.following : -1;
   const editingRow = passage && passage.first <= last ? lines[passage.first] : undefined;
