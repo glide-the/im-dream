@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: localize Reflections progress, stop, settlement, and retry feedback.
 // [Sync] 2026-11-25: localize article-specific Calendar confirmation and insertion results and accessible journal row names.
 // [Sync] 2026-11-24: name the article continuation row and localize scoped read feedback.
 // [Sync] 2026-11-18: localize Notion card reading/details actions, JSON and renderer/image recovery.
@@ -259,7 +260,22 @@ const resources = {
         },
         actions: {
           generate: 'Generate New Analysis',
-          generating: 'Reflecting...'
+          generating: 'Reflecting...',
+          stop: 'Stop analysis',
+          stopping: 'Stopping analysis…',
+          stopped: 'Analysis stopped.',
+          alreadyEnded: 'This analysis has already ended.',
+          stopFailed: 'The stop could not be confirmed. Try again.',
+        },
+        progress: {
+          preparing: 'Preparing analysis…',
+          reconnecting: 'Reconnecting to analysis…',
+          running: 'Analysis in progress',
+          section: 'Analyzing {{section}}…',
+          completed: 'Analysis complete.',
+          partial: 'Analysis finished with some sections unavailable.',
+          failed: 'Analysis could not be completed.',
+          reconnectFailed: 'Could not reconnect to analysis.',
         },
         empty: {
           title: 'Your story awaits analysis',
@@ -1473,7 +1489,22 @@ const resources = {
         },
         actions: {
           generate: '生成全新分析',
-          generating: '解析中...'
+          generating: '解析中...',
+          stop: '终止分析',
+          stopping: '正在终止分析…',
+          stopped: '分析已终止。',
+          alreadyEnded: '这次分析已经结束。',
+          stopFailed: '暂时无法确认分析已终止，请重试。',
+        },
+        progress: {
+          preparing: '正在准备分析…',
+          reconnecting: '正在重新连接分析…',
+          running: '分析正在进行',
+          section: '正在分析{{section}}…',
+          completed: '分析已完成。',
+          partial: '分析已结束，部分栏目未完成。',
+          failed: '分析未能完成。',
+          reconnectFailed: '暂时无法重新连接分析。',
         },
         empty: {
           title: '等待解析的故事',

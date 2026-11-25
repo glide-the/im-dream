@@ -1,6 +1,8 @@
 // [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Input] Original Reflections task/config/history DTOs, Cookie/CSRF and explicit platform HTTP/storage/UUID differences.
 // [Output] One shared Reflections API including original idempotent creation, SSE-first start, recovery and strict report history.
+// [Sync] 2026-11-26: restart the original active task when its event stream has no worker, then resume from the replay cursor.
+// [Sync] 2026-11-26: stop the owned task and allow its current observer to disconnect on a confirmed stop.
 // [Pos] Domain extraction from voiceApi; voiceApi preserves its existing public exports.
 // [Sync] 2026-10-29: preserve Web payloads/parser/policy; native can supply local HTTP streams, original storage keys and Foundation UUID.
 // [Sync] 2026-11-02: expose pending-submission state, retain committed task identity and recover it by read before continuing the original task.
@@ -37,6 +39,7 @@ export interface ReflectionResult {
 }
 
 export type ReflectionSectionKey = 'echoes' | 'traits' | 'patterns';
+export const REFLECTION_TASK_STOPPED = 'REFLECTION_TASK_STOPPED';
 
 export interface ReflectionTask {
   id: string;
@@ -96,12 +99,14 @@ export interface RunReflectionsTaskOptions {
   analysisContent?: ReflectionAnalysisContentOptions;
   language?: string;
   onEvent?: (event: ReflectionTaskEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface ResumeReflectionsTaskOptions {
   lastEventId?: string;
   startPrepared?: boolean;
   onEvent?: (event: ReflectionTaskEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface SavedAnalysisReport {
@@ -304,6 +309,7 @@ function reflectionKnownFailure(value: unknown): string | undefined {
     NOTION_ANALYSIS_SCOPE_CHANGED: ['已挂载资源已改变，请重新同步后选择。', 'Linked resources changed. Sync and select them again.'],
     NOTION_SNAPSHOT_UNAVAILABLE: ['尚无可用的 Notion 快照，请先同步资源。', 'Sync Notion resources before analyzing.'],
     REFLECTION_NO_ANALYZABLE_INPUT: ['没有可分析的正文，请选择有内容的日记或 Notion 页面。', 'Select diary entries or Notion pages with text to analyze.'],
+    [REFLECTION_TASK_STOPPED]: ['分析已终止。', 'Analysis stopped.'],
     ADMIN_CAPABILITY_UNAVAILABLE: ['分析内容暂时不可用，请稍后重试。', 'Analysis content is temporarily unavailable. Retry later.'],
   };
   return code && messages[code] ? messages[code][zh ? 0 : 1] : undefined;
@@ -413,9 +419,21 @@ async function startReflectionTask(taskId: string): Promise<ReflectionTask> {
   return normalizeReflectionTask(await res.json());
 }
 
-async function getReflectionTask(taskId: string): Promise<ReflectionTask> {
+async function stopReflectionTask(taskId: string): Promise<ReflectionTask> {
+  const response = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}/stop`, {
+    method: 'POST', headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error('REFLECTION_STOP_UNCONFIRMED');
+  const task = normalizeReflectionTask(await response.json());
+  if (task.task_id !== taskId || !['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
+    throw new Error('REFLECTION_STOP_UNCONFIRMED');
+  }
+  return task;
+}
+
+async function getReflectionTask(taskId: string, signal?: AbortSignal): Promise<ReflectionTask> {
   const res = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}`, {
-    headers: authHeaders(),
+    headers: authHeaders(), signal,
   });
   if (!res.ok) throw new Error(`Failed to fetch reflections task (${res.status})`);
   return normalizeReflectionTask(await res.json());
@@ -457,6 +475,7 @@ async function streamReflectionTaskEvents(
   onEvent?: (event: ReflectionTaskEvent) => void,
   onConnected?: () => Promise<void> | void,
   lastEventId?: string,
+  signal = platform.signal,
 ): Promise<void> {
   const headers = authHeaders({ Accept: 'text/event-stream' });
   if (lastEventId) {
@@ -466,11 +485,11 @@ async function streamReflectionTaskEvents(
   let chunks:AsyncIterable<string>;
   let close=()=>{};
   if(platform.openEvents){
-    const stream=await platform.openEvents(path,{headers,signal:platform.signal});
+    const stream=await platform.openEvents(path,{headers,signal});
     if(stream.status<200||stream.status>=300){stream.cancel();return;}
     chunks=stream.chunks;close=stream.cancel;
   }else{
-    const res=await fetch(path,{headers});
+    const res=await fetch(path,{headers,signal});
     if(!res.ok||!res.body)return;
     const reader=res.body.getReader(),decoder=new TextDecoder();
     chunks=(async function*(){while(true){const {done,value}=await reader.read();if(done)break;yield decoder.decode(value,{stream:true});}})();
@@ -499,8 +518,21 @@ async function waitForReflectionTaskResults(
   onEvent?: (event: ReflectionTaskEvent) => void,
   onConnected?: () => Promise<void> | void,
   lastEventId?: string,
+  recoverActive = false,
+  signal = platform.signal,
 ): Promise<ReflectionResult[]> {
-  const ensureObserving=()=>{if(platform.signal?.aborted)throw Error('REFLECTIONS_OBSERVATION_CLOSED');};
+  const ensureObserving=()=>{if(signal?.aborted || platform.signal?.aborted)throw Error('REFLECTIONS_OBSERVATION_CLOSED');};
+  let workerMissing = false;
+  let replayCursor = lastEventId;
+  const observe = (event: ReflectionTaskEvent) => {
+    ensureObserving();
+    if (event.type === 'reflection.stream.connected') {
+      workerMissing = event.payload.worker_missing === true;
+    } else if (event.sequence > 0) {
+      replayCursor = event.id;
+    }
+    onEvent?.(event);
+  };
   let connection:Promise<void>|undefined;
   const connectOnce = () => {
     if(!connection)connection=Promise.resolve().then(()=>{ensureObserving();return onConnected?.();});
@@ -509,7 +541,7 @@ async function waitForReflectionTaskResults(
   const startAfterSseGracePeriod = setTimeout(() => {
     void connectOnce().catch(()=>{/* The same Promise reports this failure to the waiting request. */});
   }, 1200);
-  try {await streamReflectionTaskEvents(taskId, onEvent, connectOnce, lastEventId).catch(async err => {
+  try {await streamReflectionTaskEvents(taskId, observe, connectOnce, lastEventId, signal).catch(async err => {
     ensureObserving();
     console.warn('[Reflections] SSE stream failed, falling back to polling:', err);
     await connectOnce();
@@ -517,9 +549,23 @@ async function waitForReflectionTaskResults(
   await connectOnce();
   } finally {clearTimeout(startAfterSseGracePeriod);}
 
+  if (workerMissing && (recoverActive || onConnected)) {
+    ensureObserving();
+    const task = await getReflectionTask(taskId, signal);
+    if (['ASSEMBLING', 'QUEUED', 'RUNNING'].includes(task.status)) {
+      ensureObserving();
+      if (recoverActive) await startReflectionTask(taskId);
+      ensureObserving();
+      await streamReflectionTaskEvents(taskId, observe, undefined, replayCursor, signal).catch(error => {
+        ensureObserving();
+        console.warn('[Reflections] Reconnected SSE stream failed, falling back to polling:', error);
+      });
+    }
+  }
+
   for (let i = 0; i < 30; i += 1) {
     ensureObserving();
-    const task = await getReflectionTask(taskId);
+    const task = await getReflectionTask(taskId, signal);
     if (['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
       if (task.status === 'FAILED') {
         throw new Error(reflectionKnownFailure(task.error_summary) ?? (task.error_summary || 'Reflections task failed'));
@@ -547,13 +593,8 @@ async function runReflectionsTask(
     created_at: new Date().toISOString(),
     payload: { sections: task.sections },
   });
-  let started = false;
-  const startOnce = async () => {
-    if (started || task.status !== 'CREATED') return;
-    started = true;
-    await startReflectionTask(task.task_id);
-  };
-  const results = await waitForReflectionTaskResults(task.task_id, options.onEvent, startOnce);
+  const start = task.status === 'CREATED' ? async () => { await startReflectionTask(task.task_id); } : undefined;
+  const results = await waitForReflectionTaskResults(task.task_id, options.onEvent, start, undefined, !start, options.signal);
   return reflectionResultsBySection(results);
 }
 
@@ -561,15 +602,15 @@ async function resumeReflectionsTask(
   taskId: string,
   options: ResumeReflectionsTaskOptions = {},
 ): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
-  const task = await getReflectionTask(taskId);
+  const task = await getReflectionTask(taskId, options.signal);
   if (task.status === 'FAILED') {
-    throw new Error(task.error_summary || 'Reflections task failed');
+    throw new Error(reflectionKnownFailure(task.error_summary) ?? (task.error_summary || 'Reflections task failed'));
   }
   const startPrepared = task.status === 'CREATED' && options.startPrepared
     ? () => startReflectionTask(taskId).then(() => undefined) : undefined;
   const results = ['COMPLETED', 'PARTIAL_FAILED'].includes(task.status)
     ? task.results ?? await getReflectionTaskResults(taskId)
-    : await waitForReflectionTaskResults(taskId, options.onEvent, startPrepared, options.lastEventId);
+    : await waitForReflectionTaskResults(taskId, options.onEvent, startPrepared, options.lastEventId, task.status !== 'CREATED', options.signal);
   return reflectionResultsBySection(results);
 }
 
@@ -693,9 +734,9 @@ async function getAnalysisHistory(options: { limit?: number; before?: AnalysisHi
     } } as AnalysisHistoryReport)), next_cursor: data.next_cursor,
   };
 }
-  return {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory};
+  return {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,stopReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory};
 }
 
-export const {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory}=createReflectionsApi();
+export const {hasPendingReflectionSubmission,getReflectionsSectionConfig,saveReflectionsSectionConfig,resetReflectionsSectionConfig,getReflectionAnalysisContent,ensureReflectionTaskReport,createReflectionTask,startReflectionTask,stopReflectionTask,getReflectionTask,getReflectionTaskResults,getLatestReflections,runReflectionsTask,resumeReflectionsTask,analyzeEchoes,analyzeTraits,analyzePatterns,fetchSessionsAggregate,saveAnalysisReport,getAnalysisReports,getAnalysisHistory}=createReflectionsApi();
 
 export type ReflectionsApi=ReturnType<typeof createReflectionsApi>;

@@ -4,6 +4,8 @@
 // [Sync] 2026-10-29: extract the existing fixture and serve the current bulk Deck catalog DTO.
 // [Sync] 2026-11-02: optionally return the existing post-create committed task identity for explicit read-recovery journeys.
 // [Sync] 2026-11-03: initialize the configured createError so explicit rejection fixtures reach the existing 422 branch.
+// [Sync] 2026-11-26: simulate a restarted process that can replay events and requires a start request before live execution resumes.
+// [Sync] 2026-11-26: support stopping an active task, recovering a rejected stop, and preserving settled results.
 import type {Page} from '@playwright/test';
 import {installFixtures,isReflectionHistoryCancellation,isReflectionHistoryNavigationCancellation} from './calendarHarness';
 export type Section = 'echoes' | 'traits' | 'patterns';
@@ -84,6 +86,7 @@ export type FixtureState = {
   createRequests: Array<Record<string, unknown>>;
   taskResponses: FixtureTask[];
   startRequests: string[];
+  stopRequests: string[];
   eventRequests: string[];
   reportRequests: string[];
   reportApiRequests: string[];
@@ -230,6 +233,8 @@ export async function installReflectionFixtures(page: Page, options: {
   seedActiveTaskStorage?: boolean;
   latestHistoricalResults?: boolean;
   holdSse?: boolean;
+  workerMissing?: boolean;
+  stopFailureOnce?: boolean;
   reportSaveFailureOnce?: boolean;
   creationUnknownOnce?: boolean;
   committedTaskIdOnUnknown?: boolean;
@@ -256,7 +261,7 @@ export async function installReflectionFixtures(page: Page, options: {
     noAnalyzableInput: options.noAnalyzableInputAfterSse ?? false,
     creationUnknownOnce: options.creationUnknownOnce ?? false,
     createError: options.createError,
-    createRequests: [], taskResponses: [], startRequests: [], eventRequests: [], reportRequests: [], reportApiRequests: [],
+    createRequests: [], taskResponses: [], startRequests: [], stopRequests: [], eventRequests: [], reportRequests: [], reportApiRequests: [],
     reportSaveFailureOnce: options.reportSaveFailureOnce ?? false,
     reports: [], results: options.noAnalyzableInputAfterSse
       ? [] : options.partial
@@ -267,17 +272,31 @@ export async function installReflectionFixtures(page: Page, options: {
     unexpectedReflectionRequests: [], historyRequests: [], holdTaskLookup: options.holdTaskLookup,
   };
   const taskLookupResolvers: Array<() => void> = [];
+  let stopFailureOnce = options.stopFailureOnce ?? false;
+  let stopped = false;
   let createNotionReadFailureOnce = options.createNotionReadFailureOnce ?? false;
   if (options.seedReport) state.reports = [makeReport(state)];
   if (options.activeTaskOnLoad) state.taskStatus = options.taskStatus ?? 'RUNNING';
 
   await page.addInitScript(({ activeTask, taskId }) => {
     localStorage.setItem('ink-language', 'en');
+    if (location.pathname.startsWith('/story-workspace/')) {
+      sessionStorage.setItem('ink-dream-web-oauth', JSON.stringify({
+        refresh_token: 'fixture-reflections-refresh',
+      }));
+      localStorage.setItem('ink-dream-web-oauth', JSON.stringify({
+        session_id: taskId, refresh_token: 'fixture-reflections-refresh',
+      }));
+    }
     if (activeTask) localStorage.setItem('reflections-active-task', JSON.stringify({
       taskId, sections: ['echoes', 'traits', 'patterns'],
       startedAt: Date.now(), lastEventId: 'event-1',
     }));
   }, { activeTask: state.activeTaskOnLoad && options.seedActiveTaskStorage !== false, taskId: TASK_ID });
+  await page.route('**/auth/refresh', route => route.fulfill({ json: {
+    access_token: 'fixture-reflections-access', refresh_token: 'fixture-reflections-refresh',
+    expires_at: Date.UTC(2099, 0, 1),
+  } }));
 
   const errors: string[] = [];
   const expectedHttpErrors = new Set<string>();
@@ -297,6 +316,7 @@ export async function installReflectionFixtures(page: Page, options: {
     const url = new URL(request.url());
     const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
       && (url.pathname === '/api/sessions/events'
+        || (stopped && url.pathname === `/api/reflections/tasks/${state.taskId}/events`)
         || url.pathname === '/api/story-workspace/dream-runs'
         || (url.pathname === '/api/claude-agent/threads' && url.search === '?limit=21'));
     if (external(request.url()) || expectedNavigationAbort || isReflectionHistoryCancellation(request)
@@ -396,6 +416,7 @@ export async function installReflectionFixtures(page: Page, options: {
   });
   await page.route('**/api/reflections/latest', async route => {
     const task = state.activeTaskOnLoad ? makeTask(state, state.taskStatus) : null;
+    if (stopped && task) task.error_summary = 'REFLECTION_TASK_STOPPED';
     const results = options.latestHistoricalResults
       ? state.results.map(result => ({ ...result, task_id: 'previous-completed-task' })) : task?.results ?? [];
     await route.fulfill({ json: { task, results } });
@@ -447,21 +468,49 @@ export async function installReflectionFixtures(page: Page, options: {
       await route.fulfill({ status: 202, json: startedTask });
       return;
     }
+    if (suffix.endsWith('/stop') && request.method() === 'POST') {
+      state.stopRequests.push(suffix.slice(0, -'/stop'.length));
+      if (stopFailureOnce) {
+        stopFailureOnce = false;
+        allowHttpError(503, url.pathname);
+        await route.fulfill({ status: 503, json: { detail: { error_code: 'ADMIN_UNAVAILABLE' } } });
+        return;
+      }
+      stopped = true;
+      state.taskStatus = 'PARTIAL_FAILED';
+      state.results = [resultFor('echoes')];
+      state.reports = [makeReport(state)];
+      await route.fulfill({ json: { ...makeTask(state), error_summary: 'REFLECTION_TASK_STOPPED' } });
+      return;
+    }
     if (suffix.endsWith('/events') && request.method() === 'GET') {
       state.eventRequests.push(suffix.slice(0, -'/events'.length));
+      if (options.workerMissing && state.startRequests.length === 0) {
+        const replay = [
+          event('reflection.stream.connected', 0, { worker_missing: true }),
+          event('reflection.section.completed', 2, { section: 'echoes', result_count: 1 }),
+        ];
+        await route.fulfill({ contentType: 'text/event-stream', body: replay.map(item =>
+          `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`,
+        ).join('') });
+        return;
+      }
       if (state.holdSse) {
         await new Promise<void>(resolve => { state.releaseSse = resolve; });
       }
+      if (stopped) return;
       const terminalType = state.noAnalyzableInput
         ? 'reflection.task.failed'
         : state.taskStatus === 'PARTIAL_FAILED' ? 'reflection.task.partial_failed' : 'reflection.task.completed';
+      const afterEvent = request.headers()['last-event-id'];
       const body = [
-        event('reflection.stream.connected', 1),
+        event('reflection.stream.connected', 0),
         ...(state.noAnalyzableInput ? [] : [event('reflection.task.started', 2)]),
         event(terminalType, state.noAnalyzableInput ? 2 : 3, state.noAnalyzableInput
           ? { error_code: 'REFLECTION_NO_ANALYZABLE_INPUT', message: 'REFLECTION_NO_ANALYZABLE_INPUT (422)', retryable: false }
           : state.taskStatus === 'PARTIAL_FAILED' ? { failed_sections: ['traits'] } : {}),
-      ].map(item => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join('');
+      ].filter(item => item.sequence === 0 || !options.workerMissing || item.sequence > Number(afterEvent?.replace('event-', '')))
+        .map(item => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join('');
       state.taskStatus = state.noAnalyzableInput ? 'FAILED' : state.taskStatus === 'PARTIAL_FAILED' ? 'PARTIAL_FAILED' : 'COMPLETED';
       await route.fulfill({ contentType: 'text/event-stream', body });
       return;
@@ -489,6 +538,7 @@ export async function installReflectionFixtures(page: Page, options: {
         state.releaseTaskLookup = () => { state.holdTaskLookup = false; taskLookupResolvers.splice(0).forEach(release => release()); };
       });
       const task = makeTask(state, state.taskStatus);
+      if (stopped) task.error_summary = 'REFLECTION_TASK_STOPPED';
       state.taskResponses.push(task);
       await route.fulfill({ json: task });
       return;

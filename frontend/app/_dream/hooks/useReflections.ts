@@ -5,9 +5,12 @@
 // [Sync] 2026-11-02: use the supplied account timezone for aggregates and diary dates; ignore superseded reads without restarting task/history observation.
 // [Sync] 2026-11-02: retain the completed task ID when report metadata fails so the existing save retry can recover its persisted history.
 // [Sync] 2026-11-02: pending submission recovery takes precedence over the same-day new-analysis chooser and preserves the original input.
+// [Sync] 2026-11-26: preserve the active recovery owner and committed event cursor while reloading history.
+// [Sync] 2026-11-26: keep stop available during recovery and clear observation only after terminal confirmation.
 import {useState,useEffect,useCallback,useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as browserApi from '../api/reflectionsApi';
+import {REFLECTION_TASK_STOPPED} from '../api/reflectionsApi';
 import type {ReflectionAnalysisContentOptions,ReflectionResult,ReflectionSectionConfig,ReflectionSectionKey,ReflectionTaskEvent,ReflectionsApi,ReflectionsStorage} from '../api/reflectionsApi';
 import {STORAGE_KEYS} from '../constants/storageKeys';
 import {getDateLocale} from '../i18n';
@@ -44,6 +47,17 @@ function isTerminalReflectionTaskStatus(status?: string): boolean {
   return status === 'COMPLETED' || status === 'PARTIAL_FAILED' || status === 'FAILED';
 }
 
+const reflectionProgressKeys: Record<string, string> = {
+  'reflection.client.task.created': 'preparing',
+  'reflection.task.created': 'preparing',
+  'reflection.context.ready': 'preparing',
+  'reflection.task.started': 'running',
+  'reflection.section.completed': 'running',
+  'reflection.section.failed': 'running',
+  'reflection.task.completed': 'completed',
+  'reflection.task.partial_failed': 'partial',
+  'reflection.task.failed': 'failed',
+};
 
 const browserStorage:ReflectionsStorage={getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value),removeItem:key=>localStorage.removeItem(key)};
 function readBrowserSection(){return typeof window==='undefined'?null:readStoryWorkspaceAnalysisSectionParam(new URLSearchParams(window.location.search));}
@@ -92,7 +106,7 @@ export default function useReflections(options:ReflectionsStateOptions){
   const {t,i18n}=useTranslation(),dateLocale=getDateLocale(i18n.language);
   const owners=useRef({api:options.api??browserApi,storage:options.storage??browserStorage,readSection:options.readRequestedSection??readBrowserSection,consumeSection:options.consumeRequestedSection??consumeBrowserSection});
   const {api,storage:localStorage,readSection:readRequestedSection,consumeSection:consumeRequestedSection}=owners.current;
-  const {hasPendingReflectionSubmission,ensureReflectionTaskReport,getAnalysisHistory,fetchSessionsAggregate,getLatestReflections,getReflectionTask,getReflectionsSectionConfig,resumeReflectionsTask,runReflectionsTask,saveReflectionsSectionConfig,resetReflectionsSectionConfig}=api;
+  const {hasPendingReflectionSubmission,ensureReflectionTaskReport,getAnalysisHistory,fetchSessionsAggregate,getLatestReflections,getReflectionTask,getReflectionsSectionConfig,resumeReflectionsTask,runReflectionsTask,stopReflectionTask,saveReflectionsSectionConfig,resetReflectionsSectionConfig}=api;
   const {readActiveReflectionTask,writeActiveReflectionTask,clearActiveReflectionTask}=useRef(taskStore(localStorage)).current;
   // ── State ──
   const [echoes, setEchoes]       = useState<ReflectionResult[]>([]);
@@ -113,6 +127,10 @@ export default function useReflections(options:ReflectionsStateOptions){
   const [reportRetryTaskId, setReportRetryTaskId] = useState<string>();
   const [reportSaving, setReportSaving] = useState(false);
   const [taskStatus, setTaskStatus] = useState('');
+  const [stoppingTask, setStoppingTask] = useState(false);
+  const [stopError, setStopError] = useState('');
+  const stopInFlightRef = useRef(false);
+  const observationRef = useRef<AbortController | null>(null);
   const [activeRecoveryTick, setActiveRecoveryTick] = useState(0);
   const [preparedTask, setPreparedTask] = useState<ActiveReflectionTaskState | null>(null);
   const explicitStartTaskIdRef = useRef<string | null>(null);
@@ -214,6 +232,9 @@ export default function useReflections(options:ReflectionsStateOptions){
     try {
       const latest = await getLatestReflections();
       if (!isCurrent()) return;
+      if (latest.task?.error_summary === REFLECTION_TASK_STOPPED && !submittingRef.current && !readActiveReflectionTask()) {
+        setTaskStatus(t('analysis.actions.stopped'));
+      }
       if (latest.task?.status === 'CREATED' && explicitStartTaskIdRef.current !== latest.task.task_id) {
         setPreparedTask({ taskId: latest.task.task_id, sections: latest.task.sections,
           startedAt: new Date(latest.task.created_at || Date.now()).getTime() });
@@ -226,11 +247,14 @@ export default function useReflections(options:ReflectionsStateOptions){
         }
       }
       if (latest.task && latest.task.status !== 'CREATED' && !isTerminalReflectionTaskStatus(latest.task.status)) {
+        if (submittingRef.current || recoveringTaskIdRef.current === latest.task.task_id) return;
+        const active = readActiveReflectionTask();
+        if (active && active.taskId !== latest.task.task_id) return;
         const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
-        writeActiveReflectionTask({ taskId: latest.task.task_id, sections,
+        writeActiveReflectionTask(active ?? { taskId: latest.task.task_id, sections,
           startedAt: new Date(latest.task.started_at || latest.task.created_at || Date.now()).getTime() || Date.now() });
         setViewMode('dashboard'); setSelectedReport(null);
-        setTaskStatus(`task · ${latest.task.status.toLowerCase()}`);
+        setTaskStatus(t('analysis.progress.reconnecting'));
         setLoading({ echoes: sections.includes('echoes'), traits: sections.includes('traits'), patterns: sections.includes('patterns') });
         setStreaming({ echoes: '', traits: '', patterns: '' }); setActiveRecoveryTick(tick => tick + 1);
         return;
@@ -256,7 +280,7 @@ export default function useReflections(options:ReflectionsStateOptions){
       }
     } catch (error) { if (isCurrent()) console.warn('[Reflections] latest task load failed:', error); }
     finally { if (isCurrent() && historyRead) setSavedReportsLoaded(true); }
-  }, [isAuthenticated, dateLocale]);
+  }, [isAuthenticated, dateLocale, t]);
 
   useEffect(() => {
     if (isAuthLoading) return;
@@ -336,12 +360,12 @@ export default function useReflections(options:ReflectionsStateOptions){
   }, [configModal.section]);
 
   const handleTaskEvent = useCallback((event: ReflectionTaskEvent) => {
-    const section = typeof event.payload?.section === 'string' ? event.payload.section as SectionKey : undefined;
-    const statusText = event.type
-      .replace('reflection.', '')
-      .replaceAll('.', ' · ')
-      .replace('client · task · created', 'task · created');
-    setTaskStatus(statusText);
+    const section = (['echoes', 'traits', 'patterns'] as const).find(value => value === event.payload?.section);
+    const progress = reflectionProgressKeys[event.type];
+    const statusText = section && event.type === 'reflection.section.started'
+      ? t('analysis.progress.section', { section: t(`analysis.papers.${section}.title`) })
+      : progress ? t(`analysis.progress.${progress}`) : '';
+    if (statusText) setTaskStatus(statusText);
 
     if (event.type === 'reflection.client.task.created') {
       const sections = Array.isArray(event.payload?.sections)
@@ -350,10 +374,9 @@ export default function useReflections(options:ReflectionsStateOptions){
       writeActiveReflectionTask({
         taskId: event.task_id,
         sections,
-        lastEventId: event.id,
         startedAt: Date.now(),
       });
-    } else if (event.id && event.task_id) {
+    } else if (event.sequence > 0 && event.id && event.task_id && event.type !== 'reflection.stream.connected') {
       const active = readActiveReflectionTask();
       if (active?.taskId === event.task_id) {
         writeActiveReflectionTask({ ...active, lastEventId: event.id });
@@ -364,10 +387,10 @@ export default function useReflections(options:ReflectionsStateOptions){
       clearActiveReflectionTask(event.task_id);
     }
 
-    if (section && ['echoes', 'traits', 'patterns'].includes(section)) {
+    if (section && statusText) {
       setStreaming(p => ({ ...p, [section]: statusText }));
     }
-  }, []);
+  }, [t]);
 
   const openReflectionBlogReport = useCallback((
     report: Omit<AnalysisReport, 'id' | 'timestamp'> & Partial<Pick<AnalysisReport, 'id' | 'timestamp'>>,
@@ -432,16 +455,45 @@ export default function useReflections(options:ReflectionsStateOptions){
     openReflectionBlogReport(report);
   }, [openReflectionBlogReport, retryReportSave, t]);
 
+  const handleStopAnalysis = async () => {
+    const active = readActiveReflectionTask();
+    if (!isAuthenticated || !active || stopInFlightRef.current) return;
+    stopInFlightRef.current = true;
+    setStoppingTask(true);
+    setStopError('');
+    const observation = observationRef.current;
+    try {
+      const task = await stopReflectionTask(active.taskId);
+      observation?.abort();
+      clearActiveReflectionTask(active.taskId);
+      setPendingSubmission(hasPendingReflectionSubmission());
+      setPreparedTask(null);
+      explicitStartTaskIdRef.current = null;
+      setLoading({ echoes: false, traits: false, patterns: false });
+      setStreaming({ echoes: '', traits: '', patterns: '' });
+      setErrors({ echoes: '', traits: '', patterns: '' });
+      setTaskStatus(t(task.error_summary === REFLECTION_TASK_STOPPED ? 'analysis.actions.stopped' : 'analysis.actions.alreadyEnded'));
+      void reloadSavedReports();
+    } catch {
+      setStopError(t('analysis.actions.stopFailed'));
+    } finally {
+      stopInFlightRef.current = false;
+      setStoppingTask(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
     const active = readActiveReflectionTask();
     if (!active || recoveringTaskIdRef.current === active.taskId) return;
 
-    let cancelled = false;
+    const observation = new AbortController();
+    observationRef.current = observation;
     recoveringTaskIdRef.current = active.taskId;
     setViewMode('dashboard');
     setSelectedReport(null);
-    setTaskStatus('task · reconnecting');
+    setErrors({ echoes: '', traits: '', patterns: '' });
+    setTaskStatus(t('analysis.progress.reconnecting'));
     const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
     setLoading({
       echoes: sections.includes('echoes'),
@@ -453,8 +505,13 @@ export default function useReflections(options:ReflectionsStateOptions){
     const restore = async () => {
       let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
       try {
-        const snapshot = await getReflectionTask(active.taskId);
-        if (cancelled) return;
+        const snapshot = await getReflectionTask(active.taskId, observation.signal);
+        if (observation.signal.aborted) return;
+        if (snapshot.error_summary === REFLECTION_TASK_STOPPED) {
+          clearActiveReflectionTask(active.taskId);
+          setTaskStatus(t('analysis.actions.stopped'));
+          return;
+        }
         if (snapshot.status === 'CREATED' && explicitStartTaskIdRef.current !== active.taskId) {
           setPreparedTask(active);
           clearActiveReflectionTask(active.taskId);
@@ -466,8 +523,9 @@ export default function useReflections(options:ReflectionsStateOptions){
           lastEventId: active.lastEventId,
           startPrepared: explicitStartTaskIdRef.current === active.taskId,
           onEvent: handleTaskEvent,
+          signal: observation.signal,
         });
-        if (cancelled) return;
+        if (observation.signal.aborted) return;
         er = bySection.echoes;
         tr = bySection.traits;
         pr = bySection.patterns;
@@ -477,21 +535,21 @@ export default function useReflections(options:ReflectionsStateOptions){
         clearActiveReflectionTask(active.taskId);
         setPreparedTask(null);
         explicitStartTaskIdRef.current = null;
-        setTaskStatus('task · restored');
+        setTaskStatus(previous => previous === t('analysis.progress.partial') ? previous : t('analysis.progress.completed'));
       } catch (e) {
-        if (!cancelled) {
+        if (!observation.signal.aborted) {
           const msg = e instanceof Error ? e.message : String(e);
           setErrors({ echoes: msg, traits: '', patterns: '' });
-          setTaskStatus('task · reconnect failed');
+          setTaskStatus(t('analysis.progress.reconnectFailed'));
         }
       } finally {
-        if (!cancelled) {
+        if (!observation.signal.aborted) {
           setLoading({ echoes: false, traits: false, patterns: false });
           setStreaming({ echoes: '', traits: '', patterns: '' });
         }
       }
 
-      if (!cancelled && (er.length || tr.length || pr.length)) {
+      if (!observation.signal.aborted && (er.length || tr.length || pr.length)) {
         const reportData = {
           echoes: er, traits: tr, patterns: pr,
           stats: { days: statsRef.current.totalDays, entries: statsRef.current.totalEntries, words: statsRef.current.totalWords },
@@ -503,10 +561,11 @@ export default function useReflections(options:ReflectionsStateOptions){
 
     void restore();
     return () => {
-      cancelled = true;
+      observation.abort();
+      if (observationRef.current === observation) observationRef.current = null;
       if (recoveringTaskIdRef.current === active.taskId) recoveringTaskIdRef.current = null;
     };
-  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, openTaskReport]);
+  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, openTaskReport, t]);
 
 
   // ── One-click analyze all ──
@@ -516,39 +575,54 @@ export default function useReflections(options:ReflectionsStateOptions){
       return;
     }
     setReportSaveError(''); setReportRetryTaskId(undefined);
+    setStopError('');
     setPreparedTask(null);
     setErrors({ echoes: '', traits: '', patterns: '' });
     setStreaming({ echoes: '', traits: '', patterns: '' });
-    setTaskStatus('task · preparing');
+    setTaskStatus(t('analysis.progress.preparing'));
     setViewMode('dashboard');
     setSelectedReport(null);
     setEchoes([]);
     setTraits([]);
     setPatterns([]);
     setLoading({ echoes: true, traits: true, patterns: true });
+    const observation = new AbortController();
+    observationRef.current = observation;
 
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
+    let observedTaskId: string | undefined;
     try {
       const bySection = await runReflectionsTask({
         language: i18n.language,
         sessionIds,
         analysisContent: { ...analysisContent },
-        onEvent: handleTaskEvent,
+        onEvent: event => {
+          observedTaskId = event.task_id;
+          handleTaskEvent(event);
+        },
+        signal: observation.signal,
       });
+      if (observation.signal.aborted) return;
+      if (observedTaskId) clearActiveReflectionTask(observedTaskId);
       er = bySection.echoes;
       tr = bySection.traits;
       pr = bySection.patterns;
       setEchoes(er);
       setTraits(tr);
       setPatterns(pr);
+      setTaskStatus(previous => previous === t('analysis.progress.partial') ? previous : t('analysis.progress.completed'));
     } catch (e) {
+      if (observation.signal.aborted) return;
       const msg = e instanceof Error ? e.message : String(e);
       setErrors({ echoes: msg, traits: '', patterns: '' });
       if (!readActiveReflectionTask()) setTaskStatus('');
     } finally {
-      setPendingSubmission(hasPendingReflectionSubmission());
-      setLoading({ echoes: false, traits: false, patterns: false });
-      setStreaming({ echoes: '', traits: '', patterns: '' });
+      if (observationRef.current === observation) observationRef.current = null;
+      if (!observation.signal.aborted) {
+        setPendingSubmission(hasPendingReflectionSubmission());
+        setLoading({ echoes: false, traits: false, patterns: false });
+        setStreaming({ echoes: '', traits: '', patterns: '' });
+      }
     }
 
     if (er.length || tr.length || pr.length) {
@@ -562,7 +636,7 @@ export default function useReflections(options:ReflectionsStateOptions){
   };
 
   const handleAnalyzeAll = async () => {
-    if (anyLoading || submittingRef.current) return;
+    if (anyLoading || submittingRef.current || stopInFlightRef.current) return;
     submittingRef.current = true;
     try {
     const active = readActiveReflectionTask();
@@ -577,19 +651,24 @@ export default function useReflections(options:ReflectionsStateOptions){
           setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
           setViewMode('dashboard');
           setSelectedReport(null);
-          setTaskStatus('task · reconnecting');
+          setErrors({ echoes: '', traits: '', patterns: '' });
+          setTaskStatus(t('analysis.progress.reconnecting'));
           setLoading({
             echoes: sections.includes('echoes'),
             traits: sections.includes('traits'),
             patterns: sections.includes('patterns'),
           });
           setStreaming({ echoes: '', traits: '', patterns: '' });
+          const observation = new AbortController();
+          observationRef.current = observation;
 
           try {
             const bySection = await resumeReflectionsTask(active.taskId, {
               lastEventId: active.lastEventId,
               onEvent: handleTaskEvent,
+              signal: observation.signal,
             });
+            if (observation.signal.aborted) return;
             const er = bySection.echoes;
             const tr = bySection.traits;
             const pr = bySection.patterns;
@@ -597,7 +676,7 @@ export default function useReflections(options:ReflectionsStateOptions){
             setTraits(tr);
             setPatterns(pr);
             clearActiveReflectionTask(active.taskId);
-            setTaskStatus('task · restored');
+            setTaskStatus(previous => previous === t('analysis.progress.partial') ? previous : t('analysis.progress.completed'));
             if (er.length || tr.length || pr.length) {
               const reportData = {
                 echoes: er, traits: tr, patterns: pr,
@@ -607,12 +686,16 @@ export default function useReflections(options:ReflectionsStateOptions){
               await openTaskReport(entry);
             }
           } catch (resumeError) {
+            if (observation.signal.aborted) return;
             const msg = resumeError instanceof Error ? resumeError.message : String(resumeError);
             setErrors({ echoes: msg, traits: '', patterns: '' });
-            setTaskStatus('task · reconnect failed');
+            setTaskStatus(t('analysis.progress.reconnectFailed'));
           } finally {
-            setLoading({ echoes: false, traits: false, patterns: false });
-            setStreaming({ echoes: '', traits: '', patterns: '' });
+            if (observationRef.current === observation) observationRef.current = null;
+            if (!observation.signal.aborted) {
+              setLoading({ echoes: false, traits: false, patterns: false });
+              setStreaming({ echoes: '', traits: '', patterns: '' });
+            }
           }
           return;
         }
@@ -685,5 +768,6 @@ export default function useReflections(options:ReflectionsStateOptions){
     setLoading({echoes:preparedTask.sections.includes('echoes'),traits:preparedTask.sections.includes('traits'),patterns:preparedTask.sections.includes('patterns')});
     setActiveRecoveryTick(tick=>tick+1);
   };
-  return {pendingSubmission,continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError};
+  const canStopAnalysis = isAuthenticated && Boolean(readActiveReflectionTask());
+  return {pendingSubmission,continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,canStopAnalysis,stoppingTask,stopError,handleStopAnalysis,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError};
 }
