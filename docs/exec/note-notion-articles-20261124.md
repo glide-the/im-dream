@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-25: 登记文章双向改选、确认与标题核对。 -->
 <!-- [Sync] 2026-11-25: 追加日历插入轻提示的桌面和窄屏验证。 -->
 <!-- [Input] 笔记外部文章需求、写作页、连接器和阅读组件。 -->
 <!-- [Output] 文章引用交付、空白区域另起一行修订、验证回执与验收状态。 -->
@@ -113,7 +114,7 @@ node_modules/.bin/eslint app/_dream/{App.tsx,i18n.ts} \
 
 本机截图位于 `frontend/output/playwright/note-notion-articles/`。其中 `calendar-inserted.png` 为跨日期插入后的提示，`focused-row-1220.png` 和 `focused-row-360.png` 为桌面和窄屏正在编辑的新行。真实账号写入、真实 Notion 阅读、物理设备软键盘和发布尚未验收。
 
-## 日历插入按钮的轻提示
+## 历史验证 · 日历插入后的轻提示
 
 此前的反馈显示在文章标题下方。点击“插入日记”后，本次修订将共享 Toast 锚定到所点按钮，箭头指向该按钮，多篇文章各自对应独立的插入入口。等待保存期间提示持续可见，成功、重复和失败结果沿用共享组件的 2.8 秒展示时间。用户可以继续点原按钮重试或关闭日历。桌面与窄屏的截图分别保存在 `frontend/output/playwright/note-notion-articles/calendar-tip-desktop.png` 和 `calendar-tip-narrow.png`。
 
@@ -127,3 +128,9 @@ node_modules/.bin/eslint app/_dream/{App.tsx,i18n.ts} \
 | `node_modules/.bin/eslint app/_dream/components/{CalendarNotionPanel.tsx,chat/Toast.tsx} e2e/note-notion-articles.spec.ts` | 0 | 专项文件无警告或错误 |
 
 本轮使用本机 Chrome 和隔离的认证、文章与日记数据。真实账户和物理设备待验收。
+
+## 日历文章的确认与标题切换
+
+在桌面 Chrome 中复现了第二篇文章的确认气泡遮住上一篇插入按钮的问题。写作页原先也只接收日历传入的地址，缺少原始标题。此次修订把确认气泡放到触发按钮的侧边。连续切换时同时替换标题、地址和触发按钮，提交入口只使用最后选中的文章。现有文本单元按完整地址保存日历标题，重开后每张卡片可打开对应的原文和预览。
+
+浏览器规格从写作页打开日历，在《上一份记录》和《设计会议》间双向切换。取消和 Esc 均核对保存请求数为零，确认后核对实际写入的原文和锚点。两篇文章保存重开后逐篇核对标题、原文链接和 react-notion-x 正文。桌面宽度为 1220 像素，窄屏为 360 像素，使用本机 Chrome 和隔离 HTTP 数据。真实账户、私有 Notion 页面和物理设备另行验收。

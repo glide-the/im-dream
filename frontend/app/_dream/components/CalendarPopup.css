@@ -1,4 +1,4 @@
-/* [Sync] 2026-11-25: place the journal insertion action beside each Notion document. */
+/* [Sync] 2026-11-25: style the journal confirmation actions beside the selected Notion article. */
 /* [Input] CalendarPopup semantic classes, shared theme tokens, and shared Modal surface. */
 /* [Output] Fixed month paper beside one naturally sized floating workspace, minimal inner rows and retained viewport-contained dialogs. */
 /* [Sync] 2026-10-07: style Codex-like repeat rows, the secondary schedule dialog, custom weekdays and an expandable advanced task section. */
@@ -890,4 +890,11 @@
   background: transparent; color: var(--color-action-primary); font: inherit; cursor: pointer;
 }
 .calendar-popup__insert-article:focus-visible {outline: 2px solid currentColor;}
-.calendar-popup__insert-article:disabled {opacity: .65;}
+.calendar-popup__insert-article[aria-disabled="true"] {opacity: .65; cursor: wait;}
+.calendar-popup__insert-choices {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .5rem;}
+.calendar-popup__insert-choices button {
+  padding: .4rem .7rem; min-height: 2.5rem; border: 1px solid currentColor; border-radius: .5rem;
+  color: inherit; background: transparent; font: inherit; cursor: pointer;
+}
+.calendar-popup__insert-choices button:last-child {background: var(--color-bg-paper); color: var(--color-text-primary);}
+.calendar-popup__insert-choices button:focus-visible {outline: 2px solid var(--color-bg-paper); outline-offset: 2px;}

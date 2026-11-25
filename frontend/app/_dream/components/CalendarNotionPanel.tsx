@@ -1,4 +1,4 @@
-// [Sync] 2026-11-25: anchor journal insertion feedback to the button that initiated the save.
+// [Sync] 2026-11-25: require a choice at the selected article button before saving its exact link and title.
 // [Sync] 2026-10-07: visible serial snapshot-version checks, distinct observed/loaded/verification guards and compact single-count safe-link content.
 // [Sync] 2026-10-06: show connector snapshot immediately, allow historical creation dates and verify today updates only while visible.
 // [Input] Calendar active/date/timezone, authenticated actor, shared connector transport and selected-day DTO.
@@ -16,6 +16,9 @@ import {calendarArticleHref} from './notes/notionArticleLinks';
 import { IconFile } from './chat/Icons';
 import Toast from './chat/Toast';
 
+type Insertion = {key: string; pageId: string; href: string; title: string; anchor: HTMLButtonElement;
+  status: 'confirming' | 'inserting' | 'inserted' | 'present' | 'insertFailed'};
+
 type Phase = 'loading' | 'success' | 'unconnected' | 'pending' | 'expired' | 'ambiguous' | 'failed';
 type Snapshot = { key: string; phase: Phase; data?: NotionTodayResponse; connectorContext?: string;
   error?: string; retryUntil?: number; failureStage?: 'probe' | 'read' | 'verify'; syncStatus?: 'applied' | 'syncing' | 'error' | 'disabled' };
@@ -26,7 +29,7 @@ const connectorContext = (connector: ResourceConnector) => JSON.stringify([conne
   connector.auth.status, connector.sources.map((source) => [source.type, source.id]).sort()]);
 
 export default function CalendarNotionPanel({ active, dateKey, timeZone, onSettings, onInsertArticle }: {
-  onInsertArticle: (href: string) => Promise<'inserted' | 'present'>;
+  onInsertArticle: (href: string, title: string) => Promise<'inserted' | 'present'>;
   active: boolean; dateKey: string; timeZone: string; onToday: (date: string) => void; onSettings: () => void;
 }) {
   const { user, isAuthenticated } = useAuth();
@@ -42,20 +45,25 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
   const key = JSON.stringify([isAuthenticated, user?.id, dateKey, effectiveZone, today]);
   const inserting = useRef(false);
   const tipId = useId();
-  const [insertion, setInsertion] = useState<{key: string; pageId: string; anchor: HTMLButtonElement; status: 'inserting' | 'inserted' | 'present' | 'insertFailed'} | null>(null);
+  const [insertion, setInsertion] = useState<Insertion | null>(null);
   const dismissTip = useCallback(() => {
     setInsertion(current => current === insertion ? null : current);
   }, [insertion]);
-  async function insertArticle(href: string, pageId: string, anchor: HTMLButtonElement) {
-    if (inserting.current) return;
+  const confirming = insertion?.status === 'confirming';
+  useEffect(() => {
+    if (confirming && (!active || insertion.key !== key)) dismissTip();
+  }, [confirming, active, insertion, key, dismissTip]);
+
+  async function confirmArticle() {
+    if (!insertion || !confirming || inserting.current || !active || insertion.key !== key || !insertion.anchor.isConnected) return;
     inserting.current = true;
-    const trigger = {key, pageId, anchor};
-    setInsertion({...trigger, status: 'inserting'});
+    insertion.anchor.focus({preventScroll: true});
+    setInsertion({...insertion, status: 'inserting'});
     try {
-      const status = await onInsertArticle(href);
-      setInsertion({...trigger, status});
+      const status = await onInsertArticle(insertion.href, insertion.title);
+      setInsertion({...insertion, status});
     } catch {
-      setInsertion({...trigger, status: 'insertFailed'});
+      setInsertion({...insertion, status: 'insertFailed'});
     } finally {
       inserting.current = false;
     }
@@ -316,9 +324,15 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
   const settings = <button type="button" className="calendar-popup__button" onClick={onSettings}>{t('calendar.notion.settings')}</button>;
 
   return <>
-    {insertion && <Toast id={tipId} anchor={insertion.anchor} hidden={!active || insertion.key !== key} message={t(`noteArticle.${insertion.status}`)}
+    {insertion && <Toast id={tipId} anchor={insertion.anchor} hidden={!active || insertion.key !== key}
+      message={t(`noteArticle.${insertion.status}`, {name: insertion.title})}
       role={insertion.status === 'insertFailed' ? 'alert' : 'status'}
-      onClose={insertion.status === 'inserting' ? undefined : dismissTip} />}
+      onClose={confirming || insertion.status === 'inserting' ? undefined : dismissTip}
+      onDismissRequest={dismissTip}
+      actions={confirming && <div className="calendar-popup__insert-choices">
+        <button type="button" onClick={() => {dismissTip(); insertion.anchor.focus({preventScroll: true});}}>{t('calendar.scheduledCancel')}</button>
+        <button type="button" onClick={() => void confirmArticle()}>{t('noteArticle.confirmInsert')}</button>
+      </div>} />}
     <header className="calendar-popup__section-heading">
       <h3>{t('calendar.notion.title')}</h3>
       {data ? <span className="calendar-popup__card-count" data-notion-count>
@@ -350,6 +364,8 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
             <h4>{t(`calendar.notion.${group}`)}</h4>
             <ul>{rows.map((item) => {
               const href = calendarArticleHref(item.pageId, item.url);
+              const selected = insertion?.key === key && insertion.pageId === item.pageId;
+              const title = item.title || t('calendar.notion.untitled');
               return <li key={item.pageId}>
               <span aria-hidden="true">{item.emoji || <IconFile />}</span>
               <div>{item.url ? <a className="calendar-popup__notion-title" href={item.url} target="_blank" rel="noopener noreferrer"
@@ -363,10 +379,15 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
                 {!item.url ? <p>{t('calendar.notion.urlUnavailable')}</p> : null}
               </div>
               {href && <button type="button" className="calendar-popup__insert-article"
-                disabled={insertion?.status === 'inserting'}
+                aria-disabled={insertion?.status === 'inserting'}
+                aria-haspopup="dialog" aria-expanded={selected && confirming}
+                aria-controls={selected && confirming ? tipId : undefined}
                 aria-label={t('noteArticle.insertNamed', {name: item.title || t('calendar.notion.untitled')})}
-                aria-describedby={insertion?.key === key && insertion.pageId === item.pageId ? tipId : undefined}
-                onClick={event => {void insertArticle(href, item.pageId, event.currentTarget);}}>{t('noteArticle.insert')}</button>}
+                aria-describedby={selected && !confirming ? tipId : undefined}
+                onClick={event => {
+                  if (inserting.current) return;
+                  setInsertion(selected && confirming ? null : {key, pageId: item.pageId, href, title, anchor: event.currentTarget, status: 'confirming'});
+                }}>{t('noteArticle.insert')}</button>}
             </li>;})}</ul>
           </section>;
         })}

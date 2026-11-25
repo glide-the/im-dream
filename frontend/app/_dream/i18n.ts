@@ -1,4 +1,4 @@
-// [Sync] 2026-11-25: localize Calendar insertion results and accessible journal row names.
+// [Sync] 2026-11-25: localize article-specific Calendar confirmation and insertion results and accessible journal row names.
 // [Sync] 2026-11-24: name the article continuation row and localize scoped read feedback.
 // [Sync] 2026-11-18: localize Notion card reading/details actions, JSON and renderer/image recovery.
 // [Input] Existing bilingual product strings and locale initialization.
@@ -99,8 +99,9 @@ const resources = {
       externalShare: {copy:'Copy link', view:'View', settings:'Settings', shareSettings:'Share settings', close:'Close', generalAccess:'General access', anyone:'Anyone on the web with this link', canView:'Can view', cannotView:'No access', accessRevoked:'Link access revoked', accessHint:'Anyone who knows this link can view this shared content.', revokeHint:'The current URL will stop working.', revokedHint:'This URL no longer allows access. Share the original content again to create a new link.', title:'External links', description:'Manage shared AI conversations and notes', publishFailed:'The conversation could not be shared. Please retry.', changed:'The conversation has changed. Close sharing and open it again.', linkHint:'Anyone with this link can read the text snapshot. You can revoke it in Settings → External links.', chat:'AI conversations', note:'Notes', active:'Active', revoked:'Revoked', status:'Status', activeCount:'Active links', content:'Content', link:'Share link', published:'Published', revokedAt:'Revoked at', revokedReason:'Revoked by the owner.', more:'Actions for {{title}}', open:'Open public page', source:'View original', revoke:'Revoke link', details:'Link details', refresh:'Refresh status', loading:'Loading links…', loadMore:'Load more', emptyActive:'No active links', emptyRevoked:'No revoked links', sourceDeleted:'Original content deleted', loadFailed:'Links could not be refreshed. Your last confirmed records are retained.', revokeFailed:'The link could not be revoked. Please retry.', unknown:'The result is not confirmed. Refresh the status.', revoking:'Revoking this link…', revokeSucceeded:'Link revoked.', noLongerActive:'This link has been revoked.', revokedCopy:'This link has been revoked. Click again to create a new link.', openFailed:'The content could not be opened. Refresh and retry.'},
       noteArticle: {
         read: 'Preview {{name}}', original: 'Open original', continueWriting: 'Write on a new line', line: 'Journal line {{number}}',
+        confirming: 'Insert “{{name}}” into the current journal?', confirmInsert: 'Confirm insertion',
         insert: 'Insert into journal', insertNamed: 'Insert {{name}} into the current journal',
-        inserting: 'Saving to the current journal…', inserted: 'Added to the current journal.', present: 'Already in the current journal.',
+        inserting: 'Saving to the current journal…', inserted: '“{{name}}” was added to the current journal.', present: 'The current journal already contains “{{name}}”.',
         insertFailed: 'Could not save this article to the current journal. Try again.',
         connection: 'Connect Notion in Settings to read this page here.',
         scope: 'Select this page or its database in Resource Links and sync the index.',
@@ -1312,8 +1313,9 @@ const resources = {
       externalShare: {copy:'拷贝链接', view:'查看', settings:'设置', shareSettings:'共享设置', close:'关闭', generalAccess:'通用访问权限', anyone:'网络上拥有该链接的任何人', canView:'可以查看', cannotView:'无法访问', accessRevoked:'链接访问已关闭', accessHint:'知道链接的任何人都可以查看这份分享内容。', revokeHint:'操作后，原地址将停止访问。', revokedHint:'此地址已停止访问。你可以从原内容重新分享，创建新的链接。', title:'外部链接', description:'管理已分享的AI对话和笔记', publishFailed:'对话分享失败，请重试。', changed:'对话已有更新，请关闭后重新打开分享。', linkHint:'持有链接的人可以阅读这份文字快照。你可以在设置的外部链接中使链接失效。', chat:'AI对话', note:'笔记', active:'有效', revoked:'已失效', status:'状态', activeCount:'有效链接', content:'内容', link:'分享链接', published:'发布时间', revokedAt:'失效时间', revokedReason:'失效原因：用户主动使链接失效。', more:'{{title}}的操作', open:'打开公开页面', source:'查看原内容', revoke:'使链接失效', details:'查看链接信息', refresh:'刷新状态', loading:'正在读取链接…', loadMore:'加载更多', emptyActive:'暂无有效链接', emptyRevoked:'暂无已失效链接', sourceDeleted:'原内容已删除', loadFailed:'链接更新失败，已保留上次确认的记录。', revokeFailed:'链接失效操作失败，请重试。', unknown:'操作结果待确认，请刷新状态。', revoking:'正在使此链接失效…', revokeSucceeded:'链接已失效。', noLongerActive:'此链接已失效。', revokedCopy:'此链接已失效，再次点击可创建新链接。', openFailed:'内容暂时无法打开，请刷新后重试。'},
       noteArticle: {
         read: '预览{{name}}', original: '打开原文', continueWriting: '另起一行', line: '日记第 {{number}} 行',
+        confirming: '将《{{name}}》插入当前日记？', confirmInsert: '确认插入',
         insert: '插入日记', insertNamed: '将《{{name}}》插入当前日记',
-        inserting: '正在保存到当前日记…', inserted: '已插入当前日记。', present: '当前日记已包含这篇文章。',
+        inserting: '正在保存到当前日记…', inserted: '已将《{{name}}》插入当前日记。', present: '当前日记已包含《{{name}}》。',
         insertFailed: '暂时未能保存到当前日记，请重试。',
         connection: '请在设置中连接或重新授权 Notion，再阅读这篇文章。',
         scope: '请在资源链接中选择此页面或所属数据库，并同步索引。',

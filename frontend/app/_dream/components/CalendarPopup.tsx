@@ -1,4 +1,4 @@
-// [Sync] 2026-11-25: route Calendar article insertion to the open Writing journal.
+// [Sync] 2026-11-25: send the confirmed article address and title to the open journal.
 // [Sync] 2026-11-02: include the existing diary first line and date in the original deletion confirmation.
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive Calendar with a month paper, exclusive task/diary/Notion panels, retained local state and viewport-contained tooltips/modals.
@@ -30,7 +30,7 @@ import { fetchFullClaudeThreadMessages } from './chat/threadSessionHydration';
 import './CalendarPopup.css';
 
 interface Props {
-  onInsertArticle: (href: string) => Promise<'present' | 'inserted'>;
+  onInsertArticle: (href: string, title: string) => Promise<'present' | 'inserted'>;
   onLoadEntry: (entry: CalendarEntry) => void;
   onClose: () => void;
   currentEntryId?: string | null;

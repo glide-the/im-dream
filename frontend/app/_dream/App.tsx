@@ -1,4 +1,4 @@
-// [Sync] 2026-11-25: insert Calendar articles into the currently edited journal and focus their continuation rows.
+// [Sync] 2026-11-25: insert explicitly confirmed Calendar references with their matching titles into the current journal.
 // [Sync] 2026-11-24: show URL-derived Notion articles and resume the last prose cell from blank notebook paper.
 // [Sync] 2026-11-12: expose frozen text-only note sharing from the original Writing toolbars.
 // [Sync] 2026-11-03: scope retained Chat to the authenticated user and refresh its reads on route return.
@@ -2120,7 +2120,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                           position: 'relative',
                           marginTop: 0
                         }}>
-                          <NoteNotionTextCell key={JSON.stringify([user?.id, state.id])} content={content}
+                          <NoteNotionTextCell key={JSON.stringify([user?.id, state.id])} content={content} articleTitles={textCell.notionArticleTitles}
                             ref={idx === state.cells.length - 1 ? lastWritingCell : undefined}
                             onTextChange={text => handleTextChange(cell.id, text)}
                             onCompositionStart={() => handleCompositionStart(cell.id)}
@@ -2529,14 +2529,14 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
       {showCalendarPopup && (
         <CalendarPopup
           key={JSON.stringify([user?.id, state?.id])}
-          onInsertArticle={async href => {
+          onInsertArticle={async (href, title) => {
             const engine = engineRef.current;
             const note = engine?.getState();
             if (!engine || !note || !isAuthenticated || selectedStateLoading || note.id !== state?.id) throw Error('NOTE_UNAVAILABLE');
-            const present = note.cells.some(cell => cell.type === 'text' && findNotionArticleLinks(cell.content).some(link => link.href === href));
-            if (!present) engine.appendTextLine(href);
+            const existing = note.cells.find((cell): cell is TextCell => cell.type === 'text' && findNotionArticleLinks(cell.content).some(link => link.href === href));
+            engine.insertNotionArticle(href, title, existing);
             await ensureSessionPersistedForAgent(note.id);
-            return present ? 'present' : 'inserted';
+            return existing ? 'present' : 'inserted';
           }}
           onLoadEntry={handleLoadEntry}
           currentEntryId={state?.id}

@@ -1,5 +1,5 @@
 // [Input] Actual Writing route, installed Chrome, isolated session/connector HTTP fixtures.
-// [Output] Actual card/input geometry, Calendar tips anchored to the selected article button while saving and on completion, clipboard, undo and narrow-screen evidence.
+// [Output] Actual card/input geometry, explicit Calendar confirmation, cancellation and title-to-link identity across two articles, clipboard, undo and narrow-screen evidence.
 // Changes only an intercepted journal DTO. Project/Episode artifacts, Run, Hook, model and real accounts are outside this journey.
 // [Pos] Provider-free browser journeys. All writes terminate at the fixture boundary.
 import {test, expect, type Locator, type Page} from '@playwright/test';
@@ -266,35 +266,70 @@ for (const failFirst of [false, true]) test(`calendar article insertion, first s
     })),
   }}));
   await page.getByRole('button',{name:'Calendar',exact:true}).click();
-  const dialog = page.getByRole('dialog');
+  const dialog = page.locator('.calendar-popup-modal');
   if (!failFirst) await dialog.getByRole('gridcell').filter({hasText:/^27$/}).click();
   await dialog.getByRole('tab',{name:'Notion',exact:true}).click();
-  const insert = dialog.getByRole('button',{name:'将《设计会议》插入当前日记'});
-  async function expectTipAtButton(tip: Locator) {
+  const insert = dialog.getByRole('button',{name:'将《设计会议》插入当前日记',exact:true});
+  const other = dialog.getByRole('button',{name:'将《上一份记录》插入当前日记',exact:true});
+  const confirmation = (name: string) => dialog.getByRole('dialog',{name:`将《${name}》插入当前日记？`,exact:true});
+  const choice = confirmation('设计会议');
+  const confirm = choice.getByRole('button',{name:'确认插入'});
+  async function expectTipAtButton(tip: Locator, button = insert) {
     await expect(tip).toBeInViewport({ratio:1});
-    await expect(insert).toHaveAttribute('aria-describedby', (await tip.getAttribute('id'))!);
-    await expect(dialog.getByRole('button',{name:'将《上一份记录》插入当前日记'})).not.toHaveAttribute('aria-describedby', /.+/);
-    const button = (await insert.boundingBox())!;
+    const rect = (await button.boundingBox())!;
     const hint = (await tip.boundingBox())!;
-    const center = button.x + button.width / 2;
+    if (await tip.getAttribute('role') === 'dialog') {
+      const centerY = rect.y + rect.height / 2;
+      expect(centerY).toBeGreaterThan(hint.y);
+      expect(centerY).toBeLessThan(hint.y + hint.height);
+      const gap = Math.max(rect.x - hint.x - hint.width, hint.x - rect.x - rect.width);
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThanOrEqual(12);
+      return;
+    }
+    const center = rect.x + rect.width / 2;
     expect(center).toBeGreaterThan(hint.x);
     expect(center).toBeLessThan(hint.x + hint.width);
-    const gap = Math.max(button.y - hint.y - hint.height, hint.y - button.y - button.height);
+    const gap = Math.max(rect.y - hint.y - hint.height, hint.y - rect.y - rect.height);
     expect(gap).toBeGreaterThanOrEqual(0);
     expect(gap).toBeLessThanOrEqual(12);
   }
+  const original = '正在编辑的日记';
   let finishSave!: () => void;
+  let attempts = 0;
   const pendingSave = new Promise<void>(resolve => {finishSave = resolve;});
   await page.route('**/api/sessions', async route => {
-    if (route.request().method() === 'POST') await pendingSave;
+    if (route.request().method() === 'POST') {attempts++; await pendingSave;}
     await route.fallback();
   });
-  rejectSave(failFirst);
+  await other.click();
+  await expectTipAtButton(confirmation('上一份记录'), other);
   await insert.click();
-  const pendingTip = dialog.getByRole('status').filter({hasText:'正在保存到当前日记'});
+  await expect(confirmation('上一份记录')).toHaveCount(0);
+  await expectTipAtButton(choice);
+  await other.click();
+  await expect(choice).toHaveCount(0);
+  await expectTipAtButton(confirmation('上一份记录'), other);
+  await insert.click();
+  await expectTipAtButton(choice);
+  await expect(editor).toHaveValue(original);
+  await testInfo.attach(failFirst ? 'article-confirm-narrow' : 'article-confirm-desktop', {body: await page.screenshot(), contentType:'image/png'});
+  await choice.getByRole('button',{name:'取消'}).click();
+  await expect(choice).toHaveCount(0);
+  await expect(insert).toBeFocused();
+  await insert.press('Enter');
+  await expect(choice).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(choice).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(editor).toHaveValue(original);
+  expect(attempts).toBe(0);
+
+  await insert.click();
+  rejectSave(failFirst);
+  await confirm.click();
   try {
-    await expectTipAtButton(pendingTip);
-    await expect(pendingTip).toHaveCSS('position', 'fixed');
+    await expectTipAtButton(dialog.getByRole('status').filter({hasText:'正在保存到当前日记'}));
     await expect(insert).toBeDisabled();
   } finally {
     finishSave();
@@ -303,24 +338,46 @@ for (const failFirst of [false, true]) test(`calendar article insertion, first s
     await expectTipAtButton(dialog.getByRole('alert').filter({hasText:'暂时未能保存到当前日记'}));
     rejectSave(false);
     await insert.click();
+    await confirm.click();
   }
-  const savedTip = dialog.getByRole('status').filter({hasText:failFirst ? /当前日记已包含|已插入当前日记/ : '已插入当前日记。'});
+  const savedTip = dialog.getByRole('status').filter({hasText:failFirst ? '当前日记已包含《设计会议》' : '已将《设计会议》插入当前日记'});
   await expectTipAtButton(savedTip);
   await testInfo.attach(failFirst ? 'calendar-tip-narrow' : 'calendar-tip-desktop', {body: await page.screenshot(), contentType: 'image/png'});
-  const expected = '正在编辑的日记\n' + article;
-  await expect.poll(() => writes.at(-1)?.cells[0].content).toBe(expected);
+  const first = original + '\n' + article;
+  await expect.poll(() => writes.at(-1)?.cells[0].content).toBe(first);
   await insert.click();
-  const duplicateTip = dialog.getByRole('status').filter({hasText:'当前日记已包含'});
+  await confirm.click();
+  const duplicateTip = dialog.getByRole('status').filter({hasText:'当前日记已包含《设计会议》'});
   await expectTipAtButton(duplicateTip);
   await expect(duplicateTip).toBeHidden();
-  await insert.click();
-  await expect(duplicateTip).toBeInViewport({ratio:1});
+  await other.click();
+  await confirmation('上一份记录').getByRole('button',{name:'确认插入'}).click();
+  await expectTipAtButton(dialog.getByRole('status').filter({hasText:'已将《上一份记录》插入当前日记'}), other);
+  const otherId = '42230b7547c3802e8cb4cde06b73d2ae';
+  const otherHref = 'https://www.notion.so/' + otherId;
+  const expected = first + '\n' + otherHref;
+  await expect.poll(() => writes.at(-1)?.cells[0].content).toBe(expected);
   await page.keyboard.press('Escape');
-  await expect(page.getByText('当前日记已包含这篇文章。')).toHaveCount(0);
   await page.reload();
   await expect(editor).toHaveValue(expected);
-  await expect(page.locator('.note-article-row').nth(1).getByRole('link')).toHaveAttribute('href',article);
+  const cards = page.locator('.note-article');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).getByRole('button')).toHaveAccessibleName('预览设计会议');
+  await expect(cards.nth(0).getByRole('link')).toHaveAttribute('href',article);
+  await expect(cards.nth(1).getByRole('button')).toHaveAccessibleName('预览上一份记录');
+  await expect(cards.nth(1).getByRole('link')).toHaveAttribute('href',otherHref);
   expect(reads).toEqual([]);
+  await page.route('**/api/connectors/notion/articles/*', route => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    const title = id === pageId ? '设计会议' : '上一份记录';
+    return route.fulfill({json:{pageId:id, title, markdown:'## ' + title + '正文'}});
+  });
+  for (const name of ['设计会议','上一份记录']) {
+    await page.getByRole('button',{name:'预览' + name,exact:true}).click();
+    const reader = page.getByRole('dialog',{name,exact:true});
+    await expect(reader.locator('.notion-text, .notion-h2').filter({hasText:name+'正文'}).first()).toBeVisible();
+    await reader.getByRole('button',{name:'关闭页面预览'}).click();
+  }
 });
 
 test('insert between two existing journal lines and reuse the empty row', async ({page}) => {

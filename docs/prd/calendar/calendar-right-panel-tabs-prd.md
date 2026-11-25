@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-25: 文章确认提示支持改选和取消。 -->
 <!-- [Sync] 2026-11-25: 日历文章条目的插入操作使用即时浮动提示。 -->
 <!-- [Sync] 2026-10-07: current backend uses pinned Admin sync-run request/claim/renew/finish and accepted-version cache; technical71/11/overview1 and backend lanes passed, normal cap/claims/drain remain unproven; pre-status full history preserved. -->
 <!-- [Sync] 2026-10-07: 前端新增9及完整63技术旅程、freshbuild/tsc/focusedESLint实际通过；正常新UIharness限制与后端独立门禁保留，当前文档/清理待回执。 -->
@@ -21,7 +22,7 @@
 
 当前状态：页签、浮空内部留白、快照版本发现及Settings恢复叶子已实现，完整四spec71、受影响Scheduled11与旧Settings overview1隔离技术旅程已通过。后端Admin四精确operation与接受缓存源码、Dream83/3/52及Admin消费者6/公开worker2技术验证已通过；**当前正常能力目录仍缺新四operation/schema，正常发布、旧writer drain与claims切换未验证**。这些结果不声明正常自动恢复已启用；回执分别见[前端§14.5](../../exec/notion-calendar-sync-refresh-20261007.md#145-r2-完整旅程最终实际回执)及[后端§13](../../exec/notion-sync-ownership-dream-integration-20261007.md#13-本仓后端实际复测与范围)。本次状态同步前[完整PRD](./calendar-right-panel-tabs-prd-pre-backend-status-20261007-history.md)保留原文；下列旧Sync注释为各阶段历史时点。
 
-日历 Notion 条目的“插入日记”把文章作为独立一行加到当前打开的日记。浏览日期仅用于筛选列表。点击后保存提示紧邻原按钮浮出，箭头指向所选文章的按钮。保存完成、地址已有和保存失败各有结果提示，稍后自动消失，失败可点击原按钮重试。[写作需求与页面骨架](../notes/notion-article-links.md)
+点 Notion 文章旁的“插入日记”，按钮侧边显示所点标题、“取消”和“确认插入”。点另一篇文章可直接改选，取消保留原日记。确认后将所选文章追加为当前日记的独立一行。浏览日期只筛选列表。保存完成、地址已有和保存失败各有反馈，失败可重新确认并重试。[写作需求与页面骨架](../notes/notion-article-links.md)
 
 ## 1. 背景与问题
 
