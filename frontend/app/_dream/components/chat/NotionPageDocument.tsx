@@ -1,5 +1,6 @@
 'use client';
-// [Input] Saved page projection and the existing resolved application theme.
+// [Sync] 2026-11-24: accept shared page fields from authorized Writing and Chat reads.
+// [Input] Page projection and the existing resolved application theme.
 // [Output] react-notion-x body with shared code/math extensions and recoverable image feedback.
 // [Pos] On-demand browser document; no Notion client, resource discovery or page re-fetch.
 // [Sync] 2026-11-18: register host extensions and keep page chrome in the existing Modal.
@@ -12,7 +13,7 @@ import {getTheme, onThemeChange} from '../../utils/theme';
 import ChatMath from './ChatMath';
 import MermaidBlock from './MermaidBlock';
 import {createNotionRecordMap, notionPreviewUrl} from './notionRecordMapAdapter';
-import type {NotionWorkspacePreviewData} from './notionPreviewProjection';
+import type {NotionDocumentData} from './notionRecordMapAdapter';
 
 function NotionLink({href, children, ...props}: AnchorHTMLAttributes<HTMLAnchorElement>) {
   const safe = notionPreviewUrl(href);
@@ -38,7 +39,7 @@ function NotionImage({src, alt, style, className, onLoad}: Pick<ImgHTMLAttribute
 }
 const components = {Code: NotionCode, Equation: NotionEquation, Image: NotionImage, Link: NotionLink, PageLink: NotionLink};
 
-export default function NotionPageDocument({data}: {data: NotionWorkspacePreviewData}) {
+export default function NotionPageDocument({data}: {data: NotionDocumentData}) {
   const [theme, setTheme] = useState(getTheme);
   useEffect(() => onThemeChange(next => setTheme(next)), []);
   const recordMap = useMemo(() => createNotionRecordMap(data), [data]);

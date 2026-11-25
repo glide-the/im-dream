@@ -1,3 +1,4 @@
+// [Sync] 2026-11-24: inject a reader failure at the component export independently of its shared data type.
 // [Sync] 2026-11-18: replay actual tab-numbered Read envelopes through the production message list and history recovery.
 // [Input] Production ChatMessageList/Modal/NotionRenderer and original public tool/history DTOs.
 // [Output] Isolated Chrome evidence for reader geometry, JSON/download, failures and history lifecycle.
@@ -65,7 +66,13 @@ async function harness(rendererFault = false) {
     optimizeDeps: {entries: [], include: ['react', 'react-dom/client', 'react/jsx-runtime', 'mermaid', 'react-notion-x', 'react-notion-x/third-party/code', 'htmlparser2', 'mdast-util-from-markdown', 'mdast-util-gfm', 'micromark-extension-gfm']},
     server: {host: '127.0.0.1', port: 0}, plugins: [{name: 'notion-preview-isolated-harness', enforce: 'pre',
       transform(code, id) {
-        if (rendererFault && id.endsWith('/NotionPageDocument.tsx')) return code.replace('export default function NotionPageDocument({data}: {data: NotionWorkspacePreviewData}) {', 'export default function NotionPageDocument({data}: {data: NotionWorkspacePreviewData}) { if (!window.notionRendererRecovered) {throw Error("Isolated renderer fault");}');
+        if (rendererFault && id.endsWith('/NotionPageDocument.tsx')) {
+          return code.replace('export default function NotionPageDocument', 'function NotionPageDocument') + `
+            export default function FaultableDocument(props: Parameters<typeof NotionPageDocument>[0]) {
+              if (!window.notionRendererRecovered) throw Error("Isolated renderer fault");
+              return <NotionPageDocument {...props}/>;
+            }`;
+        }
       },
       configureServer(vite) {vite.middlewares.use((req, res, next) => {
         if (req.url !== '/notion-preview') return next();

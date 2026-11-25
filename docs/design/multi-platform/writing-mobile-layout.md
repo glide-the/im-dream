@@ -16,7 +16,7 @@
 
 ## 目标与边界
 
-- iOS/Android沿原`WritingView.native`和局部`WritingDocument`；Web窄屏沿原App、Router和Sidebar。原生横屏继续移动排版，桌面保持18px/1.8、原全页线、正文心情入口、工具和Writing/Chat分栏。
+- iOS/Android沿原`WritingView.native`和局部`WritingDocument`；Web窄屏沿原App、Router和Sidebar。原生横屏继续移动排版，桌面保持18px/1.8、纯色纸面、正文心情入口、工具和Writing/Chat分栏。
 - 复用原EditorEngine、`useSessionLifecycle`、`useTextCells`、`StateChooser`与`StateCube`。会话恢复优先级、时区和跨日规则、前3项与锁定面、选择即提交、原保存及认证权限保持。
 - 当前源码实现布局与消息接线。原生手指触摸、系统文字缩放、安全区及软键盘仍需设备验收；浏览器模拟指针和原生组件边界分别记录资格。
 - 新依赖、全局导航入口、字号设置、全局状态服务、后端接口和数据库变更退出范围。
@@ -29,7 +29,7 @@
 | --- | --- |
 | 移动范围 | `App`以`mobileWriting`覆盖原移动识别和原生局部文档，根节点`data-mobile-layout`限定全部新增样式；桌面保留原样式分支 |
 | 字体与行框 | 原18px字体栈与字体资源保留，`--writing-font-size`和`--writing-line-height: 1.6em`供textarea及高亮层共同消费，默认行高28.8px；缩放后的实际字号同步改变行框 |
-| 稿纸线 | 全页保留纸色和竖向页边线；移动横线绘制在原textarea背景内，从每个单元的首个行框下沿起线，周期等于相同行高。建议/Chat卡片高度与后续正文相位独立 |
+| 写作背景 | 桌面、窄屏和共用网页的原生写作表面使用纸色。正文、引用和输入行按各自内容决定高度。 |
 | 盒模型 | 移动textarea采用block、border-box、零padding和零margin，空输入采用rows=1且最小高度一行；高亮层采用相同字体、行高、换行和零内外边距。用户换行与单元间原文保持 |
 | 元信息 | 日期与标签在原Chooser位置自然换行；移动移除正文心情按钮、32px槽、10.8px段距及首段0.4px补偿。桌面原值保持 |
 | 重排 | `useTextCells`在React提交文字后、引用就绪、字体ready/loadingdone、实际宽度或有效字体尺寸变化时，复用auto→scrollHeight更新。ResizeObserver只用宽度和字体签名调度一帧，避免高度观察循环 |

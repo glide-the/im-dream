@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: send the confirmed article address and title to the open journal.
 // [Sync] 2026-11-02: include the existing diary first line and date in the original deletion confirmation.
 // [Input] Calendar storage, authenticated diary/scheduled-task APIs, locale, timezone, and shared dialog/navigation boundaries.
 // [Output] Accessible responsive Calendar with a month paper, exclusive task/diary/Notion panels, retained local state and viewport-contained tooltips/modals.
@@ -29,6 +30,7 @@ import { fetchFullClaudeThreadMessages } from './chat/threadSessionHydration';
 import './CalendarPopup.css';
 
 interface Props {
+  onInsertArticle: (href: string, title: string) => Promise<'present' | 'inserted'>;
   onLoadEntry: (entry: CalendarEntry) => void;
   onClose: () => void;
   currentEntryId?: string | null;
@@ -630,7 +632,7 @@ function ScheduledTaskCard({ task, triggers, onAction, onOpenThread, onOpenResul
     </Modal>
   </>;
 }
-export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, onEntryDeleted, timezone,
+export default function CalendarPopup({ onInsertArticle, onLoadEntry, onClose, currentEntryId, onEntryDeleted, timezone,
   initialDateKey, onOpenTaskThread, onArrangeTask, onOpenSettings }: Props) {
   const { isAuthenticated, user } = useAuth();
   const { t, i18n } = useTranslation();
@@ -1075,7 +1077,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
           <section className="calendar-popup__section calendar-popup__notion-section" role="tabpanel"
             id={`${tabsId}-notion-panel`} aria-labelledby={`${tabsId}-notion-tab`} hidden={activeTab !== 'notion'} inert={activeTab !== 'notion'}
             ref={(element) => { if (element) panelRefs.current.set('notion', element); }}>
-            <CalendarNotionPanel active={activeTab === 'notion'} dateKey={selectedDate} timeZone={timezone}
+            <CalendarNotionPanel onInsertArticle={onInsertArticle} active={activeTab === 'notion'} dateKey={selectedDate} timeZone={timezone}
               onToday={(date) => { handleDateClick(date); const parsed = parseDateKey(date); setCurrentMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1)); }}
               onSettings={() => { onClose(); onOpenSettings?.(); }} />
           </section>

@@ -1,5 +1,6 @@
 /**
  * EditorEngine.ts
+ * [Sync] 2026-11-25: keep the confirmed Calendar title with its exact URL in the original text cell.
  * Clean editor engine based on trace-based energy model
  * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
  *   even when inserting between two widgets (was only guarding the last-cell case).
@@ -33,6 +34,7 @@ export interface TextCell {
   id: string;
   type: 'text';
   content: string;  // Plain text content
+  notionArticleTitles?: Record<string, string>; // Calendar display titles keyed by the exact source URL.
 }
 
 export interface WidgetCell {
@@ -176,12 +178,37 @@ export class EditorEngine {
     // Kept for backward compatibility, but does nothing
   }
 
+  /** Save a confirmed Calendar reference; an existing link can acquire its article title without changing the prose. */
+  insertNotionArticle(href: string, title: string, existing?: TextCell) {
+    if (existing) {
+      if (existing.notionArticleTitles?.[href] !== title) {
+        existing.notionArticleTitles = {...existing.notionArticleTitles, [href]: title};
+        this.notifyChange();
+      }
+      return;
+    }
+    let last = this.state.cells.at(-1);
+    if (!last || last.type !== 'text') {
+      last = {id: generateId(), type: 'text', content: ''};
+      this.state.cells.push(last);
+    }
+    last.notionArticleTitles = {...last.notionArticleTitles, [href]: title};
+    const separator = last.content && !last.content.endsWith('\n') ? '\n' : '';
+    this.updateTextCell(last.id, last.content + separator + href);
+  }
+
   // @@@ Update a specific text cell by ID
   updateTextCell(cellId: string, newText: string) {
     const cell = this.state.cells.find(c => c.id === cellId);
     if (!cell || cell.type !== 'text') return;
 
-    (cell as TextCell).content = newText;
+    cell.content = newText;
+    if (cell.notionArticleTitles) {
+      for (const href of Object.keys(cell.notionArticleTitles)) {
+        if (!newText.includes(href)) delete cell.notionArticleTitles[href];
+      }
+      if (Object.keys(cell.notionArticleTitles).length === 0) delete cell.notionArticleTitles;
+    }
     this.applyTextUpdate();
   }
 

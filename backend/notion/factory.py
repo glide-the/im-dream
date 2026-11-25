@@ -1,3 +1,4 @@
+# [Sync] 2026-11-24: read one note-linked page within the active connector scope and recheck before release.
 # [Sync] 2026-10-07: share owned sync flow, enforce renewal completion budgets after cancellation, read strict accepted versions, and separate saved-selection errors.
 # [Sync] 2026-10-06: Calendar reads selected canonical snapshots and binds today-only verification to version/credential context.
 # [Input] Notion connector auth, operation, Admin DTO store, and sync helpers.
@@ -584,6 +585,37 @@ class NotionConnectorFacade:
         for record in records:
             record["selected"] = record.get("page_id") in selected_ids
         return records
+
+    async def read_article(self, page_id: str) -> dict[str, str]:
+        """Read a note reference through the actor's current selected Notion index."""
+        from .today import NotionTodayError, snapshot_records
+
+        connector = await asyncio.to_thread(self._resolve_connector)
+        if str(connector.get("platform") or "").lower() != "notion":
+            raise NotionConnectorNotFoundError("No active Notion connector.")
+        if connector.get("auth_status") != "authenticated":
+            raise NotionAuthRequiredError("Notion authorization is required.")
+        credential = self._credential_identity()
+        snapshot = await asyncio.to_thread(self._accepted_snapshot, connector)
+        if snapshot is None:
+            raise NotionTodayError("NOTION_SNAPSHOT_NOT_READY", 409)
+        records, _ = snapshot_records(sync.filter_snapshot_for_connector(snapshot, connector))
+        page = records.get(page_id)
+        if page is None:
+            raise NotionTodayError("NOTION_RESOURCE_NOT_SELECTED", 403)
+
+        home = self.credential_store.effective_home(self.user_id)
+        result = await operations.NotionOperationClient(home).get_page_markdown(page_id)
+        # The user may remove a source or reconnect while the remote read is in flight.
+        current = await asyncio.to_thread(self.connector_store.get_active_connector_for_user, self.user_id)
+        if (current is None or self._read_context(current) != self._read_context(connector)
+                or self._accepted_identity(current) != self._accepted_identity(connector)
+                or self._credential_identity() != credential):
+            raise NotionTodayError("NOTION_CONTEXT_CHANGED", 409)
+        markdown = (result.data or {}).get("markdown")
+        if not result.success or not isinstance(markdown, str):
+            raise NotionOperationError("Page body unavailable.")
+        return {"pageId": page_id, "title": page["title"], "markdown": markdown}
 
     async def today_pages(self, date_key: str, time_zone: str, *, now: datetime | None = None,
                           validate_remote: bool = False, snapshot_version: str | None = None) -> dict:

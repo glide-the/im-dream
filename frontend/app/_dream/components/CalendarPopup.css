@@ -1,3 +1,4 @@
+/* [Sync] 2026-11-25: style the journal confirmation actions beside the selected Notion article. */
 /* [Input] CalendarPopup semantic classes, shared theme tokens, and shared Modal surface. */
 /* [Output] Fixed month paper beside one naturally sized floating workspace, minimal inner rows and retained viewport-contained dialogs. */
 /* [Sync] 2026-10-07: style Codex-like repeat rows, the secondary schedule dialog, custom weekdays and an expandable advanced task section. */
@@ -302,7 +303,7 @@
 .calendar-popup__notion-group { margin-top: 1.5rem; }
 .calendar-popup__notion-group h4 { margin: 0 0 0.75rem; color: var(--color-text-primary); font-size: 0.94rem; }
 .calendar-popup__notion-group ul { display: grid; gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
-.calendar-popup__notion-group li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: 0.5rem; }
+.calendar-popup__notion-group li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; gap: 0.5rem; }
 .calendar-popup__notion-group svg { width: 1.1rem; height: 1.1rem; }
 .calendar-popup__notion-group strong { display: block; overflow-wrap: anywhere; color: var(--color-text-primary); }
 .calendar-popup__notion-group a { display: inline-block; padding: 0.45rem 0; color: var(--color-action-primary); }
@@ -883,3 +884,17 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+.calendar-popup__insert-article {
+  align-self: start; min-height: 2.75rem; padding: 0 .5rem; border: 0; border-radius: .35rem;
+  background: transparent; color: var(--color-action-primary); font: inherit; cursor: pointer;
+}
+.calendar-popup__insert-article:focus-visible {outline: 2px solid currentColor;}
+.calendar-popup__insert-article[aria-disabled="true"] {opacity: .65; cursor: wait;}
+.calendar-popup__insert-choices {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .5rem;}
+.calendar-popup__insert-choices button {
+  padding: .4rem .7rem; min-height: 2.5rem; border: 1px solid currentColor; border-radius: .5rem;
+  color: inherit; background: transparent; font: inherit; cursor: pointer;
+}
+.calendar-popup__insert-choices button:last-child {background: var(--color-bg-paper); color: var(--color-text-primary);}
+.calendar-popup__insert-choices button:focus-visible {outline: 2px solid var(--color-bg-paper); outline-offset: 2px;}
