@@ -1,3 +1,4 @@
+# [Sync] 2026-11-26: pin Runtime 0.1.13 for non-PDF Read calls with blank pages.
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Backend dependency manifests and Docker image specification.
 # [Output] Static regression proof that the immutable Dream SDK, default public
@@ -33,7 +34,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.12"
+RUNTIME_VERSION = "0.1.13"
 NOTION_CLI_VERSION = "0.15.1"
 
 

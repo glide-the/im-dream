@@ -3,6 +3,7 @@
 # [Pos] Local Runtime storage adapter; no database, model, historical tool execution or file sync.
 # [Sync] 2026-11-04: initialize missing cross-platform transcripts without changing session identity.
 # [Sync] 2026-11-08: retain Runtime parallel results and meta injections; reconcile saved stopped text without replay.
+# [Sync] 2026-11-26: identify newly constructed records with the selected Dream Runtime release.
 from __future__ import annotations
 
 import errno
@@ -18,6 +19,7 @@ from functools import wraps
 from pathlib import Path
 from uuid import UUID, NAMESPACE_URL, uuid5
 
+from .sdk_env import DREAM_CLAUDE_CLI_VERSION
 from .session_files import ClaudeResumeStorageError, _runtime_project_name
 
 FORMAT = "ink-admin-history/1"
@@ -66,7 +68,7 @@ def history_records(messages: list[dict], *, thread_id: str, session_id: str, cw
         message = {"role": role, "content": content}
         if role == "assistant":
             message.update(id=str(uuid5(NAMESPACE_URL, uid + "/message")), type="message", model="<synthetic>", stop_reason="tool_use" if tool else "end_turn", stop_sequence=None, usage={"input_tokens": 0, "output_tokens": 0}, container=None, context_management=None)
-        records.append({"parentUuid": records[-1]["uuid"] if records else None, "isSidechain": False, "type": role, "uuid": uid, "sessionId": session_id, "timestamp": last_time.isoformat(timespec="milliseconds"), "cwd": cwd, "version": "0.1.12", "message": message})
+        records.append({"parentUuid": records[-1]["uuid"] if records else None, "isSidechain": False, "type": role, "uuid": uid, "sessionId": session_id, "timestamp": last_time.isoformat(timespec="milliseconds"), "cwd": cwd, "version": DREAM_CLAUDE_CLI_VERSION, "message": message})
 
     for item in messages:
         identity = item.get("id")

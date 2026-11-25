@@ -1,3 +1,4 @@
+# [Sync] 2026-11-26: pin Runtime 0.1.13 for non-PDF Read calls with blank pages.
 # [Sync] 2026-11-18: keep server trace signing/export configuration out of CLI and MCP children.
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume backend/.env, process env, thread-projected Notion CLI credentials, and ClaudeAgentOptions-like objects.
@@ -120,7 +121,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.145"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.12"
+DREAM_CLAUDE_CLI_VERSION = "0.1.13"
 DREAM_CLAUDE_RUNTIME_ENTRYPOINT = "cli.js"
 DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT = f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"

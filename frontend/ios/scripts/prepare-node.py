@@ -7,6 +7,7 @@
 # [Sync] 2026-10-25: retain original SandboxManager; the existing deployment setting disables the command sandbox.
 # [Sync] 2026-10-30: package only the pinned official Linux ARM64 ntn executable and its MIT notice for the existing command interpreter.
 # [Sync] 2026-11-03: include the same-version Runtime Linux ARM64 ripgrep and bind only its iOS command selection to the verified guest executable.
+# [Sync] 2026-11-26: derive the archive cache name from the locked Runtime version.
 import base64
 import hashlib
 import json
@@ -83,7 +84,7 @@ def prepare():
         bundle.extractall(node)
     runtime = IOS / "RuntimeArtifacts"
     runtime.mkdir(exist_ok=True)
-    archive = runtime / "runtime-0.1.12-darwin-arm64.tgz"
+    archive = runtime / f"runtime-{LOCK['runtime']['version']}-darwin-arm64.tgz"
     download(LOCK["runtime"], archive)
     with tarfile.open(archive) as bundle:
         bundle.extractall(runtime, filter="data")
