@@ -1,4 +1,5 @@
 // [Input] Actual Writing route, installed Chrome, isolated session/connector HTTP fixtures.
+// [Sync] 2026-11-25: verify the actual Calendar save payload against the closed text-cell shape.
 // [Output] Actual card/input geometry, explicit Calendar confirmation, cancellation and title-to-link identity across two articles, clipboard, undo and narrow-screen evidence.
 // Changes only an intercepted journal DTO. Project/Episode artifacts, Run, Hook, model and real accounts are outside this journey.
 // [Pos] Provider-free browser journeys. All writes terminate at the fixture boundary.
@@ -343,20 +344,22 @@ for (const failFirst of [false, true]) test(`calendar article insertion, first s
   const savedTip = dialog.getByRole('status').filter({hasText:failFirst ? '当前日记已包含《设计会议》' : '已将《设计会议》插入当前日记'});
   await expectTipAtButton(savedTip);
   await testInfo.attach(failFirst ? 'calendar-tip-narrow' : 'calendar-tip-desktop', {body: await page.screenshot(), contentType: 'image/png'});
-  const first = original + '\n' + article;
+  const first = original + '\n[设计会议](<' + article + '>)';
   await expect.poll(() => writes.at(-1)?.cells[0].content).toBe(first);
   await insert.click();
   await confirm.click();
   const duplicateTip = dialog.getByRole('status').filter({hasText:'当前日记已包含《设计会议》'});
   await expectTipAtButton(duplicateTip);
   await expect(duplicateTip).toBeHidden();
+  const saveRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/api/sessions');
   await other.click();
   await confirmation('上一份记录').getByRole('button',{name:'确认插入'}).click();
   await expectTipAtButton(dialog.getByRole('status').filter({hasText:'已将《上一份记录》插入当前日记'}), other);
   const otherId = '42230b7547c3802e8cb4cde06b73d2ae';
   const otherHref = 'https://www.notion.so/' + otherId;
-  const expected = first + '\n' + otherHref;
-  await expect.poll(() => writes.at(-1)?.cells[0].content).toBe(expected);
+  const expected = first + '\n[上一份记录](<' + otherHref + '>)';
+  await expect.poll(() => writes.at(-1)?.cells).toEqual([{id:'old-text', type:'text', content:expected}]);
+  await testInfo.attach('calendar-session-save', {body:(await saveRequest).postData()!, contentType:'application/json'});
   await page.keyboard.press('Escape');
   await page.reload();
   await expect(editor).toHaveValue(expected);

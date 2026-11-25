@@ -1,7 +1,10 @@
+// [Sync] 2026-11-25: encode Calendar titles as Markdown links inside the supported text-cell content.
 // [Sync] 2026-11-25: resolve the selected Calendar page to an insertable article URL.
 // [Input] Unmodified Writing TextCell prose.
 // [Output] Ordered source ranges, original URLs and page identities for inline Notion articles.
 // [Pos] Local presentation only. The connector owns page authorization.
+import type {TextCell} from '../../engine/EditorEngine';
+
 export interface NotionArticleLink {
   start: number;
   end: number;
@@ -18,7 +21,7 @@ const adjacentProse = new RegExp(`((?:${uuid}))(?=[\\p{Script=Han}\\p{Script=Hir
 const blockWithPunctuation = new RegExp(`(#(?:${uuid}))[.,!;:'\\])]+$`, 'i');
 const articleHosts = new Set(['notion.so', 'www.notion.so', 'app.notion.com', 'notion.site']);
 
-export function findNotionArticleLinks(text: string): NotionArticleLink[] {
+function findBareLinks(text: string): NotionArticleLink[] {
   if (!text.includes('://')) return [];
   const links: NotionArticleLink[] = [];
   // Consume ordinary URLs as a whole so a Notion URL inside their query is still ordinary text.
@@ -54,6 +57,49 @@ export function findNotionArticleLinks(text: string): NotionArticleLink[] {
     links.push({start: match.index, end: match.index + href.length, href, pageId, label: title || `Notion · ${pageId.slice(-8)}`});
   }
   return links;
+}
+
+/** Angle-bracket destinations keep the original query and fragment, including literal parentheses. */
+export function formatNotionArticleLink(href: string, title: string): string {
+  const label = title.replace(/[\r\n]+/g, ' ').replace(/[\\[\]]/g, '\\$&');
+  return `[${label}](<${href}>)`;
+}
+
+export function findNotionArticleLinks(text: string): NotionArticleLink[] {
+  if (!text.includes('](<')) return findBareLinks(text);
+  const links: NotionArticleLink[] = [];
+  let cursor = 0;
+  function appendBare(end: number) {
+    for (const link of findBareLinks(text.slice(cursor, end))) {
+      links.push({...link, start: cursor + link.start, end: cursor + link.end});
+    }
+  }
+  const named = /\[((?:\\[^\r\n]|[^\\[\]\r\n])+)\]\(<([^<>\s]+)>\)/g;
+  for (const match of text.matchAll(named)) {
+    const href = match[2];
+    const [link] = findBareLinks(href);
+    if (link?.href !== href) continue;
+    appendBare(match.index);
+    cursor = match.index + match[0].length;
+    links.push({...link, start: match.index, end: cursor, label: match[1].replace(/\\([\\[\]])/g, '$1')});
+  }
+  appendBare(text.length);
+  return links;
+}
+
+/** Recover a draft from the client that put article titles outside the published Session schema. */
+export function recoverNotionArticleDraft(cell: TextCell): TextCell {
+  if (!('notionArticleTitles' in cell)) return cell;
+  const {notionArticleTitles, ...restored} = cell;
+  if (notionArticleTitles && typeof notionArticleTitles === 'object') {
+    const titles = notionArticleTitles as Record<string, unknown>;
+    for (const link of findNotionArticleLinks(cell.content).reverse()) {
+      const title = titles[link.href];
+      if (typeof title !== 'string' || !title.trim()) continue;
+      restored.content = restored.content.slice(0, link.start) + formatNotionArticleLink(link.href, title) + restored.content.slice(link.end);
+    }
+  }
+  return restored;
 }
 
 /** Keep a matching original URL; a selected page without one can still use its canonical page ID. */

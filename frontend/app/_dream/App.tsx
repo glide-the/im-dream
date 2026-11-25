@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: insert a named text reference through the existing Session save.
 // [Sync] 2026-11-25: insert explicitly confirmed Calendar references with their matching titles into the current journal.
 // [Sync] 2026-11-24: show URL-derived Notion articles and resume the last prose cell from blank notebook paper.
 // [Sync] 2026-11-12: expose frozen text-only note sharing from the original Writing toolbars.
@@ -109,7 +110,6 @@ import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
 import NotebookLines from './components/Editor/NotebookLines';
 import NoteNotionTextCell, {type NoteWritingHandle} from './components/notes/NoteNotionTextCell';
-import {findNotionArticleLinks} from './components/notes/notionArticleLinks';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import { submitClaudeMcpRedirect } from './api/claudeMcpApi';
@@ -2120,7 +2120,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                           position: 'relative',
                           marginTop: 0
                         }}>
-                          <NoteNotionTextCell key={JSON.stringify([user?.id, state.id])} content={content} articleTitles={textCell.notionArticleTitles}
+                          <NoteNotionTextCell key={JSON.stringify([user?.id, state.id])} content={content}
                             ref={idx === state.cells.length - 1 ? lastWritingCell : undefined}
                             onTextChange={text => handleTextChange(cell.id, text)}
                             onCompositionStart={() => handleCompositionStart(cell.id)}
@@ -2533,10 +2533,9 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
             const engine = engineRef.current;
             const note = engine?.getState();
             if (!engine || !note || !isAuthenticated || selectedStateLoading || note.id !== state?.id) throw Error('NOTE_UNAVAILABLE');
-            const existing = note.cells.find((cell): cell is TextCell => cell.type === 'text' && findNotionArticleLinks(cell.content).some(link => link.href === href));
-            engine.insertNotionArticle(href, title, existing);
+            const status = engine.insertNotionArticle(href, title);
             await ensureSessionPersistedForAgent(note.id);
-            return existing ? 'present' : 'inserted';
+            return status;
           }}
           onLoadEntry={handleLoadEntry}
           currentEntryId={state?.id}
