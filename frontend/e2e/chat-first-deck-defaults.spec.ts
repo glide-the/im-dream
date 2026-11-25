@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: verify direct Kastention entry and preview with a restored Web Bearer session.
 // [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
 // [Sync] 2026-11-19: verify the catalog is visible while one shared background repair is pending.
 // [Sync] 2026-10-28: require successful replacement reads for cancelled auth/session and connector lifecycle GETs.
@@ -22,6 +23,8 @@
 //                    CozeLoop-inspired durable draft/explicit content commits inside the popup.
 
 import { expect, test, type Request } from '@playwright/test';
+import { STORAGE_KEYS } from '../app/_dream/constants/storageKeys';
+import { installFixtures } from './fixtures/calendarHarness';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 const PREVIEW_DREAM_RUN_ID = 'run_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
@@ -214,6 +217,36 @@ const secondaryInstallation = {
   artifact_digest: 'sha256:story-notes',
   operation_id: 'operation-secondary',
 };
+
+test('a restored Web Bearer session can open the Kastention catalog directly and preview a deck', async ({ page }) => {
+  await installFixtures(page);
+  await page.addInitScript(key => {
+    sessionStorage.setItem(key, JSON.stringify({ refresh_token: 'catalog-fixture-refresh' }));
+  }, STORAGE_KEYS.WEB_OAUTH);
+  await page.route('**/auth/refresh', route => route.fulfill({ json: {
+    access_token: 'catalog-fixture-access', refresh_token: 'catalog-fixture-refresh', expires_at: Date.now() + 300_000,
+  } }));
+  await page.route('**/auth/session', route => route.fulfill({ json: { user: {
+    id: '42', email: 'catalog@example.test', display_name: null, avatar_url: null, role: 'user', created_at: null,
+  } } }));
+  await page.route('**/api/decks/catalog', async route => {
+    const headers = await route.request().allHeaders();
+    expect(headers.authorization).toBe('Bearer catalog-fixture-access');
+    expect(headers['x-ink-csrf']).toBeUndefined();
+    expect(headers.cookie).toBeUndefined();
+    await route.fulfill({ json: { decks: [screenplayDeck] } });
+  });
+  await page.route('**/api/decks/defaults/reconcile', route => route.fulfill({ json: {
+    deck_id: screenplayDeck.id, reconciled: false, reason: 'refs_preserved',
+  } }));
+
+  await page.goto(WEB_BASE + '/story-workspace/decks');
+  const shortcut = page.getByRole('listitem').getByRole('button', { name: new RegExp(screenplayDeck.name) }).first();
+  await expect(shortcut).toBeVisible();
+  await shortcut.click();
+  await expect(page.getByRole('heading', { name: screenplayDeck.name, exact: true })).toBeVisible();
+  await expect(page.getByText('Not authenticated', { exact: true })).toHaveCount(0);
+});
 
 test('login → Deck list → create → Agent/Prompt/plugin maintenance → Chat → reopen', async ({ page }, testInfo) => {
   let releaseInitialReconciliation!: () => void;

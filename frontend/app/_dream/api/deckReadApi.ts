@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: scope catalog reads to the active session across Web Bearer and native Cookie transports.
 // [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-28: bulk catalog reads share in-flight requests per transport and session; settled reads are released.
 // [Input] Authenticated Deck catalog/list/detail endpoints and an optional platform HTTP transport.
@@ -9,24 +10,23 @@ import {API_BASE} from '../lib/apiBase';
 const catalogReads = new WeakMap<typeof fetch, Map<string, Promise<Deck[]>>>();
 
 export function listDecksWithVoices(transport: typeof fetch = fetch): Promise<Deck[]> {
-  let headers: Record<string, string>;
-  try { headers = authHeaders(); } catch (error) { return Promise.reject(error); }
-  const csrf = headers['x-ink-csrf'];
+  let sessionScope: string;
+  try { sessionScope = requireSessionScope(); } catch (error) { return Promise.reject(error); }
   let reads = catalogReads.get(transport);
   if (!reads) { reads = new Map(); catalogReads.set(transport, reads); }
-  const pending = reads.get(csrf);
+  const pending = reads.get(sessionScope);
   if (pending) return pending;
   const request = (async () => {
-    const response = await transport(`${API_BASE}/api/decks/catalog`, { headers, cache: 'no-store' });
+    const response = await transport(`${API_BASE}/api/decks/catalog`, { headers: authHeaders(sessionScope), cache: 'no-store' });
     if (!response.ok) {
       const error = await response.json();
       throw new Error(typeof error.detail === 'string' ? error.detail : 'Load Agents failed');
     }
     const data = await response.json();
-    if (getBrowserCsrfToken() !== csrf) throw new Error('Not authenticated');
+    if (getBrowserCsrfToken() !== sessionScope) throw new Error('Not authenticated');
     return data.decks as Deck[];
-  })().finally(() => { if (reads.get(csrf) === request) reads.delete(csrf); });
-  reads.set(csrf, request);
+  })().finally(() => { if (reads.get(sessionScope) === request) reads.delete(sessionScope); });
+  reads.set(sessionScope, request);
   return request;
 }
 
@@ -40,7 +40,12 @@ export async function getDeck(deckId:string,transport:typeof fetch=fetch):Promis
   if(!response.ok){const error=await response.json();throw new Error(error.detail || 'Get Kastention failed');}
   return response.json();
 }
-function authHeaders(): Record<string, string> {
-  const csrf=getBrowserCsrfToken();if(!csrf)throw new Error('Not authenticated');
-  return {'Content-Type':'application/json',...browserRequestHeaders({},csrf)};
+function requireSessionScope(): string {
+  const sessionScope = getBrowserCsrfToken();
+  if (!sessionScope) throw new Error('Not authenticated');
+  return sessionScope;
+}
+
+function authHeaders(sessionScope = requireSessionScope()): Record<string, string> {
+  return browserRequestHeaders({ 'Content-Type': 'application/json' }, sessionScope);
 }
