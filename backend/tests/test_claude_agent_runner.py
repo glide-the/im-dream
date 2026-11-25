@@ -1,3 +1,4 @@
+# [Sync] 2026-11-25: verify typed provider errors retain the SDK terminal receipt when it arrives.
 # [Sync] 2026-11-11: cover data-source reads through the existing Dream guard, confirmation and disabled-network policy.
 # [Sync] 2026-11-04: 增加平台音频工具显式启用与原确认/拒绝/缺回调/full-access合同。
 # [Sync] 2026-10-15: exact user MCP inventory includes the three owner-bound memory Tools.
@@ -1154,6 +1155,37 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         self.assertIn("403 usage limit exceeded", str(result.error))
         self.assertEqual(errors, [result.error])
         self.assertEqual(result.full_text, "")
+        self.assertFalse(result.sdk_terminal_received)
+
+    async def test_assistant_message_error_drains_terminal_without_reporting_success(self):
+        for terminal_is_error in (True, False):
+            with self.subTest(terminal_is_error=terminal_is_error):
+                assistant_error = AssistantMessage([
+                    _text_block("API Error: 409 REQUEST_IN_PROGRESS"),
+                ])
+                assistant_error.error = "unknown"
+                terminal = ResultMessage(session_id="provider-error-session")
+                terminal.is_error = terminal_is_error
+                terminal.subtype = "error_during_execution" if terminal_is_error else "success"
+                self.set_query([assistant_error, _text_delta_event("must not emit"), terminal])
+                errors = []
+                deltas = []
+
+                with self.assertLogs(agent_runner_module.logger, level="ERROR"):
+                    result = await self.make_runner().run_streaming(
+                        opts=AgentRunOptions(
+                            thread_id="provider-error-thread", user_message="fixture", tool_choice="none",
+                        ),
+                        callbacks=AgentStreamingCallbacks(on_text_delta=deltas.append, on_error=errors.append),
+                    )
+
+                self.assertTrue(result.sdk_terminal_received)
+                self.assertFalse(result.success)
+                self.assertFalse(result.protocol_completed)
+                self.assertIn("REQUEST_IN_PROGRESS", str(result.error))
+                self.assertEqual(errors, [result.error])
+                self.assertEqual(deltas, [])
+                self.assertEqual(result.full_text, "")
 
     async def test_sdk_error_sets_success_false(self):
         boom = RuntimeError("sdk exploded")

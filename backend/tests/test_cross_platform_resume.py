@@ -1,3 +1,5 @@
+# [Sync] 2026-11-26: restore stopped tool history and a confirmed failed user input through the installed Runtime.
+# [Sync] 2026-11-25: verify a synthetic API error leaves the native transcript intact and out of reply comparison.
 # [Input] Canonical synthetic history, isolated workspaces and the installed production SDK/Runtime.
 # [Output] Mapping/no-follow/corruption checks and actual same-ID cross-cwd resume receipts.
 # [Pos] Provider-free contract; no normal database, real account or external model traffic.
@@ -23,6 +25,25 @@ def history(tool=False):
     if tool:
         parts.insert(0, {"type": "tool-invocation", "toolCallId": "historical_tool_1", "toolName": "Bash", "input": {"command": "touch historical-tool-must-not-run"}, "state": "output-available", "output": "historical completed output"})
     return [{"id": "user-1", "role": "user", "parts": [{"type": "text", "text": "Remember cobalt-seven."}], "metadata": None, "created_at": "2026-11-01T00:00:00Z"}, {"id": "assistant-1", "role": "assistant", "parts": parts, "metadata": {"turnStatus": "completed", "turnId": "old-turn"}, "created_at": "2026-11-01T00:00:01Z"}]
+
+
+def ended_turn_history():
+    first, stopped = history(True)
+    first_call = stopped["parts"][0]
+    first_call["output"] = {"notion_fixture": ["closed", {"ok": True}]}
+    stopped["parts"] = [first_call]
+    stopped["metadata"].update(turnStatus="cancelled", is_partial=True)
+    next_user, complete = history()
+    next_user.update(id="user-2", created_at="2026-11-01T00:00:02Z",
+                     parts=[{"type": "text", "text": "Check the record again."}])
+    complete.update(id="assistant-2", created_at="2026-11-01T00:00:03Z")
+    complete["parts"][0:0] = [
+        {**first_call, "toolCallId": "historical_tool_2", "output": "fixture second result"},
+        {**first_call, "toolCallId": "historical_tool_3", "output": {"complete": True}},
+    ]
+    failed = {**first, "id": "failed-input", "created_at": "2026-11-01T00:00:04Z",
+              "parts": [{"type": "text", "text": "Historical failed input."}]}
+    return [first, stopped, next_user, complete, failed]
 
 
 def parallel_native_history(sid, cwd, *, stopped=False):
@@ -60,6 +81,30 @@ def parallel_native_history(sid, cwd, *, stopped=False):
 
 
 class TranscriptContract(unittest.TestCase):
+    def test_gateway_error_marker_is_not_compared_as_an_assistant_reply(self):
+        with tempfile.TemporaryDirectory(prefix="ink-cross-resume-api-error-") as tmp:
+            root = Path(tmp).resolve()
+            sid = str(uuid4())
+            lease = ResumeTranscriptLease(thread_id="thread", session_id=sid, cwd=str(root),
+                                         config_home=str(root / "home"), lock_root=str(root))
+            try:
+                shared = history()
+                user, diagnostic = history_records(shared, thread_id="thread", session_id=sid, cwd=str(root))
+                diagnostic["isApiErrorMessage"] = True
+                diagnostic["error"] = "unknown"
+                diagnostic["message"]["stop_reason"] = "stop_sequence"
+                diagnostic["message"]["content"] = [{"type": "text", "text": "API Error: 409 REQUEST_IN_PROGRESS"}]
+                target = sid + ".jsonl"
+                raw = ("\n".join(json.dumps(row) for row in (user, diagnostic)) + "\n").encode()
+                lease._write(target, raw)
+
+                lease.prepare(shared[:1], "known-failed-turn")
+
+                self.assertEqual(lease._read(target), raw)
+                self.assertTrue(lease._read(target + ".ink-continuation.json"))
+            finally:
+                lease.close()
+
     def test_parallel_results_and_meta_rows_adopt_native_bytes(self):
         from libs.claude_agent_kit.server.resume_transcript import _projection
         with tempfile.TemporaryDirectory(prefix="ink-cross-resume-parallel-") as tmp:
@@ -114,11 +159,27 @@ class TranscriptContract(unittest.TestCase):
             validate_transcript("\n".join(json.dumps(v) for v in broken).encode(), sid)
 
     def test_reject_incomplete_and_structured_tool_output(self):
-        for mutate in (lambda v: v[1]["metadata"].update(turnStatus="failed"), lambda v: v[1]["parts"][0].update(output={"lossy": True})):
+        for mutate in (lambda v: v[1]["metadata"].update(turnStatus="failed"),
+                       lambda v: v[1]["parts"][0].update(output=[{"type": "image"}])):
             value = history(True)
             mutate(value)
             with self.assertRaises(ClaudeResumeStorageError):
                 history_records(value, thread_id="thread", session_id=str(uuid4()), cwd="/fixture")
+
+    def test_ended_history_requires_failed_receipt_and_closed_tool_results(self):
+        history = ended_turn_history()
+        sid = str(uuid4())
+        args = {"thread_id": "thread", "session_id": sid, "cwd": "/fixture"}
+        with self.assertRaisesRegex(ClaudeResumeStorageError, "HISTORY_UNSUPPORTED"):
+            history_records(history, **args, failed_input_ids=frozenset({"different-input"}))
+        records = history_records(history, **args, failed_input_ids=frozenset({"failed-input"}))
+        tool_results = [block for row in records for block in row["message"]["content"] if block["type"] == "tool_result"]
+        self.assertEqual([block["tool_use_id"] for block in tool_results], ["historical_tool_1", "historical_tool_2", "historical_tool_3"])
+        self.assertEqual(json.loads(tool_results[0]["content"]), history[1]["parts"][0]["output"])
+        self.assertEqual(records[-1]["message"]["content"], history[-1]["parts"])
+        history[1]["parts"][0]["state"] = "call"
+        with self.assertRaisesRegex(ClaudeResumeStorageError, "HISTORY_UNSUPPORTED"):
+            history_records(history, **args, failed_input_ids=frozenset({"failed-input"}))
 
     def test_atomic_reuse_archive_and_symlink(self):
         with tempfile.TemporaryDirectory(prefix="ink-cross-resume-contract-") as tmp:
@@ -166,8 +227,6 @@ class TranscriptContract(unittest.TestCase):
                 shared[1]["parts"][0]["output"] = {"saved": True}
                 lease.prepare(shared, "structured-native")
                 self.assertEqual(target.read_text(), native)
-                with self.assertRaisesRegex(ClaudeResumeStorageError, "HISTORY_UNSUPPORTED"):
-                    history_records(shared, thread_id="thread", session_id=sid, cwd=str(root))
             finally:
                 lease.close()
 
@@ -260,10 +319,13 @@ class InstalledRuntimeContract(unittest.TestCase):
     def test_service_prepares_before_claim_and_submits_once(self):
         self._resume(False, service=True)
 
+    def test_service_restores_stopped_tools_and_failed_input_without_replay(self):
+        self._resume(False, service=True, ended=True)
+
     def test_interrupted_native_tail_resumes_without_tool_replay(self):
         self._resume(False, interrupted=True)
 
-    def _resume(self, tool, service=False, interrupted=False, stopped_text=False):
+    def _resume(self, tool, service=False, interrupted=False, stopped_text=False, ended=False):
         from http.server import ThreadingHTTPServer
         from libs.claude_agent_kit import AgentRunOptions, AgentStreamingCallbacks
         from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
@@ -286,7 +348,8 @@ class InstalledRuntimeContract(unittest.TestCase):
                 with patch.dict(os.environ, env):
                     lease = ResumeTranscriptLease(thread_id="original-thread", session_id=sid, cwd=str(cwd), config_home=home, lock_root=str(cwd))
                     try:
-                        lease.prepare(history(tool or interrupted), "fixture-history")
+                        if not ended:
+                            lease.prepare(history(tool or interrupted), "fixture-history")
                         if stopped_text:
                             records, shared = parallel_native_history(sid, str(cwd), stopped=True)
                             target = next((cwd / ".claude-home/projects").glob("*/*.jsonl"))
@@ -314,6 +377,7 @@ class InstalledRuntimeContract(unittest.TestCase):
                             from services.admin_data.continuation_data import Snapshot
                             from services.admin_data.chat_models import ChatMessageDTO, ChatThreadDTO
                             events = []
+                            saved_history = ended_turn_history() if ended else history()
                             user = {"id": "current", "role": "user", "parts": [{"type": "text", "text": "Current message exactly once."}], "metadata": None, "created_at": "2026-11-02T00:00:00Z"}
                             def message(value):
                                 return ChatMessageDTO(**value, metadata_decode_error=False, history_final_text=None, history_process_available=False, history_projection_version=None)
@@ -329,7 +393,11 @@ class InstalledRuntimeContract(unittest.TestCase):
                                     events.append(value.action)
                                     return SimpleNamespace(dispatch_turn_id=value.dispatch_turn_id, revision=value.expected_revision + 1)
                                 def continuation_snapshot(self, **kwargs):
-                                    return Snapshot(thread=bound, messages=[message(v) for v in history()] + ([message(user), self.saved] if self.saved else []), history_digest=("f" if self.saved else "e") * 64)
+                                    return Snapshot(thread=bound, messages=[message(v) for v in saved_history] + ([message(user), self.saved] if self.saved else []), history_digest=("f" if self.saved else "e") * 64)
+                                def list_queued_inputs(self, **kwargs):
+                                    self_outer.assertEqual(kwargs, {"actor_id": "1", "thread_id": "original-thread"})
+                                    events.append("read_input_receipts")
+                                    return [SimpleNamespace(message_id="failed-input", status="failed", dispatch_turn_id="prior-turn")]
                                 def persist_user(self, **kwargs):
                                     raise AssertionError("The atomic claim owns input persistence")
                                 def persist_assistant(self, **kwargs):
@@ -342,12 +410,12 @@ class InstalledRuntimeContract(unittest.TestCase):
                             state = AgentRunState(session_id="original-thread")
                             state.current_turn_id = str(uuid4())
                             options = AgentRunOptions(thread_id=sid, resume=True, require_existing_session=True, model="fixture-model", user_message="Current message exactly once.", cwd=str(cwd), claude_tmp_workspace=str(cwd), claude_config_home=home, max_turns=3, user_sdk_env={"ANTHROPIC_BASE_URL": env["ANTHROPIC_BASE_URL"], "ANTHROPIC_AUTH_TOKEN": env["ANTHROPIC_AUTH_TOKEN"]})
-                            execution = _TurnExecution(request=ClaudeAgentRunRequest(user_id="1",thread_id="original-thread",message_id="current",message_parts=user["parts"],admin_turn_persistence=persistence),state=state,runner=ClaudeAgentRunner(),run_options=options,turn_context=_TurnContext(queue=asyncio.Queue(),confirmation_store=ToolConfirmationStore()),resume_existing_session={"claude_session_id":sid},continuation_snapshot=Snapshot(thread=bound,messages=[message(v) for v in history()],history_digest="e"*64))
+                            execution = _TurnExecution(request=ClaudeAgentRunRequest(user_id="1",thread_id="original-thread",message_id="current",message_parts=user["parts"],admin_turn_persistence=persistence),state=state,runner=ClaudeAgentRunner(),run_options=options,turn_context=_TurnContext(queue=asyncio.Queue(),confirmation_store=ToolConfirmationStore()),resume_existing_session={"claude_session_id":sid})
                             # Use a separate root lock: this caller releases its qualification lock first.
                             lease.close()
                             asyncio.run(ClaudeAgentService().execute_session(execution))
                             self.assertTrue(execution.user_response_committed)
-                            self.assertEqual(events, ["claim", "arm_query", "assistant_saved", "complete"])
+                            self.assertEqual(events, (["read_input_receipts"] if ended else []) + ["claim", "arm_query", "assistant_saved", "complete"])
                             # An existing pre-upgrade transcript has no Ink marker.
                             # Reuse the real Runtime bytes through its UI projection.
                             lease = ResumeTranscriptLease(thread_id="original-thread", session_id=sid, cwd=str(cwd), config_home=home, lock_root=str(cwd))
@@ -367,6 +435,11 @@ class InstalledRuntimeContract(unittest.TestCase):
                         self.assertIn("cobalt-seven", first)
                         if stopped_text:
                             self.assertIn("Saved partial response.", first)
+                        if ended:
+                            self.assertIn("notion_fixture", first)
+                            self.assertIn("fixture second result", first)
+                            self.assertIn("Historical failed input.", first)
+                            self.assertEqual(len(requests), 1)
                         self.assertEqual(first.count("Current message exactly once."), 1)
                         self.assertFalse((cwd / "historical-tool-must-not-run").exists())
                         self.assertEqual((original / "keep.txt").read_text(), "original mobile file")

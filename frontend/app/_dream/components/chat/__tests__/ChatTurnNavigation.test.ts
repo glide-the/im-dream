@@ -2,6 +2,7 @@
 // [Output] Regression coverage for one marker per real user input and accurate live reply state.
 // [Pos] Provider-free turn-navigation projection contract.
 // [Sync] 2026-09-29: keep streamed text in progress and merge saved/live markers by message ID.
+// [Sync] 2026-11-26: cover stopped replies saved after a queued input and failures without a reply row.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -32,4 +33,28 @@ test('visible navigation excludes system inputs and keeps streamed text in progr
   ], visible);
   expect(merged.map((item) => item.messageId)).toEqual(['user-1', 'user-2']);
   expect(merged[0].assistantPreview).toBe('First answer');
+});
+
+test('visible navigation uses dispatch receipts to restore stopped and failed turns', () => {
+  const visible = projectVisibleTurnNavigation([
+    textMessage('first', 'user', 'First question'),
+    textMessage('second', 'user', 'Queued question'),
+    textMessage('stopped-reply', 'assistant', 'Partial reply', {
+      turnId: 'first-turn', turnStatus: 'cancelled', is_partial: true,
+    }),
+    textMessage('second-reply', 'assistant', 'Answer to the queued question', {
+      turnId: 'second-turn', turnStatus: 'completed', finalPartIndex: 0,
+    }),
+    textMessage('third', 'user', 'Question without a saved reply'),
+  ], false, [
+    { message_id: 'first', dispatch_turn_id: 'first-turn', status: 'failed' },
+    { message_id: 'second', dispatch_turn_id: 'second-turn', status: 'consumed' },
+    { message_id: 'third', dispatch_turn_id: 'third-turn', status: 'failed' },
+  ]);
+
+  expect(visible.map(({ messageId, status, assistantPreview }) => [messageId, status, assistantPreview])).toEqual([
+    ['first', 'cancelled', null],
+    ['second', 'answered', 'Answer to the queued question'],
+    ['third', 'failed', null],
+  ]);
 });

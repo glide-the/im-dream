@@ -1,3 +1,4 @@
+# [Sync] 2026-11-25: read the SDK terminal receipt after a typed assistant error before settling the turn.
 # [Sync] 2026-11-11: recognize actor-bound data-source query/schema reads before the existing network and confirmation policy.
 # [Sync] 2026-11-04: mobile_clock_audio精确列为low-sensitivity；问答表单仍收集answers，无独立工具授权提示。
 # [Sync] 2026-11-04: 音频MCP复用AskUserQuestion问答，full-access保留问答；丢弃Agent自填answers并合并原用户回答。
@@ -3206,6 +3207,7 @@ class ClaudeAgentRunner:
         current_session_id: Optional[str] = None
         success = True
         run_error: Optional[Exception] = None
+        assistant_protocol_error: RuntimeError | None = None
         usage: dict[str, Optional[int]] = {}
         terminal_stop_reason: Optional[str] = None
         result_message_count = 0
@@ -4092,6 +4094,8 @@ class ClaudeAgentRunner:
                 if callable(close_query):
                     query_scope.push_async_callback(close_query)
                 async for message in query_stream:
+                    if assistant_protocol_error is not None and not isinstance(message, ResultMessage):
+                        continue
                     messages.append(message)
 
                     # Track session ID
@@ -4106,10 +4110,9 @@ class ClaudeAgentRunner:
                     # Raw message callback
                     await _call(callbacks.on_message, message)
 
-                    # The SDK can report terminal protocol failures as an
-                    # AssistantMessage.error without raising from query_stream.
-                    # Treat that typed error exactly like a raised SDK failure so
-                    # the existing on_error -> SSE error channel is preserved.
+                    # A typed error can precede the SDK's ResultMessage. Keep
+                    # reading that one query for the terminal receipt without
+                    # projecting more assistant content from the failed turn.
                     if isinstance(message, AssistantMessage):
                         assistant_error = getattr(message, "error", None)
                         if assistant_error:
@@ -4119,11 +4122,12 @@ class ClaudeAgentRunner:
                                 if provider_detail
                                 else ""
                             )
-                            raise RuntimeError(
+                            assistant_protocol_error = RuntimeError(
                                 "Claude SDK AssistantMessage error: "
                                 f"{str(assistant_error).strip() or 'unknown'}"
                                 f"{detail_suffix}"
                             )
+                            continue
 
                     # Route to typed handler
                     await self._process_message(
@@ -4167,6 +4171,8 @@ class ClaudeAgentRunner:
                             and raw_duration_ms >= 0
                         ):
                             result_duration_ms = int(raw_duration_ms)
+            if assistant_protocol_error is not None:
+                raise assistant_protocol_error
             full_text = "".join(text_parts)
 
             if terminal_stop_reason == "max_tokens":
@@ -4261,7 +4267,9 @@ class ClaudeAgentRunner:
             # wrapped so SSE serialisation and ``isinstance(_, Exception)``
             # consumers downstream do not choke on them.
             # ----------------------------------------------------------
-            if _BASE_EXCEPTION_GROUP_TYPES and isinstance(
+            if assistant_protocol_error is not None:
+                run_error = assistant_protocol_error
+            elif _BASE_EXCEPTION_GROUP_TYPES and isinstance(
                 exc, _BASE_EXCEPTION_GROUP_TYPES
             ):
                 run_error = Exception(_format_exception_message(exc))
@@ -4329,7 +4337,8 @@ class ClaudeAgentRunner:
                 except Exception:  # noqa: BLE001
                     pass
         protocol_completed = (
-            result_message_count == 1
+            assistant_protocol_error is None
+            and result_message_count == 1
             and result_message_subtype == "success"
             and result_message_is_error is False
             and terminal_stop_reason in {None, "end_turn", "stop_sequence"}

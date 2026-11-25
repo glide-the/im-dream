@@ -1,12 +1,14 @@
-// [Input] Owner-scoped turn-navigation DTO and the current visible UIMessage window.
+// [Input] Owner-scoped turn-navigation DTO, visible UIMessage window and input dispatch receipts.
 // [Output] Safe, ID-stable user-turn summaries for the Chat navigation rail.
 // [Pos] Pure Chat turn-navigation projection beside the shared message renderer.
 // [Sync] 2026-09-29: create user-message markers and pair only replies before the next user row.
+// [Sync] 2026-11-26: pair saved replies by dispatch identity and show confirmed failures without a reply row.
 
 import type { UIMessage } from 'ai';
 import { API_BASE } from '../../lib/apiBase';
 import { browserRequestHeaders } from '../../lib/browserSession';
 import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
+import type { ThreadInputEntry } from './threadInputQueue';
 
 export type ChatTurnNavigationStatus = 'answered' | 'running' | 'failed' | 'cancelled' | 'no_reply' | 'state_unknown';
 
@@ -46,15 +48,22 @@ export function isNavigableUserMessage(message: UIMessage): boolean {
 export function projectVisibleTurnNavigation(
   messages: readonly UIMessage[],
   running: boolean,
+  inputs: readonly Pick<ThreadInputEntry, 'message_id' | 'dispatch_turn_id' | 'status'>[] = [],
 ): ChatTurnNavigationItem[] {
   const items: ChatTurnNavigationItem[] = [];
+  const positionByMessageId = new Map<string, number>();
+  const inputByMessageId = new Map(inputs.map((input) => [input.message_id, input]));
+  const messageIdByTurn = new Map<string, string>();
+  for (const input of inputs) {
+    if (input.dispatch_turn_id) messageIdByTurn.set(input.dispatch_turn_id, input.message_id);
+  }
   const runningTurnId = running
     ? [...messages].reverse().find(isNavigableUserMessage)?.id ?? null
     : null;
-  let current: ChatTurnNavigationItem | null = null;
+  let currentPosition: number | undefined;
   for (const message of messages) {
     if (message.role === 'user') {
-      current = null;
+      currentPosition = undefined;
       if (!isNavigableUserMessage(message)) continue;
       const text = preview(message.parts
         .filter((part) => part.type === 'text')
@@ -64,18 +73,29 @@ export function projectVisibleTurnNavigation(
         .filter((part) => part.type === 'file')
         .map((part) => part.filename)
         .filter((name): name is string => typeof name === 'string' && Boolean(name.trim()));
-      current = {
+      const failed = metadataOf(message).dispatch_status === 'failed'
+        || inputByMessageId.get(message.id)?.status === 'failed';
+      currentPosition = items.length;
+      positionByMessageId.set(message.id, currentPosition);
+      items.push({
         messageId: message.id,
         userPreview: text || preview(filenames[0] ?? ''),
         hasAttachment: message.parts.some((part) => part.type === 'file'),
         assistantPreview: null,
-        status: metadataOf(message).dispatch_status === 'failed' ? 'failed' : 'no_reply',
-      };
-      items.push(current);
+        status: failed ? 'failed' : 'no_reply',
+      });
       continue;
     }
-    if (message.role !== 'assistant' || !current) continue;
+    if (message.role !== 'assistant') continue;
     const metadata = metadataOf(message);
+    const dispatchedMessageId = typeof metadata.turnId === 'string'
+      ? messageIdByTurn.get(metadata.turnId)
+      : undefined;
+    const position = dispatchedMessageId === undefined
+      ? currentPosition
+      : positionByMessageId.get(dispatchedMessageId);
+    if (position === undefined) continue;
+    let current = items[position];
     const currentTurnRunning = current.messageId === runningTurnId;
     const projection = currentTurnRunning && metadata.turnStatus !== 'completed'
       ? null
@@ -97,7 +117,7 @@ export function projectVisibleTurnNavigation(
         status: 'running',
       };
     }
-    items[items.length - 1] = current;
+    items[position] = current;
   }
   if (running && items.length > 0) {
     const last = items[items.length - 1];
