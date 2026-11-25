@@ -1,3 +1,4 @@
+# [Sync] 2026-11-26: pin Runtime 0.1.13 for non-PDF Read calls with blank pages.
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume server.py (FastAPI app) and claude_agent module.
 # [Output] Verify that claude-agent and Notion connector routes are registered,
@@ -2673,7 +2674,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/cli.js",
-                "cli_runtime_release": "0.1.12",
+                "cli_runtime_release": "0.1.13",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",

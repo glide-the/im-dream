@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-26: pin the source installation default to Runtime 0.1.13. -->
 <!-- [Sync] 2026-10-11: source default uses published Runtime 0.1.12; no remote deployment is claimed. -->
 <!-- [Input] AutoDL direct-host scripts, current Next.js/pnpm source, and deployment safety contracts. -->
 <!-- [Output] Current release, runtime, safety, candidate-smoke, atomic-switch, and verification procedure. -->
@@ -85,7 +86,7 @@ public health gates pass.
   builds an immutable candidate, verifies it on `16006`/`18765`, switches
   `current`, then removes every old release after public verification succeeds;
   no long-lived rollback release is retained.
-- Runtime installation uses the published `@glide-the/ink-claude-code-dream@0.1.12`
+- Runtime installation uses the published `@glide-the/ink-claude-code-dream@0.1.13`
   package and verifies its adjacent manifest, SDK `0.2.145` binding, production
   eligibility, CLI compatibility `2.1.241`, and `plugin` command before build.
   The retired unpublished AutoDL `0.1.9` local artifact is not a release input.
