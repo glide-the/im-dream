@@ -3,6 +3,8 @@
 # [Pos] Local Runtime storage adapter; no database, model, historical tool execution or file sync.
 # [Sync] 2026-11-04: initialize missing cross-platform transcripts without changing session identity.
 # [Sync] 2026-11-08: retain Runtime parallel results and meta injections; reconcile saved stopped text without replay.
+# [Sync] 2026-11-25: exclude native synthetic API diagnostics from reply comparison while preserving the transcript.
+# [Sync] 2026-11-26: restore closed partial turns, JSON tool results and confirmed failed inputs across devices.
 from __future__ import annotations
 
 import errno
@@ -41,8 +43,11 @@ def _storage_boundary(method):
     return call
 
 
-def history_records(messages: list[dict], *, thread_id: str, session_id: str, cwd: str) -> list[dict]:
-    """Convert explicit text and complete text tool results; reject missing semantics."""
+def history_records(
+    messages: list[dict], *, thread_id: str, session_id: str, cwd: str,
+    failed_input_ids: frozenset[str] = frozenset(),
+) -> list[dict]:
+    """Restore verified historical content, including explicitly ended turns."""
     try:
         UUID(session_id)
     except (ValueError, TypeError):
@@ -50,7 +55,7 @@ def history_records(messages: list[dict], *, thread_id: str, session_id: str, cw
     records: list[dict] = []
     seen: set[str] = set()
     tools: set[str] = set()
-    pending_user = False
+    pending_user: str | None = None
     last_time = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
     def append(role, content, identity, timestamp, *, tool=False):
@@ -74,21 +79,26 @@ def history_records(messages: list[dict], *, thread_id: str, session_id: str, cw
             _fail()
         seen.add(identity)
         metadata = item.get("metadata") or {}
-        if metadata.get("is_partial") or metadata.get("kind"):
+        if metadata.get("kind"):
             _fail()
         role = item.get("role")
         parts = item.get("parts")
         if not isinstance(parts, list) or not parts:
             _fail()
         if role == "user":
-            if pending_user or any(not isinstance(p, dict) or p.get("type") != "text" or not isinstance(p.get("text"), str) for p in parts):
+            if pending_user is not None and pending_user not in failed_input_ids:
+                _fail()
+            if metadata.get("is_partial") or any(
+                not isinstance(p, dict) or p.get("type") != "text" or not isinstance(p.get("text"), str)
+                for p in parts
+            ):
                 _fail()
             append(role, [{"type": "text", "text": p["text"]} for p in parts], identity, item.get("created_at"))
-            pending_user = True
+            pending_user = identity
         elif role == "assistant":
-            if not pending_user or metadata.get("turnStatus") != "completed":
-                _fail()
-            if sum(isinstance(p, dict) and p.get("type") == "tool-invocation" for p in parts) > 1:
+            stopped = metadata.get("is_partial") is True and metadata.get("turnStatus") in {"cancelled", "error"}
+            completed = not metadata.get("is_partial") and metadata.get("turnStatus") == "completed"
+            if pending_user is None or not (completed or stopped):
                 _fail()
             text: list[dict] = []
             for part in parts:
@@ -103,7 +113,16 @@ def history_records(messages: list[dict], *, thread_id: str, session_id: str, cw
                 elif kind == "tool-invocation":
                     call = part.get("toolCallId")
                     output = part.get("output")
-                    if not isinstance(call, str) or not call or call in tools or part.get("providerExecuted") or part.get("state") not in {"output-available", "output-error"} or not isinstance(part.get("toolName"), str) or not isinstance(part.get("input"), dict) or not isinstance(output, str):
+                    if not isinstance(call, str) or not call or call in tools or part.get("providerExecuted") or part.get("state") not in {"output-available", "output-error"} or not isinstance(part.get("toolName"), str) or not isinstance(part.get("input"), dict):
+                        _fail()
+                    if isinstance(output, dict):
+                        # Runner parses JSON text for Chat. Emit the same JSON
+                        # value as Claude's text tool result on the new device.
+                        try:
+                            output = json.dumps(output, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                        except (ValueError, TypeError):
+                            _fail()
+                    if not isinstance(output, str):
                         _fail()
                     tools.add(call)
                     text.append({"type": "tool_use", "id": call, "name": part["toolName"], "input": part["input"]})
@@ -112,18 +131,21 @@ def history_records(messages: list[dict], *, thread_id: str, session_id: str, cw
                     append("user", [{"type": "tool_result", "tool_use_id": call, "content": output, "is_error": part["state"] == "output-error"}], identity, item.get("created_at"))
                 else:
                     _fail()
-            if not text or not any(p["text"].strip() for p in text):
+            if completed and not any(p["text"].strip() for p in text):
                 _fail()
-            append("assistant", text, identity, item.get("created_at"))
-            pending_user = False
+            if text:
+                append("assistant", text, identity, item.get("created_at"))
+            pending_user = None
         else:
             _fail()
-    if pending_user or not records:
+    if (pending_user is not None and pending_user not in failed_input_ids) or not records:
         _fail()
     return records
 
 
-def validate_transcript(raw: bytes, session_id: str, *, allow_unsettled: bool = False) -> list[dict]:
+def validate_transcript(
+    raw: bytes, session_id: str, *, allow_unsettled: bool = False, allow_user_tail: bool = False,
+) -> list[dict]:
     """Validate every JSON line and the actual non-sidechain conversation chain."""
     try:
         entries = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
@@ -168,7 +190,9 @@ def validate_transcript(raw: bytes, session_id: str, *, allow_unsettled: bool = 
                 seen.update(r["uuid"] for r in recovered)
         chain = [item for record in chain for item in [record, *inserts.get(record["uuid"], [])]]
         conversation = [e for e in chain if e["type"] in {"user", "assistant"}]
-        if not conversation or not allow_unsettled and conversation[-1]["type"] != "assistant":
+        if not conversation or (
+            not allow_unsettled and not allow_user_tail and conversation[-1]["type"] != "assistant"
+        ):
             _fail("CLAUDE_RESUME_TRANSCRIPT_UNSETTLED")
         outstanding = set()
         for entry in conversation:
@@ -197,13 +221,31 @@ def validate_transcript(raw: bytes, session_id: str, *, allow_unsettled: bool = 
 
 def _projection(records):
     """Compare complete visible turns while retaining native Runtime envelopes."""
-    from .agent_runner import _normalize_tool_result_output
+    from .agent_runner import _SYNTHETIC_NO_RESPONSE_TEXT, _normalize_tool_result_output
     turns = []
     for record in records:
         if record["type"] == "user" and record.get("isMeta") is True:
             continue
         role, content = record["type"], record["message"]["content"]
         blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content
+        if (
+            role == "assistant"
+            and record.get("isApiErrorMessage") is True
+            and record["message"].get("model") == "<synthetic>"
+            and all(block.get("type") == "text" for block in blocks)
+        ):
+            continue
+        if (
+            role == "assistant"
+            and record.get("isApiErrorMessage") is False
+            and record["message"].get("model") == "<synthetic>"
+            and len(blocks) == 1
+            and blocks[0].get("type") == "text"
+            and blocks[0].get("text") == _SYNTHETIC_NO_RESPONSE_TEXT
+        ):
+            # The Runtime can append its own sentinel when adopting a user
+            # turn with no answer. It does not represent saved reply text.
+            continue
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         if role == "user" and text in {"[Request interrupted by user]", "[Request interrupted by user for tool use]"}:
             continue
@@ -376,7 +418,7 @@ class ResumeTranscriptLease:
                 pass
 
     @_storage_boundary
-    def prepare(self, messages, history_digest):
+    def prepare(self, messages, history_digest, *, failed_input_ids: frozenset[str] = frozenset()):
         if self.session_id is None:
             if messages:
                 _fail()
@@ -416,7 +458,8 @@ class ResumeTranscriptLease:
                         self.checkpoint(history_digest)
                         return
                 _fail("CLAUDE_RESUME_HISTORY_DIVERGED")
-        expected = expected or history_records(messages, thread_id=self.thread_id, session_id=self.session_id, cwd=self.cwd)
+        expected = expected or history_records(messages, thread_id=self.thread_id, session_id=self.session_id,
+                                              cwd=self.cwd, failed_input_ids=failed_input_ids)
         if raw is not None:
             archive = target + ".archive-" + hashlib.sha256(raw).hexdigest()
             saved = self._read(archive)
@@ -425,7 +468,7 @@ class ResumeTranscriptLease:
             elif saved != raw:
                 _fail("CLAUDE_RESUME_INVALID_RECORD")
         candidate = ("\n".join(json.dumps(v, ensure_ascii=False, separators=(",", ":")) for v in expected) + "\n").encode()
-        validate_transcript(candidate, self.session_id)
+        validate_transcript(candidate, self.session_id, allow_user_tail=True)
         self._write(target, candidate)
         self.checkpoint(history_digest)
 

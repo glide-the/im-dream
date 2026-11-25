@@ -1,3 +1,4 @@
+# [Sync] 2026-11-26: verify unanswered history against existing Admin input receipts before transcript initialization.
 # [Sync] 2026-11-13: explicit Chat MCP names filter each turn snapshot; empty selection skips remote credentials.
 # [Sync] 2026-11-04: 端侧tools选择透传；音频ask_user沿原Store问题/选项/answers通道。
 # [Sync] 2026-11-04: 将本次平台tools选择传至原Runner，确认与工具结果沿原通道。
@@ -2561,6 +2562,7 @@ class ClaudeAgentService:
     ) -> ClaudeAgentTurnContinuation | None:
         """Execute a turn and unconditionally release confirmation resources."""
 
+        from libs.claude_agent_kit.server.session_files import ClaudeResumeStorageError
         from services.admin_data.continuation_data import ClaimInput, ProgressInput
         from services.admin_data.user_message_data import user_message_input
 
@@ -2592,9 +2594,29 @@ class ClaudeAgentService:
             lease = self._continuation_storage_factory(thread_id=request.thread_id, session_id=snapshot.thread.claude_session_id,
                 cwd=runtime_cwd, config_home=config_home, lock_root=options.claude_tmp_workspace)
             await execution.turn_context.queue.put(_event("data-continuation", {"state": "preparing"}))
+            history = [item.model_dump() for item in snapshot.messages]
             # File work remains synchronous: cancellation cannot release a descriptor
             # while a background write still owns it.
-            lease.prepare([item.model_dump() for item in snapshot.messages], snapshot.history_digest)
+            try:
+                lease.prepare(history, snapshot.history_digest)
+            except ClaudeResumeStorageError as exc:
+                list_inputs = getattr(persistence, "list_queued_inputs", None)
+                if exc.code != "CLAUDE_RESUME_HISTORY_UNSUPPORTED" or not callable(list_inputs):
+                    raise
+                unanswered_ids = {
+                    item["id"] for index, item in enumerate(history)
+                    if item["role"] == "user" and (index + 1 == len(history) or history[index + 1]["role"] == "user")
+                }
+                if not unanswered_ids:
+                    raise
+                entries = await asyncio.to_thread(list_inputs, actor_id=request.user_id, thread_id=request.thread_id)
+                failed_input_ids = frozenset(
+                    entry.message_id for entry in entries
+                    if entry.message_id in unanswered_ids and entry.status == "failed" and entry.dispatch_turn_id
+                )
+                if not failed_input_ids:
+                    raise
+                lease.prepare(history, snapshot.history_digest, failed_input_ids=failed_input_ids)
             current = user_message_input(request.thread_id, request.message_id or str(uuid4()), list(request.message_parts or [{"type": "text", "text": ""}]), request.message_metadata)
             request.message_id = current.message_id
             execution.continuation_owner = str(uuid4())
