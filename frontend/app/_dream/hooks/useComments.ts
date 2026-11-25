@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: keep comment pagination stable while typing within an unchanged set of comments.
 // [Input] Persisted editor comments, enabled Voice configs, textarea geometry, and Claude Agent SSE helpers.
 // [Output] Historical comment grouping/navigation/feedback plus explicit Voice Thread chat actions.
 // [Pos] Writing historical-comment compatibility hook in frontend/app/_dream/hooks
@@ -175,6 +176,10 @@ export function useComments({
       currentSignatures.set(groupKey, signature);
     });
 
+    const previous = prevGroupSignatures.current;
+    if (previous.size === currentSignatures.size &&
+        [...currentSignatures].every(([key, signature]) => previous.get(key) === signature)) return;
+
     setGroupPages(prev => {
       const next = new Map(prev);
 
@@ -188,7 +193,7 @@ export function useComments({
         const maxPage = group.comments.length - 1;
         const isNewGroup = !prev.has(groupKey);
         const currentSignature = currentSignatures.get(groupKey) || "";
-        const prevSignature = prevGroupSignatures.current.get(groupKey) || "";
+        const prevSignature = previous.get(groupKey) || "";
         const signatureChanged = currentSignature !== prevSignature;
         const manualLockSignature = manualLockSignatures.current.get(groupKey) || "";
 
@@ -244,7 +249,7 @@ export function useComments({
     const cellText = (cell as TextCell).content;
     const appliedComments = state.commentors.filter(c => c.appliedAt);
     if (appliedComments.length === 0) {
-      if (isMobile) setMobileActiveComment(null);
+      if (isMobile && mobileActiveComment !== null) setMobileActiveComment(null);
       return;
     }
 
@@ -262,7 +267,7 @@ export function useComments({
       }
     }
 
-    if (isMobile) {
+    if (isMobile && mobileActiveComment !== foundComment) {
       setMobileActiveComment(foundComment);
     }
 
@@ -285,7 +290,7 @@ export function useComments({
         });
       }
     });
-  }, [cursorPosition, cursorCellId, state, commentGroups, isMobile, expandedCommentId]);
+  }, [cursorPosition, cursorCellId, state, commentGroups, isMobile, mobileActiveComment, expandedCommentId]);
 
   const handleCursorChange = useCallback((cellId: string, e: SyntheticEvent<HTMLTextAreaElement>) => {
     setCursorPosition(e.currentTarget.selectionStart);

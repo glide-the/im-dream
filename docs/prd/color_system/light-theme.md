@@ -75,12 +75,7 @@
 
 ## 5. 组件级衍生变量（亮色）
 
-| 变量 | 当前派生 | 适用对象 |
-| --- | --- | --- |
-| `--notebook-margin-line` | `color-mix(in srgb, var(--color-state-error) 24%, transparent)` | 原稿纸页边线 |
-| `--notebook-rule-line` | `color-mix(in srgb, var(--color-border-paper) 58%, transparent)` | 原稿纸横线 |
-
-移动写作的横线与实际行框对齐，桌面稿纸保留原规则，详见[写作设计](../../design/multi-platform/writing-mobile-layout.md)。
+写作区使用纸色背景，引用行和输入行按内容排版。[写作设计](../../design/multi-platform/writing-mobile-layout.md)
 
 ## 6. 使用规则
 

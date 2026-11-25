@@ -1,28 +1,15 @@
+// [Sync] 2026-11-24: share deferred document rendering with Writing.
 // [Input] Validated existing Read result, current Thread and ChatPanel preview container.
 // [Output] Compact excerpt, on-demand react-notion-x reading and same-result JSON inspection/download.
 // [Pos] Web Chat result presentation; no connector, network, tool or persistence operations.
 // [Sync] 2026-11-18: compact borderless preview with title-row download/expand and a two-line excerpt.
-import {Component, lazy, Suspense, useMemo, useRef, useState, type ReactNode} from 'react';
+import {useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import Modal from './Modal';
+import DeferredNotionDocument from './DeferredNotionDocument';
 import {IconDownload, IconFile, IconMaximize} from './Icons';
 import {notionPreviewExcerpt, type NotionWorkspacePreviewData} from './notionPreviewProjection';
 import './NotionWorkspacePreview.css';
-
-class DocumentBoundary extends Component<{children: ReactNode; fallback: ReactNode}, {failed: boolean}> {
-  state = {failed: false};
-  static getDerivedStateFromError() {return {failed: true};}
-  render() {return this.state.failed ? this.props.fallback : this.props.children;}
-}
-function DeferredDocument({data}: {data: NotionWorkspacePreviewData}) {
-  const {t} = useTranslation();
-  const [attempt, setAttempt] = useState(0);
-  // A fresh lazy instance permits an explicit retry after a rejected module/render attempt.
-  const Document = useMemo(() => {void attempt; return lazy(() => import('./NotionPageDocument'));}, [attempt]);
-  return <DocumentBoundary key={attempt} fallback={<p role="alert">{t('chat.notionPreview.renderFailed')} <button type="button" onClick={() => setAttempt(value => value + 1)}>{t('chat.notionPreview.retry')}</button></p>}>
-    <Suspense fallback={<p role="status">{t('chat.notionPreview.loading')}</p>}><Document data={data}/></Suspense>
-  </DocumentBoundary>;
-}
 
 export default function NotionWorkspacePreview({data}: {data: NotionWorkspacePreviewData; threadId: string}) {
   const {t} = useTranslation();
@@ -63,7 +50,7 @@ export default function NotionWorkspacePreview({data}: {data: NotionWorkspacePre
       {downloadFailed ? <p role="alert">{t('chat.notionPreview.downloadFailed')}</p> : null}
       <div className={`notion-preview__panes${json ? ' notion-preview__panes--json' : ''}`}>
         <article className="notion-preview__body" tabIndex={0} aria-label={t('chat.notionPreview.body')}>
-          {data.state === 'error' ? <p role="alert">{failure}</p> : data.markdown.trim() ? <DeferredDocument data={data}/> : <p>{t('chat.notionPreview.empty')}</p>}
+          {data.state === 'error' ? <p role="alert">{failure}</p> : data.markdown.trim() ? <DeferredNotionDocument data={data} renderFailed={t('chat.notionPreview.renderFailed')}/> : <p>{t('chat.notionPreview.empty')}</p>}
         </article>
         {json ? <aside className="notion-preview__json" aria-label={t('chat.notionPreview.json')}><pre tabIndex={0}>{detail}</pre></aside> : null}
       </div>

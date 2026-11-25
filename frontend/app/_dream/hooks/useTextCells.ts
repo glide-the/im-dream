@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: commit full TextCell prose assembled from an active Writing row or the original textarea.
 // [Sync] 2026-11-01: optionally recompute mobile textarea geometry after committed text, font and width changes without editor writes.
 // [Input] EditorEngine text Cells, textarea events, IME state, and Agent dropdown state.
 // [Output] Manage local TextCell mirrors, composition, paste, key handling, and textarea refs without model side effects.
@@ -28,7 +29,7 @@ export interface UseTextCellsReturn {
   setRefsReady: Dispatch<SetStateAction<number>>;
   handleTextChange: (cellId: string, newText: string) => void;
   handleCompositionStart: (cellId: string) => void;
-  handleCompositionEnd: (cellId: string, e: React.CompositionEvent<HTMLTextAreaElement>) => void;
+  handleCompositionEnd: (cellId: string, newText: string) => void;
   handlePaste: (cellId: string, e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   handleKeyDown: (cellId: string, e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   createTextareaRef: (cellId: string) => (el: HTMLTextAreaElement | null) => void;
@@ -52,19 +53,15 @@ export function useTextCells({
   const refsReadyTriggered = useRef(false);
 
   useEffect(() => {
-    if (state) {
-      setLocalTexts(prev => {
-        const next = new Map(prev);
-        state.cells.filter(c => c.type === 'text').forEach(cell => {
-          const textCell = cell as TextCell;
-          if (!composingCells.has(cell.id)) {
-            next.set(cell.id, textCell.content || '');
-          }
-        });
-        return next;
-      });
-    }
-  }, [state, composingCells]);
+    if (!state) return;
+    const changes = state.cells.filter((cell): cell is TextCell =>
+      cell.type === 'text' && !composingCells.has(cell.id) && localTexts.get(cell.id) !== cell.content);
+    if (changes.length) setLocalTexts(prev => {
+      const next = new Map(prev);
+      for (const cell of changes) next.set(cell.id, cell.content);
+      return next;
+    });
+  }, [state, composingCells, localTexts]);
 
   const resizeTextareas = useCallback(() => {
     const container = scrollContainerRef?.current;
@@ -147,14 +144,13 @@ export function useTextCells({
     setComposingCells(prev => new Set(prev).add(cellId));
   }, []);
 
-  const handleCompositionEnd = useCallback((cellId: string, e: React.CompositionEvent<HTMLTextAreaElement>) => {
+  const handleCompositionEnd = useCallback((cellId: string, newText: string) => {
     setComposingCells(prev => {
       const next = new Set(prev);
       next.delete(cellId);
       return next;
     });
 
-    const newText = e.currentTarget.value;
     setLocalTexts(prev => {
       const next = new Map(prev);
       next.set(cellId, newText);

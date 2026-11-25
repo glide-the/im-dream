@@ -1,3 +1,4 @@
+// [Sync] 2026-11-24: expose the page data consumed by both reading surfaces.
 // [Input] One saved Notion enhanced-Markdown result; no API, authentication or persistence access.
 // [Output] Ordered ExtendedRecordMap for react-notion-x, with validated URLs and literal code preserved.
 // [Pos] Presentation-only format adapter; NotionRenderer owns block DOM and layout.
@@ -83,7 +84,9 @@ function dedent(text: string): string {
   return Number.isFinite(indentation) && indentation > 0 ? lines.map(line => line.slice(indentation)).join('\n') : lines.join('\n');
 }
 
-export function createNotionRecordMap({pageId, title, markdown}: {pageId: string; title: string; markdown: string}): ExtendedRecordMap {
+export interface NotionDocumentData {pageId: string; title: string; markdown: string}
+
+export function createNotionRecordMap({pageId, title, markdown}: NotionDocumentData): ExtendedRecordMap {
   const map: ExtendedRecordMap = {block: {}, collection: {}, collection_view: {}, notion_user: {}, collection_query: {}, signed_urls: {}};
   const blocks = new Map<string, BaseBlock>();
   let sequence = 0;

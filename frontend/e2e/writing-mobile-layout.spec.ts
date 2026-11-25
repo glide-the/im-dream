@@ -1,3 +1,4 @@
+// [Sync] 2026-11-25: Writing uses plain backgrounds on both screen sizes.
 // [Input] Production Writing routes/components, original session/preferences DTO fixture and installed Chrome.
 // [Output] Mobile typography, chooser scrolling/navigation/selection/cancellation, retry and desktop preservation evidence.
 // [Pos] Provider-free browser interaction; DOM touch dispatch and fake native boundaries do not qualify device gestures or keyboards.
@@ -5,14 +6,30 @@
 // original persistence owners remain. Project, Episode, canonical Artifact, Run-private publication, Hook and models are out of scope.
 import {expect,test,type Page} from '@playwright/test';
 import {installReflectionFixtures} from './fixtures/reflectionsHarness';
+import type {WritingDocumentEvent, WritingDocumentState} from '../app/_dream/components/Editor/WritingDocument.protocol';
+
+interface WritingHost {
+ events: WritingDocumentEvent[];
+ revision: number;
+ documentId: string;
+ send: (overrides?: Partial<WritingDocumentState>) => void;
+}
+type TestWindow = Window & {__writingDocument: WritingHost; __INK_NATIVE_HOST__: {framework: string}};
 const base=process.env.E2E_WEB_BASE;
 if(!base)throw Error('E2E_WEB_BASE_REQUIRED');
 const evidence=process.env.INK_WRITING_EVIDENCE_DIR??'/tmp/ink-writing-mobile-implementation-20261101/validation';
 const states={happy:{name:'Happy',prompt:'happy'},ok:{name:'OK',prompt:'ok'},unhappy:{name:'Unhappy',prompt:'unhappy'}};
 async function open(page:Page,{width=390,height=844,selected='happy',document=false,long=false,fail=false}:{width?:number;height?:number;selected?:string|null;document?:boolean;long?:boolean;fail?:boolean}={}){
- const f=await installReflectionFixtures(page),writes:any[]=[],saves:any[]=[],errors=f.errors;let failNext=fail;
+ const f=await installReflectionFixtures(page),writes:unknown[]=[],saves:{session_id:string;editor_state?:{cells:{content?:string}[]}}[]=[],errors=f.errors;let failNext=fail;
  if(fail)f.allowHttpError(503,'/api/preferences');
- await page.addInitScript(()=>localStorage.setItem('ink-language','zh'));
+ await page.addInitScript(()=>{
+  localStorage.setItem('ink-language','zh');
+  sessionStorage.setItem('ink-dream-web-oauth', JSON.stringify({refresh_token:'isolated-writing-refresh'}));
+ });
+ await page.route('**/auth/refresh',route=>route.fulfill({json:{access_token:'writing-test',refresh_token:'isolated-writing-refresh',expires_at:Date.UTC(2035,0,1)}}));
+ if(!document)await page.route('**/auth/session',route=>route.fulfill({json:{user:{
+  id:'20260929',email:'writing@example.test',display_name:'Writing',avatar_url:null,role:'user',created_at:'2026-09-28T12:00:00Z'
+ }}}));
  await page.route('**/api/preferences',async route=>{
   if(route.request().method()==='GET')return route.fulfill({json:{first_login_completed:true,timezone:'UTC',selected_state:selected,updated_at:'2026-09-28T12:00:00Z',state_config:{states,greeting:long?'Today is a day to explore how you feel. '.repeat(45):'How are you feeling today?'}}});
   const body=route.request().postDataJSON();if('selected_state' in body){writes.push(body);if(failNext){failNext=false;return route.fulfill({status:503,json:{detail:'fixture preference save failed'}});}}
@@ -22,9 +39,20 @@ async function open(page:Page,{width=390,height=844,selected='happy',document=fa
  await page.clock.setFixedTime(new Date('2026-09-28T12:00:00Z'));
  await page.setViewportSize({width,height});
  if(document)await page.addInitScript(()=>{
-  const f=(window as any).__writingDocument={events:[],revision:0,documentId:''};
-  f.send=(overrides:any={})=>window.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'state',documentId:f.documentId,revision:++f.revision,active:true,theme:'light',language:'en',showEnergyBar:true,...overrides})}));
-  (window as any).ReactNativeWebView={postMessage:(raw:string)=>{const event=JSON.parse(raw);f.events.push(event);if(event.type==='ready'){f.documentId=event.documentId;f.send();}}};
+  const host = window as TestWindow;
+  host.__INK_NATIVE_HOST__ = {framework:'react-native'};
+  const f: WritingHost = {
+   events:[], revision:0, documentId:'',
+   send(overrides={}) {
+    window.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'state',documentId:f.documentId,revision:++f.revision,active:true,theme:'light',language:'en',showEnergyBar:true,...overrides})}));
+   },
+  };
+  host.__writingDocument=f;
+  window.ReactNativeWebView={postMessage:(raw:string)=>{
+   const event: WritingDocumentEvent=JSON.parse(raw);
+   f.events.push(event);
+   if(event.type==='ready'){f.documentId=event.documentId;f.send();}
+  }};
  });
  await page.goto(base+(document?'/native/writing':'/story-workspace/writing'),{waitUntil:'domcontentloaded'});
  await expect(page.locator('textarea.writing-prose').first()).toBeVisible();
@@ -40,14 +68,14 @@ test('mobile Writing shares line metrics, resizes long prose and returns through
  await expect(page.locator('.writing-page-header').getByRole('button',{name:'Happy',exact:true})).toBeVisible();
  const text='An ordinary morning. 中文段落会随着可用宽度自动换行。 '.repeat(45)+'\n\nA final line.\n';await editor.fill(text);
  await expect.poll(async()=>{const g=await assertGeometry(page);return g.scroll-g.height;}).toBeLessThanOrEqual(1);
- let g=await assertGeometry(page);expect(g.font).toBe(18);expect(g.line).toBeCloseTo(28.8,1);expect(g.padding).toBe('0px');expect(g.display).toBe('block');expect(g.background).toContain('28.8px');
+ const g=await assertGeometry(page);expect(g.font).toBe(18);expect(g.line).toBeCloseTo(28.8,1);expect(g.padding).toBe('0px');expect(g.display).toBe('block');expect(g.background).toBe('none');
  await page.locator('.writing-page').evaluate(el=>(el as HTMLElement).style.setProperty('--writing-font-size','22px'));
  await expect.poll(async()=>Math.round((await assertGeometry(page)).line*10)).toBe(352);
  await page.setViewportSize({width:320,height:568});await expect.poll(async()=>{const g=await assertGeometry(page);return g.scroll-g.height;}).toBeLessThanOrEqual(1);await expect(editor).toHaveValue(text);
  await editor.focus();await page.locator('.writing-page-header').getByRole('button',{name:'Happy',exact:true}).click();await expect(editor).not.toBeFocused();await expect(page.getByRole('dialog',{name:'How are you feeling today?'})).toBeVisible();
  await page.getByRole('button',{name:'← 更多',exact:true}).click();await expect(page.getByRole('dialog',{name:'更多',exact:true})).toBeVisible();expect(f.writes).toEqual([]);
  await page.getByRole('dialog',{name:'更多',exact:true}).getByRole('button',{name:'写作',exact:true}).click();await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);await expect(editor).toHaveValue(text);
- await expect.poll(()=>f.saves.some(save=>save.editor_state?.cells?.some((cell:any)=>cell.content===text))).toBe(true);
+ await expect.poll(()=>f.saves.some(save=>save.editor_state?.cells?.some(cell=>cell.content===text))).toBe(true);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(f.errors).toEqual([]);expect(f.f.createRequests).toEqual([]);await page.screenshot({path:evidence+'/writing-mobile.png'});
 });
 test('short chooser scrolls all content, touch dragging does not select and clicking submits once',async({page})=>{
@@ -90,16 +118,23 @@ test('failed preference save keeps the value and retries without creating anothe
  expect(f.writes).toEqual([{selected_state:'ok'},{selected_state:'ok'}]);expect([...sessionIds()].every(id=>before.has(id))).toBe(true);expect(f.errors.filter(error=>!error.startsWith('console: Failed to save state to database:'))).toEqual([]);expect(f.errors.filter(error=>error.startsWith('console: Failed to save state to database:'))).toHaveLength(1);
 });
 test('native document stays mobile in landscape and consumes the header open nonce once',async({page})=>{
- const f=await open(page,{document:true,width:844,height:390});await expect(page.locator('.writing-page-header')).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as any).__writingDocument.events.some((e:any)=>e.type==='chooser-view'&&!e.loading&&!e.expanded))).toBe(true);
+ const f=await open(page,{document:true,width:844,height:390});await expect(page.locator('.writing-page-header')).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as TestWindow).__writingDocument.events.some(e=>e.type==='chooser-view'&&!e.loading&&!e.expanded))).toBe(true);
+ // Development Strict Mode can remount the document before the first chooser view.
+ const readyDocuments=()=>page.evaluate(()=>(window as TestWindow).__writingDocument.events.filter(e=>e.type==='ready').map(e=>e.documentId));
+ const initialReady=await readyDocuments();
+ const startupErrors=[...f.errors];
+ expect(startupErrors.length).toBeLessThan(initialReady.length);
+ for(const error of startupErrors) expect(error).toBe('request: net::ERR_ABORTED '+base+'/auth/session');
+ expect(initialReady.at(-1)).toBe(await page.evaluate(()=>(window as TestWindow).__writingDocument.documentId));
  expect((await assertGeometry(page)).line).toBeCloseTo(28.8,1);
- await page.evaluate(()=>(window as any).__writingDocument.send({openChooserNonce:1}));await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('dialog').getByRole('button',{name:'OK',exact:true}).click();await expect.poll(()=>f.writes.length).toBe(1);await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
- await page.evaluate(()=>(window as any).__writingDocument.send({openChooserNonce:1}));await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
- await page.evaluate(()=>(window as any).__writingDocument.send({active:false}));await page.evaluate(()=>(window as any).__writingDocument.send({active:true}));await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
- expect(await page.evaluate(()=>(window as any).__writingDocument.events.filter((e:any)=>e.type==='ready').length)).toBe(1);expect(f.errors).toEqual([]);
+ await page.evaluate(()=>(window as TestWindow).__writingDocument.send({openChooserNonce:1}));await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('dialog').getByRole('button',{name:'OK',exact:true}).click();await expect.poll(()=>f.writes.length).toBe(1);await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
+ await page.evaluate(()=>(window as TestWindow).__writingDocument.send({openChooserNonce:1}));await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
+ await page.evaluate(()=>(window as TestWindow).__writingDocument.send({active:false}));await page.evaluate(()=>(window as TestWindow).__writingDocument.send({active:true}));await expect(page.locator('.state-chooser-overlay')).toHaveCount(0);
+ expect(await readyDocuments()).toEqual(initialReady);expect(f.errors).toEqual(startupErrors);
 });
 test('desktop retains original line height, compact chooser and floating Writing tools',async({page})=>{
  const f=await open(page,{width:1280});await expect(page.locator('.writing-page-header')).toHaveCount(0);await expect(page.locator('.state-chooser').getByText('Happy',{exact:true})).toBeVisible();expect((await assertGeometry(page)).line).toBeCloseTo(32.4,1);
- expect(await page.locator('.notebook-lines').evaluate(el=>getComputedStyle(el).backgroundImage)).toContain('32.4px');await expect(page.locator('.writing-mobile-tools')).toHaveCount(0);expect(f.errors).toEqual([]);await page.screenshot({path:evidence+'/writing-desktop.png'});
+ expect(await page.locator('.notebook-lines').evaluate(el=>getComputedStyle(el).backgroundImage)).toBe('none');await expect(page.locator('.writing-mobile-tools')).toHaveCount(0);expect(f.errors).toEqual([]);await page.screenshot({path:evidence+'/writing-desktop.png'});
 });
 
 test('font swap recomputes original textarea height without changing text or selection',async({page})=>{

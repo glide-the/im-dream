@@ -1,17 +1,20 @@
+// [Sync] 2026-11-25: anchor journal insertion feedback to the button that initiated the save.
 // [Sync] 2026-10-07: visible serial snapshot-version checks, distinct observed/loaded/verification guards and compact single-count safe-link content.
 // [Sync] 2026-10-06: show connector snapshot immediately, allow historical creation dates and verify today updates only while visible.
 // [Input] Calendar active/date/timezone, authenticated actor, shared connector transport and selected-day DTO.
 // [Output] Read-only local-state Notion panel with snapshot-first reads, explicit refresh, recovery and guarded response submission.
 // [Pos] Calendar-owned metadata consumer; Settings owns connection and Agent owns selected body access.
 // [Sync] 2026-10-05: implement Search-scope today journeys, context invalidation and hidden-panel query suspension.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { getDateLocale } from '../i18n';
 import { getLocalDayKey } from '../utils/timezone';
 import { getNotionToday, type NotionTodayResponse } from '../api/notionTodayApi';
 import { listConnectors, ResourceConnectorApiError, RESOURCE_CONNECTORS_CHANGED_EVENT, type ResourceConnector } from '../api/resourceConnectorApi';
+import {calendarArticleHref} from './notes/notionArticleLinks';
 import { IconFile } from './chat/Icons';
+import Toast from './chat/Toast';
 
 type Phase = 'loading' | 'success' | 'unconnected' | 'pending' | 'expired' | 'ambiguous' | 'failed';
 type Snapshot = { key: string; phase: Phase; data?: NotionTodayResponse; connectorContext?: string;
@@ -22,7 +25,8 @@ const DATE_CHECK_INTERVAL_MS = 60_000;
 const connectorContext = (connector: ResourceConnector) => JSON.stringify([connector.id, connector.updatedAt,
   connector.auth.status, connector.sources.map((source) => [source.type, source.id]).sort()]);
 
-export default function CalendarNotionPanel({ active, dateKey, timeZone, onSettings }: {
+export default function CalendarNotionPanel({ active, dateKey, timeZone, onSettings, onInsertArticle }: {
+  onInsertArticle: (href: string) => Promise<'inserted' | 'present'>;
   active: boolean; dateKey: string; timeZone: string; onToday: (date: string) => void; onSettings: () => void;
 }) {
   const { user, isAuthenticated } = useAuth();
@@ -36,6 +40,26 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
   try { today = getLocalDayKey(new Date(Math.max(now, Date.now())), effectiveZone); } catch { /* Date feedback below. */ }
   if (serverDay?.owner === owner && today === serverDay.localDate) today = serverDay.date;
   const key = JSON.stringify([isAuthenticated, user?.id, dateKey, effectiveZone, today]);
+  const inserting = useRef(false);
+  const tipId = useId();
+  const [insertion, setInsertion] = useState<{key: string; pageId: string; anchor: HTMLButtonElement; status: 'inserting' | 'inserted' | 'present' | 'insertFailed'} | null>(null);
+  const dismissTip = useCallback(() => {
+    setInsertion(current => current === insertion ? null : current);
+  }, [insertion]);
+  async function insertArticle(href: string, pageId: string, anchor: HTMLButtonElement) {
+    if (inserting.current) return;
+    inserting.current = true;
+    const trigger = {key, pageId, anchor};
+    setInsertion({...trigger, status: 'inserting'});
+    try {
+      const status = await onInsertArticle(href);
+      setInsertion({...trigger, status});
+    } catch {
+      setInsertion({...trigger, status: 'insertFailed'});
+    } finally {
+      inserting.current = false;
+    }
+  }
   const currentKeyRef = useRef(key); currentKeyRef.current = key;
   const canStartRef = useRef(false); canStartRef.current = active && visible && isAuthenticated && today !== null;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -292,6 +316,9 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
   const settings = <button type="button" className="calendar-popup__button" onClick={onSettings}>{t('calendar.notion.settings')}</button>;
 
   return <>
+    {insertion && <Toast id={tipId} anchor={insertion.anchor} hidden={!active || insertion.key !== key} message={t(`noteArticle.${insertion.status}`)}
+      role={insertion.status === 'insertFailed' ? 'alert' : 'status'}
+      onClose={insertion.status === 'inserting' ? undefined : dismissTip} />}
     <header className="calendar-popup__section-heading">
       <h3>{t('calendar.notion.title')}</h3>
       {data ? <span className="calendar-popup__card-count" data-notion-count>
@@ -321,7 +348,9 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
           if (!rows.length) return null;
           return <section key={group} className="calendar-popup__notion-group" aria-label={t(`calendar.notion.${group}`)}>
             <h4>{t(`calendar.notion.${group}`)}</h4>
-            <ul>{rows.map((item) => <li key={item.pageId}>
+            <ul>{rows.map((item) => {
+              const href = calendarArticleHref(item.pageId, item.url);
+              return <li key={item.pageId}>
               <span aria-hidden="true">{item.emoji || <IconFile />}</span>
               <div>{item.url ? <a className="calendar-popup__notion-title" href={item.url} target="_blank" rel="noopener noreferrer"
                 aria-label={t('calendar.notion.openAria', { title: item.title || t('calendar.notion.untitled') })}>
@@ -333,7 +362,12 @@ export default function CalendarNotionPanel({ active, dateKey, timeZone, onSetti
                 </div>
                 {!item.url ? <p>{t('calendar.notion.urlUnavailable')}</p> : null}
               </div>
-            </li>)}</ul>
+              {href && <button type="button" className="calendar-popup__insert-article"
+                disabled={insertion?.status === 'inserting'}
+                aria-label={t('noteArticle.insertNamed', {name: item.title || t('calendar.notion.untitled')})}
+                aria-describedby={insertion?.key === key && insertion.pageId === item.pageId ? tipId : undefined}
+                onClick={event => {void insertArticle(href, item.pageId, event.currentTarget);}}>{t('noteArticle.insert')}</button>}
+            </li>;})}</ul>
           </section>;
         })}
       </> : null}

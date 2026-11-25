@@ -1,3 +1,4 @@
+/* [Sync] 2026-11-25: Writing uses content line boxes on a plain paper surface. */
 /* [Sync] 2026-11-01: scope Writing typography, header and chooser scrolling to mobile surfaces; desktop values remain. */
 /* [Input] App-level React class names and semantic theme tokens from styles/tokens.css. */
 /* [Output] Global app shell, notebook, binder, scrollbar, and modal styling. */
@@ -271,25 +272,6 @@
   background: url(https://s2.svgbox.net/pen-brushes.svg?ic=brush-5&color=ddb3ff);
 }
 
-/* @@@ Notebook ruled lines background */
-.notebook-lines {
-  --notebook-margin-line: color-mix(in srgb, var(--color-state-error) 24%, transparent);
-  --notebook-rule-line: color-mix(in srgb, var(--color-border-paper) 58%, transparent);
-  background-image:
-    /* Vertical margin line (left) */
-    linear-gradient(to right, transparent 0, transparent 39px, var(--notebook-margin-line) 40px, var(--notebook-margin-line) 41px, transparent 41px),
-    /* Horizontal ruled lines */
-    repeating-linear-gradient(
-      transparent,
-      transparent 31.4px,
-      var(--notebook-rule-line) 31.4px,
-      var(--notebook-rule-line) 32.4px
-    );
-  background-size: 100% 100%;
-  background-position: 0 0;
-  background-attachment: local; /* Scroll lines with content instead of fixing to viewport */
-}
-
 /* Scrollbar styling for simplified version */
 .writing-textarea::-webkit-scrollbar,
 .comments-panel::-webkit-scrollbar {
@@ -359,13 +341,8 @@
 .writing-chooser-action:disabled {opacity:.6;cursor:default;}
 .writing-page-header button:focus-visible,.writing-chooser-action:focus-visible {outline:2px solid var(--color-border-paper);outline-offset:2px;}
 .writing-page[data-mobile-layout='true'] .writing-mobile-tools {position:static !important;justify-content:flex-end;flex:0 0 auto;padding:4px 12px 8px;}
-.writing-page[data-mobile-layout='true'] .notebook-lines {
-  background-image:linear-gradient(to right,transparent 0,transparent 39px,var(--notebook-margin-line) 40px,var(--notebook-margin-line) 41px,transparent 41px);
-}
 .writing-page[data-mobile-layout='true'] .writing-prose {
   display:block;box-sizing:border-box;padding:0;margin:0;
-  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--writing-line-height) - 1px),var(--notebook-rule-line) calc(var(--writing-line-height) - 1px),var(--notebook-rule-line) var(--writing-line-height)) !important;
-  background-attachment:local;
 }
 .writing-page[data-mobile-layout='true'] .writing-text-highlight {white-space:pre-wrap;overflow-wrap:break-word;word-wrap:break-word;box-sizing:border-box;padding:0;margin:0;}
 .writing-page[data-mobile-layout='true'] .writing-feedback {position:static !important;flex:0 0 auto;box-sizing:border-box;}

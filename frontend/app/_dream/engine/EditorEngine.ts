@@ -1,5 +1,6 @@
 /**
  * EditorEngine.ts
+ * [Sync] 2026-11-25: append a calendar article on its own journal line.
  * Clean editor engine based on trace-based energy model
  * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
  *   even when inserting between two widgets (was only guarding the last-cell case).
@@ -174,6 +175,17 @@ export class EditorEngine {
   setVoiceConfigs(configs: Record<string, unknown>) {
     void configs;
     // Kept for backward compatibility, but does nothing
+  }
+
+  /** Append a journal line after the current contents, including a trailing widget in an older note. */
+  appendTextLine(line: string) {
+    let last = this.state.cells.at(-1);
+    if (!last || last.type !== 'text') {
+      last = {id: generateId(), type: 'text', content: ''};
+      this.state.cells.push(last);
+    }
+    const separator = last.content && !last.content.endsWith('\n') ? '\n' : '';
+    this.updateTextCell(last.id, last.content + separator + line);
   }
 
   // @@@ Update a specific text cell by ID

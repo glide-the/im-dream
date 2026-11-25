@@ -1,3 +1,4 @@
+# [Sync] 2026-11-24: authenticated page-ID-only note article read with a private, non-cacheable response.
 # [Sync] 2026-10-07: map safe domain-only busy Retry-After and selection_saved feedback while retaining original statuses and errors.
 # [Sync] 2026-10-06: expose selected-date snapshot reads and version-bound metadata verification through one public handler.
 # [Input] Notion facade, current Admin OAuth actor, discovery, and snapshot materialization.
@@ -21,8 +22,9 @@ from datetime import datetime, timezone
 
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Iterable, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from notion import (
@@ -308,6 +310,30 @@ def read_notion_skill_file(
         )
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
+
+
+@router.get("/api/connectors/notion/articles/{page_id}")
+async def read_notion_article(
+    page_id: UUID,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
+    facade = _connector_facade(current_user, owner)
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        return await facade.read_article(str(page_id))
+    except NotionTodayError as exc:
+        if exc.code == "NOTION_AUTH_EXPIRED":
+            raise HTTPException(403, detail={"error_code": exc.code}) from None
+        raise _http_error(exc) from None
+    except NotionConnectorNotFoundError:
+        raise HTTPException(404, detail={"error_code": "NOTION_CONNECTOR_UNAVAILABLE"}) from None
+    except (NotionAuthRequiredError, NotionCredentialError):
+        # The Dream session remains valid when the Notion connection needs attention.
+        raise HTTPException(403, detail={"error_code": "NOTION_AUTH_EXPIRED"}) from None
+    except Exception as exc:
+        raise _http_error(exc) from None
 
 
 @router.get("/api/connectors/{connector_id}")
