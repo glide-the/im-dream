@@ -4,6 +4,7 @@
  * [Sync] 2026-10-23: repeat-day dialog shares the page content draft and inline Notion/Agent controls.
  * [Sync] 2026-10-13: centralize analysis content, freeze each submission and recover task-linked reports.
  * [Sync] 2026-10-13: distinguish prepared tasks from running recovery; explicit continuation retains original inputs.
+ * [Sync] 2026-11-26: show Stop analysis beside the active analysis action at desktop and narrow widths.
  * [Sync] 2026-10-14: consume Chat Reflections section links by opening and focusing the newest matching saved report.
  * [Sync] 2026-10-14: preview independent analyses by true creation time and navigate to the existing timeline.
  * [Sync] 2026-10-14: retain the original history heading/grid and empty dashboard layout after scope correction.
@@ -31,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type {ReflectionAnalysisContentOptions,ReflectionResult,ReflectionSectionConfig,ReflectionSectionKey} from '../api/voiceApi';
 import ReflectionAnalysisContentControls from './ReflectionAnalysisContentControls';
+import './AnalysisTaskProgress.css';
 import useReflections,{type AnalysisSessionCandidate} from '../hooks/useReflections';
 import useReflectionReport from '../hooks/useReflectionReport';
 import useReflectionDetailSheet from '../hooks/useReflectionDetailSheet';
@@ -438,7 +440,7 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
   const formatEntriesLabel = (n: number) => t('analysis.statsLabels.entriesCount', { count: n });
   const formatWordsLabel   = (n: number) => t('analysis.statsLabels.wordsCount', { value: n.toLocaleString() });
 
-  const {continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError}=useReflections({timezone,authenticated:isAuthenticated,authLoading:isAuthLoading});
+  const {continuePreparedTask,echoes,traits,patterns,loading,streaming,errors,stats,savedReports,analysisContent,setAnalysisContent,reportSaveError,reportRetryTaskId,reportSaving,taskStatus,canStopAnalysis,stoppingTask,stopError,handleStopAnalysis,setActiveRecoveryTick,preparedTask,explicitStartTaskIdRef,recoveringTaskIdRef,setLoading,writeActiveReflectionTask,reanalysisDialog,setReanalysisDialog,viewMode,setViewMode,currentPaper,setCurrentPaper,selectedReport,historyLoading,historyError,requestedBlogSection,setRequestedBlogSection,configModal,setConfigModal,reloadSavedReports,handleOpenConfig,handleSaveConfig,handleResetConfig,openReflectionBlogReport,retryReportSave,handleAnalyzeAll,handleToggleReanalysisSession,handleToggleAllReanalysisSessions,handleConfirmReanalysis,anyLoading,hasAnyData,anyError}=useReflections({timezone,authenticated:isAuthenticated,authLoading:isAuthLoading});
 
   // ──────────────────────────────────────────────
   // BLOG VIEW — full-page editorial layout for a single Past Reflection
@@ -532,7 +534,6 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
       padding: isMobile ? '1.75rem 1rem 2.5rem' : '3rem 2rem',
       position: 'relative',
     }}>
-      <style>{`@keyframes reflection-progress-sweep{0%{transform:translateX(-120%)}100%{transform:translateX(260%)}}`}</style>
       <DecorativeInkSpots />
 
       <div style={{ maxWidth: '1100px', margin: '0 auto', position: 'relative' }}>
@@ -686,7 +687,7 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', alignItems: 'center' }}>
           <button
             onClick={handleAnalyzeAll}
-            disabled={anyLoading}
+            disabled={anyLoading || stoppingTask}
             style={{
               padding: '16px 48px',
               background: anyLoading ? 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)' : 'transparent',
@@ -723,45 +724,20 @@ export default function AnalysisView({ timezone }: { timezone: string }) {
               {i18n.language.startsWith('zh') ? '继续未开始的分析' : 'Continue unstarted analysis'}
             </button>
           </div>}
-          {taskStatus && (
-            <div style={{
-              width: 'min(520px, 100%)',
-              margin: '1rem auto 0',
-              padding: '0.9rem 1.1rem',
-              borderRadius: '18px',
-              border: '1px solid color-mix(in srgb, var(--color-border-paper) 70%, transparent)',
-              background: 'linear-gradient(135deg, var(--color-bg-surface) 0%, color-mix(in srgb, var(--color-bg-surface-solid) 84%, transparent) 100%)',
-              boxShadow: '0 14px 40px color-mix(in srgb, var(--color-border-paper) 22%, transparent)',
-              fontSize: '12px',
-              color: 'var(--color-text-secondary)',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              display: 'grid',
-              gap: '0.55rem',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
-                <span style={{ letterSpacing: '1.6px', textTransform: 'uppercase', fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 700 }}>
-                  Live editorial analysis
+          {(taskStatus || canStopAnalysis || stoppingTask || stopError) && (
+            <div className="analysis-task-progress">
+              <div className="analysis-task-progress__row">
+                <span className="analysis-task-progress__status" role="status">
+                  <span className="analysis-task-progress__indicator" aria-hidden="true"
+                    data-active={anyLoading || stoppingTask} data-error={Boolean(stopError)} />
+                  {stoppingTask ? t('analysis.actions.stopping') : taskStatus || t('analysis.progress.reconnecting')}
                 </span>
-                <span style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-body)' }}>
-                  {taskStatus}
-                </span>
+                {(canStopAnalysis || stoppingTask) && <button className="analysis-task-progress__stop" type="button"
+                  onClick={() => { void handleStopAnalysis(); }} disabled={stoppingTask}>
+                  {t('analysis.actions.stop')}
+                </button>}
               </div>
-              {anyLoading && (
-                <div style={{
-                  height: '3px',
-                  overflow: 'hidden',
-                  borderRadius: '999px',
-                  background: 'color-mix(in srgb, var(--color-border-paper) 38%, transparent)',
-                }}>
-                  <div style={{
-                    width: '42%',
-                    height: '100%',
-                    borderRadius: '999px',
-                    background: 'linear-gradient(90deg, transparent, var(--color-text-muted), transparent)',
-                    animation: 'reflection-progress-sweep 1.5s ease-in-out infinite',
-                  }} />
-                </div>
-              )}
+              {stopError && <p className="analysis-task-progress__error" role="alert">{stopError}</p>}
             </div>
           )}
         </div>

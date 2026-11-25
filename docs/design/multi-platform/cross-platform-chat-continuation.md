@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-25: document continuation history comparison after a native API error. -->
+<!-- [Sync] 2026-11-26: restore complete saved tool results and ended inputs when the local transcript is absent. -->
 <!-- [Sync] 2026-11-08: Simulator40与本机服务采用，正常模型验收及旧未知队列回执保持待完成。 -->
 <!-- [Sync] 2026-11-08: 追加0086及接口正常发布状态，先行设计和源码回执原文保留。 -->
 <!-- [Sync] 2026-11-04: 实现同一Thread与Claude会话跨端恢复，发布采用及真实业务验收单列。 -->
@@ -464,3 +466,57 @@ stateDiagram-v2
 | 原对话故障 | 旧unknown行缺少可用于接管的终态回执 | 保留原行、消息与转录，阻断自动重发 | 新流程准备失败保持pending，同ID显式重试合同通过 | 旧尝试回执核实及原对话可见业务复核 |
 
 **最终评审结论：待满足明确前提后通过。** 设计、源码实施与已列技术验证完成；真实跨端模型验收及指定旧unknown行的业务恢复仍有明确依赖。发布检查、Simulator采用、fixture结果与真实业务分别留证。
+
+### 模型接口错误与原会话恢复
+
+已确认失败的轮次可以保留原用户消息、部分回复及工具结果。`ResumeTranscriptLease.prepare` 比对本端转录与 Admin 消息时，跳过原生转录内由 `<synthetic>` 助手生成、`isApiErrorMessage` 为 `true` 且只含文本的错误诊断。诊断记录保留在原文件内。比对仍校验相同的会话标识、用户输入、助手正文及工具回执。核对通过后沿原 Claude 会话执行下一条用户消息，每条新消息只提交一次。
+
+轮次收到模型错误时的终态读取、队列结算与异常恢复见[队列设计](../claude-agent/claude-agent-streaming-thread-queue.md#模型接口错误后的轮次结算)。
+
+### 已结束轮次缺少本端转录
+
+现行补充恢复规则适用于本端首次初始化。`history_records` 接受已保存的 `completed` 回复，以及 `is_partial=true`、`turnStatus` 为 `cancelled` 或 `error` 的部分回复。按已保存的消息片段顺序写入工具调用与对应结果，每个调用标识只出现一次。工具结果支持原字符串及由 Claude 结果文本解析出的 JSON 对象。对象按 JSON 文本写回同一个工具结果。含未闭合调用或原生媒体的结果保留恢复失败。缺少回复的用户输入进入转录前，Service 复用当前 Thread 的 `chat-input.list`，核对原消息 ID、派发标识和 `failed`。历史快照与本次 claim 继续使用同一 `history_digest`。
+
+本端已有原生转录时沿原字节进行比对。Runtime 为无回复输入补入的原生合成占位在正文比对中跳过，原文件保留。`SimpleClaudeAgentSDKClient` 在原会话恢复时继续关闭自动重跑历史中断输入。旧消息、历史工具结果和本次新查询分别保留原有身份。[产品规则](../../prd/chat/cross-platform-continuation.md)
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Service as ClaudeAgentService
+    participant Admin as Admin
+    participant Lease as ResumeTranscriptLease
+    participant Runner as ClaudeAgentRunner
+    User->>Service: 在原对话发送新消息
+    Service->>Admin: chat-message.resume-snapshot
+    Admin-->>Service: 原会话及历史摘要
+    Service->>Lease: prepare
+    alt 缺少本端转录且存在无回复输入
+        Lease-->>Service: 历史输入需要核对
+        Service->>Admin: chat-input.list
+        Admin-->>Service: 原消息状态及派发标识
+        Service->>Lease: 准备已确认失败的历史输入
+    end
+    alt 写入合法转录或核对原转录成功
+        Lease-->>Service: 原会话可准备
+        Service->>Admin: chat-input.claim-continuation
+        Admin-->>Service: 本次输入派发回执
+        Service->>Runner: 恢复原会话并提交本次消息
+    else 无法核实历史或工具结果未闭合
+        Lease-->>Service: CLAUDE_RESUME_HISTORY_UNSUPPORTED
+        Service-->>User: 显示准备失败并保留输入
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Preparing
+    Preparing --> CheckingReceipts: 本端转录缺失且历史输入无回复
+    CheckingReceipts --> Preparing: Admin 确认原派发失败
+    CheckingReceipts --> Unavailable: 失败回执缺失
+    Preparing --> Unavailable: 工具历史无法完整恢复
+    Preparing --> Ready: 原会话转录校验完成
+    Ready --> Claimed: Admin 确认本次派发
+    Unavailable --> Preparing: 用户显式重试
+```
+
+验收覆盖原会话标识、保存的停止工具轮次、多个闭合结果、失败输入回执、本次查询一次和历史工具零执行。含未闭合工具或缺失回执的输入继续拒绝初始化。

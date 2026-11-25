@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: reconcile the current Thread's navigation summaries with input dispatch receipts.
 // [Sync] 2026-11-18: expose the current conversation bounds for local Notion reading overlays.
 // [Sync] 2026-11-13: ordinary and queued messages capture current Thread tools without global MCP saves.
 // [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
@@ -1031,8 +1032,8 @@ export default function ChatPanel({
   const agentBusy = canStopMainTurn || isStopping || submissionStopPending;
   const chatLoading = agentBusy || isLoading || historyPending;
   const visibleTurnNavigation = useMemo(
-    () => projectVisibleTurnNavigation(visibleMessages, agentBusy),
-    [visibleMessages, agentBusy],
+    () => projectVisibleTurnNavigation(visibleMessages, agentBusy, threadInputs),
+    [visibleMessages, agentBusy, threadInputs],
   );
   const turnNavigationItems = useMemo(
     () => mergeTurnNavigation(indexedTurns, visibleTurnNavigation),

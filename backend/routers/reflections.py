@@ -17,6 +17,8 @@
 # [Sync] 2026-09-15: route public section config, task, event, and result ownership through Admin.
 # [Sync] 2026-10-13: read mounted Notion candidates and create immutable task content through additive Admin operations.
 # [Sync] 2026-10-13: bind complete source candidates to the original caller key and clear them after task commit.
+# [Sync] 2026-11-26: signal missing workers after authorized event lookup so clients can restart the original task.
+# [Sync] 2026-11-26: expose an owner-authorized stop that settles the original task and preserves committed results.
 """Reflections analysis router.
 
 Endpoints
@@ -48,9 +50,12 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from reflections_agent import (
+    REFLECTION_TASK_STOPPED,
+    TERMINAL_TASK_STATUSES,
     get_reflection_event_bus,
     prepare_reflection_event_bus,
     start_reflections_task,
+    stop_reflections_task_worker,
 )
 from reflections_config import REFLECTIONS_SECTION_CONFIGS, list_sections, get_section_config
 
@@ -81,6 +86,7 @@ from services.admin_data.reflection_analysis_content import (
 )
 from services.admin_data.reflection_task_models import (
     ReflectionEventListInputDTO,
+    ReflectionTaskAdvanceInputDTO,
     ReflectionTaskCreateInputDTO,
     ReflectionTaskCreateSnapshotDTO,
     ReflectionTaskDTO,
@@ -477,9 +483,10 @@ async def create_reflections_task_endpoint(
         created = await invoke_admin_operation(current_user, data.create, create_input, request_id=body.request_key)
     task = created.task
     try:
-        await prepare_reflection_event_bus(
-            task.task_id, worker=_reflections_worker(owner)
-        )
+        if recovered is None:
+            await prepare_reflection_event_bus(
+                task.task_id, worker=_reflections_worker(owner)
+            )
         if body.auto_start:
             started = await invoke_admin_operation(
                 current_user,
@@ -487,7 +494,7 @@ async def create_reflections_task_endpoint(
                 ReflectionTaskLookupDTO(task_id=task.task_id),
             )
             task = started.task
-            if not started.terminal or started.report_missing:
+            if not started.terminal or (started.report_missing and task.error_summary != REFLECTION_TASK_STOPPED):
                 await _start_worker(task.task_id, owner)
         return Response(
             content=json.dumps(await _content_task_response(task, current_user, owner), ensure_ascii=False),
@@ -520,13 +527,63 @@ async def start_reflections_task_endpoint(
         data.start,
         _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id),
     )
-    if not started.terminal or started.report_missing:
+    if not started.terminal or (started.report_missing and started.task.error_summary != REFLECTION_TASK_STOPPED):
         await _start_worker(task_id, owner)
     return Response(
         content=json.dumps(await _content_task_response(started.task, current_user, owner), ensure_ascii=False),
         media_type="application/json",
         status_code=202,
     )
+
+
+@router.post("/api/reflections/tasks/{task_id}/stop")
+async def stop_reflections_task_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> dict[str, Any]:
+    """Settle the owned task even when the local worker disappeared on restart."""
+    lookup = _validated_reflection_input(ReflectionTaskLookupDTO, task_id=task_id)
+    data = _reflections_data(owner)
+    # Admin start authorizes writes and binds the task to this service. Worker
+    # dispatch is a separate Dream action that this route does not call.
+    started = await invoke_admin_operation(current_user, data.start, lookup)
+    task = started.task
+    stopped = task.error_summary == REFLECTION_TASK_STOPPED
+    if not started.terminal:
+        worker = _reflections_worker(owner)
+        for retry_conflict in (True, False):
+            try:
+                advanced = await asyncio.to_thread(worker.advance, ReflectionTaskAdvanceInputDTO(
+                    task_id=task_id,
+                    action="finalize" if task.status == "RUNNING" else "fatal-fail",
+                    expected_revision=task.revision,
+                    error_summary=REFLECTION_TASK_STOPPED,
+                ), str(uuid4()))
+                stopped = advanced.status in {"PARTIAL_FAILED", "FAILED"}
+                break
+            except AdminDataError as exc:
+                conflict = exc.code in {"REFLECTION_TASK_REVISION_CONFLICT", "REFLECTION_TASK_TRANSITION_CONFLICT"}
+                if conflict or exc.outcome_unknown:
+                    observed = await invoke_admin_operation(current_user, data.get, lookup)
+                    task = observed.task
+                    if task.status in TERMINAL_TASK_STATUSES:
+                        stopped = task.error_summary == REFLECTION_TASK_STOPPED
+                        break
+                    if retry_conflict and conflict and not exc.outcome_unknown:
+                        continue
+                raise HTTPException(exc.status_code, detail={
+                    "error_code": exc.code, "outcome_unknown": exc.outcome_unknown,
+                }) from None
+    if stopped:
+        await stop_reflections_task_worker(task_id)
+    result = await invoke_admin_operation(current_user, data.get, lookup)
+    if stopped and result.results:
+        try:
+            await asyncio.to_thread(owner.reflections_worker_data().ensure_report, lookup, str(uuid4()))
+        except AdminDataError:
+            logger.warning("Reflections stopped report could not be ensured task_id=%s", task_id)
+    return _task_response(result.task, result.results)
 
 
 @router.get("/api/reflections/tasks/{task_id}")
@@ -638,9 +695,14 @@ async def stream_reflections_task_events_endpoint(
 
     async def _stream():
         try:
+            connected = {
+                "id": "stream-connected", "task_id": task_id,
+                "type": "reflection.stream.connected", "sequence": 0, "created_at": None,
+                "payload": {"worker_missing": bus is None or bus.is_done},
+            }
             yield (
                 "event: reflection.stream.connected\n"
-                f"data: {json.dumps({'id': 'stream-connected', 'task_id': task_id, 'type': 'reflection.stream.connected', 'sequence': 0, 'created_at': None, 'payload': {}}, ensure_ascii=False)}\n\n"
+                f"data: {json.dumps(connected, ensure_ascii=False)}\n\n"
             )
             maximum = 0
             for event in history.events:

@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-26: 分析页重开时接管当前服务进程中断的原任务，沿已提交事件序号恢复。 -->
+<!-- [Sync] 2026-11-26: 记录原任务终止、当前子轮次停止及结果保留。 -->
 <!-- [Sync] 2026-11-03: 日记全文通过原get_sessions_range显式include_text读取；默认摘要及snapshot权限保持。 -->
 <!-- [Sync] 2026-10-29: 前端任务客户端/状态已共享给Native，更新现行源码归属；业务、后端与权限合同保持。 -->
 <!-- [Sync] 2026-10-23: v2 创建冻结 Notion 范围，栏目通过原 Read hook 按需读取并登记实际证据。 -->
@@ -234,10 +236,12 @@ sequenceDiagram
 
 ## 异常与恢复时序
 
+服务重启会清空本机执行进程和事件订阅。Admin 保存的中间状态仅记录任务进度，延长查询周期无法启动执行。分析页使用原任务的授权启动入口恢复执行，启动时从 Admin 读取任务快照。页面重开提供当前用户身份，服务启动阶段无需扫描账户任务。
+
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant FE as AnalysisView / voiceApi
+    participant FE as AnalysisView / reflectionsApi
     participant API as routers.reflections
     participant E as ReflectionsTaskEngine
     participant R as ClaudeAgentReflectionsRunner
@@ -259,6 +263,7 @@ sequenceDiagram
     else Admin 写入结果未知
         A-->>E: AdminDataError，outcome_unknown=true
         E->>E: 退出本轮执行并保留 Admin 当前状态
+        E->>B: 关闭本轮事件订阅
         FE->>API: GET task/results，核对原任务
         API->>A: 校验归属并读取状态与结果
         A-->>API: 已保存状态与结果
@@ -289,15 +294,66 @@ sequenceDiagram
         API->>A: 授权启动并加载原任务
         API->>E: 进入既有后台执行流程
         API-->>FE: 当前任务状态
-    else 当前任务仍在执行
+    else 任务处于 ASSEMBLING、QUEUED 或 RUNNING
         FE->>S: 重新订阅并携带 Last-Event-ID
         S->>A: 查询已保存历史
-        B-->>S: 后续已提交事件
-        S-->>FE: 历史回放与后续任务事件
+        alt 本机事件发布仍可用
+            B-->>S: 后续已提交事件
+            S-->>FE: 历史回放与后续任务事件
+        else 本机事件发布已中断
+            S-->>FE: worker_missing、已提交事件和流结束
+            FE->>API: GET tasks/task_id，核对当前状态
+            opt 任务仍处于中间状态
+                FE->>API: POST tasks/task_id/start
+                API->>A: 校验任务归属和启动权限
+                API->>E: 从 Admin 快照及已提交事件序号接管
+                API-->>FE: 启动回执
+                FE->>S: 携带最新已回放事件游标订阅
+                S-->>FE: 新事件及任务结果状态
+            end
+        end
     end
 ```
 
-确定的栏目失败会保存错误并继续其余栏目，最终状态由 Admin finalize 结果确定。`outcome_unknown=true` 传播到 Engine 后，本轮执行结束；恢复依据 Admin 当前状态和原业务回执。终态再次进入 Engine 只执行报告恢复分支。浏览器重开使用同一 task_id；进程重启后的生产者恢复取决于既有任务启动入口和 Admin 栏目状态，页面订阅负责读取事件。
+同一 Dream 进程收到重复启动时直接返回，已有执行继续发布事件。重新接管时按 Admin 栏目状态跳过已完成及已失败的栏目。执行中的栏目使用原 Thread 执行；栏目权限已过最大有效期时，用该栏目当前 revision 保存失败后继续其余栏目。最终状态由 Admin finalize 结果确定。启动或状态读取失败时页面显示错误并保留原任务供再次恢复。终态再次进入 Engine 时只执行报告恢复分支。
+
+## 终止分析时序
+
+页面状态会在执行进程退出后继续显示原任务。终止请求在 Admin 保存终态，解决进程不在时仍需结束任务的情况。只关闭客户端订阅会让任务保持活动。复用 Admin 的 `finalize` 和 `fatal-fail`，按当前 revision 结算栏目与权限，并使用现有终态表示保存结果。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant UI as AnalysisView / useReflections
+    participant API as routers.reflections
+    participant A as Admin Reflections
+    participant E as ReflectionsTaskEngine
+    participant F as ClaudeAgentThreadFactory
+    U->>UI: 点击进度状态后的终止分析
+    UI->>API: POST tasks/task_id/stop
+    API->>A: reflection-task.start 校验写权限与任务归属
+    alt 任务仍活动
+        API->>A: 使用 revision 执行 finalize 或 fatal-fail
+        alt 终态已保存
+            A-->>API: 保留已完成栏目，关闭未完成栏目权限
+            opt 有本机执行任务
+                API->>E: 取消本机任务
+                E->>F: stop_thread 停止当前栏目轮次
+            end
+            API->>A: get 读取原任务与结果，已有结果则 report.ensure
+            API-->>UI: 返回已保存终态
+            UI-->>U: 显示分析已终止，恢复生成入口
+        else 版本冲突或写入结果未知
+            API->>A: get 核对原任务
+            API-->>UI: 已确认终态或暂时无法确认
+            UI-->>U: 显示结果或保留终止入口供重试
+        end
+    else 已有终态
+        API-->>UI: 返回已有终态与结果
+    end
+```
+
+`RUNNING` 使用 `finalize` 和 `error_summary=REFLECTION_TASK_STOPPED`。仍有未完成栏目的任务保存为 `PARTIAL_FAILED` 或 `FAILED`，取决于已完成栏目。`CREATED`、`ASSEMBLING`、`QUEUED` 使用 `fatal-fail` 保存相同终止原因。已完成任务返回原结果。停止只操作任务所属的本机工作者和其当前栏目，权限已由 Admin 回收的栏目不能提交新的结果。
 
 ## 状态转换
 
@@ -307,6 +363,9 @@ stateDiagram-v2
     CREATED --> ASSEMBLING: 公开 start 获得启动状态
     ASSEMBLING --> QUEUED: context-ready 提交成功
     QUEUED --> RUNNING: run-started 提交成功
+    ASSEMBLING --> ASSEMBLING: 执行中断后从原任务快照恢复
+    QUEUED --> QUEUED: 执行中断后从原任务快照恢复
+    RUNNING --> RUNNING: 执行中断后从已提交的栏目状态恢复
     RUNNING --> RUNNING: begin 栏目并等待 Agent 完整轮次
     RUNNING --> RUNNING: 解析转录、检查来源、保存栏目 outcome
     RUNNING --> COMPLETED: finalize 返回全部栏目成功
@@ -315,6 +374,11 @@ stateDiagram-v2
     ASSEMBLING --> FAILED: 确定的上下文失败并保存 fatal-fail
     QUEUED --> FAILED: 确定的启动失败并保存 fatal-fail
     RUNNING --> FAILED: 确定的任务失败并保存 fatal-fail
+    CREATED --> FAILED: 用户终止并保存原因
+    ASSEMBLING --> FAILED: 用户终止并保存原因
+    QUEUED --> FAILED: 用户终止并保存原因
+    RUNNING --> PARTIAL_FAILED: 用户终止且有已完成栏目
+    RUNNING --> FAILED: 用户终止且没有已完成栏目
     COMPLETED --> COMPLETED: 原任务 report ensure 或重开读取
     PARTIAL_FAILED --> PARTIAL_FAILED: 原任务 report ensure 或重开读取
     FAILED --> FAILED: 读取错误与已有任务记录
@@ -327,6 +391,7 @@ stateDiagram-v2
 | 边界 | 当前合同 |
 | --- | --- |
 | create/start/get/results/events/report | OAuth 当前用户与任务归属校验；扩展来源按精确 analysis-content capability 准入 |
+| stop | Admin 写权限与任务归属校验后按 revision 保存终态；已终止时返回原结果，重新打开时使用终态和终止原因 |
 | worker-load / advance / begin / finish / append / transcript / report.ensure | Admin Reflections 后台 operation；任务与栏目范围由服务端 DTO/authority 检查 |
 | Agent 消息和模型请求 | 栏目 authority 绑定 Thread；Gateway runtime 使用限定用途 delegation；RTA 留在 Host |
 | EventBus 事件 | required observer 保存成功后分发；可选 observer 的失败按已有异常隔离处理 |
@@ -342,7 +407,8 @@ stateDiagram-v2
 | Agent 执行 | Runner 建立栏目 owner、选定模型并调用统一 ThreadFactory/Service；等待两项 completion，转录解析与完成判断分别执行 |
 | 消息及来源 | 用户/assistant 消息通过栏目 owner 保存；校验冻结范围与本栏目实际读取记录，越界或未读取 Notion 引用导致栏目失败 |
 | 任务事件 | `TaskPersistenceObserver` 先保存；保存失败时 sequence 与队列保持原值；SSE 回放与本机队列按 sequence 去重 |
-| 失败及恢复 | 栏目确定失败继续处理其他栏目；未知写入通过原任务查询核实；重开读取结果和事件，终态恢复关联报告 |
+| 失败及恢复 | 页面重开后从历史事件继续观察，缺少本机执行进程时启动原任务。已完成栏目保留，权限过期栏目保存失败。终态恢复关联报告 |
+| 终止 | 活动任务、断线后的孤立任务及冲突均通过原任务核对，已保存结果可重新阅读，界面按终态恢复生成 |
 | 图文一致 | 6.1 索引和本文使用相同的 Engine/Runner/Factory/Service/EventBus 职责与当前接口名 |
 
 现有测试参考：[Engine、事件与权限](../../../backend/tests/test_reflections_agent.py)、[来源冻结及栏目执行](../../../backend/tests/test_reflection_analysis_content.py)、[快照与 Admin 操作](../../../backend/tests/test_admin_reflection_task_data.py)、[按需读取及 v2 注册](../../../backend/tests/test_reflection_notion_scope.py)。设计阶段完成文档引用、历史字节、用词及 Mermaid 检查；当前技术回归与真实验收状态以测试执行记录为准。

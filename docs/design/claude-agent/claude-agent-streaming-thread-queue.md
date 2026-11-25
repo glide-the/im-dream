@@ -1,6 +1,8 @@
 <!-- [Input] Dream public Chat, ThreadFactory, Service, Runner, Admin Chat operations; Claude Agent SDK documentation rechecked 2026-09-27 and restored source inspected 2026-09-26. -->
 <!-- [Output] Thread input queue design, evidence boundaries, target flows, failure handling, and implementation review. -->
 <!-- [Pos] Current design for receiving input while a Dream Agent turn runs; task-session-tools.md owns independent task Tools. -->
+<!-- [Sync] 2026-11-25: specify SDK terminal receipt handling after a typed provider error and same-session recovery. -->
+<!-- [Sync] 2026-11-26: correlate visible Chat turn summaries with existing dispatch receipts. -->
 <!-- [Sync] 2026-09-27: record Admin 0064-0067 schema/ACL publication and the live-turn acceptance boundary before final E2E. -->
 <!-- [Sync] 2026-09-27: link the implemented task-session v2 capability and four Tools while keeping the per-Thread queue design distinct. -->
 <!-- [Sync] 2026-09-27: close the live-turn acceptance boundary with normal-account Chrome, real SDK and normal-database evidence. -->
@@ -157,6 +159,75 @@ sequenceDiagram
 ```
 
 ## 失败、影响与验收
+
+### 模型接口错误后的轮次结算
+
+`AssistantMessage.error` 携带模型接口错误。`ClaudeAgentRunner.run_streaming` 保留首个错误，继续读取当前查询的 `ResultMessage`，停止输出错误帧之后的助手正文增量。Runner 沿现有错误回调报告一次失败。收到唯一 `ResultMessage` 时，`ClaudeAgentService.execute_session` 沿已有 `fail_after_query` 操作提交失败状态，保存已收集的部分回复。Admin 确认失败后，用户可以在原会话发送新消息。响应流结束时缺少唯一终态回执，原送出消息进入 `state_unknown`，等待结果核对。
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Service as ClaudeAgentService
+    participant Runner as ClaudeAgentRunner
+    participant SDK as ClaudeSDKClient
+    participant Admin as Admin
+    User->>Service: 发送消息
+    Service->>Runner: 执行已登记轮次
+    Runner->>SDK: 提交本次查询并读取响应
+    SDK-->>Runner: AssistantMessage.error
+    alt 收到唯一 ResultMessage
+        SDK-->>Runner: ResultMessage
+        Runner-->>Service: 原始错误与已核实终态
+        Service->>Admin: continuation-progress / fail_after_query
+        Admin-->>Service: failed 回执
+        Service-->>User: 显示失败，允许在原会话发送新消息
+    else 流结束且缺少唯一终态
+        Runner-->>Service: 原始错误与终态未核实
+        Service->>Admin: continuation-progress / mark_unknown
+        Service-->>User: 显示处理结果待核对
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    state "已派发" as dispatching
+    state "处理失败" as failed
+    state "处理结果待核对" as unknown
+    dispatching --> failed: 已读取唯一终态且 Admin 确认失败
+    dispatching --> unknown: 响应结束且缺少唯一终态
+```
+
+验收覆盖错误后读取唯一终态、只发送一次错误回调、缺少终态时保留待核对状态、后续恢复原 Claude 会话时按[原生转录规则](../multi-platform/cross-platform-chat-continuation.md#模型接口错误与原会话恢复)验证历史。历史待核对记录继续依赖原始回执。
+
+### 历史轮次摘要
+
+`ChatPanel` 将现有输入队列查询返回的 `message_id`、`dispatch_turn_id` 和 `status` 传给 `projectVisibleTurnNavigation`。该函数用助手消息的 `metadata.turnId` 匹配 `dispatch_turn_id`，再按 `message_id` 更新已加载的用户消息摘要。队列状态为 `failed` 且没有保存助手回复时，摘要显示失败。原轮次存有 `turnStatus: cancelled` 时，摘要显示停止。取得正文的已完成轮次继续显示对应的回复。缺少派发回执时使用原有消息顺序和历史索引；已知关联的用户消息未加载时，助手结果留待对应消息加载。产品规则见[轮次导航](../../prd/chat/turn-navigation.md)。
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Chat as ChatPanel
+    participant Dream as Dream Chat API
+    User->>Chat: 打开历史对话
+    Chat->>Dream: 读取历史和输入队列
+    Dream-->>Chat: 返回消息与派发回执
+    alt 可按轮次标识关联
+        Chat->>Chat: 更新原用户消息的摘要
+    else 缺少派发回执
+        Chat->>Chat: 使用已加载的消息及历史索引
+        Dream-->>Chat: 后续队列刷新返回回执
+        Chat->>Chat: 按具体轮次更新已加载摘要
+    end
+    User->>Chat: 聚焦消息刻度
+    Chat-->>User: 显示对应回复或状态
+```
+
+```mermaid
+stateDiagram-v2
+    no_reply --> failed: 输入回执确认失败
+    failed --> cancelled: 原轮次有已保存的停止记录
+    no_reply --> answered: 原轮次有已保存的完整回复
+```
 
 ### 独立任务 Tool
 
