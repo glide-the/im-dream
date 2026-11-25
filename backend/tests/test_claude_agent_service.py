@@ -1,3 +1,4 @@
+# [Sync] 2026-11-25: verify the projected Notion snapshot Read example uses only file_path.
 # [Sync] 2026-11-13: verify selected and empty Chat MCP snapshots independently of global connections.
 # [Sync] 2026-11-04: inject explicit continuation fixtures for legacy Service unit contracts.
 # [Sync] 2026-10-26: a committed confirmation retries the original Hook with no model or assistant write; Hook errors retain the existing terminal failure.
@@ -2069,6 +2070,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 editor_session_id="session-attach",
             )
             self.assertIn("Notion lightweight index (.notion/):", notion_block)
+            example_prefix = "  Read the attached snapshot first with "
+            example = next(line for line in notion_block.splitlines() if line.startswith(example_prefix))
+            self.assertEqual(
+                json.loads(example.removeprefix(example_prefix)),
+                {"file_path": str(workspace_path / ".notion" / "snapshot.json")},
+            )
             self.assertIn(
                 "Notion Skill index (from .notion/README.md):",
                 notion_block,

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-25: show the thread's snapshot Read input and reserve pages for PDFs.
 # [Input] Server-resolved Thread cwd/editor identity and attached local Notion indexes.
 #         Runtime dependency: libs.claude_agent_kit.server.editor_index.EDITOR_RESOURCES
 #         defines the virtual resource names embedded in this template.
@@ -220,7 +221,9 @@ def _render_notion_context_block(cwd: str) -> str:
                 if skill_index
                 else ["  Read .notion/README.md for the current capability catalog."]
             ),
-            "  Read .notion/snapshot.json first for the attached snapshot identity.",
+            "  For Notion JSON files, omit the PDF-only pages field. Use offset and limit for line ranges.",
+            "  Read the attached snapshot first with "
+            + json.dumps({"file_path": str(notion_dir / "snapshot.json")}, ensure_ascii=False),
             "  Read .notion/connector.json for connector details and selection state.",
             "  Read .notion/index.json for the page listing.",
             "  Read .notion/databases.json for database summaries.",
