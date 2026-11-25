@@ -1,0 +1,75 @@
+/* [Input] Reflections task status, secondary stop action and Kastention theme tokens. */
+/* [Output] Paper feedback row with a wrapping action and visible keyboard focus. */
+/* [Pos] Web Reflections task progress within the scrolling analysis dashboard. */
+.analysis-task-progress {
+  width: min(520px, 100%);
+  box-sizing: border-box;
+  margin: 16px auto 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 10px;
+  background: var(--color-bg-paper);
+  color: var(--color-text-primary);
+  text-align: start;
+  font-family: var(--font-family-ui, system-ui, sans-serif);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.analysis-task-progress__row {
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.analysis-task-progress__status {
+  display: flex;
+  flex: 1 1 10rem;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.analysis-task-progress__indicator {
+  flex: 0 0 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+}
+
+.analysis-task-progress__indicator[data-active='true'] { background: var(--color-action-link); }
+.analysis-task-progress__indicator[data-error='true'] { background: var(--color-state-danger); }
+
+.analysis-task-progress__stop {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-surface-solid);
+  font: inherit;
+  cursor: pointer;
+}
+
+.analysis-task-progress__stop:hover:not(:disabled) { background: var(--color-bg-active); }
+.analysis-task-progress__stop:active:not(:disabled) { background: var(--color-bg-active-hover); }
+.analysis-task-progress__stop:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+.analysis-task-progress__stop:disabled {
+  background: var(--color-disabled-bg);
+  cursor: wait;
+}
+
+.analysis-task-progress__error {
+  margin: 8px 0 4px;
+  border-inline-start: 2px solid var(--color-state-danger);
+  padding-inline-start: 8px;
+  color: var(--color-text-primary);
+}

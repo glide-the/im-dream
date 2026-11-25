@@ -1,5 +1,7 @@
 // [Sync] 2026-11-01: verify touch-only detail resizing, snapping/cancel, scrolling and original desktop height.
 // [Sync] 2026-11-02: unknown-submission feedback names the unconfirmed outcome while preserving explicit same-key recovery.
+// [Sync] 2026-11-26: verify a process restart recovers the original active task from persisted events.
+// [Sync] 2026-11-26: verify stopping during reconnect, retained results, feedback placement and keyboard activation.
 // [Sync] 2026-10-29: reuse original public Reflections fixture and current bulk catalog DTO; assertions remain.
 // [Sync] 2026-10-23: verify persisted diary scope/read counts, legacy and Notion-only reports across locales and widths.
 // [Sync] 2026-10-23: verify on-demand copy, inline rerun controls and return position after keyboard focus.
@@ -269,6 +271,65 @@ test('reconnects an existing active task after reload without creating a new tas
   expect(fixture.errors).toEqual([]);
 });
 
+test('restarts the original Reflections task when Dream has lost its worker', async ({ page }) => {
+  const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true, workerMissing: true });
+  const cursors: Array<string | undefined> = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === `/api/reflections/tasks/${TASK_ID}/events`) {
+      cursors.push(request.headers()['last-event-id']);
+    }
+  });
+  await page.goto(`${WEB_BASE}/story-workspace/analysis`);
+  await expect(page.getByRole('button', { name: '← Past Reflections' })).toBeVisible();
+  await expect(page.getByText('Repeated concern', { exact: true })).toBeVisible();
+  expect(fixture.createRequests).toEqual([]);
+  expect(fixture.startRequests).toEqual([TASK_ID]);
+  expect(fixture.eventRequests).toEqual([TASK_ID, TASK_ID]);
+  expect(cursors).toEqual(['event-1', 'event-2']);
+  expect(fixture.reportRequests).toEqual([TASK_ID]);
+  expect(fixture.errors).toEqual([]);
+});
+
+for (const width of [1440, 375]) {
+  test(`stops the interrupted analysis from its progress row at ${width}px`, async ({ page }, testInfo) => {
+    const fixture = await installReflectionFixtures(page, {
+      activeTaskOnLoad: true, seedActiveTaskStorage: false, holdSse: true, stopFailureOnce: width === 375,
+    });
+    await page.setViewportSize({ width, height: 850 });
+    if (width === 375) await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await page.goto(`${WEB_BASE}/story-workspace/analysis`);
+    const progress = page.locator('.analysis-task-progress');
+    const status = progress.getByRole('status');
+    const stop = progress.getByRole('button', { name: 'Stop analysis' });
+    await expect(status).toHaveText('Reconnecting to analysis…');
+    await expect(stop).toBeVisible();
+    await expect(progress.locator('[role="status"] + button')).toHaveText('Stop analysis');
+    expect((await stop.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await stop.focus();
+    await expect(stop).toBeFocused();
+    await progress.screenshot({ path: testInfo.outputPath('progress.png') });
+    await stop.press('Enter');
+    if (width === 375) {
+      await expect(progress.getByRole('alert')).toHaveText('The stop could not be confirmed. Try again.');
+      await expect(stop).toBeEnabled();
+      await stop.click();
+    }
+    await expect(status).toHaveText('Analysis stopped.');
+    await expect(stop).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Generate New Analysis', exact: true })).toBeEnabled();
+    await expect(page.locator('[data-analysis-report-id="9001"]')).toBeVisible();
+    fixture.releaseSse?.();
+    await page.reload();
+    await expect(status).toHaveText('Analysis stopped.');
+    await expect(stop).toHaveCount(0);
+    expect(fixture.stopRequests).toEqual(width === 375 ? [TASK_ID, TASK_ID] : [TASK_ID]);
+    expect(fixture.startRequests).toEqual([]);
+    expect(fixture.createRequests).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
+
 test('prepared task stays idle on load and explicit continuation starts its original id', async ({ page }) => {
   const fixture = await installReflectionFixtures(page, { activeTaskOnLoad: true, taskStatus: 'CREATED', seedActiveTaskStorage: false, latestHistoricalResults: true });
   await openAnalysis(page);
@@ -349,7 +410,7 @@ test('Notion read and Agent invalidation errors recover through the explicit rel
   await page.getByRole('button', { name: 'Generate New Analysis', exact: true }).click();
   await expect.poll(() => fixture.createRequests.length).toBe(1);
   await expect(page.getByText('Notion content is temporarily unavailable. Retry the analysis later.', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('task · preparing', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Preparing analysis…', { exact: true })).toHaveCount(0);
   expect(fixture.taskResponses).toEqual([]);
   expect(fixture.startRequests).toEqual([]);
   expect(fixture.eventRequests).toEqual([]);
