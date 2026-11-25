@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-25: 明确网页和原生目录读取的会话标识来源及响应归属校验。 -->
 <!-- [Sync] 2026-11-03: Kastention register设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-10-28: 完整目录聚合、单次请求、会话去重及失败恢复。 -->
@@ -128,7 +129,8 @@ Chat 选择器和全局 Voice 配置曾分别读取 Deck 列表，再逐项读�
 - Admin `deck.catalog` 接受空输入，使用认证主体确定用户，要求 `dream:read` 与现有 Deck schema capability。操作描述追加到 Registry 尾部，已有操作描述和 hash 保持。
 - `DeckVoiceRepository.catalog` 复用 `list(false)`，按返回的 Deck ID 集合一次查询全部 Voice；空列表直接返回。列表策略装饰继续由现有 `list` 负责。
 - Dream `AdminDeckListData.catalog` 校验精确 operation capability、严格 DTO、Deck ID 唯一性、Voice ID 唯一性和 `voice.deck_id` 对应关系，再执行原 Memory 字段转换。
-- `listDecksWithVoices` 为 Chat、全局 Voice 初始化、Deck 管理、Reflections 和原生启动提供同一传输。相同 transport 与当前会话 CSRF 的在途读取共享 Promise；成功或失败后释放，下一次显式读取获取新数据。会话变更后拒绝旧响应。
+- `listDecksWithVoices` 为卡片结构首页、Chat、全局 Voice 初始化、Deck 管理、Reflections 和原生启动读取同一目录。发起读取时从会话模块取得当前会话标识。Web 使用登录后生成的内存标识，目录请求携带 Bearer 令牌。原生 Cookie 会话使用其 CSRF 值作为标识并发送对应请求头。
+- 相同 transport 与会话标识的并发读取共享 Promise。成功或失败后释放，下一次读取重新请求目录。返回目录前再次核对会话标识，退出或切换登录后拒绝原会话的目录。
 - 成功读取对应一次浏览器目录请求与一次 Admin 领域读取。Admin 共享传输层保留现有只读恢复规则：网络超时后使用相同 request ID 再尝试一次，第二次使用现有较短超时；领域消费者继续读取完整目录。
 - 页面加载期间保持既有禁用和加载文案；成功后按现有 enabled 规则展示。失败沿现有错误反馈结束加载；重新进入、刷新或现有重试入口发起完整目录读取。
 - 发布顺序为 Admin 发布 `deck.catalog` → Dream 后端与前端更新。缺少 operation capability 时 Dream 返回结构化不可用响应。
@@ -144,13 +146,14 @@ sequenceDiagram
     U->>C: 打开新对话
     C->>D: listDecksWithVoices
     V->>D: 同一会话初始化 Voice 配置
-    D->>D: 同 transport 与会话共享在途读取
+    D->>D: 按 transport 和发起请求时的会话标识共享读取
     D->>R: GET /api/decks/catalog
     R->>A: deck.catalog 空输入和当前用户委托
     A->>A: list(false) 并按 Deck ID 集合读取 Voice
     A-->>R: Deck 列表和有序 Voice DTO
     R->>R: 校验 capability、DTO 与 ID 对应关系
     R-->>D: 完整目录
+    D->>D: 核对当前会话标识与请求发起时一致
     D-->>C: 当前会话目录
     D-->>V: 同一目录
     C-->>U: 启用 Agent 选择入口
@@ -176,7 +179,7 @@ sequenceDiagram
     else 读取期间会话变更
         A-->>R: 原用户目录
         R-->>D: 原读取响应
-        D->>D: 当前会话 CSRF 校验失败
+        D->>D: 当前会话标识与请求发起时不同
         D-->>C: 拒绝旧会话响应
     end
 ```
@@ -209,3 +212,9 @@ stateDiagram-v2
 目录传输测试验证 Chat、StrictMode 重建和 Voice 初始化并发调用只产生一次 `/api/decks/catalog`。原生启动读取集合为 `/api/decks/catalog` 与 `/api/system-config`。完整 Chat 页面在选择器可操作前的逐项 Deck 详情 GET 数量为 0。Deck 页面测试对取消的认证与连接读取要求同路径后续读取成功。
 
 受影响 Markdown 的相对引用检查未发现缺失路径；Chrome 中的 Mermaid 解析覆盖本文三个 `sequenceDiagram` 和一个 `stateDiagram-v2`，应用错误为 0。Admin 原 292 项操作描述经完整对照保持，目录操作追加为第 293 项。本轮保留现有只读传输短超时恢复规则，未执行数据库迁移、真实模型调用或远程部署。
+
+## 11. 网页卡片结构目录复核（2026-11-25）
+
+隔离 Chrome 回归在修复前观察到 `/auth/session` 和 `/api/decks/catalog` 均返回 200，页面显示 `Not authenticated`。修复后从原地址进入目录、打开预览，以及目录并发、重新读取、失败重试、会话切换和未登录拦截共 6 项测试通过。
+
+本机 Chrome 使用已有产品登录，在新标签页直接打开 `http://localhost:5173/story-workspace/decks`。页面显示 5 个卡片结构，按类型筛选的计数为 Chat 4 个、Dream 1 个。

@@ -1,4 +1,8 @@
 ---
+# [Input] Current thread's mounted Notion index and built-in Read tool.
+# [Output] Index lookup and on-demand page reading instructions.
+# [Pos] Backend-owned notion-session Skill entrypoint.
+# [Sync] 2026-11-25: specify JSON file paths and optional line ranges.
 name: notion-session
 description: 只读访问当前用户已连接的 Notion。用户要求搜索 Notion、读取页面、查看数据库记录，或问题明确依赖 .notion/ 已挂载来源时使用。通过 thread 内的轻量索引和 Runtime Read hook 按需读取，不运行 ntn/Bash，不读取凭证文件。
 tools: ["Read"]
@@ -15,6 +19,8 @@ tools: ["Read"]
 - 读取 `.notion/pages/<page_id>.json` 时，Runtime hook 会校验 ID 属于当前 thread 索引，再按需返回当前 Markdown。
 
 ## 工作流
+
+使用内置 `Read` 读取快照、索引和页面时，`file_path` 填写当前工作区内的完整文件路径，省略 PDF 专用的 `pages` 字段。需要分段读取较大的索引时，使用 `offset` 和 `limit` 指定起始行与行数。
 
 1. 先读 `.notion/connector.json` 确认连接和选择范围。
 2. 未指定页面 ID 时读 `.notion/index.json`；只关心一个数据库时读 `.notion/databases/<database_id>.json`。
