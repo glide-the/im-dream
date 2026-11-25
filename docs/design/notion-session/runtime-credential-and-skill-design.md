@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-25: specify JSON Read arguments for the thread projection. -->
 <!-- [Input] Current Notion connector, MCP credential pattern, Runtime PreToolUse hook, workspace initialization, and upstream notion-session Skill. -->
 <!-- [Output] Product/architecture contract for actor credentials, lightweight indexes, thread projection, Agent CLI environment injection, lazy Read, failures, migration, and acceptance. -->
 <!-- [Pos] Current Notion credential/index/Runtime/Skill source of truth in docs/design/notion-session. -->
@@ -123,6 +124,10 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 - 频率选项来自后端 DTO，不把技术常量包装成产品配额。
 
 ### 5.4 Agent 使用
+
+工作区上下文给出当前 Thread 的快照读取示例，参数仅含指向 `.notion/snapshot.json` 的完整 `file_path`。索引和虚拟页面均按 JSON 读取，分行读取使用 `offset`、`limit`。Agent 省略 PDF 专用的 `pages` 字段。Runtime 在 `PreToolUse` 前校验输入，已发布的 0.1.12 收到空字符串时会返回 `Invalid pages parameter`。此时使用同一路径并省略该字段即可重试。
+
+2026-11-25 的隔离进程测试使用同一组工具输入核对已安装版本与候选构建。候选 Runtime 成功读取带空字符串或纯空格页码的 JSON 快照。PDF 的空页码、非法格式及超限范围均返回校验错误。此修复待发布并接入 Dream。
 
 1. `build_notion_capability_catalog(connector)` 的 `skills[]`、`package_revision` 和 installation/connection-aware availability 是 Settings 与 workspace 的唯一 Skill 索引合同；页面、README renderer 和 context 不硬编码 Skill ID、标题或状态。
 2. `materialize_workspace_snapshot` 调用该 catalog，把返回的每个 Skill、availability、`skills/<skill-id>/SKILL.md` 指令入口与 `.claude/skills/<skill-id>` Runtime 发现别名动态写入 `.notion/README.md`；每轮 workspace context 直接消费该生成段，不维护第二份 Skill 清单。
