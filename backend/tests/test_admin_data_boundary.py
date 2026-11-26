@@ -1,3 +1,4 @@
+# [Sync] 2026-11-16: distinguish explicit catalog failure from business rejection and preserve original unknown-write receipts.
 # [Input] Exact Admin DTOs and production consumer classes with injected HTTP/JWKS providers.
 # [Output] Deterministic authentication, bounded read recovery and unknown-commit receipts without PG/model calls.
 # [Pos] Provider-free tests for the unified Admin consumer boundary.
@@ -634,3 +635,40 @@ def test_response_size_bound_marks_write_unknown(config):
     with pytest.raises(AdminDataError) as exc:
         client.revoke_browser_session(BrowserHandleRequestDTO(request_id="request-1", handle="dbr_" + "a" * 43))
     assert exc.value.outcome_unknown
+
+
+@pytest.mark.parametrize("code,status,invalidates", [
+    ("INSUFFICIENT_SCOPE", 403, False),
+    ("REVISION_CONFLICT", 409, False),
+    ("DREAM_THREAD_NOT_FOUND", 404, False),
+    ("AUTH_SERVICE_UNAVAILABLE", 503, False),
+    ("ADMIN_UNAVAILABLE", 503, False),
+    ("DREAM_DATA_SCHEMA_NOT_READY", 503, True),
+    ("AUTH_SCHEMA_NOT_READY", 503, True),
+    ("OPERATION_UNAVAILABLE", 404, True),
+])
+def test_business_and_schema_errors_with_same_status_preserve_original_write_and_receipt(config, code, status, invalidates):
+    spec = operation()
+    calls = []
+    def handler(request):
+        calls.append(request)
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            return response(auth_capabilities(config, (spec,)), request_id)
+        if "/receipts/" in request.url.path:
+            return response({"status": "absent", "operation": spec.capability.name, "request_id": request_id}, request_id)
+        return httpx.Response(status, json={"request_id": request_id, "error": {"code": code, "message": "safe"}})
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(spec,))
+    client.capabilities_snapshot("bootstrap")
+    with pytest.raises(AdminDataError) as caught:
+        client.execute(spec, PersistNoteInput(session_id="note-1", text="text"), "original-write", access_token="actor-token")
+    assert caught.value.code == code and caught.value.status_code == status
+    assert caught.value.request_id == "original-write"
+    assert caught.value.outcome_unknown is (status >= 500)
+    assert client.capabilities_ready is (not invalidates)
+    receipt = client.receipt(spec, "original-write", access_token="actor-token")
+    assert receipt.status == "absent" and receipt.request_id == "original-write"
+    client.capabilities_snapshot("next-request")
+    assert sum(item.url.path.endswith("/capabilities") for item in calls) == (2 if invalidates else 1)
+    writes = [item for item in calls if item.url.path.endswith("/operations/notes.persist")]
+    assert len(writes) == 1 and json.loads(writes[0].content)["request_id"] == "original-write"

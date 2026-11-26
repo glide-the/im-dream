@@ -1,3 +1,4 @@
+// [Sync] 2026-11-19: explicit Bearer remains the sole selected credential in the presence of legacy cookies.
 // [Sync] 2026-10-11: keep native Bearer canonical origin and current-cookie precedence while resolving Browser addresses.
 // [Input] Actual API credential owner/shared stream transport with explicit fake Admin/backend providers.
 // [Output] Cookie precedence, CSRF/origin, header/query isolation, SSE flush and caller-abort contracts.
@@ -9,6 +10,7 @@
 //                    and incomplete selections never retry.
 // [Sync] 2026-10-13: loopback Undici transport reproduces GET SSE body timeout after
 //                    an initial connected chunk while preserving non-SSE and abort semantics.
+// [Sync] 2026-11-19: isolate these transport tests from the developer's private OTLP settings.
 import { createServer } from 'node:http';
 import { Agent, fetch as undiciFetch } from 'undici';
 import assert from 'node:assert/strict';
@@ -17,6 +19,7 @@ import { createApiProxy, apiRequestBoundary } from './api-proxy.ts';
 import { BffLoginBoundary } from './login-boundary.ts';
 import { forwardBackendRequest } from '../_http-proxy.ts';
 
+process.env.INK_TRACE_ENABLED = 'false';
 const publicOrigin = 'https://dream.example';
 const handle = 'dbr_' + 'h'.repeat(43);
 const loopbackPort = 55177;
@@ -40,9 +43,9 @@ test('production API factory preserves native canonical origin and current-cooki
   assert.equal(boundary.publicOrigin, publicOrigin);
   assert.equal(boundary.hasHandleCookie(browser), true);
   let resolved = false;
-  const proxy = createApiProxy(boundary, { resolve: async () => { resolved = true; throw Error('must not resolve'); } }, new URL('http://backend.example'));
+  const proxy = createApiProxy(boundary, { resolve: async () => { resolved = true; throw Error('must not resolve'); } }, new URL('http://backend.example'), async () => new Response('ok'));
   const response = await proxy(browser);
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 200);
   assert.equal(resolved, false);
 });
 function fixture() {
@@ -60,16 +63,16 @@ function fixture() {
   return { boundary, resolves, calls, admin, proxy: createApiProxy(boundary, admin, new URL('http://backend.example'), transport) };
 }
 
-test('Browser handle takes precedence and strips credential/actor/proxy headers', async () => {
+test('explicit Bearer bypasses legacy cookies and strips credential/actor/proxy headers', async () => {
   const { boundary, proxy, calls, resolves } = fixture();
   const response = await proxy(new Request(publicOrigin + '/api/storage/file/key?download=1', { headers: {
     cookie: boundary.handleCookieName + '=' + handle + '; other=private', authorization: 'Bearer attacker',
     'x-ink-dream-service': 'attacker', 'x-ink-dream-credential': 'secret', 'x-ink-dream-service-authorization': 'Bearer attacker', 'x-user-id': '7', 'x-auth-user': '7',
     'x-forwarded-host': 'evil.example', connection: 'x-custom-hop', 'x-custom-hop': 'private',
   } }));
-  assert.equal(response.status, 200); assert.deepEqual(resolves, [handle]);
+  assert.equal(response.status, 200); assert.deepEqual(resolves, []);
   const headers = new Headers(calls[0].init.headers);
-  assert.equal(headers.get('authorization'), 'Bearer resolved.admin.token');
+  assert.equal(headers.get('authorization'), 'Bearer attacker');
   for (const key of ['cookie', 'x-ink-dream-service', 'x-ink-dream-credential', 'x-ink-dream-service-authorization', 'x-user-id', 'x-auth-user', 'x-forwarded-host', 'connection', 'x-custom-hop']) assert.equal(headers.get(key), null);
   assert.equal(headers.get('accept-encoding'), 'identity');
   assert.equal(calls[0].url, 'http://backend.example/api/storage/file/key?download=1');
@@ -77,11 +80,11 @@ test('Browser handle takes precedence and strips credential/actor/proxy headers'
   for (const key of ['set-cookie', 'x-new-access-token', 'x-ink-dream-credential', 'x-ink-dream-service-authorization', 'content-encoding']) assert.equal(response.headers.get(key), null);
 });
 
-test('invalid, empty and duplicate Browser cookies never fall back to explicit Bearer', async () => {
+test('explicit Bearer ignores invalid, empty and duplicate legacy cookies', async () => {
   for (const value of ['invalid', '', handle + '; __Host-ink-dream-browser=' + handle]) {
     const { boundary, proxy, calls, resolves } = fixture();
     const response = await proxy(new Request(publicOrigin + '/api/me', { headers: { cookie: boundary.handleCookieName + '=' + value, authorization: 'Bearer native.token' } }));
-    assert.equal(response.status, 401); assert.equal(calls.length, 0); assert.equal(resolves.length, 0);
+    assert.equal(response.status, 200); assert.equal(calls.length, 1); assert.equal(resolves.length, 0);
   }
 });
 
@@ -113,6 +116,8 @@ test('missing auth, foreign Origin, credential queries and foreign path fail bef
     [new Request(publicOrigin + '/api/me', { headers: { authorization: 'Bearer token', origin: 'https://evil.example' } }), 403],
     [new Request(publicOrigin + '/api/me?token=private', { headers: { authorization: 'Bearer token' } }), 400],
     [new Request(publicOrigin + '/api/me?access_token=private', { headers: { authorization: 'Bearer token' } }), 400],
+    [new Request(publicOrigin + '/api/me?refresh_token=private', { headers: { authorization: 'Bearer token' } }), 400],
+    [new Request(publicOrigin + '/api/me?id_token=private', { headers: { authorization: 'Bearer token' } }), 400],
     [new Request(publicOrigin + '/auth/other', { headers: { authorization: 'Bearer token' } }), 400],
   ];
   for (const [request, status] of requests) assert.equal((await proxy(request)).status, status);

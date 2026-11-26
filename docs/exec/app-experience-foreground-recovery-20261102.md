@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-04: 追加身份/原媒体确认/默认角色纠正记录，实施继续暂停。 -->
+<!-- [Sync] 2026-11-04: 单独补系统播放器开发稿，记录接入、接口、时序与文档验证；业务源码保持。 -->
+<!-- [Sync] 2026-11-04: 按通知栏播放器纠正补独立产品文档、v4.2封面和样式预览；仅设计与文档验证。 -->
 <!-- [Sync] 2026-11-04: 追加v3.1无框屏保视觉修订及限定验证，其他任务范围保持。 -->
 <!-- [Sync] 2026-11-04: v4.2三项核心Simulator旅程、发丝限定帧采样与最终安装资源回执分项登记。 -->
 <!-- [Sync] 2026-11-03: 用户单独授权屏保与共享Thread二值组件实施及Simulator验证；后台计算与音频任务保持暂停。 -->
@@ -592,3 +595,128 @@ git diff --check -- docs/design/multi-platform/mobile-recovery-interaction.md do
 首轮引用解析将URL编码空格及源码`#L`误记为3个历史链接问题，修正验证器后本地引用全部通过；正文保持。行号检查首次覆盖0处，随后补充5处范围及2处单行，最终7处全部检查。现存r1／r2／r3回执分别保留中间覆盖和最终结果，首次完整JSON未单独留存，首次覆盖缺口由主任务读取记录确认。原13段Mermaid结果沿用，不将结构重查记为再次解析。
 
 原始[命令回执](../../frontend/output/app04-thread-presence-20261103/final-docs.log)与[最终结构结果](../../frontend/output/app04-thread-presence-20261103/app04-doc-report-r3.json)可复核；追加本结果后的文档结构和空白单独再检查。设计文档已更新，源码／配置／原历史稿保持，屏保、系统组件、APP-04后台适配及真实业务验收均未执行。
+
+
+## 2026-11-04 iOS系统播放器独立组件设计
+
+### 目标与授权
+
+用户指出系统组件需要通知区域的播放器样式，主体尽量包含时钟可视化原型元素；要求读取指定Notion音频需求背景，并使用独立文档描述。此次交付范围为产品与正式交互设计、视觉封面、离线样式预览及文档检查。原业务、原生工程、依赖、系统配置、服务、数据库、设备与模型均保持原范围。
+
+### 发现、定义与方案收敛
+
+1. 发现：当前ThreadActivityWidget为启动图加活跃Thread有／无，仅承担任务观察。Notion返回的11月3日页面快照同时包含Agent整理媒体、App通知中心操作播放器、选择可接收设备、推送及对端选择接收的需求。
+2. 定义：系统播放器以媒体和播放操作为主体，v4.2角色、蓝色发丝、三根指针及十二时位形成封面；任务状态与媒体状态分别表达。独立文档归移动应用产品目录。
+3. 比较：继续放大二值卡缺少媒体操作；完全自绘系统媒体卡无法控制系统外观；在计算期间登记虚假媒体会混淆状态。选用实际播放走系统媒体卡，计算准备／待接收使用同视觉状态入口，接收设备在App内选择。
+4. 收敛：本机显式播放沿原用户操作，不重复确认；新远端推送提供接收／稍后。系统音频输出和Agent终端选择各自反馈，避免将AirPlay与网关设备等同。系统封面采用静态时钟，前台原型动效保持原归属。
+
+### 交付与保护范围
+
+- [独立组件文档](../prd/mobile-app/ios-system-player.md)：背景、目标、规则、具体样式、桌面/窄屏骨架、正常/异常时序及播放状态图。
+- [离线样式预览](../prd/mobile-app/ios-system-player/preview.html)：主题、播放/暂停、准备、待接收、失败、接收选择和示例设备入口；不播放音频或连接设备。
+- 时钟封面从已有kastention-clock-v4.2.json读取路径并派生浅/深色SVG，原原型与素材保持；截图供文档内直接查看。
+- 原PRD、恢复稿、技术稿、README及目录合同只同步当前入口与前版范围；旧二值规则、原图及历史证据保留。
+
+资料核对使用Notion研究文档与frontend-design技能。Notion只读fetch成功，页面为《近期需求》，工具返回最后编辑时间11月3日，正文包含上述音频需求。Apple Now Playing信息、系统播放控制和音频交互指南的官方Markdown读取成功；Live Activities HIG的一次HTTPS读取失败，方案不据此新增动画能力承诺。
+
+### 文档与样式验证
+
+采用luna-test-stage执行有界文档/图示/离线浏览器检查。只允许读取本轮文档和现有参考，写入本轮命名的验证目录及两张设计截图；禁止运行产品服务、编译App、操作设备或修改业务源码。验证回执在完成后追加。
+
+
+| 验证项与命令 | 实际状态 | 证据与范围 |
+| --- | --- | --- |
+| 离线Playwright inline Node单元 | `PLAYWRIGHT_R2_EXIT:0` | 97项通过；1280/390/320视口、五种播放/准备状态、主题、接收/稍后、系统输出/示例终端、上下项与媒体定位；console/pageerror/network均0 |
+| 三幅Mermaid的parse/render | 3/3 | 实际SVG及几何尺寸有效；后续仅改目标文字，图源保持，未重复启动渲染 |
+| 文档inline Python单元 | `DOC_R2_EXIT:0` | 本地链接/片段0问题、清单缺失0、禁用术语0；独立文档、预览及样式资产共14项 |
+| 定向git diff --check | `DIFF_CHECK_EXIT:0` | 本轮文档范围，无空白诊断 |
+| 原时钟SVG几何对照 | `SVG_GEOMETRY_EXIT:0` | 两张封面各保留7条基础路径、12个时位坐标与3针，原素材未修改 |
+| 源码与配置SHA256对照 | 漂移0/1818 | 读取本轮初始基线，业务源码、配置及原型保持 |
+
+首轮回执按实际失败保留：一次标题预期错误与shell只读变量错误属于harness；一次可见性辅助函数忽略隐藏祖先；另有准备/待接收/失败时音频输出按钮仍显示的样式缺口。主代理为不可播放状态隐藏输出按钮并落实hidden样式；Luna改用包含祖先状态的可见性判断后复验通过。首轮文档脚本的路径前缀与URL解码问题已在检查脚本修正。
+
+命令与状态回执、浏览器R2报告、文档R2报告保存在本机`/tmp/ios-system-player-design-20261104/checks/`，文件分别为`command-receipt.md`、`preview-report-r2.json`和`document-report-r2.json`。原始R1报告保留为preview-report-r1.json。上述外部临时目录只用于本机复核；仓库内正文引用长期样式文件。
+
+主代理实际查看浅/深色截图，确认时钟角色与媒体控制层级。浏览器已关闭，未启动产品服务、构建、音频、设备扫描或实际推送。交付范围为独立组件设计及可复核样式，原生系统播放器、接收队列、终端推送和真机业务仍待实施及验收。
+
+
+## 2026-11-04 iOS播放器独立开发文档
+
+### 范围与优化目标
+
+用户要求对应开发文档独立维护，写清播放器、iOS系统组件和现有后台适配器的接入关系、接口及时序，并明确先不改业务代码。本轮目标收敛为：以当前Native宿主、会话、文件读取和ActivityKit为代码依据，补原生媒体所有权、统一系统投影、媒体DTO/桥接、后台工作引用、正常控制与失败恢复的可开发合同。源文件、原生配置、依赖、服务、数据库、模型、构建与设备操作均退出本轮范围。
+
+### 发现与设计评审
+
+- 发现：原后台适配器仅有设计合同，当前系统扩展只显示hasActiveThread；NativeThreadPresence.reconcile直接更新/结束活动，新增待接收媒体会与该写入竞争。原文件store可acquire/finish，deinit会删除根目录，播放器需持有使用期强引用。
+- 定义：原Factory持计算与任务终态，媒体实例持播放与资源，单一系统适配对象投影Now Playing和ActivityKit，后台适配器持系统许可。页面退订、账户清理、媒体Stop和Agent Stop分别追踪。
+- 比较：由RN页面持AVPlayer会丢失跨页面生命周期；Widget直接执行媒体会增加运行责任；再建全局Manager会重复现有App宿主。选用原宿主内两个小型对象与既有后台方法。
+- 收敛：独立开发稿直接给出拓扑、内存关系、DTO/桥接与内部接口、后台窄工作引用、系统展示仲裁、正常/控制/异常时序及状态图。原计算完成即释放许可；媒体尚未就绪时按真实执行条件等待前台，禁止用音频或循环申请承诺持续计算。
+
+### 交付与当前状态
+
+新增[播放器开发文档](../design/multi-platform/ios-system-player-technical.md)，与[产品设计](../prd/mobile-app/ios-system-player.md)和[原后台合同](../design/multi-platform/mobile-background-execution-technical.md)互链。README及受影响目录合同补入口，既有文档和其他任务改动保留。
+
+新播放器、系统适配类型、媒体桥接与native_media_prepare窄扩展均为建议、未实现；远端网关、流式资源、媒体返回路由和精确工作观察作为开发前置。原Thread presence和原资源权限入口按源码核对。Apple AVPlayer、Now Playing、Remote Command、ActivityKit及playback官方Markdown于本轮读取成功，资料放在`/tmp/ios-system-player-technical-20261104/`。
+
+### 文档验证范围
+
+采用luna-test-stage检查本轮七份文档的路径/片段、目录、禁用术语、原图保留与新增六幅Mermaid渲染，核对本轮初始源码/配置SHA，执行定向git diff --check。只使用本机已有Chrome/依赖渲染图示，不启动应用服务或运行播放器；精确命令与结果在完成后追加。
+
+
+| 精确验证命令 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `python3 /tmp/ios-system-player-technical-20261104/checks/final-technical-doc-check.py` | 0 | 七份范围文档，链接/片段0问题，旧图3+3+7完整保留，术语/空白0问题；八项接口责任检查通过；源码/配置SHA漂移0/1818 |
+| `node /tmp/ios-system-player-technical-20261104/checks/mermaid-check.mjs` | 0 | 新稿六幅图parse/render通过，实际几何有效；console/page/network均0，浏览器已关闭 |
+| 定向 `git diff --check` | 0 | 七份本轮文档，无空白诊断；新增稿另经脚本独立检查 |
+
+图示首轮遇到Playwright CommonJS named export导入错误，Node退出1且未启动浏览器；Luna修正验证脚本import后复验退出0。静态检查的TypeScript结束符启发式产生一次人工concern，已核对为检查器误报，仓库类型示例保持。后续请求幂等、媒体意图回执、可选任务观察及清理边界均经最新静态复核；六图源未变化，未重复启动图示渲染。
+
+原始回执及可复现脚本保存在`/tmp/ios-system-player-technical-20261104/checks/`：`command-receipt.md`、`final-technical-doc-report.json`、`mermaid-report.json`。主代理实际读取这些报告，确认六图均ok、引用与失败列表为空、sourceDriftCount为0。新接口与源文件位置均保持建议未实现，本轮没有修改业务源码或运行应用验收。
+
+
+## 2026-11-04 默认角色与原媒体确认流程修订
+
+### 需求范围与优化目标
+
+基于用户对正常时序身份、交互过程及默认主体的纠正，统一产品稿、开发稿和离线原型：用户发起任务；Agent整理媒体并沿Claude本地笔记同一确认方式提供媒体信息；用户确认后取得原服务批准回执，才创建和展示播放器。正常画面保留v4.2脸型交互组件。明确用户、Agent、语音资源、确认区域、原生播放器和系统展示的职责；本机与远端新媒体均需本次决定。复用原Thread、turn、tool call、确认Store、POST、认证、Stop及后台许可，去除explicit_local自动播放分支和独立接收弹窗。只修改文档与设计附件，原APP-04实现目标继续暂停。
+
+### 方案评审与收敛
+
+- 发现：前稿把Agent结果就绪直接连接播放，原型默认显示播放器；本机explicit_local分支跳过媒体确认。当前笔记确认沿原Service登记ToolConfirmationStore，再发布tool-approval-request；前端原确认区域经confirmToolCall及原tool-confirm回到Factory/Store。当前媒体业务Tool/provider尚未发布。
+- 定义：用户为确认者，Agent为操作提出者，语音为资源，原生播放器为执行者；默认角色、待确认提示、批准后播放器分为三种呈现。常驻表达默认角色入口，系统显示受平台生命周期约束。
+- 比较：独立播放器接收弹窗会建立第二条决定链；原确认区域可复用当前调用身份与决定入口，选用后者。工具权限模式继续沿原策略，媒体副作用另需同一通道取得本次明确用户决定，auto/full-access不替代该决定。
+- 交付：产品稿补身份表、三态骨架和正常/拒绝/恢复图；开发稿补冻结媒体计划、真实批准回执、原接口顺序、无进展许可释放及开发项；原型默认角色，先提示再模拟批准与准备。纠正前四份原稿和图示完整归档。
+
+### 交付物与状态
+
+| 交付物 | 本轮变更与状态 |
+| --- | --- |
+| [产品交互设计](../design/multi-platform/mobile-recovery-interaction.md) | 正常时序改为默认角色→原媒体确认→批准后播放器，明确参与者 |
+| [独立组件设计](../prd/mobile-app/ios-system-player.md) | 定义三态、确认范围、拒绝/失效与角色恢复 |
+| [独立开发合同](../design/multi-platform/ios-system-player-technical.md) | 原Store及POST接线、媒体计划/批准回执、接口/时序和开发任务，新增接线建议未实现 |
+| [后台适配合同](../design/multi-platform/mobile-background-execution-technical.md) | 等待原确认释放无进展许可；批准后独立媒体准备；原计算/播放生命周期保持 |
+| [离线交互预览](../prd/mobile-app/ios-system-player/preview.html) | 默认角色、原提示、拒绝/失效、批准后准备/播放/关闭，虚构回执 |
+| [修订前归档](../design/multi-platform/history/ios-player-before-confirmation-20261104.md) | 四稿与原图逐字保存，现行规则归上述文档 |
+
+本轮未修改业务源码、原生配置和依赖，未启动产品服务、数据库、构建、真机或模型调用。其他任务并发工作树改动按来源保留。文档与离线原型验证回执在本节完成后追加。
+
+### 本轮验证回执
+
+验证按luna-test-stage交由专用验证Agent执行。主代理读取原始报告，并实际查看默认角色、媒体确认和深色已确认播放器截图。检查范围为设计文档和离线原型；确认回执与媒体资源均为虚构示例。
+
+| 命令 | 退出码 | 关键结果 |
+| --- | --- | --- |
+| `node /tmp/ios-media-confirmation-design-20261104/checks/preview-check.mjs` | 0 | R2共57项通过；1280/390/320宽度无溢出；默认/待确认无新播放器，批准后准备与播放、拒绝/失效、暂停/继续/定位、角色切换及主题通过；console/page/network均0 |
+| `node /tmp/ios-media-confirmation-design-20261104/checks/diagram-check.mjs` | 0 | 组件3、恢复7、独立技术6、后台技术7、执行记录3，共26图parse/render及几何有效；浏览器已关闭 |
+| `python3 /tmp/ios-media-confirmation-design-20261104/checks/final-static-check.py` | 0 | 19项目录/资产清单存在，本地引用/禁用术语/空白问题0；四稿归档及原图保持；封面七条路径、十二时位和三针保持 |
+| 定向 `git diff --check --` 本轮文档与设计附件 | 0 | 无空白诊断；完整路径列表见原始命令回执 |
+
+首轮原型检查有16项harness断言失败，涉及标题、祖先隐藏状态及角色保持的断言；修正检查器后R2通过，产品原型未因这些断言修改。首轮静态检查误按归档目录解析四反引号内的历史相对链接；修正归档解析边界后通过。初始Node前置表达式语法错误及修正后的依赖存在回执均保留。原始报告与完整命令保存在本机`/tmp/ios-media-confirmation-design-20261104/checks/`，包括`browser-report-r1.json`、`browser-report.json`、`diagram-report.json`、`final-static-report.json`及`command-receipt.md`。
+
+源文件基线1818项中观察到14项并发漂移，路径清单保存在静态报告。本轮未向这些源码路径写入；本次检查不声明全工作树源码保持不变。业务实现、系统播放器、媒体批准接线、后台持续执行与真机业务验收继续待完成。原APP-04实现目标保持暂停。
+
+
+## 2026-11-04 音频工具入口与问答修订
+
+用户进一步明确：后端先接默认关闭的tools及mobile_clock_audio MCP；音频工具为Low-Sensitivity Tools，使用AskUserQuestion收集播放选择。当前合同与后端专项验收归[音频MCP执行记录](mobile-clock-audio-mcp-20261104.md)。本节之前的Editor式确认及独立批准回执保留为阶段历史；当前前端组件通过本次问答后的工具结果进入播放器，新增前端/原生播放接线待实现。原APP-04持续后台计算目标保持原状态。

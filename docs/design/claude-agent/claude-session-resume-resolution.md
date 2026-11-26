@@ -1,3 +1,6 @@
+<!-- [Sync] 2026-11-04: 实现同一Thread与Claude会话跨端恢复，发布采用及真实业务验收单列。 -->
+<!-- [Sync] 2026-11-04: 补当前缺失转录判断与跨端初始化设计入口，保留历史原文。 -->
+
 <!-- [Sync] 2026-10-10: current repository governance now points only to root AGENTS.md. -->
 <!-- [Sync] 2026-09-26: bound Dream Threads now fail closed instead of creating a second Claude session. -->
 <!-- [Input] Authorized Dream thread, SDK receipts, and qualified Runtime session storage. -->
@@ -6,6 +9,17 @@
 <!-- [Sync] 2026-09-13: record completed technical gates and three normal local business turns with settled Gateway receipts. -->
 
 # Claude 历史会话恢复判定
+
+> 2026-11-04源码更新：[跨端正式设计](../multi-platform/cross-platform-chat-continuation.md#2026-11-04代码实现)及[实施记录](../../exec/cross-platform-chat-continuation-20261104.md)记录按需初始化、同ID恢复及已知停止／未知结果的边界；正常环境capability与真实业务验收另行执行。下方各日期原文保持。
+
+## 2026-11-04 设计阶段事实与跨端候选方案（原文）
+
+当前Service先建立本端工作目录，再用原Claude ID精确探测当前项目转录；返回空时抛出`CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE`，尚无Admin历史到JSONL的初始化实现。bound Thread继续保持原ID、`require_existing_session=true`及禁止fresh的规则。源码证据、已安装Runtime 0.1.12协议、历史字段映射及正常／异常／状态图归[正式跨端设计](../multi-platform/cross-platform-chat-continuation.md)。
+
+拟议变化为正常目录或转录缺失时先完成当前端初始化，再沿原Claude会话继续。Admin历史经过UI parts转换，完整恢复资格需按历史类型验证；当前消息、历史快照、跨端claim及query回执边界在正式稿定义。评审结论为“待满足明确前提后通过”，新增行为均为建议、未实现。
+
+下方2026-09-26规则及更早设计、时序图和业务回执完整保留。2026-09-13正文中的fresh方案属于历史记录；当前已绑定Thread规则由2026-09-26增补和现行源码表达。本节描述当前事实与候选设计，未执行Runtime恢复、数据库变更、部署或真实模型验收。
+
 
 ## 2026-09-26 现行规则增补
 

@@ -1,3 +1,5 @@
+<!-- [Sync] 2026-11-08: 记录41现场排除空authority及空fragment兼容候选，真实主界面闭环单列。 -->
+<!-- [Sync] 2026-11-08: 系统登录接收兼容相同回调的空authority表示，原登记URI／事务与窗口完成次序保持。 -->
 <!-- [Sync] 2026-11-01: 专项页面与状态已接入源码，后台初始化和Native接口保持。 -->
 <!-- [Sync] 2026-11-01: 本次异步启动方案迁至mobile-startup-interaction.md，旧章节保留导航。 -->
 <!-- [Sync] 2026-11-01: 移动应用PRD迁至docs/prd/mobile-app/mobile-app.md，更新现行引用，保留历史回执。 -->
@@ -433,7 +435,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | SessionGate.native | 先ensureStarted再读/auth/session；前台刷新合并inFlight；401、503与取消按原前端处理 | [入口](../../../frontend/src/platform/SessionGate.native.tsx#L24)、[会话DTO](../../../frontend/app/_dream/lib/browserSession.ts#L39) |
 | InkRuntime / NativeLoginSessionProbe | 保留首方登录文档，匹配本机来源Cookie；原session200和user/CSRF通过后关闭，dismiss完成才resolve | [弹窗](../../../frontend/ios/InkMemory/InkReactNative.swift#L356)、[关闭次序](../../../frontend/ios/InkMemory/InkReactNative.swift#L408)、[probe](../../../frontend/ios/InkMemory/InkReactNative.swift#L435) |
-| NativeAccountLogin | Google使用系统授权，绑定当前操作并保留原文档；App协议严格匹配后交还本机BFF | [回调校验](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L9)、[授权](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L136) |
+| NativeAccountLogin | Google使用系统授权，绑定当前操作并保留原文档；App协议严格匹配后交还本机BFF | [回调校验](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L14)、[授权](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L164) |
 | createBffHandlers / BffLoginBoundary | options投影产品表单；start取得原Client与scope，callback验证事务并交换，session解析handle和profile，logout原撤销 | [处理器](../../../frontend/app/api/_auth/handlers.ts#L31)、[边界](../../../frontend/app/api/_auth/login-boundary.ts#L110) |
 | AdminBffClient / api-proxy | 原服务令牌、DTO、request_id及权限所有权；Cookie请求解析原handle后投影Bearer到App内Python | [客户端](../../../frontend/app/api/_auth/admin-client.ts#L137)、[代理](../../../frontend/app/api/_auth/api-proxy.ts#L14) |
 | NativeHTTPResponse及两种语言绑定 | RN本机请求与Admin后通道分别持有Cookie策略；Admin共用系统池，原DTO/权限继续调用方负责 | [池](../../../frontend/ios/InkMemory/InkReactNative.swift#L633)、[Next选择](../../../frontend/ios/runtime/ios-admin-http.mjs#L14)、[Python绑定](../../../backend/mobile_runtime/ios.py#L97) |
@@ -572,6 +574,99 @@ App/后端实例继续原生命周期；登录关闭仅结束当前登录操作�
 | 凭据范围 | 普通包包含服务身份/BFF配置 | 外部分发资格独立审查 | 签名和Keychain不作为静态secret保密证明 | 原认证所有者的scope/发放/撤销评审 |
 
 结论：方案评审待满足明确前提后通过，真机工作区实现验收未通过。后续先完成目标与普通前台采证，再定位实际传输/超时并恢复原会话和读取；Google、Android、真实Claude及外部分发继续各自验收。[后续任务与矩阵](../../deploy/mobile-auth-troubleshooting.md#八后续工作项和验收)定义责任、前提和关闭条件。本轮仅文档交付，代码、依赖、服务、构建、设备、账号及模型操作0。
+
+## Google系统回调地址兼容修订（2026-11-08）
+
+### 背景与问题
+
+Simulator40现场操作已复现：Google账户选择完成后系统窗口关闭，原App登录表单保持。安全诊断为callback阶段target=false，code/state/iss各一项、stateMatches=true、oauthError=absent。Foundation协议探针确认，`scheme:/auth/callback`的host为nil，`scheme:///auth/callback`的host为空字符串；原[目标校验](../../../frontend/ios/InkMemory/InkAccountLogin.swift#L27)拒绝后者。实际系统回调具体结构与修订后真实窗口结果分别留证，原先的本人验证阻挡与App地址校验失败分别分类。
+
+Simulator41密码返回现场补充：scheme、host、path及state匹配，target仍为false，空authority修订未解决该次失败。空fragment兼容属于源码修订候选，实际回调fragment存在／空值判断与真实主界面闭环仍待验证。系统API只按[custom scheme完成回调](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/callback)，App继续承担路径、结构和事务校验。
+
+### 目标与边界
+
+修订复用现有NativeAccountLogin、BFF与登录弹层，接纳同scheme、同精确路径的空authority表示及空fragment分隔符。Admin登记／authorize／exchange仍使用原单斜杠URI；原code/state/iss、S256、Cookie、CSRF、账户、scope和资源归属校验保持。新增Client、原生密码表单、认证框架、重放过期授权码和绕过本人验证均退出范围。
+
+### 概念与规则
+
+- 配置继续只接受原`<bundle>.auth:/auth/callback`。运行时接收允许单斜杠无authority，或严格三斜杠前缀且host为空；响应末尾允许空`#`，映射到HTTP时移除该空分隔符；非空host、端口、userinfo、带内容的fragment、路径差异和编码别名继续拒绝。
+- `NativeAccountCallback.localRequest`保留原查询字节，映射到当前App既有本机`/auth/callback`。当前操作state精确匹配；BFF继续验证原加密事务、issuer及授权码兑换。
+- 原NativeLoginSessionProbe确认原`/auth/session`为200且user／CSRF有效后，InkRuntime关闭登录弹层，dismiss完成再resolve，SessionGate.native重新读取会话并显示原主界面。
+- 地址、参数或BFF失败保留原登录文档和Cookie；沿原失败分类及显式重试处理。诊断只包含结构判断、字段数量、HTTP状态及固定错误类别，完整URL／query／授权值退出日志。
+- [NativeAccountLoginTests](../../../frontend/ios/InkMemoryTests/NativeAccountLoginTests.swift)覆盖两种接收形式、空fragment正负矩阵、原注册URI、原查询映射与拒绝矩阵；真实WK Cookie／session样例复用原fixture。技术通过、目标构建和真实Google窗口闭环分别登记。
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant SG as SessionGate.native
+  participant H as InkRuntime
+  participant W as MobileHostViewController
+  participant N as NativeAccountLogin
+  participant S as ASWebAuthenticationSession
+  participant C as NativeAccountCallback
+  participant B as createBffHandlers
+  participant A as AdminBffClient
+  participant P as NativeLoginSessionProbe
+  U->>SG: 点击原登录入口
+  SG->>H: presentLogin()
+  H->>W: 原登录文档
+  U->>W: 点击Google按钮
+  W->>N: handles(action,page)及当前操作
+  N->>B: 原options及start请求
+  B-->>N: 原Client、S256和登记回调
+  N->>S: 原authorize及customScheme
+  U->>S: 完成本人Google验证
+  S-->>N: 当前操作的callback URL
+  N->>C: localRequest及原state
+  C->>C: 校验原路径、两种无主机表示及空fragment
+  C-->>N: 当前本机callback及原查询字节
+  N->>B: GET /auth/callback
+  B->>A: exchange，原redirect_uri及verifier
+  A-->>B: 原handle及有效期
+  B-->>N: 303及原handle Cookie
+  N->>P: 复制Cookie并恢复probe
+  P->>B: GET /auth/session
+  B-->>P: 200及合法user／CSRF
+  P->>H: finishLogin(authenticated=true)
+  H-->>SG: dismiss完成后resolve
+  SG->>B: 原会话重新读取
+  B-->>SG: 原公开会话
+  SG-->>U: 原主界面
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant N as NativeAccountLogin
+  participant S as ASWebAuthenticationSession
+  participant C as NativeAccountCallback
+  participant B as createBffHandlers
+  U->>N: 当前Google登录操作
+  N->>S: 原authorize
+  alt 系统本人验证等待或用户取消
+    S-->>U: 原系统验证页面
+    U->>S: 完成验证或取消
+    S-->>N: 当前结果或canceledLogin
+    Note over N,S: 取消结束当前操作并保留原登录文档
+  else callback到达
+    S-->>N: 当前callback URL
+    N->>C: localRequest及原state
+    alt 目标或参数不符
+      C-->>N: nil
+      N-->>U: 保留原登录文档，沿原失败反馈与重试
+      Note over N,C: 仅记录结构判断与字段数量
+    else callback合法
+      C-->>N: 当前本机callback
+      N->>B: 原callback请求
+      B-->>N: 明确失败或暂不可用
+      N-->>U: 原失败处理及可重试路径
+    end
+  end
+  U->>N: 显式重新登录
+  N->>B: 新事务沿原start
+```
+
+窗口状态沿上节既有LoginWindow、Dismissing、Checking及SignedIn投影；新增状态存储和页面为零。评审要求原身份、原注册URI及失败拒绝矩阵保持，最终采用结论以[执行回执](../../exec/cross-platform-chat-continuation-20261104.md)为准。
 
 ## 2026-10-27现行工程合同
 

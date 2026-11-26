@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: share fail-closed, entity-bound continuation persistence.
 # [Input] A server-constructed, entity-bound Admin persistence owner.
 # [Output] Marker base accepted by the shared Claude Agent Service and ThreadFactory.
 # [Sync] 2026-10-23: allow an explicit task-bound Notion Read runtime override.
@@ -10,6 +11,27 @@
 
 class AdminAgentTurnPersistence:
     """Marker implemented only by reviewed server-side persistence owners."""
+
+    def _continuation_access_token(self, *, actor_id: str, thread_id: str) -> str:
+        raise NotImplementedError("A bound continuation authority is required")
+
+    def continuation_snapshot(self, *, actor_id: str, thread_id: str, message_id: str | None, dispatch_turn_id: str | None):
+        from .continuation_data import SnapshotInput, RESUME_SNAPSHOT, execute
+        with self._write_lock:
+            token = self._continuation_access_token(actor_id=actor_id, thread_id=thread_id)
+            return execute(self._client, RESUME_SNAPSHOT, SnapshotInput(thread_id=thread_id, message_id=message_id, dispatch_turn_id=dispatch_turn_id), self._request_id_factory(), access_token=token)
+
+    def continuation_claim(self, *, actor_id: str, input_dto):
+        from .continuation_data import CLAIM_CONTINUATION, execute
+        with self._write_lock:
+            token = self._continuation_access_token(actor_id=actor_id, thread_id=input_dto.thread_id)
+            return execute(self._client, CLAIM_CONTINUATION, input_dto, self._request_id_factory(), access_token=token).entry
+
+    def continuation_progress(self, *, actor_id: str, input_dto):
+        from .continuation_data import CONTINUATION_PROGRESS, execute
+        with self._write_lock:
+            token = self._continuation_access_token(actor_id=actor_id, thread_id=input_dto.thread_id)
+            return execute(self._client, CONTINUATION_PROGRESS, input_dto, self._request_id_factory(), access_token=token).entry
 
     def notion_turn_runtime(self, *, actor_id: str, thread_id: str):
         """Return a task-specific Notion adapter, or use normal Chat projection."""

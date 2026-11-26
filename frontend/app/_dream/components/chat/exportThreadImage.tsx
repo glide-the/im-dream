@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: settle shared Chat diagrams before capturing the preview.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: share original projection and PNG stitch/fallback preparation; retain DOM capture and Web downloads.
 // [Input] ChatExportSnapshot (messages + pendingConfirmation + toolChoice) + thread title +
@@ -243,7 +244,7 @@ interface ExportFontPlan {
 
 let exportFontPlanPromise: Promise<ExportFontPlan | null> | null = null;
 
-async function blobToBase64(blob: Blob): Promise<string> {
+export async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';
   const CHUNK = 0x8000;
@@ -563,12 +564,31 @@ export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElemen
   return collector.finish();
 }
 
-async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
+// [Sync] 2026-11-12: share the bounded tiled/legacy capture owner with note image exports.
+export async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   try {
     return await capturePartBlobsTiled(node, host, hooks);
   } catch {
     return capturePartBlobsLegacy(node, host, hooks);
   }
+}
+
+function waitForRenderedDiagrams(node: HTMLElement): Promise<void> {
+  const pending = () => Boolean(node.querySelector('[data-markdown-media-kind="mermaid"][data-render-state="pending"]'));
+  if (!pending()) return Promise.resolve();
+  return new Promise(resolve => {
+    const observer = new MutationObserver(() => {
+      if (!pending()) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+    observer.observe(node, {subtree: true, attributes: true, attributeFilter: ['data-render-state'], childList: true});
+    if (!pending()) {
+      observer.disconnect();
+      resolve();
+    }
+  });
 }
 
 /**
@@ -641,6 +661,7 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
       }
     }
     await document.fonts.ready;
+    await waitForRenderedDiagrams(node);
     // Give the off-screen tree two frames to settle layout before capture.
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));

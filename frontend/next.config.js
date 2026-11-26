@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: prohibit caching, indexing and referrer disclosure for public share pages.
 // [Input] Configuration-file location, server-owned deployment environment and public asset/API behavior.
 // [Output] Stable frontend-root Next config with optional standalone output and Python fallbacks.
 // [Pos] Sole Next project configuration owned by the frontend workspace root.
@@ -35,6 +36,7 @@ const nextConfig = {
   },
   async headers() {
     return [
+      {source: '/share/:path*', headers: [{key: 'Cache-Control', value: 'no-store'}, {key: 'X-Robots-Tag', value: 'noindex, nofollow'}, {key: 'Referrer-Policy', value: 'no-referrer'}]},
       {
         source: '/runtime-config.js',
         headers: [

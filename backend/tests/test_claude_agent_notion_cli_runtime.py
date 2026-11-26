@@ -1,6 +1,7 @@
 # [Input] Production ClaudeAgentRunner, manifest-qualified Dream Runtime, local fake Provider, and a test-owned native ntn executable outside the workspace.
 # [Output] Process-isolated provider-free proof that an approved actor-bound notion-cli Bash call executes inside the real Runtime and sandbox.
 # [Pos] Integration contract test node in backend/tests; no real Notion credential or content is accessed.
+# [Sync] 2026-11-11: force the current data-source query through the real Runtime and sandbox.
 # [Sync] 2026-09-04: add the Dream notion-cli PreToolUse regression acceptance.
 # [Sync] 2026-09-15: compile the fixture to match Runtime 0.1.10 native ntn policy without allowing shell-script shadows.
 # [Sync] 2026-09-13: assert final Bash binding and real config file readability.
@@ -20,7 +21,7 @@ from typing import Any
 
 import pytest
 
-_NTN_COMMAND = 'ntn api v1/search --data \'{"query":"fixture-only","page_size":1}\''
+_NTN_COMMAND = 'ntn api v1/data_sources/source-fixture/query --data \'{"page_size":20}\''
 
 
 def _run_contract(tmp_path: Path, *, installed_cli: bool = False, relative_shadow: bool = False) -> None:

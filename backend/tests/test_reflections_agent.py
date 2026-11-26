@@ -6,6 +6,8 @@
 # [Sync] 2026-10-13: include the current actor ID in the create fixture so the
 #                    production preparation-cache cleanup boundary is exercised.
 # [Sync] 2026-10-13: assert Reflections dispatches through the canonical normalized turn result and waits for the Factory owner.
+# [Sync] 2026-11-26: exercise original-task start after worker loss, duplicate start, and stream closure on exit.
+# [Sync] 2026-11-26: cover durable stop after worker loss and cancellation of the concrete child turn.
 
 from __future__ import annotations
 
@@ -14,7 +16,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+from fastapi import HTTPException
 
 import reflections_agent as runtime
 import routers.reflections as reflections_routes
@@ -34,6 +38,7 @@ from services.admin_data.reflection_task_models import (
     ReflectionEventListOutputDTO,
     ReflectionLaunchSnapshotDTO,
     ReflectionPromptSnapshotDTO,
+    ReflectionResultDTO,
     ReflectionSectionBeginOutputDTO,
     ReflectionSectionStateDTO,
     ReflectionSessionSnapshotDTO,
@@ -42,6 +47,7 @@ from services.admin_data.reflection_task_models import (
     ReflectionTaskDTO,
     ReflectionTaskGetOutputDTO,
     ReflectionTaskPublicInputDTO,
+    ReflectionTaskStartOutputDTO,
     ReflectionWorkerLoadOutputDTO,
 )
 from services.admin_data.session_projection_broker import (
@@ -238,6 +244,12 @@ class _RouteData:
     def events(self, input_dto, request_id, *, access_token):
         raise AssertionError("patched invocation expected")
 
+    def start(self, input_dto, request_id, *, access_token):
+        raise AssertionError("patched invocation expected")
+
+    def get(self, input_dto, request_id, *, access_token):
+        raise AssertionError("patched invocation expected")
+
 
 class ReflectionsPrestartSseTest(unittest.TestCase):
     def tearDown(self) -> None:
@@ -304,6 +316,67 @@ class ReflectionsPrestartSseTest(unittest.TestCase):
 
         _run(case())
 
+    def test_stop_settles_the_original_task_after_restart_and_keeps_results(self):
+        async def case():
+            owner = _RouteOwner(Mock())
+            active = _task("/fixture", status="RUNNING", revision=7)
+            stopped = _task("/fixture", status="COMPLETED", revision=8).model_copy(update={
+                "status": "PARTIAL_FAILED", "error_summary": runtime.REFLECTION_TASK_STOPPED,
+            })
+            result = ReflectionResultDTO(
+                id=THREAD_ID, task_id=TASK_ID, section="echoes", title="Saved result", description="",
+                related_session_ids=[], evidence="", confidence="low", created_at=stopped.completed_at,
+            )
+            owner.worker.advance.return_value = ReflectionTaskAdvanceOutputDTO(status="PARTIAL_FAILED", revision=8)
+            with patch.object(reflections_routes, "invoke_admin_operation", AsyncMock(side_effect=[
+                ReflectionTaskStartOutputDTO(task=active, terminal=False, report_missing=False),
+                ReflectionTaskGetOutputDTO(task=stopped, results=[result]),
+            ])) as invoke:
+                response = await reflections_routes.stop_reflections_task_endpoint(TASK_ID, current_user={}, owner=owner)
+            self.assertEqual(response["error_summary"], runtime.REFLECTION_TASK_STOPPED)
+            self.assertEqual(response["results"][0]["id"], THREAD_ID)
+            self.assertEqual(invoke.await_args_list[0].args[1], owner.data.start)
+            advance = owner.worker.advance.call_args.args[0]
+            self.assertEqual((advance.task_id, advance.action, advance.expected_revision), (TASK_ID, "finalize", 7))
+            owner.worker.ensure_report.assert_called_once()
+            self.assertNotIn(TASK_ID, runtime._RUNNING_TASKS)
+
+        _run(case())
+
+    def test_stop_requires_owner_authorization(self):
+        async def case():
+            owner = _RouteOwner(Mock())
+            with patch.object(reflections_routes, "invoke_admin_operation", AsyncMock(side_effect=HTTPException(404))), \
+                    patch.object(reflections_routes, "stop_reflections_task_worker", AsyncMock()) as stop:
+                with self.assertRaises(HTTPException) as failure:
+                    await reflections_routes.stop_reflections_task_endpoint(TASK_ID, current_user={}, owner=owner)
+            self.assertEqual(failure.exception.status_code, 404)
+            owner.worker.advance.assert_not_called()
+            stop.assert_not_awaited()
+
+        _run(case())
+
+    def test_stopping_a_local_worker_reaches_the_current_child_turn(self):
+        async def case():
+            running = asyncio.Event()
+            async def drain(*args, **kwargs):
+                running.set()
+                await asyncio.Future()
+
+            factory = Mock(stop_thread=AsyncMock())
+            request = Mock(thread_id=THREAD_ID)
+            with patch("claude_agent.runtime_owner.get_thread_factory", return_value=factory), \
+                    patch("services.story_workspace.dream_lifecycle_observer.drain_chat_agent_turn", drain):
+                worker = asyncio.create_task(runtime._run_claude_agent_turn(request))
+                runtime._RUNNING_TASKS[TASK_ID] = worker
+                await asyncio.wait_for(running.wait(), timeout=1)
+                await runtime.stop_reflections_task_worker(TASK_ID)
+            factory.stop_thread.assert_awaited_once_with(THREAD_ID)
+            self.assertTrue(worker.cancelled())
+            self.assertNotIn(TASK_ID, runtime._RUNNING_TASKS)
+
+        _run(case())
+
     def test_existing_bus_requires_exact_admin_high_water(self):
         async def case():
             worker = _AppendWorker()
@@ -319,6 +392,63 @@ class ReflectionsPrestartSseTest(unittest.TestCase):
                 await runtime._get_or_create_reflection_event_bus(
                     TASK_ID, initial_sequence=5, worker=worker
                 )
+
+        _run(case())
+
+    def test_restart_replays_history_and_reuses_the_original_task(self):
+        async def case():
+            with tempfile.TemporaryDirectory() as root:
+                root = str(Path(root).resolve())
+                worker = _AppendWorker()
+                load = _load(root, status="RUNNING", revision=4, high_water=2)
+                worker.worker_load = lambda lookup, _: load
+                owner = _RouteOwner(worker)
+                event = ReflectionEventDTO(
+                    task_id=TASK_ID, id=runtime.reflection_event_id(TASK_ID, 2),
+                    sequence=2, type="reflection.task.started", created_at=load.task.updated_at,
+                    payload={},
+                )
+                invoke = AsyncMock(side_effect=[
+                    ReflectionEventListOutputDTO(events=[event]),
+                    ReflectionTaskStartOutputDTO(task=load.task, terminal=False, report_missing=False),
+                    ReflectionTaskStartOutputDTO(task=load.task, terminal=False, report_missing=False),
+                ])
+                running = asyncio.Event()
+                finish = asyncio.Event()
+
+                async def execute(context, bus):
+                    running.set()
+                    await finish.wait()
+                    raise AdminDataError("ADMIN_WRITE_RESULT_UNKNOWN", 503, outcome_unknown=True)
+
+                with patch.object(reflections_routes, "invoke_admin_operation", invoke), patch.object(
+                    ReflectionsTaskEngine, "_execute_sections", side_effect=execute,
+                ) as execution, patch.dict(os.environ, {"AGENT_CWD": root, "DREAM_REFLECTIONS_WORKSPACE_ROOT": root}):
+                    stream = await reflections_routes.stream_reflections_task_events_endpoint(
+                        TASK_ID, current_user={}, owner=owner, last_event_id=None,
+                    )
+                    frames = [frame async for frame in stream.body_iterator]
+                    self.assertIn('"worker_missing": true', frames[0])
+                    self.assertIn(event.id, frames[1])
+                    await reflections_routes.start_reflections_task_endpoint(TASK_ID, current_user={}, owner=owner)
+                    task = runtime._RUNNING_TASKS[TASK_ID]
+                    await asyncio.wait_for(running.wait(), timeout=1)
+                    bus = await runtime.get_reflection_event_bus(TASK_ID)
+                    self.assertEqual(bus.sequence, 2)
+                    token = await bus.subscribe(event.id)
+                    try:
+                        await asyncio.wait_for(reflections_routes.start_reflections_task_endpoint(
+                            TASK_ID, current_user={}, owner=owner,
+                        ), timeout=1)
+                        self.assertIs(runtime._RUNNING_TASKS[TASK_ID], task)
+                    finally:
+                        finish.set()
+                        await task
+                    self.assertEqual([event async for event in bus.read(token)], [])
+                    self.assertTrue(bus.is_done)
+                    self.assertNotIn(TASK_ID, runtime._RUNNING_TASKS)
+                    execution.assert_awaited_once()
+                    self.assertEqual(worker.events, [])
 
         _run(case())
 
@@ -387,6 +517,58 @@ class ReflectionsTaskEngineRecoveryTest(unittest.TestCase):
             self.assertEqual(worker.reports, [TASK_ID])
             self.assertEqual(worker.events, [])
             self.assertIsNone(_run(runtime.get_reflection_event_bus(TASK_ID)))
+
+    def test_recovery_finalizes_an_interrupted_section_with_expired_authority(self):
+        async def case(root):
+            load = _load(root, status="RUNNING", revision=4, high_water=5)
+            completed = load.task.section_states[0].model_copy(update={
+                "status": "COMPLETED", "revision": 3, "result_count": 1,
+            })
+            interrupted = ReflectionSectionStateDTO(
+                section="traits", status="RUNNING", result_count=0, revision=2,
+                started_at=load.task.created_at, completed_at=None, error_summary=None,
+            )
+            load = load.model_copy(update={
+                "task": load.task.model_copy(update={
+                    "sections": ["echoes", "traits"], "section_states": [completed, interrupted],
+                }),
+                "launch_snapshot": load.launch_snapshot.model_copy(update={
+                    "custom_prompts": [*load.launch_snapshot.custom_prompts,
+                                       ReflectionPromptSnapshotDTO(section="traits", prompt_files_json=None)],
+                }),
+            })
+
+            class Worker(_EngineWorker):
+                def begin(self, input_dto, request_id):
+                    self.begun = input_dto
+                    raise AdminDataError("REFLECTION_AUTHORITY_REQUIRED", 401, request_id)
+
+                def finish(self, input_dto, request_id):
+                    self.finished = input_dto
+
+                def advance(self, input_dto, request_id):
+                    self.advances.append(input_dto)
+                    return ReflectionTaskAdvanceOutputDTO(status="PARTIAL_FAILED", revision=5)
+
+            worker = Worker()
+            engine = ReflectionsTaskEngine(
+                worker, object(), SessionProjectionBrokerSettings(timeout_seconds=1, max_bytes=1024),
+                _runtime_http_config(),
+            )
+            with patch.dict(os.environ, {"AGENT_CWD": root, "DREAM_REFLECTIONS_WORKSPACE_ROOT": root}):
+                await engine.run(TASK_ID, load=load)
+            self.assertEqual(worker.begun.section, "traits")
+            self.assertEqual((worker.finished.section, worker.finished.expected_revision, worker.finished.outcome),
+                             ("traits", 2, "failed"))
+            self.assertEqual([(item.action, item.expected_revision) for item in worker.advances], [("finalize", 4)])
+            self.assertEqual(worker.reports, [TASK_ID])
+            self.assertEqual([event.sequence for event in worker.events], [6, 7])
+            self.assertEqual(worker.events[-1].payload, {
+                "completed_sections": ["echoes"], "failed_sections": ["traits"], "result_count": 1,
+            })
+
+        with tempfile.TemporaryDirectory() as root:
+            _run(case(str(Path(root).resolve())))
 
 
 class _OwnerWorker:

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: preserve structured pre-stream conflicts in the failed suggestion Cell.
 // [Input] Manual WritingSuggestionController with injected Thread, persistence, and SSE transports.
 // [Output] Verify explicit-only requests, Thread reuse/isolation, snapshot binding, retry, failure, and late-response rejection.
 // [Pos] Writing suggestion side-effect orchestration regression test in frontend/app/_dream/hooks/__tests__.
@@ -6,6 +7,7 @@
 import { expect, test } from '@playwright/test';
 import type { streamClaudeAgentTurn } from '../../api/voiceApi';
 import { EditorEngine, type EditorState } from '../../engine/EditorEngine';
+import { ClaudeAgentTransportError } from '../../lib/claude-agent-transport';
 import {
   WritingSuggestionController,
   type WritingSuggestionControllerDependencies,
@@ -45,6 +47,30 @@ function makeController(options: {
   };
   return new WritingSuggestionController(dependencies);
 }
+
+test('a rejected turn retains its conflict code and retryability in the same Cell', async () => {
+  const engine = new EditorEngine('session-conflict');
+  const text = firstText(engine);
+  engine.updateTextCell(text.id, '正文保留');
+  const controller = makeController({
+    engine,
+    streamTurn: async (request) => {
+      request.onError(new ClaudeAgentTransportError({
+        type: 'error', errorText: 'Claude-agent request failed: 409',
+        errorCode: 'GATEWAY_MODEL_SELECTION_STALE', retryable: false,
+      }));
+    },
+  });
+
+  const suggestionId = controller.start(text.id) as string;
+  await flushAsyncWork();
+
+  expect(engine.getWritingSuggestionCell(suggestionId)).toMatchObject({
+    status: 'failed', content: '',
+    error: { code: 'GATEWAY_MODEL_SELECTION_STALE', retryable: false },
+  });
+  expect(firstText(engine).content).toBe('正文保留');
+});
 
 test('ordinary input is request-free and one Go deeper click sends exactly one request', async () => {
   const engine = new EditorEngine('session-a');

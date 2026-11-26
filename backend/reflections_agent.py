@@ -13,6 +13,8 @@
 # [Sync] 2026-10-13: preserve the selected server model and its CLI configuration in internal Reflections turns.
 # [Sync] 2026-10-13: repeat exact frozen Notion citation IDs after the output contract without repairing invalid references.
 # [Sync] 2026-11-03: request frozen diary bodies through the existing get_sessions_range include_text option.
+# [Sync] 2026-11-26: close event subscriptions when execution exits and reload the original task on recovery.
+# [Sync] 2026-11-26: stop the local Reflections worker and its current child turn after Admin commits a stop.
 """Run Reflections tasks from an immutable Admin worker snapshot."""
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ from services.admin_gateway.selection import resolve_platform_model
 logger = logging.getLogger(__name__)
 
 TERMINAL_TASK_STATUSES = {"COMPLETED", "PARTIAL_FAILED", "FAILED"}
+REFLECTION_TASK_STOPPED = "REFLECTION_TASK_STOPPED"
 _TERMINAL_EVENT_TYPES = {
     "reflection.task.completed",
     "reflection.task.partial_failed",
@@ -166,6 +169,13 @@ class ReflectionEventBus:
     def sequence(self) -> int:
         return self._sequence
 
+    async def close(self) -> None:
+        async with self._lock:
+            self._done = True
+            for queue in self._subscribers:
+                queue.put_nowait(None)
+            self._subscribers.clear()
+
     async def publish(self, event_type: str,
         payload: dict[str, Any] | None = None) -> ReflectionTaskEvent:
         async with self._lock:
@@ -250,10 +260,12 @@ _TASK_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 async def _get_or_create_reflection_event_bus(task_id: str, *,
-    initial_sequence: int, worker: AdminReflectionsWorkerData) -> ReflectionEventBus:
+    initial_sequence: int, worker: AdminReflectionsWorkerData,
+    replace_closed: bool = False,
+) -> ReflectionEventBus:
     async with _BUSES_LOCK:
         bus = _BUSES.get(task_id)
-        if bus is None:
+        if bus is None or (replace_closed and bus.is_done):
             bus = ReflectionEventBus(
                 task_id,
                 initial_sequence=initial_sequence,
@@ -430,9 +442,13 @@ async def _run_claude_agent_turn(request: Any):
     claude_agent_thread_factory = get_thread_factory()
     from services.story_workspace.dream_lifecycle_observer import drain_chat_agent_turn
 
-    return await drain_chat_agent_turn(
-        claude_agent_thread_factory, request, wait_for_factory_owner=True,
-    )
+    try:
+        return await drain_chat_agent_turn(
+            claude_agent_thread_factory, request, wait_for_factory_owner=True,
+        )
+    except asyncio.CancelledError:
+        await claude_agent_thread_factory.stop_thread(request.thread_id)
+        raise
 
 
 def _parse_json_array_from_text(text: str) -> list[dict[str, Any]] | None:
@@ -675,6 +691,7 @@ class ReflectionsTaskEngine:
                 if not self._task_terminal:
                     await self._fatal_fail(current, bus, error)
             finally:
+                await bus.close()
                 if _RUNNING_TASKS.get(task_id) is asyncio.current_task():
                     _RUNNING_TASKS.pop(task_id, None)
 
@@ -790,8 +807,14 @@ class ReflectionsTaskEngine:
                 if error.outcome_unknown:
                     raise
                 failed.append(section)
+                revision = begin.revision if begin else None
+                if (revision is None and state.status == "RUNNING"
+                        and error.code == "REFLECTION_AUTHORITY_REQUIRED"):
+                    # The persisted section can outlive its worker authority.
+                    # Finish it using its current revision so pending sections can run.
+                    revision = state.revision
                 await self._finish_known_failure(
-                    context.load.task.task_id, section, begin, error
+                    context.load.task.task_id, section, revision, error
                 )
                 await bus.publish(
                     "reflection.section.failed",
@@ -802,7 +825,7 @@ class ReflectionsTaskEngine:
             except Exception as error:
                 failed.append(section)
                 await self._finish_known_failure(
-                    context.load.task.task_id, section, begin, error
+                    context.load.task.task_id, section, begin.revision if begin else None, error
                 )
                 await bus.publish(
                     "reflection.section.failed",
@@ -822,16 +845,16 @@ class ReflectionsTaskEngine:
         }
 
     async def _finish_known_failure(self, task_id: str, section: str,
-        begin: ReflectionSectionBeginOutputDTO | None,
+        revision: int | None,
         error: BaseException) -> None:
-        if begin is None:
+        if revision is None:
             return
         await self._call(
             self.worker.finish,
             ReflectionSectionFinishInputDTO(
                 task_id=task_id,
                 section=section,
-                expected_revision=begin.revision,
+                expected_revision=revision,
                 outcome="failed",
                 error_summary=_summary(error),
             ),
@@ -941,6 +964,9 @@ async def start_reflections_task(task_id: str, *,
     session_broker_settings: SessionProjectionBrokerSettings,
     runtime_http_config: RuntimeHttpConfig) -> None:
     """Load the Admin snapshot once, then start one local task owner."""
+    existing = _RUNNING_TASKS.get(task_id)
+    if existing is not None and not existing.done():
+        return
     lock = _TASK_LOCKS.setdefault(task_id, asyncio.Lock())
     async with lock:
         existing = _RUNNING_TASKS.get(task_id)
@@ -956,6 +982,7 @@ async def start_reflections_task(task_id: str, *,
                 task_id,
                 initial_sequence=load.last_event_sequence,
                 worker=worker,
+                replace_closed=True,
             )
         engine = ReflectionsTaskEngine(
             worker, client, session_broker_settings, runtime_http_config
@@ -964,6 +991,24 @@ async def start_reflections_task(task_id: str, *,
             engine.run(task_id, load=load), name=f"reflections-task-{task_id}"
         )
         _RUNNING_TASKS[task_id] = task
+
+
+async def stop_reflections_task_worker(task_id: str) -> None:
+    """Drain local execution after the original task has reached a durable terminal status."""
+    task = _RUNNING_TASKS.get(task_id)
+    if task is None:
+        # A concurrent start may still be loading its snapshot under this lock.
+        async with _TASK_LOCKS.setdefault(task_id, asyncio.Lock()):
+            task = _RUNNING_TASKS.get(task_id)
+    if task is not None and not task.done():
+        if not task.cancelling():
+            task.cancel()
+        await asyncio.shield(asyncio.gather(task, return_exceptions=True))
+    if _RUNNING_TASKS.get(task_id) is task:
+        _RUNNING_TASKS.pop(task_id, None)
+    bus = await get_reflection_event_bus(task_id)
+    if bus is not None:
+        await bus.close()
 
 
 __all__ = [
@@ -975,4 +1020,5 @@ __all__ = [
     "get_reflection_event_bus",
     "prepare_reflection_event_bus",
     "start_reflections_task",
+    "stop_reflections_task_worker",
 ]

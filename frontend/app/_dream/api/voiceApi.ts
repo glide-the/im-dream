@@ -1,3 +1,5 @@
+// [Sync] 2026-11-25: recover rejected Calendar title metadata when retrying a still-open draft.
+// [Sync] 2026-11-12: preserve pre-stream HTTP error codes and retryability for Writing and historical comment turns.
 // [Sync] 2026-11-03: use Kastention / 卡片结构 for Deck display copy; retain existing identifiers, requests and operations.
 // [Sync] 2026-10-29: inject native HTTP into the original Timeline read helpers; Web signatures and defaults remain compatible.
 // [Sync] 2026-10-29: re-export the original Reflections domain API for Web/native reuse; remaining session and Chat behavior stays here.
@@ -42,12 +44,13 @@ import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSessio
  *         Reflections-agent async tasks with SSE-first start control.
  */
 
-import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
 import {listDecks, getDeck, listDecksWithVoices} from './deckReadApi';
+import { createSessionRequestShare } from '../lib/shareSessionRequest';
 import {updateVoice} from './deckMutationApi';
 export {createDeck,updateDeck,deleteDeck,forkDeck,syncDeck,createVoice,updateVoice,deleteVoice,forkVoice} from './deckMutationApi';
 import type { EditorState } from '../engine/EditorEngine';
+import {recoverNotionArticleDraft} from '../components/notes/notionArticleLinks';
 import { consumeClaudeAgentSseStream } from '../lib/claude-agent-sse-utils';
 import { ClaudeAgentTransportError } from '../lib/claude-agent-transport';
 
@@ -280,8 +283,22 @@ export async function streamClaudeAgentTurn({
     return;
   }
 
-  if (!response.ok || !response.body) {
-    onError(new Error(`Claude-agent request failed: ${response.status}`));
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    const detail = payload && typeof payload === 'object' && 'detail' in payload
+      ? payload.detail : null;
+    onError(new ClaudeAgentTransportError({
+      type: 'error',
+      errorText: `Claude-agent request failed: ${response.status}`,
+      errorCode: detail && typeof detail === 'object' && 'error_code' in detail
+        && typeof detail.error_code === 'string' ? detail.error_code : undefined,
+      retryable: detail && typeof detail === 'object' && 'retryable' in detail
+        && typeof detail.retryable === 'boolean' ? detail.retryable : undefined,
+    }));
+    return;
+  }
+  if (!response.body) {
+    onError(new Error('Claude-agent response body is missing'));
     return;
   }
 
@@ -443,7 +460,7 @@ export async function saveSession(sessionId: string, editorState: EditorState, n
     headers: getAuthHeaders(),
     body: JSON.stringify({
       session_id: sessionId,
-      editor_state: editorState,
+      editor_state: {...editorState, cells: editorState.cells.map(cell => cell.type === 'text' ? recoverNotionArticleDraft(cell) : cell)},
       name
     })
   });
@@ -658,24 +675,29 @@ export {listDecks, getDeck, listDecksWithVoices};
  * Ensure the actor's screenplay default exists and reconcile empty plugin refs.
  * Existing Decks and user selections are preserved by the backend.
  */
-export async function reconcileDefaultDeckPlugin(): Promise<{
+type DefaultDeckReconciliation = {
   deck_id: string | null;
   reconciled: boolean;
   // `default_not_found` keeps the client compatible with an older backend
   // during a rolling restart; current servers create the missing default.
   reason: 'default_created' | 'missing_ref' | 'refs_preserved' | 'default_not_found';
-}> {
-  const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
+};
+const shareDefaultDeckReconciliation = createSessionRequestShare<DefaultDeckReconciliation>();
+
+// [Sync] 2026-11-19: share the active default repair within the browser session.
+export function reconcileDefaultDeckPlugin(): Promise<DefaultDeckReconciliation> {
+  return shareDefaultDeckReconciliation(fetch, 'default', async () => {
+    const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Reconcile default Kastention plugin failed');
+    }
+    return await response.json();
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Reconcile default Kastention plugin failed');
-  }
-
-  return await response.json();
 }
 
 /**

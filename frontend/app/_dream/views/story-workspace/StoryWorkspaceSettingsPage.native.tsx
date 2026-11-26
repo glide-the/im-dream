@@ -1,5 +1,8 @@
+// [Sync] 2026-11-12: add native external-link management using shared account/transport ownership.
+import ExternalLinksSettings from './ExternalLinksSettings.native';
+import type {ExternalShare} from '../../api/externalShareApi';
 // [Input] Original Settings categories/search, App catalog/config callbacks and normal account actions.
-// [Output] Native six-category Settings, Work tabs and original resource destinations with retained drafts.
+// [Output] Native seven-category Settings, Work tabs and original resource destinations with retained drafts.
 // [Pos] Settings navigation composition; BackendRuntimeManager, authentication and business APIs retain their owners.
 // [Sync] 2026-11-03: forward existing About visibility for diagnostics sampling cleanup; navigation and retained drafts stay unchanged.
 // [Sync] 2026-10-29: adopt existing native content and one account-scoped resource owner, without ordinary Settings WebViews.
@@ -20,11 +23,11 @@ import DeckManager from '../../components/DeckManager.native';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage.native';
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection.native';
 import {filterStoryWorkspaceSettingsNavigation,STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS as SEARCH} from './storyWorkspaceSettingsSearch';
-type Category='general'|'subscription'|'work'|'behavior'|'model'|'about';
+type Category='external-links'|'general'|'subscription'|'work'|'behavior'|'model'|'about';
 type WorkTab='deck'|'resources'|'plugins';
 export interface NativeSettingsNavigation {nonce:number;target:'menu'|'resources'}
-interface Props {ownerId:string;origin:string;active:boolean;navigation:NativeSettingsNavigation;decks:Deck[];loading:boolean;error?:string;onRefreshDecks:()=>Promise<Deck[]>;onTryDeck:(deck:Deck,voice:Voice,input?:string)=>void;onBack:()=>void;onSessionExpired:()=>void;onConfigSaved:()=>void;logout:()=>Promise<void>;transport?:typeof fetch}
-export default function StoryWorkspaceSettingsPage({ownerId,origin,active,navigation,decks,loading,error,onRefreshDecks,onTryDeck,onBack,onSessionExpired,onConfigSaved,logout,transport=clientFetch}:Props){
+interface Props {onOpenShareSource?:(share:ExternalShare)=>Promise<void>;ownerId:string;origin:string;active:boolean;navigation:NativeSettingsNavigation;decks:Deck[];loading:boolean;error?:string;onRefreshDecks:()=>Promise<Deck[]>;onTryDeck:(deck:Deck,voice:Voice,input?:string)=>void;onBack:()=>void;onSessionExpired:()=>void;onConfigSaved:()=>void;logout:()=>Promise<void>;transport?:typeof fetch}
+export default function StoryWorkspaceSettingsPage({ownerId,origin,active,navigation,decks,loading,error,onRefreshDecks,onTryDeck,onBack,onSessionExpired,onConfigSaved,logout,transport=clientFetch,onOpenShareSource}:Props){
  const {t,i18n}=useTranslation(),c=useInkColors(),sessionExpired=useRef(onSessionExpired);sessionExpired.current=onSessionExpired;
  const [resources]=useState(()=>createNativeSettingsResources(ownerId,()=>sessionExpired.current(),transport));
  const [category,setCategory]=useState<Category|'menu'>(navigation.target==='resources'?'work':'menu'),[visited,setVisited]=useState<Set<Category>>(()=>new Set(navigation.target==='resources'?['work']:[]));
@@ -41,6 +44,7 @@ export default function StoryWorkspaceSettingsPage({ownerId,origin,active,naviga
   {id:'general' as const,label:t('settings.workspace.navigation.general'),searchKeys:SEARCH.settings},
   {id:'subscription' as const,label:t('settings.workspace.navigation.subscription'),searchKeys:SEARCH['settings-subscription']},
   {id:'work' as const,label:t('settings.workspace.navigation.work'),searchKeys:SEARCH['settings-work']},
+  {id:'external-links' as const,label:t('externalShare.title'),searchKeys:SEARCH['settings-external-links']},
   {id:'behavior' as const,label:t('settings.workspace.navigation.behavior',{defaultValue:i18n.language.startsWith('zh')?'记忆回应':'Memory responses'}),searchKeys:SEARCH['settings-behavior']},
   {id:'model' as const,label:t('settings.workspace.navigation.model'),searchKeys:SEARCH['settings-model']},
   {id:'about' as const,label:t('settings.workspace.navigation.about'),searchKeys:SEARCH['settings-about']},
@@ -61,6 +65,7 @@ export default function StoryWorkspaceSettingsPage({ownerId,origin,active,naviga
   </View>
   {scene('general',<GeneralSettings onBack={root} transport={transport} onSessionExpired={onSessionExpired}/>)}
   {scene('subscription',<StoryWorkspaceSubscriptionPage onBack={root} transport={transport} onSessionExpired={onSessionExpired}/>)}
+  {scene('external-links',<ExternalLinksSettings ownerId={ownerId} origin={origin} active={show('external-links')} transport={transport} onBack={root} onSessionExpired={onSessionExpired} onOpenSource={onOpenShareSource}/>)}
   {scene('behavior',<MemoryBehaviorSettings active={show('behavior')} onBack={root} transport={transport} onSessionExpired={onSessionExpired}/>)}
   {scene('model',<ModelConfigSection active={show('model')} onBack={root} transport={transport} onSessionExpired={onSessionExpired} onConfigSaved={onConfigSaved}/>)}
   {scene('about',<AboutView active={show('about')} onBack={root}/>)}

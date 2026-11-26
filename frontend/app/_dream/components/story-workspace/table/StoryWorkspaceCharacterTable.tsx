@@ -1,3 +1,5 @@
+// [Sync] 2026-11-19: protected character avatars consume the shared Bearer image adapter.
+import { AuthenticatedImage } from '../../chat/AuthenticatedResource';
 import type {
   StoryWorkspaceCharacter,
   StoryWorkspaceSortOrder,
@@ -77,7 +79,7 @@ export function StoryWorkspaceCharacterTable({
               <td>
                 <span className="story-workspace-character-avatar">
                   {character.avatar_url ? (
-                    <img alt="" src={character.avatar_url} />
+                    <AuthenticatedImage alt="" src={character.avatar_url} />
                   ) : character.name.slice(0, 1)}
                 </span>
               </td>

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-24: TextCell 增加文章引用展示，保存合同沿用原文。 -->
 # 编辑器会话模块设计梳理
 
 Status: Current
@@ -49,8 +50,8 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 | Hooks 层 | `frontend/app/_dream/hooks/useWritingSuggestions.ts` | 手动建议控制器：Thread 懒创建/持久化、SSE、重试和过期响应隔离 |
 | Hooks 层 | `frontend/app/_dream/hooks/useVoiceInput.ts` | 语音输入 |
 | API 层 | `frontend/app/_dream/api/voiceApi.ts` | 后端 API 调用：共享 Claude Agent SSE turn、Voice 对话、saveSession、listSessions、getSession |
-| 后端 API | `backend/server.py` → `/api/sessions/*` | 会话持久化：CRUD |
-| 持久化层 | `backend/database.py` | SQLite/DB 操作 |
+| 后端 API | [会话路由](../../../backend/routers/sessions.py) | 通过当前账户的会话接口保存、列出和获取 editor_state |
+| 持久化层 | [AdminSessionData](../../../backend/services/admin_data/session_data.py) | 调用 Admin 会话操作，Admin 按账户将编辑状态写入 PostgreSQL 的 user_sessions.editor_state_json |
 
 ---
 
@@ -84,6 +85,8 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 | `WritingSuggestionCell` | `{id, type:'writing-suggestion', content, status, anchor, createdAt, updatedAt, error?}` | 只读、可恢复、可持久化的产品级写作建议；不参与正文与 Weight/Energy |
 
 设计约束：数组中不能出现连续两个 TextCell（`mergeConsecutiveTextCells` 自动合并）。
+
+TextCell.content 中的 Notion 文章链接按原文区间显示。静读、编辑和按当前资源选择读取正文的规则见[笔记文章引用](notion-article-links.md)。
 
 ### 3.3 Commentor（语音评论）
 

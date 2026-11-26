@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: share the original message presentation with public and image read-only surfaces.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] User-authored text message part from the chat message stream/history and an optional leading action.
 // [Output] Right-aligned user chat bubble with an anchored provenance action, GFM Markdown and copy.
@@ -10,12 +11,16 @@
 // [Sync] 2026-08-22: accept the owning Chat Thread for explicit workspace:// rendering.
 // [Sync] 2026-09-01: render a lightweight source label for persisted Dream auto-repair messages.
 // [Sync] 2026-09-27: anchor a created Thread's source navigation above its first user bubble.
+import type {Components} from 'react-markdown';
+import '../../styles/markdown.css';
 import { memo, type ReactNode } from 'react';
 import { useCopy } from '../../hooks/useCopy';
 import { IconCheck, IconCopy } from './Icons';
 import ChatMarkdown from './ChatMarkdown';
 
 interface UserMessagePartProps {
+  publicView?: boolean;
+  mediaComponents?: Pick<Components, 'a' | 'img'>;
   text: string;
   workspaceSessionId?: string;
   sourceLabel?: string;
@@ -23,7 +28,7 @@ interface UserMessagePartProps {
   onAddImageMaterial?: (file: File) => void;
 }
 
-export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel, leadingAction, onAddImageMaterial }: UserMessagePartProps) {
+export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel, leadingAction, onAddImageMaterial, publicView = false, mediaComponents }: UserMessagePartProps) {
   const { copied, copy } = useCopy();
 
   return (
@@ -53,7 +58,7 @@ export default memo(function UserMessagePart({ text, workspaceSessionId, sourceL
         }}
       >
         <div className="prose prose-chat" style={{ color: 'var(--color-text-primary)', fontSize: '0.92rem', lineHeight: 1.7 }}>
-          <ChatMarkdown text={text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} />
+          <ChatMarkdown text={text} workspaceSessionId={workspaceSessionId} onAddImageMaterial={onAddImageMaterial} publicView={publicView} mediaComponents={mediaComponents} />
         </div>
       </div>
       <button

@@ -1,5 +1,7 @@
+# [Sync] 2026-11-04: packaged public origin follows the native host config so Simulator and Web coexist.
 # [Sync] 2026-11-02: connect original account failures to runtime diagnostics and align the packaged native callback.
 # [Sync] 2026-10-31: include the private native Admin HTTP adapter and its exact resource digest.
+# [Sync] 2026-11-18: reject server trace configuration before copying mobile env resources.
 #!/usr/bin/env python3
 # [Input] Prepared original Runtime resources and Xcode target build settings.
 # [Output] App-local Node, original Runtime and original Next standalone resources with provenance receipts.
@@ -19,8 +21,11 @@ import os
 from pathlib import Path
 import shutil
 import plistlib
+import re
 import subprocess
 import sys
+
+from mobile_env_policy import validate_mobile_environment
 
 ios = Path(__file__).resolve().parents[1]
 source = ios / "RuntimeArtifacts/generated"
@@ -71,10 +76,26 @@ for source, target in (
     (ios.parents[1] / "frontend/.env.local", (next_root / next_entry).parent / ".env.local"),
 ):
     if source.is_file():
+        # Fail before copying: OTLP endpoints may embed authorization keys. Server
+        # configuration belongs in private process EnvironmentFiles, outside mobile inputs.
+        validate_mobile_environment(source.read_text())
         shutil.copy2(source, target)
         target.chmod(0o600)
     else:
         target.unlink(missing_ok=True)
+
+# The native host owns its local listener. The desktop public origin remains
+# in the source env; only the packaged copies adopt the host's existing origin.
+native_origin = json.loads((ios / "host-config.json").read_text())["webOrigin"]
+for target in (destination.parent / "app/.env", (next_root / next_entry).parent / ".env.local"):
+    if target.is_file():
+        body = target.read_text()
+        pattern = r"(?m)^[ \t]*(?:export[ \t]+)?INK_DREAM_PUBLIC_ORIGIN[ \t]*=[^\r\n]*(?:\r?\n|$)"
+        if len(re.findall(pattern, body)) > 1:
+            raise RuntimeError("Duplicate packaged public origin configuration")
+        body = re.sub(pattern, "", body).rstrip("\r\n")
+        target.write_text(body + "\nINK_DREAM_PUBLIC_ORIGIN=" + native_origin + "\n")
+        target.chmod(0o600)
 
 # Command resources come only from the hash-verified local preparation directory.
 guest = ios / "Guest"
@@ -94,7 +115,6 @@ value = os.environ.get("INK_AGENT_SANDBOX_ENABLED")
 if value not in ("false", "true"):
     raise RuntimeError("INK_AGENT_SANDBOX_ENABLED must be an explicit build configuration value")
 environment = destination.parent / "app/.env"
-import re
 body = environment.read_text() if environment.is_file() else ""
 body = re.sub(r"(?m)^\s*(?:export\s+)?INK_AGENT_SANDBOX_ENABLED\s*=.*(?:\n|$)", "", body)
 if body and not body.endswith("\n"):

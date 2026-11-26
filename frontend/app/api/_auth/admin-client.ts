@@ -1,5 +1,5 @@
 // [Input] Explicit Admin public authority, optional internal transport origin, confidential client and canonical v1 DTOs.
-// [Output] Process-shared bounded server transport; OAuth credentials never leave this private module.
+// [Output] Process-shared bounded Admin DTO/OAuth transport with separate private service credentials.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
 // [Sync] 2026-10-11: expose the existing transport origin to select validated loopback browser navigation only.
 // [Sync] 2026-10-11: use immutable browser-origin wrappers sharing the original service-token owner.
@@ -7,6 +7,10 @@
 // [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 // [Sync] 2026-09-16: centralize control-character rejection without regex literals.
 // [Sync] 2026-09-17: share the client across Next route invocations so token cache/flight coalescing are effective.
+// [Sync] 2026-11-18: propagate W3C child context across the existing bounded Admin transport.
+// [Sync] 2026-11-19: consume public PKCE/refresh/revoke OAuth endpoints for Web Bearer credentials.
+import { traceFetch } from '../_trace.ts';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -143,7 +147,7 @@ export class AdminBffClient {
       try {
         const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
         const authorization = Buffer.from(`${encodeURIComponent(this.#config.serviceId)}:${encodeURIComponent(this.#config.serviceSecret)}`, 'utf8').toString('base64');
-        response = await this.#fetch(this.#config.transportOrigin + '/api/auth/oauth2/token', {
+        response = await traceFetch(this.#fetch, this.#config.transportOrigin + '/api/auth/oauth2/token', {
           method: 'POST',
           headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${authorization}` },
           body: new URLSearchParams({ grant_type: 'client_credentials', resource: this.resource }),
@@ -175,7 +179,7 @@ export class AdminBffClient {
     let raw: string;
     try {
       const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
-      response = await this.#fetch(this.#config.transportOrigin + '/api/internal/dream/v1' + path, {
+      response = await traceFetch(this.#fetch, this.#config.transportOrigin + '/api/internal/dream/v1' + path, {
         method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body),
         cache: 'no-store', redirect: 'manual', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
@@ -223,6 +227,58 @@ export class AdminBffClient {
       code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/), redirect_uri: z.string().min(1).max(2048) })
       .parse({ request_id: transactionId, transaction_id: transactionId, code, code_verifier: codeVerifier, redirect_uri: redirectUri });
     return this.#request('/browser-sessions/exchange', transactionId, exchangedDto, body, undefined, signal);
+  }
+
+  async #publicOAuth(endpoint: 'token' | 'revoke', parameters: Record<string, string>, signal?: AbortSignal) {
+    const caps = await this.capabilities(randomUUID(), signal);
+    const timeout = AbortSignal.timeout(this.#config.timeoutMilliseconds);
+    let response: Response;
+    try {
+      response = await traceFetch(this.#fetch, this.transportOrigin + '/api/auth/oauth2/' + endpoint, {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...(this.#browserOrigin ? { origin: this.#browserOrigin } : {}) },
+        body: new URLSearchParams({ ...parameters, client_id: caps.auth.clients.browser, resource: this.resource }),
+        credentials: 'omit', cache: 'no-store', redirect: 'manual', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      });
+      const chunks: Uint8Array[] = []; let length = 0;
+      const reader = response.body?.getReader();
+      if (reader) {
+        try { for (;;) { const next = await reader.read(); if (next.done) break;
+          length += next.value.length;
+          if (length > this.#config.maxResponseBytes) { await reader.cancel(); throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503); }
+          chunks.push(next.value);
+        } } finally { reader.releaseLock(); }
+      }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      let payload: unknown;
+      try { payload = raw ? JSON.parse(raw) : {}; } catch { throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503); }
+      if (!response.ok) {
+        const code = (payload as { error?: unknown })?.error;
+        throw new BffBoundaryError(code === 'invalid_grant' || code === 'invalid_token' ? 'BFF_LOGIN_REQUIRED' : 'BFF_OAUTH_UNAVAILABLE', code === 'invalid_grant' || code === 'invalid_token' ? 401 : 503);
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof BffBoundaryError) throw error;
+      throw new BffBoundaryError('BFF_ADMIN_UNAVAILABLE', 503);
+    }
+  }
+
+  async oauthTokens(parameters: Record<string, string>, signal?: AbortSignal) {
+    // Start the lifetime before network I/O so transit cannot extend token validity.
+    const requestedAt = Date.now();
+    const parsed = z.object({ access_token: z.string().regex(/^[A-Za-z0-9._~-]+$/).max(16_384), token_type: z.literal('Bearer'),
+      expires_in: z.number().int().positive().max(300), refresh_token: z.string().min(1).max(16_384).optional(), scope: z.string().optional(),
+    }).safeParse(await this.#publicOAuth('token', parameters, signal));
+    if (!parsed.success) throw new BffBoundaryError('BFF_ADMIN_RESPONSE_INVALID', 503);
+    return { ...parsed.data, expires_at: requestedAt + parsed.data.expires_in * 1_000 };
+  }
+
+  async revokeOAuth(refreshToken: string, signal?: AbortSignal) {
+    await this.#publicOAuth('revoke', { token: refreshToken, token_type_hint: 'refresh_token' }, signal);
+  }
+
+  async profileForAccessToken(accessToken: string, requestId: string, signal?: AbortSignal) {
+    const principal = await this.#request('/principal', requestId, principalDto, undefined, accessToken, signal);
+    return this.currentProfile({ access_token: accessToken, principal, expires_at: new Date().toISOString() }, requestId, signal);
   }
 
   async resolve(browserHandle: string, requestId: string, signal?: AbortSignal): Promise<BrowserResolution> {

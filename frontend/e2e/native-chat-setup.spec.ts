@@ -1,3 +1,4 @@
+// [Sync] 2026-11-08: absent optional settings retain original defaults without persisting preferences or weakening malformed-value checks.
 // [Sync] 2026-11-01: original config/catalog errors survive read recovery in process diagnostics.
 // [Sync] 2026-10-29: configuration-only refresh preserves catalog/runtime/draft and rejects older reads.
 // [Sync] 2026-10-28: require one complete catalog read per setup cycle and reject per-Deck detail traffic.
@@ -25,7 +26,7 @@ async function transport(input,init={}){
  const deck={id:'fixture-deck',name:f.variant,enabled:true,agent_type:'chat',voices:[{id:'fixture-agent',deck_id:'fixture-deck',name:f.variant,enabled:true}]};
  let reply;
  if(f.expired)reply=new Response(null,{status:401});
- else if(path==='/api/system-config')reply=f.failConfig?new Response(null,{status:503}):Response.json(f.invalidConfig?{workspace_enabled:'unknown',im_full_access_enabled:true}:{workspace_enabled:false,im_full_access_enabled:true,system_prompt:f.variant});
+ else if(path==='/api/system-config')reply=f.failConfig?new Response(null,{status:503}):Response.json(f.invalidConfig?{workspace_enabled:'unknown',im_full_access_enabled:true}:mode==='empty-config'?{}:mode==='partial-config'?{workspace_enabled:false}:{workspace_enabled:false,im_full_access_enabled:true,system_prompt:f.variant});
  else if(path==='/api/decks/catalog')reply=f.failCatalog?Response.json({detail:'fixture catalog unavailable'},{status:503}):Response.json({decks:[deck]});
  else throw Error('UNEXPECTED_FIXTURE_HTTP '+path);
  return f.hold?new Promise(resolve=>f.held.push({signal:init.signal,release:()=>resolve(reply)})):reply;
@@ -98,4 +99,12 @@ test('a superseded configuration refresh cannot overwrite newer server settings'
  await open(page);await settled(page);await page.evaluate(()=>{const f=(window as any).__setupFixture;f.hold=true;f.variant='older-settings';});await page.getByRole('button',{name:'Refresh configuration',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).__setupFixture.held.length)).toBe(1);
  await page.evaluate(()=>{const f=(window as any).__setupFixture;f.hold=false;f.variant='newer-settings';});await page.getByRole('button',{name:'Refresh configuration',exact:true}).click();await expect.poll(async()=>(await state(page)).config.system_prompt).toBe('newer-settings');
  await page.evaluate(()=>(window as any).__setupFixture.held[0].release());await expect.poll(async()=>(await state(page)).config.system_prompt).toBe('newer-settings');expect(await page.evaluate(()=>(window as any).__setupFixture.runtimeStarts)).toBe(1);
+});
+
+for(const [mode,workspace] of [['empty-config',true],['partial-config',false]] as const)test(`optional ${mode} keeps existing defaults and reads only`,async({page})=>{
+ await open(page,mode);await settled(page);
+ expect(await state(page)).toMatchObject({configLoaded:true,error:'',config:{workspace_enabled:workspace,im_full_access_enabled:false}});
+ await expect(page.getByRole('button',{name:'Send readiness'})).toBeEnabled();
+ expect(await page.evaluate(()=>(window as Window & {__setupFixture:{calls:ReadonlyArray<{method:string}>}}).__setupFixture.calls.every(c=>c.method==='GET'))).toBe(true);
+ await expect(page.getByRole('textbox',{name:'Source draft'})).toHaveValue('Existing unsent draft');
 });

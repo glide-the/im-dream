@@ -1,3 +1,6 @@
+// [Sync] 2026-11-12: add external links using the original navigation, search and content surface.
+import ExternalLinksSettings from '../../components/sharing/ExternalLinksSettings';
+import type {ExternalShare} from '../../api/externalShareApi';
 // [Sync] 2026-10-15: add one owner memory behavior section.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 import { browserRequestHeaders } from '../../lib/browserSession';
@@ -40,6 +43,7 @@ export type StoryWorkspaceSettingsSection =
   | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
+  | 'settings-external-links'
   | 'settings-behavior'
   | 'settings-model'
   | 'settings-about'
@@ -62,6 +66,7 @@ export interface StoryWorkspaceSettingsPageProps {
   onCloseClaudeMcpDetail?: () => void;
   onNavigate: (path: string) => void;
   workDeckContent?: ReactNode;
+  onOpenShareSource?: (share: ExternalShare) => Promise<void>;
 }
 
 export type StoryWorkspaceWorkTab = 'deck' | 'resources' | 'plugins';
@@ -172,6 +177,7 @@ export function StoryWorkspaceSettingsPage({
   onCloseClaudeMcpDetail,
   onNavigate,
   workDeckContent = null,
+  onOpenShareSource,
 }: StoryWorkspaceSettingsPageProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -201,6 +207,7 @@ export function StoryWorkspaceSettingsPage({
       path: '/story-workspace/settings/work',
       searchKeys: [...STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-work'], t('settings.workspace.navigation.work'), t('settings.workspace.work.tabs.deck'), t('settings.workspace.work.description')],
     },
+    {id: 'settings-external-links', label: t('externalShare.title'), icon: FaCog, path: '/story-workspace/settings/external-links', searchKeys: STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS['settings-external-links']},
     {
       id: 'settings-behavior', label: t('settings.workspace.navigation.behavior', { defaultValue: currentLanguage.startsWith('zh') ? '记忆回应' : 'Memory responses' }), icon: FaCog,
       path: '/story-workspace/settings/behavior',
@@ -311,6 +318,8 @@ export function StoryWorkspaceSettingsPage({
     >
       <div className="story-workspace-settings__card"><ModelConfigSection /></div>
     </SettingsSection>
+  ) : activeSection === 'settings-external-links' ? (
+    <ExternalLinksSettings onOpenSource={onOpenShareSource}/>
   ) : activeSection === 'settings-behavior' ? (
     <MemoryBehaviorSettings />
   ) : activeSection === 'settings-subscription' ? (
@@ -436,6 +445,7 @@ export function storyWorkspaceSettingsSectionForRoute(route: StoryWorkspaceStati
     || route === 'settings-work'
     || route === 'settings-resources'
     || route === 'settings-plugins'
+    || route === 'settings-external-links'
     || route === 'settings-behavior'
     || route === 'settings-model'
     || route === 'settings-about'

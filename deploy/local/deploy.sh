@@ -11,6 +11,7 @@
 # [Sync] 2026-09-05: select the Next compatibility shell by default with an explicit Vite rollback runtime.
 # [Sync] 2026-09-05: remove source-built Vite rollback; only an explicitly named image may be selected.
 # [Sync] 2026-09-06: verify the canonical pnpm workspace marker after the npm transition lock is retired.
+# [Sync] 2026-11-19: let the Web runtimes read the private tracing configuration at startup.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

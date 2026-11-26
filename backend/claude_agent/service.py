@@ -1,3 +1,8 @@
+# [Sync] 2026-11-26: verify unanswered history against existing Admin input receipts before transcript initialization.
+# [Sync] 2026-11-13: explicit Chat MCP names filter each turn snapshot; empty selection skips remote credentials.
+# [Sync] 2026-11-04: 端侧tools选择透传；音频ask_user沿原Store问题/选项/answers通道。
+# [Sync] 2026-11-04: 将本次平台tools选择传至原Runner，确认与工具结果沿原通道。
+# [Sync] 2026-11-04: same-ID history preparation, durable claim/arm and local transcript lifecycle.
 # [Sync] 2026-10-30: place the bound image-material marker immediately before the original ordered image/reference pairs, preserving leading context.
 # [Sync] 2026-10-28: align resume documentation with the existing local-transcript guard; runtime behavior unchanged.
 # [Sync] 2026-10-26: an exact committed Dream confirmation retries its original artifact Hook before any model or message write.
@@ -1464,6 +1469,10 @@ class ClaudeAgentRunRequest:
     reconnect: bool = False
     resume: bool = False
     tool_choice: str = "auto"
+    # Per-request platform tool selection; omission never inherits a device tool.
+    tools: tuple[str, ...] = ()
+    # Public Chat always supplies an explicit selection, including empty. None is server-owned execution.
+    mcp_server_names: tuple[str, ...] | None = None
     # Server-only execution policy; unlike tool_choice, this decides whether a
     # selected exact tool executes automatically or requires a human.
     tool_approval_policy: ToolApprovalPolicy | None = field(default=None, repr=False)
@@ -1680,7 +1689,10 @@ class ClaudeAgentService:
         dream_artifact_turn_hook: DreamArtifactTurnHook | None = None,
         dream_workbench_context: DreamWorkbenchContext | None = None,
         managed_mcp_runtime_snapshot_loader: Any | None = None,
+        continuation_storage_factory: Callable[..., Any] | None = None,
     ) -> None:
+        from libs.claude_agent_kit.server.resume_transcript import ResumeTranscriptLease
+        self._continuation_storage_factory = continuation_storage_factory or ResumeTranscriptLease
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
             platform_model_resolver or resolve_platform_model
@@ -2058,7 +2070,11 @@ class ClaudeAgentService:
 
         managed_workspace_id: str | None = None
         try:
+            from claude_mcp.runtime_snapshot import ManagedMcpRuntimeSnapshot
+            selected_mcp_names = () if request.tool_choice == "none" else request.mcp_server_names
             snapshot = request.managed_mcp_runtime_snapshot
+            if selected_mcp_names == ():
+                snapshot = ManagedMcpRuntimeSnapshot()
             if snapshot is not None:
                 from claude_mcp.runtime_snapshot import (  # noqa: PLC0415
                     ManagedMcpRuntimeSnapshot,
@@ -2113,19 +2129,26 @@ class ClaudeAgentService:
                     )
                 ):
                     snapshot = await loader.load(
-                        str(request.user_id),
-                        managed_workspace_id,
+                        str(request.user_id), managed_workspace_id,
+                        **({"server_names": selected_mcp_names} if selected_mcp_names is not None else {}),
                     )
             claude_mcp_servers = {
                 str(name): dict(config)
                 for name, config in snapshot.items()
                 if isinstance(name, str) and isinstance(config, dict)
+                and (selected_mcp_names is None or name in selected_mcp_names)
             }
+            if selected_mcp_names is not None and set(selected_mcp_names) != set(claude_mcp_servers):
+                raise RuntimeError("Selected Chat MCP connection is unavailable.")
             managed_mcp_app_resource_bindings = deepcopy(
                 getattr(snapshot, "mcp_app_resource_bindings", {})
             )
             if not isinstance(managed_mcp_app_resource_bindings, dict):
                 managed_mcp_app_resource_bindings = {}
+            managed_mcp_app_resource_bindings = {
+                key: value for key, value in managed_mcp_app_resource_bindings.items()
+                if key in claude_mcp_servers
+            }
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 "Managed Claude MCP snapshot loading failed safely."
@@ -2148,6 +2171,8 @@ class ClaudeAgentService:
         existing_session: Optional[dict] = None
         try:
             existing_session = await self._thread_record(request)
+        except AdminDataError:
+            raise
         except Exception:
             raise RuntimeError("CLAUDE_RESUME_DATABASE_UNAVAILABLE") from None
 
@@ -2173,8 +2198,9 @@ class ClaudeAgentService:
                 cwd=cwd or os.getcwd(),
                 config_home=claude_config_home,
             )
-            if not located_session_path:
-                raise RuntimeError("CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE")
+            # Normal absence is initialized under the execution storage lock.
+            # All path/access/corruption errors from the strict probe still propagate.
+            del located_session_path
 
         stored_claude_session_id: Optional[str] = (
             resume_existing_session.get("claude_session_id") if resume_existing_session else None
@@ -2337,6 +2363,7 @@ class ClaudeAgentService:
             notion_page_reader=notion_page_reader,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
+            tools=request.tools,
             tool_approval_policy=request.tool_approval_policy,
             tool_approval_violation=request.tool_approval_violation,
             im_full_access_enabled=im_full_access_enabled,
@@ -2535,16 +2562,107 @@ class ClaudeAgentService:
     ) -> ClaudeAgentTurnContinuation | None:
         """Execute a turn and unconditionally release confirmation resources."""
 
+        from libs.claude_agent_kit.server.session_files import ClaudeResumeStorageError
+        from services.admin_data.continuation_data import ClaimInput, ProgressInput
+        from services.admin_data.user_message_data import user_message_input
+
+        request, snapshot = execution.request, execution.continuation_snapshot
+        persistence = request.admin_turn_persistence
+        lease = None
+        failure = None
         try:
-            return await self._execute_session_inner(execution)
+            if not isinstance(persistence, AdminAgentTurnPersistence):
+                raise configuration_invalid()
+            if request.user_message_pre_persisted and (request.message_metadata or {}).get("kind") == "story-workspace-dream-confirmation":
+                committed = await asyncio.to_thread(persistence.completed_dream_confirmation_text,
+                    actor_id=request.user_id, thread_id=request.thread_id, message_id=request.message_id)
+                if committed is not None:
+                    # Existing committed recovery runs only the original post-Hook.
+                    # It neither initializes a transcript nor acquires a query claim.
+                    return await self._execute_session_inner(execution)
+            snapshot = await asyncio.to_thread(persistence.continuation_snapshot, actor_id=request.user_id,
+                thread_id=request.thread_id, message_id=request.message_id, dispatch_turn_id=execution.state.current_turn_id)
+            expected = (execution.resume_existing_session or {}).get("claude_session_id")
+            if snapshot.thread.claude_session_id != expected or expected and snapshot.thread.agent_contract_version != _AGENT_RUNTIME_CONTRACT_VERSION:
+                raise AdminDataError("CHAT_CONTINUATION_HISTORY_CHANGED", 409)
+            execution.continuation_snapshot = snapshot
+            options = execution.run_options
+            runtime_cwd = options.cwd or os.getcwd()
+            config_home = options.claude_config_home or resolve_claude_config_home(None)
+            if not config_home:
+                config_home = str(Path.home() / ".claude")
+            lease = self._continuation_storage_factory(thread_id=request.thread_id, session_id=snapshot.thread.claude_session_id,
+                cwd=runtime_cwd, config_home=config_home, lock_root=options.claude_tmp_workspace)
+            await execution.turn_context.queue.put(_event("data-continuation", {"state": "preparing"}))
+            history = [item.model_dump() for item in snapshot.messages]
+            # File work remains synchronous: cancellation cannot release a descriptor
+            # while a background write still owns it.
+            try:
+                lease.prepare(history, snapshot.history_digest)
+            except ClaudeResumeStorageError as exc:
+                list_inputs = getattr(persistence, "list_queued_inputs", None)
+                if exc.code != "CLAUDE_RESUME_HISTORY_UNSUPPORTED" or not callable(list_inputs):
+                    raise
+                unanswered_ids = {
+                    item["id"] for index, item in enumerate(history)
+                    if item["role"] == "user" and (index + 1 == len(history) or history[index + 1]["role"] == "user")
+                }
+                if not unanswered_ids:
+                    raise
+                entries = await asyncio.to_thread(list_inputs, actor_id=request.user_id, thread_id=request.thread_id)
+                failed_input_ids = frozenset(
+                    entry.message_id for entry in entries
+                    if entry.message_id in unanswered_ids and entry.status == "failed" and entry.dispatch_turn_id
+                )
+                if not failed_input_ids:
+                    raise
+                lease.prepare(history, snapshot.history_digest, failed_input_ids=failed_input_ids)
+            current = user_message_input(request.thread_id, request.message_id or str(uuid4()), list(request.message_parts or [{"type": "text", "text": ""}]), request.message_metadata)
+            request.message_id = current.message_id
+            execution.continuation_owner = str(uuid4())
+            execution.continuation_claim = await asyncio.to_thread(persistence.continuation_claim,
+                actor_id=request.user_id, input_dto=ClaimInput(**current.model_dump(), history_digest=snapshot.history_digest,
+                    claude_session_id=snapshot.thread.claude_session_id, owner=execution.continuation_owner, dispatch_turn_id=execution.state.current_turn_id))
+            execution.continuation_managed = True
+            await execution.turn_context.queue.put(_event("data-continuation", {"state": "ready"}))
+            result = await self._execute_session_inner(execution)
+            if execution.user_response_committed and not execution.committed_response_recovered:
+                latest = await asyncio.to_thread(persistence.continuation_snapshot, actor_id=request.user_id,
+                    thread_id=request.thread_id, message_id=None, dispatch_turn_id=execution.state.current_turn_id)
+                lease.checkpoint(latest.history_digest, session_id=latest.thread.claude_session_id)
+            return result
+        except Exception as exc:
+            failure = exc
+            # Only local preparation before any possibly committed claim/query
+            # authorizes an explicit same-message retry.
+            if execution.continuation_claim is None and not getattr(exc, "outcome_unknown", False):
+                try:
+                    exc.retryable = True
+                except AttributeError:
+                    pass
+            raise
         finally:
-            # Timeout/reject leaves only a bounded tombstone while the turn is
-            # active.  Every terminal/error/cancellation path clears both live
-            # policy/Futures and those tombstones before the factory drops the
-            # turn context.
-            if execution.turn_context.image_provider is not None:
-                execution.turn_context.image_provider.close()
-            execution.turn_context.confirmation_store.cancel_all()
+            try:
+                if execution.continuation_claim is not None:
+                    action = ("complete" if execution.user_response_committed and not execution.committed_response_recovered else
+                              "fail_after_query" if execution.continuation_armed and (execution.continuation_stopped or execution.sdk_terminal_received) else
+                              "mark_unknown" if execution.continuation_armed else "fail_before_query")
+                    claim = execution.continuation_claim
+                    await asyncio.to_thread(persistence.continuation_progress, actor_id=request.user_id,
+                        input_dto=ProgressInput(thread_id=request.thread_id, message_id=request.message_id,
+                            owner=execution.continuation_owner, dispatch_turn_id=claim.dispatch_turn_id,
+                            expected_revision=claim.revision, action=action))
+                    if action == "fail_before_query" and failure is not None:
+                        try:
+                            failure.retryable = True
+                        except AttributeError:
+                            pass
+            finally:
+                if lease is not None:
+                    lease.close()
+                if execution.turn_context.image_provider is not None:
+                    execution.turn_context.image_provider.close()
+                execution.turn_context.confirmation_store.cancel_all()
 
     async def _execute_session_inner(
         self,
@@ -2645,9 +2763,22 @@ class ClaudeAgentService:
             on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
 
+        if execution.continuation_managed:
+            from services.admin_data.continuation_data import ProgressInput
+            claim = execution.continuation_claim
+            # Mark possible submission before entering Runner. A lost response
+            # never grants another invocation, even if the SDK has not connected.
+            execution.continuation_armed = True
+            execution.continuation_claim = await asyncio.to_thread(
+                execution.request.admin_turn_persistence.continuation_progress,
+                actor_id=execution.request.user_id,
+                input_dto=ProgressInput(thread_id=execution.request.thread_id, message_id=execution.request.message_id,
+                    owner=execution.continuation_owner, dispatch_turn_id=claim.dispatch_turn_id,
+                    expected_revision=claim.revision, action="arm_query"))
         try:
             result = await execution.runner.run_streaming(execution.run_options, callbacks)
         except asyncio.CancelledError:
+            execution.continuation_stopped = True
             # Explicit stop / shutdown cancellation — flush partial assistant
             # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution, turn_status="cancelled")
@@ -3023,6 +3154,8 @@ class ClaudeAgentService:
         message is visible in the thread history even when the SSE stream is
         cancelled mid-flight (e.g. the user switches threads).
         """
+        if getattr(execution, "continuation_managed", False):
+            return
         if execution.request.user_message_pre_persisted:
             claim = execution.request.queued_input_claim
             if (
@@ -3950,6 +4083,12 @@ class _TurnExecution:
     committed_response_recovered: bool = False
     queue_result_failed: bool = False
     sdk_terminal_received: bool = False
+    continuation_snapshot: Any = None
+    continuation_managed: bool = False
+    continuation_owner: str | None = None
+    continuation_claim: Any = None
+    continuation_armed: bool = False
+    continuation_stopped: bool = False
 
 
 # ---------------------------------------------------------------------------

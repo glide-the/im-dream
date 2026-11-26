@@ -1,5 +1,5 @@
-// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
-import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Sync] 2026-11-19: Web uploads use fetch with Bearer and omitted cookies; progress reports transfer start/completion.
+import { browserRequestHeaders } from '../lib/browserSession';
 // [Input] Runtime API base config, shared Browser session/header owner, storage upload endpoints, and file proxy utility.
 // [Output] File upload hook that supports server/direct upload and cross-origin backend URLs.
 // [Pos] file-upload hook node in frontend/app/_dream/hooks
@@ -49,58 +49,6 @@ function getFallbackStorageInfo(): StorageInfo {
   };
 }
 
-async function uploadWithXHR(
-  url: string,
-  body: Document | XMLHttpRequestBodyInit | null,
-  onProgress?: (progress: number) => void,
-): Promise<UploadResult | undefined> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.upload.onprogress = (event) => {
-      if (!onProgress || !event.lengthComputable) {
-        return;
-      }
-      onProgress(Math.round((event.loaded / event.total) * 100));
-    };
-    xhr.onload = () => {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        try {
-          const errorBody = JSON.parse(xhr.responseText) as { error?: string };
-          reject(new Error(errorBody.error || i18n.t('chat.upload.serverFailed')));
-        } catch {
-          reject(new Error(i18n.t('chat.upload.serverFailed')));
-        }
-        return;
-      }
-
-      try {
-        const result = JSON.parse(xhr.responseText) as {
-          key?: string;
-          url?: string;
-          metadata?: { contentType?: string; size?: number };
-        };
-        if (!result.key) {
-          reject(new Error(i18n.t('chat.upload.noFileKey')));
-          return;
-        }
-        resolve({
-          key: result.key,
-          url: result.url || toFileProxyUrl(result.key),
-          contentType: result.metadata?.contentType,
-          size: result.metadata?.size,
-        });
-      } catch {
-        reject(new Error(i18n.t('chat.upload.parseFailed')));
-      }
-    };
-    xhr.onerror = () => reject(new Error(i18n.t('chat.upload.failed')));
-    const csrfToken = getBrowserCsrfToken();
-    for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) xhr.setRequestHeader(name, value);
-    xhr.send(body);
-  });
-}
-
 async function serverUpload(
   file: File,
   filename: string,
@@ -109,9 +57,7 @@ async function serverUpload(
   const formData = new FormData();
   formData.append('file', file, filename);
 
-  if (onProgress) {
-    return uploadWithXHR(`${API_BASE}/api/storage/upload`, formData, onProgress);
-  }
+  onProgress?.(0);
 
   const response = await fetch(`${API_BASE}/api/storage/upload`, {
     method: 'POST',
@@ -119,7 +65,9 @@ async function serverUpload(
     body: formData,
   });
 
-  return readStorageUploadResponse(response);
+  const result = await readStorageUploadResponse(response);
+  onProgress?.(100);
+  return result;
 }
 
 export async function readStorageUploadResponse(response:Response):Promise<UploadResult> {

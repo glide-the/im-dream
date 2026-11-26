@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-24: 增加登录表单按钮按下、提交中与返回表单的交互。 -->
 <!-- [Sync] 2026-11-03: APP-07补原工具资源、Notion线程home与Transport PATH默认交付、方案取舍及正常/异常/状态图，真实资格单列。 -->
 <!-- [Sync] 2026-11-03: APP-04现行生命周期与恢复方案独立维护，旧章节与图示保留，暂停状态保持。 -->
 <!-- [Sync] 2026-11-03: iOS构建选择同版Undici标量HTTP解析器；原创建、流式、期限及取消协议保持。 -->
@@ -45,6 +46,64 @@
 当前名称规则见[应用名称需求](../../prd/mobile-app/app-brand.md)。默认展示Kastention，中文本地化应用称谓使用卡片结构。
 
 现行登录认证、目标编译与配置职责见[运行库认证合同](mobile-runtime-architecture.md#端侧登录认证与目标编译合同2026-10-31)，操作指南见[认证排障](../../deploy/mobile-auth-troubleshooting.md)。iOS已有登录文档、系统授权和Cookie适配源码；构建26的真机账号错误日志复验通过，当前构建27已安装启动。公网Google完整授权与新账户创建资格按[本轮执行记录](../../exec/ios-account-entry-fix-20261102.md)登记。下方旧日期阶段保留其原始状态。
+
+## 登录表单按钮反馈
+
+**背景与问题。** 弹窗保留当前表单等待密码请求或 Google 系统授权，按钮原文在等待期间看起来仍可点按。
+
+**目标与边界。** 用户在所选按钮上看到提交进度。按钮内的指示保留页面布局、错误提示和左上角关闭入口，免去全屏加载层对表单的遮挡。
+
+**概念与规则。** 按下时按钮变暗。表单通过校验后，所选按钮显示进度指示和当前操作的文字，登录、注册和方式切换暂时停用。VoiceOver 可读取状态文字。减弱动态效果开启时显示静态指示。表单提交和登录成功分别由原网页导航和会话校验处理。
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant F as AuthEntry
+  participant N as NativeAccountLogin
+  participant A as Admin
+  U->>F: 点按提交按钮
+  alt 登录或注册，表单有效
+    F-->>U: 在按钮内显示登录或注册进度
+    F->>A: 提交原密码表单
+  else 选择 Google
+    F-->>U: 在按钮内显示连接进度
+    F->>N: 提交原 Google 表单
+    N-->>U: 打开系统授权
+  end
+  Note over U,F: 当前会话确认成功后关闭弹窗
+```
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant F as AuthEntry
+  participant H as MobileHostViewController
+  participant N as NativeAccountLogin
+  alt 输入未通过校验
+    U->>F: 点按登录或注册
+    F-->>U: 显示字段校验提示，按钮可用
+  else 系统授权取消或用户关闭授权错误提示
+    N->>H: 恢复当前表单
+    H->>F: 通知结束等待
+    F-->>U: 恢复操作按钮，保留当前输入
+  else 表单导航失败，原表单仍在屏幕上
+    H->>F: 通知导航失败
+    F-->>U: 显示连接错误，恢复提交按钮
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> 可提交
+  可提交 --> 可提交: 输入无效
+  可提交 --> 等待结果: 有效表单提交或选择 Google
+  等待结果 --> 可提交: 授权取消、返回表单或失败后重试
+  等待结果 --> 已关闭: 当前会话确认成功
+  等待结果 --> 已关闭: 用户关闭弹窗
+  可提交 --> 已关闭: 用户关闭弹窗
+```
+
+验收覆盖按钮按下、等待时按钮位置和单次提交、无效输入、密码错误后的重试、取消授权后的输入保留与再次提交。
 
 ## 现行iOS工程与交互
 

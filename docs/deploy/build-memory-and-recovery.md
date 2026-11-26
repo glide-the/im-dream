@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-08: Admin当前从GitHub手动Actions生成Linux完整制品，ECS保留原服务与数据；历史容量事故继续留存。 -->
 <!-- [Input] Dream 当前构建入口、Admin 发布事故记录、Node/systemd 官方资料与既有制品恢复流程。 -->
 <!-- [Output] 发布资源检查、构建位置选择、失败识别及原制品恢复操作要求。 -->
 <!-- [Pos] Dream 发布专项手册；与平台发布指南配套，Admin 的服务操作由 Admin 仓库维护。 -->
@@ -10,6 +11,8 @@
 发布过程包含 Next.js 编译、类型检查、依赖准备及平台打包，峰值内存需要独立于应用运行内存评估。2026-11-02 的 Admin 发布记录发现 2048 MiB V8 old space 上限与约 1607 MiB 的 `MemTotal` 配置不匹配；公网 502 与 SSH 超时需要结合系统证据判断原因。[事故记录](../exec/ios-account-entry-fix-20261102.md)随后记录 512 MiB 堆构建发生 V8 heap 耗尽、worker SIGABRT，所观察 memcg 的 `oom=0`。这些记录分别对应容量风险、连接症状与堆耗尽，不能合并为同一个已确认内核 OOM。
 
 本轮依据本地源码和记录编写手册，未连接服务器核对现状。事故中的 512 MiB 堆、900 MiB 初始构建限额均为单次参数，后续尝试及恢复结果以对应发布回执为准。
+
+当前Admin构建在GitHub手动Actions的Linux runner完成，ECS消费完整制品并沿原`start:embedded`运行。统一receiver合同由PR CI与手动发布调用`pnpm test:release-receiver`；普通应用发布只检查已登记迁移，原数据库／私有配置保持。具体步骤与失败重试归[Admin发布指南](../../../ink-admin-memory/docs/deploy.md)，[阿里云分流](aliyun.md)保留原Compose历史。
 
 ## 目标与边界
 

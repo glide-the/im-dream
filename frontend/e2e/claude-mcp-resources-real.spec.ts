@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: align resource heading and connect action with the reviewed card UI; modal submit keeps its original label.
 // [Input] Named existing actor/Deck, normal Dream/PostgreSQL, candidate Claude Runtime, an explicit remote MCP URL or server-owned stdio profile, and live Agent runtime.
 // [Output] Real-business managed-DB configure → auth routing → automatic inventory → visible Chat SSE/MCP results → refresh/resume → cleanup evidence.
 // [Pos] Opt-in macOS/Linux Claude MCP acceptance; no API interception, shadow account, cloned database, or fake CLI.
@@ -454,9 +455,9 @@ test('real actor completes MCP auth routing, inventory, Agent resume, and cleanu
       'the selected existing Deck must be enabled').toBe(true);
 
     await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
-    await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'MCP工具连接' })).toBeVisible();
     await expect(page.getByText('安全门禁已关闭此能力')).toHaveCount(0);
-    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    await page.getByRole('button', { name: '连接工具', exact: true }).click();
     const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
     await addDialog.getByLabel('MCP 服务名称').fill(SERVER_NAME);
     await addDialog.getByLabel('MCP 传输方式').selectOption(SERVER_TRANSPORT);

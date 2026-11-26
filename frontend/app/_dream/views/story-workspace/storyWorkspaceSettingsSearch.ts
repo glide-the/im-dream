@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: index the owned external-share management section.
 // [Sync] 2026-11-03: make Kastention / 卡片结构 searchable while retaining legacy Deck aliases and routes.
 // [Sync] 2026-10-15: index memory response settings.
 // [Input] Searchable settings navigation items and the user's free-text query.
@@ -28,6 +29,7 @@ export const STORY_WORKSPACE_SETTINGS_STATIC_SEARCH_KEYS = {
     '/story-workspace/settings/plugins', '/story-workspace/settings/work?tab=plugins',
     '插件 市场 工作流 运行时',
   ],
+  'settings-external-links': ['settings-external-links', '/story-workspace/settings/external-links', '外部链接 分享 笔记 AI 对话 public share external links'],
   'settings-behavior': ['settings-behavior', '/story-workspace/settings/behavior', 'memory behavior reflections 记忆 回应 回顾'],
   'settings-model': [
     'settings-model', 'model', 'ai', '/story-workspace/settings/model',

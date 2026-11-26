@@ -1,0 +1,49 @@
+/* [Input] iOS account form touch, disabled and submission states.
+ * [Output] Press feedback, inline progress and a VoiceOver status message.
+ * [Pos] Styles for the existing login sheet.
+ */
+.ios-account-form button:enabled:active {
+  opacity: 0.72;
+}
+
+.ios-account-form button:disabled:not([aria-busy="true"]) {
+  opacity: 0.55;
+}
+
+.ios-account-form button[aria-busy="true"]::before {
+  content: "";
+  display: inline-block;
+  box-sizing: border-box;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: account-form-spin 0.8s linear infinite;
+}
+
+.ios-account-form button[type="submit"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ios-account-form .account-form-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes account-form-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ios-account-form button[aria-busy="true"]::before {
+    animation: none;
+  }
+}

@@ -1,3 +1,7 @@
+# [Sync] 2026-11-13: public Chat tools project platform types and explicit MCP names per message and queue input.
+# [Sync] 2026-11-08: only the same sole unclaimed pending input may explicitly retry preparation; uncertain dispatch stays blocked.
+# [Sync] 2026-11-04: 默认空tools仅选择后端平台工具类型；普通发送与排队传递选择，scheduled不启用端侧工具。
+# [Sync] 2026-11-04: defer ordinary user persistence until continuation preparation.
 # [Sync] 2026-11-03: name client-visible Deck errors Kastention; preserve codes, permissions, DTOs and operations.
 # [Sync] 2026-10-25: resolve the application-owned original ThreadFactory at execution; server defaults and workflow behavior remain unchanged.
 # [Sync] 2026-10-15: freeze owner memory settings and current message before each turn broker starts.
@@ -134,6 +138,7 @@ from claude_agent.thread_retrieval import (
     search_chat_threads,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
+from claude_agent.request_tools import ChatToolDescriptor
 from libs.claude_agent_kit.server.builtin_skill_packages import (
     COMMON_SKILL_NAMESPACE,
     BuiltinSkillPackageError,
@@ -939,6 +944,7 @@ class ClaudeAgentRequestBody(BaseModel):
         default="auto",
         validation_alias=AliasChoices("tool_choice", "toolChoice"),
     )
+    tools: list[ChatToolDescriptor] = Field(default_factory=list)
     chatModel: Optional[dict] = None
     model: Optional[str] = None
     max_turns: int = 100
@@ -1160,8 +1166,14 @@ async def _claude_agent_stream_impl(
             if detail.get("error_code") != "ADMIN_CAPABILITY_UNAVAILABLE":
                 raise
         else:
-            if any(entry.status in ("queued", "selected", "dispatching", "state_unknown")
-                   for entry in queue_snapshot.entries):
+            pending = [entry for entry in queue_snapshot.entries
+                       if entry.status in ("queued", "selected", "dispatching", "state_unknown")]
+            retry_pending = (len(pending) == 1 and pending[0].message_id == message_id
+                             and pending[0].status in ("queued", "selected")
+                             and pending[0].dispatch_turn_id is None)
+            # Only the original unclaimed message may retry preparation.
+            # Service's claim revalidates its saved parts/metadata atomically.
+            if pending and not retry_pending:
                 raise HTTPException(
                     status_code=409,
                     detail={"error_code": "CHAT_INPUT_RECONCILIATION_REQUIRED"},
@@ -1476,32 +1488,16 @@ async def _claude_agent_stream_impl(
             },
         ) from None
 
-    if message_id is not None and scheduled_dispatch is None:
-        # One Admin transaction guards the control record, reserves the user
-        # message and fills only a missing title. Service reuses this known
-        # reservation, retaining the original command and request identity.
-        resolved_user_parts = (
-            list(message_parts)
-            if message_parts
-            else [{"type": "text", "text": ""}]
-        )
-        try:
-            await run_in_threadpool(turn_persistence.persist_user, actor_id=str(user_id), thread_id=thread_id,
-                parts=resolved_user_parts, message_id=message_id, metadata=message_metadata)
-        except AdminDataError as exc:
-            await run_in_threadpool(gateway_runtime.close)
-            await run_in_threadpool(turn_persistence.close)
-            await run_in_threadpool(editor_runtime.close)
-            detail = {"error_code": exc.code, "request_id": exc.request_id, "outcome_unknown": exc.outcome_unknown}
-            if exc.code == "CHAT_MESSAGE_IDENTITY_CONFLICT":
-                detail["message"] = "The message identifier is already bound."
-            raise HTTPException(status_code=exc.status_code, detail=detail) from None
+    # The Service prepares the current transcript, then atomically claims and saves
+    # this message through Admin. A failed preparation leaves the draft unsubmitted.
 
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
         resume=body.resume,
         tool_choice=("auto" if scheduled_dispatch is not None else body.tool_choice),
+        tools=(() if scheduled_dispatch is not None else tuple(dict.fromkeys(tool.type for tool in body.tools if tool.type != "mcp"))),
+        mcp_server_names=(None if scheduled_dispatch is not None else tuple(dict.fromkeys(tool.server_name for tool in body.tools if tool.type == "mcp"))),
         tool_approval_policy=(scheduled_dispatch.tool_approval_policy if scheduled_dispatch is not None else None),
         tool_approval_violation=(scheduled_dispatch.tool_approval_violation if scheduled_dispatch is not None else None),
         model=platform_model_alias,
@@ -2034,6 +2030,8 @@ async def claude_agent_thread_enqueue_input(
             thread_id=thread_id, user_id=str(current_user["user_id"]),
             message_id=message_id, parts=parts, title_candidate=text,
             tool_choice=body.tool_choice, chat=chat, access_token=actor.access_token,
+            tools=tuple(dict.fromkeys(tool.type for tool in body.tools if tool.type != "mcp")),
+            mcp_server_names=tuple(dict.fromkeys(tool.server_name for tool in body.tools if tool.type == "mcp")),
         )
     except AdminDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail={

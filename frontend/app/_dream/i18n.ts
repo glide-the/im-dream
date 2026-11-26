@@ -1,3 +1,18 @@
+// [Sync] 2026-11-26: localize Reflections progress, stop, settlement, and retry feedback.
+// [Sync] 2026-11-25: localize article-specific Calendar confirmation and insertion results and accessible journal row names.
+// [Sync] 2026-11-24: name the article continuation row and localize scoped read feedback.
+// [Sync] 2026-11-18: localize Notion card reading/details actions, JSON and renderer/image recovery.
+// [Input] Existing bilingual product strings and locale initialization.
+// [Output] Shared translations including current-conversation tool selection.
+// [Pos] Dream application locale owner.
+// [Sync] 2026-11-13: Chat tools copy defines per-conversation, per-message selection.
+// [Sync] 2026-11-13: localize combined current-Agent trigger and migrated model picker.
+// [Sync] 2026-11-13: localize Chat tools panel and the Workbench resources peer.
+// [Sync] 2026-11-13: external-link action popup and shared-access settings copy.
+// [Sync] 2026-11-12: localize unified external-share publication and Settings revocation/recovery.
+// [Sync] 2026-11-12: localize Writing model-selection, active-turn and pending-input recovery.
+// [Sync] 2026-11-12: localize note image/link sharing, saved-content conflicts and clipboard recovery.
+// [Sync] 2026-11-04: localize cross-platform preparation and retained-draft feedback.
 // [Sync] 2026-11-03: name the existing Deck feature Kastention / 卡片结构; preserve translation keys, interpolation parameters and business concepts.
 // [Sync] 2026-11-03: label full user-message expansion and collapse in the existing Chat locale scope.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
@@ -82,6 +97,20 @@ const LANGUAGE_STORAGE_KEY = 'ink-language';
 const resources = {
   en: {
     translation: {
+      externalShare: {copy:'Copy link', view:'View', settings:'Settings', shareSettings:'Share settings', close:'Close', generalAccess:'General access', anyone:'Anyone on the web with this link', canView:'Can view', cannotView:'No access', accessRevoked:'Link access revoked', accessHint:'Anyone who knows this link can view this shared content.', revokeHint:'The current URL will stop working.', revokedHint:'This URL no longer allows access. Share the original content again to create a new link.', title:'External links', description:'Manage shared AI conversations and notes', publishFailed:'The conversation could not be shared. Please retry.', changed:'The conversation has changed. Close sharing and open it again.', linkHint:'Anyone with this link can read the text snapshot. You can revoke it in Settings → External links.', chat:'AI conversations', note:'Notes', active:'Active', revoked:'Revoked', status:'Status', activeCount:'Active links', content:'Content', link:'Share link', published:'Published', revokedAt:'Revoked at', revokedReason:'Revoked by the owner.', more:'Actions for {{title}}', open:'Open public page', source:'View original', revoke:'Revoke link', details:'Link details', refresh:'Refresh status', loading:'Loading links…', loadMore:'Load more', emptyActive:'No active links', emptyRevoked:'No revoked links', sourceDeleted:'Original content deleted', loadFailed:'Links could not be refreshed. Your last confirmed records are retained.', revokeFailed:'The link could not be revoked. Please retry.', unknown:'The result is not confirmed. Refresh the status.', revoking:'Revoking this link…', revokeSucceeded:'Link revoked.', noLongerActive:'This link has been revoked.', revokedCopy:'This link has been revoked. Click again to create a new link.', openFailed:'The content could not be opened. Refresh and retry.'},
+      noteArticle: {
+        read: 'Preview {{name}}', original: 'Open original', continueWriting: 'Write on a new line', line: 'Journal line {{number}}',
+        confirming: 'Insert “{{name}}” into the current journal?', confirmInsert: 'Confirm insertion',
+        insert: 'Insert into journal', insertNamed: 'Insert {{name}} into the current journal',
+        inserting: 'Saving to the current journal…', inserted: '“{{name}}” was added to the current journal.', present: 'The current journal already contains “{{name}}”.',
+        insertFailed: 'Could not save this article to the current journal. Try again.',
+        connection: 'Connect Notion in Settings to read this page here.',
+        scope: 'Select this page or its database in Resource Links and sync the index.',
+        access: 'This page is unavailable to your Notion connection. Check its sharing permissions.',
+        changed: 'Your Notion connection or selected resources changed. Retry to read with the current settings.',
+        failed: 'The article could not be loaded.', renderFailed: 'The article could not be displayed.',
+      },
+      noteShare: {imageHint: 'Save the complete note as a long image', shareImage: 'Share image', title: 'Share note', creating: 'Creating link…', copied: 'Link copied', link: 'Shared note link', linkHint: 'Anyone with the link can read this snapshot. It remains available after the original note is edited or deleted.', copyManually: 'Select the link below to copy it.', changed: 'This note has changed. Close sharing and open it again.', failed: 'The note could not be shared. Please retry.', publicUrlRequired: 'A public application address is required to share a link from this device.'},
       brand: { name: BRAND_NAME },
       nav: {
         writing: 'Writing',
@@ -94,7 +123,8 @@ const resources = {
         more: 'More',
         theme: 'Theme',
         friends: 'Friends',
-        settings: 'Settings'
+        settings: 'Settings',
+        resources: 'Remote resources'
       },
       morePage: {
         intro: 'Write today. Look back when you need to.',
@@ -103,6 +133,7 @@ const resources = {
         currentTheme: 'Current: {{appearance}}',
         themeAction: 'Current: {{appearance}}. Tap to switch to {{next}}.',
         guidance: {
+          resources: 'Connect services and manage their tools',
           writing: 'Capture thoughts and everyday moments',
           timeline: 'Browse entries and past reports',
           analysis: 'Review patterns across your entries',
@@ -114,6 +145,8 @@ const resources = {
         loading: 'Going deeper…',
         refresh: 'Refresh',
         retry: 'Retry',
+        checkSubscription: 'Check subscription and allowance',
+        checkModel: 'Check model settings',
         regionLabel: 'Writing suggestion',
         threadTitle: 'Writing suggestions',
         failed: 'The suggestion was interrupted. Your writing is unchanged.',
@@ -121,7 +154,10 @@ const resources = {
         errors: {
           threadCreate: 'The suggestion conversation could not be started. Try again.',
           threadPersist: 'The suggestion conversation could not be saved. Try again.',
-          interrupted: 'The suggestion was interrupted. Your writing is unchanged.'
+          interrupted: 'The suggestion was interrupted. Your writing is unchanged.',
+          modelSelection: 'The selected model is unavailable. Check your subscription and allowance or choose an available model in Settings, then retry.',
+          busy: 'This conversation is still generating a reply. Wait for it to finish, then retry.',
+          pendingInput: 'This conversation has pending messages. Open it in Chat to check their status, then retry.'
         }
       },
       settings: {
@@ -224,7 +260,22 @@ const resources = {
         },
         actions: {
           generate: 'Generate New Analysis',
-          generating: 'Reflecting...'
+          generating: 'Reflecting...',
+          stop: 'Stop analysis',
+          stopping: 'Stopping analysis…',
+          stopped: 'Analysis stopped.',
+          alreadyEnded: 'This analysis has already ended.',
+          stopFailed: 'The stop could not be confirmed. Try again.',
+        },
+        progress: {
+          preparing: 'Preparing analysis…',
+          reconnecting: 'Reconnecting to analysis…',
+          running: 'Analysis in progress',
+          section: 'Analyzing {{section}}…',
+          completed: 'Analysis complete.',
+          partial: 'Analysis finished with some sections unavailable.',
+          failed: 'Analysis could not be completed.',
+          reconnectFailed: 'Could not reconnect to analysis.',
         },
         empty: {
           title: 'Your story awaits analysis',
@@ -614,6 +665,7 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        notionPreview: {read:'Read page', details:'View details', untitled:'Notion page', loading:'Reading Notion page…', empty:'This page has no body content.', expand:'Expand {{title}}', close:'Close page preview', download:'Download JSON', json:'JSON details', body:'Page content', access:'Access to this page is unavailable. Restore the Notion connection or page permissions in Settings, then ask the Agent to read it again.', scope:'This page is outside the selected resources. Update Resource Links and sync the index, then ask the Agent to read it again.', failed:'This page could not be read. Ask the Agent to read it again.', downloadFailed:'The JSON could not be downloaded. Please retry.', renderFailed:'Page preview could not be displayed. Please retry or inspect JSON details.', retry:'Retry', imageFailed:'Image could not be loaded.', openOriginal:'Open original'},
         reflectionAnalysisPreview: {
           label: 'Reflections · {{mode}}',
           openAria: 'Open Reflections: {{mode}}',
@@ -909,6 +961,51 @@ const resources = {
           accept: 'Accept'
         },
         imageTool: { generate: 'Generate image', edit: 'Edit image', prepare: 'Check image request', running: 'In progress', completed: 'Completed', failed: 'Failed', incomplete: 'Not completed' },
+        agentTools: {
+          "title": "Agent & tools",
+          "trigger": "Agent and tools: {{name}}",
+          "select": "Select Agent",
+          "back": "Back to Agent & tools",
+          "unavailable": "Agent unavailable"
+        },
+        modelMenu: {
+          "title": "Select model",
+          "trigger": "Select model: {{name}}",
+          "loading": "Loading models…",
+          "search": "Search models…",
+          "close": "Close model selection",
+          "reload": "Reload models",
+          "recommended": "Recommended",
+          "unavailable": "Currently unavailable",
+          "savedUnavailable": "Saved model {{model}} is unavailable. Select a callable model.",
+          "empty": "No matching models",
+          "protocols": {
+            "anthropic": "Anthropic compatible",
+            "openai": "OpenAI compatible"
+          }
+        },
+        toolsMenu: {
+          title: "Tools",
+          close: "Close tools",
+          services: "MCP services",
+          search: "Search services",
+          scope: "Choose tools for this conversation. Each message uses its submitted selection.",
+          loading: "Loading tools…",
+          unavailable: "Tool connections are unavailable.",
+          enabled: "Enabled",
+          disabled: "Disabled",
+          enable: "Enable",
+          disable: "Disable",
+          saving: "Saving…",
+          managedElsewhere: "Managed at source",
+          noMatch: "No matching services",
+          empty: "No services configured",
+          retry: "Retry",
+          audio: "Audio player",
+          appOnly: "Available in the App",
+          audioUnavailable: "Playback capability is not ready. Audio tool selection is unavailable.",
+          manage: "Manage remote resources",
+        },
         inputDock: {
           commandMenu: 'Chat commands',
           compactDescription: 'Compact this conversation’s context',
@@ -980,6 +1077,7 @@ const resources = {
           }
         },
         writingContextUnavailable: 'This note could not be prepared. Return to Writing and try again. Your input is kept.',
+        continuation: { title: 'Conversation preparation', unsupported: 'This device cannot restore all required conversation data yet. You can continue on the original device.', busy: 'This conversation is being processed on another device. Your draft is saved.', preparing: 'Preparing this conversation', failed: 'The conversation could not be prepared. Your draft is saved; try again.' },
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
           consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
@@ -1228,6 +1326,20 @@ const resources = {
   },
   zh: {
     translation: {
+      externalShare: {copy:'拷贝链接', view:'查看', settings:'设置', shareSettings:'共享设置', close:'关闭', generalAccess:'通用访问权限', anyone:'网络上拥有该链接的任何人', canView:'可以查看', cannotView:'无法访问', accessRevoked:'链接访问已关闭', accessHint:'知道链接的任何人都可以查看这份分享内容。', revokeHint:'操作后，原地址将停止访问。', revokedHint:'此地址已停止访问。你可以从原内容重新分享，创建新的链接。', title:'外部链接', description:'管理已分享的AI对话和笔记', publishFailed:'对话分享失败，请重试。', changed:'对话已有更新，请关闭后重新打开分享。', linkHint:'持有链接的人可以阅读这份文字快照。你可以在设置的外部链接中使链接失效。', chat:'AI对话', note:'笔记', active:'有效', revoked:'已失效', status:'状态', activeCount:'有效链接', content:'内容', link:'分享链接', published:'发布时间', revokedAt:'失效时间', revokedReason:'失效原因：用户主动使链接失效。', more:'{{title}}的操作', open:'打开公开页面', source:'查看原内容', revoke:'使链接失效', details:'查看链接信息', refresh:'刷新状态', loading:'正在读取链接…', loadMore:'加载更多', emptyActive:'暂无有效链接', emptyRevoked:'暂无已失效链接', sourceDeleted:'原内容已删除', loadFailed:'链接更新失败，已保留上次确认的记录。', revokeFailed:'链接失效操作失败，请重试。', unknown:'操作结果待确认，请刷新状态。', revoking:'正在使此链接失效…', revokeSucceeded:'链接已失效。', noLongerActive:'此链接已失效。', revokedCopy:'此链接已失效，再次点击可创建新链接。', openFailed:'内容暂时无法打开，请刷新后重试。'},
+      noteArticle: {
+        read: '预览{{name}}', original: '打开原文', continueWriting: '另起一行', line: '日记第 {{number}} 行',
+        confirming: '将《{{name}}》插入当前日记？', confirmInsert: '确认插入',
+        insert: '插入日记', insertNamed: '将《{{name}}》插入当前日记',
+        inserting: '正在保存到当前日记…', inserted: '已将《{{name}}》插入当前日记。', present: '当前日记已包含《{{name}}》。',
+        insertFailed: '暂时未能保存到当前日记，请重试。',
+        connection: '请在设置中连接或重新授权 Notion，再阅读这篇文章。',
+        scope: '请在资源链接中选择此页面或所属数据库，并同步索引。',
+        access: '当前 Notion 连接无法访问此文章，请核对文章的共享权限。',
+        changed: 'Notion 连接或所选资源已更新，请重试以读取当前文章。',
+        failed: '文章暂时无法读取。', renderFailed: '文章暂时无法显示。',
+      },
+      noteShare: {imageHint: '将完整笔记保存为长图', shareImage: '分享图片', title: '分享笔记', creating: '正在创建链接…', copied: '链接已复制', link: '笔记分享链接', linkHint: '持有链接的人可以阅读这份快照。原笔记修改或删除后，快照继续保留。', copyManually: '请选中下方链接手动复制。', changed: '笔记已有更新，请关闭后重新打开分享。', failed: '笔记分享失败，请重试。', publicUrlRequired: '请配置公开应用地址后，再从此设备分享链接。'},
       brand: { name: BRAND_NAME_ZH },
       nav: {
         writing: '写作',
@@ -1240,7 +1352,8 @@ const resources = {
         more: '更多',
         theme: '主题',
         friends: '好友',
-        settings: '设置'
+        settings: '设置',
+        resources: '远程资源链接'
       },
       morePage: {
         intro: '记录此刻，也回看走过的日子。',
@@ -1252,7 +1365,8 @@ const resources = {
           writing: '记下想法与日常点滴',
           timeline: '浏览日记与历史报告',
           analysis: '回看一段时间的变化',
-          settings: '管理账户、模型与资源'
+          settings: '管理账户、模型与资源',
+          resources: '连接服务并管理可用工具'
         }
       },
       writingSuggestion: {
@@ -1260,6 +1374,8 @@ const resources = {
         loading: '正在深入…',
         refresh: '重新生成',
         retry: '重试',
+        checkSubscription: '查看订阅与额度',
+        checkModel: '查看模型设置',
         regionLabel: '写作建议',
         threadTitle: '写作建议',
         failed: '建议生成中断，你的正文未受影响。',
@@ -1267,7 +1383,10 @@ const resources = {
         errors: {
           threadCreate: '无法开始建议对话，请重试。',
           threadPersist: '无法保存建议对话，请重试。',
-          interrupted: '建议生成中断，你的正文未受影响。'
+          interrupted: '建议生成中断，你的正文未受影响。',
+          modelSelection: '当前模型不可用。请检查订阅与额度，或在设置中选择可用模型后重试。',
+          busy: '当前对话仍在生成回复，请等待完成后重试。',
+          pendingInput: '当前对话有待处理的消息，请在对话页面确认消息状态后重试。'
         }
       },
       settings: {
@@ -1370,7 +1489,22 @@ const resources = {
         },
         actions: {
           generate: '生成全新分析',
-          generating: '解析中...'
+          generating: '解析中...',
+          stop: '终止分析',
+          stopping: '正在终止分析…',
+          stopped: '分析已终止。',
+          alreadyEnded: '这次分析已经结束。',
+          stopFailed: '暂时无法确认分析已终止，请重试。',
+        },
+        progress: {
+          preparing: '正在准备分析…',
+          reconnecting: '正在重新连接分析…',
+          running: '分析正在进行',
+          section: '正在分析{{section}}…',
+          completed: '分析已完成。',
+          partial: '分析已结束，部分栏目未完成。',
+          failed: '分析未能完成。',
+          reconnectFailed: '暂时无法重新连接分析。',
         },
         empty: {
           title: '等待解析的故事',
@@ -1760,6 +1894,7 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        notionPreview: {read:'阅读页面', details:'查看详情', untitled:'Notion 页面', loading:'正在显示 Notion 页面…', empty:'此页面暂无正文。', expand:'展开{{title}}', close:'关闭页面预览', download:'下载 JSON', json:'JSON 详情', body:'页面正文', access:'当前无法访问此页面。请在设置中恢复 Notion 连接或页面权限，再请 Agent 重新读取。', scope:'此页面超出已选择的资源范围。请在资源链接中更新范围并同步索引，再请 Agent 重新读取。', failed:'页面读取失败，请在对话中请 Agent 重新读取。', downloadFailed:'JSON 下载失败，请重试。', renderFailed:'页面预览暂时无法显示，请重试或查看 JSON 详情。', retry:'重试', imageFailed:'图片暂时无法加载。', openOriginal:'打开原图'},
         reflectionAnalysisPreview: {
           label: '回顾分析 · {{mode}}',
           openAria: '打开回顾分析：{{mode}}',
@@ -2054,6 +2189,51 @@ const resources = {
           accept: '接受'
         },
         imageTool: { generate: '生成图片', edit: '编辑图片', prepare: '检查图片请求', running: '进行中', completed: '已完成', failed: '失败', incomplete: '未完成' },
+        agentTools: {
+          "title": "Agent与工具",
+          "trigger": "Agent与工具：{{name}}",
+          "select": "选择Agent",
+          "back": "返回Agent与工具",
+          "unavailable": "Agent暂不可用"
+        },
+        modelMenu: {
+          "title": "选择模型",
+          "trigger": "选择模型：{{name}}",
+          "loading": "正在读取模型…",
+          "search": "搜索模型…",
+          "close": "关闭模型选择",
+          "reload": "重新读取模型",
+          "recommended": "推荐",
+          "unavailable": "暂不可用",
+          "savedUnavailable": "已保存的模型{{model}}暂不可用，请选择可调用模型。",
+          "empty": "没有匹配的模型",
+          "protocols": {
+            "anthropic": "Anthropic兼容",
+            "openai": "OpenAI兼容"
+          }
+        },
+        toolsMenu: {
+          title: "工具",
+          close: "关闭工具菜单",
+          services: "MCP服务",
+          search: "搜索服务",
+          scope: "选择当前对话使用的工具，每条消息按提交时的选择执行。",
+          loading: "正在读取工具…",
+          unavailable: "工具连接暂不可用。",
+          enabled: "已启用",
+          disabled: "已停用",
+          enable: "启用",
+          disable: "停用",
+          saving: "正在保存…",
+          managedElsewhere: "由来源管理",
+          noMatch: "没有匹配的服务",
+          empty: "尚未配置服务",
+          retry: "重试",
+          audio: "音频播放器",
+          appOnly: "仅App可用",
+          audioUnavailable: "播放能力尚未就绪，音频工具暂不可选择。",
+          manage: "管理远程资源链接",
+        },
         inputDock: {
           commandMenu: '聊天指令',
           compactDescription: '压缩此聊天的上下文',
@@ -2124,6 +2304,7 @@ const resources = {
           }
         },
         writingContextUnavailable: '当前笔记暂时无法用于对话。请返回写作后重试，输入内容已保留。',
+        continuation: { title: '暂时无法继续对话', unsupported: '此端暂时无法恢复所需的对话数据，可以回原端继续。', busy: '此对话正在其他端处理，输入已保留，请稍后继续。', preparing: '正在准备对话', failed: '暂时无法准备对话。输入已保留，请重试。' },
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
           consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',

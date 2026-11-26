@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: return the public profile shape for authenticated Web Reflections fixture requests.
 // [Sync] 2026-11-03: complete the real initial mood choice before opening Calendar; retain the first-day chooser and original focus assertions.
 // [Sync] 2026-11-01: opt in to exact same-origin Settings GET cancellation during AuthProvider/Notion owner cleanup.
 // [Sync] 2026-10-29: serve the existing bulk Deck catalog DTO during Settings boot reads.
@@ -257,9 +258,10 @@ export async function installFixtures(page: Page, options: FixtureOptions = {}) 
   });
 
   await page.route('**/auth/session', async (route) => {
+    const bearer = options.reflectionHistory && route.request().headers().authorization?.startsWith('Bearer ');
     await route.fulfill({ json: {
       user: { id: '20260929', email: 'scheduled-calendar@example.test', display_name: 'Schedule QA', avatar_url: null, role: 'user', created_at: '2026-09-01T00:00:00Z' },
-      csrf_token: CSRF,
+      ...(bearer ? {} : { csrf_token: CSRF }),
     } });
   });
   await page.route('**/api/**', async (route: Route) => {

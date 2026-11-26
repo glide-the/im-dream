@@ -1,6 +1,7 @@
 // [Input] Actual BFF handlers/private transport with explicit configuration and fake Admin fetch.
 // [Output] Public PKCE/handle/profile/logout, exact DTO and original-transaction recovery contracts.
 // [Pos] Provider-free technical validation, no account/database/model or external HTTP calls.
+// [Sync] 2026-11-08: independent native loopback hosts retain a configured local Admin's registered authority.
 // [Sync] 2026-10-31: keep one public Client/S256 and original exchange/session contracts for a configured App callback with local HTTP receiving.
 // [Sync] 2026-10-25: cover public Admin form navigation from the registered localhost Dream client.
 // [Sync] 2026-10-11: local/public navigation, proxy evidence, callback host and fixed issuer/backchannel regression.
@@ -52,6 +53,35 @@ function fixture() {
   const admin = new AdminBffClient(adminBffConfig(env), transport, async () => 'service.access.token');
   return { boundary, calls, outputs, admin, handlers: createBffHandlers(boundary, admin) };
 }
+
+test('native loopback keeps the explicitly configured local Admin authority and Google callback host', async () => {
+  const { outputs } = fixture();
+  const origin = 'http://127.0.0.1:4173';
+  const configured = 'http://localhost:3000';
+  const native = 'com.inkmemory.example.auth:/auth/callback';
+  const calls: { origin: string | null; url: string }[] = [];
+  const config = adminBffConfig({ ...env, INK_ADMIN_DREAM_BASE_URL: configured, INK_ADMIN_AUTH_ISSUER: configured + '/api/auth' });
+  const admin = new AdminBffClient(config, async (url, init) => {
+    calls.push({ origin: new Headers(init?.headers).get('origin'), url: String(url) });
+    const caps = outputs['/capabilities'] as { auth: Record<string, unknown> };
+    return Response.json({ request_id: new Headers(init?.headers).get('x-request-id'), data: {
+      ...caps, auth: { ...caps.auth, issuer: config.issuer, jwks_uri: config.issuer + '/jwks' },
+    } });
+  }, async () => 'service.access.token');
+  const boundary = new BffLoginBoundary({ publicOrigin: origin, callbackUri: native, cookieSecret: 'c'.repeat(32) });
+  const handlers = createBffHandlers(boundary, admin);
+  const options = await handlers.options(new Request(origin + '/auth/options'));
+  assert.equal(options.status, 200);
+  assert.equal((await options.json()).google_action, configured + '/auth/dream/google');
+  const start = await handlers.start(new Request(origin + '/auth/start'));
+  assert.equal(start.status, 303);
+  const authorization = new URL(start.headers.get('location')!);
+  assert.equal(authorization.origin, configured);
+  assert.equal(authorization.searchParams.get('redirect_uri'), native);
+  assert.equal(authorization.searchParams.get('client_id'), 'registered-browser');
+  assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+  assert.ok(calls.every(call => call.origin === origin && new URL(call.url).origin === adminTransportOrigin));
+});
 
 test('App callback keeps the original Client, PKCE transaction, unknown-exchange recovery and local session', async () => {
   const { admin, calls, outputs } = fixture();

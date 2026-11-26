@@ -1,4 +1,5 @@
 // [Sync] 2026-10-29: share original receipt/configured-plugin read lifecycle; Web DOM, labels and Agent selection stay unchanged.
+// [Sync] 2026-11-19: read plugin details when the popover opens, with a legacy receipt probe after restoration.
 // [Input] getThreadPluginLoadReceipt API plus the hydrated Deck bound to the thread.
 // [Output] Compact, stable Deck context badge for the active chat thread; clicking
 //          opens Deck metadata, bundled Agents, and plugin receipt provenance.
@@ -18,6 +19,8 @@ import usePluginReceiptBadgeData from './usePluginReceiptBadgeData';
 import { COLORS, iconMap } from '../deckVisuals';
 
 interface PluginReceiptBadgeProps {
+  active?: boolean;
+  observePacking?: boolean;
   activeVoiceId?: string;
   activeVoiceName?: string;
   deck?: Deck;
@@ -96,14 +99,20 @@ export default function PluginReceiptBadge({
   deck,
   onSelectAgent,
   threadId,
+  active = true,
+  observePacking = false,
 }: PluginReceiptBadgeProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
-  const {receipt, configuredPlugins} = usePluginReceiptBadgeData({threadId, deck});
   const [open, setOpen] = useState(false);
+  const {receipt, configuredPlugins} = usePluginReceiptBadgeData({
+    threadId, deck, enabled: active && (open || (!deck && threadId !== null)),
+    observePacking: open || observePacking,
+  });
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setOpen(false); }, [threadId]);
+  useEffect(() => { if (!active) setOpen(false); }, [active]);
 
   // @@@ Click-outside / Escape closes the metadata popover.
   useEffect(() => {

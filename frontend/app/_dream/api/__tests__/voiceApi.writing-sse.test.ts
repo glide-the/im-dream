@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: cover HTTP conflict codes, retryability and malformed error responses before SSE starts.
 // [Input] Product-neutral Claude Agent SSE requests, mocked protocol frames, and historical Voice chat compatibility.
 // [Output] Verify shared-parser streaming, structured errors, missing-finish recovery, and absence of random-Voice Writing transport.
 // [Pos] Writing Claude Agent browser transport regression test in frontend/app/_dream/api/__tests__.
@@ -136,6 +137,54 @@ test('structured Claude SSE errors keep their code and retryability', async () =
   expect(readClaudeAgentErrorCode(captured)).toBe('MODEL_NOT_AVAILABLE');
   expect((captured as unknown as { retryable: boolean }).retryable).toBe(false);
 });
+
+for (const code of ['GATEWAY_MODEL_SELECTION_STALE', 'CHAT_INPUT_USE_QUEUE']) {
+  test(`HTTP 409 preserves ${code} before SSE starts`, async () => {
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({ detail: {
+        error_code: code, retryable: false, message: 'private diagnostic',
+      } }), { status: 409, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const errors: Error[] = [];
+    const deltas: string[] = [];
+    let completed = false;
+
+    await streamClaudeAgentTurn({
+      threadId: 'thread-writing', message: '正文', systemPrompt: 'Writing',
+      onDelta: (delta) => deltas.push(delta),
+      onComplete: () => { completed = true; },
+      onError: (error) => { errors.push(error); },
+    });
+
+    expect(fetchCalls).toBe(1);
+    expect(errors).toHaveLength(1);
+    expect(readClaudeAgentErrorCode(errors[0])).toBe(code);
+    expect(errors[0]).toMatchObject({ retryable: false });
+    expect(errors[0].message).not.toContain('private diagnostic');
+    expect(deltas).toEqual([]);
+    expect(completed).toBe(false);
+  });
+}
+
+for (const body of ['unavailable', '{', JSON.stringify({ detail: 'Conflict' }),
+  JSON.stringify({ detail: { error_code: 409, retryable: 'false' } })]) {
+  test(`invalid HTTP error details retain a safe failure: ${body}`, async () => {
+    globalThis.fetch = (async () => new Response(body, { status: 409 })) as typeof fetch;
+    const errors: Error[] = [];
+    await streamClaudeAgentTurn({
+      threadId: 'thread-writing', message: '正文', systemPrompt: 'Writing',
+      onDelta: () => { throw new Error('Unexpected delta'); },
+      onComplete: () => { throw new Error('Unexpected completion'); },
+      onError: (error) => { errors.push(error); },
+    });
+    expect(errors).toHaveLength(1);
+    expect(readClaudeAgentErrorCode(errors[0])).toBeNull();
+    expect(errors[0]).toMatchObject({ retryable: null });
+    expect(errors[0].message).toBe('Claude-agent request failed: 409');
+  });
+}
 
 test('a stream that ends without finish is a recoverable interruption, not completion', async () => {
   globalThis.fetch = (async () => sseResponse([

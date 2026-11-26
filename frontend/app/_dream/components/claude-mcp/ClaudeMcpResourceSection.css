@@ -216,3 +216,7 @@
     min-height: 44px;
   }
 }
+
+/* [Sync] 2026-11-13: use actual service cards, bounded by the available resource page width. */
+.claude-mcp-resource__cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;}
+.claude-mcp-resource__cards button {min-height:44px;}

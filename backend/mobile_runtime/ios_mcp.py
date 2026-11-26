@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: 固定工厂表接入显式选中的音频MCP，保留原iOS SDK传输与确认。
 # [Input] Original Runner private MCP projection, fixed internal server factories and one Runtime endpoint.
 # [Output] Existing owned MCP handlers on the original SDK's in-memory transport with per-server broker values.
 # [Pos] iOS stdio compatibility adapter; remote MCP configuration and tool permissions retain their owners.
@@ -61,13 +62,14 @@ def adapt_owned_mcp(options, *, workspace_root: str):
 def _adapt_configs(configs):
     from libs.claude_agent_kit.server import agent_runner
     from libs.claude_agent_kit.server.mcp_server import create_user_mcp_server
-    from libs.claude_agent_kit.server.editor_mcp_server import create_editor_mcp_server
+    from libs.claude_agent_kit.server.editor_mcp_server import create_editor_mcp_server, create_mobile_clock_audio_mcp_server
     from libs.claude_agent_kit.server.story_workspace_mcp_server import story_workspace_create_mcp_server
     from libs.claude_agent_kit.server.image_gen_stdio import create_image_gen_server
 
     factories = {
         "user": (create_user_mcp_server, agent_runner._user_mcp_stdio_config),
         "editor": (create_editor_mcp_server, agent_runner._editor_mcp_stdio_config),
+        "mobile_clock_audio": (create_mobile_clock_audio_mcp_server, agent_runner._mobile_clock_audio_mcp_stdio_config),
         "story_workspace": (story_workspace_create_mcp_server, agent_runner._story_workspace_mcp_stdio_config),
         "image_gen": (create_image_gen_server, lambda env: agent_runner._user_mcp_stdio_config(
             env, module_name="libs.claude_agent_kit.server.image_gen_stdio")),

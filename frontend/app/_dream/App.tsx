@@ -1,3 +1,7 @@
+// [Sync] 2026-11-25: insert a named text reference through the existing Session save.
+// [Sync] 2026-11-25: insert explicitly confirmed Calendar references with their matching titles into the current journal.
+// [Sync] 2026-11-24: show URL-derived Notion articles and resume the last prose cell from blank notebook paper.
+// [Sync] 2026-11-12: expose frozen text-only note sharing from the original Writing toolbars.
 // [Sync] 2026-11-03: scope retained Chat to the authenticated user and refresh its reads on route return.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-01: prepare Session-bound saved Writing snapshots for native Chat and expose existing linked actions on touch screens.
@@ -62,6 +66,9 @@
 import { BRAND_NAME, BRAND_BANNER_PATH } from './constants/brand';
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import NoteShareDialog, {type NoteShareActions} from './components/notes/NoteShareDialog';
+import {projectNote, type NoteShareSource} from './components/notes/noteShare';
+import {IconShare} from './components/chat/Icons';
 import type { Commentor, EditorState, TextCell, WritingSuggestionCell as WritingSuggestionCellData } from './engine/EditorEngine';
 import { ChatWidget } from './engine/ChatWidget';
 import type { ChatWidgetData } from './engine/ChatWidget';
@@ -101,6 +108,8 @@ import {
 import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
+import NotebookLines from './components/Editor/NotebookLines';
+import NoteNotionTextCell, {type NoteWritingHandle} from './components/notes/NoteNotionTextCell';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import { submitClaudeMcpRedirect } from './api/claudeMcpApi';
@@ -251,6 +260,7 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 
 // @@@ Main App Component
 export interface WritingDocumentHost {
+  noteShareActions?: NoteShareActions;
   active:boolean;showEnergyBar:boolean;openChooserNonce?:number;onChooserView?:(view:WritingChooserView)=>void;
   contextRequest?:WritingContextRequest;onContextResult?:(result:WritingContextResult)=>void;
   onOpenThread:(threadId:string,editorSessionId?:string)=>void;onPrepareChat:(input:string)=>void;onOpenResources:()=>void;
@@ -302,6 +312,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
   ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
   const [chatLandingTab] = useState<'history' | 'dreams'>('history');
+  const lastWritingCell = useRef<NoteWritingHandle>(null);
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   useEffect(()=>{if(writingDocument)setShowEnergyBar(writingDocument.showEnergyBar);},[writingDocument?.showEnergyBar]);
 
@@ -389,6 +400,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     }
   }, []);
   const [stateConfig, setStateConfig] = useState(() => getStateConfig());
+  const [noteShare, setNoteShare] = useState<NoteShareSource | null>(null);
 
   const {
     engineRef,
@@ -1232,6 +1244,12 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
     if(writingDocument && !writingDocument.active){setShowCalendarPopup(false);setDropdownVisible(false);setExpandedCommentId(null);if(document.activeElement instanceof HTMLElement)document.activeElement.blur();}
   },[writingDocument?.active]);
 
+  const openNoteShare = () => {
+    const current = engineRef.current?.getState();
+    if (current) setNoteShare(projectNote(current));
+  };
+  useEffect(() => {setNoteShare(null);}, [state?.id, user?.id, writingRouteActive, writingDocument?.active]);
+
   // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
   const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     if(writingDocument){writingDocument.onOpenThread(threadId,engineRef.current?.getState().id);return;}
@@ -1812,6 +1830,14 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
             renderSettings={(section, onNavigate) => (
               <StoryWorkspaceSettingsPage
                 activeSection={section}
+                onOpenShareSource={async share => {
+                  if (share.kind === 'chat') {handleStoryWorkspaceChatThreadRequest(share.source_id); onNavigate('/story-workspace/chat'); return;}
+                  await ensureSessionPersistedForAgent();
+                  const {getSession} = await import('./api/voiceApi');
+                  const session = await getSession(share.source_id);
+                  if (!session.editor_state || !loadPersistedEditorSession({sessionId: session.id, editorState: session.editor_state, labels: session.labels})) throw Error('SHARE_SOURCE_UNAVAILABLE');
+                  onNavigate('/story-workspace/writing');
+                }}
                 claudeMcpDetailServerName={claudeMcpDetailServerName}
                 connectorSettingsFocusNonce={connectorSettingsFocusNonce}
                 currentLanguage={currentLanguage}
@@ -1916,6 +1942,8 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                 onToggleAlign={handleToggleAlign}
                 onShowCalendar={() => setShowCalendarPopup(true)}
                 onSaveToday={handleSaveToday}
+                onShareNote={openNoteShare}
+                shareLabel={i18n.t('noteShare.title')}
                 onToggleTalking={handleToggleTalking}
                 isAligned={commentsAligned}
                 isTalking={userTalking}
@@ -1933,6 +1961,9 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
               gap: '8px',
               zIndex: 1000
             }}>
+              <button type="button" onClick={openNoteShare} aria-label={i18n.t('noteShare.title')} title={i18n.t('noteShare.title')} style={{width:44,height:44,border:'none',borderRadius:'50%',background:'var(--color-bg-surface-solid)',color:'var(--color-text-secondary)',display:'grid',placeItems:'center',boxShadow:'0 2px 6px var(--color-shadow-medium)'}}>
+                <IconShare style={{width:20,height:20}}/>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowCalendarPopup(true)}
@@ -2038,27 +2069,9 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
               margin: '0 auto'
             }}>
               <div ref={setChooserSurface} className="writing-scroll-region" style={mobileWriting ? {flex:1,minHeight:0,position:'relative',display:'flex'} : {display:'contents'}}>
-              <div
-                inert={mobileWriting && chooserExpanded ? true : undefined}
-                ref={scrollContainerRef}  // @@@ Track scroll container for position preservation
-                className="notebook-lines"
-                onScroll={(e) => {
-                  // @@@ Save scroll position whenever user scrolls manually
-                  const target = e.currentTarget;
-                  savedScrollTop.current = target.scrollTop;
-                }}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  position: 'relative',
-                  overflow: 'auto',
-                  padding: '20px',
-                  paddingLeft: mobileWriting ? '20px' : '80px',  // @@@ Extra left padding for floating toolbar
-                  paddingBottom: mobileWriting
-                    ? '20px'
-                    : '80px',  // Extra space for smooth scrolling to bottom
-                  backgroundColor: 'var(--color-bg-paper)'  // @@@ Cream paper background for notebook lines
-                }}>
+              <NotebookLines mobile={mobileWriting} inert={mobileWriting && chooserExpanded} scrollRef={scrollContainerRef}
+                onBlankPaper={y => lastWritingCell.current?.continueAtEnd(y)}
+                onScrollTop={top => {savedScrollTop.current = top;}}>
                 <div style={{
                   position: 'relative',
                   maxWidth: '600px'
@@ -2103,63 +2116,70 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                         && !hasStreamingSuggestion;
 
                       return (
-                        <div key={cell.id} style={{
+                        <div key={cell.id} data-writing-text-cell style={{
                           position: 'relative',
-                          marginTop: !mobileWriting && idx === 0 ? '0.4px' : 0  // @@@ Align first line with 2nd notebook line
+                          marginTop: 0
                         }}>
-                          {/* Highlight layer for this cell */}
-                          <div className="writing-text-highlight" style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            pointerEvents: 'none',
-                            fontSize: mobileWriting ? 'var(--writing-font-size)' : '18px',
-                            lineHeight: mobileWriting ? 'var(--writing-line-height)' : '1.8',
-                            color: 'transparent',
-                            fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                            zIndex: 0
-                          }}>
-                            {renderHighlightedText(content)}
-                          </div>
-
-                          {/* Textarea for this cell */}
-                          <textarea
-                            className="writing-prose"
-                            rows={mobileWriting ? 1 : undefined}
-                            ref={createTextareaRef(cell.id)}
-                            value={content}
-                            onChange={(e) => handleTextChange(cell.id, e.target.value)}
+                          <NoteNotionTextCell key={JSON.stringify([user?.id, state.id])} content={content}
+                            ref={idx === state.cells.length - 1 ? lastWritingCell : undefined}
+                            onTextChange={text => handleTextChange(cell.id, text)}
                             onCompositionStart={() => handleCompositionStart(cell.id)}
-                            onCompositionEnd={(e) => handleCompositionEnd(cell.id, e)}
-                            onPaste={(e) => handlePaste(cell.id, e)}
-                            onSelect={(e) => handleCursorChange(cell.id, e)}
-                            onClick={(e) => handleCursorChange(cell.id, e)}
-                            onKeyUp={(e) => handleCursorChange(cell.id, e)}
-                            onKeyDown={(e) => handleKeyDown(cell.id, e)}
-                            placeholder={idx === 0 ? "Start writing..." : "Continue writing..."}
-                            style={{
-                              width: '100%',
-                              border: 'none',
-                              outline: 'none',
-                              resize: 'none',
+                            onCompositionCommit={text => handleCompositionEnd(cell.id, text)}
+                            documentActive={writingDocument?.active ?? writingRouteActive}>
+                            {/* Highlight layer for this cell */}
+                            <div className="writing-text-highlight" style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              pointerEvents: 'none',
                               fontSize: mobileWriting ? 'var(--writing-font-size)' : '18px',
                               lineHeight: mobileWriting ? 'var(--writing-line-height)' : '1.8',
+                              color: 'transparent',
                               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                              background: 'transparent',
-                              color: 'var(--color-text-body)',
-                              caretColor: 'var(--color-text-body)',
-                              position: 'relative',
-                              zIndex: 1,
-                              marginBottom: '0px',
-                              overflow: 'hidden',
-                              overflowWrap: 'break-word',
-                              wordWrap: 'break-word',
-                              whiteSpace: 'pre-wrap',
-                              minHeight: mobileWriting ? 'var(--writing-line-height)' : '32px',
-                              height: 'auto'
-                            }}
-                          />
+                              zIndex: 0
+                            }}>
+                              {renderHighlightedText(content)}
+                            </div>
+
+                            {/* Textarea for this cell */}
+                            <textarea
+                              className="writing-prose"
+                              rows={mobileWriting ? 1 : undefined}
+                              ref={createTextareaRef(cell.id)}
+                              value={content}
+                              onChange={(e) => handleTextChange(cell.id, e.target.value)}
+                              onCompositionStart={() => handleCompositionStart(cell.id)}
+                              onCompositionEnd={(e) => handleCompositionEnd(cell.id, e.currentTarget.value)}
+                              onPaste={(e) => handlePaste(cell.id, e)}
+                              onSelect={(e) => handleCursorChange(cell.id, e)}
+                              onClick={(e) => handleCursorChange(cell.id, e)}
+                              onKeyUp={(e) => handleCursorChange(cell.id, e)}
+                              onKeyDown={(e) => handleKeyDown(cell.id, e)}
+                              placeholder={idx === 0 ? "Start writing..." : "Continue writing..."}
+                              style={{
+                                width: '100%',
+                                border: 'none',
+                                outline: 'none',
+                                resize: 'none',
+                                fontSize: mobileWriting ? 'var(--writing-font-size)' : '18px',
+                                lineHeight: mobileWriting ? 'var(--writing-line-height)' : '1.8',
+                                fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+                                background: 'transparent',
+                                color: 'var(--color-text-body)',
+                                caretColor: 'var(--color-text-body)',
+                                position: 'relative',
+                                zIndex: 1,
+                                marginBottom: '0px',
+                                overflow: 'hidden',
+                                overflowWrap: 'break-word',
+                                wordWrap: 'break-word',
+                                whiteSpace: 'pre-wrap',
+                                minHeight: mobileWriting ? 'var(--writing-line-height)' : '32px',
+                                height: 'auto'
+                              }}
+                            />
+                          </NoteNotionTextCell>
 
                           {canGenerateSuggestion ? (
                             <WritingSuggestionTrigger
@@ -2223,9 +2243,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                     const cellTextarea = textareaRefs.current.get(group.cellId);
                     if (!cellTextarea) return null;
 
-                    // @@@ Use offsetTop relative to the content container (with maxWidth: 600px)
-                    // This div is at line 1031 with position: relative
-                    const cellWrapper = cellTextarea.parentElement; // The div with position: relative
+                    const cellWrapper = cellTextarea.closest<HTMLElement>('[data-writing-text-cell]');
                     if (!cellWrapper) return null;
 
                     const cellOffsetTop = cellWrapper.offsetTop;
@@ -2332,7 +2350,7 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
                     </div>
                   </div>
                 )}
-              </div>
+              </NotebookLines>
 
               </div>
               {/* Debug stats bar at bottom */}
@@ -2506,8 +2524,19 @@ export default function App({writingDocument}:{writingDocument?:WritingDocumentH
       )}
 
       {/* Calendar Popup */}
+      {noteShare && state?.id === noteShare.sessionId && <NoteShareDialog key={noteShare.sessionId} source={noteShare} save={() => ensureSessionPersistedForAgent(noteShare.sessionId)} onClose={() => setNoteShare(null)} actions={writingDocument?.noteShareActions}/>}
+
       {showCalendarPopup && (
         <CalendarPopup
+          key={JSON.stringify([user?.id, state?.id])}
+          onInsertArticle={async (href, title) => {
+            const engine = engineRef.current;
+            const note = engine?.getState();
+            if (!engine || !note || !isAuthenticated || selectedStateLoading || note.id !== state?.id) throw Error('NOTE_UNAVAILABLE');
+            const status = engine.insertNotionArticle(href, title);
+            await ensureSessionPersistedForAgent(note.id);
+            return status;
+          }}
           onLoadEntry={handleLoadEntry}
           currentEntryId={state?.id}
           onEntryDeleted={handleCalendarEntryDeleted}

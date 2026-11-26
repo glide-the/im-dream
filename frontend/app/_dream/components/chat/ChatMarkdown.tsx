@@ -1,3 +1,6 @@
+// [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
+import { AuthenticatedImage, AuthenticatedLink } from './AuthenticatedResource';
+// [Sync] 2026-11-13: reuse Chat typography for sharing and accept only export-owned media components.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 // [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
 // [Output] Shared GFM/math/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
@@ -61,6 +64,9 @@ const BASE_COMPONENTS: Components = {
 };
 
 interface ChatMarkdownProps {
+  /** Authenticated image exports supply resolved media; publicView keeps inert references. */
+  mediaComponents?: Pick<Components, 'a' | 'img'>;
+  publicView?: boolean;
   text: string;
   workspaceSessionId?: string;
   workspaceDocumentPath?: string;
@@ -71,7 +77,8 @@ function workspaceUrlTransform(value: string): string {
   return isWorkspaceUri(value) ? value : defaultUrlTransform(value);
 }
 
-export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath, onAddImageMaterial }: ChatMarkdownProps) {
+// [Sync] 2026-11-12: public snapshots reuse Markdown/math/Mermaid with inert file/image references.
+export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath, onAddImageMaterial, publicView = false, mediaComponents }: ChatMarkdownProps) {
   const { activeSessionId, workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const threadId = workspaceSessionId ?? activeSessionId ?? undefined;
   const workspaceAvailability = workspaceConfigLoaded
@@ -81,6 +88,7 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
     ...BASE_COMPONENTS,
     a({ href, children, node, ...props }) {
       void node;
+      if (publicView) return href && /^https?:\/\//i.test(href) ? <AuthenticatedLink href={href} target="_blank" rel="noopener noreferrer">{children}</AuthenticatedLink> : <span>{children}</span>;
       if (isWorkspaceUri(href)) {
         return (
           <WorkspaceFileLink uri={href} threadId={threadId} workspaceAvailability={workspaceAvailability} allowDocumentPreview={!workspaceDocumentPath}>
@@ -88,19 +96,21 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceD
           </WorkspaceFileLink>
         );
       }
-      return <a href={href} {...props}>{children}</a>;
+      return <AuthenticatedLink href={href} {...props}>{children}</AuthenticatedLink>;
     },
     img({ src, alt, node, ...props }) {
       void node;
+      if (publicView) return <span>{alt ?? ''}</span>;
       if (typeof src === 'string' && isWorkspaceUri(src)) {
         return <WorkspaceImage uri={src} alt={alt} threadId={threadId} workspaceAvailability={workspaceAvailability} onAddImageMaterial={onAddImageMaterial} />;
       }
-      return <img src={src} alt={alt} {...props} />;
+      return <AuthenticatedImage src={src} alt={alt} {...props} />;
     },
-  }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial]);
+    ...(publicView ? {} : mediaComponents),
+  }), [threadId, workspaceAvailability, workspaceDocumentPath, onAddImageMaterial, publicView, mediaComponents]);
 
   return (
-    <div className="chat-markdown" onCopy={event => {
+    <div className="chat-markdown" style={publicView ? {maxWidth: '100%', overflowX: 'auto'} : undefined} onCopy={event => {
       if (event.defaultPrevented) return;
       const projection = projectMathSelection(event.currentTarget);
       if (!projection) return;

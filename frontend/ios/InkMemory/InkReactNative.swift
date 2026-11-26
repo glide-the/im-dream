@@ -1,3 +1,4 @@
+// [Sync] 2026-11-24: restore the login buttons when system authorization returns or form navigation fails.
 // [Sync] 2026-10-31: pool Admin URLSession connections with per-task delegates, drained-buffer resume and original request deadlines.
 // [Sync] 2026-10-31: observe only explicitly correlated Admin request phases, numeric network errors and timing; exclude HTTP content.
 // [Sync] 2026-10-31: recover one pre-header connection loss for fixed read-only authentication calls within the original deadline.
@@ -529,10 +530,14 @@ final class InkRuntime: RCTEventEmitter, UIAdaptivePresentationControllerDelegat
             let account = NativeAccountLogin(origin: origin, callback: callback.flatMap { schemes.contains($0.scheme ?? "") ? $0 : nil },
                 navigation: navigation, probe: probe, chinese: language.hasPrefix("zh"), diagnostic: { [weak self] value in
                     self?.sendEvent(withName: "InkAccountError", body: value)
-                }) { [weak controller] in controller?.reloadAccountDocument() }
+                }, formRestored: { [weak controller] in controller?.restoreAccountForm() },
+                webReady: { [weak controller] in controller?.reloadAccountDocument() })
             self.accountLogin = account
             controller.accountNavigation = { [weak account] action, page in account?.handles(action, page: page) ?? false }
-            controller.hostStateDidChange = { [weak self] state in
+            controller.hostStateDidChange = { [weak self, weak controller] state in
+                if state["failed"] as? Bool == true && !account.isHandlingNavigation {
+                    controller?.restoreAccountForm(navigationFailed: true)
+                }
                 if let error = state["authError"] as? [String: Any] { self?.sendEvent(withName: "InkAccountError", body: error) }
                 if state["authenticated"] as? Bool == true || state["loading"] as? Bool == false { probe.check() }
             }

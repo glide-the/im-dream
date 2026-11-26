@@ -1,3 +1,6 @@
+# [Sync] 2026-11-25: verify the projected Notion snapshot Read example uses only file_path.
+# [Sync] 2026-11-13: verify selected and empty Chat MCP snapshots independently of global connections.
+# [Sync] 2026-11-04: inject explicit continuation fixtures for legacy Service unit contracts.
 # [Sync] 2026-10-26: a committed confirmation retries the original Hook with no model or assistant write; Hook errors retain the existing terminal failure.
 # [Sync] 2026-10-23: ordinary turn fixtures return no task-owned Notion runtime, preserving Chat projection coverage.
 # [Sync] 2026-10-07: scheduled tool-only completions persist a visible final receipt for durable result settlement.
@@ -259,6 +262,9 @@ class _LegacyTurnPersistence(
         )
 
 
+from tests.fixtures.continuation_persistence import UnitContinuationStorage as _UnitContinuationStorage, bind_continuation_fixture
+
+
 class ClaudeAgentService(_ProductionClaudeAgentService):
     """Test-only DI for historical fixtures without a real Admin server."""
 
@@ -267,7 +273,14 @@ class ClaudeAgentService(_ProductionClaudeAgentService):
             "system_config_reader",
             lambda user_id: _db.get_system_config(int(user_id)),
         )
+        kwargs.setdefault("continuation_storage_factory", _UnitContinuationStorage)
         super().__init__(*args, **kwargs)
+
+    async def execute_session(self, execution):
+        if execution.request.admin_turn_persistence is None:
+            execution.request.admin_turn_persistence = _LegacyTurnPersistence()
+        bind_continuation_fixture(execution, persist_user=not isinstance(self._persist_user_message, unittest.mock.AsyncMock))
+        return await super().execute_session(execution)
 
     async def assemble_context(self, request, **kwargs):
         if request.admin_turn_persistence is None:
@@ -590,7 +603,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         }
         for resume, stored, located, expected, failure in (
             (True, {}, None, False, None),
-            (True, row, None, False, "CLAUDE_RESUME_TRANSCRIPT_UNAVAILABLE"),
+            (True, row, None, True, None),
             (True, row, "/verified-transcript", True, None),
             (False, row, "/verified-transcript", False, "CLAUDE_RESUME_REQUIRED_FOR_BOUND_THREAD"),
             (True, {**row, "agent_contract_version": "old"}, None, False, "CLAUDE_RESUME_SESSION_UNAVAILABLE"),
@@ -1490,6 +1503,96 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_chat_selects_remote_names_and_never_inherits_unselected_connections(self):
+        managed_loader = _managed_loader({
+            "other": {"type": "http", "url": "https://other.example.test/mcp"},
+            "remote-readonly": {
+                "type": "http",
+                "url": "https://mcp.example.test/mcp",
+            }
+        })
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            managed_mcp_runtime_snapshot_loader=managed_loader,
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            mcp_server_names=("remote-readonly",),
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_workspace_disabled_mcp"),
+            ),
+        ):
+            execution = await service.assemble_context(
+                request,
+                state=AgentRunState(session_id=request.thread_id),
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        managed_loader.load.assert_awaited_once_with("7", None, server_names=("remote-readonly",))
+        self.assertEqual(
+            execution.run_options.claude_mcp_servers,
+            {
+                "remote-readonly": {
+                    "type": "http",
+                    "url": "https://mcp.example.test/mcp",
+                }
+            },
+        )
+
+    async def test_chat_empty_selection_skips_remote_credentials_and_loader(self):
+        managed_loader = _managed_loader({
+            "remote-readonly": {
+                "type": "http",
+                "url": "https://mcp.example.test/mcp",
+            }
+        })
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            managed_mcp_runtime_snapshot_loader=managed_loader,
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            mcp_server_names=(),
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                _db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_workspace_disabled_mcp"),
+            ),
+        ):
+            execution = await service.assemble_context(
+                request,
+                state=AgentRunState(session_id=request.thread_id),
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        managed_loader.load.assert_not_awaited()
+        self.assertEqual(execution.run_options.claude_mcp_servers, {})
+        self.assertEqual(execution.turn_context.managed_mcp_server_keys, ())
+
     async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):
         builder = _FakeContextBuilder()
         service = ClaudeAgentService(context_builder=builder)
@@ -1967,6 +2070,12 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 editor_session_id="session-attach",
             )
             self.assertIn("Notion lightweight index (.notion/):", notion_block)
+            example_prefix = "  Read the attached snapshot first with "
+            example = next(line for line in notion_block.splitlines() if line.startswith(example_prefix))
+            self.assertEqual(
+                json.loads(example.removeprefix(example_prefix)),
+                {"file_path": str(workspace_path / ".notion" / "snapshot.json")},
+            )
             self.assertIn(
                 "Notion Skill index (from .notion/README.md):",
                 notion_block,

@@ -1,3 +1,44 @@
+<!-- [Input] 已验证的Admin手动Actions、原ECS服务与Dream现有Admin访问配置。 -->
+<!-- [Output] 当前双仓库发布职责、手动入口、验证／恢复与退役Compose原文。 -->
+<!-- [Pos] Dream侧阿里云发布分流；Admin操作权威位于Admin仓库deploy.md。 -->
+<!-- [Sync] 2026-11-08: Admin改用GitHub手动完整制品发布，保留原数据与禁交换策略，旧Compose正文归历史。 -->
+# 阿里云 ECS 发布
+
+## 当前范围与入口
+
+| 发布单元 | 权威入口 | 当前职责 |
+| --- | --- | --- |
+| Admin／Gateway | [Admin发布指南](../../../ink-admin-memory/docs/deploy.md)及[GitHub手动Actions](https://github.com/glide-the/dream-im-platform/actions/workflows/deploy-admin.yml) | Linux runner打包完整制品，ECS原systemd／embedded supervisor运行，Drizzle管理共享schema |
+| Dream Web／backend | [Remote SSH手册](remote-ssh.md)或当前已确认的本机／宿主部署入口 | 维护Dream应用；Admin认证、数据与Gateway仍经既有授权API访问 |
+| nginx边缘入口 | [边缘转发手册](natapp-edge-relay.md) | 按显式topology维护公开路由，保留现有域名与认证身份 |
+
+2026-11-08的Admin现用服务为`ink-memory-admin.service`，运行用户`ink-admin`，完整制品沿`pnpm run start:embedded`启动。数据库保留原PostgreSQL目录；普通发布无迁移DDL、重建、旧备份恢复或工作区文件同步。ECS保持swap／zswap禁用。原工作区、认证、权限与历史保持。
+
+本机正常Admin与ECS按当次已核对拓扑分别维护；发布ECS代码保留Dream现有数据源、issuer、Client、service credential与BFF配置。本机3000的实际运行／传输方式归[当前执行回执](../exec/cross-platform-chat-continuation-20261104.md)，禁止从历史SSH转发或旧容器地址推断现用数据库。
+
+## Admin手动打包发布
+
+1. 打开上述GitHub Actions，选择 **Build and deploy Admin (manual)**，点击 **Run workflow** 并选择`main`。push／PR执行CI检查，发布由手动事件触发。
+2. runner执行锁定安装、打包合同、统一`pnpm test:release-receiver`、单元／lint／完整类型与构建，上传与source SHA绑定的Linux制品。
+3. deploy通过已配置专用受限SSH key执行preflight及固定deploy命令。服务器核对原实例、Node、摘要、原env、数据目录、资源及check-only迁移后切换原服务，ECS保留已验证制品作为恢复依据。
+4. 核对run的部署回执、source／BUILD_ID、本机与ECS固定公网HTTP200、原数据目录／配置。失败重试及回滚沿[Admin指南](../../../ink-admin-memory/docs/deploy.md#失败后重试与恢复)，候选已创建时保留原目录并使用新run ID。
+
+公开登录页HTTP200属于发布检查。真实账户、手机创建→Web原Thread／Claude会话继续及真实模型验收独立留证。当前成功发布与剩余本人认证前提见[Admin采用记录](../../../ink-admin-memory/docs/verification/chat-continuation-20261108.md)。公网波动按具体异常分类保留，入口策略保持。
+
+## Dream配置与后续维护
+
+Dream的[prepare-env.sh](../../deploy/remote-ssh/prepare-env.sh)读取已登记的HTTPS Gateway／Product origins、service Client／secret、BFF handle secret与显式磁盘预算，生成0600运行配置。它保留Admin PostgreSQL凭证在Admin边界；旧`DREAM_ADMIN_ENV_FILE`／PG alias／共享数据库网络说明归下方历史。已有正常配置按原部署入口维护，禁止从旧Admin Compose env复制数据库或认证密钥。
+
+Admin root receiver安装版本、私有服务器配置及专用key维护归[服务手册](../../../ink-admin-memory/docs/deploy-services.md)。普通应用发布保留已安装receiver；修改接收器时单独完成测试、摘要核对、备份、原子替换与受限preflight。Dream仓库不增加Admin发布器、临时DDL或替代会话框架。
+
+## 历史Remote SSH Compose正文（已退役）
+
+下方原文保留2026-08～09的Admin容器、bootstrap、数据库alias及swap说明。其Admin脚本已退役；当前运维使用上方手动Actions及Admin手册。历史数值与命令退出现行发布步骤。
+
+<details>
+<summary>查看旧Admin／Dream Compose原文</summary>
+
+<!-- BEGIN ALIYUN_COMPOSE_HISTORY -->
 # 阿里云 ECS 部署
 <!--
 [Input] Admin/Dream Remote SSH topology, embedded PostgreSQL alias, and public HTTPS service origins.
@@ -188,3 +229,6 @@ backfill/validate → contract。
   TRUNCATE 或 runtime DDL；
 - `bootstrap` 只用于首次空目标；后续使用物理备份与经过审核的恢复维护窗口；
 - Admin object storage 当前 disabled；不得假设 MinIO URL/volume 仍然存在。
+<!-- END ALIYUN_COMPOSE_HISTORY -->
+
+</details>

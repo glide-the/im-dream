@@ -1,3 +1,5 @@
+// [Sync] 2026-11-13: native first/ordinary/queued sends carry their own tool descriptor snapshots.
+// [Sync] 2026-11-04: retain native drafts and message identity across safe preparation retries.
 // [Sync] 2026-11-03: retain running Thread readers across Native navigation and publish only the visible selection.
 // [Sync] 2026-11-03: reuse current/previous saved prose during navigation; fresh status exclusively enables execution controls.
 // [Sync] 2026-11-02: restore the selected Thread through original GETs; retire background work even before Thread creation completes.
@@ -24,7 +26,8 @@ import {createThreadHistoryPreview,threadHistoryPreviewMessages} from './threadH
 import {buildClaudeChatRequest,type ClaudeChatRequestContext} from '../../lib/claude-chat-request';
 import {applyBackendEventToMessages,coalesceClaudeAgentSseEvents,drainClaudeAgentSseFrames,parseClaudeAgentSseBuffer,type BackendEvent} from '../../lib/claude-agent-sse-utils';
 import {toFileProxyUrl} from '../../lib/toFileProxyUrl';
-import type {ToolChoice} from '../../lib/chat-schema';
+import {readThreadTools,rememberThreadTools} from '../../hooks/useChatToolSelection';
+import type {ChatToolDescriptor,ToolChoice} from '../../lib/chat-schema';
 import {toAttachment,type UploadedFile} from './AIInputDock.helpers';
 import {hydrateClaudeThreadSession,fetchClaudeThreadMessages,claudeThreadHydrationRetryDelayMs,type ClaudeThreadRecord} from './threadSessionHydration';
 import {mergeRecoveredLatestPage,prependUniqueOlderMessages} from './chatHistoryWindow';
@@ -35,7 +38,7 @@ import type {ChatUserMessage} from './chatUserMessageIngress';
 import {confirmToolCall,resolvePendingToolConfirmation,resolveToolName,resolveSandboxNetworkRequest,type PendingToolConfirmation} from './toolConfirmation';
 import type {NativeChatRecovery} from './nativeChatRecovery.native';
 
-const empty=()=>({threadId:null as string|null,thread:undefined as ClaudeThreadRecord|undefined,messages:[] as UIMessage[],historicalMessageIds:new Set<string>() as ReadonlySet<string>,running:false,posting:false,recovering:false,stopping:false,previewing:false,unknown:false,error:null as string|null,
+const empty=()=>({threadId:null as string|null,thread:undefined as ClaudeThreadRecord|undefined,messages:[] as UIMessage[],historicalMessageIds:new Set<string>() as ReadonlySet<string>,running:false,posting:false,preparing:false,recovering:false,stopping:false,previewing:false,unknown:false,error:null as string|null,
   nextCursor:null as string|null,hasMore:false,loadingOlder:false,queue:[] as ThreadInputEntry[],localOwner:false,queueError:null as string|null,queueChecking:false,editDraftRecovery:null as {id:string;text:string}|null,editRetrying:false,settled:new Set<string>() as ReadonlySet<string>,runtimePending:new Set<string>() as ReadonlySet<string>});
 function inputFailureKey(error:unknown):string {
   if(error instanceof ThreadInputError){
@@ -61,6 +64,7 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
     if(previousId!==state.threadId&&mounted.current)restartQueue();
     for(const notify of listeners)notify();
   }
+  const continuationIds=box(new Map<string,string>());
   const latest=box({context,prepareEditorState,onSettled,onSessionExpired});latest.current={context,prepareEditorState,onSettled,onSessionExpired};
   const transport:typeof fetch=async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401&&mounted.current){historyPreview.current?.clear();update({messages:[],thread:undefined,unknown:true});latest.current.onSessionExpired?.();}return response;};
   const mounted=box(false),epoch=box(0),selectionEpoch=box(0),connection=box<OpenResponse|null>(null),postLock=box<number|null>(null);
@@ -87,17 +91,20 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
     if(!active(id,version)){response.cancel();return;}
     if(response.status!==200){response.cancel();if(response.status===401)latest.current.onSessionExpired?.();if(submission)observeClaudeThreadSubmission(submission,'rejected');throw new Error('CHAT_HTTP_REJECTED');}
     connection.current=response;
-    let buffer='',terminal=false;
+    let buffer='',terminal=false,preparationRejected=false,submissionFailed=false;
     const dispatch=(frames:string)=>{
       const events:BackendEvent[]=[];
       for(const event of coalesceClaudeAgentSseEvents(parseClaudeAgentSseBuffer(frames))) {
         if(submission)observeClaudeThreadSubmission(submission,event.type==='finish'?'terminal':'accepted');
+        if(event.type==='error'){submissionFailed=true;if(event.retryable===true)preparationRejected=true;}
         events.push(event);
         if(event.type==='finish'){terminal=true;break;}
       }
       if(events.length && active(id,version))update(value=>{const projected=events.reduce((next,event)=>({...next,
         messages:applyBackendEventToMessages(next.messages,event),
-        ...(event.type==='error'?{error:'chat.turnNavigation.status.failed'}:{}),
+        ...(event.type==='data-continuation'?{preparing:event.state==='preparing'}:{}),
+        ...(event.type==='error'?{error:event.retryable===true?'chat.continuation.failed':'chat.turnNavigation.status.failed',preparing:false}:{}),
+        ...(event.type==='finish'?{preparing:false}:{}),
         ...(event.type==='tool-approval-request'?{settled:new Set([...next.settled].filter(toolId=>toolId!==event.toolCallId))}:{}),
       }),value);for(const message of projected.messages){const metadata=message.metadata as {turnId?:unknown}|undefined;if(message.role==='assistant'&&!value.historicalMessageIds.has(message.id)&&typeof metadata?.turnId==='string'&&metadata.turnId)livePresentedTurnIds.current.add(metadata.turnId);}return projected;});
     };
@@ -109,6 +116,7 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
         if(terminal)break;
       }
       if(!terminal && buffer.trim() && active(id,version))dispatch(buffer);
+      if(submissionFailed)throw Object.assign(new Error('CHAT_SUBMISSION_FAILED'),{continuationRejected:preparationRejected});
     } catch(error) {if(!acknowledgedReaderStops.current.has(response))throw error;}
     finally {acknowledgedReaderStops.current.delete(response);response.cancel();if(connection.current===response)connection.current=null;}
   }
@@ -150,11 +158,11 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
     current.current={...empty(),threadId:id,recovering:true,previewing:true,unknown:true,messages:threadHistoryPreviewMessages(preview)};setState(current.current);
     await recover(id,version);
   }
-  async function send(text:string,files:UploadedFile[]=[],toolChoice:ToolChoice='auto') {
+  async function send(text:string,files:UploadedFile[]=[],toolChoice:ToolChoice='auto',tools:readonly ChatToolDescriptor[]=current.current.threadId?readThreadTools(current.current.threadId):[]) {
     const before=current.current;
     if((postLock.current===epoch.current && !before.threadId) || before.stopping || (before.threadId && claudeThreadStopPending(before.threadId)))throw new Error('CHAT_STOP_PENDING');
     if(before.unknown || before.queue.some(entry=>entry.status==='state_unknown')){update({error:'chat.inputQueue.stateUnknown'});throw new Error('CHAT_OUTCOME_UNKNOWN');}
-    const selected={...latest.current.context,currentToolChoice:toolChoice};
+    const selected={...latest.current.context,currentToolChoice:toolChoice,tools:tools.map(tool=>({...tool}))};
     const effective=selected.imFullAccessEnabled?'auto':toolChoice;
     if(before.threadId && (before.running || before.posting || before.localOwner)) {
       if(files.length){update({error:'chat.inputQueue.textOnly'});throw new Error('CHAT_INPUT_UNSUPPORTED_PAYLOAD');}
@@ -162,7 +170,7 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       const selectionVersion=selectionEpoch.current;
       const messageId=queueIds.current.get(input) ?? generateId();queueIds.current.set(input,messageId);
       try {
-        const entry=await enqueueThreadInput(before.threadId,messageId,input,effective,selected.deckId,selected.voiceId,transport);
+        const entry=await enqueueThreadInput(before.threadId,messageId,input,effective,selected.deckId,selected.voiceId,transport,selected.tools);
         if(ownsSelection(before.threadId,selectionVersion)){
           queueIds.current.delete(input);update(value=>({...value,error:null,queue:[...value.queue.filter(item=>item.message_id!==entry.message_id),entry]}));
           void refreshQueue(before.threadId).catch(()=>{});
@@ -172,14 +180,14 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
     }
     const parts:UIMessage['parts']=files.filter(file=>file.storageKey).map(file=>({type:'file',url:toFileProxyUrl(file.storageKey!),mediaType:file.mimeType,filename:file.name}));
     if(text)parts.push({type:'text',text});if(!parts.length)return;
-    return submitMessage({role:'user',parts},files,toolChoice);
+    return submitMessage({role:'user',parts},files,toolChoice,tools);
   }
-  async function submitMessage(outgoing:ChatUserMessage,files:UploadedFile[]=[],toolChoice:ToolChoice='auto') {
+  async function submitMessage(outgoing:ChatUserMessage,files:UploadedFile[]=[],toolChoice:ToolChoice='auto',tools:readonly ChatToolDescriptor[]=current.current.threadId?readThreadTools(current.current.threadId):[]) {
     const before=current.current;
     if(!outgoing.parts?.length)return;
     if((postLock.current===epoch.current&&!before.threadId)||before.stopping||(before.threadId&&claudeThreadStopPending(before.threadId)))throw Error('CHAT_STOP_PENDING');
     if(before.unknown||before.queue.some(entry=>entry.status==='state_unknown'))throw Error('CHAT_OUTCOME_UNKNOWN');
-    const selected={...latest.current.context,currentToolChoice:toolChoice},effective=selected.imFullAccessEnabled?'auto':toolChoice;
+    const selected={...latest.current.context,currentToolChoice:toolChoice,tools:tools.map(tool=>({...tool}))},effective=selected.imFullAccessEnabled?'auto':toolChoice;
     if(before.threadId)historyPreview.current?.forget(before.threadId);
     postLock.current=epoch.current;update({posting:true,error:null});
     let id=before.threadId,dispatched=false,rejected=false,submission:ClaudeThreadSubmission|undefined;const version=epoch.current;
@@ -193,7 +201,10 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       id ??= await createChatThread(selected.deckId,selected.voiceId,undefined,transport);
       if(!id)throw new Error('CHAT_THREAD_CREATE_FAILED');
       if(epoch.current!==version || !mounted.current)throw new Error('CHAT_SELECTION_CHANGED');
-      const message:UIMessage={...outgoing,id:outgoing.id??generateId(),role:'user'};
+      if(!before.threadId)rememberThreadTools(id,selected.tools);
+      const retryKey=JSON.stringify([id,outgoing.parts,files.map(file=>file.storageKey),effective,selected.tools]);
+      const message:UIMessage={...outgoing,id:outgoing.id??continuationIds.current.get(retryKey)??generateId(),role:'user'};
+      continuationIds.current.set(retryKey,message.id);
       submission=beginClaudeThreadSubmission(id,message.id);
       current.current={...current.current,threadId:id,posting:true,running:true,messages:[...current.current.messages,message]};setState(current.current);
       recovery?.rememberThread(id);
@@ -202,15 +213,17 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       const response=await stream('/api/claude-agent',{method:'POST',headers:{...browserRequestHeaders(),'Content-Type':'application/json'},body:JSON.stringify(body)});
       rejected=response.status!==200;
       await consume(id,version,response,submission);
+      continuationIds.current.delete(retryKey);
       if(active(id,version)){update({posting:false});await recover(id,version);}
     } catch(error) {
+      if(error && typeof error==='object' && 'continuationRejected' in error && error.continuationRejected===true)rejected=true;
       if(submission)observeClaudeThreadSubmission(submission,rejected || !dispatched?'rejected':'unknown');
       if(epoch.current===version && mounted.current) {
-        update({posting:false,running:dispatched && !rejected,unknown:dispatched && !rejected,error:dispatched?'chat.inputQueue.stateUnknown':'chat.history.createFailed'});
+        update({posting:false,preparing:false,running:dispatched && !rejected,unknown:dispatched && !rejected,error:rejected?'chat.continuation.failed':dispatched?'chat.inputQueue.stateUnknown':'chat.history.createFailed'});
         if(id && dispatched && !rejected)schedule(id,version);
         else if(submission)update(value=>({...value,messages:value.messages.filter(message=>message.id!==submission?.messageId)}));
       }
-      if(!dispatched || rejected)throw error;
+      throw error;
     } finally {contextPreparations.current.delete(preparation);if(postLock.current===version)postLock.current=null;}
   }
   function settleToolCall(toolCallId:string,expectedThreadId=current.current.threadId) {
@@ -284,13 +297,13 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
     const id=inputThread(entry),version=selectionEpoch.current,selected={...latest.current.context};
     await cancelInput(entry);
     const messageId=generateId();
-    try{await enqueueThreadInput(id,messageId,text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport);if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
+    try{await enqueueThreadInput(id,messageId,text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
     catch(error){if(ownsSelection(id,version)){update({editDraftRecovery:{id:messageId,text},queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
   }
   async function retryEditedInput() {
     const id=current.current.threadId,draft=current.current.editDraftRecovery;if(!id||!draft||current.current.editRetrying)return;
     const version=selectionEpoch.current,selected={...latest.current.context};update({editRetrying:true});
-    try{await enqueueThreadInput(id,draft.id,draft.text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport);if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
+    try{await enqueueThreadInput(id,draft.id,draft.text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
     catch(error){if(ownsSelection(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}}
     finally{if(ownsSelection(id,version))update({editRetrying:false});}
   }

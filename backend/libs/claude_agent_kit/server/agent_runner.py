@@ -1,3 +1,7 @@
+# [Sync] 2026-11-25: read the SDK terminal receipt after a typed assistant error before settling the turn.
+# [Sync] 2026-11-11: recognize actor-bound data-source query/schema reads before the existing network and confirmation policy.
+# [Sync] 2026-11-04: mobile_clock_audio精确列为low-sensitivity；问答表单仍收集answers，无独立工具授权提示。
+# [Sync] 2026-11-04: 音频MCP复用AskUserQuestion问答，full-access保留问答；丢弃Agent自填answers并合并原用户回答。
 # [Sync] 2026-10-25: composition may bind the exact in-process Runtime entry; default CLI resolution and Agent semantics remain unchanged.
 # [Sync] 2026-10-23: forward the bound Notion reader into the existing page Read hook.
 # [Sync] 2026-10-15: allow the three exact user memory Tools.
@@ -313,6 +317,7 @@ from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME
+from .mobile_clock_audio import MOBILE_CLOCK_AUDIO_TYPE, MOBILE_CLOCK_AUDIO_TOOL, prepare_audio_question
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
@@ -411,7 +416,7 @@ _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _INTERNAL_MCP_SERVER_NAMES: frozenset[str] = frozenset(
-    {"user", "memory", "necklace", "editor", "story_workspace", "image_gen"}
+    {"user", "memory", "necklace", "editor", "story_workspace", "image_gen", "mobile_clock_audio"}
 )
 _MCP_CONFIG_OBJECT_FIELDS: tuple[str, ...] = (
     "type",
@@ -554,6 +559,8 @@ _WORKSPACE_QUERY_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "NotebookRead",
 })
 _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
+    # App audio metadata/question tool; AskUserQuestion still collects answers.
+    MOBILE_CLOCK_AUDIO_TOOL,
     # Claude Code built-in query tools that do not accept arbitrary filesystem
     # paths. File/search tools are handled by the workspace-boundary helper.
     "TodoRead",
@@ -606,13 +613,13 @@ _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
 _NOTION_CLI_API_SEGMENT_PATTERN = r"[A-Za-z0-9_%~-]+"
 _NOTION_CLI_API_NO_DATA_ENDPOINT_RE = re.compile(
     rf"^v1/(?:"
-    rf"databases/{_NOTION_CLI_API_SEGMENT_PATTERN}|"
+    rf"(?:databases|data_sources)/{_NOTION_CLI_API_SEGMENT_PATTERN}|"
     rf"pages/{_NOTION_CLI_API_SEGMENT_PATTERN}(?:/markdown|/properties/{_NOTION_CLI_API_SEGMENT_PATTERN})?|"
     rf"blocks/{_NOTION_CLI_API_SEGMENT_PATTERN}/children"
     rf")$"
 )
 _NOTION_CLI_API_DATA_ENDPOINT_RE = re.compile(
-    rf"^v1/(?:search|databases/{_NOTION_CLI_API_SEGMENT_PATTERN}/query)$"
+    rf"^v1/(?:search|(?:databases|data_sources)/{_NOTION_CLI_API_SEGMENT_PATTERN}/query)$"
 )
 _NOTION_CLI_API_COMMAND_RE = re.compile(
     r"^[ \t]*ntn[ \t]+api[ \t]+"
@@ -1782,6 +1789,7 @@ _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
 _ANSWER_FORM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
+    MOBILE_CLOCK_AUDIO_TOOL,
 })
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
@@ -2279,6 +2287,13 @@ def _editor_mcp_stdio_config(
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
         env=_stdio_env(extra_env=trusted_env),
+    )
+
+
+def _mobile_clock_audio_mcp_stdio_config(mcp_env=None) -> McpStdioServerConfig:
+    """Audio metadata needs no broker or actor credential in the MCP child."""
+    return _user_mcp_stdio_config(
+        {}, module_name="libs.claude_agent_kit.server.mobile_clock_audio_stdio",
     )
 
 
@@ -2803,6 +2818,10 @@ def _apply_low_sensitivity_query_permission(
     falls through to frontend confirmation.
     """
 
+    # Low sensitivity removes tool authorization, while answer forms must wait
+    # for the original question callback before returning updatedInput.
+    if tool_name in _ANSWER_FORM_TOOL_NAMES:
+        return None
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
         return {
             "hookSpecificOutput": {
@@ -3154,6 +3173,12 @@ class ClaudeAgentRunner:
             if opts.allowed_tools is not None
             else _default_allowed_tools()
         )
+        if any(tool != MOBILE_CLOCK_AUDIO_TYPE for tool in opts.tools):
+            raise ValueError("Unsupported platform tool type")
+        if MOBILE_CLOCK_AUDIO_TYPE not in opts.tools:
+            allowed_tools = [tool for tool in allowed_tools if not tool.startswith("mcp__mobile_clock_audio__")]
+        elif opts.allowed_tools is None and MOBILE_CLOCK_AUDIO_TOOL not in allowed_tools:
+            allowed_tools.append(MOBILE_CLOCK_AUDIO_TOOL)
         if opts.image_generation_broker_env is not None and "mcp__image_gen__imagegen" not in allowed_tools:
             allowed_tools.append("mcp__image_gen__imagegen")
         if opts.image_generation_broker_env is not None and "mcp__image_gen__select_image_operation" not in allowed_tools:
@@ -3182,6 +3207,7 @@ class ClaudeAgentRunner:
         current_session_id: Optional[str] = None
         success = True
         run_error: Optional[Exception] = None
+        assistant_protocol_error: RuntimeError | None = None
         usage: dict[str, Optional[int]] = {}
         terminal_stop_reason: Optional[str] = None
         result_message_count = 0
@@ -3298,6 +3324,11 @@ class ClaudeAgentRunner:
                 tool_name,
                 original_tool_input,
             )
+            if tool_name == MOBILE_CLOCK_AUDIO_TOOL:
+                try:
+                    tool_input = prepare_audio_question(tool_input)
+                except ValueError:
+                    return _unattended_pre_tool_deny("MOBILE_AUDIO_INPUT_INVALID", "音频信息无效，无法询问用户")
             tool_call_id = tool_use_id or str(uuid4())
             pending_tool_calls[tool_call_id] = {
                 "tool_name": tool_name,
@@ -3509,9 +3540,12 @@ class ClaudeAgentRunner:
                         # Note: tool_input originates from Claude (LLM-generated),
                         # not from external HTTP requests, so spreading it is safe.
                         has_answers = bool(confirmation_result.get("answers"))
+                        if tool_name == MOBILE_CLOCK_AUDIO_TOOL and not has_answers:
+                            return _unattended_pre_tool_deny("MOBILE_AUDIO_ANSWER_REQUIRED", "尚未取得用户的播放选择")
                         if has_answers and tool_name in (
                             "AskUserQuestion",
                             "mcp__user__ask_user",
+                            MOBILE_CLOCK_AUDIO_TOOL,
                             # Animation event tool — merge frontend answers per §9.5
                             "mcp__user__touch_animation",
                         ):
@@ -3596,6 +3630,11 @@ class ClaudeAgentRunner:
                 tool_name,
                 dict(input_data or {}),
             )
+            if tool_name == MOBILE_CLOCK_AUDIO_TOOL:
+                try:
+                    input_data = prepare_audio_question(input_data)
+                except ValueError:
+                    return PermissionResultDeny(message="音频信息无效，无法询问用户")
             is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
             if opts.tool_approval_policy is not None and opts.tool_approval_policy.deny_unresolved:
                 code = ("SCHEDULE_NETWORK_APPROVAL_REQUIRED" if is_sandbox_network_ask
@@ -3665,12 +3704,15 @@ class ClaudeAgentRunner:
                 and confirmation_result.get("approved") is True
             ):
                 updated_input: dict[str, Any] = dict(input_data or {})
+                if tool_name == MOBILE_CLOCK_AUDIO_TOOL and not confirmation_result.get("answers"):
+                    return PermissionResultDeny(message="尚未取得用户的播放选择")
                 # Mirror PreToolUse step ⑦: merge frontend answers into the
                 # input for AskUserQuestion-style tools so Claude receives
                 # the collected responses.
                 if confirmation_result.get("answers") and tool_name in (
                     "AskUserQuestion",
                     "mcp__user__ask_user",
+                    MOBILE_CLOCK_AUDIO_TOOL,
                     "mcp__user__touch_animation",
                 ):
                     updated_input = {
@@ -3887,6 +3929,9 @@ class ClaudeAgentRunner:
                 "Story Workspace MCP enabled with trusted actor/thread/run context."
             )
 
+        if MOBILE_CLOCK_AUDIO_TYPE in opts.tools and MOBILE_CLOCK_AUDIO_TOOL in effective_allowed_tools:
+            mcp_servers[MOBILE_CLOCK_AUDIO_TYPE] = _mobile_clock_audio_mcp_stdio_config()
+
         # Resources connectors are actor-owned and synchronized by the
         # application service on every turn. Inject them through the public
         # SDK option, but never add wildcard allowed_tools: all remote tool
@@ -4049,6 +4094,8 @@ class ClaudeAgentRunner:
                 if callable(close_query):
                     query_scope.push_async_callback(close_query)
                 async for message in query_stream:
+                    if assistant_protocol_error is not None and not isinstance(message, ResultMessage):
+                        continue
                     messages.append(message)
 
                     # Track session ID
@@ -4063,10 +4110,9 @@ class ClaudeAgentRunner:
                     # Raw message callback
                     await _call(callbacks.on_message, message)
 
-                    # The SDK can report terminal protocol failures as an
-                    # AssistantMessage.error without raising from query_stream.
-                    # Treat that typed error exactly like a raised SDK failure so
-                    # the existing on_error -> SSE error channel is preserved.
+                    # A typed error can precede the SDK's ResultMessage. Keep
+                    # reading that one query for the terminal receipt without
+                    # projecting more assistant content from the failed turn.
                     if isinstance(message, AssistantMessage):
                         assistant_error = getattr(message, "error", None)
                         if assistant_error:
@@ -4076,11 +4122,12 @@ class ClaudeAgentRunner:
                                 if provider_detail
                                 else ""
                             )
-                            raise RuntimeError(
+                            assistant_protocol_error = RuntimeError(
                                 "Claude SDK AssistantMessage error: "
                                 f"{str(assistant_error).strip() or 'unknown'}"
                                 f"{detail_suffix}"
                             )
+                            continue
 
                     # Route to typed handler
                     await self._process_message(
@@ -4124,6 +4171,8 @@ class ClaudeAgentRunner:
                             and raw_duration_ms >= 0
                         ):
                             result_duration_ms = int(raw_duration_ms)
+            if assistant_protocol_error is not None:
+                raise assistant_protocol_error
             full_text = "".join(text_parts)
 
             if terminal_stop_reason == "max_tokens":
@@ -4218,7 +4267,9 @@ class ClaudeAgentRunner:
             # wrapped so SSE serialisation and ``isinstance(_, Exception)``
             # consumers downstream do not choke on them.
             # ----------------------------------------------------------
-            if _BASE_EXCEPTION_GROUP_TYPES and isinstance(
+            if assistant_protocol_error is not None:
+                run_error = assistant_protocol_error
+            elif _BASE_EXCEPTION_GROUP_TYPES and isinstance(
                 exc, _BASE_EXCEPTION_GROUP_TYPES
             ):
                 run_error = Exception(_format_exception_message(exc))
@@ -4286,7 +4337,8 @@ class ClaudeAgentRunner:
                 except Exception:  # noqa: BLE001
                     pass
         protocol_completed = (
-            result_message_count == 1
+            assistant_protocol_error is None
+            and result_message_count == 1
             and result_message_subtype == "success"
             and result_message_is_error is False
             and terminal_stop_reason in {None, "end_turn", "stop_sequence"}

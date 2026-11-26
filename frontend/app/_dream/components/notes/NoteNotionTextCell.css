@@ -1,0 +1,45 @@
+/* [Input] Writing typography, paper and focus tokens.
+   [Output] Borderless article references, clickable prose and a full-width writing row.
+   [Pos] Writing TextCell display only. */
+.note-article-cell, .note-article-source { position: relative; min-width: 0; }
+.note-article-cell[data-compact] > .note-article-source {
+  position: absolute; inset: 0 0 auto; height: 1px; overflow: hidden;
+  opacity: 0; pointer-events: none;
+}
+.note-article-projection {
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-body);
+  font: var(--writing-font-size, 18px)/var(--writing-line-height, 1.8) 'Excalifont', 'Xiaolai', Georgia, serif;
+}
+.note-article-cell[data-compact] .note-article-projection { cursor: text; }
+.note-article {
+  display: inline-flex; align-items: center; max-width: 100%; vertical-align: middle;
+  border-radius: 6px; color: var(--color-text-primary); font: 500 .875rem/1.4 var(--font-family-ui, sans-serif);
+}
+.note-article button, .note-article-edit, .note-article-open, .note-article-original {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem;
+  padding: 0 .4rem; border: 0; border-radius: 6px; background: transparent;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.note-article-read { min-width: 0; gap: .4rem; }
+.note-article-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: .2em; }
+.note-article-mark { font: bold 1rem/1 Georgia, serif; }
+.note-article-open { min-width: 2.75rem; text-decoration: none; }
+.note-article-edit {
+  width: 100%; justify-content: flex-start; padding-inline: 0; cursor: text;
+  color: var(--color-text-secondary); font: inherit;
+}
+.note-article-original { font: .875rem var(--font-family-ui, sans-serif); }
+.note-article :is(button, a):hover { background: var(--color-bg-hover); }
+.note-article-cell :is(button, a):focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: -2px; }
+
+.note-article-row {
+  display: block; min-height: 1lh; overflow-wrap: anywhere; cursor: text;
+}
+.note-article-input-wrap { position: relative; min-width: 0; }
+.note-article-input-wrap > span { display: block; min-height: 1lh; visibility: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-article-row-input {
+  position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+  font: inherit; letter-spacing: inherit; color: inherit; caret-color: currentColor;
+  background: transparent; white-space: pre-wrap; overflow-wrap: anywhere;
+}

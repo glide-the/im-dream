@@ -1,3 +1,6 @@
+// [Sync] 2026-11-12: add explicit shared-database link publication with the original native clipboard.
+import {useShareLink} from '../../hooks/useShareLink';
+import {publishChatShare} from '../../api/externalShareApi';
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Input] Current original Chat snapshot, full-history HTTP and the local DOM export leaf.
 // [Output] Native share controls, original partial/final previews and system PNG export with scoped file cleanup.
@@ -35,6 +38,7 @@ export default forwardRef<NativeChatShareHandle,Props>(function ChatShareSurface
  const observedThread=useRef(threadId);
  const latest=useRef({threadId,title,availability,snapshot,resources,transport,onSessionExpired,t,theme,language:i18n.resolvedLanguage??i18n.language});latest.current={threadId,title,availability,snapshot,resources,transport,onSessionExpired,t,theme,language:i18n.resolvedLanguage??i18n.language};
  const [open,setOpen]=useState(false),[exporting,setExporting]=useState(false),[downloading,setDownloading]=useState(false),[failed,setFailed]=useState(false),[preview,setPreview]=useState<Preview|null>(null),[progress,setProgress]=useState<{done:number;total:number}|null>(null);
+ const link=useShareLink({sourceId:open?(threadId??''):'',origin,requirePublicOrigin:true,transport,onSessionExpired,copyText:text=>runtime.copyText(text),create:(key,signal)=>publishChatShare(threadId!,key,transport,signal)});
  let url='';try{url=chatImageDocumentUrl(origin);}catch{/* Runtime readiness remains the origin owner. */}
  function post(message:ChatImageCommand){view.current?.injectJavaScript(`window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(JSON.stringify(message))}}));true;`);}
  function valid(owner:Job){return active.current&&job.current===owner&&latest.current.threadId===owner.threadId;}
@@ -57,7 +61,7 @@ export default forwardRef<NativeChatShareHandle,Props>(function ChatShareSurface
   }catch(error){if(valid(owner)){if(error instanceof ClaudeThreadHydrationUnknownError&&error.httpStatus===401)latest.current.onSessionExpired?.();exportingRef.current=false;setExporting(false);setFailed(true);setOpen(true);}}
  }
  function close(){setOpen(false);if(!exportingRef.current&&!downloadingRef.current)reset();}
- useImperativeHandle(ref,()=>({open(){Keyboard.dismiss();setOpen(true);if(!exportingRef.current&&!previewRef.current&&!downloadingRef.current)void start();}}));
+ useImperativeHandle(ref,()=>({open(){Keyboard.dismiss();setOpen(true);}}));
  useEffect(()=>{active.current=true;return()=>{active.current=false;job.current?.controller.abort();job.current=null;for(const read of imageReads.current)read.abort();if(previewRef.current)releaseNativeFiles(previewRef.current.images.map(file=>file.id));previewRef.current=null;};},[]);
  useEffect(()=>{if(observedThread.current===threadId)return;observedThread.current=threadId;reset();setOpen(false);},[threadId]);
  async function importImages(images:ChatImagePNG[],owner:Job){
@@ -116,8 +120,8 @@ export default forwardRef<NativeChatShareHandle,Props>(function ChatShareSurface
     {preview?<ScrollView style={[styles.previewScroll,{maxHeight:Math.min(height*0.56,416),backgroundColor:colors['color-bg-app'],borderColor:colors['color-border-paper']}]} contentContainerStyle={styles.preview} accessibilityLabel={t('chat.share.previewTitle')}>
      {preview.images.map(file=><Image key={file.id} source={{uri:file.uri}} accessibilityLabel={t('chat.share.previewTitle')} style={{width:imageWidth,height:imageWidth*file.height/file.width}} resizeMode="contain"/>)}
     </ScrollView>:<View style={styles.content}>{exporting?<><ActivityIndicator color={colors['color-text-muted']}/><InkLabel style={text}>{t('chat.share.preparingPreview')}</InkLabel></>:<>
-     {button(t('chat.share.copyLink')+' · '+t('chat.share.comingSoon'),()=>{},true)}
-     {button(t('chat.share.exportImage'),retry,!threadId||!url)}<InkLabel style={muted}>{t('chat.share.exportImageHint')}</InkLabel>
+     {button(t(link.busy?'noteShare.creating':link.copied?'noteShare.copied':'chat.share.copyLink'),()=>void link.copy(),link.busy||!threadId)}<InkLabel style={muted}>{t('externalShare.linkHint')}</InkLabel>{link.url?<InkLabel selectable style={text}>{link.url}</InkLabel>:null}{link.error?<InkLabel accessibilityRole="alert" style={{color:colors['color-state-error']}}>{link.error}</InkLabel>:null}
+     {button(t('chat.share.exportImage'),retry,!threadId||!url||link.busy)}<InkLabel style={muted}>{t('chat.share.exportImageHint')}</InkLabel>
     </>}</View>}
     {preview?<InkLabel numberOfLines={1} style={[muted,{fontSize:11.52,marginTop:8.8}]}>{preview.fileName+(!preview.partial&&preview.images.length>1?' · '+t('chat.share.partsInfo',{count:preview.images.length}):'')}</InkLabel>:null}
     {exporting&&progress?<View accessibilityRole="progressbar" accessibilityValue={{min:0,max:progress.total,now:progress.done}} style={styles.progress}><InkLabel style={muted}>{t('chat.share.rendering')+' '+Math.round(progress.done/progress.total*100)+'%'}</InkLabel></View>:null}

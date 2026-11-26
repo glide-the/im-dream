@@ -1,7 +1,9 @@
+# [Sync] 2026-11-18: package the dependency-optional shared observability facade.
 #!/usr/bin/env python3
 # [Input] Prepared, hash-pinned Python dependencies and Xcode's target build settings.
 # [Output] Target-specific Python sources and signed extension frameworks in the app bundle.
 # [Pos] Xcode resource phase; copies an explicit backend source list without credentials or data.
+# [Sync] 2026-11-16: include the Admin external-sharing contract required by the startup import graph.
 # [Sync] 2026-10-25: bundle production business routers, DTO dependencies and their original prompts.
 # [Sync] 2026-10-25: retain the original backend Python package graph while excluding tests, credentials and runtime data.
 # [Sync] 2026-10-25: retain both original memory policy assets used by the normal Chat turn preparation.
@@ -58,7 +60,7 @@ for name in ("mobile_runtime/__init__.py", "mobile_runtime/ios.py", "mobile_runt
              "routers/sessions.py", "routers/reports.py", "routers/pictures.py", "routers/friends.py",
              "routers/deck_versions.py", "routers/memory.py", "routers/oauth.py", "routers/device_oauth.py",
              "routers/voices.py", "services/deck/__init__.py", "services/deck/defaults.py",
-             "config.py", "session_events.py", "chat_message_projection.py", "voice_projection.py",
+             "config.py", "observability.py", "session_events.py", "chat_message_projection.py", "voice_projection.py",
              "models/workflow_run.py", "models/workflow_preflight.py", "models/deck_version.py", "libs/__init__.py",
              "story_workspace/__init__.py", "story_workspace/contracts.py",
              "services/story_workspace/dream_launch_application_service.py",
@@ -77,7 +79,7 @@ for directory in ("mobile_runtime", "routers", "services", "claude_agent", "clau
         destination = APP / "app" / source.relative_to(REPO / "backend")
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-for name in ("memory_contract.json", "memory_contract_v2.json"):
+for name in ("memory_contract.json", "memory_contract_v2.json", "external_share_contract.json"):
     shutil.copy2(REPO / "backend/services/admin_data" / name, APP / "app/services/admin_data" / name)
 for name in ("policy.json", "policy-v2.json"):
     shutil.copy2(REPO / "backend/services/memory" / name, APP / "app/services/memory" / name)

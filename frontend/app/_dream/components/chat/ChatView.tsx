@@ -1,6 +1,12 @@
+// [Sync] 2026-11-13: bind draft tool selection to the newly created Thread before its first queued send.
+// [Sync] 2026-11-13: pass isVisible to landing and existing-Thread composers for menu dismissal and model rereads.
+// [Sync] 2026-11-13: supply original current/legacy Agent projection and selection to the combined Agent/tools composer trigger.
+// [Sync] 2026-11-12: expose explicit AI conversation link publication beside the original image option.
+// [Sync] 2026-11-09: mount the existing composer during history reconciliation and preserve its draft through loading and retry.
 // [Sync] 2026-11-03: retain saved-prose previews across Thread selection and keep runtime controls behind fresh reconciliation.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-10-28: hydrate the Agent selector with one shared Deck/Agent catalog request.
+// [Sync] 2026-11-19: enable Thread activity and plugin metadata after history and runtime restoration.
 // [Sync] 2026-10-07: share scheduled-task detail navigation with activity and refresh relations after a settled turn.
 // [Sync] 2026-10-27: extract the unchanged landing action translation model for native reuse; DOM layout and handlers stay intact.
 // [Sync] 2026-10-28: share original history date grouping/labels with native; retain the inline Web list and callbacks.
@@ -117,6 +123,7 @@ import './ChatView.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
+import {rememberThreadTools} from '../../hooks/useChatToolSelection';
 import ChatPanel, { type ChatPanelHistoryPage, type ChatPanelRecoverySnapshot } from './ChatPanel';
 import ChatMessageList from './ChatMessageList';
 import {createThreadHistoryPreview,threadHistoryPreviewMessages} from './threadHistoryPreview';
@@ -142,14 +149,16 @@ import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ChatShareDialog from './ChatShareDialog';
+import ShareLinkOption from '../sharing/ShareLinkOption';
+import {publishChatShare} from '../../api/externalShareApi';
 import { renderThreadImage, downloadThreadImage, releaseThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
 import { getChatExportSnapshot } from '../../lib/chat-export-registry';
 import { IconBell, IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconSparkles, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
-import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
+import type { ActiveChatVoice, ChatToolDescriptor, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { listDecksWithVoices, type Deck } from '../../api/voiceApi';
-import DeckChatSelector from '../deck/DeckChatSelector';
+
 import PluginReceiptBadge from './PluginReceiptBadge';
 import {
   claudeThreadHydrationRetryDelayMs,
@@ -317,10 +326,10 @@ function ChatViewContent({
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
+  const [queuedTools,setQueuedTools]=useState<readonly ChatToolDescriptor[]>([]);
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
-  // This ref belongs to ChatView, which remains mounted while the child ChatPanel
-  // is temporarily removed for active-thread history loading. A ChatPanel-local
-  // useRef resets during that remount and cannot provide request-level de-duplication.
+  // ChatView owns the queued-send claim across keyed Thread panel lifecycles.
+  // A child-local ref resets on remount and cannot provide request-level de-duplication.
   const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
@@ -374,6 +383,7 @@ function ChatViewContent({
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareLinkBusy, setShareLinkBusy] = useState(false);
   const [shareExporting, setShareExporting] = useState(false);
   const [shareExportFailed, setShareExportFailed] = useState(false);
   const [sharePreview, setSharePreview] = useState<RenderedThreadImage | null>(null);
@@ -686,6 +696,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
     void reloadThreads();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedThreadId, requestedThreadNonce]);
@@ -713,6 +724,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
   }, [availableDecks, requestedAgentId, requestedDeckId, requestedDeckNonce]);
 
   useEffect(() => {
@@ -727,6 +739,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
     setScheduledTaskDetail(null);
   }, [requestedInput, requestedInputNonce]);
 
@@ -870,7 +883,9 @@ function ChatViewContent({
     prompt: string,
     attachments: Attachment[] = [],
     toolChoice: ToolChoice = 'auto',
+    tools: readonly ChatToolDescriptor[] = [],
   ) => {
+    rememberThreadTools(threadId,tools);
     freshQueuedThreadIdRef.current = threadId;
     setThreadMessages([]);
     setInitialSettledToolCallIds(new Set<string>());
@@ -885,6 +900,7 @@ function ChatViewContent({
     setQueuedPrompt(prompt);
     setQueuedAttachments(attachments);
     setQueuedToolChoice(toolChoice);
+    setQueuedTools(tools.map(tool=>({...tool})));
     setQueuedPromptNonce((value) => value + 1);
     void reloadThreads();
   }, [onLandingTabChange, reloadThreads]);
@@ -900,6 +916,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
     return true;
   }, []);
 
@@ -907,6 +924,7 @@ function ChatViewContent({
     message: string,
     uploadedFiles: UploadedFile[] = [],
     toolChoice: ToolChoice = 'auto',
+    tools: readonly ChatToolDescriptor[] = [],
   ) => {
     if (isCreatingThread) return;
 
@@ -919,17 +937,18 @@ function ChatViewContent({
       return;
     }
 
-    queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
+    queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice, tools);
   }, [isCreatingThread, queuePromptForThread, selectedAgentId, selectedDeckId, t]);
 
   const startSelectedDeckInteraction = useCallback(async (
     message: string,
     uploadedFiles: UploadedFile[] = [],
     toolChoice: ToolChoice = 'auto',
+    tools: readonly ChatToolDescriptor[] = [],
   ) => {
     if (isReactNativeHost() && selectedDeck?.agent_type === 'dream') return;
     if (selectedDeck?.agent_type !== 'dream') {
-      await startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
+      await startThreadWithQueuedSend(message, uploadedFiles, toolChoice, tools);
       return;
     }
     if (!selectedAgentId) {
@@ -975,6 +994,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
     setThreadSidebarOpen(false);
     setThreadSearchOpen(false);
     onLandingTabChange('history');
@@ -1006,6 +1026,7 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+    setQueuedTools([]);
   }, [activeThreadId, historyPreview, onLandingTabChange]);
 
   const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
@@ -1153,6 +1174,7 @@ function ChatViewContent({
       setQueuedPrompt('');
       setQueuedAttachments([]);
       setQueuedToolChoice('auto');
+      setQueuedTools([]);
     }
     setThreads((prev) => prev.filter((t) => t.id !== threadId));
     removeActivityChat(threadId);
@@ -1256,6 +1278,8 @@ function ChatViewContent({
               deck={availableDecks.find((deck) => deck.id === badgeDeckId)}
               onSelectAgent={activeThreadId ? setSelectedAgentId : undefined}
               threadId={activeThreadId ?? null}
+                active={isVisible && !isLoadingMessages && (activeThreadId === null || threadMessages !== null)}
+                observePacking={initialRuntimeRunning}
             />
             {/* 新建对话 */}
             <button
@@ -1276,8 +1300,9 @@ function ChatViewContent({
               style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: threadSidebarOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
               <IconBell style={{ width: '1.1rem', height: '1.1rem' }} />
             </button>
-            {activeThreadId ? (
+            {isVisible && activeThreadId && !isLoadingMessages && threadMessages !== null ? (
               <PlanButton
+                key={activeThreadId}
                 threadId={activeThreadId}
                 scheduledRefreshKey={scheduledActivityRevision}
                 onOpenScheduledTask={openScheduledTask}
@@ -1348,9 +1373,9 @@ function ChatViewContent({
                     <button
                       type="button"
                       onClick={() => {
-                        // 点分享直接触发生成 — 弹窗立即进入预览流程（先出头部一段）。
+                        // 分享先展示链接与图片两个明确选项。
                         handleOpenShareDialog();
-                        void handleExportShareImage();
+
                         setMoreMenuOpen(false);
                       }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
@@ -1366,24 +1391,35 @@ function ChatViewContent({
 
           <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {activeThreadId && landingTab === 'history' && threadMessages === null ? (
-                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                  {messageHydrationError ? (
-                    <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
-                      <p>{t('chat.historyTurn.initialLoadFailed')}</p>
-                      <button type="button" onClick={() => setThreadReloadNonce((value) => value + 1)}>
-                        {t('chat.historyTurn.retry')}
-                      </button>
-                    </div>
-                  ) : previewMessages.length===0 ? <SkeletonList rows={3} /> : null}
-                  {previewMessages.length>0?<div aria-busy={isLoadingMessages} data-testid="chat-history-preview" style={{overflowY:'auto',flex:1,minHeight:0}}>
-                    <ChatMessageList messages={previewMessages} threadId={activeThreadId} isLoading={false} readonly addToolResult={()=>{}} historicalMessageIds={new Set(previewMessages.map(message=>message.id))}/>
-                  </div>:null}
-                </div>
-              ) : activeThreadId && landingTab === 'history' ? (
+              {activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
+                  active={isVisible}
                   key={activeThreadId}
                   threadId={activeThreadId}
+                  historyLoadingContent={threadMessages === null ? (
+                    <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      {messageHydrationError ? (
+                        <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
+                          <p>{t('chat.historyTurn.initialLoadFailed')}</p>
+                          <button type="button" onClick={() => setThreadReloadNonce((value) => value + 1)}>
+                            {t('chat.historyTurn.retry')}
+                          </button>
+                        </div>
+                      ) : previewMessages.length === 0 ? <SkeletonList rows={3} /> : null}
+                      {previewMessages.length > 0 ? (
+                        <div aria-busy={isLoadingMessages} data-testid="chat-history-preview" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+                          <ChatMessageList
+                            messages={previewMessages}
+                            threadId={activeThreadId}
+                            isLoading={false}
+                            readonly
+                            addToolResult={() => {}}
+                            historicalMessageIds={new Set(previewMessages.map(message => message.id))}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : undefined}
                   initialMessages={threadMessages ?? undefined}
                   readRefreshNonce={catalogRefresh}
                   isLoading={isLoadingMessages}
@@ -1400,6 +1436,7 @@ function ChatViewContent({
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}
                   queuedToolChoice={queuedToolChoice}
+                  queuedTools={queuedTools}
                   queuedPromptNonce={queuedPromptNonce}
                   claimQueuedPrompt={claimQueuedPrompt}
                   inputPlaceholder={`Ask ${BRAND_NAME}…`}
@@ -1426,6 +1463,7 @@ function ChatViewContent({
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
                   voiceId={selectedAgentId}
+                  agentSelection={{decks:availableDecks.filter(deck=>deck.id===badgeDeckId),selectedAgentId:threadVoiceEntry?.voice.id??selectedAgentId,allowNone:false,onChange:selection=>{if(selection)setSelectedAgentId(selection.agentId);},loading:isLoadingDecks,error:deckLoadError}}
                   onConversationStart={() => {
                     historyPreview.forget(activeThreadId);
                     setHasConversationStarted(true);
@@ -1442,28 +1480,20 @@ function ChatViewContent({
                     ) : null}
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
+                        active={isVisible}
                         deckId={selectedDeckId}
                         workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
                         prefill={requestedInput ?? requestedDeckInput}
                         prefillNonce={requestedInputNonce ?? requestedDeckNonce}
-                        onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
-                          void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
+                        onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto', tools = []) => {
+                          void startSelectedDeckInteraction(message, uploadedFiles, toolChoice, tools);
                         }}
                         placeholder={`Ask ${BRAND_NAME}…`}
                         disabled={isCreatingThread || dreamLaunch.isLaunching}
                         loading={isCreatingThread || dreamLaunch.isLaunching}
-                        contextControl={(
-                          <DeckChatSelector
-                            decks={availableDecks}
-                            selectedAgentId={selectedAgentId}
-                            onChange={(selection) => {
-                              setSelectedDeckId(selection?.deckId);
-                              setSelectedAgentId(selection?.agentId);
-                            }}
-                            loading={isLoadingDecks}
-                            error={deckLoadError}
-                          />
-                        )}
+                        agentSelection={{
+                          decks:availableDecks,selectedAgentId,onChange:selection=>{setSelectedDeckId(selection?.deckId);setSelectedAgentId(selection?.agentId);},loading:isLoadingDecks,error:deckLoadError,
+                        }}
                         mode="full"
                       />
                     </div>
@@ -1868,11 +1898,13 @@ function ChatViewContent({
         /> : null}
 
         <ChatShareDialog
+          manageFocus
           open={shareDialogOpen}
+          linkOption={<ShareLinkOption key={activeThreadId ?? 'none'} sourceId={activeThreadId ?? ''} onBusyChange={setShareLinkBusy} disabled={!activeThreadId || shareExporting || shareDownloading} create={(key, signal) => publishChatShare(activeThreadId!, key, fetch, signal)}/>}
           threadTitle={threads.find((thread) => thread.id === activeThreadId)?.title ?? null}
           exporting={shareExporting}
           exportFailed={shareExportFailed}
-          canExport={Boolean(activeThreadId)}
+          canExport={Boolean(activeThreadId) && !shareLinkBusy}
           preview={sharePreview}
           downloading={shareDownloading}
           progress={shareProgress}

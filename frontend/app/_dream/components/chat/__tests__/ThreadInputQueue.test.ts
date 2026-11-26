@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: capture each queue submission tool descriptor list and explicit empty choices.
 // [Input] Production Thread input queue browser adapter and its persisted status DTO.
 // [Output] Verify guide eligibility, stable message identity, revision and Browser session policy.
 // [Pos] Provider-free Chat input queue state and transport contract regression.
@@ -130,4 +131,13 @@ test('queue reads forward caller cancellation and preserve the AbortError', asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test('queue requests carry each submitted MCP selection without inheriting the previous request',async()=>{
+  const bodies:Record<string,unknown>[]=[];
+  const transport:typeof fetch=async(_input,init)=>{bodies.push(JSON.parse(String(init?.body)));return Response.json(entry);};
+  await enqueueThreadInput('owned-thread','stable-message','one','auto',null,null,transport,[{type:'mcp',server_name:'research'}]);
+  await enqueueThreadInput('owned-thread','stable-message','two','auto',null,null,transport,[]);
+  expect(bodies.map(body=>body.tools)).toEqual([[{type:'mcp',server_name:'research'}],[]]);
 });

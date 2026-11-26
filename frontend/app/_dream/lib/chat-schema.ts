@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: type public per-message platform and managed MCP selections.
 // [Sync] 2026-10-12: type closed server-owned contextUsage alongside compaction state.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Input] Consume AI SDK message and usage types for chat request/metadata contracts.
@@ -33,6 +34,9 @@ export const DEFAULT_CHAT_MODEL: ChatModel = {
 
 export type ToolChoice = 'auto' | 'none' | 'manual';
 
+/** Per-message selections; managed MCP names resolve through authenticated server-owned connections. */
+export type ChatToolDescriptor = {type:'mobile_clock_audio'} | {type:'mcp';server_name:string};
+
 export type ChatApiSchemaRequestBody = {
   id: string;
   /** Parent Deck provides the selected Agent's plugin/runtime context. */
@@ -43,6 +47,7 @@ export type ChatApiSchemaRequestBody = {
   message: UIMessage;
   chatModel?: ChatModel;
   toolChoice?: ToolChoice;
+  tools?: readonly ChatToolDescriptor[];
   attachments?: ChatAttachment[];
   systemPrompt?: string;
   allowedMcpServers?: Record<string, unknown>;

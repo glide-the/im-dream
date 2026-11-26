@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: align resource heading and connect action with the reviewed card UI; modal submit keeps its original label.
 // [Input] Running frontend entry point plus production-shaped intercepted Claude MCP and boot API fixtures.
 // [Output] Verify managed-DB Resources → Configure → automatic inventory → OAuth → revision-aware Update → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
@@ -692,9 +693,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
 
   await expect(page.getByRole('heading', { name: '资源链接', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'MCP工具连接' })).toBeVisible();
   await expect(page.getByLabel('MCP 服务名称')).toHaveCount(0);
-  await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+  await page.getByRole('button', { name: '连接工具', exact: true }).click();
   const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
   await expect(addDialog).toBeVisible();
   await expect(addDialog.getByLabel('MCP 服务名称')).toBeFocused();
@@ -807,7 +808,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.setViewportSize({ width: 390, height: 520 });
   await expect(serverCard).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
-  await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+  await page.getByRole('button', { name: '连接工具', exact: true }).click();
   const narrowAddDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
   await expect(narrowAddDialog).toBeVisible();
   const narrowDialogBox = await narrowAddDialog.boundingBox();
@@ -820,7 +821,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-add-dialog-narrow.png' });
   await page.keyboard.press('Escape');
   await expect(narrowAddDialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '添加 MCP 服务', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: '连接工具', exact: true })).toBeFocused();
   await page.setViewportSize({ width: 390, height: 760 });
   await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-resources-narrow.png' });
 

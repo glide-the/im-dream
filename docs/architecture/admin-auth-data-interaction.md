@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-19: Web使用OAuth Bearer、标签页续期与退出；原生Cookie合同独立保留。 -->
 <!-- [Sync] 2026-11-03: Kastention设计目录及文件名迁移；同步文档引用，业务定义与执行行为保持。 -->
 <!-- [Sync] 2026-09-17: close Deck detail empty/raw legacy Memory projection parity. -->
 <!-- [Sync] 2026-09-16: require an actor/Thread/Run-bound Admin owner for every production Agent turn and remove Service DB fallbacks. -->
@@ -41,7 +42,15 @@
 <!-- [Sync] 2026-09-17: bind shared Claude plugin artifacts to one explicit deployment root across Dream checkouts. -->
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
+<!-- [Sync] 2026-11-15: 请求性能与业务聚合评审独立归档，修正Admin规范的失效worktree链接，保留当前协议与原历史正文。 -->
+
 # Dream / Admin 认证与数据交互
+
+<!-- [Sync] 2026-11-16: P0 目录批量查询与错误归属已落入源码，技术回执归执行记录。 -->
+
+2026-11-16 的 P0 实现见[执行记录](../exec/admin-capability-performance-20261116.md)：Admin 使用独立 data 连接批量校验；Dream 客户端统一维护目录状态，按明确 capability/schema 错误失效，权限、冲突与普通业务传输错误保留健康目录。原 HTTP、DTO、写 request ID 与 receipt 合同保持。
+
+2026-11-15的请求与查询整理见[专项评审](admin-request-boundary-review-20261115.md)：已核对实际目录检查次数、错误触发刷新、共享锁及Agent准备链；优化建议与真实耗时证据分别记录。下文保留原认证、权限及数据所有权合同。
 
 ## 现行实现边界（2026-09-16）
 
@@ -166,7 +175,7 @@ Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 autho
 
 ## 目标与边界
 
-[Admin唯一规范](/Users/dmeck/.codex/worktrees/729f/ink-admin-memory/docs/architecture/admin-dream-auth-data-contract.md)定义API/DTO/operation/capability。Dream仅消费确切DTO并用Pydantic严格校验；Admin Request/Response DTO → domain service → typed repository → Drizzle ORM，ORM实体与公开DTO显式投影分离。不能把database函数RPC、PostgresRow、表列模型或远程逐statement transaction包装为HTTP。每个原事务组合变为明确业务操作，保留原公开Dream DTO/状态。
+[Admin唯一规范](/Users/dmeck/project/ink-admin-memory/docs/architecture/admin-dream-auth-data-contract.md)定义API/DTO/operation/capability。Dream仅消费确切DTO并用Pydantic严格校验；Admin Request/Response DTO → domain service → typed repository → Drizzle ORM，ORM实体与公开DTO显式投影分离。不能把database函数RPC、PostgresRow、表列模型或远程逐statement transaction包装为HTTP。每个原事务组合变为明确业务操作，保留原公开Dream DTO/状态。
 
 Next页面、FastAPI编排、Agent Runtime、Runner/ThreadFactory/service/EventBus/SSE、turn/resume/cancel、资源admission算法/比较/顺序与既有lease不改。共享FS仍Dream执行规范路径操作，Admin持有metadata与数据权限。Dream无生产PG凭据/连接库/SQL/pool/UOW/DDL路径；独立importer/技术fixture不得自动成为runtime依赖。
 
@@ -359,11 +368,13 @@ Admin `user-profile.current` 的闭集输入为空，输出仅当前调用主体
 
 ## BFF API 请求规则
 
-Next运行时auth与API Route Handler接入同一私有BFF owner，旧generic API/auth/OAuth rewrites已移除。Browser handle cookie存在时只解析该handle，非法、重复或空cookie直接401，不采用附带Bearer；所有Browser写须exact Origin与handle-bound CSRF。无handle cookie的Device/native请求只接受显式OAuth Bearer，Python验证Admin签名/scope/principal；Origin存在时仍须exact match。请求Cookie、服务/actor覆盖头、代理身份头及响应cookie/renewal credential不转发；URL token/access_token拒绝400。共享HTTP transport复用原Claude代理body/abort/SSE flush，不新增parser/EventBus。Browser state与显式MCP Apps已接同一session/CSRF owner；候选源码与技术构建并非正常部署或真实业务证明。
+Next auth与API Route Handler共用原认证owner。显式Web/native Bearer优先于遗留Cookie；Web使用`credentials: omit`，Python继续执行签名、scope与principal校验。原生Cookie-only请求继续验证handle，写操作要求exact Origin与handle-bound CSRF。代理剥离Cookie、私有service/actor与代理身份覆盖头，token/access_token URL参数返回400；body、AbortSignal与SSE flush沿原transport处理。Node Apps共享相同Bearer选择和原资源校验。
+
+Web callback使用原state/issuer/PKCE交易与Admin公开code grant；Web refresh/logout使用同源JSON刷新凭据和Admin公开token/revoke。公开用户通过Bearer principal/profile读取。详细时序、凭据存放、失败恢复及验收见[Web Bearer认证](../design/web-bearer-auth.md)；[迁移前交互原文](history/web-cookie-admin-auth-data-interaction-20261119.md)保留原Cookie设计。
 
 ## Browser 与构建阶段事实
 
-AuthContext现从同源BFF session读取strict公开user与内存CSRF；登录注册单一入口进入Admin同页email/signup/Google UI，device entry转Admin device UI。37个Browser API/hook/Chat/XHR模块与明确Node Apps adapter采用该owner，文件URL回到当前origin且去除旧token。静态旧getter/storage读取/Bearer写/options.token均0，full frontend typecheck与production Next build已通过。仍需受影响业务journey与真实模型验收；旧Dream authority已退役，其余数据域/后台grant仍未闭合。Chat initial user reserve采用下方原子user-turn命令与server-persistence委托，沿用原identity与409/unknown回执，不使用短OAuth token承担后台persist。
+AuthContext读取平台owner的strict公开用户。Next现有`.web.ts`解析选择Web内存Access、标签页Refresh及single flight；Metro选择原Cookie owner。Web同源fetch、Chat/Stop、Node Apps、FormData和媒体Blob使用Bearer；外部签名URL保留原请求。当前验证回执见[本轮执行记录](../exec/web-bearer-auth-20261119.md)，当前运行服务、真实账户/Google/模型与部署采用分别留存证据。Chat user reserve、server-persistence委托及后台授权保持原合同。
 
 ### Runtime purpose consumer 的当前边界
 

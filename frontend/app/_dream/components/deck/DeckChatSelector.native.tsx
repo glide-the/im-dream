@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: show the selected Agent icon in the compact Chat trigger; native selection ownership remains.
 // [Sync] 2026-10-29: follow the persisted native appearance and original explicit/system token palettes.
 // [Input] Original caller-owned Deck/Agent catalog, selected Agent and selection callback.
 // [Output] Native anchored Agent popup with the original grouping, prefix search and labels.
@@ -46,7 +47,7 @@ export default function DeckChatSelector({decks,selectedAgentId,onChange,loading
   return <View style={variant==='dream'?{width:'100%'}:styles.root}>
     <Pressable ref={trigger} accessibilityRole="button" accessibilityLabel={triggerLabel ?? t('chat.deck.selectAgentAria')} accessibilityHint={error || t('chat.deck.selectAgentTitle')} accessibilityState={{expanded:!!anchor,disabled:loading}} disabled={loading} onPress={open}
       style={[styles.trigger,variant==='dream'?{width:'100%'}:null,{borderColor:colors[error?'color-state-error':'color-border-paper'],backgroundColor:colors['color-bg-app']}]}>
-      <InkLabel style={{fontSize:12.16,color:colors['color-text-muted']}}>{triggerLabel ?? 'Agent'}</InkLabel>
+      {variant==='compact'&&!triggerLabel?<DeckAgentIcon name={selected?.agent.icon||'brain'} color={colors['color-text-secondary']}/>:<InkLabel style={{fontSize:12.16,color:colors['color-text-muted']}}>{triggerLabel ?? 'Agent'}</InkLabel>}
       <InkLabel numberOfLines={1} style={{maxWidth:160,flexShrink:1,fontSize:12.16,color:colors['color-text-primary']}}>{loading?t('chat.deck.loadingAgents'):selectedLabel}</InkLabel>
       <InkLabel style={{fontSize:9.6,color:colors['color-text-muted']}}>▾</InkLabel>
     </Pressable>

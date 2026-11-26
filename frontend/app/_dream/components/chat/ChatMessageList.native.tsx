@@ -1,3 +1,4 @@
+// [Sync] 2026-11-14: retain complete message part order; extract final text only for a validated historical projection.
 // [Sync] 2026-11-08: pass each message surface color to formula-containing text documents.
 // [Sync] 2026-11-03: measure viewport-bound user previews and coalesce bottom movement after native layout; expansion retains reading intent.
 // [Sync] 2026-10-30: preserve the original source marker above the first user text or at the pagination boundary.
@@ -98,7 +99,7 @@ function MessageRow({message:persisted,index,count,props,detail,load,sourceIndex
     const saved=part as typeof part&{mcpAppResult?:unknown;toolMetadata?:{mcpAppResult?:unknown}};
     return parseSavedMcpAppToolCall({toolName:resolveToolName(part),toolCallId:part.toolCallId,input:'input' in part?part.input:undefined,output:'output' in part?part.output:undefined,mcpAppResult:saved.mcpAppResult??saved.toolMetadata?.mcpAppResult})?[{part,partIndex}]:[];
   });
-  const finalIndex=projection?.finalPartIndex??lastText;
+  const finalIndex=projection?.finalPartIndex??-1;
   return <View testID={`native-chat-message-${message.id}`} style={styles.message}>
     <View key="parts" style={styles.parts}>
     {projection?<>

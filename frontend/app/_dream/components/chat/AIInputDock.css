@@ -1,6 +1,7 @@
 /* [Input] AIInputDock semantic tokens and the Story Workspace viewport or narrowed Chat column. */
 /* [Output] Responsive composer controls with one visible Send or Stop action at the trailing edge. */
 /* [Pos] Local responsive presentation contract for the shared Chat input dock. */
+/* [Sync] 2026-11-13: shrink long Chinese Agent/model labels while retaining one horizontal action row. */
 /* [Sync] 2026-09-27: keep the conditional Send/Stop action inside the composer trailing edge. */
 /* [Sync] 2026-10-09: in-flow attachment options include independent hand-drawn sketch input. */
 /* [Sync] 2026-10-12: wrap the built-in compact usage label and decorative progress ring in narrow menus. */
@@ -93,3 +94,19 @@
     height: 2.75rem !important;
   }
 }
+
+/* [Sync] 2026-11-13: compact reference-style toolbar; preserve wrapping and trailing Send/Stop. */
+.ai-input-dock .ai-input-dock__attachment-button {width:44px;padding:0!important;display:grid;place-items:center;border:0!important;}
+.ai-input-dock .ai-input-dock__leading-actions {gap:4px!important;}
+
+/* [Sync] 2026-11-13: keep the model selector beside the original trailing Send/Stop. */
+.ai-input-dock__trailing-actions{gap:4px;max-width:65%;}
+.ai-input-dock__trailing-actions>.model-selector{flex:1 1 auto;min-width:0;}
+.ai-input-dock__trailing-actions .model-selector__trigger{max-width:100%;}
+
+.ai-input-dock__trailing-actions>.model-selector{max-width:180px;}
+@media(max-width:767px){.ai-input-dock__trailing-actions>.model-selector{max-width:120px;}}
+.ai-input-dock .ai-input-dock__leading-actions{flex-wrap:nowrap;flex:1 1 0;}
+.ai-input-dock__add-actions{flex:0 0 44px;}
+.ai-input-dock__leading-actions>.composer-tools-trigger{flex:0 1 auto;max-width:calc(100% - 48px);}
+.ai-input-dock__trailing-actions{flex:0 1 auto;min-width:0;}

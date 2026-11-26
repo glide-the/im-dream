@@ -1,9 +1,10 @@
 // [Input] Original AuthProvider/AuthEntry and isolated public session/options DTOs.
+// [Sync] 2026-11-24: verify pressed and pending buttons, single submission and retained-form recovery in the iOS sheet.
 // [Output] Wide/narrow recovery, current-session restoration and original top-level form POST receipts.
 // [Pos] Provider-free browser regression; no real credentials, accounts, database or model requests.
 // [Sync] 2026-10-25: retry reloads the original page; credential errors retain the normal form interaction.
 // [Sync] 2026-11-02: qualify original login/register switching and host error delivery without creating accounts.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type ElementHandle, type Page } from '@playwright/test';
 import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -189,6 +190,90 @@ for (const width of [1440, 390]) {
     });
   });
 }
+
+test.describe('iOS login sheet feedback', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__INK_NATIVE_HOST__', { value: { framework: 'react-native' } });
+    });
+    await page.route('**/auth/session', route => route.fulfill({ status: 401, json: {} }));
+    await page.route('**/auth/options', route => route.fulfill({ json: actions }));
+    await page.goto(base);
+  });
+
+  for (const mode of ['login', 'register'] as const) {
+    test(`${mode} shows progress only after validation and submits once`, async ({ page }) => {
+      if (mode === 'register') await page.getByRole('button', { name: 'Register', exact: true }).click();
+      const submit = page.getByRole('button', { name: mode === 'login' ? 'Login' : 'Register', exact: true });
+      await submit.click();
+      await expect(submit).toBeEnabled();
+      await expect(page.getByRole('status')).toBeEmpty();
+      await page.getByLabel('Email', { exact: true }).fill('recovery@example.test');
+      await page.locator('input[name=password]').fill('fixture-password-only');
+
+      let release!: () => void;
+      const hold = new Promise<void>(resolve => { release = resolve; });
+      const posts: URLSearchParams[] = [];
+      await page.route(actions.password_action, async route => {
+        posts.push(new URLSearchParams(route.request().postData() ?? ''));
+        await hold;
+        await route.fulfill({ status: 303, headers: { location: base + '?auth_error=' + (mode === 'login' ? 'credentials' : 'registration') } });
+      });
+      try {
+        const box = (await submit.boundingBox())!;
+        // Keep a reference to the visible document while its top-level POST is waiting for a response.
+        const element = await submit.elementHandle() as ElementHandle<HTMLButtonElement>;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await expect(submit).toHaveCSS('opacity', '0.72');
+        await page.mouse.up();
+        const label = mode === 'login' ? 'Signing in…' : 'Creating account…';
+        const feedback = await element.evaluate(button => {
+          const { x, y, width, height } = button.getBoundingClientRect();
+          return {
+            label: button.textContent,
+            announcement: document.querySelector('[role="status"]')?.textContent,
+            allDisabled: Array.from(document.querySelectorAll('button')).every(control => control.disabled),
+            box: { x, y, width, height },
+          };
+        });
+        expect(feedback).toEqual({ label, announcement: label, allDisabled: true, box });
+        await element.evaluate(button => button.form!.requestSubmit());
+        await expect.poll(() => posts.length).toBe(1);
+      } finally { release(); }
+      await expect(page.getByRole('alert')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeEnabled();
+      expect(posts.map(post => post.get('mode'))).toEqual([mode]);
+    });
+  }
+
+  test('Google cancellation restores the draft and navigation failure allows another submission', async ({ page }) => {
+    const google = page.getByRole('button', { name: 'Continue with Google' });
+    const email = page.getByLabel('Email', { exact: true });
+    const password = page.locator('input[name=password]');
+    await email.fill('recovery@example.test');
+    await password.fill('fixture-password-only');
+    // The native navigation delegate consumes the POST while keeping this document alive.
+    await page.evaluate(() => document.addEventListener('submit', event => event.preventDefault()));
+    await google.click();
+    await expect(page.getByRole('status')).toHaveText('Connecting to Google…');
+    await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeDisabled();
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ink:account-form-restored')));
+    await expect(google).toBeEnabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(email).toHaveValue('recovery@example.test');
+    await expect(password).toHaveValue('fixture-password-only');
+    await password.press('Enter');
+    await expect(page.getByRole('status')).toHaveText('Signing in…');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ink:account-form-restored', { detail: { navigationFailed: true } })));
+    await expect(page.getByRole('alert')).toHaveText('Could not connect. Please try again.');
+    await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeEnabled();
+    await google.click();
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await expect(google).toBeEnabled();
+  });
+});
 
 test('login diagnostics include the HTTP failure message even when WebKit stack excludes it',async({page})=>{
   await page.addInitScript(()=>{

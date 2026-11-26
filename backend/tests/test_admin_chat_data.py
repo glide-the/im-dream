@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: verify versioned creation origin through the exact consumer.
 # [Input] Actual typed Chat consumers and exact Admin DTO candidates with injected transport.
 # [Output] Named-wire, microsecond/nullable/JSON/final-projection and original-receipt checks without PG.
 # [Pos] Provider-free technical contracts for the pending Thread/message production cutover.
@@ -5,6 +6,8 @@
 # [Sync] 2026-09-17: require the secondary OAuth service bearer on user-delegated calls.
 
 from __future__ import annotations
+
+from services.admin_data.continuation_data import CONTINUATION_SCHEMA
 
 import json
 
@@ -28,7 +31,7 @@ def client(config, handler):
         if request.url.path.endswith("/capabilities"):
             return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": {
                 "version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []},
-                "schema_capabilities": [], "operations": [operation.capability.model_dump() for operation in data.CHAT_OPERATIONS],
+                "schema_capabilities": [CONTINUATION_SCHEMA.model_dump()], "operations": [operation.capability.model_dump() for operation in data.CHAT_OPERATIONS],
             }})
         return handler(request)
     result = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(transport)), operations=data.CHAT_OPERATIONS)
@@ -57,13 +60,16 @@ CASES = [
 @pytest.mark.parametrize("operation,method,input_value,output", CASES, ids=[case[0].capability.name for case in CASES])
 def test_all_named_chat_consumers_use_exact_dto_and_explicit_actor(config, operation, method, input_value, output):
     seen = []
+    from services.admin_data.continuation_data import CREATE_WITH_ORIGIN, execution_origin
+    actual_operation = CREATE_WITH_ORIGIN if operation is data.CREATE_THREAD else operation
+    expected_input = {**input_value, "created_execution_origin": execution_origin()} if operation is data.CREATE_THREAD else input_value
     def handler(request):
         seen.append(request)
-        assert request.url.path.endswith("/operations/" + operation.capability.name)
+        assert request.url.path.endswith("/operations/" + actual_operation.capability.name)
         assert request.headers["authorization"] == "Bearer admin-actor-token"
         assert request.headers["x-ink-dream-service-authorization"] == "Bearer fixture.service.access.token"
         assert "x-ink-dream-service" not in request.headers and "x-ink-dream-credential" not in request.headers
-        assert json.loads(request.content) == {"request_id": "chat-request-1", "input": input_value}
+        assert json.loads(request.content) == {"request_id": "chat-request-1", "input": expected_input}
         return httpx.Response(200, json={"request_id": "chat-request-1", "data": output})
     consumer = data.AdminChatData(client(config, handler))
     result = getattr(consumer, method)(operation.input_dto.model_validate(input_value), "chat-request-1", access_token="admin-actor-token")

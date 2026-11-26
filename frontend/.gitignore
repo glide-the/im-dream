@@ -1,4 +1,5 @@
 # Frontend dependency, build, log, and editor artifacts excluded from Git.
+# [Sync] 2026-11-09: keep the complete online Admin development environment private.
 # [Sync] 2026-10-09: keep browser test reports and screenshots local under test-results/.
 # Logs
 logs
@@ -17,6 +18,7 @@ dist-ssr
 .next/
 next-env.d.ts
 *.local
+.env.online
 
 # Browser test reports and screenshots
 test-results/

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-19: Web使用OAuth Bearer、标签页续期与退出；原生Cookie合同独立保留。 -->
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
@@ -26,7 +27,7 @@ Admin 原有后台操作员，Dream 原有产品用户。两者属于不同业�
 - `identity.subject_links` 只建立 Dream 协议主体到 canonical user 的显式一对一关系。`identity.admin_subject_links` 是已存在的迁移历史，不参与新登录路径。
 - 相同邮箱只触发冲突检查。旧主体采用必须校验明确源记录、原主键和证据摘要；禁止自动合并。
 - Dream 请求不提交任意 `user_id`。Admin 从已验证 OAuth `sub` 反查 `subject_links`，再在同一事务中执行实体权限过滤。
-- Dream 浏览器只持有 HttpOnly opaque handle；Google token、OAuth access token 和 refresh token 不进入浏览器脚本。
+- Dream Web在内存持有Access Token，在当前标签页sessionStorage持有刷新凭据；原生私有协议callback保留HttpOnly handle。Google token保留在Admin的第三方认证边界。
 - Admin 管理路由只接受独立 Admin Session，在每次请求检查 `admin_users` 状态、角色和权限；Dream Session/token 不参与。
 - 浏览器和设备是 public OAuth client；Dream service 是 confidential client。`client_credentials` 只用于无用户后台 scope，不能代替用户委托 token。
 - 无用户后台调用使用 `Authorization: Bearer <service token>`。用户数据调用使用 `Authorization: Bearer <user token>`，Dream 服务端另加 `X-Ink-Dream-Service-Authorization: Bearer <service token>`；Browser 不能写入或读取第二个头。
@@ -57,7 +58,7 @@ Admin 原有后台操作员，Dream 原有产品用户。两者属于不同业�
 | Dream 主体映射 | `identity.subject_links` | `auth_user_id → canonical_user_id` | 任意客户端传入的 user ID |
 | Admin Session | `public.admin_sessions` | Admin operator 的登录、过期与撤销 | Dream OAuth Session 或 resource token |
 | OAuth client/resource | `identity.oauthClient`、`oauthResource`、`oauthClientResource` | 注册 Dream browser/device public client、service confidential client、resource 与 scope | Dream 用户业务记录 |
-| Dream 浏览器句柄 | `identity.browser_sessions` | Admin 加密持有 token bundle，Dream BFF 使用 opaque handle | 浏览器可读 token |
+| 原生兼容句柄 | `identity.browser_sessions` | Admin加密持有token bundle，原生BFF使用opaque handle；Web使用公开OAuth凭据 | Web业务Bearer |
 
 `subject_links.auth_user_id` 是主键，`canonical_user_id` 也唯一，因此同一个 Dream user 不能被静默绑定给两个 Better Auth 主体。Admin operator 不通过该映射登录，也不与 Dream user 建立外键。
 
@@ -286,24 +287,21 @@ sequenceDiagram
       A-->>U: 303 Dream /auth/callback?code&state&iss
       U->>B: callback
       B->>B: 精确校验 cookie/state/iss/redirect
-      B->>D: service credential + code/verifier/transaction
-      D->>A: 兑换 OAuth code
-      D->>I: 加密保存 token bundle，返回 opaque handle
-      B-->>U: HttpOnly handle cookie，返回原页面
-      U->>B: 请求 Dream API
-      B->>D: resolve handle
-      D->>I: 校验/刷新 token + active subject link
-      D-->>B: 短期 access token + principal DTO
-      B->>P: Bearer access token
+      B->>A: OAuth code/verifier与固定client/resource
+      A-->>B: Access与Refresh凭据
+      B-->>U: CSP完成文档；清交易及旧handle Cookie
+      U->>U: Access存内存，Refresh存当前标签页
+      U->>B: Bearer请求Dream API，省略Cookie
+      B->>P: 原Bearer access token
       P->>P: JWKS/alg/issuer/audience/time/scope 校验
       P->>D: service credential + 用户委托 token + 业务 DTO
       D->>I: 从 sub 反查 canonical user 并执行权限/事务
     else deny
-      A-->>U: access_denied，不建立 handle
+      A-->>U: access_denied，返回登录入口
     end
 ```
 
-Dream渲染的表单由浏览器handler构造闭集请求并直接发送到Admin；Dream Next/Python不接收或持久化密码。浏览器不能读取 access/refresh token。Dream BFF 不签发用户 token；Python 只验证 Admin OAuth access token，也不能把 Google token或 OIDC ID token当作 Dream API 凭据。
+Dream渲染的表单由浏览器handler构造闭集请求并直接发送到Admin；Dream Next/Python不接收或持久化密码。Web凭据由`browserSession.web.ts`私有owner管理；公开React context只接收用户资料。Dream BFF消费Admin公开OAuth接口；Python继续验证Admin OAuth Access Token，Google token及OIDC ID Token保留各自协议用途。续期、异常恢复与状态图见[Web认证设计](../design/web-bearer-auth.md)。原生私有回调继续使用handle流程，[迁移前原文](history/web-cookie-auth-identity-er-and-flows-20261119.md)保留历史图示。
 
 ## 7. Admin 后台独立登录与权限隔离
 
@@ -361,8 +359,9 @@ sequenceDiagram
 | Dream identity 已登录并持有有效 token | Admin 管理入口仍要求独立 Admin Session | 不转换为 Admin operator，不授予角色 |
 | Admin 密码错误或 member inactive | Admin 401 | 不查询 Dream user，不创建 Session |
 | OAuth client/redirect/resource/scope 未注册 | 协议错误 | 不签 code/token |
-| handle 过期、撤销或 refresh replay | 401，需要重新登录 | token bundle不返回浏览器 |
-| 当前Dream browser退出 | 撤销该client的refresh grant/lineage与BFF handle，清Dream cookie | 中央Dream SSO、其他client与Admin管理Session不变；再次登录可在中央Session有效时直接返回 |
+| Web refresh失效、撤销或replay | 401，清当前标签页并重新登录 | Access内存与标签页Refresh清理；业务DTO排除凭据 |
+| 原生handle过期或撤销 | 401，进入原生登录恢复 | token bundle保持服务端保存 |
+| 当前Dream Web退出 | 等待轮换，撤销最新Refresh，成功清标签页凭据与用户 | Admin SSO、其他client与管理Session保持独立；再次登录按中央Session状态执行 |
 | canonical user 或 billing projection disabled | 产品访问拒绝 | 不接受客户端 user ID 绕过 |
 | Admin DTO/数据库不可用 | 明确 503/504 | Dream 不回退 PostgreSQL |
 

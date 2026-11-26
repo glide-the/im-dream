@@ -15,6 +15,7 @@
 # [Sync] 2026-10-26: restore bundled immutable plugin artifacts and bind original CLI checks to the native Runtime.
 # [Sync] 2026-10-26: bind the original confirmation worker for explicit message dispatch without a global claim scan.
 # [Sync] 2026-11-02: emit startup-only wall/process-CPU phase metadata while retaining original owners and exceptions.
+# [Sync] 2026-11-19: start optional native APM export from a private installation configuration.
 
 from seo_content import APP_NAME
 import asyncio
@@ -38,6 +39,7 @@ load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 os.environ.pop("INK_DREAM_BFF_COOKIE_SECRET", None)
 
 from fastapi import FastAPI
+from observability import TraceMiddleware, configure_tracing, record_startup
 from routers.public import create_public_router
 from .asgi_transport import NativeASGITransport
 
@@ -54,6 +56,7 @@ _admin_request_owner = None
 _http_owner = None
 _web_origin = None
 _startup_lock = threading.Lock()
+_traced_app = None
 _presence_subscription = None
 _presence_generation = None
 
@@ -127,7 +130,7 @@ def _submit(coroutine):
 
 
 async def _initialize():
-    global _app, _lifespan, _transport
+    global _app, _lifespan, _transport, _traced_app
     if sys.platform == "ios":
         # Match the original backend process's default directory using bundled
         # sources. Workspace Mode still owns its separate optional per-turn cwd.
@@ -139,7 +142,8 @@ async def _initialize():
                                               public_base_url="/", backend_public_base_url="/"))
     _lifespan = _app.router.lifespan_context(_app)
     await _lifespan.__aenter__()
-    _transport = NativeASGITransport(_app, _contract)
+    _traced_app = TraceMiddleware(_app)
+    _transport = NativeASGITransport(_traced_app, _contract)
 
 
 async def _bind_runtime(endpoint):
@@ -206,7 +210,7 @@ async def _bind_runtime(endpoint):
     with _startup_phase("asgi_listener_start"):
         from .ios_http import IOSHTTPServer
         if _http_owner is None:
-            _http_owner = IOSHTTPServer(_app)
+            _http_owner = IOSHTTPServer(_traced_app)
         await _http_owner.start()
     with _startup_phase("next_web_ready"):
         from .ios_claude_transport import start_native_web
@@ -228,7 +232,46 @@ async def _complete(value):
         await _transport.cancel_owner(owner)
 
 
+def _observe_startup(started, ended, failed):
+    try:
+        # Private app container configuration provisioned onto the developer device.
+        # Keep credentials out of the app bundle, process environment and children.
+        path = Path(os.environ['HOME']) / 'Library/Application Support/dream-otel.json'
+        with path.open('rb') as source:
+            config = json.loads(source.read(4097))
+        endpoint = config['endpoint']
+        if not isinstance(endpoint, str) or not endpoint.startswith('https://'):
+            return
+        configure_tracing({
+            'INK_TRACE_ENABLED': 'true', 'OTEL_SERVICE_NAME': 'ink-memory-dream-native',
+            'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT': endpoint,
+            'OTEL_EXPORTER_OTLP_TRACES_HEADERS': config['headers'],
+        }, signed_parent=False)
+        record_startup('ios.runtime', started, ended_ns=ended, failed=failed)
+    except Exception:
+        pass
+
+
 def start(payload: str | None = None) -> str:
+    started = time.time_ns()
+    failed = True
+    try:
+        result = _start(payload)
+        failed = False
+        return result
+    finally:
+        if sys.platform == 'ios' and payload is not None:
+            try:
+                runtime_started = json.loads(payload).get('runtimeStartedNs')
+                if type(runtime_started) is int and 0 < runtime_started <= started:
+                    started = runtime_started
+                threading.Thread(target=_observe_startup, args=(started, time.time_ns(), failed),
+                                 name='DreamStartupTrace', daemon=True).start()
+            except Exception:
+                pass
+
+
+def _start(payload: str | None) -> str:
     global _loop
     with _startup_lock:
         if _loop is None:

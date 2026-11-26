@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: retain storage failure classification in the existing SSE error code.
 # [Input] Consume CLAUDE_CONFIG_DIR / HOME process env and optional workspace cwd.
 # [Output] Provide locate_session_file, read_session_messages,
 #          parse_session_messages_from_jsonl to simple_cas_client.
@@ -24,6 +25,7 @@ Session files are JSONL files stored at:
 from __future__ import annotations
 
 import json
+import errno
 import os
 import stat
 import sys
@@ -105,6 +107,11 @@ def _runtime_long_project_hash(value: str) -> str:
 class ClaudeResumeStorageError(RuntimeError):
     """Safe diagnostic: storage errors never authorize a fresh fallback."""
 
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 
 def _runtime_project_name(runtime_cwd: str) -> str:
     # JavaScript's non-Unicode regex replaces UTF-16 code units individually.
@@ -167,9 +174,13 @@ def locate_resumable_session(
             components = target.parts[1:-1]
         try:
             for component in components:
+                if stat.S_ISLNK(os.stat(component, dir_fd=fd, follow_symlinks=False).st_mode):
+                    raise ClaudeResumeStorageError("CLAUDE_RESUME_SYMLINK_DENIED")
                 next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 os.close(fd)
                 fd = next_fd
+            if stat.S_ISLNK(os.stat(target.name, dir_fd=fd, follow_symlinks=False).st_mode):
+                raise ClaudeResumeStorageError("CLAUDE_RESUME_SYMLINK_DENIED")
             transcript_fd = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         finally:
             os.close(fd)
@@ -196,8 +207,13 @@ def locate_resumable_session(
         return None
     except ClaudeResumeStorageError:
         raise
-    except (OSError, ValueError, UnicodeError):
-        raise ClaudeResumeStorageError("CLAUDE_RESUME_STORAGE_UNAVAILABLE") from None
+    except PermissionError:
+        raise ClaudeResumeStorageError("CLAUDE_RESUME_PERMISSION_DENIED") from None
+    except OSError as exc:
+        code = "CLAUDE_RESUME_SYMLINK_DENIED" if exc.errno == errno.ELOOP else "CLAUDE_RESUME_STORAGE_UNAVAILABLE"
+        raise ClaudeResumeStorageError(code) from None
+    except (ValueError, UnicodeError):
+        raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_RECORD") from None
 
 
 def get_projects_root(cwd: Optional[Union[str, Path]] = None) -> Optional[str]:

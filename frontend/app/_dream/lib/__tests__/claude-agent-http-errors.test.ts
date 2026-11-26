@@ -1,3 +1,4 @@
+// [Sync] 2026-11-04: validate transient preparation and no automatic resend through the real transport.
 // [Input] Actual HTTP transport and synthetic public pre-SSE responses.
 // [Output] Safe typed model-selection failures and unchanged unrelated HTTP/SSE behavior.
 // [Pos] Isolated transport regression; no browser, normal service or model.
@@ -45,4 +46,31 @@ test('successful text SSE still passes through the same decoder', async () => {
   for (;;) { const next = await reader.read(); if (next.done) break; chunks.push(next.value); }
   expect(chunks).toContainEqual({ type: 'text-delta', id: 'text-1', delta: 'OK' });
   expect(chunks).toContainEqual({ type: 'finish', finishReason: 'stop' });
+});
+
+
+test('preparation feedback stays transient and preserves the single request identity', async () => {
+  let calls=0;
+  const frames=[{type:'data-continuation',state:'preparing'},{type:'data-continuation',state:'ready'},{type:'finish',finishReason:'stop'}].map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
+  const transport=new ClaudeAgentChatTransport({fetch:async(_url,init)=>{
+    calls++;expect((JSON.parse(String(init?.body)).message?.id ?? JSON.parse(String(init?.body)).messages?.at(-1)?.id)).toBe('user-1');
+    return new Response(frames,{headers:{'content-type':'text/event-stream'}});
+  }});
+  const reader=(await transport.sendMessages(request)).getReader();const chunks=[];
+  for(;;){const next=await reader.read();if(next.done)break;chunks.push(next.value);}
+  expect(chunks).toContainEqual({type:'data-continuation',data:{state:'preparing'},transient:true});
+  expect(chunks.filter(chunk=>chunk.type==='text-delta')).toHaveLength(0);
+  expect(calls).toBe(1);
+});
+
+test('pre-query initialization failure retains typed retryability without automatic requests', async () => {
+  let calls=0;
+  const frames=[{type:'data-continuation',state:'preparing'},{type:'error',errorCode:'CLAUDE_RESUME_HISTORY_UNSUPPORTED',errorText:'Unavailable history',retryable:true}].map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
+  const transport=new ClaudeAgentChatTransport({fetch:async()=>{calls++;return new Response(frames,{headers:{'content-type':'text/event-stream'}});}});
+  const reader=(await transport.sendMessages(request)).getReader();let failure:unknown;
+  try{for(;;){const next=await reader.read();if(next.done)break;}}catch(error){failure=error;}
+  expect(failure).toBeInstanceOf(ClaudeAgentTransportError);
+  expect((failure as ClaudeAgentTransportError).retryable).toBe(true);
+  expect(readClaudeAgentErrorCode(failure)).toBe('CLAUDE_RESUME_HISTORY_UNSUPPORTED');
+  expect(calls).toBe(1);
 });

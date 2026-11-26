@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-11-03: 补充Native Thread运行实例所有权、可见投影、正常/异常/状态图及验收。 -->
+<!-- [Sync] 2026-11-09: ChatPanel提前挂载原输入框，读取内容单独更新；完整核对前阻止提交与运行操作。 -->
 <!-- [Sync] 2026-11-03: 追加页面重进、正文预览与当前状态核对增量，保留历史测量。 -->
 # Chat 历史消息稳定分页与首屏加载设计
 
@@ -780,6 +781,12 @@ stateDiagram-v2
 
 技术验证覆盖首次进入、同对话与 A/B/A、栏目重进、分页游标、列表/正文更新、网络失败与重试、会话替换及权限失效。消息发送、SSE、Stop、队列、工具确认和原生相邻设置沿现有定向规格回归。性能只按实际测量的页面及 HTTP 阶段报告；fixture 结果归技术验证，Simulator、物理设备、真实模型和发布分别记录。
 
+### Web 首屏读取顺序与活动（2026-11-19）
+
+`ChatView` 优先读取消息，收到后可展示只读正文，再依次核对运行状态与空闲时的最新消息。恢复成功后，`ChatPanel` 开始读取输入队列，活动入口完成一次摘要读取。打开活动面板或子 Agent 侧栏时启动对应轮询。Chat、计划与活动面板按会话、transport 和 Thread 共享进行中的任务链接读取，运行结束后的显式刷新取得新结果。带 Deck 的会话打开卡片信息时读取插件详情，旧会话在恢复后可读取一次回执以识别已有卡片信息。恢复失败沿用原重试和草稿保留流程。
+
+`ChatPanel` 和 `useModelConfig` 按浏览器会话共享进行中的 `GET /api/system-config` 及其解析结果。模型保存回执后发起独立读取，注入原生 transport 的读取继续传递取消信号。
+
 ### 原生进行中Thread保留与UI发布
 
 发现：`useNativeChatThread.openThread`原先对不同Thread递增读取代次、关闭当前reader并执行hydrate。上一轮两页正文预览覆盖静态阅读，运行中实例的连接和投影未保留。新增受控SSE基线两项失败分别显示：隐藏页面仍增加React提交；A→B导航取消A reader。
@@ -874,3 +881,102 @@ stateDiagram-v2
 ```
 
 验收：进行中A切往B再返回，A的reader取消及重开数均为0；隐藏页收到SSE后React提交数不增加，返回显示最新正文；原发送/Stop/队列/确认、完成释放、断流恢复和登录范围隔离分别验证。静态方案评审通过；技术、Simulator、真机及真实模型状态按执行记录逐项填写。
+
+## 已有对话的输入框挂载（2026-11-09）
+
+### 背景与问题
+
+[输入框等待记录](https://app.notion.com/p/40b30b7547c380f7ac22f85fdd2dbdd0#41130b7547c3804ba7c6c2df14744b00)指向 `AIInputDock → ChatPanel → ChatViewContent`。当前 `ChatViewContent` 在 `threadMessages === null` 时仅挂载阅读预览。`hydrateClaudeThreadSession` 完成消息、status 和空闲稳定复核后才挂载 `ChatPanel`，输入框的出现时间包含全部读取等待。本节定义输入框挂载增量；上节历史读取、预览和原生运行实例协议继续由原模块所有。
+
+### 目标与边界
+
+`ChatPanel` 与目标 Thread 同时挂载，原 `AIInputDock` 提前提供草稿编辑。历史读取顺序、认证、消息归属、状态校验、跨端恢复、原生协调器和后端接口沿现行协议。部署、原生打包、设备性能和真实模型验收分别登记。
+
+### 概念与规则
+
+方案评审已核对问题原文、现行缓存设计与页面代码。选定单个 `ChatPanel` 持有原输入框，并以 `historyLoadingContent` 承载父级现有加载、预览和失败视图。独立临时输入框需要转移草稿、附件和焦点；扩大缓存范围需要额外失效规则。当前目标由原组件的挂载时序调整完成。
+
+| 模块或状态 | 行为 |
+| --- | --- |
+| `ChatViewContent` | 选择 Thread 后立即挂载其 `ChatPanel`；传入最近页预览、读取反馈及原重试入口。最终快照作为 `initialMessages` 和原运行状态输入传递。 |
+| `ChatPanel.historyLoadingContent` | 有值时显示父级阅读区域，保留同一个输入框；成功、自动重试与手动重试只替换阅读区域。 |
+| 草稿与发送 | `AIInputDock` 沿原 `useComposerDraft` 编辑草稿；核对期间使用原 passive loading 状态，隐藏 Stop，阻止按钮和回车提交。`sendUserMessage` 与预置发送 Effect 同时检查读取状态。 |
+| 执行控件 | 完整核对前隐藏队列修改、工具确认和历史操作，暂停原重连 Effect；workspace-backed Skill 与附件目录写入等待状态恢复。 |
+| 最终快照 | 收到完整 `initialMessages` 后初始化原消息 store；显式同 Thread 重读先将初始化标记重置，成功后替换为当前页，空页清除旧消息。输入框保持挂载。 |
+| 失败恢复 | 网络与状态失败保留草稿和已读正文，沿原重试；401、403、404 与登录范围变化沿原正文清理及回执拒绝。完整核对前发送持续不可用。 |
+
+### 正常业务时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant View as ChatViewContent
+    participant Panel as ChatPanel与AIInputDock
+    participant Read as hydrateClaudeThreadSession
+    participant API as 既有Thread接口
+    User->>View: 打开已有对话
+    View->>Panel: 挂载目标Thread与读取视图
+    Panel-->>User: 显示可编辑输入框，发送等待核对
+    User->>Panel: 编辑下一条消息
+    View->>Read: 读取原对话
+    Read->>API: messages
+    API-->>Read: 当前历史页
+    Read-->>View: 只读正文预览
+    Read->>API: status与原空闲稳定复核
+    API-->>Read: 完整状态和稳定历史
+    Read-->>View: 当前快照
+    View->>Panel: initialMessages与运行状态，移除读取视图
+    Panel-->>User: 显示当前消息，保留草稿并开放原操作
+    User->>Panel: 主动发送草稿
+    Panel->>API: 原消息提交，使用原Thread身份
+    API-->>Panel: 原SSE回复
+    Panel-->>User: 显示本次消息与回复
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant View as ChatViewContent
+    participant Panel as ChatPanel与AIInputDock
+    participant API as 既有Thread接口
+    User->>View: 重新打开对话
+    View->>Panel: 挂载读取视图及输入框
+    User->>Panel: 编辑草稿并按回车
+    Panel-->>User: 保留草稿，发送等待核对
+    View->>API: 读取历史与运行状态
+    API-->>View: 状态读取失败
+    View->>Panel: 更新失败反馈与原重试入口
+    Panel-->>User: 保留同一个输入框及草稿
+    User->>View: 点击原重试入口
+    View->>API: 原历史、状态和稳定复核
+    alt 当前读取成功
+      API-->>View: 完整当前快照
+      View->>Panel: 更新消息与运行状态
+      Panel-->>User: 保留草稿，开放原发送
+    else 登录失效、权限拒绝或对话缺失
+      API-->>View: 401、403或404
+      View->>Panel: 清除正文预览，保留失败反馈
+      Panel-->>User: 发送继续等待有效状态
+    end
+```
+
+### 页面状态
+
+```mermaid
+stateDiagram-v2
+    [*] --> LoadingDraft: 打开已有Thread，挂载输入框
+    LoadingDraft --> PreviewDraft: 历史读取成功
+    LoadingDraft --> FailedDraft: 历史读取失败
+    PreviewDraft --> FailedDraft: 状态或稳定复核失败
+    FailedDraft --> LoadingDraft: 原自动或手动重试
+    PreviewDraft --> ReadyDraft: 完整核对成功
+    ReadyDraft --> LoadingDraft: 显式重读同Thread，保留输入框
+    ReadyDraft --> Sending: 用户主动发送
+    Sending --> ReadyDraft: 原提交与恢复结束
+    LoadingDraft --> [*]: 切换目标或退出登录
+    FailedDraft --> [*]: 切换目标或退出登录
+```
+
+验收条件：正文与 status 分别阻塞时输入框均可见且可编辑，回车产生零提交；状态失败及手动重试保留同一个输入节点与草稿；成功后一次主动发送使用原 Thread 与 `resume: true`。桌面、窄屏、路由返回、滚动位置、原首次发送、重连与停止分别回归。结果归[本轮执行记录](../../exec/chat-composer-hydration-20261109.md)。

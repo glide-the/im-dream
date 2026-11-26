@@ -1,4 +1,5 @@
 // [Sync] 2026-11-03: assert Kastention / 卡片结构 display names; preserve fixture-owned names, IDs, routes and business payloads.
+// [Sync] 2026-11-19: hold the first history page and verify passive reads wait for restoration.
 // [Sync] 2026-10-28: serve complete Agent catalogs and assert the selector creates no per-Deck GET requests.
 // [Sync] 2026-11-02: expect the renamed application display text; existing behavior checks remain.
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
@@ -185,9 +186,15 @@ test('Dream active Deck context → workbench → Chat active tab → production
   let releaseDeepLinkRead: (() => void) | null = null;
   let createdThreadRequests = 0;
   const deckDetailReads: string[] = [];
+  let releaseHistory!: () => void;
+  const firstHistory = new Promise<void>(resolve => { releaseHistory = resolve; });
+  const historicalReads: string[] = [];
   page.on('request', request => {
     requestOrder.set(request, ++nextRequestOrder);
     const path = new URL(request.url()).pathname;
+    if (request.method() === 'GET' && path.startsWith(`/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/`)) {
+      historicalReads.push(path.split('/').at(-1)!);
+    }
     if (request.method() === 'GET' && [
       `/api/decks/${dreamDeck.id}`, `/api/decks/${actorSystemDefaultDeck.id}`,
     ].includes(path)) deckDetailReads.push(path);
@@ -371,6 +378,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
       });
     }
     if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/messages`) {
+      await firstHistory;
       const unchanged = url.searchParams.get('known_latest_message_id') === 'history-assistant-message-e2e';
       return route.fulfill({
         json: {
@@ -578,8 +586,12 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(page.locator('.ai-input-dock')).toBeVisible();
   expect(createdThreadRequests).toBe(beforeNew);
   await page.setViewportSize({width:1440,height:1000});
+  const historyRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith(`/${HISTORICAL_THREAD_ID}/messages`));
   await page.getByRole('button', { name: historicalThread.title }).click();
+  await historyRequest;
   await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
+  expect(historicalReads.filter(path => ['task-links', 'inputs', 'scheduled-tasks', 'subagents', 'plugin-load-receipt', 'status'].includes(path))).toEqual([]);
+  releaseHistory();
   const historicalAssistantTurn = page.locator('[data-chat-assistant-turn="history-completed-turn-e2e"]');
   const historicalProcessToggle = historicalAssistantTurn.locator('.chat-assistant-turn__toggle');
   await expect(historicalAssistantTurn.getByText('这是历史轮次的最终答复。')).toBeVisible();
@@ -601,6 +613,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(historicalDeckContext).toBeVisible();
   await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await expect(historicalDeckContext).not.toContainText('drama-forge');
+  expect(historicalReads).not.toContain('plugin-load-receipt');
   await historicalDeckContext.click();
   const deckMetadataDialog = page.getByRole('dialog', { name: "卡片结构信息" });
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');

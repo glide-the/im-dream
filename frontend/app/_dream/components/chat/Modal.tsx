@@ -1,3 +1,4 @@
+// [Sync] 2026-11-18: allow caller-owned conversation preview portals while retaining shared focus and close lifecycle.
 // [Input] Open state, title/content, close callback, optional caller-owned initial focus/surface class, presentation variant, media toolbar actions, and controlled zoom state.
 // [Output] Portal-backed accessible modal with backdrop/Escape close, focus containment/restoration, and one shared media-preview skeleton whose controls resize only marked media content.
 // [Pos] shared modal component node in frontend/app/_dream/components/chat
@@ -48,7 +49,8 @@ interface ModalProps {
   closeLabel?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   surfaceClassName?: string;
-  variant?: 'default' | 'media-preview';
+  variant?: 'default' | 'media-preview' | 'conversation-preview';
+  portalContainer?: HTMLElement;
   toolbarActions?: ReactNode;
   zoom?: {
     value: number;
@@ -67,6 +69,7 @@ export default function Modal({
   initialFocusRef,
   surfaceClassName,
   variant = 'default',
+  portalContainer,
   toolbarActions,
   zoom,
 }: ModalProps) {
@@ -264,6 +267,6 @@ export default function Modal({
         ) : null}
       </div>
     </div>,
-    document.body,
+    portalContainer ?? document.body,
   );
 }

@@ -3,6 +3,7 @@
 // [Pos] Native presentation over useReflections; the App owns the supplied API/storage instance and backend lifecycle.
 // [Sync] 2026-10-29: preserve reachable Web flows and text history navigation; no automatic task launch or whole-page WebView.
 // [Sync] 2026-11-02: label pending recovery explicitly and render task errors once in the existing alert.
+// [Sync] 2026-11-26: expose the original task's stop action during analysis and recovery.
 import {useEffect,type ReactNode} from 'react';
 import {KeyboardAvoidingView,Modal,Platform,Pressable,SafeAreaView,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
 import {useTranslation} from 'react-i18next';
@@ -46,11 +47,17 @@ export default function AnalysisView({timezone,authenticated,api,storage,onBack,
           <Text style={muted}>{reportStats(report.stats)}</Text><View style={s.row}>{(['echoes','traits','patterns'] as const).filter(section=>report[section].length>0).map(section=><Text key={section} style={[s.badge,{color:c['color-text-body'],backgroundColor:c['color-bg-hover']}]}>{t(`analysis.reportCounts.${section}`,{count:report[section].length})}</Text>)}</View>
         </Pressable>)}
       </View>:null}
-      <View style={[s.group,{alignItems:'center'}]}><Action onPress={()=>void r.handleAnalyzeAll()} disabled={r.anyLoading}>{r.anyLoading?t('analysis.actions.generating'):r.pendingSubmission?(zh?'恢复上次分析':'Recover previous analysis'):t('analysis.actions.generate')}</Action>
+      <View style={[s.group,{alignItems:'center'}]}><Action onPress={()=>void r.handleAnalyzeAll()} disabled={r.anyLoading||r.stoppingTask}>{r.anyLoading?t('analysis.actions.generating'):r.pendingSubmission?(zh?'恢复上次分析':'Recover previous analysis'):t('analysis.actions.generate')}</Action>
         {r.pendingSubmission?<Text style={[s.body,muted]}>{zh?'恢复时使用上次提交的分析内容。':'Recovery uses the analysis content from the previous submission.'}</Text>:null}
         {!r.reanalysisDialog.open?<ReflectionAnalysisContentControls value={r.analysisContent} onChange={r.setAnalysisContent} authenticated={authenticated} api={api} transport={transport} active={active}/>:null}
         {r.preparedTask&&!r.anyLoading&&!r.pendingSubmission?<View style={s.group}><Text style={muted}>{zh?'有一项分析尚未开始；继续时使用原分析内容。':'An analysis has not started. Continuing uses its original content.'}</Text><Action onPress={r.continuePreparedTask}>{zh?'继续未开始的分析':'Continue unstarted analysis'}</Action></View>:null}
-        {r.taskStatus?<View accessibilityLiveRegion="polite" style={[s.report,{borderColor:c['color-border-paper'],backgroundColor:c['color-bg-paper']}]}><Text style={muted}>Live editorial analysis</Text><Text style={[s.heading,text]}>{r.taskStatus}</Text></View>:null}
+        {r.taskStatus||r.canStopAnalysis||r.stoppingTask||r.stopError?<View style={[s.report,{alignSelf:'stretch',borderColor:c['color-border-paper'],backgroundColor:c['color-bg-paper']}]}>
+          <View style={[s.row,{flexWrap:'wrap',justifyContent:'space-between'}]}>
+            <Text accessibilityLiveRegion="polite" style={[s.body,text,{flexShrink:1}]}>{r.stoppingTask?t('analysis.actions.stopping'):r.taskStatus||t('analysis.progress.reconnecting')}</Text>
+            {r.canStopAnalysis||r.stoppingTask?<Action onPress={()=>void r.handleStopAnalysis()} disabled={r.stoppingTask}>{t('analysis.actions.stop')}</Action>:null}
+          </View>
+          {r.stopError?<Text accessibilityRole="alert" style={[s.body,text]}>{r.stopError}</Text>:null}
+        </View>:null}
       </View>
       {authenticated||r.anyLoading||r.anyError?<View style={s.group}>{(['echoes','traits','patterns'] as const).map(section=><View key={section} style={s.group}>
         <View style={[s.row,{justifyContent:'center'}]}><Text style={muted}>{section==='echoes'?'🔄':section==='traits'?'⭐':'🌀'} {t(`analysis.papers.${section}.title`)}</Text>{authenticated?<Action label={`${t(`analysis.papers.${section}.title`)} Configure analysis prompts`} onPress={()=>void r.handleOpenConfig(section)}>⚙</Action>:null}</View>

@@ -1,5 +1,6 @@
-// [Input] Same-origin MCP Apps requests and opaque selector/session headers.
-// [Output] Cookie-free Request carrying only server-resolved Admin Bearer and Runtime selectors.
+// [Sync] 2026-11-19: Web authentication uses explicit OAuth credentials while native retains its platform contract.
+// [Input] Web/native Bearer MCP Apps requests or native handles and opaque selectors.
+// [Output] Cookie-free Request carrying the selected Admin Bearer and original Runtime selectors.
 // [Pos] Explicit Node Apps BFF adapter; existing Runtime continues to validate policy/ownership.
 // [Sync] 2026-10-11: preserve the per-request browser origin through the original Apps adapter.
 // [Sync] 2026-09-14: share API session/CSRF precedence without exposing server credentials to Browser.
@@ -10,7 +11,7 @@ import { AdminBffClient } from './admin-client.ts';
 import { bffFailure } from './handlers.ts';
 
 export async function runtimeRequest(request: Request, boundary: BffLoginBoundary, admin: Pick<AdminBffClient, 'resolve'>): Promise<Request> {
-  if (new URL(request.url).searchParams.has('token') || new URL(request.url).searchParams.has('access_token')) throw new BffBoundaryError('BFF_TOKEN_QUERY_DENIED', 400);
+  if (['token', 'access_token', 'refresh_token', 'id_token'].some(name => new URL(request.url).searchParams.has(name))) throw new BffBoundaryError('BFF_TOKEN_QUERY_DENIED', 400);
   const authorization = await apiAuthorization(request, boundary, admin);
   const headers = forwardRequestHeaders(request, authorization);
   // These are opaque Runtime selectors, never user/service identity assertions.

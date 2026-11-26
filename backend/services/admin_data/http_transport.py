@@ -1,3 +1,5 @@
+# [Sync] 2026-11-19: attach the configured Admin HTTP peer to each attempt span.
+# [Sync] 2026-11-18: create one child span per original attempt and inject W3C context before every transport.
 # [Input] Explicit configured URL, per-request headers, strict DTO and bounded httpx client.
 # [Output] Correlated closed response with one bounded read-only transport recovery, preserving unknown write outcomes.
 # [Pos] Shared HTTP parser; holds no service, user, DB or Gateway authentication configuration.
@@ -11,6 +13,8 @@ from typing import Literal
 
 import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from observability import admin_http_attributes, span, inject_trace, mark_error
 
 from .errors import AdminDataError, invalid_response, unavailable
 from .models import ErrorEnvelopeDTO, RequestDTO, ResponseEnvelopeDTO
@@ -31,27 +35,37 @@ def request_admin_dto(http: httpx.Client, *, method: Literal["GET", "POST"], url
         # a stale pooled connection without extending an unavailable Admin by a
         # second full timeout. Writes remain single-dispatch.
         timeout = timeout_seconds if attempt == 0 else min(2.0, timeout_seconds)
-        request = httpx.Request(method, url, headers=headers, params=params,
-            json=input_dto.model_dump(mode="json") if input_dto is not None else None,
-            extensions={"timeout": {key: timeout for key in ("connect", "read", "write", "pool")}})
-        try:
-            response = http.send(request, stream=True, follow_redirects=False, auth=None)
+        with span("admin.http", kind="CLIENT", attributes={
+            **admin_http_attributes(url, method),
+            "dream.transport.attempt": attempt + 1,
+        }) as current:
+            request = httpx.Request(method, url, headers=inject_trace(headers), params=params,
+                json=input_dto.model_dump(mode="json") if input_dto is not None else None,
+                extensions={"timeout": {key: timeout for key in ("connect", "read", "write", "pool")}})
             try:
-                status = response.status_code
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > max_response_bytes:
-                        raise invalid_response(request_id, write=write)
-            finally:
-                response.close()
-            break
-        except httpx.TimeoutException:
-            if write or attempt == 1:
-                raise AdminDataError("ADMIN_TIMEOUT", 504, request_id, write) from None
-        except httpx.HTTPError:
-            if write or attempt == 1:
-                raise unavailable(request_id, write=write) from None
+                response = http.send(request, stream=True, follow_redirects=False, auth=None)
+                try:
+                    status = response.status_code
+                    if current is not None:
+                        current.set_attribute("http.response.status_code", status)
+                    if status >= 400:
+                        mark_error(current)
+                    raw = bytearray()
+                    for chunk in response.iter_bytes():
+                        raw.extend(chunk)
+                        if len(raw) > max_response_bytes:
+                            raise invalid_response(request_id, write=write)
+                finally:
+                    response.close()
+                break
+            except httpx.TimeoutException:
+                mark_error(current)
+                if write or attempt == 1:
+                    raise AdminDataError("ADMIN_TIMEOUT", 504, request_id, write) from None
+            except httpx.HTTPError:
+                mark_error(current)
+                if write or attempt == 1:
+                    raise unavailable(request_id, write=write) from None
     if raw is None or status is None:
         raise unavailable(request_id, write=write)
     if not 200 <= status < 300:

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: queue submissions include explicit tools and default to an empty selection.
 // [Input] Authenticated browser session and owned Dream Thread input endpoints.
 // [Output] Typed queue receipt, list, selection, cancellation and side-task transfer calls.
 // [Pos] Chat input queue API adapter used by the existing ChatPanel.
@@ -108,12 +109,13 @@ export async function enqueueThreadInput(
   threadId: string, messageId: string, text: string, toolChoice: string,
   deckId: string | null | undefined, voiceId: string | null | undefined,
   transport: typeof fetch = fetch,
+  tools: readonly import('../../lib/chat-schema').ChatToolDescriptor[] = [],
 ): Promise<ThreadInputEntry> {
   const response = await transport(inputUrl(threadId), {
     method: 'POST',
     headers: { ...browserRequestHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      thread_id: threadId, resume: true, toolChoice,
+      thread_id: threadId, resume: true, toolChoice, tools,
       ...(deckId ? { deckId } : {}),
       ...(voiceId ? { voiceId } : {}),
       message: { id: messageId, role: 'user', parts: [{ type: 'text', text }] },

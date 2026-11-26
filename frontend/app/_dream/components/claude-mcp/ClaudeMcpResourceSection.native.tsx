@@ -1,3 +1,5 @@
+// [Sync] 2026-11-13: explain connection management and current-Thread Chat tool selection separately.
+// [Sync] 2026-11-13: connected counts and versioned service toggles share the Chat tools API.
 // [Input] Original MCP list state/API, operation-ID storage and concrete native authorization action.
 // [Output] Native server cards, transport-specific creation, authorization/cancel/logout and removal controls.
 // [Pos] Settings Resources presentation; backend capability, auth classification and revisions retain authority.
@@ -8,26 +10,30 @@ import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
 import type {ClaudeMcpApi,ClaudeMcpOperation} from '../../api/claudeMcpApi';
 import useClaudeMcpResources from '../../hooks/useClaudeMcpResources';
+import {mcpServerToggleChanges} from './mcpServerToggle';
 import {canStartClaudeMcpAuth,claudeMcpAuthActionLabel} from './authPolicy';
 import {ACTIVE_STATES,SCOPE_LABELS,serverStatusLabel,canLogout,canDetectConnection,safeOperationError,messageForCapability,operationFor} from './mcpResourcePresentation';
 interface Props {api:ClaudeMcpApi;active:boolean;remember:(id:string)=>boolean;forget:(id?:string)=>void;onOpenServerDetail:(name:string)=>void;onAuthorize:(operation:ClaudeMcpOperation)=>Promise<void>}
 export default function ClaudeMcpResourceSection({api,active,remember,forget,onOpenServerDetail,onAuthorize}:Props){
  const c=useInkColors(),state=useClaudeMcpResources({api,active,remember,forget});
- const {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove}=state;
+ const {capability,servers,operations,loading,busyServer,serverName,setServerName,serverUrl,setServerUrl,serverTransport,setServerTransport,stdioProfileKey,setStdioProfileKey,addDialogOpen,setAddDialogOpen,configuring,configurationError,setConfigurationError,error,load,start,configure,cancel,logout,remove,toggle}=state;
  const [authorizationError,setAuthorizationError]=useState<string|null>(null),[openingAuthorization,setOpeningAuthorization]=useState<string|null>(null);
  useEffect(()=>{if(!active)setAddDialogOpen(false);},[active]);
  const text={color:c['color-text-primary']},secondary={color:c['color-text-secondary']};
  const button=(label:string,onPress:()=>void,disabled=false)=><Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} accessibilityState={{disabled}} onPress={onPress} style={[s.button,{borderColor:c['color-border-paper'],opacity:disabled?0.5:1}]}><InkLabel style={text}>{label}</InkLabel></Pressable>;
  async function authorize(operation:ClaudeMcpOperation){if(openingAuthorization)return;setAuthorizationError(null);setOpeningAuthorization(operation.id);try{await onAuthorize(operation);}catch{setAuthorizationError('授权页面未完成，请重试或取消这次认证。');}finally{setOpeningAuthorization(null);}}
  return <View style={s.gap}>
-  <View style={s.row}><InkLabel accessibilityRole="header" style={[text,s.heading]}>Claude MCP 资源</InkLabel>{capability?.enabled?button('添加 MCP 服务',()=>{setConfigurationError(null);setAddDialogOpen(true);}):null}</View>
+  <View style={s.row}><InkLabel accessibilityRole="header" style={[text,s.heading]}>MCP工具连接</InkLabel>{capability?.enabled?button('连接工具',()=>{setConfigurationError(null);setAddDialogOpen(true);}):null}</View>
+  <InkLabel style={secondary}>配置服务连接与认证。当前对话使用的工具在Chat输入栏选择。</InkLabel>
   {loading?<View style={s.row}><ActivityIndicator color={c['color-text-primary']}/><InkLabel style={secondary}>读取 Claude MCP 状态…</InkLabel></View>:null}
   {capability&&!capability.enabled?<InkLabel accessibilityRole="alert" style={secondary}>{messageForCapability(capability)}</InkLabel>:null}
   {capability?.enabled&&!loading&&servers.length===0?<InkLabel style={secondary}>尚未配置 MCP 服务。添加后列表会立即返回；进入详情页后自动加载远端能力清单。</InkLabel>:null}
+  {capability?.enabled?<InkLabel style={secondary}>{`已连接 ${servers.filter(server=>server.state==='connected').length} · 已启用 ${servers.filter(server=>server.enabled).length}`}</InkLabel>:null}
   {servers.map(server=>{const operation=operationFor(operations,server),state=operation&&ACTIVE_STATES.includes(operation.state)?operation.state:server.state,busy=busyServer===server.name;return <View key={server.name} style={[s.card,{borderColor:c['color-border-paper'],backgroundColor:c['color-bg-surface-solid']}]}>
    {button(`管理与工具 ${server.name}`,()=>onOpenServerDetail(server.name))}<InkLabel style={secondary}>{`${serverStatusLabel(server,state)} · ${SCOPE_LABELS[server.config_scope||'unknown']}`}</InkLabel>
    {server.detail?<InkLabel selectable style={secondary}>{server.detail}</InkLabel>:null}
    <View style={s.row}>
+    {mcpServerToggleChanges(server,!server.enabled)?<Pressable accessibilityRole="switch" accessibilityLabel={`启用 ${server.display_name||server.name}`} accessibilityState={{checked:server.enabled,disabled:loading||busyServer!==null}} disabled={loading||busyServer!==null} onPress={()=>void toggle(server,!server.enabled)} style={[s.button,{backgroundColor:c[server.enabled?'color-bg-hover':'color-bg-app']}]}><InkLabel style={text}>{busy?'正在保存…':server.enabled?'停用':'启用'}</InkLabel></Pressable>:null}
     {canLogout(server,state)?button('退出认证',()=>void logout(server.name),busy):null}
     {canStartClaudeMcpAuth(server,state)&&!ACTIVE_STATES.includes(state)?button(claudeMcpAuthActionLabel(server),()=>void start(server,state),busy):null}
     {canDetectConnection(server,state)&&!ACTIVE_STATES.includes(state)?button('刷新数据库状态',()=>void load(),loading||busy):null}

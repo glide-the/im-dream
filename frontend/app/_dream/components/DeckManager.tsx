@@ -1,5 +1,5 @@
 // [Sync] 2026-10-29: use shared original related-conversation pagination; endpoints and Web orchestration remain.
-// [Sync] 2026-10-28: load Deck cards and their Agents with one catalog read after explicit reconciliation.
+// [Sync] 2026-11-19: show the saved catalog before the shared background default repair.
 // [Input] Existing Deck/Agent CRUD APIs, PDF-led home, original create defaults, and pre-refactor maintenance editor.
 // [Output] Resilient Deck home/Work manager with Deck preview, create-first editing, and related Chat cleanup.
 // [Pos] Deck manager orchestration node in frontend/app/_dream/components.
@@ -30,6 +30,7 @@ import { updateDeckAgentType, type DeckAgentType } from '../api/deckPluginApi';
 import { deleteChatThread, listChatThreads } from '../api/chatHistoryApi';
 import { DEFAULT_DECK_CREATE_VISUAL,DECK_RELATED_THREADS_PAGE_SIZE } from '../constants/deck';
 import type { ActiveChatVoice } from '../lib/chat-schema';
+import { getBrowserCsrfToken } from '../lib/browserSession';
 import {
   storyWorkspaceDreamRunPath,
   useStoryWorkspaceDreamLaunch,
@@ -58,6 +59,8 @@ export default function DeckManager({
   const { t } = useTranslation();
   const [decks, setDecks] = useState<Deck[]>([]);
   const [loading, setLoading] = useState(true);
+  const [preparingDefaults, setPreparingDefaults] = useState(false);
+  const [loadRevision, setLoadRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [refreshingDecks, setRefreshingDecks] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -71,27 +74,20 @@ export default function DeckManager({
   const [selectedVoiceByDeck, setSelectedVoiceByDeck] = useState<Record<string, string | null>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const previewDreamLaunch = useStoryWorkspaceDreamLaunch();
+  const requestScope = getBrowserCsrfToken();
 
   const loadDecks = useCallback(async (
-    options: { initial?: boolean; preserveScroll?: boolean } = {},
+    options: { initial?: boolean; preserveScroll?: boolean; isCurrent?: () => boolean } = {},
   ) => {
+    const isCurrent = options.isCurrent ?? (() => true);
     const savedScrollTop = options.preserveScroll && scrollContainerRef.current
       ? scrollContainerRef.current.scrollTop
       : 0;
 
     try {
-      if (options.initial) {
-        setLoading(true);
-        try {
-          await reconcileDefaultDeckPlugin();
-        } catch (reconcileError) {
-          console.warn(
-            'Default Deck plugin reconciliation is temporarily unavailable; loading persisted Decks.',
-            reconcileError,
-          );
-        }
-      }
+      if (options.initial) setLoading(true);
       const decksWithVoices = await listDecksWithVoices();
+      if (!isCurrent()) return;
       setDecks(decksWithVoices.filter(deck => !isReactNativeHost() || deck.agent_type !== 'dream'));
       setError(null);
       setRefreshError(null);
@@ -102,18 +98,34 @@ export default function DeckManager({
         });
       }
     } catch (loadError) {
+      if (!isCurrent()) return;
       const message = getErrorMessage(loadError, t('deck.messages.loadFailed'));
       if (options.initial) setError(message);
       else setRefreshError(message);
       throw loadError;
     } finally {
-      if (options.initial) setLoading(false);
+      if (options.initial && isCurrent()) setLoading(false);
     }
   }, [t]);
 
   useEffect(() => {
-    void loadDecks({ initial: true }).catch(() => undefined);
-  }, [loadDecks]);
+    let mounted = true;
+    const isCurrent = () => mounted && requestScope === getBrowserCsrfToken();
+    setPreparingDefaults(false);
+    void loadDecks({ initial: true, isCurrent }).then(async () => {
+      if (!isCurrent()) return;
+      setPreparingDefaults(true);
+      try {
+        const result = await reconcileDefaultDeckPlugin();
+        if (isCurrent() && result.reconciled) await loadDecks({ preserveScroll: true, isCurrent });
+      } catch (cause) {
+        if (isCurrent()) console.warn('Background default Kastention reconciliation failed.', cause);
+      } finally {
+        if (isCurrent()) setPreparingDefaults(false);
+      }
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [loadDecks, loadRevision, requestScope]);
 
   useEffect(() => {
     setSelectedVoiceByDeck((previous) => {
@@ -303,7 +315,7 @@ export default function DeckManager({
     }
   }
 
-  if (loading) {
+  if (loading || (decks.length === 0 && preparingDefaults && !error)) {
     return (
       <div className="deck-manager-status" aria-live="polite">
         <span className="deck-manager-status__spinner" aria-hidden="true" />
@@ -318,7 +330,7 @@ export default function DeckManager({
         <span>{error}</span>
         <button
           className="deck-manager-primary-action deck-manager-primary-action--compact"
-          onClick={() => void loadDecks({ initial: true }).catch(() => undefined)}
+          onClick={() => setLoadRevision(value => value + 1)}
           type="button"
         >
           {t('deck.actions.retry')}

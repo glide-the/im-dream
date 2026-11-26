@@ -1,0 +1,40 @@
+{
+  "operations": [
+    {
+      "name": "external-share.create",
+      "kind": "write",
+      "user_scope": "dream:write",
+      "background_scope": null,
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "contract_sha256": "a3159464220028c80d9ed469d90a58fb8574b36d118c4c5d1bda752dd2e7163d"
+    },
+    {
+      "name": "external-share.list",
+      "kind": "read",
+      "user_scope": "dream:read",
+      "background_scope": null,
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "contract_sha256": "e117751113bd2461b331d68b521ff764f4efc677c8fb475d2d6f632d86d12125"
+    },
+    {
+      "name": "external-share.get",
+      "kind": "read",
+      "user_scope": "dream:read",
+      "background_scope": null,
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "contract_sha256": "f5135d0e8e8cf6165ee71b6d3f9db0889a580dd7423c717089a6eca85f2e55d0"
+    },
+    {
+      "name": "external-share.revoke",
+      "kind": "write",
+      "user_scope": "dream:write",
+      "background_scope": null,
+      "input_schema_version": 1,
+      "output_schema_version": 1,
+      "contract_sha256": "fa4a5a64b97b317ff61f43ec8e3521156177accedf4569d1321aa64086bcdce8"
+    }
+  ]
+}

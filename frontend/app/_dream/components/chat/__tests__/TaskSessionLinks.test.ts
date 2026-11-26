@@ -4,6 +4,7 @@
 // [Sync] 2026-09-27: add source/created relation read coverage without model or database writes.
 // [Sync] 2026-09-27: cover owner-scoped runtime status and reject private or contradictory fields.
 // [Sync] 2026-09-28: accept the server's completed status for committed task results.
+// [Sync] 2026-11-19: verify active reads share one request while a post-write read starts independently.
 
 import { expect, test } from '@playwright/test';
 import { fetchTaskSessionDetail, fetchTaskSessionLinks, TaskSessionLinksError } from '../taskSessionLinks';
@@ -13,6 +14,26 @@ const link = {
   title: 'Review task', launch_status: 'starting' as const, launch_error_code: null,
   created_at: '2026-09-27T00:00:00Z',
 };
+
+test('concurrent Thread-link readers share one request while explicit refresh stays fresh', async () => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls: string[] = [];
+  const transport: typeof fetch = async input => {
+    calls.push(String(input));
+    await held;
+    return Response.json({ source: null, created: [link] });
+  };
+  const first = fetchTaskSessionLinks('source-thread', { transport });
+  const duplicate = fetchTaskSessionLinks('source-thread', { transport });
+  expect(duplicate).toBe(first);
+  const fresh = fetchTaskSessionLinks('source-thread', { transport, fresh: true });
+  release();
+  await Promise.all([first, duplicate, fresh]);
+  expect(calls).toHaveLength(2);
+  await fetchTaskSessionLinks('source-thread', { transport });
+  expect(calls).toHaveLength(3);
+});
 
 test('task-session link adapter reads the current Thread without a mutation', async () => {
   const originalFetch = globalThis.fetch;

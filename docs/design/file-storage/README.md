@@ -1,3 +1,8 @@
+<!-- [Sync] 2026-11-12: 分享改用Admin快照，FileStorage恢复普通文件合同，早期方案保留历史。 -->
+<!-- [Input] 文件存储接口、部署配置及历史分享原型。 -->
+<!-- [Output] local/S3存储职责、API及历史分享边界。 -->
+<!-- [Pos] 文件存储技术设计。 -->
+<!-- [Sync] 2026-11-12: 追加服务端固定note-shares命名空间和公开读取约束。 -->
 # File Storage — Design Document
 
 **Path**: `backend/libs/file_storage/` · `backend/server.py` (`/api/storage/*`)
@@ -345,3 +350,12 @@ if (uploadData.directUploadSupported) {
 - [AWS S3 documentation](https://docs.aws.amazon.com/s3/)
 - [MinIO documentation](https://min.io/docs/minio/linux/index.html)
 - [boto3 S3 client](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html)
+
+
+## 2026-11-12 笔记分享命名空间（历史）
+
+本节保留早期文件原型记录。现行分享使用[Admin独立快照](../sharing/external-links.md)，原文件保留，旧token结束公开读取。FileStorage维持普通文件合同，新增namespace参数已随改造移除。
+
+早期原型中，`UploadOptions.namespace`增加服务端固定值`note-shares`，普通上传和直传继续使用原配置前缀。local/S3上传共同生成`{FILE_STORAGE_PREFIX}/note-shares/{uuid_hex}-note.json`。文件正文仅有公开笔记DTO。
+
+公开读取只由独立笔记路由处理，验证规范Base64url、完整命名空间及随机文件名。发布实例与公开阅读实例需要读取同一存储位置；原生独立local目录由可达服务或共享S3承接。完整接口、图示和失败恢复见[笔记分享设计](../edit-session/note-sharing.md)。

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: render external links inside the existing Settings shell.
 // [Sync] 2026-11-03: retain the visited Chat subtree during authenticated route navigation.
 // [Sync] 2026-11-01: forward the Writing page return to the existing narrow More menu without route or business changes.
 // [Sync] 2026-10-15: render memory behavior through the existing Settings shell.
@@ -190,6 +191,7 @@ function renderStoryWorkspaceRoute(
     case 'settings-work':
     case 'settings-resources':
     case 'settings-plugins':
+    case 'settings-external-links':
     case 'settings-behavior':
     case 'settings-model':
     case 'settings-about':
@@ -427,6 +429,7 @@ export function StoryWorkspaceRouter({
     || activeRoute === 'settings-work'
     || activeRoute === 'settings-resources'
     || activeRoute === 'settings-plugins'
+    || activeRoute === 'settings-external-links'
     || activeRoute === 'settings-behavior'
     || activeRoute === 'settings-model'
     || activeRoute === 'settings-about'

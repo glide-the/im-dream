@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: AgentRunOptions增加默认空的平台tools选择，不改变tool_choice策略。
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: carry a private image broker tuple; public request DTO and Runtime credentials unchanged.
 # [Sync] 2026-10-07: add server-owned exact tool auto/manual policy and a thread-safe unattended violation marker.
@@ -334,6 +335,8 @@ class AgentRunOptions:
     allowed_tools: Optional[list[str]] = None
     # Tool choice mode.
     tool_choice: ToolChoiceMode = "auto"
+    # Backend-owned platform tools selected for this turn; empty disables all.
+    tools: tuple[str, ...] = ()
     # Internal exact per-tool execution policy. Public request DTOs cannot set it.
     tool_approval_policy: Optional[ToolApprovalPolicy] = field(default=None, repr=False)
     # Shared marker lets an unattended coordinator fail the run even if Claude

@@ -3,6 +3,7 @@
 # [Output] A credential-free, separately owned source directory for an original standalone build.
 # [Sync] 2026-11-01: isolate explicitly owned Next outputs and record original runtime-source inputs for packaging freshness checks.
 # [Sync] 2026-11-03: bundle Undici's same-version scalar llhttp for the iOS polywasm interpreter; preserve original HTTP dispatchers.
+# [Sync] 2026-11-19: copy and qualify the Next server instrumentation hook with the original sources.
 # [Pos] iOS build preparation; it never modifies the running Web checkout or installs packages.
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ shutil.copy2(FRONTEND / "shared/bridge/contract.json", contract)
 excluded = shutil.ignore_patterns("node_modules", "build", ".next", ".git", ".env", ".env.*", "__pycache__", "*.pyc")
 for name in ("app", "packages", "public", "src", "shared"):
     shutil.copytree(FRONTEND / name, STAGE / name, ignore=excluded)
-for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "next-env.d.ts"):
+for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "next-env.d.ts", "instrumentation.ts"):
     shutil.copy2(FRONTEND / name, STAGE / name)
 config = (FRONTEND / "next.config.js").read_text()
 assert config.count("export default nextConfig;") == 1

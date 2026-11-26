@@ -1,3 +1,6 @@
+// [Sync] 2026-11-13: native sends capture current Thread tools separately from permission mode.
+// [Sync] 2026-11-13: unified Agent/tools and IM model-selection adapters retain original native draft and send guards.
+// [Sync] 2026-11-13: forward resource navigation and scene visibility to the standalone Chat tools menu.
 // [Sync] 2026-11-02: adopt display-only Kastention naming; existing behavior and technical identities remain.
 // [Sync] 2026-11-02: restore the original composer text/completed attachment references; interrupted uploads require explicit selection.
 // [Sync] 2026-11-02: block source-dependent sending independently of draft editing and the original Stop action.
@@ -16,13 +19,15 @@ import {ActivityIndicator,Image,Pressable,StyleSheet,View,useWindowDimensions} f
 import {useTranslation} from 'react-i18next';
 import InkLabel from '../../../../src/components/InkLabel.native';
 import useInkColors from '../../../../src/components/useInkColors.native';
-import type {ToolChoice} from '../../lib/chat-schema';
+import type {DeckChatSelectorProps} from '../deck/deckAgentSelection';
+import type {ChatToolDescriptor,ToolChoice} from '../../lib/chat-schema';
 import type {UploadedFile} from './AIInputDock.helpers';
 import {formatFileSize,shouldShowUploadHint,MAX_UPLOAD_FILE_SIZE_BYTES} from './AIInputDock.helpers';
 import useComposerDraft from './useComposerDraft';
 import useFileAttachments from './useFileAttachments.native';
 import MarkdownInputEditor from './MarkdownInputEditor';
 import AIInputDockControls from './AIInputDockControls.native';
+import {useChatToolSelection} from '../../hooks/useChatToolSelection';
 import {IconFile,IconX} from './Icons';
 import useComposerSkills from './useComposerSkills';
 import ComposerSkillMenu from './ComposerSkillMenu.native';
@@ -32,24 +37,29 @@ import {releaseNativeFiles,type NativePickedFile} from '../../../../src/platform
 import type {NativeChatRecovery} from './nativeChatRecovery.native';
 export interface NativeAIInputDockHandle {addFile:(file:NativePickedFile)=>Promise<boolean>;}
 export interface NativeAIInputDockProps {
-  origin:string;onSendMessage:(message:string,files?:UploadedFile[],toolChoice?:ToolChoice)=>void|Promise<void>;
+  origin:string;onSendMessage:(message:string,files?:UploadedFile[],toolChoice?:ToolChoice,tools?:readonly ChatToolDescriptor[])=>void|Promise<void>;
   fullAccessEnabled:boolean;onOpenSketch:()=>void;contextControl?:ReactNode;
   disabled?:boolean;loading?:boolean;onStop?:()=>void|Promise<void>;stopPending?:boolean;loadingLabel?:string;
   defaultToolChoice?:ToolChoice;workspaceSessionId?:string;prefill?:string;prefillNonce?:number;placeholder?:string;
   deckId?:string;threadId?:string;workspaceEnabled?:boolean;contextUsage?:ContextUsageSnapshot;
   active?:boolean;
   recovery?:NativeChatRecovery;
+  onManageTools?:()=>void;
+  agentSelection?:DeckChatSelectorProps;
+  onModelConfigSaved?:()=>void;
+  onModelSessionExpired?:()=>void;
   sendBlocked?:boolean;
 }
-function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder=`Ask ${BRAND_NAME}…`,deckId,threadId,workspaceEnabled,contextUsage,active=true,recovery,sendBlocked=false}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
+function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contextControl,disabled=false,loading=false,onStop,stopPending=false,loadingLabel,defaultToolChoice='auto',workspaceSessionId,prefill,prefillNonce,placeholder=`Ask ${BRAND_NAME}…`,deckId,threadId,workspaceEnabled,contextUsage,active=true,recovery,sendBlocked=false,onManageTools,agentSelection,onModelConfigSaved,onModelSessionExpired}:NativeAIInputDockProps,ref:ForwardedRef<NativeAIInputDockHandle>) {
   const {t}=useTranslation();const colors=useInkColors();
   const narrow=useWindowDimensions().width<=767;
   const uploads=useFileAttachments(workspaceSessionId);
   const [restoration]=useState(()=>recovery?.composer());
   const [notice,setNotice]=useState<string|null>(()=>restoration?.initial?.interruptedFiles.length
     ?t('chat.inputDock.uploadInterrupted',{names:restoration.initial.interruptedFiles.join('、')}):null);
-  const [focused,setFocused]=useState(false);
-  const draft=useComposerDraft({onSendMessage,disabled:disabled||sendBlocked,loading,onStop,fullAccessEnabled,defaultToolChoice:restoration?.initial?.toolChoice??defaultToolChoice,
+  const [focused,setFocused]=useState(false),[modelBlocked,setModelBlocked]=useState(false);
+  const toolSelection=useChatToolSelection(threadId);
+  const draft=useComposerDraft({onSendMessage:(text,files,choice)=>onSendMessage(text,files,choice,toolSelection.tools),disabled:disabled||sendBlocked||modelBlocked,loading,onStop,fullAccessEnabled,defaultToolChoice:restoration?.initial?.toolChoice??defaultToolChoice,
     initialDraft:prefill??restoration?.initial?.query,initialFiles:restoration?.initial?.uploadedFiles,onDraftChange:restoration?.write,
     onUploadBlocked:()=>setNotice(t('chat.inputDock.waitForUpload')),releasePreview:uploads.releasePreview});
   useImperativeHandle(ref,()=>({addFile:async file=>{if(disabled){releaseNativeFiles([file.id]);return false;}if(file.size>MAX_UPLOAD_FILE_SIZE_BYTES){setNotice(t('chat.inputDock.fileTooLarge',{name:file.name,max:formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES)}));releaseNativeFiles([file.id]);return false;}return (await uploads.addFiles([file],draft.setUploadedFiles))[0]===true;}}));
@@ -72,8 +82,8 @@ function AIInputDock({origin,onSendMessage,fullAccessEnabled,onOpenSketch,contex
     <View style={styles.hints}>{shouldShowUploadHint(draft.query,focused)?<InkLabel style={{fontSize:11.68,color:colors['color-text-muted']}}>{t('chat.inputDock.uploadHint')}</InkLabel>:null}<InkLabel style={{fontSize:11.68,color:colors['color-text-muted']}}>{t('chat.inputDock.sendShortcut')}</InkLabel></View>
     <MarkdownInputEditor active={active} origin={origin} value={draft.query} onChange={draft.setQuery} onSubmit={()=>{if(!skills.keyDown('Enter'))draft.handleSend();}} skillMenuOpen={skills.matches.length>0} onSkillKey={key=>{if(!skills.keyDown(key) && key==='Enter')draft.handleSend();}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} disabled={disabled} placeholder={placeholder} ariaLabel={t('chat.inputDock.inputAria')} />
     <ComposerSkillMenu commands={skills.matches} activeIndex={skills.activeIndex} onSelect={skills.select} contextUsage={contextUsage} />
-    <AIInputDockControls draft={draft} disabled={disabled} loading={loading} onStop={onStop} stopPending={stopPending} loadingLabel={loadingLabel} fullAccessEnabled={fullAccessEnabled} contextControl={contextControl}
-      onChooseFiles={()=>{setNotice(null);void uploads.chooseFiles(draft.setUploadedFiles);}} onOpenSketch={onOpenSketch} />
+    <AIInputDockControls tools={toolSelection.tools} onToolsChange={toolSelection.setTools} agentSelection={agentSelection} onModelConfigSaved={onModelConfigSaved} onModelSessionExpired={onModelSessionExpired} onModelBlocked={setModelBlocked} draft={draft} disabled={disabled} loading={loading} onStop={onStop} stopPending={stopPending} loadingLabel={loadingLabel} fullAccessEnabled={fullAccessEnabled} contextControl={contextControl}
+      onManageTools={onManageTools} active={active} onChooseFiles={()=>{setNotice(null);void uploads.chooseFiles(draft.setUploadedFiles);}} onOpenSketch={onOpenSketch} />
   </View>;
 }
 export default forwardRef(AIInputDock);

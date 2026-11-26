@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: bind continuation operations to the existing persistence authority.
 # [Input] Admin section.begin RTA, worker service consumer and immutable launch snapshot.
 # [Output] Server-only child Thread persistence/config owner with snapshot Session broker and renewal.
 # [Sync] 2026-10-23: bind the task Notion adapter without expanding the RTA operation allowlist.
@@ -303,6 +304,10 @@ class AdminReflectionSectionPersistence(AdminAgentTurnPersistence):
     def _require_binding(self, *, actor_id: str, thread_id: str) -> None:
         if thread_id != self.thread_id or str(actor_id) != self.resolve_actor_id():
             raise AdminDataError("DREAM_DELEGATION_ENTITY_DENIED", 403)
+
+    def _continuation_access_token(self, *, actor_id: str, thread_id: str) -> str:
+        self._require_binding(actor_id=actor_id, thread_id=thread_id)
+        return self._token()
 
     def thread(self, *, actor_id: str, thread_id: str) -> ChatThreadDTO | None:
         with self._write_lock:

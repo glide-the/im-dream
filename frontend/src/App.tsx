@@ -1,3 +1,9 @@
+// [Sync] 2026-11-13: pass native composer tool selection to the existing session send/queue path.
+// [Sync] 2026-11-13: current-Agent tools trigger and migrated model picker reuse App-owned Agent/config callbacks.
+// [Sync] 2026-11-13: Chat tools navigate to the existing resource page through the native More owner.
+// [Sync] 2026-11-12: open a managed share's original Chat or Writing entity through the existing native navigation.
+import {clientFetch as shareSourceFetch} from './platform/transport';
+// [Sync] 2026-11-04: show same-conversation preparation in the existing native composer area.
 // [Sync] 2026-11-03: retain business views behind an idle clock and share native account Thread presence.
 // [Sync] 2026-11-03: pause hidden Chat UI publication while its live Thread readers remain account-owned.
 // [Sync] 2026-11-03: retain the current Thread composer on reselection and discard previews after confirmed deletion.
@@ -42,7 +48,7 @@ import type {ToolChoice} from '../app/_dream/lib/chat-schema';
 import type {Deck,Voice} from '../app/_dream/api/voiceApi';
 import {getDeck} from '../app/_dream/api/deckReadApi';
 import useNativeChatSetup,{type NativeChatConfig} from '../app/_dream/components/chat/useNativeChatSetup.native';
-import DeckChatSelector,{type DeckAgentSelection} from '../app/_dream/components/deck/DeckChatSelector.native';
+import type {DeckAgentSelection} from '../app/_dream/components/deck/deckAgentSelection';
 import useNativeChatThread from '../app/_dream/components/chat/useNativeChatThread.native';
 import {createNativeChatRecovery} from '../app/_dream/components/chat/nativeChatRecovery.native';
 import ToolConfirmationDock from '../app/_dream/components/chat/ToolConfirmationDock.native';
@@ -115,6 +121,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
   useEffect(()=>()=>{currentSideChat.current=null;},[]);
   const [section, setSection] = useState<'chat' | 'decks' | 'more'>('chat');
   const [moreVisited,setMoreVisited]=useState(false),[moreNonce,setMoreNonce]=useState(0),moreSource=useRef<'chat'|'decks'>('chat');
+  const [resourceRequestNonce,setResourceRequestNonce]=useState(0);
   const [settingsNavigation,setSettingsNavigation]=useState<NativeSettingsNavigation>({nonce:0,target:'menu'});
   const [selection,setSelection] = useState<DeckAgentSelection>();
   const [deckPrefill,setDeckPrefill]=useState<{text:string;nonce:number}>();
@@ -227,6 +234,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
           sendUserMessage={value=>{setToolChoice('auto');return session.sendUserMessage(value,thread??null);}} addToolResult={value=>session.addToolResult(value,thread??null)} onConfirmationSettled={id=>session.settleToolCall(id,thread??null)} onSessionExpired={()=>void refreshSession()}
           onEditorJump={detail=>{setEditorJump({nonce:++editorJumpNonce.current,detail});openSection('more');}}/>:part.type==='file'?<FileMessagePart part={part} origin={origin} isUserMessage={message.role==='user'} resources={messageFiles} onOpenLink={url=>void openExternalLink(url).catch(()=>setError('链接暂时无法打开。'))}/>:null} />}
       composer={<View style={styles.shrink}>
+      {session.preparing?<InkLabel accessibilityRole="text" style={{color:foreground,padding:8}}>{t('chat.continuation.preparing')}</InkLabel>:null}
       {session.queue.some(isThreadInputQueueCard)?<ScrollView accessibilityLabel={t('chat.inputQueue.region')} style={styles.queue} contentContainerStyle={{gap:4.8}} keyboardShouldPersistTaps="handled">
         {session.queue.filter(isThreadInputQueueCard).map(entry=><ThreadInputQueueCard key={entry.message_id} entry={entry} localOwner={session.localOwner} onGuide={session.guide} onCancel={session.cancelInput} onEdit={session.editInput} onSideChat={openSideChat}/>)}
       </ScrollView>:null}
@@ -238,14 +246,14 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       </View>:null}
       {session.confirmation ? <ToolConfirmationDock key={session.confirmation.partKey} confirmation={session.confirmation} onConfirm={session.confirm} /> : null}
       {origin ? <View style={styles.shrink}>
-        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
+        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} onManageTools={()=>{openSection('more');setResourceRequestNonce(value=>value+1);}} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
           active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
-          onSendMessage={(text,files,choice)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice);}}
+          onSendMessage={(text,files,choice,tools)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice,tools);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}
           onStop={thread && canStop?stop:undefined} stopPending={stopping} loadingLabel={t(session.recovering?'chat.historyTurn.loading':'chat.inputDock.generating')} onOpenSketch={()=>setSketchOpen(true)}
           deckId={boundContext.threadId?boundContext.deckId:selection?.deckId} threadId={thread ?? undefined}
           workspaceEnabled={configLoaded && config.workspace_enabled!==false} workspaceSessionId={configLoaded && config.workspace_enabled ? thread ?? undefined : undefined}
-          contextControl={!thread?<DeckChatSelector decks={decks.filter(deck=>deck.enabled && deck.agent_type!=='dream')} selectedAgentId={selection?.agentId} onChange={setSelection} />:undefined} />
+          agentSelection={{loading:setup.loading,error:setup.error||null,decks:thread?(selectedDeck?[selectedDeck]:[]):decks.filter(deck=>deck.enabled && deck.agent_type!=='dream'),selectedAgentId:thread?selectedVoice?.id:selection?.agentId,allowNone:!thread,onChange:value=>{if(thread){if(value&&selectedDeck?.voices?.some(voice=>voice.enabled&&voice.id===value.agentId))setBoundContext(current=>current.threadId===thread?{...current,voiceId:value.agentId}:current);}else setSelection(value);}}} onModelConfigSaved={()=>{void setup.refreshConfig().catch(()=>setError('配置暂时无法读取，请重试。'));}} onModelSessionExpired={()=>void refreshSession()} />
       </View>:null}
       </View>}
     /></View>
@@ -254,10 +262,10 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
         onTryDeck={tryDeck} />
     </View>
     <View style={[styles.fill,section!=='more'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='more'} importantForAccessibility={section==='more'?'auto':'no-hide-descendants'}>
-      {moreVisited?<MoreNavigator onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
+      {moreVisited?<MoreNavigator resourceRequestNonce={resourceRequestNonce} onIdleBlocked={setWritingIdleBlocked} ownerId={ownerId} origin={origin} decks={decks} editorJump={editorJump} onEditorJumpDispatched={nonce=>setEditorJump(current=>current?.nonce===nonce?undefined:current)} active={section==='more'} resetNonce={moreNonce} onClose={()=>openSection(moreSource.current)} onSessionExpired={()=>void refreshSession()}
         onOpenThread={(id,writingContext)=>{recovery.rememberSideChat({threadId:id,writingSessionId:writingContext?.sessionId});setSideChat({threadId:id,writingContext,documentOwner:{}});}} onPrepareChat={async input=>{await newChat();setDeckPrefill({text:input,nonce:composerKey+1});openSection('chat');}}
         onSettingsOpen={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'menu'}))} onResources={()=>setSettingsNavigation(value=>({nonce:value.nonce+1,target:'resources'}))}
-        renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
+        renderSettings={(back,settingsActive)=><StoryWorkspaceSettingsPage onOpenShareSource={async share=>{if(share.kind==='chat'){await selectThread(share.source_id);openSection('chat');return;}const response=await shareSourceFetch('/api/sessions/'+encodeURIComponent(share.source_id));if(!response.ok)throw Error('SHARE_SOURCE_UNAVAILABLE');const session=await response.json() as {editor_state:{cells:{id:string;type:string}[]}};const cell=session.editor_state.cells.find(value=>value.type==='text');if(!cell)throw Error('SHARE_SOURCE_UNAVAILABLE');setEditorJump({nonce:++editorJumpNonce.current,detail:{cellId:cell.id,editorSessionId:share.source_id}});openSection('more');}} ownerId={ownerId} origin={origin} active={settingsActive} navigation={settingsNavigation}
           decks={decks} loading={setup.loading} error={setup.error} onRefreshDecks={setup.refreshDecks} onTryDeck={tryDeck} onBack={back} logout={logout}
           onSessionExpired={()=>void refreshSession()} onConfigSaved={()=>void setup.refreshConfig().catch(()=>setError('配置暂时无法读取，请重试。'))}/>}/>:null}
     </View>

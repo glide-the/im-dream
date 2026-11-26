@@ -3,6 +3,7 @@
 // [Pos] Technical isolated Writing suggestion browser journey; it does not claim real-model or real-business acceptance.
 // [Sync] 2026-09-01: add the manual persistent Writing suggestion visual and interaction matrix.
 // [Sync] 2026-09-01: prove only the latest suggestion Cell exposes its regeneration action.
+// [Sync] 2026-11-12: exercise real HTTP conflict decoding, localized recovery links and same-Cell retry with the installed Chrome.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -11,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer as createNetServer } from 'node:net';
 import { createServer } from 'vite';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chrome' });
 
 /*
 Business impact brief used by this provider-free browser lane:
@@ -52,13 +53,14 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
     import i18n from '/app/_dream/i18n.ts';
     import { EditorEngine } from '/app/_dream/engine/EditorEngine.ts';
     import { WritingSuggestionController } from '/app/_dream/hooks/useWritingSuggestions.ts';
+    import { streamClaudeAgentTurn } from '/app/_dream/api/voiceApi.ts';
     import { WritingSuggestionCell, WritingSuggestionTrigger } from '/app/_dream/components/Editor/WritingSuggestionCell.tsx';
     import '/app/_dream/styles/tokens.css';
 
     const engine = new EditorEngine('writing-browser-session');
     const firstText = engine.getState().cells.find((cell) => cell.type === 'text');
     engine.updateTextCell(firstText.id, '雨落在旧车站的玻璃顶上。');
-    window.writingHarness = { createCalls: 0, threadIds: [], snapshots: [], persistedThreads: [] };
+    window.writingHarness = { createCalls: 0, threadIds: [], snapshots: [], persistedThreads: [], httpError: false };
 
     const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -77,6 +79,10 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
           window.writingHarness.threadIds.push(request.threadId);
           const snapshot = request.message.match(/<writing_passage>\\n([\\s\\S]*?)\\n<\\/writing_passage>/)?.[1] ?? request.message;
           window.writingHarness.snapshots.push(snapshot);
+          if (window.writingHarness.httpError) {
+            window.writingHarness.httpError = false;
+            return streamClaudeAgentTurn(request);
+          }
           await wait(180);
           request.onDelta('试着让雨声');
           await wait(180);
@@ -171,7 +177,16 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
   });
 
   const diagnostics: string[] = [];
+  let conflictCode = 'GATEWAY_MODEL_SELECTION_STALE';
+  let httpRejections = 0;
+  await page.route('**/api/claude-agent', async (route) => {
+    expect(route.request().postDataJSON().id).toBe('thread-writing-browser');
+    httpRejections += 1;
+    await route.fulfill({ status: 409, json: { detail: { error_code: conflictCode } } });
+  });
   page.on('console', (message) => {
+    if (message.location().url.endsWith('/api/claude-agent')
+      && message.text().includes('409')) return;
     if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
   });
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
@@ -243,6 +258,20 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
       'thread-writing-browser',
     ]);
 
+    const latestSuggestion = suggestionCells.nth(1);
+    const latestCellId = await latestSuggestion.getAttribute('data-suggestion-cell-id');
+    await page.evaluate(() => {
+      (window as unknown as { writingHarness: { httpError: boolean } }).writingHarness.httpError = true;
+    });
+    await latestSuggestion.getByRole('button', { name: 'Refresh' }).click();
+    await expect(latestSuggestion).toContainText('Check your subscription and allowance');
+    await expect(latestSuggestion.getByRole('link', { name: 'Check subscription and allowance' }))
+      .toHaveAttribute('href', '/story-workspace/subscription');
+    await expect(latestSuggestion.getByRole('link', { name: 'Check model settings' }))
+      .toHaveAttribute('href', '/story-workspace/settings/model');
+    await expect(latestSuggestion).toContainText('试着让雨声触发一个具体的记忆。');
+    await expect(suggestionCells).toHaveCount(2);
+
     await page.evaluate(async () => {
       const [{ default: i18n }, theme] = await Promise.all([
         import('/app/_dream/i18n.ts'),
@@ -252,6 +281,27 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
       theme.setThemeMode('dark');
     });
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(latestSuggestion).toContainText('请检查订阅与额度');
+    await expect(latestSuggestion.getByRole('link', { name: '查看订阅与额度' })).toBeVisible();
+    await latestSuggestion.getByRole('button', { name: '重试', exact: true }).click();
+    await expect(latestSuggestion).toHaveAttribute('aria-busy', 'false');
+    await expect(latestSuggestion.getByRole('link')).toHaveCount(0);
+    await expect(latestSuggestion).toHaveAttribute('data-suggestion-cell-id', latestCellId ?? '');
+    for (const [code, feedback] of [
+      ['CHAT_INPUT_USE_QUEUE', '当前对话仍在生成回复'],
+      ['CHAT_INPUT_RECONCILIATION_REQUIRED', '当前对话有待处理的消息'],
+    ]) {
+      conflictCode = code;
+      await page.evaluate(() => {
+        (window as unknown as { writingHarness: { httpError: boolean } }).writingHarness.httpError = true;
+      });
+      await latestSuggestion.getByRole('button', { name: '重新生成', exact: true }).click();
+      await expect(latestSuggestion).toContainText(feedback);
+      await expect(latestSuggestion.getByRole('link')).toHaveCount(0);
+      await latestSuggestion.getByRole('button', { name: '重试', exact: true }).click();
+      await expect(latestSuggestion.getByRole('button', { name: '重新生成', exact: true })).toBeVisible();
+    }
+    expect(httpRejections).toBe(3);
     await expect(page.getByRole('button', { name: '重新生成' })).toHaveCount(1);
     await expect(page.getByRole('button', { name: '重新生成' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);

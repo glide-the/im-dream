@@ -1,3 +1,10 @@
+// [Sync] 2026-11-26: reconcile the current Thread's navigation summaries with input dispatch receipts.
+// [Sync] 2026-11-18: expose the current conversation bounds for local Notion reading overlays.
+// [Sync] 2026-11-13: ordinary and queued messages capture current Thread tools without global MCP saves.
+// [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
+// [Sync] 2026-11-13: preserve caller Agent context in the combined menu and refresh original model config after confirmed saves.
+// [Sync] 2026-11-04: show preparation inline and retain rejected drafts with stable retry message IDs.
+// [Sync] 2026-11-09: retain the composer while history loads; gate submissions and runtime controls until reconciliation completes.
 // [Sync] 2026-11-03: refresh original system configuration when the retained Chat route returns.
 // [Sync] 2026-10-28: share the unchanged numeric bottom proximity with native; DOM measurement and scroll behavior remain owned here.
 // [Sync] 2026-10-12: scope compact usage to the latest reply, selected model and idle Thread.
@@ -15,9 +22,13 @@
 // [Sync] 2026-09-26: running turns submit durable queued text and show server queue states.
 // [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
 // [Sync] 2026-09-29: forward persisted scheduled-task marker actions to the ChatView sidebar owner.
+// [Sync] 2026-11-19: start passive task-link and input observations after history restoration.
+// [Sync] 2026-11-19: share the composer configuration GET and reread independently after a model save.
 // [Sync] 2026-10-14: forward Reflections preview tags to the existing Analysis page.
 import { browserRequestHeaders } from '../../lib/browserSession';
+import { readWebSystemConfig } from '../../api/systemConfigApi';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
+import {readThreadTools} from '../../hooks/useChatToolSelection';
 import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
 import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
@@ -94,7 +105,7 @@ import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSess
 // [Sync] 2026-09-07: keep live turn identities in a ref so metadata replay cannot
 //                    recreate the recovery callback and abort an active reconnect stream.
 // [Sync] 2026-09-29: pair a compact full-Thread turn index with the paged message scroller and left navigation rail.
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -119,6 +130,7 @@ import {
   toAttachment,
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
+import type {DeckChatSelectorProps} from '../deck/deckAgentSelection';
 import { latestContextUsage } from '../../lib/context-compaction';
 import ChatMessageList from './ChatMessageList';
 import type { ScheduledTaskMarkerSnapshot } from './scheduledTaskMarkerModel';
@@ -200,10 +212,14 @@ interface SystemConfigResponse {
 }
 
 interface ChatPanelProps {
+  active?: boolean;
+  agentSelection?:DeckChatSelectorProps;
   threadId: string;
   initialMessages?: UIMessage[];
   readRefreshNonce?: number;
   isLoading?: boolean;
+  /** Reading-only history surface while the mounted composer retains an editable draft. */
+  historyLoadingContent?: ReactNode;
   /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
   reconnectStreamNonce?: number;
   /** Exact historical tool calls proven absent from the runtime confirmation store. */
@@ -225,10 +241,10 @@ interface ChatPanelProps {
   queuedPrompt?: string;
   queuedAttachments?: Attachment[];
   queuedToolChoice?: ToolChoice;
+  queuedTools?:readonly import('../../lib/chat-schema').ChatToolDescriptor[];
   queuedPromptNonce?: number;
   /**
-   * Parent-owned at-most-once gate for queued sends. ChatPanel-local refs do not
-   * survive the history-load remount that follows lazy thread creation.
+   * Parent-owned at-most-once gate for queued sends across child remounts.
    */
   claimQueuedPrompt?: (nonce: number) => boolean;
   openFileDialogSignal?: number;
@@ -287,10 +303,12 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
 }
 
 export default function ChatPanel({
+  active = true,
   threadId,
   initialMessages,
   readRefreshNonce = 0,
   isLoading = false,
+  historyLoadingContent,
   reconnectStreamNonce = 0,
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
@@ -303,6 +321,7 @@ export default function ChatPanel({
   queuedPrompt,
   queuedAttachments = [],
   queuedToolChoice = 'auto',
+  queuedTools = [],
   queuedPromptNonce,
   claimQueuedPrompt,
   openFileDialogSignal,
@@ -319,8 +338,10 @@ export default function ChatPanel({
   voiceSystemPrompt,
   deckId,
   voiceId,
+  agentSelection,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const historyPending = historyLoadingContent !== undefined;
   const submissionStopPending = useSyncExternalStore(
     useCallback((listener: () => void) => subscribeClaudeThreadStop(threadId, listener), [threadId]),
     useCallback(() => claudeThreadStopPending(threadId), [threadId]),
@@ -329,6 +350,7 @@ export default function ChatPanel({
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
+    tools?: readonly import('../../lib/chat-schema').ChatToolDescriptor[];
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
   const [imageMaterial, setImageMaterial] = useState<{ threadId: string; file: File } | null>(null);
@@ -344,6 +366,8 @@ export default function ChatPanel({
   const [queueCheckPending, setQueueCheckPending] = useState(false);
   const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
   const pendingInputIdsRef = useRef(new Map<string, string>());
+  const [modelConfigRefresh,setModelConfigRefresh]=useState(0);
+  const lastModelConfigRefresh = useRef(0);
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -430,17 +454,13 @@ export default function ChatPanel({
 
   useEffect(() => {
     let active = true;
+    const fresh = lastModelConfigRefresh.current !== modelConfigRefresh;
+    lastModelConfigRefresh.current = modelConfigRefresh;
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { ...browserRequestHeaders() },
-        });
-        if (!response.ok) {
-          return;
-        }
-        const payload = (await response.json()) as SystemConfigResponse;
-        if (active) {
-          setSystemConfig(normalizeSystemConfig(payload));
+        const { payload } = await readWebSystemConfig({ fresh });
+        if (active && payload) {
+          setSystemConfig(normalizeSystemConfig(payload as SystemConfigResponse));
         }
       } catch {
         // ignore config fetch errors
@@ -449,7 +469,7 @@ export default function ChatPanel({
     return () => {
       active = false;
     };
-  }, [readRefreshNonce]);
+  }, [readRefreshNonce,modelConfigRefresh]);
 
   useEffect(() => {
     return subscribeImFullAccessChanged((enabled) => {
@@ -485,8 +505,16 @@ export default function ChatPanel({
     settingsSystemPrompt: systemConfig?.system_prompt,
   };
 
+  const [continuationPreparing, setContinuationPreparing] = useState(false);
+  const continuationErrorRef = useRef<Error | null>(null);
+  const continuationMessageIds = useRef(new Map<string, string>());
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop, clearError } = useChat({
     id: threadId,
+    onError: (failure) => { continuationErrorRef.current = failure; setContinuationPreparing(false); },
+    onData: (part) => {
+      if (part.type === 'data-continuation') setContinuationPreparing((part.data as { state?: string })?.state === 'preparing');
+    },
+    onFinish: () => setContinuationPreparing(false),
     transport: new ClaudeAgentChatTransport({
       threadId,
       api: `${API_BASE}/api/claude-agent`,
@@ -499,7 +527,7 @@ export default function ChatPanel({
         const requestContext = requestContextRef.current;
 
         const pending=getPendingData();
-        const requestBody:ChatApiSchemaRequestBody=buildClaudeChatRequest({id,message:lastMessage,context:requestContext,attachments:pending?.rawAttachments,toolChoice:pending?.toolChoice});
+        const requestBody:ChatApiSchemaRequestBody=buildClaudeChatRequest({id,message:lastMessage,context:{...requestContext,tools:pending?.tools??readThreadTools(threadId)},attachments:pending?.rawAttachments,toolChoice:pending?.toolChoice});
 
         setTimeout(() => {
           pendingDataRef.current = null;
@@ -526,16 +554,29 @@ export default function ChatPanel({
     message: ChatUserMessage,
     options: CoordinatedChatSendOptions<Attachment> = {},
   ) => {
+    if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
     if (claudeThreadStopPending(threadId)) throw new Error('CHAT_STOP_PENDING');
     await sendCoordinatedChatUserMessage(message, options, {
       onConversationStart,
       setToolChoice: setCurrentToolChoice,
-      setPendingData: (value) => { pendingDataRef.current = value; },
+      setPendingData: (value) => { pendingDataRef.current = {...value,tools:value.tools??readThreadTools(threadId)}; },
       ensureEditorSessionPersisted: editorState ? ensureEditorSessionPersisted : undefined,
       incrementTurnGeneration: () => { turnGenerationRef.current += 1; },
-      dispatch: sendMessage,
+      dispatch: async (outgoing) => {
+        const identity = JSON.stringify([threadId, outgoing.parts, options.rawAttachments, options.toolChoice, options.tools??readThreadTools(threadId)]);
+        const id = outgoing.id ?? continuationMessageIds.current.get(identity) ?? crypto.randomUUID();
+        continuationMessageIds.current.set(identity, id);
+        continuationErrorRef.current = null;
+        await sendMessage({ ...outgoing, id });
+        const failure = continuationErrorRef.current as Error | null;
+        if (failure) {
+          if ('retryable' in failure && failure.retryable === true) setMessages(current => current.filter(item => item.id !== id));
+          throw failure;
+        }
+        continuationMessageIds.current.delete(identity);
+      },
     });
-  }, [editorState, ensureEditorSessionPersisted, onConversationStart, sendMessage, threadId]);
+  }, [editorState, ensureEditorSessionPersisted, historyPending, onConversationStart, sendMessage, setMessages, threadId]);
 
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
@@ -618,15 +659,14 @@ export default function ChatPanel({
   }, [initialToolConfirmationKnown]);
 
   useEffect(() => {
+    if (!initialMessages) {
+      hasInitializedRef.current = false;
+      return;
+    }
     if (hasInitializedRef.current) {
       return;
     }
-    if (!initialMessages) {
-      return;
-    }
-    if (initialMessages.length > 0) {
-      setMessages(initialMessages);
-    }
+    setMessages(initialMessages);
     setHistoryPage(initialHistoryPage);
     setHistoricalMessageIds(new Set(initialMessages.map((message) => message.id)));
     hasInitializedRef.current = true;
@@ -645,6 +685,7 @@ export default function ChatPanel({
   }, [historicalMessageIds, messages, runtimeRunning, status]);
 
   useEffect(() => {
+    if (historyPending) return;
     if (submissionStopPending || claudeThreadStopPending(threadId)) return;
     if (!queuedPromptNonce || queuedPromptNonce === lastQueuedNonceRef.current) {
       return;
@@ -676,10 +717,10 @@ export default function ChatPanel({
       }
       await sendUserMessage(
         { role: 'user', parts: queuedMessageParts },
-        { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice },
+        { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice, tools:queuedTools },
       );
     })();
-  }, [claimQueuedPrompt, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendUserMessage, submissionStopPending, threadId]);
+  }, [claimQueuedPrompt, historyPending, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, queuedTools, sendUserMessage, submissionStopPending, threadId]);
 
   const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
@@ -836,6 +877,7 @@ export default function ChatPanel({
   }, [recoverLocalCompletion, status]);
 
   useEffect(() => {
+    if (historyPending) return;
     const reconnectClaim = claimChatReconnect(
       runtimeRunning,
       reconnectStreamNonce,
@@ -984,14 +1026,14 @@ export default function ChatPanel({
         setIsReconnecting(false);
       }
     };
-  }, [reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
+  }, [historyPending, reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
 
   const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting) || submissionStopPending;
   const agentBusy = canStopMainTurn || isStopping || submissionStopPending;
-  const chatLoading = agentBusy || isLoading;
+  const chatLoading = agentBusy || isLoading || historyPending;
   const visibleTurnNavigation = useMemo(
-    () => projectVisibleTurnNavigation(visibleMessages, agentBusy),
-    [visibleMessages, agentBusy],
+    () => projectVisibleTurnNavigation(visibleMessages, agentBusy, threadInputs),
+    [visibleMessages, agentBusy, threadInputs],
   );
   const turnNavigationItems = useMemo(
     () => mergeTurnNavigation(indexedTurns, visibleTurnNavigation),
@@ -1016,11 +1058,11 @@ export default function ChatPanel({
     return () => controller.abort();
   }, [threadId, latestVisibleMessageId, agentBusy, navigationIndexNonce]);
 
-  const refreshTaskSessionLinks = useCallback(async () => {
+  const refreshTaskSessionLinks = useCallback(async (fresh = false) => {
     const request = taskSessionLinksRequestRef.current + 1;
     taskSessionLinksRequestRef.current = request;
     try {
-      const next = await fetchTaskSessionLinks(threadId);
+      const next = await fetchTaskSessionLinks(threadId, { fresh });
       if (chatPanelMountedRef.current && taskSessionLinksRequestRef.current === request) {
         setTaskSessionLinks(next);
         setTaskSessionLinksFailed(false);
@@ -1033,17 +1075,19 @@ export default function ChatPanel({
   }, [threadId]);
 
   useEffect(() => {
+    if (historyPending || !active) return;
     setTaskSessionLinks({ source: null, created: [] });
     setTaskSessionLinksFailed(false);
     void refreshTaskSessionLinks();
-  }, [refreshTaskSessionLinks]);
+    return () => { taskSessionLinksRequestRef.current += 1; };
+  }, [active, historyPending, refreshTaskSessionLinks]);
 
   const previousTaskSessionBusyRef = useRef(agentBusy);
   useEffect(() => {
     const wasBusy = previousTaskSessionBusyRef.current;
     previousTaskSessionBusyRef.current = agentBusy;
-    if (wasBusy && !agentBusy) void refreshTaskSessionLinks();
-  }, [agentBusy, refreshTaskSessionLinks]);
+    if (active && !historyPending && wasBusy && !agentBusy) void refreshTaskSessionLinks(true);
+  }, [active, agentBusy, historyPending, refreshTaskSessionLinks]);
 
   const refreshThreadInputs = useCallback(async () => {
     const snapshot = await fetchThreadInputs(threadId);
@@ -1076,15 +1120,16 @@ export default function ChatPanel({
   }, [inputFailureText, refreshThreadInputs]);
 
   useEffect(() => {
-    let active = true;
+    if (historyPending || !active) return;
+    let observing = true;
     let inFlight = false;
     const cancellation = new AbortController();
     const load = async () => {
-      if (!active || inFlight) return;
+      if (!observing || inFlight || document.visibilityState !== 'visible') return;
       inFlight = true;
       try {
         const snapshot = await fetchThreadInputs(threadId, cancellation.signal);
-        if (active) {
+        if (observing) {
           setThreadInputs(snapshot.entries);
           setInputOwnerLocal(snapshot.local_owner);
         }
@@ -1097,11 +1142,11 @@ export default function ChatPanel({
     void load();
     const timer = window.setInterval(() => { void load(); }, 2000);
     return () => {
-      active = false;
+      observing = false;
       window.clearInterval(timer);
       cancellation.abort();
     };
-  }, [threadId]);
+  }, [active, historyPending, threadId]);
 
   const selectQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
     try {
@@ -1437,8 +1482,8 @@ export default function ChatPanel({
   }, [messages, status, shouldShowMessageSurface, updateActiveTurn, updateScrollToBottomVisibility]);
 
   return (
-    <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
-      {shouldShowMessageSurface ? (
+    <div data-chat-preview-container className={className} style={{ position: 'relative', display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
+      {historyPending ? historyLoadingContent : shouldShowMessageSurface ? (
         <div className="chat-turn-reading">
           <div className="chat-turn-reading__layout">
             <TurnNavigation
@@ -1513,7 +1558,7 @@ export default function ChatPanel({
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)',
         }}
       >
-        {shouldShowMessageSurface && showScrollToBottom ? (
+        {!historyPending && shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
             aria-label={t('chat.panel.scrollToBottom')}
@@ -1540,7 +1585,7 @@ export default function ChatPanel({
             <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
           </button>
         ) : null}
-        {queueCardEntries.length > 0 ? (
+        {!historyPending && queueCardEntries.length > 0 ? (
           <div aria-label={t('chat.inputQueue.region')} style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0 0.75rem', display: 'grid', gap: '0.3rem' }}>
             {queueCardEntries.map((entry) => (
               <ThreadInputQueueCard
@@ -1555,6 +1600,9 @@ export default function ChatPanel({
             ))}
           </div>
         ) : null}
+        {continuationPreparing ? <div role="status" aria-live="polite" style={{ padding: '0.45rem 0.75rem', color: 'var(--color-text-secondary)' }}>
+          {t('chat.continuation.preparing')}
+        </div> : null}
         {threadInputError || queueOutcomeUnknown ? (
           <div role="alert" className="chat-input-queue-error" style={{
             boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center',
@@ -1574,12 +1622,12 @@ export default function ChatPanel({
             ) : null}
           </div>
         ) : null}
-        {editDraftRecovery ? <div role="status" style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', color: 'var(--color-text-primary)' }}>
+        {!historyPending && editDraftRecovery ? <div role="status" style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', color: 'var(--color-text-primary)' }}>
           <span>{t('chat.inputQueue.editDraftSaved')}</span>
           <p style={{ margin: '0.3rem 0', whiteSpace: 'pre-wrap' }}>{editDraftRecovery.text}</p>
           <button type="button" onClick={() => { void retryEditedInput(); }}>{t('chat.inputQueue.retryEdit')}</button>
         </div> : null}
-        {pendingConfirmation ? (
+        {!historyPending && pendingConfirmation ? (
           <ToolConfirmationDock
             key={`${pendingConfirmation.partKey}-${pendingConfirmation.toolCallId}`}
             confirmation={pendingConfirmation}
@@ -1588,16 +1636,17 @@ export default function ChatPanel({
             onSettled={markToolConfirmationSettled}
           />
         ) : null}
-        <AIInputDock
+        <AIInputDock active={active} agentSelection={agentSelection} onModelConfigSaved={()=>setModelConfigRefresh(value=>value+1)}
             contextUsage={latestContextUsage(messages, systemConfig?.model, chatLoading)}
             deckId={deckId}
             threadId={threadId}
-            workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
+            workspaceEnabled={!historyPending && workspaceConfigLoaded && workspaceEnabled}
             openFileDialogSignal={openFileDialogSignal}
             imageMaterial={imageMaterial?.threadId === threadId ? imageMaterial.file : undefined}
             onImageMaterialConsumed={() => setImageMaterial(null)}
             fullAccessEnabled={imFullAccessEnabled}
-            onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
+            onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto', tools = []) => {
+              if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
               if (isStopping || claudeThreadStopPending(threadId)) {
                 setThreadInputError(t('chat.inputDock.stopping'));
                 throw new Error('CHAT_STOP_PENDING');
@@ -1612,7 +1661,7 @@ export default function ChatPanel({
                 const id = pendingInputIdsRef.current.get(text) ?? crypto.randomUUID();
                 pendingInputIdsRef.current.set(text, id);
                 try {
-                  const entry = await enqueueThreadInput(threadId, id, text, toolChoice, deckId, voiceId);
+                  const entry = await enqueueThreadInput(threadId, id, text, toolChoice, deckId, voiceId, undefined, tools);
                   pendingInputIdsRef.current.delete(text);
                   setThreadInputs((current) => current.some((item) => item.message_id === entry.message_id)
                     ? current.map((item) => item.message_id === entry.message_id ? entry : item)
@@ -1640,14 +1689,15 @@ export default function ChatPanel({
               }
               await sendUserMessage(
                 { role: 'user', parts },
-                { rawAttachments: uploadedFiles.map(toAttachment), toolChoice },
+                { rawAttachments: uploadedFiles.map(toAttachment), toolChoice, tools },
               );
             }}
             placeholder={inputPlaceholder}
             loading={chatLoading}
-            onStop={canStopMainTurn ? handleStop : undefined}
+            loadingLabel={historyPending ? t('chat.historyTurn.loading') : undefined}
+            onStop={!historyPending && canStopMainTurn ? handleStop : undefined}
             stopPending={isStopping || submissionStopPending}
-            workspaceSessionId={workspaceEnabled ? threadId : undefined}
+            workspaceSessionId={!historyPending && workspaceEnabled ? threadId : undefined}
             mode="full"
         />
       </div>

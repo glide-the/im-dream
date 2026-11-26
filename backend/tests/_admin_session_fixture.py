@@ -1,3 +1,4 @@
+# [Sync] 2026-11-12: allow explicitly supplied additive operations in isolated Session/share fixtures.
 # [Sync] 2026-09-17: verify confidential service OAuth and separate delegated-user Bearer transport.
 # [Input] Actual FastAPI Session router, Admin DTO transport and explicit synthetic OAuth verifier.
 # [Output] Reusable provider-free Session boundary with precise business fixtures and request receipts.
@@ -40,7 +41,8 @@ class SessionVerifier:
         return OAuthPrincipalClaims("session-ba-subject", "dream-browser", scopes, "fixture-jti", 100, 400)
 
 
-def build_session_boundary(*, user_id="42"):
+def build_session_boundary(*, user_id="42", extra_operations=()):
+    operations = (*SESSION_OPERATIONS, *extra_operations)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth",
         resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     calls, outputs = [], {
@@ -55,7 +57,7 @@ def build_session_boundary(*, user_id="42"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri,
                 "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"},
                 "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": [],
-                "operations": [item.capability.model_dump() for item in SESSION_OPERATIONS]}
+                "operations": [item.capability.model_dump() for item in operations]}
         elif request.url.path.endswith("/principal"):
             scopes = ["dream:read"] if request.headers["authorization"] == "Bearer read-only" else ["dream:read", "dream:write"]
             value = {"subject": "session-ba-subject", "canonical_user_id": user_id, "client_id": "dream-browser", "scopes": scopes, "status": "active"}
@@ -74,7 +76,7 @@ def build_session_boundary(*, user_id="42"):
             if isinstance(value, tuple):
                 return httpx.Response(value[0], json={"request_id": request_id, "error": {"code": value[1], "message": "synthetic private error"}})
         return httpx.Response(200, json={"request_id": request_id, "data": value})
-    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=SESSION_OPERATIONS)
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=operations)
     app = FastAPI()
     app.state.admin_request_auth = AdminRequestAuth(config, client=client, verifier=SessionVerifier())
     app.include_router(router)

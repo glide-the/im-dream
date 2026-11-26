@@ -1,13 +1,15 @@
+# [Sync] 2026-11-12: register unified chat/note public snapshots and owner management.
 # [Input] The canonical production business-router module inventory.
 # [Output] Existing APIRouter instances in the same registration order for server and embedded hosts.
 # [Pos] Router assembly inventory; imports remain lazy until the composition root loads them.
+# [Sync] 2026-11-12: register note publication and anonymous snapshot reads for both hosts.
 from importlib import import_module
 
 BUSINESS_ROUTER_NAMES = (
     "auth", "oauth", "device_oauth", "sessions", "pictures", "preferences", "notion", "product", "reports",
     "voices", "friends", "claude_agent", "storage", "deck_plugins", "claude_plugins", "claude_mcp",
     "deck_plugin_binding", "deck_versions", "story_workspace", "system_config", "gateway_models", "workspace",
-    "reflections", "memory",
+    "reflections", "memory", "note_shares", "external_shares",
 )
 
 

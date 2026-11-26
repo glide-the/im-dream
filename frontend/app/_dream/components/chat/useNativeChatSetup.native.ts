@@ -1,3 +1,4 @@
+// [Sync] 2026-11-08: omitted optional settings use existing workspace-on/manual-approval defaults; malformed stored values still fail.
 // [Sync] 2026-10-29: reread the same owned configuration after Settings saves; reject superseded configuration responses.
 // [Sync] 2026-10-29: expose the same owned catalog refresh after Deck maintenance; keep configuration and Chat instances.
 // [Sync] 2026-10-28: read the complete Agent catalog once through the injected cancellable transport.
@@ -54,9 +55,11 @@ export default function useNativeChatSetup({transport=clientFetch,onSessionExpir
       const response=await read('/api/system-config',{headers:browserRequestHeaders()});
       if(!response.ok)throw new Error(`HTTP_${response.status}`);
       const payload=await response.json(),snapshot=payload?.data ?? payload;
-      if(!snapshot || typeof snapshot.workspace_enabled!=='boolean' || typeof snapshot.im_full_access_enabled!=='boolean'
+      if(!snapshot || typeof snapshot!=='object' || Array.isArray(snapshot)
+        || (snapshot.workspace_enabled!==undefined && typeof snapshot.workspace_enabled!=='boolean')
+        || (snapshot.im_full_access_enabled!==undefined && typeof snapshot.im_full_access_enabled!=='boolean')
         || (snapshot.system_prompt!=null && typeof snapshot.system_prompt!=='string'))throw new Error('SYSTEM_CONFIG_INVALID');
-      const next:NativeChatConfig={workspace_enabled:snapshot.workspace_enabled,im_full_access_enabled:snapshot.im_full_access_enabled,
+      const next:NativeChatConfig={workspace_enabled:snapshot.workspace_enabled ?? true,im_full_access_enabled:snapshot.im_full_access_enabled ?? false,
         ...(typeof snapshot.system_prompt==='string'?{system_prompt:snapshot.system_prompt}:{})};
       if(!active)throw new Error('HTTP_ABORTED');
       if(sequence===configRequest)setConfig(next);

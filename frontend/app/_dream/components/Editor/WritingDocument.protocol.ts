@@ -6,13 +6,16 @@
 // [Sync] 2026-11-01: bind on-demand saved Writing context to one document, Session, request and cancellable native submission.
 import {parseEditorJumpToCellDetail,type EditorJumpToCellDetail} from '../chat/editorWriteTools';
 import {WRITING_CHAT_CONTEXT_TIMEOUT_MS} from '../../constants/sessionSync';
+// [Sync] 2026-11-12: bind explicit note clipboard/file actions and receipts to the local document.
+import {isWritingShareRequest, isWritingShareResult, type WritingShareRequest, type WritingShareResult} from './WritingShare.protocol';
 export const WRITING_DOCUMENT_PATH='/native/writing';
 export interface WritingChooserView {loading:boolean;selectedStateId:string|null;name:string;expanded:boolean;createdAt?:string}
 export interface WritingContextRequest {requestId:string;sessionId:string}
 export type WritingContextResult = WritingContextRequest & ({type:'chat-context';editorState:Record<string,unknown>}|{type:'chat-context-error';code:'session-changed'|'save-failed'});
 export interface WritingThreadContext {sessionId:string;prepareEditorState:(signal:AbortSignal)=>Promise<Record<string,unknown>>}
-export interface WritingDocumentState {type:'state';documentId:string;revision:number;active:boolean;theme:'light'|'dark'|'system';language:'en'|'zh';showEnergyBar:boolean;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};openChooserNonce?:number;contextRequest?:WritingContextRequest}
+export interface WritingDocumentState {type:'state';documentId:string;revision:number;active:boolean;theme:'light'|'dark'|'system';language:'en'|'zh';showEnergyBar:boolean;editorJump?:{nonce:number;detail:EditorJumpToCellDetail};openChooserNonce?:number;contextRequest?:WritingContextRequest;shareResult?:WritingShareResult}
 export type WritingDocumentEvent=
+ | {type:'note-share';documentId:string;request:WritingShareRequest}
  | {type:'ready'|'session-expired'|'resources';documentId:string}
  | {type:'open-thread';documentId:string;threadId:string;editorSessionId?:string}
  | {type:'prepare-chat';documentId:string;input:string}
@@ -27,12 +30,14 @@ export function readWritingState(raw:unknown):WritingDocumentState|null {
  return r.type==='state'&&typeof r.documentId==='string'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>=0&&typeof r.active==='boolean'&&['light','dark','system'].includes(String(r.theme))&&['en','zh'].includes(String(r.language))&&typeof r.showEnergyBar==='boolean'
   &&(r.openChooserNonce===undefined||(Number.isSafeInteger(r.openChooserNonce)&&Number(r.openChooserNonce)>0))
   &&(r.contextRequest===undefined||isContextRequest(r.contextRequest))
+  &&(r.shareResult===undefined||isWritingShareResult(r.shareResult))
   &&(r.editorJump===undefined||(typeof r.editorJump==='object'&&r.editorJump!==null&&'nonce' in r.editorJump&&Number.isSafeInteger(r.editorJump.nonce)&&'detail' in r.editorJump&&parseEditorJumpToCellDetail(r.editorJump.detail)!==null))?r as unknown as WritingDocumentState:null;
 }
 export function readWritingEvent(raw:string):WritingDocumentEvent|null {
  let r:Record<string,unknown>;try{r=JSON.parse(raw);}catch{return null;}
  if(!r||typeof r.documentId!=='string')return null;
  if(['ready','session-expired','resources'].includes(String(r.type)))return r as WritingDocumentEvent;
+ if(r.type==='note-share'&&isWritingShareRequest(r.request))return r as WritingDocumentEvent;
  if(r.type==='chooser-view'&&Number.isSafeInteger(r.revision)&&Number(r.revision)>0&&typeof r.loading==='boolean'&&(r.selectedStateId===null||typeof r.selectedStateId==='string')&&typeof r.name==='string'&&typeof r.expanded==='boolean'&&(r.createdAt===undefined||(typeof r.createdAt==='string'&&Number.isFinite(Date.parse(r.createdAt)))))return r as WritingDocumentEvent;
  if(r.type==='editor-jump-dispatched'&&Number.isSafeInteger(r.nonce))return r as WritingDocumentEvent;
  if(r.type==='open-thread'&&typeof r.threadId==='string'&&r.threadId.length>0&&(r.editorSessionId===undefined||(typeof r.editorSessionId==='string'&&r.editorSessionId.length>0)))return r as WritingDocumentEvent;

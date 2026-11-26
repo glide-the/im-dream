@@ -1,3 +1,4 @@
+// [Sync] 2026-11-13: align resource heading and connect action with the reviewed card UI; modal submit keeps its original label.
 // [Input] Named existing actor/Deck, normal services, one public OAuth MCP URL, and one server-owned stdio profile.
 // [Output] Visible OAuth-operation cancel and live Agent-turn stop receipts with temporary Server cleanup and preserved Thread evidence.
 // [Pos] Opt-in real-account cancel acceptance; no provider login, credential creation, remote mutation, shadow account, or fault injection.
@@ -137,7 +138,7 @@ async function openResources(page: Page, token: string): Promise<void> {
     localStorage.setItem('ink-language', 'zh');
   }, token);
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
-  await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'MCP工具连接' })).toBeVisible();
   await expect(page.getByText('安全门禁已关闭此能力')).toHaveCount(0);
 }
 
@@ -150,7 +151,7 @@ test('real actor visibly cancels an OAuth operation without creating a credentia
   let removed = false;
   await openResources(page, token);
   try {
-    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    await page.getByRole('button', { name: '连接工具', exact: true }).click();
     const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
     await addDialog.getByLabel('MCP 服务名称').fill(OAUTH_SERVER_NAME);
     await addDialog.getByLabel('MCP 传输方式').selectOption('streamable_http');
@@ -205,7 +206,7 @@ test('real actor visibly stops a running managed-MCP Chat turn', async ({ page }
   let removed = false;
   await openResources(page, token);
   try {
-    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    await page.getByRole('button', { name: '连接工具', exact: true }).click();
     const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
     await addDialog.getByLabel('MCP 服务名称').fill(STDIO_SERVER_NAME);
     await addDialog.getByLabel('MCP 传输方式').selectOption('stdio');

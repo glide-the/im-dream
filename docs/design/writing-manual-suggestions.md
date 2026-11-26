@@ -1,6 +1,7 @@
 <!-- [Input] Writing editor Cell state, persisted user Session JSON, Claude Agent Thread/SSE contracts, and the three manual-suggestion visual references. -->
 <!-- [Output] Product interaction, ownership, lifecycle, recovery, accessibility, and acceptance contract for manual Writing suggestions. -->
 <!-- [Pos] Canonical design contract for product-level WritingSuggestionCell behavior in docs/design. -->
+<!-- [Sync] 2026-11-12: 保留生成前HTTP错误码与重试标记，补齐模型、订阅及消息冲突恢复。 -->
 <!-- [Sync] 2026-09-01: replace debounced random-Voice inspiration with manual, Session-thread-bound persistent suggestion Cells. -->
 <!-- [Sync] 2026-09-01: make the latest suggestion the sole regeneratable Cell while preserving earlier Cells as read-only history. -->
 
@@ -345,6 +346,39 @@ sessionId + suggestionCellId + requestId + writingThreadId + textSnapshot
 | `WRITING_REQUEST_FAILED` | Agent 返回可恢复错误 | 由协议决定 | 最新 Cell 按 retryable 显示操作 |
 | `WRITING_REQUEST_STALE` | 请求身份已过期 | 否且不展示 | 静默忽略，不改 Cell |
 | `WRITING_ANCHOR_EMPTY` | 锚点正文为空 | 否 | 不插入、不请求 |
+| `GATEWAY_MODEL_SELECTION_STALE` / `GATEWAY_MODEL_SELECTION_CONFLICT` | 已保存模型当前无法调用或选择发生变化 | 按服务端标记 | 显示检查订阅与额度、模型设置的文案；最新建议提供两个既有页面入口 |
+| `CHAT_INPUT_USE_QUEUE` | 当前 Thread 仍在处理回复 | 按服务端标记 | 显示等待回复完成后重试 |
+| `CHAT_INPUT_RECONCILIATION_REQUIRED` | 当前 Thread 有待核对的持久消息 | 按服务端标记 | 引导在对话页面确认消息状态后重试 |
+
+### 16.1 生成前拒绝与恢复
+
+已核对的缺口：`streamClaudeAgentTurn` 将 HTTP 409 统一转为普通 Error，控制器保存 `WRITING_REQUEST_FAILED`，建议 Cell 显示通用不可用文案。修复复用原 `ClaudeAgentTransportError`，将响应 `detail.error_code` 与布尔 `detail.retryable` 交给原控制器；错误正文中的诊断文本保持在传输边界内。
+
+模型调用资格由当前 Gateway 目录决定。订阅周期结束、额度不足、模型停用和权限限制均可使已保存模型失去调用资格。页面提供订阅与模型设置入口，服务端继续校验模型、订阅和额度。生成请求只由用户点击触发，错误处理保留原正文、旧建议和原 Thread。
+
+```mermaid
+sequenceDiagram
+    actor U as 写作者
+    participant Cell as WritingSuggestionCell
+    participant C as WritingSuggestionController
+    participant API as streamClaudeAgentTurn
+    participant G as POST /api/claude-agent
+    participant P as 原订阅与模型设置页面
+    U->>Cell: 点击深入一下或重试
+    Cell->>C: 使用当前Session及锚点快照生成
+    C->>API: 原Thread上的单次请求
+    API->>G: 提交写作请求
+    G-->>API: HTTP拒绝及detail.error_code
+    API-->>C: ClaudeAgentTransportError及retryable
+    C->>Cell: 同一请求的建议状态变为failed
+    Cell-->>U: 对应原因及允许的恢复操作
+    opt 最新建议的模型选择错误
+        U->>P: 查看订阅与额度或模型设置
+        P-->>U: 当前资格与可用操作
+    end
+    U->>Cell: 恢复后点击重试
+    Cell->>C: 原Cell及Thread的新请求版本
+```
 
 ## 17. 验收标准
 

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-14: 原生完整消息按parts原序渲染；final槽仅接收合法历史投影的最终正文。 -->
 <!-- [Sync] 2026-11-08: 补充共享Markdown输入的剪贴板解析、原插入事务、失败恢复及状态图。 -->
 <!-- [Input] 消息阅读PRD、原Native Markdown、消息列表、共享MarkdownInputEditor与复制实现。 -->
 <!-- [Output] 消息预览测量、局部横滚、底部跟随及共享输入粘贴的交互和状态合同。 -->
@@ -114,6 +115,62 @@ stateDiagram-v2
 | 范围 | UI层最小修复；复用原业务Hook及公开协议 | provider-free完整旅程；真实模型、真机及发布独立登记 |
 
 方案通过最小范围评审。实现、技术验证、Simulator结果及剩余资格由[独立执行记录](../../exec/app-experience-chat-rendering-20261103.md)维护；PRD页面骨架归[消息阅读PRD](../../prd/chat/message-reading.md)。
+
+## 原生消息片段顺序（2026-11-14）
+
+发现：`MessageRow`从完整消息中选出`lastText`并移动到固定`final`容器，后续工具留在`parts`容器，造成显示顺序改变。目标为复用`UIMessage.parts`原序并保留合法历史投影的过程折叠。方案比较：修改SSE或重排DTO会扩大协议影响；展示层仅为合法`projection`提取最终正文，完整消息在`parts`原序渲染。`apps`容器继续承载原独立MCP App文档。
+
+`lastText`仅决定原复制操作的展示位置；`finalPartIndex`仅来自`projectHistoricalAssistantTurn`且`processAvailable`为真。运行、当前页面完成、取消、失败和无合法投影的历史消息，全部片段使用原索引键留在`parts`容器。工具状态更新复用原组件实例。任务、权限、SSE、历史读取和底部跟随算法沿原实现。
+
+```mermaid
+sequenceDiagram
+  participant Hook as useNativeChatThread
+  participant Row as MessageRow
+  participant Tool as ToolMessagePart.native
+  actor User as 用户
+  Hook-->>Row: parts：文字A、Read
+  Row-->>User: 文字A在Read之前
+  Hook-->>Row: Read输入及结果更新
+  Row->>Tool: 原toolCallId与更新片段
+  Tool-->>User: 更新工具进度
+  Hook-->>Row: 追加文字B、Grep、文字C
+  Row-->>User: 原序A、Read、B、Grep、C
+  Hook-->>Row: 当前回复完成
+  Row-->>User: 保持完整片段顺序
+```
+
+```mermaid
+sequenceDiagram
+  actor User as 用户
+  participant Hook as useNativeChatThread
+  participant Row as MessageRow
+  participant Projection as projectHistoricalAssistantTurn
+  User->>Hook: 停止任务或重新打开历史
+  Hook-->>Row: 原消息及historicalMessageIds
+  Row->>Projection: 历史消息与原metadata
+  alt 合法完成且存在过程
+    Projection-->>Row: processPartIndexes与finalPartIndex
+    Row-->>User: 过程入口与最终正文
+    User->>Row: 展开过程
+    Row-->>User: 按原索引显示过程
+  else 取消、失败或投影校验失败
+    Projection-->>Row: 无合法过程投影
+    Row-->>User: 按parts原序显示完整消息
+  end
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> CompleteParts: 完整消息
+  CompleteParts --> CompleteParts: 工具更新或追加片段
+  CompleteParts --> CompleteParts: 当前回复完成、取消或失败
+  CompleteParts --> CollapsedHistory: 重新打开合法完成历史
+  CollapsedHistory --> ExpandedHistory: 展开过程
+  ExpandedHistory --> CollapsedHistory: 收起过程
+  CollapsedHistory --> CompleteParts: 投影校验失败
+```
+
+验证使用实际Hermes Simulator、生产`ChatMessageList.native`与`ToolMessagePart.native`，以显式片段增量提供渲染输入。源码基线复现、修订后排序、稳定位置、取消及历史折叠分别记录于[执行记录](../../exec/chat-part-order-20261114.md)。真实账户、模型与物理设备资格独立登记。
 
 ## 消息复制与输入区粘贴
 

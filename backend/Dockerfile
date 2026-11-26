@@ -1,3 +1,4 @@
+# [Sync] 2026-11-26: pin Runtime 0.1.13 for non-PDF Read calls with blank pages.
 # [Sync] 2026-10-11: adopt exact published Runtime 0.1.12 with original compact-image compatibility.
 # [Input] Consume backend source tree and requirements.txt during container builds.
 # [Output] Build the Ink & Memory FastAPI runtime image served by uvicorn on port 8765.
@@ -67,7 +68,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep zip: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
-ARG INK_CLAUDE_CODE_VERSION=0.1.12
+ARG INK_CLAUDE_CODE_VERSION=0.1.13
 ARG NOTION_CLI_VERSION=0.15.1
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -109,7 +110,7 @@ RUN set -eux; \
 # default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
 # explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
-    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.12"; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.13"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm install -g \
         --registry="${INK_CLAUDE_NPM_REGISTRY}" \

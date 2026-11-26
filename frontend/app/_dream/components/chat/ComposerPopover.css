@@ -1,0 +1,10 @@
+/* [Input] Migrated menu contents and existing IM theme tokens. */
+/* [Output] Desktop popover and mobile sheet boundaries shared by Agent/tools and models. */
+/* [Pos] Presentation adapter for upstream Popover/Drawer; no data or routing ownership. */
+/* [Sync] 2026-11-13: portal menus use the existing product UI font and explicit Chinese line metrics. */
+.composer-popover-backdrop{position:fixed;inset:0;z-index:1149;background:color-mix(in srgb,var(--color-text-primary) 12%,transparent);}
+.composer-popover{position:fixed;box-sizing:border-box;display:flex;flex-direction:column;min-height:0;overflow:hidden;border:1px solid var(--color-border-paper);border-radius:16px;background:var(--color-bg-surface-solid);color:var(--color-text-primary);box-shadow:0 12px 36px var(--color-shadow-medium);font-size:13px;}
+.composer-popover--sheet{border-radius:20px;padding-bottom:env(safe-area-inset-bottom,0px);}
+.composer-popover{font-family:var(--font-family-ui);font-size:14px;font-weight:400;line-height:22px;}
+.composer-popover button,.composer-popover input{font:inherit;}
+.composer-popover button svg{display:block;flex-shrink:0;width:16px;height:16px;}

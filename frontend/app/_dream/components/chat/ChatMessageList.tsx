@@ -1,3 +1,5 @@
+// [Sync] 2026-11-18: present existing Notion Read results outside loaded process disclosures with on-demand reading.
+// [Sync] 2026-11-04: show user-facing continuation failures through the existing error card.
 // [Sync] 2026-10-30: share original pure tool projections with Native; original DOM render tree and event handlers remain.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
 // [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -63,7 +65,9 @@
 // [Sync] 2026-09-29: expose stable user-message anchors and a transient locate highlight for the turn rail.
 // [Sync] 2026-10-07: render durable task markers when persisted Tool output and final prose occupy separate assistant messages.
 // [Sync] 2026-10-14: replace exact Reflections Analyze user prompts with one section-navigation tag.
-import { useCallback, useEffect, useRef, useState } from 'react';
+// [Sync] 2026-11-13: share message-stack geometry with read-only share surfaces.
+import {CHAT_MESSAGE_LIST_STYLE, CHAT_MESSAGE_GROUP_STYLE} from './chatMessageLayout';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -75,6 +79,8 @@ import { isCompactionCompletionText, readContextCompactions } from '../../lib/co
 import { CreatedTaskSessionList, TaskSessionSourceMarker } from './TaskSessionNavigation';
 import type { TaskSessionLink, TaskSessionLinksSnapshot } from './taskSessionLinks';
 import ToolMessagePart from './ToolMessagePart';
+import NotionWorkspacePreview from './NotionWorkspacePreview';
+import {resolveNotionWorkspacePreview} from './notionPreviewProjection';
 import { EditorWriteCompletedCard } from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
@@ -244,6 +250,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   const {details:historicalProcessDetails,load:loadHistoricalProcess}=useHistoricalChatProcess(threadId,messages,historicalMessageIds);
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
+  const isContinuationFailure = Boolean(errorCode?.startsWith('CLAUDE_RESUME_') || errorCode?.startsWith('CHAT_CONTINUATION_'));
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
   const isDreamAutoRepairFailure = errorCode === 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED';
   const isDreamArtifactSyncFailure = (
@@ -283,7 +290,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
   };
 
   return (
-    <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
+    <div style={CHAT_MESSAGE_LIST_STYLE}>
       <div style={{ alignSelf: 'center', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
         {historyError ? (
           <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
@@ -346,6 +353,11 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
           if (marker && !tasks.some((task) => task.id === marker.id && task.revision === marker.revision)) tasks.push(marker);
           return tasks;
         }, []);
+        const notionPreviews = new Map(message.role === 'assistant' ? message.parts.flatMap((part, partIndex) => {
+          if (!isToolUIPart(part)) return [];
+          const preview = resolveNotionWorkspacePreview(part);
+          return preview ? [[partIndex, preview] as const] : [];
+        }) : []);
         const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'outside-app' | 'final') => {
               const part = message.parts?.[partIndex];
               if (!part) return null;
@@ -488,6 +500,8 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
 
               if (isToolUIPart(part)) {
                 const toolPart = part as ToolUIPart | DynamicToolUIPart;
+                const notionPreview = notionPreviews.get(partIndex);
+                if (notionPreview) return partKind === 'process' ? null : <NotionWorkspacePreview key={`${threadId}:${partKey}`} data={notionPreview} threadId={threadId}/>;
                 const toolStatus = getToolStatus(toolPart, isLoading);
                 const isCompleted = toolStatus !== 'executing';
                 const isError = toolStatus === 'error';
@@ -694,6 +708,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
         };
         const outsideMcpAppPartIndexes = projection
           ? projection.processPartIndexes.filter((partIndex) => {
+              if (notionPreviews.has(partIndex)) return true;
               const part = message.parts?.[partIndex];
               if (!part || !isToolUIPart(part)) return false;
               const toolPart = part as ToolUIPart | DynamicToolUIPart;
@@ -719,7 +734,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
             data-chat-message-id={message.id}
             data-chat-user-message-id={isNavigableUserMessage(message) ? message.id : undefined}
             className={locatedMessageId === message.id ? 'chat-turn-message--located' : undefined}
-            style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}
+            style={CHAT_MESSAGE_GROUP_STYLE}
           >
             {projection ? (
               <AssistantTurnGroup
@@ -804,7 +819,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
         >
           <div style={{ fontWeight: 700 }}>
             {t(
-              isDreamBindingConflict
+              isContinuationFailure ? 'chat.continuation.title' : isDreamBindingConflict
                 ? 'chat.turnError.bindingConflictTitle'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedTitle'
@@ -819,7 +834,7 @@ export default function ChatMessageList({ messages, threadId, onAddImageMaterial
           </div>
           <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
             {dreamAutoRepairFailureText ?? t(
-              isDreamBindingConflict
+              isContinuationFailure ? (errorCode?.includes('HISTORY_UNSUPPORTED') ? 'chat.continuation.unsupported' : errorCode === 'CHAT_CONTINUATION_BUSY' ? 'chat.continuation.busy' : errorCode?.includes('ALREADY_CLAIMED') || errorCode?.includes('RESULT_UNKNOWN') ? 'chat.inputQueue.stateUnknown' : 'chat.continuation.failed') : isDreamBindingConflict
                 ? 'chat.turnError.bindingConflictDescription'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedDescription'

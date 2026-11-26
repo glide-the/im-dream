@@ -1,4 +1,6 @@
 // [Input] ChatView lazy-thread first-send flow under the application's React StrictMode runtime.
+// [Sync] 2026-11-09: require successful later same-URL list, input and scheduled-task reads after StrictMode/navigation cancellation.
+// [Sync] 2026-11-09: isolate the optimizer and avoid scanning unrelated HTML before serving the virtual test entry.
 // [Output] Browser regression proving one user submission owns exactly one /api/claude-agent POST.
 // [Pos] Chat-only queued-send lifecycle regression seam; Dream adapters are intentionally out of scope.
 // [Sync] 2026-08-24: serve the shell's read-only Dream Run collection, classify
@@ -6,7 +8,7 @@
 // [Sync] 2026-09-05: serve the shell's read-only common Skill command catalog.
 // [Sync] 2026-09-27: fixture the queue snapshot while proving first-turn streamed text remains visible.
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -59,6 +61,8 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
+    cacheDir: fileURLToPath(new URL('../../../../../node_modules/.vite/chat-queued-send/', import.meta.url)),
+    optimizeDeps: { entries: [], include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
     server: { host: '127.0.0.1', port: harnessPort, strictPort: true },
     plugins: [{
       name: 'chat-queued-send-browser-harness',
@@ -137,8 +141,33 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
     if (message.type() === 'error') diagnostics.push(message.text());
   });
   page.on('pageerror', (error) => diagnostics.push(error.message));
+  const requestOrder = new Map<PlaywrightRequest, number>();
+  const cancellableReadPaths = new Set([
+    '/api/claude-agent/threads',
+    '/api/claude-agent/threads/thread-single-send/inputs',
+    '/api/claude-agent/threads/thread-single-send/scheduled-tasks',
+  ]);
+  const cancelledListReads: { url: string; order: number }[] = [];
+  const completedListReads: { url: string; order: number }[] = [];
+  page.on('request', request => requestOrder.set(request, requestOrder.size));
+  page.on('response', response => {
+    if (response.status() === 200
+      && response.request().method() === 'GET'
+      && cancellableReadPaths.has(new URL(response.url()).pathname)) {
+      completedListReads.push({ url: response.url(), order: requestOrder.get(response.request())! });
+    }
+  });
+  const listReadsRecovered = () => cancelledListReads.every(cancelled => completedListReads.some(completed => (
+    completed.url === cancelled.url && completed.order > cancelled.order
+  )));
   page.on('requestfailed', (request) => {
     const url = new URL(request.url());
+    if (request.method() === 'GET'
+      && cancellableReadPaths.has(url.pathname)
+      && request.failure()?.errorText === 'net::ERR_ABORTED') {
+      cancelledListReads.push({ url: request.url(), order: requestOrder.get(request)! });
+      return;
+    }
     const isExpectedDreamRunsStrictModeAbort = (
       request.method() === 'GET'
       && url.pathname === '/api/story-workspace/dream-runs'
@@ -255,7 +284,7 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
       throw new Error('Chat queued-send harness did not bind a TCP port.');
     }
     await page.goto(`http://127.0.0.1:${address.port}/chat-queued-send`);
-    await page.waitForTimeout(250);
+    await expect.poll(listReadsRecovered).toBe(true);
     expect(
       diagnostics,
       `Chat harness did not reach a clean render. Body: ${await page.locator('body').innerText()}`,
@@ -276,6 +305,7 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
       id: 'thread-single-send',
       resume: true,
     });
+    await expect.poll(listReadsRecovered).toBe(true);
     expect(diagnostics).toEqual([]);
   } finally {
     await page.close();

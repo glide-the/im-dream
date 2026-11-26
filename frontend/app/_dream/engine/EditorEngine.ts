@@ -1,5 +1,7 @@
 /**
  * EditorEngine.ts
+ * [Sync] 2026-11-25: keep the confirmed Calendar title with its exact URL in the original text cell.
+ * [Sync] 2026-11-25: persist named Calendar links within the existing Session text contract.
  * Clean editor engine based on trace-based energy model
  * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
  *   even when inserting between two widgets (was only guarding the last-cell case).
@@ -11,6 +13,8 @@
  * [Sync] 2026-09-01: add persistent WritingSuggestionCell sequencing and a
  *   Session-owned Writing Thread while keeping all prose metrics TextCell-only.
  */
+
+import {findNotionArticleLinks, formatNotionArticleLink, recoverNotionArticleDraft} from '../components/notes/notionArticleLinks.ts';
 
 // @@@ Core data model - cells + commentors + tasks + WeightPath
 export interface EditorState {
@@ -176,12 +180,27 @@ export class EditorEngine {
     // Kept for backward compatibility, but does nothing
   }
 
+  /** Keep a confirmed Calendar reference in the same text contract as ordinary writing. */
+  insertNotionArticle(href: string, title: string): 'present' | 'inserted' {
+    const present = this.state.cells.some(cell => cell.type === 'text' &&
+      findNotionArticleLinks(cell.content).some(link => link.href === href));
+    if (present) return 'present';
+    let last = this.state.cells.at(-1);
+    if (!last || last.type !== 'text') {
+      last = {id: generateId(), type: 'text', content: ''};
+      this.state.cells.push(last);
+    }
+    const separator = last.content && !last.content.endsWith('\n') ? '\n' : '';
+    this.updateTextCell(last.id, last.content + separator + formatNotionArticleLink(href, title));
+    return 'inserted';
+  }
+
   // @@@ Update a specific text cell by ID
   updateTextCell(cellId: string, newText: string) {
     const cell = this.state.cells.find(c => c.id === cellId);
     if (!cell || cell.type !== 'text') return;
 
-    (cell as TextCell).content = newText;
+    cell.content = newText;
     this.applyTextUpdate();
   }
 
@@ -584,6 +603,7 @@ export class EditorEngine {
     this.lastLoadSource = options.source ?? 'local';
     const restoredAt = new Date().toISOString();
     const cells = Array.isArray(state.cells) ? state.cells.map((cell) => {
+      if (cell.type === 'text') return recoverNotionArticleDraft(cell);
       if (cell.type !== 'writing-suggestion') return cell;
       const restored: WritingSuggestionCell = {
         ...cell,

@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-13: record bounded Dream PATH repair, 45 passing tests and two real resumed Notion CLI reads on installed 0.1.9. -->
 
 <!-- [Sync] 2026-11-03: iOS Transport补服务端PATH默认交付，原nativeNtn、owner、mode与shadow拒绝保持；App目标验证单列。 -->
+<!-- [Sync] 2026-11-11: document data-source query/schema classification, existing permission flow and recovery. -->
 # Notion CLI Agent Bash 环境修复设计
 
 ## 2026-09-13 config 读取事件（修复与真实只读验收完成）
@@ -359,3 +360,93 @@ App内阶段诊断确认原`notionProjection`在`native-executable`处拒绝：h
 原生产connect与SDK参数的四项环境合同基线为1 failed、3 passed，失败项为省略PATH时的默认交付。修复后PATH与原Notion Worker共7项通过，原SDK环境及凭据归属另13项通过。测试只使用自有loopback握手，Runtime、模型、账户和Notion API调用均为0。
 
 Simulator候选采用既有原生/Node/Next制品，仅更新与源码SHA-256匹配的单个Python资源并重新加载原模块。完整App包构建和物理iPhone资格分别记录，本任务设备操作为0；并行任务已交付的build30尚缺该PATH分支。临时Runtime诊断制品已恢复原摘要；原Runtime权限逻辑修改为0。修复后原账户CLI实际回执按执行记录更新。
+
+## 2026-11-11 Data source query 权限修复
+
+### 背景与问题
+
+[问题记录](https://app.notion.com/p/40b30b7547c380f7ac22f85fdd2dbdd0#40d30b7547c3808a97f3c90dab1cae93)中的 `ntn api v1/data_sources/<id>/query --data '{"page_size":20}'` 收到 Story Workspace 写保护拒绝。当前 `NotionOperations.query_database` 使用 `v1/data_sources/{id}/query`；Runner 的只读 endpoint 集合仅覆盖旧 `databases/{id}/query`。包含 `.dream/` 的工作区将未识别命令交给通用写保护拒绝，命令执行与普通确认均未开始。
+
+### 目标与边界
+
+当前 actor/thread 已绑定 Notion credential home 时，Data source 查询及属性 Schema 读取进入原 Bash 权限流程。修复复用现有正则分类器，补齐两个精确 endpoint；内置 `notion-cli` 指引同步采用 Data source ID 和单行 JSON。通用 `ntn` 前缀放行、Skill 名称授权及 Runtime 权限修改均排除，依据为现有 actor/thread 绑定与 endpoint 校验已经覆盖目标调用。
+
+### 概念与规则
+
+- `v1/data_sources/<id>/query` 为查询，`v1/data_sources/<id>` 为属性 Schema 读取；官方合同见 [Query a data source](https://developers.notion.com/reference/query-a-data-source) 与 [Retrieve a data source](https://developers.notion.com/reference/retrieve-a-data-source)。
+- 连接器现有 `database_id` 字段保存所选 Data source ID，内置指引按该 ID 构造 endpoint；公开 DTO 字段保持。
+- 查询的 `--data` 使用 ASCII 单引号包裹的单行 JSON 对象。属性 Schema 读取省略 `--data`。旧 `databases` 读取形式保留既有兼容行为。
+- 分类结果只跳过 Dream surface 写保护。禁网仍先于 full-access；Auto/手动模式沿用原确认回调，拒绝、取消及缺少回调分别沿用原处理。
+- 绑定缺失、写 endpoint、方法覆盖、命令拼接、JSON 格式错误和未闭合引号在包含 `.dream/` 的工作区被硬拒绝。
+- 工作空间文件保护、Notion 凭证投影、CLI 认证、资源权限、正常对话及停止语义保持现行合同。
+
+### 正常调用时序
+
+```mermaid
+sequenceDiagram
+    participant A as Claude Agent
+    participant R as ClaudeAgentRunner
+    participant G as Dream surface guard
+    participant U as 原工具确认回调
+    participant C as Runtime Bash / ntn
+    A->>R: Bash(command: data_sources query/schema)
+    R->>G: 当前thread绑定与精确命令分类
+    G-->>R: 匹配只读endpoint，继续权限判断
+    R->>R: 检查sandbox_network_mode
+    alt 网络可用且full-access启用
+        R-->>C: permissionDecision allow
+    else 网络可用且需要确认
+        R->>U: 原command与tool_call_id
+        U-->>R: approved true
+        R-->>C: permissionDecision allow
+    end
+    C-->>A: 原Notion API结果或CLI错误
+```
+
+### 异常与恢复时序
+
+```mermaid
+sequenceDiagram
+    participant A as Claude Agent
+    participant R as ClaudeAgentRunner
+    participant U as 原工具确认回调
+    A->>R: Bash(command)
+    alt 绑定缺失或命令格式未匹配
+        R-->>A: Dream surface guard deny
+        Note over A,R: 连接恢复或命令修正后重新调用
+    else 已绑定且网络被禁用
+        R-->>A: disabled-network deny
+        Note over A,R: 用户调整网络设置后重新调用
+    else 需要工具确认
+        R->>U: 原command与tool_call_id
+        alt 用户拒绝或确认回调缺失
+            U-->>R: 拒绝或无响应
+            R-->>A: 原拒绝反馈
+        else 确认期间取消
+            U-->>R: CancelledError
+            R-->>A: 沿原取消路径传播
+        end
+    end
+```
+
+### 工具权限状态
+
+```mermaid
+stateDiagram-v2
+    [*] --> 分类
+    分类 --> 拒绝: 绑定缺失或命令未匹配
+    分类 --> 网络检查: 绑定与命令匹配
+    网络检查 --> 拒绝: 网络禁用
+    网络检查 --> 执行: full-access启用
+    网络检查 --> 等待确认: 普通权限流程
+    等待确认 --> 执行: 用户批准
+    等待确认 --> 拒绝: 用户拒绝或回调缺失
+    等待确认 --> 取消: 用户停止
+    执行 --> [*]: CLI返回
+    拒绝 --> [*]
+    取消 --> [*]
+```
+
+### 验证范围
+
+修复前新回归通过生产 Runner hook 复现 Data source 查询硬拒绝；现有旧 endpoint 回归继续保留。修复后验证覆盖 Auto/手动批准和拒绝、full-access、禁网、绑定缺失、确认通道缺失、命令格式以及内置查询示例。真实 Runtime 合同使用本地合成模型服务和测试专用 `ntn`，结果限定技术验证。正常服务、真实账户/模型、物理设备与发布分别保留待验收状态。

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-04: bind continuation operations to the existing persistence authority.
 # [Sync] 2026-10-15: bind and refresh memory actor through the original turn broker.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
 # [Sync] 2026-10-10: expose Host image-provider binding through the original turn broker owner.
@@ -342,6 +343,9 @@ class AdminTurnPersistence(
             if len(completed) > 1:
                 raise invalid_response(request_id)
             return completed[0] if completed else None
+
+    def _continuation_access_token(self, *, actor_id: str, thread_id: str) -> str:
+        return self.current_grant(actor_id=actor_id, thread_id=thread_id).token
 
     def thread(self, *, actor_id: str, thread_id: str) -> ChatThreadDTO | None:
         with self._write_lock:

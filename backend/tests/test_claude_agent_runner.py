@@ -1,3 +1,6 @@
+# [Sync] 2026-11-25: verify typed provider errors retain the SDK terminal receipt when it arrives.
+# [Sync] 2026-11-11: cover data-source reads through the existing Dream guard, confirmation and disabled-network policy.
+# [Sync] 2026-11-04: 增加平台音频工具显式启用与原确认/拒绝/缺回调/full-access合同。
 # [Sync] 2026-10-15: exact user MCP inventory includes the three owner-bound memory Tools.
 # [Sync] 2026-10-12: callback cancellation must close the owned SDK generator before returning.
 # [Sync] 2026-10-11: validate full original compact feedback in partial mode while preserving normal snapshot deduplication.
@@ -128,6 +131,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -1151,6 +1155,37 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         self.assertIn("403 usage limit exceeded", str(result.error))
         self.assertEqual(errors, [result.error])
         self.assertEqual(result.full_text, "")
+        self.assertFalse(result.sdk_terminal_received)
+
+    async def test_assistant_message_error_drains_terminal_without_reporting_success(self):
+        for terminal_is_error in (True, False):
+            with self.subTest(terminal_is_error=terminal_is_error):
+                assistant_error = AssistantMessage([
+                    _text_block("API Error: 409 REQUEST_IN_PROGRESS"),
+                ])
+                assistant_error.error = "unknown"
+                terminal = ResultMessage(session_id="provider-error-session")
+                terminal.is_error = terminal_is_error
+                terminal.subtype = "error_during_execution" if terminal_is_error else "success"
+                self.set_query([assistant_error, _text_delta_event("must not emit"), terminal])
+                errors = []
+                deltas = []
+
+                with self.assertLogs(agent_runner_module.logger, level="ERROR"):
+                    result = await self.make_runner().run_streaming(
+                        opts=AgentRunOptions(
+                            thread_id="provider-error-thread", user_message="fixture", tool_choice="none",
+                        ),
+                        callbacks=AgentStreamingCallbacks(on_text_delta=deltas.append, on_error=errors.append),
+                    )
+
+                self.assertTrue(result.sdk_terminal_received)
+                self.assertFalse(result.success)
+                self.assertFalse(result.protocol_completed)
+                self.assertIn("REQUEST_IN_PROGRESS", str(result.error))
+                self.assertEqual(errors, [result.error])
+                self.assertEqual(deltas, [])
+                self.assertEqual(result.full_text, "")
 
     async def test_sdk_error_sets_success_false(self):
         boom = RuntimeError("sdk exploded")
@@ -2998,6 +3033,56 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "用户取消 Notion 查询",
         )
 
+    async def test_dream_notion_data_source_query_keeps_permission_policy(self):
+        command = 'ntn api v1/data_sources/source-1/query --data \'{"page_size":20}\''
+        cases = (
+            # mode, full access, bound, network, response, decision, confirmations
+            ("auto", False, True, "allowlist", True, "allow", 1),
+            ("auto", False, True, "allowlist", False, "deny", 1),
+            ("manual", False, True, "allowlist", True, "allow", 1),
+            ("manual", False, True, "allowlist", False, "deny", 1),
+            ("auto", True, True, "allowlist", False, "allow", 0),
+            ("manual", True, True, "allowlist", False, "allow", 0),
+            ("auto", True, True, "disabled", True, "deny", 0),
+            ("auto", True, False, "allowlist", True, "deny", 0),
+            ("auto", False, True, "allowlist", None, "deny", 0),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, notion_home = self._create_notion_bound_dream_workspace(temp_dir)
+            for mode, full_access, bound, network, approved, decision, count in cases:
+                with self.subTest(mode=mode, full_access=full_access, bound=bound,
+                                  network=network, approved=approved):
+                    requests: list[dict] = []
+
+                    async def confirm(payload: dict):
+                        requests.append(payload)
+                        return {"approved": approved, "reason": "fixture rejection"}
+
+                    hook = await self._capture_pre_tool_use_hook(
+                        cwd=str(workspace), tool_choice=mode,
+                        notion_credential_home=str(notion_home) if bound else None,
+                        im_full_access_enabled=full_access,
+                        sandbox_network_mode=network,
+                        on_tool_confirmation_request=confirm if approved is not None else None,
+                    )
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-notion-data-source", _SDK_HOOK_CONTEXT(),
+                    )
+                    specific = _hook_specific(result, {})
+                    self.assertEqual(specific.get("permissionDecision"), decision)
+                    self.assertEqual(len(requests), count)
+                    if count:
+                        self.assertEqual(requests[0]["input"], {"command": command})
+                    if network == "disabled":
+                        self.assertIn("代理网络访问已关闭", specific["permissionDecisionReason"])
+                    elif not bound:
+                        self.assertIn("controlled by Story Workspace", specific["permissionDecisionReason"])
+                    elif approved is None:
+                        self.assertEqual(specific["permissionDecisionReason"], "需要用户确认但未收到响应")
+                    elif count and not approved:
+                        self.assertEqual(specific["permissionDecisionReason"], "fixture rejection")
+
     async def test_dream_notion_cli_api_confirmation_cancellation_propagates(self):
         async def cancel(_payload: dict):
             raise asyncio.CancelledError()
@@ -3039,6 +3124,13 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "ntn api v1/users",
             "ntn api v1/search --data '[]'",
             "ntn api v1/pages/page-1 --data '{}'",
+            "ntn api v1/data_sources/source-1 --data '{}'",
+            "ntn api v1/data_sources --data '{}'",
+            "ntn api v1/data_sources/source-1/query --method PATCH --data '{}'",
+            "ntn api v1/data_sources/source-1/query --data '[]'",
+            "ntn api v1/data_sources/source-1/query --data '{bad}'",
+            "ntn api v1/data_sources/source-1/query --data '{\"page_size\":20}’",
+            "ntn api v1/data_sources/source-1/query --data '{}'; touch .dream/pwned",
             'ntn api v1/search --data "{\\"query\\":\\"$HOME\\"}"',
             "ntn api v1/search; rm -rf files",
             "ntn api v1/search $(touch files/pwned)",
@@ -3198,6 +3290,9 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "ntn api v1/search --data '{\"query\":\"R&D; $(literal)\"}'",
             "ntn api v1/databases/database-1",
             "ntn api v1/databases/database-1/query --data '{}'",
+            "ntn api v1/data_sources/source-1",
+            "ntn api v1/data_sources/source-1/query",
+            "ntn api v1/data_sources/source-1/query --data '{\"page_size\":20}'",
             "ntn api v1/pages/page-1",
             "ntn api v1/pages/page-1/markdown",
             "ntn api v1/pages/page-1/properties/property%3A1",
@@ -3209,6 +3304,21 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 self.assertTrue(
                     agent_runner_module._is_notion_cli_read_api_command(command)
                 )
+
+    def test_notion_cli_query_reference_commands_reach_permission_classifier(self):
+        guide = (Path(__file__).resolve().parents[1] / "builtin_skills" / "notion"
+                 / "notion-cli" / "references" / "notion-db-query.md")
+        examples = re.findall(r"```bash\n(.*?)```", guide.read_text(encoding="utf-8"), re.S)
+        self.assertTrue(examples)
+        for example in examples:
+            for line in example.splitlines():
+                if not line.strip() or line.startswith("#"):
+                    continue
+                command = line.replace("<data_source_id>", "source-fixture")
+                command = command.replace("<next_cursor>", "cursor-fixture")
+                with self.subTest(command=command):
+                    self.assertTrue(command.startswith("ntn api v1/data_sources/"))
+                    self.assertTrue(agent_runner_module._is_notion_cli_read_api_command(command))
 
     async def test_auto_bash_low_sensitivity_commands_get_query_allow(self):
         """Bash read-only/navigation commands bypass confirmation in auto mode."""
@@ -5136,3 +5246,79 @@ class TestRunnerQueryOwnership(_RunnerBase):
         )
         self.assertTrue(result.success)
         self.assertEqual(deltas, ["compatible"])
+
+
+class TestMobileClockAudioPlatformTool(_RunnerBase):
+    """Opt-in discovery and the original Editor approval hook, without a model."""
+
+    async def capture(self, *, tools=(), tool_choice="auto", allowed_tools=None, full_access=False, confirm=None):
+        self.set_query([])
+        with tempfile.TemporaryDirectory() as workspace:
+            await self.make_runner().run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="audio-tool-fixture", user_message="play the selected audio",
+                    cwd=workspace, claude_tmp_workspace=workspace,
+                    tools=tools, tool_choice=tool_choice,
+                    allowed_tools=allowed_tools, im_full_access_enabled=full_access,
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda value: None, on_tool_confirmation_request=confirm),
+            )
+        options = self._mock_client.last_options
+        return options, options.hooks["PreToolUse"][0].hooks[0]
+
+    def test_audio_is_low_sensitivity_and_answer_form(self):
+        tool = "mcp__mobile_clock_audio__ask_user"
+        self.assertIn(tool, agent_runner_module._LOW_SENSITIVITY_QUERY_TOOL_NAMES)
+        self.assertIn(tool, agent_runner_module._ANSWER_FORM_TOOL_NAMES)
+        self.assertNotIn(tool, agent_runner_module._ALWAYS_CONFIRM_TOOL_NAMES)
+        self.assertIsNone(agent_runner_module._apply_low_sensitivity_query_permission(tool))
+
+    async def test_default_and_none_do_not_load_audio_mcp(self):
+        tool = "mcp__mobile_clock_audio__ask_user"
+        for selection, choice in [((), "auto"), (("mobile_clock_audio",), "none")]:
+            with self.subTest(selection=selection, choice=choice):
+                options, _ = await self.capture(tools=selection, tool_choice=choice, allowed_tools=[tool])
+                self.assertNotIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+                self.assertNotIn(tool, options.allowed_tools)
+
+    async def test_opt_in_loads_exact_mcp_without_editor_context(self):
+        options, _ = await self.capture(tools=("mobile_clock_audio",))
+        self.assertIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+        self.assertIn("mcp__mobile_clock_audio__ask_user", options.allowed_tools)
+        self.assertNotIn("editor", self._mock_client.captured_mcp_servers())
+
+    async def test_server_allowlist_still_limits_opt_in(self):
+        options, _ = await self.capture(tools=("mobile_clock_audio",), allowed_tools=[])
+        self.assertNotIn("mobile_clock_audio", self._mock_client.captured_mcp_servers())
+
+    async def test_unknown_platform_tool_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported platform tool"):
+            await self.capture(tools=("unknown",))
+
+    async def test_audio_asks_and_merges_user_answer_in_every_permission_mode(self):
+        from libs.claude_agent_kit.server.mobile_clock_audio import AUDIO_PLAYBACK_QUESTION
+        media = {"items": [{"title": "fixture", "resource_uri": "workspace://files/audio.m4a"}], "reason": "fixture"}
+        for mode in ("auto", "manual"):
+            for full_access in (False, True):
+                for choice in ("播放", "不播放"):
+                    requests = []
+                    async def answer(payload):
+                        requests.append(payload)
+                        return {"approved": True, "answers": {AUDIO_PLAYBACK_QUESTION: choice}}
+                    _, hook = await self.capture(tools=("mobile_clock_audio",), tool_choice=mode, full_access=full_access, confirm=answer)
+                    result = await hook({"tool_name": "mcp__mobile_clock_audio__ask_user", "tool_input": {**media, "answers": {AUDIO_PLAYBACK_QUESTION: "播放"}}}, "audio-ask", _SDK_HOOK_CONTEXT())
+                    specific = _hook_specific(result)
+                    self.assertEqual(specific["permissionDecision"], "allow")
+                    self.assertEqual(specific["updatedInput"]["answers"], {AUDIO_PLAYBACK_QUESTION: choice})
+                    self.assertEqual(len(requests), 1)
+                    self.assertNotIn("answers", requests[0]["input"])
+                    self.assertEqual(requests[0]["input"]["questions"][0]["question"], AUDIO_PLAYBACK_QUESTION)
+
+    async def test_missing_answer_or_cancel_denies_even_with_full_access(self):
+        media = {"items": [{"title": "fixture", "resource_uri": "workspace://files/audio.m4a"}], "reason": "fixture"}
+        for response in (None, {"approved": True}, {"approved": False}):
+            async def answer(payload):
+                return response
+            _, hook = await self.capture(tools=("mobile_clock_audio",), full_access=True, confirm=answer if response is not None else None)
+            result = await hook({"tool_name": "mcp__mobile_clock_audio__ask_user", "tool_input": media}, "audio-no-answer", _SDK_HOOK_CONTEXT())
+            self.assertEqual(_hook_specific(result)["permissionDecision"], "deny")

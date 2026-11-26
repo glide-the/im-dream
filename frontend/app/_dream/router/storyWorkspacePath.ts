@@ -1,3 +1,4 @@
+// [Sync] 2026-11-12: register the canonical external-links Settings route.
 // [Sync] 2026-10-15: route owner memory response settings.
 // [Input] Browser pathname/search strings.
 // [Output] Pure story-workspace route resolution seams: static route table,
@@ -35,6 +36,7 @@ export type StoryWorkspaceStaticRoute =
   | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
+  | 'settings-external-links'
   | 'settings-behavior'
   | 'settings-model'
   | 'settings-about';
@@ -59,6 +61,7 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   'settings-work': '/story-workspace/settings/work',
   'settings-resources': '/story-workspace/settings/resources',
   'settings-plugins': '/story-workspace/settings/plugins',
+  'settings-external-links': '/story-workspace/settings/external-links',
   'settings-behavior': '/story-workspace/settings/behavior',
   'settings-model': '/story-workspace/settings/model',
   'settings-about': '/story-workspace/settings/about',
@@ -374,6 +377,7 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'settings-work'
     || match.route === 'settings-resources'
     || match.route === 'settings-plugins'
+    || match.route === 'settings-external-links'
     || match.route === 'settings-behavior'
     || match.route === 'settings-model'
     || match.route === 'settings-about'

@@ -1,0 +1,8 @@
+/* [Input] Shared Chat Markdown in the fixed-width image capture canvas. */
+/* [Output] Full code content wraps within the capture width with the original Chat colors and type. */
+/* [Pos] Image-only adaptation; interactive Chat/public code blocks retain horizontal scrolling. */
+.chat-share-image .prose pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-16: distinguish explicit catalog failure from business rejection and preserve original unknown-write receipts.
 # [Input] Actual typed profile/request-auth owner and the production FastAPI dependency.
 # [Output] Provider-free claim/identity/profile/scope and public-boundary regression checks.
 # [Pos] Technical authentication contracts; no real users, PostgreSQL or model calls.
@@ -182,3 +183,117 @@ def test_file_auth_dependencies_share_the_same_admin_authority():
     from routers.workspace import _require_workspace_auth
     assert _require_storage_auth is get_current_user
     assert _require_workspace_auth is get_current_user
+
+
+@pytest.mark.parametrize("path", ["workflow", "persistence", "gateway", "editor"])
+@pytest.mark.parametrize("code,status,unknown", [
+    ("INSUFFICIENT_SCOPE", 403, False),
+    ("DREAM_DELEGATION_ENTITY_DENIED", 403, False),
+    ("REVISION_CONFLICT", 409, False),
+    ("ADMIN_TIMEOUT", 504, True),
+    ("ADMIN_UNAVAILABLE", 503, True),
+    ("ADMIN_RESPONSE_INVALID", 503, True),
+])
+def test_business_errors_preserve_healthy_catalog_across_all_composition_paths(config, monkeypatch, path, code, status, unknown):
+    from services.admin_data import request_auth
+    from services.admin_data.workflow_data import AdminWorkflowResolution
+
+    auth_owner, calls = owner(config)
+    actor = auth_owner.authenticate("write-token", "authenticate-1", required_scopes=frozenset({"dream:read"}))
+    actor = request_auth.AdminRequestActor(actor.subject, actor.canonical_user_id, actor.client_id,
+        actor.scopes | {"messages:create", "messages:count_tokens", "models:list"}, actor.issued_at, actor.expires_at, actor.access_token)
+    failure = AdminDataError(code, status, "original-write", unknown)
+    def fail(*args, **kwargs):
+        raise failure
+    monkeypatch.setattr(auth_owner._workflow, "resolve", fail)
+    monkeypatch.setattr(auth_owner._delegations, "create", fail)
+    monkeypatch.setattr(request_auth, "AdminEditorRuntime", fail)
+    resolution = AdminWorkflowResolution("42", "thread-1", None)
+    actions = {
+        "workflow": lambda: auth_owner.workflow_context(actor, "thread-1", "original-write"),
+        "persistence": lambda: auth_owner.turn_persistence(actor, resolution, "original-write"),
+        "gateway": lambda: auth_owner.gateway_runtime(actor, resolution, "original-write"),
+        "editor": lambda: auth_owner.editor_runtime(actor, resolution, "original-write", initial_session_id=None),
+    }
+    with pytest.raises(AdminDataError) as caught:
+        actions[path]()
+    assert caught.value is failure
+    assert caught.value.request_id == "original-write" and caught.value.outcome_unknown is unknown
+    auth_owner.authenticate("read-token", "authenticate-2", required_scopes=frozenset({"dream:read"}))
+    assert auth_owner.current_profile(auth_owner.authenticate("read-token", "authenticate-3", required_scopes=frozenset({"dream:read"})), "profile-after-error").id == "42"
+    assert sum(item.url.path.endswith("/capabilities") for item in calls) == 1
+
+
+@pytest.mark.parametrize("path", ["workflow", "persistence", "gateway", "editor"])
+def test_explicit_capability_failure_invalidates_and_recovers_all_composition_paths(config, monkeypatch, path):
+    from services.admin_data import request_auth
+    from services.admin_data.workflow_data import AdminWorkflowResolution
+
+    auth_owner, calls = owner(config)
+    actor = auth_owner.authenticate("write-token", "authenticate-1", required_scopes=frozenset({"dream:read"}))
+    actor = request_auth.AdminRequestActor(actor.subject, actor.canonical_user_id, actor.client_id,
+        actor.scopes | {"messages:create", "messages:count_tokens", "models:list"}, actor.issued_at, actor.expires_at, actor.access_token)
+    def fail(*args, **kwargs):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, "missing-contract")
+    monkeypatch.setattr(auth_owner._workflow, "resolve", fail)
+    monkeypatch.setattr(auth_owner._delegations, "create", fail)
+    monkeypatch.setattr(request_auth, "AdminEditorRuntime", fail)
+    resolution = AdminWorkflowResolution("42", "thread-1", None)
+    actions = {
+        "workflow": lambda: auth_owner.workflow_context(actor, "thread-1", "missing-contract"),
+        "persistence": lambda: auth_owner.turn_persistence(actor, resolution, "missing-contract"),
+        "gateway": lambda: auth_owner.gateway_runtime(actor, resolution, "missing-contract"),
+        "editor": lambda: auth_owner.editor_runtime(actor, resolution, "missing-contract", initial_session_id=None),
+    }
+    with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
+        actions[path]()
+    assert not auth_owner.client.capabilities_ready
+    # Cleared advertisements reject execution before any domain request.
+    with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
+        auth_owner.client.execute(CURRENT_PROFILE, ProfileInputDTO(), "stale-read", access_token="read-token")
+    auth_owner.authenticate("read-token", "authenticate-2", required_scopes=frozenset({"dream:read"}))
+    assert auth_owner.client.capabilities_ready
+    assert sum(item.url.path.endswith("/capabilities") for item in calls) == 2
+
+
+@pytest.mark.parametrize("drift", ["missing", "version", "hash", "operation-hash"])
+def test_actual_workflow_catalog_drift_rejects_then_refreshes_without_business_replay(config, drift):
+    from services.admin_data.workflow_data import RESOLVE_WORKFLOW_CONTEXT, WORKFLOW_SCHEMA_REQUIREMENTS
+
+    calls = []
+    healthy = False
+    def handler(request):
+        calls.append(request)
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            schemas = [item.model_dump() for item in WORKFLOW_SCHEMA_REQUIREMENTS]
+            operation = RESOLVE_WORKFLOW_CONTEXT.capability.model_dump()
+            if not healthy:
+                if drift == "missing": schemas.pop()
+                if drift == "version": schemas[0]["version"] += 1
+                if drift == "hash": schemas[0]["contract_sha256"] = "0" * 64
+                if drift == "operation-hash": operation["contract_sha256"] = "0" * 64
+            value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri,
+                "algorithm": "ES256", "resource": config.resource,
+                "clients": {"browser": "dream-browser", "device": "dream-device"},
+                "scopes": ["dream:read"], "delegations": []},
+                "schema_capabilities": schemas, "operations": [operation]}
+        elif request.url.path.endswith("/principal"):
+            value = {"subject": "opaque-ba-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read"], "status": "active"}
+        else:
+            assert request.url.path.endswith("/operations/workflow-context.resolve")
+            value = {"context": None}
+        return httpx.Response(200, json={"request_id": request_id, "data": value})
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(RESOLVE_WORKFLOW_CONTEXT,))
+    auth_owner = AdminRequestAuth(config, client=client, verifier=Verifier())
+    actor = auth_owner.authenticate("read-token", "auth-1", required_scopes=frozenset({"dream:read"}))
+    with pytest.raises(AdminDataError, match="ADMIN_CAPABILITY_UNAVAILABLE"):
+        auth_owner.workflow_context(actor, "thread-1", "denied-context")
+    assert not client.capabilities_ready
+    assert not any("/operations/" in item.url.path for item in calls)
+    healthy = True
+    actor = auth_owner.authenticate("read-token", "auth-2", required_scopes=frozenset({"dream:read"}))
+    assert auth_owner.workflow_context(actor, "thread-1", "recovered-context").context is None
+    assert sum(item.url.path.endswith("/capabilities") for item in calls) == 2
+    domain_calls = [item for item in calls if "/operations/" in item.url.path]
+    assert len(domain_calls) == 1 and domain_calls[0].headers["x-request-id"] == "recovered-context"

@@ -1,3 +1,4 @@
+# [Sync] 2026-11-18: distinguish local artifact and CLI verification without recording paths or content.
 """Verify the Admin-selected screenplay Deck Claude plugin on shared storage.
 
 [Input] Admin's closed six-field candidate plus the existing shared-artifact and CLI verifiers.
@@ -11,6 +12,8 @@
 """
 
 from __future__ import annotations
+
+from observability import span
 
 try:
     from services.admin_data.deck_default_data import (
@@ -52,10 +55,12 @@ def resolve_default_deck_plugin_ref(
     except ModuleNotFoundError:  # pragma: no cover - package import compatibility
         from backend.services.claude_plugin.install_service import PluginInstallService
     record = installation.model_dump()
-    if not PluginInstallService.verify_installation_artifact(record):
-        raise DefaultDeckPluginUnavailable()
-    if not PluginInstallService.check_cli_compatibility(record):
-        raise DefaultDeckPluginUnavailable()
+    with span("dream.deck.artifact.verify"):
+        if not PluginInstallService.verify_installation_artifact(record):
+            raise DefaultDeckPluginUnavailable()
+    with span("dream.deck.cli.compatibility"):
+        if not PluginInstallService.check_cli_compatibility(record):
+            raise DefaultDeckPluginUnavailable()
     return DefaultPluginEvidenceDTO(
         plugin_installation_id=installation.plugin_installation_id,
         package_name=installation.package_name,

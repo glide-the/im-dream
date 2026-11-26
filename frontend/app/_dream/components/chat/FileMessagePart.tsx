@@ -1,3 +1,5 @@
+// [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
+import { AuthenticatedImage, AuthenticatedLink } from './AuthenticatedResource';
 // [Sync] 2026-10-30: share original file labels/URL helpers with Native; DOM markup remains unchanged.
 // [Input] Original file message part and role.
 // [Output] Original image/attachment DOM.
@@ -24,7 +26,7 @@ export const FileMessagePart = memo(function FileMessagePart({ part, isUserMessa
   if (isImage && fileUrl) {
     return (
       <div style={{ maxWidth: '28rem', overflow: 'hidden', borderRadius: '14px', border: '1px solid var(--color-border-paper)', marginLeft: isUserMessage ? 'auto' : undefined, marginRight: isUserMessage ? undefined : 'auto', background: 'var(--color-bg-paper)' }}>
-        <img src={fileUrl} alt={part.filename || 'Uploaded image'} loading="lazy" style={{ display: 'block', width: '100%', height: 'auto' }} />
+        <AuthenticatedImage src={fileUrl} alt={part.filename || 'Uploaded image'} loading="lazy" style={{ display: 'block', width: '100%', height: 'auto' }} />
         {part.filename ? <div style={{ padding: '0.625rem 0.875rem', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{part.filename}</div> : null}
       </div>
     );
@@ -45,9 +47,9 @@ export const FileMessagePart = memo(function FileMessagePart({ part, isUserMessa
           </div>
         </div>
         {fileUrl ? (
-          <a href={fileUrl} download={part.filename ?? filename} title={`Download ${filename}`} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '999px', color: isUserMessage ? 'rgba(255,255,255,0.84)' : 'var(--color-text-secondary)', textDecoration: 'none' }}>
+          <AuthenticatedLink href={fileUrl} download={part.filename ?? filename} title={`Download ${filename}`} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '999px', color: isUserMessage ? 'rgba(255,255,255,0.84)' : 'var(--color-text-secondary)', textDecoration: 'none' }}>
             <IconDownload style={{ width: '1.25rem', height: '1.25rem' }} />
-          </a>
+          </AuthenticatedLink>
         ) : null}
       </div>
     </div>

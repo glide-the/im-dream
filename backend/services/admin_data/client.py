@@ -1,3 +1,4 @@
+# [Sync] 2026-11-16: invalidate catalog state only for explicit capability/schema failures; preserve business errors and unknown writes.
 # [Input] AdminDataConfig, confidential service-token source and exact Admin Pydantic DTO contracts.
 # [Output] No-retry HTTP consumer with separate service/user authentication and receipt recovery.
 # [Pos] Sole Admin authentication/data transport; domain adapters register explicit DTO operations.
@@ -90,26 +91,52 @@ class AdminDataClient:
         headers["authorization"] = "Bearer " + (access_token or service_token)
         if access_token is not None:
             headers["x-ink-dream-service-authorization"] = "Bearer " + service_token
-        return request_admin_dto(self._http, method=method,
-            url=self._config.transport_origin + ADMIN_INTERNAL_PREFIX + path,
-            request_id=request_id, output_type=output_type, headers=headers,
-            timeout_seconds=self._config.timeout_seconds,
-            max_response_bytes=self._config.max_response_bytes,
-            input_dto=input_dto, params=params, write=write)
+        try:
+            return request_admin_dto(self._http, method=method,
+                url=self._config.transport_origin + ADMIN_INTERNAL_PREFIX + path,
+                request_id=request_id, output_type=output_type, headers=headers,
+                timeout_seconds=self._config.timeout_seconds,
+                max_response_bytes=self._config.max_response_bytes,
+                input_dto=input_dto, params=params, write=write)
+        except AdminDataError as error:
+            self.invalidate_capabilities_for(error)
+            raise
+
+    def _clear_capabilities(self) -> None:
+        # Caller holds the catalog lock; execute must lose stale advertisements.
+        self._advertised = {}
+        self._schema_capabilities = {}
+        self._schema_capabilities_unique = False
+        self._capabilities = None
+        self._capabilities_ready = False
+
+    def invalidate_capabilities_for(self, error: AdminDataError) -> None:
+        """Retire an explicitly rejected contract; ordinary business errors retain it."""
+
+        if error.code in {
+            "ADMIN_CAPABILITY_UNAVAILABLE",
+            "AUTH_SCHEMA_NOT_READY",
+            "DREAM_DATA_SCHEMA_NOT_READY",
+            "OPERATION_UNAVAILABLE",
+        }:
+            with self._catalog_lock:
+                self._clear_capabilities()
 
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
         """Force a complete capability refresh and invalidate on any failure."""
 
         with self._catalog_lock:
-            self._advertised = {}
-            self._schema_capabilities = {}
-            self._schema_capabilities_unique = False
-            self._capabilities = None
-            self._capabilities_ready = False
+            self._clear_capabilities()
             result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
             auth = result.auth
             if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
-                raise invalid_response(request_id)
+                error = invalid_response(request_id)
+                error.remote = (
+                    f"{self._config.transport_origin}{ADMIN_INTERNAL_PREFIX}/capabilities"
+                    f" advertised(issuer={auth.issuer}, jwks_uri={auth.jwks_uri}, resource={auth.resource})"
+                    f" expected(issuer={self._config.issuer}, jwks_uri={self._config.jwks_uri}, resource={self._config.resource})"
+                )
+                raise error
             advertised = {item.name: item for item in result.operations}
             schemas = {
                 item.capability: item for item in result.schema_capabilities
