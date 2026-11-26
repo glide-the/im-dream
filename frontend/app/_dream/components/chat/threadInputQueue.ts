@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 携带输入端标识，在等待其他端期间自动读取执行状态。
 // [Sync] 2026-11-26: serialize queue reads triggered by lifecycle and input events within one Thread scope.
 // [Sync] 2026-11-13: queue submissions include explicit tools and default to an empty selection.
 // [Input] Authenticated browser session and owned Dream Thread input endpoints.
@@ -11,6 +12,8 @@
 // [Sync] 2026-10-25: forward the caller's optional AbortSignal for owned queue reads.
 // [Sync] 2026-10-28: allow native transport injection for existing queue reads/actions; endpoint DTOs and default Web fetch remain unchanged.
 import { browserRequestHeaders } from '../../lib/browserSession';
+import { chatClientId } from '../../lib/claude-chat-request';
+import { claudeThreadHydrationRetryDelayMs } from './threadSessionHydration';
 import { API_BASE } from '../../lib/apiBase';
 
 export type ThreadInputStatus =
@@ -31,6 +34,14 @@ export interface ThreadInputEntry {
 export interface ThreadInputSnapshot {
   entries: ThreadInputEntry[];
   local_owner: boolean;
+  remote_running?: boolean;
+}
+
+/** Only an unresolved submission reuses its retry ID. A later message can have identical text. */
+export function pendingChatRetryId(id: string | undefined, entries: readonly ThreadInputEntry[]) {
+  const saved = id && entries.find(entry => entry.message_id === id);
+  if (saved && ['failed', 'consumed', 'cancelled'].includes(saved.status)) return undefined;
+  return id;
 }
 
 export function canGuideThreadInput(entry: ThreadInputEntry, localOwner: boolean): boolean {
@@ -76,7 +87,12 @@ function parseSnapshot(value: unknown): ThreadInputSnapshot {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalidResponse();
   const snapshot = value as Record<string, unknown>;
   if (!Array.isArray(snapshot.entries) || typeof snapshot.local_owner !== 'boolean') invalidResponse();
-  return { entries: snapshot.entries.map(parseEntry), local_owner: snapshot.local_owner };
+  const entries = snapshot.entries.map(parseEntry);
+  const remote = snapshot.remote_running;
+  if (remote !== undefined && typeof remote !== 'boolean') invalidResponse();
+  return { entries, local_owner: snapshot.local_owner,
+    remote_running: remote ?? (!snapshot.local_owner && entries.some(entry => entry.status === 'dispatching' || entry.status === 'state_unknown')) };
+
 }
 
 function inputUrl(threadId: string): string {
@@ -98,7 +114,7 @@ async function checkedJson(response: Response): Promise<unknown> {
 }
 
 export async function fetchThreadInputs(threadId: string, signal?: AbortSignal, transport: typeof fetch = fetch): Promise<ThreadInputSnapshot> {
-  const response = await transport(inputUrl(threadId), {
+  const response = await transport(inputUrl(threadId) + "?chat_client_id=" + encodeURIComponent(chatClientId), {
     headers: { ...browserRequestHeaders() },
     cache: 'no-store',
     signal,
@@ -110,30 +126,41 @@ export function createThreadInputReader(
   threadId: string,
   applySnapshot: (snapshot: ThreadInputSnapshot) => void,
   transport?: typeof fetch,
+  shouldObserve: () => boolean = () => true,
 ) {
   const controller = new AbortController();
   let latestRead = Promise.resolve();
   let scheduledRead: Promise<void> | undefined;
 
-  return {
-    threadId,
-    refresh() {
-      if (!scheduledRead) {
-        // Events before a read starts share it. Events during a read need a fresh snapshot.
-        scheduledRead = latestRead.catch(() => {}).then(async () => {
-          scheduledRead = undefined;
-          if (controller.signal.aborted) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let observingRemote = false;
+  let attempt = 0;
+  function refresh(): Promise<void> {
+    if (timer) clearTimeout(timer);
+    if (!scheduledRead) {
+      scheduledRead = latestRead.catch(() => {}).then(async () => {
+        scheduledRead = undefined;
+        if (controller.signal.aborted) return;
+        try {
           const snapshot = await fetchThreadInputs(threadId, controller.signal, transport);
-          if (!controller.signal.aborted) applySnapshot(snapshot);
-        });
-        latestRead = scheduledRead;
-      }
-      return scheduledRead;
-    },
-    dispose() {
-      controller.abort();
-    },
-  };
+          if (controller.signal.aborted) return;
+          observingRemote = Boolean(snapshot.remote_running);
+          if (!observingRemote) attempt = 0;
+          applySnapshot(snapshot);
+        } finally {
+          if (observingRemote && !controller.signal.aborted && !scheduledRead) {
+            timer = setTimeout(() => {
+              if (shouldObserve()) void refresh().catch(() => {});
+            }, claudeThreadHydrationRetryDelayMs(++attempt));
+          }
+        }
+      });
+      latestRead = scheduledRead;
+    }
+    return scheduledRead;
+  }
+  return { threadId, refresh, dispose() { controller.abort(); clearTimeout(timer); } };
+
 }
 
 export async function enqueueThreadInput(
@@ -146,7 +173,7 @@ export async function enqueueThreadInput(
     method: 'POST',
     headers: { ...browserRequestHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      thread_id: threadId, resume: true, toolChoice, tools,
+      thread_id: threadId, chat_client_id: chatClientId, resume: true, toolChoice, tools,
       ...(deckId ? { deckId } : {}),
       ...(voiceId ? { voiceId } : {}),
       message: { id: messageId, role: 'user', parts: [{ type: 'text', text }] },

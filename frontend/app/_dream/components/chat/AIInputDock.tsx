@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: block sending during input reconciliation while keeping the draft editable.
 // [Sync] 2026-11-19: private media and download elements consume Bearer-fetched bytes.
 import { AuthenticatedImage } from './AuthenticatedResource';
 // [Sync] 2026-11-13: capture current Thread tools as the fourth send argument; no connection mutation.
@@ -94,6 +95,7 @@ interface AIInputDockProps {
   ) => void | Promise<void>;
   placeholder?: string;
   disabled?: boolean;
+  sendBlocked?: boolean;
   loading?: boolean;
   /** Accessible status for passive loading states that do not expose Stop. */
   loadingLabel?: string;
@@ -149,6 +151,7 @@ export default function AIInputDock({
   onSendMessage,
   placeholder = `Ask ${BRAND_NAME}…`,
   disabled = false,
+  sendBlocked = false,
   loading = false,
   loadingLabel,
   defaultToolChoice = 'auto',
@@ -184,7 +187,7 @@ export default function AIInputDock({
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
   const toolSelection=useChatToolSelection(threadId);
   const {query,setQuery,uploadedFiles,setUploadedFiles,toolChoice,setToolChoice,handleSend,hasUploadingFiles,showStopAction,canSend} = useComposerDraft({
-    onSendMessage:(text,files,choice)=>onSendMessage(text,files,choice,toolSelection.tools),disabled:disabled||modelBlocked,loading,onStop,fullAccessEnabled:resolvedFullAccessEnabled,defaultToolChoice,initialDraft:prefill,
+    onSendMessage:(text,files,choice)=>onSendMessage(text,files,choice,toolSelection.tools),disabled:disabled||sendBlocked||modelBlocked,loading,onStop,fullAccessEnabled:resolvedFullAccessEnabled,defaultToolChoice,initialDraft:prefill,
     onUploadBlocked:() => setUploadError(t('chat.inputDock.waitForUpload')),releasePreview:revokeObjectPreviewUrl,
   });
   const skills=useComposerSkills({query,setQuery,focused:isInputFocused,workspaceEnabled,deckId,threadId});

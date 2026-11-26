@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 验证共享进程中的竞争端收到即时拒绝。
 # [Sync] 2026-11-03: verify complete actor presence across multiple original turns, detached readers and observer failures.
 # [Input] Consume ClaudeAgentThreadFactory, AgentRunStatePool, AgentRunLifecycle,
 #         ClaudeAgentRunRequest from backend/claude_agent/.
@@ -351,6 +352,77 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         self.factory = ClaudeAgentThreadFactory()
         # Stub service to avoid real SDK calls
         self._patch_service()
+
+    def test_competing_composer_cannot_wait_to_dispatch_after_a_live_turn(self):
+        async def scenario():
+            gates = asyncio.Event(), asyncio.Event()
+            executed = []
+            async def run(execution):
+                executed.append(execution.request.message_id)
+                gates[0].set()
+                await gates[1].wait()
+                await execution.turn_context.queue.put(None)
+            self.factory._service.execute_session = run
+            async def submit(client):
+                request = _make_request(thread_id="shared")
+                request.chat_client_id = request.message_id = client
+                return [frame async for frame in self.factory.run_streaming(request)]
+            first = asyncio.create_task(submit("first"))
+            try:
+                await asyncio.wait_for(gates[0].wait(), 2)
+                self.assertTrue(self.factory.owns_client_input("shared", "first"))
+                self.assertFalse(self.factory.owns_client_input("shared", "second"))
+                frames = await asyncio.wait_for(submit("second"), 2)
+                self.assertIn("CHAT_CONTINUATION_BUSY", "".join(frames))
+                self.assertEqual(executed, ["first"])
+            finally:
+                gates[1].set()
+                await first
+        asyncio.run(scenario())
+
+    def test_expiring_owner_rechecks_renewal_then_stops_the_local_turn(self):
+        async def scenario():
+            running = asyncio.Event()
+            cancelled = asyncio.Event()
+            grants_checked = []
+
+            class ExpiringOwner:
+                def start(self):
+                    pass
+
+                def close(self):
+                    pass
+
+                def execution_lease_remaining(self, *, actor_id, thread_id):
+                    grants_checked.append((actor_id, thread_id))
+                    return 0.01 if len(grants_checked) < 3 else 0
+
+            async def execute(execution):
+                running.set()
+                try:
+                    await asyncio.Future()
+                finally:
+                    cancelled.set()
+
+            self.factory._service.execute_session = execute
+            request = _make_request("owner", thread_id="shared")
+            request.chat_client_id = "first"
+            request.admin_turn_persistence = ExpiringOwner()
+            stream = self.factory.run_streaming(request)
+
+            async def read():
+                return [frame async for frame in stream]
+
+            reader = asyncio.create_task(read())
+            await asyncio.wait_for(running.wait(), 2)
+            await asyncio.wait_for(reader, 2)
+            await asyncio.wait_for(stream.owner_completion, 2)
+            self.assertTrue(cancelled.is_set())
+            self.assertEqual(grants_checked, [("owner", "shared")] * 3)
+            self.assertFalse(self.factory.owns_client_input("shared", "first"))
+            self.assertFalse(self.factory._pool.get_lock("shared").locked())
+
+        asyncio.run(scenario())
 
     def test_account_presence_covers_all_turns_and_survives_reader_departure(self):
         async def scenario():

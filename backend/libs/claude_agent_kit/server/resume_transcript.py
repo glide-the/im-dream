@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 匹配并归档已中断工具调用的本端尾部，按共享消息准备后续输入。
 # [Input] Owner-authorized canonical Chat history and server-owned Runtime cwd/config home.
 # [Output] Validated same-session JSONL, atomic checkpoints and a no-follow execution lock.
 # [Pos] Local Runtime storage adapter; no database, model, historical tool execution or file sync.
@@ -113,6 +114,12 @@ def history_records(
                     # UI reasoning lacks the signature; no synthetic thinking blocks.
                     continue
                 elif kind == "tool-invocation":
+                    if stopped and pending_user in failed_input_ids and part.get("state") in {
+                        "call", "partial-call", "input-streaming", "input-available", "approval-requested", "approval-responded",
+                    }:
+                        # Keep the persisted process detail in Chat. A historical open
+                        # invocation has no tool result to supply to a new SDK query.
+                        continue
                     call = part.get("toolCallId")
                     output = part.get("output")
                     if not isinstance(call, str) or not call or call in tools or part.get("providerExecuted") or part.get("state") not in {"output-available", "output-error"} or not isinstance(part.get("toolName"), str) or not isinstance(part.get("input"), dict):
@@ -294,6 +301,26 @@ def _covers_history(native, messages):
         for index, (a, b) in enumerate(zip(actual, expected)))
 
 
+def _matches_interrupted_tail(native, messages, failed_input_ids):
+    """Identify a local unfinished suffix by its full preceding conversation and user input."""
+    if not failed_input_ids:
+        return False
+    # Locate the last conversational user (tool results and Runtime markers are excluded).
+    projected = _projection(native)
+    if not projected:
+        return False
+    users = [index for index, item in enumerate(messages) if item.get("role") == "user"]
+    if len(projected) > len(users):
+        return False
+    boundary = users[len(projected) - 1]
+    if messages[boundary]["id"] not in failed_input_ids:
+        return False
+    for index in range(len(native) - 1, -1, -1):
+        if native[index]["type"] == "user" and _covers_history(native[:index + 1], messages[:boundary + 1]):
+            return True
+    return False
+
+
 def _stopped_text_record(native, messages, *, thread_id, session_id, cwd):
     """Recover only saved text from the final confirmed stopped assistant."""
     if len(messages) < 2 or messages[-2].get("role") != "user" or messages[-1].get("role") != "assistant":
@@ -442,7 +469,8 @@ class ResumeTranscriptLease:
                 if checkpoint.get("history_digest") == history_digest:
                     return
             else:
-                if _covers_history(native, messages):
+                interrupted_tail = _matches_interrupted_tail(native, messages, failed_input_ids)
+                if not interrupted_tail and _covers_history(native, messages):
                     self.checkpoint(history_digest)
                     return
                 stopped = _stopped_text_record(native, messages, thread_id=self.thread_id, session_id=self.session_id, cwd=self.cwd)
@@ -459,7 +487,8 @@ class ResumeTranscriptLease:
                         self._write(target, candidate)
                         self.checkpoint(history_digest)
                         return
-                _fail("CLAUDE_RESUME_HISTORY_DIVERGED")
+                if not interrupted_tail:
+                    _fail("CLAUDE_RESUME_HISTORY_DIVERGED")
         expected = expected or history_records(messages, thread_id=self.thread_id, session_id=self.session_id,
                                               cwd=self.cwd, failed_input_ids=failed_input_ids)
         if raw is not None:

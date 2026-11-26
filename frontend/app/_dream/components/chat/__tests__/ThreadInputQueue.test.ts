@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 验证读取和排队请求使用相同输入端标识。
 // [Sync] 2026-11-26: verify that overlapping events share a follow-up read and disposal discards late snapshots.
 // [Sync] 2026-11-13: capture each queue submission tool descriptor list and explicit empty choices.
 // [Input] Production Thread input queue browser adapter and its persisted status DTO.
@@ -13,7 +14,7 @@ import { expect, test } from '@playwright/test';
 import { clearBrowserSession, loadBrowserSession } from '../../../lib/browserSession';
 import {
   canGuideThreadInput, cancelThreadInput, createThreadInputReader, enqueueThreadInput, fetchThreadInputs,
-  isThreadInputQueueCard,
+  isThreadInputQueueCard, pendingChatRetryId,
   moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry,
 } from '../threadInputQueue';
 
@@ -49,6 +50,12 @@ test('queue reader serializes overlapping events and discards work from a dispos
   await Promise.all([changed, waiting]);
   expect(snapshots).toEqual([3]);
   expect(reads).toHaveLength(2);
+});
+
+test('the same text sent after interruption belongs to a new turn', () => {
+  expect(pendingChatRetryId(entry.message_id, [])).toBe(entry.message_id);
+  expect(pendingChatRetryId(entry.message_id, [entry])).toBe(entry.message_id);
+  expect(pendingChatRetryId(entry.message_id, [{ ...entry, status: 'failed' }])).toBeUndefined();
 });
 
 test('only a queued entry with the local owner can be selected for guidance', () => {
@@ -117,7 +124,8 @@ test('queue transport retains message ID and revision under the Browser session'
     expect((await selectThreadInput('owned-thread', entry)).entry.status).toBe('selected');
     expect((await cancelThreadInput('owned-thread', entry)).status).toBe('cancelled');
     expect((await moveThreadInputToSideTask('owned-thread', entry)).thread_id).toBe('child-thread');
-    expect(calls.map(call => call.url)).toEqual([
+    expect(new URL(calls[0].url, 'http://localhost').searchParams.get('chat_client_id')).toBe(JSON.parse(String(calls[1].init.body)).chat_client_id);
+    expect(calls.map(call => new URL(call.url, 'http://localhost').pathname)).toEqual([
       '/api/claude-agent/threads/owned-thread/inputs',
       '/api/claude-agent/threads/owned-thread/inputs',
       '/api/claude-agent/threads/owned-thread/inputs/stable-message/select',

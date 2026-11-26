@@ -1,4 +1,6 @@
+<!-- [Sync] 2026-11-27: 记录普通对话跨端竞争、授权结束和工具中断恢复。 -->
 <!-- [Sync] 2026-11-25: document continuation history comparison after a native API error. -->
+<!-- [Sync] 2026-11-26: document Web feedback for saved inputs awaiting terminal receipts. -->
 <!-- [Sync] 2026-11-26: restore complete saved tool results and ended inputs when the local transcript is absent. -->
 <!-- [Sync] 2026-11-08: Simulator40与本机服务采用，正常模型验收及旧未知队列回执保持待完成。 -->
 <!-- [Sync] 2026-11-08: 追加0086及接口正常发布状态，先行设计和源码回执原文保留。 -->
@@ -9,6 +11,9 @@
 <!-- [Sync] 2026-11-04: 只读源码调查与文档交付；新增行为均为建议、未实现。 -->
 
 # mobile创建的对话在Web继续
+
+普通对话当前执行规则见[跨端发送、中断与并发](#跨端发送中断与并发)。下列历次设计与验证记录保留各版本当时的状态。
+
 
 > 当前源码状态见文末“2026-11-04代码实现”及[实施记录](../../exec/cross-platform-chat-continuation-20261104.md)。先行设计、源码调查及其当时验证原文保留；发布与设备采用分别登记。
 
@@ -520,3 +525,54 @@ stateDiagram-v2
 ```
 
 验收覆盖原会话标识、保存的停止工具轮次、多个闭合结果、失败输入回执、本次查询一次和历史工具零执行。含未闭合工具或缺失回执的输入继续拒绝初始化。
+
+### 跨端发送、中断与并发
+
+共享队列保存输入、尝试身份和执行阶段。普通对话由执行端续期的 `server-persistence` 授权证明执行权。新发送把授权创建请求 ID 作为 `continuation_owner`。旧版本使用随机 owner，Admin 核对同一账户、同一 Thread 在派发时有效的全部对应授权。任何候选仍有效时保留占用。缺少候选记录时保留原状态。服务端任务沿用各自的权限与结算合同。
+
+`ChatContinuationRepository.inputs` 在读取时投影普通对话的状态。执行端报告退出后的 `state_unknown` 或执行授权已结束的 `dispatching`，按派发 ID 匹配已保存的完整回复。有完整回复投影为 `consumed`，其余投影为 `failed`。后者记录本次执行已中断，工具的外部结果以已保存回执为准。下一次 claim 在 Thread 行锁内复核原授权、结束旧派发、核对历史摘要并认领新输入。原消息 ID 的 armed 尝试禁止再次执行。
+
+Web 与 Native 在普通发送和排队请求中携带输入端标识。服务端在共享队列和本地运行锁两处拒绝竞争发送。等待中的输入端在对话可见时自动读取队列，解除占用后补齐历史并恢复发送。读取、打开页面和设备恢复均可独立于发起消息的设备完成。
+
+`ResumeTranscriptLease` 依据已结束输入的派发记录准备本端转录。缺少回复的用户消息保留为历史输入。若本端尾部仍有旧工具调用，先匹配原会话、此前全部轮次与最后的用户输入，再归档原文件并根据共享记录恢复。历史工具调用只有成对的结果进入重建的模型上下文。
+
+```mermaid
+sequenceDiagram
+    actor A as 手机用户
+    participant P as 手机 Dream
+    participant S as Admin
+    participant W as Web Dream
+    actor B as 网页用户
+    A->>P: 发送消息
+    P->>S: 认领输入并记录 arm_query
+    P->>P: 执行本轮工具
+    B->>W: 打开同一对话
+    W->>S: 读取历史和输入队列
+    S-->>W: 原授权有效
+    W-->>B: 其他端正在回复，保留草稿
+    alt 手机正常结束
+        P->>S: 保存回复与终态
+    else 手机执行中断
+        Note over P,S: 执行端报告退出，或停止续期后授权到期
+    end
+    W->>S: 自动读取队列
+    S-->>W: 原轮次已结束
+    W-->>B: 恢复发送
+    B->>W: 发送新消息
+    W->>S: 在原 Thread 复核并认领新输入
+    alt 取得执行权
+        W->>W: 在原会话执行新输入一次
+    else 其他端同时取得执行权
+        W-->>B: 保留草稿并等待释放
+    end
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Available
+    Available --> RemoteRunning: 其他端取得执行权
+    RemoteRunning --> Available: 正常终态或已退出
+    RemoteRunning --> Available: 执行端退出后授权到期
+    Available --> LocalRunning: 本端取得执行权
+    LocalRunning --> Available: 本轮结束
+```

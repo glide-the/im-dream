@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 绑定可续期执行授权并依据已中断输入恢复原会话。
 # [Sync] 2026-11-26: verify unanswered history against existing Admin input receipts before transcript initialization.
 # [Sync] 2026-11-13: explicit Chat MCP names filter each turn snapshot; empty selection skips remote credentials.
 # [Sync] 2026-11-04: 端侧tools选择透传；音频ask_user沿原Store问题/选项/answers通道。
@@ -1516,6 +1517,7 @@ class ClaudeAgentRunRequest:
     extra: dict[str, Any] = field(default_factory=dict)
     # AI-SDK message fields (for context assembly and DB persistence)
     message_id: Optional[str] = None
+    chat_client_id: str | None = None
     message_parts: Optional[list] = None
     # Optional AI-SDK message metadata persisted with the user row. Server-side
     # turn injectors (e.g. Story Workspace guidance) pass their audit metadata
@@ -2601,25 +2603,17 @@ class ClaudeAgentService:
                 lease.prepare(history, snapshot.history_digest)
             except ClaudeResumeStorageError as exc:
                 list_inputs = getattr(persistence, "list_queued_inputs", None)
-                if exc.code != "CLAUDE_RESUME_HISTORY_UNSUPPORTED" or not callable(list_inputs):
-                    raise
-                unanswered_ids = {
-                    item["id"] for index, item in enumerate(history)
-                    if item["role"] == "user" and (index + 1 == len(history) or history[index + 1]["role"] == "user")
-                }
-                if not unanswered_ids:
+                if exc.code not in {"CLAUDE_RESUME_HISTORY_UNSUPPORTED", "CLAUDE_RESUME_HISTORY_DIVERGED"} or not callable(list_inputs):
                     raise
                 entries = await asyncio.to_thread(list_inputs, actor_id=request.user_id, thread_id=request.thread_id)
-                failed_input_ids = frozenset(
-                    entry.message_id for entry in entries
-                    if entry.message_id in unanswered_ids and entry.status == "failed" and entry.dispatch_turn_id
-                )
+                failed_input_ids = frozenset(entry.message_id for entry in entries
+                                             if entry.status == "failed" and entry.dispatch_turn_id)
                 if not failed_input_ids:
                     raise
                 lease.prepare(history, snapshot.history_digest, failed_input_ids=failed_input_ids)
             current = user_message_input(request.thread_id, request.message_id or str(uuid4()), list(request.message_parts or [{"type": "text", "text": ""}]), request.message_metadata)
             request.message_id = current.message_id
-            execution.continuation_owner = str(uuid4())
+            execution.continuation_owner = getattr(persistence, "continuation_grant_id", None) or str(uuid4())
             execution.continuation_claim = await asyncio.to_thread(persistence.continuation_claim,
                 actor_id=request.user_id, input_dto=ClaimInput(**current.model_dump(), history_digest=snapshot.history_digest,
                     claude_session_id=snapshot.thread.claude_session_id, owner=execution.continuation_owner, dispatch_turn_id=execution.state.current_turn_id))

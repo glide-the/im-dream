@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: check typed queue reconciliation and absence of automatic follow-up requests.
 // [Sync] 2026-11-04: validate transient preparation and no automatic resend through the real transport.
 // [Input] Actual HTTP transport and synthetic public pre-SSE responses.
 // [Output] Safe typed model-selection failures and unchanged unrelated HTTP/SSE behavior.
@@ -32,6 +33,18 @@ test('an unrelated conflict retains the existing HTTP failure behavior', async (
   const error = await transport.sendMessages(request).catch((value: unknown) => value);
   expect(error).toBeInstanceOf(Error);
   expect(readClaudeAgentErrorCode(error)).toBeNull();
+});
+
+test('an unreconciled input is reported as a typed pre-send conflict', async () => {
+  let calls = 0;
+  const transport = new ClaudeAgentChatTransport({ fetch: async () => {
+    calls += 1;
+    return Response.json({ detail: { error_code: 'CHAT_INPUT_RECONCILIATION_REQUIRED' } }, { status: 409 });
+  } });
+  const error = await transport.sendMessages(request).catch((value: unknown) => value);
+  expect(readClaudeAgentErrorCode(error)).toBe('CHAT_INPUT_RECONCILIATION_REQUIRED');
+  expect((error as ClaudeAgentTransportError).retryable).toBeNull();
+  expect(calls).toBe(1);
 });
 
 test('successful text SSE still passes through the same decoder', async () => {

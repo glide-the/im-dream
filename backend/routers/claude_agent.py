@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 拒绝竞争发送，返回当前输入端和远端占用。
 # [Sync] 2026-11-13: public Chat tools project platform types and explicit MCP names per message and queue input.
 # [Sync] 2026-11-08: only the same sole unclaimed pending input may explicitly retry preparation; uncertain dispatch stays blocked.
 # [Sync] 2026-11-04: 默认空tools仅选择后端平台工具类型；普通发送与排队传递选择，scheduled不启用端侧工具。
@@ -935,6 +936,7 @@ _FORBIDDEN_CLIENT_PLUGIN_FIELDS = frozenset({
 
 
 class ClaudeAgentRequestBody(BaseModel):
+    chat_client_id: str | None = Field(default=None, min_length=1, max_length=128)
     thread_id: Optional[str] = None
     id: Optional[str] = None
     message: Any = None
@@ -1149,35 +1151,23 @@ async def _claude_agent_stream_impl(
     if scheduled_dispatch is None and callable(accepting_input) and accepting_input(thread_id):
         raise HTTPException(
             status_code=409,
-            detail={"error_code": "CHAT_INPUT_USE_QUEUE"},
+            detail={"error_code": "CHAT_INPUT_USE_QUEUE" if _owns_chat_input(thread_id, body.chat_client_id) else "CHAT_CONTINUATION_BUSY"},
         )
-    # A lost process owner must not let the ordinary Chat path overtake a
-    # durable queued or uncertain input.  Older Admin deployments without the
-    # queue capability still serve their existing single-turn Chat contract.
+    # Only active dispatch owns further execution. A pending local queue has no
+    # runnable template on a new device; the next user input keeps its own identity.
     list_inputs = getattr(chat, "list_inputs", None)
     if callable(list_inputs):
         try:
             queue_snapshot = await _chat_invoke(
-                current_user, list_inputs,
-                chat_dto.ThreadIdInputDTO(thread_id=thread_id),
+                current_user, list_inputs, chat_dto.ThreadIdInputDTO(thread_id=thread_id),
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {}
             if detail.get("error_code") != "ADMIN_CAPABILITY_UNAVAILABLE":
                 raise
         else:
-            pending = [entry for entry in queue_snapshot.entries
-                       if entry.status in ("queued", "selected", "dispatching", "state_unknown")]
-            retry_pending = (len(pending) == 1 and pending[0].message_id == message_id
-                             and pending[0].status in ("queued", "selected")
-                             and pending[0].dispatch_turn_id is None)
-            # Only the original unclaimed message may retry preparation.
-            # Service's claim revalidates its saved parts/metadata atomically.
-            if pending and not retry_pending:
-                raise HTTPException(
-                    status_code=409,
-                    detail={"error_code": "CHAT_INPUT_RECONCILIATION_REQUIRED"},
-                )
+            if any(entry.status in ("dispatching", "state_unknown") for entry in queue_snapshot.entries):
+                raise HTTPException(status_code=409, detail={"error_code": "CHAT_CONTINUATION_BUSY"})
 
     message_text = body.get_message_text()
     if not message_text:
@@ -1510,6 +1500,9 @@ async def _claude_agent_stream_impl(
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,
+        # Legacy composers omit their identity. Give that submission a private
+        # owner so another unidentified request cannot enqueue behind it.
+        chat_client_id=None if scheduled_dispatch is not None else (body.chat_client_id or str(uuid4())),
         message_parts=message_parts,
         attachments=attachment_payloads or None,
         editor_state=(scheduled_dispatch.editor_state if scheduled_dispatch is not None else body.editor_state),
@@ -1973,9 +1966,14 @@ async def claude_agent_thread_stream(
     return streaming_sse_response(generate())
 
 
+def _owns_chat_input(thread_id: str, client_id: str | None) -> bool:
+    return claude_agent_thread_factory.owns_client_input(thread_id, client_id)
+
+
 @router.get("/api/claude-agent/threads/{thread_id}/inputs")
 async def claude_agent_thread_inputs(
     thread_id: str,
+    chat_client_id: str | None = Query(default=None, min_length=1, max_length=128),
     current_user: dict = Depends(get_current_user),
     chat: AdminChatData = Depends(get_admin_chat_data),
 ):
@@ -1985,9 +1983,13 @@ async def claude_agent_thread_inputs(
         current_user, chat.list_inputs,
         chat_dto.ThreadIdInputDTO(thread_id=thread_id),
     )
+    local_owner = _owns_chat_input(thread_id, chat_client_id)
+    remote_running = not local_owner and (claude_agent_thread_factory.accepting_input(thread_id)
+        or any(entry.status in ("dispatching", "state_unknown") for entry in result.entries))
     return {
         "entries": [entry.model_dump() for entry in result.entries],
-        "local_owner": claude_agent_thread_factory.accepting_input(thread_id),
+        "local_owner": local_owner,
+        "remote_running": remote_running,
     }
 
 
@@ -2030,6 +2032,7 @@ async def claude_agent_thread_enqueue_input(
             thread_id=thread_id, user_id=str(current_user["user_id"]),
             message_id=message_id, parts=parts, title_candidate=text,
             tool_choice=body.tool_choice, chat=chat, access_token=actor.access_token,
+            chat_client_id=body.chat_client_id,
             tools=tuple(dict.fromkeys(tool.type for tool in body.tools if tool.type != "mcp")),
             mcp_server_names=tuple(dict.fromkeys(tool.server_name for tool in body.tools if tool.type == "mcp")),
         )

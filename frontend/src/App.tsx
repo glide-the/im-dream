@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 对话被其他端占用时显示运行提示并停用发送。
 // [Sync] 2026-11-13: pass native composer tool selection to the existing session send/queue path.
 // [Sync] 2026-11-13: current-Agent tools trigger and migrated model picker reuse App-owned Agent/config callbacks.
 // [Sync] 2026-11-13: Chat tools navigate to the existing resource page through the native More owner.
@@ -220,6 +221,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       pluginReceipt={<PluginReceiptBadge threadId={thread??null} deck={!thread || boundContext.threadId===thread?selectedDeck:undefined} activeVoiceId={selectedVoice?.id} activeVoiceName={selectedVoice?.name} onSessionExpired={()=>void refreshSession()}
         onSelectAgent={thread?voiceId=>{if(!selectedDeck?.voices?.some(voice=>voice.enabled && voice.id===voiceId))return;setBoundContext(current=>current.threadId===thread?{...current,voiceId}:current);}:undefined}/>}
         onNewChat={newChat} onToggleActivity={toggleActivity} onToggleWorkspace={toggleWorkspace} onShare={()=>{setActivityOpen(false);setFileSidebarOpen(false);setScheduledDetail(null);setWorkspaceUri(null);setSketchOpen(false);share.current?.open();}}/>:null}</View>
+    {session.remoteRunning && <Text accessibilityRole="text" style={{color:foreground}}>{t('chat.continuation.busy')}</Text>}
     {writingRecoveryBlocked || error || setup.error || contextReadError || session.error ? <View><Text accessibilityRole="alert" style={[styles.error,{color:foreground}]}>{writingRecoveryBlocked?t('chat.writingContextUnavailable'):error || setup.error || contextReadError || '会话状态待核对，请重试读取。'}</Text><Pressable accessibilityRole="button" disabled={Boolean(setup.error)&&setup.loading} style={styles.action} onPress={retryReads}><Text style={{color:foreground}}>{setup.loading?'正在读取…':'重试读取'}</Text></Pressable>{writingRecoveryBlocked?<Pressable accessibilityRole="button" style={styles.action} onPress={()=>void onReturnToWriting?.().catch(()=>setError(t('chat.writingContextUnavailable')))}><Text style={{color:foreground}}>{t('nav.writing')}</Text></Pressable>:null}</View> : null}
     <View style={[styles.fill,section!=='chat'?styles.hidden:undefined]} accessibilityElementsHidden={section!=='chat'} importantForAccessibility={section==='chat'?'auto':'no-hide-descendants'}><ChatPage showSearch={false} hasConversation={Boolean(thread)} history={history} activeThreadId={thread}
       quickActions={buildDefaultLandingQuickActions(t)} quickActionsDisabled={!configLoaded} onSelectThread={id=>void selectThread(id)}
@@ -246,7 +248,7 @@ function Business({ownerId,logout,refreshSession,initialThreadId,onClose,initial
       </View>:null}
       {session.confirmation ? <ToolConfirmationDock key={session.confirmation.partKey} confirmation={session.confirmation} onConfirm={session.confirm} /> : null}
       {origin ? <View style={styles.shrink}>
-        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} onManageTools={()=>{openSection('more');setResourceRequestNonce(value=>value+1);}} disabled={uncertain} sendBlocked={writingRecoveryBlocked} loading={running}
+        <AIInputDock key={composerKey} ref={composer} recovery={recovery} origin={origin} onManageTools={()=>{openSection('more');setResourceRequestNonce(value=>value+1);}} disabled={uncertain} sendBlocked={writingRecoveryBlocked || session.remoteRunning} loading={running && !session.remoteRunning}
           active={section==='chat' && !activityOpen && !fileSidebarOpen && scheduledDetail===null && sideChat===null && !sketchOpen && workspaceUri===null}
           onSendMessage={(text,files,choice,tools)=>{setToolChoice(choice ?? 'auto');return session.send(text,files,choice,tools);}}
           fullAccessEnabled={config.im_full_access_enabled===true} defaultToolChoice={toolChoice} prefill={deckPrefill?.text} prefillNonce={deckPrefill?.nonce}

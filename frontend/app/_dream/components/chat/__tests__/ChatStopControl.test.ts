@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 验证本端运行时继续使用原输入队列操作。
 // [Input] Real ChatPanel Stop button, Browser session/CSRF state and a delayed same-origin Stop response.
 // [Output] Executable request-policy, strict DTO, compact queue-error feedback and component-remount delivery regressions.
 // [Pos] Provider-free Browser acceptance seam for main-turn cancellation.
@@ -307,7 +308,7 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     await page.clock.runFor(6_000);
     expect(queueReadStartedCount).toBe(1);
     holdQueueReads = false;
-    const initialRead = page.waitForResponse(response => response.url().endsWith('/inputs') && response.request().method() === 'GET');
+    const initialRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/inputs') && response.request().method() === 'GET');
     releaseQueueRead();
     await initialRead;
     await page.clock.runFor(6_000);
@@ -365,13 +366,9 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toBeVisible();
-    expect(queueReadStartedCount).toBe(5);
-    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
-      ? { ...entry, status: 'failed', revision: 4 } : entry);
-    await page.getByRole('button', { name: 'Check queue status' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toHaveCount(0);
-    expect(queueReadStartedCount).toBe(6);
+    await expect.poll(() => queueReadStartedCount).toBe(5);
+    await expect(page.getByRole('button', {name: 'Check conversation status'})).toHaveCount(0);
+    await expect(cards.first().getByRole('button', {name: 'Adjust direction'})).toBeEnabled();
     await editor.click();
     await editor.press('ControlOrMeta+A');
     await editor.press('Backspace');
