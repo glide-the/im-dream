@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-11-26: iOS 恢复使用现有 Python Factory 和 CLI，音频通过当前工具结果独立交接。 -->
 <!-- [Sync] 2026-11-04: 低敏音频MCP通过AskUserQuestion获取answers，成功播放请求与后台许可分别处理。 -->
 <!-- [Sync] 2026-11-04: 独立链接iOS播放器开发合同，媒体准备窄引用与原后台方法保持统一。 -->
 <!-- [Sync] 2026-11-04: 音频交接链接独立系统播放器组件，区分现有任务观察与待开发媒体能力。 -->
@@ -9,15 +10,15 @@
 <!-- [Pos] APP-04开发文档；新增适配器及接口均为建议、未实现；Web沿原路径。 -->
 <!-- [Sync] 2026-11-03: 从混合稿拆出技术职责，补iOS/Android平台实现、拓扑/类图/对象关系及先计算后播放时序。 -->
 
-<!-- [Sync] 2026-11-15: 追加iOS第一阶段宿主、许可、保存和重开合同；路线二TS迁移后续接入，保留原正文与图示。 -->
+<!-- [Sync] 2026-11-15: 追加 iOS 第一阶段宿主、许可、保存和重开合同。 -->
 
 # 本机 Agent 后台执行开发文档
 
-本轮iOS实施范围采用[2026-11-15宿主与恢复合同](#2026-11-15-ios第一阶段宿主与恢复合同)。前文保留原双平台、适配器和媒体方案；第一阶段在既有宿主内接线，持续后台任务与媒体接入分别延后。
+iOS 先按[宿主与恢复合同](#2026-11-15-ios第一阶段宿主与恢复合同)设计原任务的前后台处理与进程重开，再按[音频交接合同](#音频边界)接入用户选择的媒体。两项设计都通过现有 Agent 执行路径接入。
 
 ## 背景与问题
 
-目标链路为：用户前台启动原任务，手机内原Agent继续计算，音频资源就绪时按需启动播放，原结果完成保存后分别释放计算与音频资源。产品规则归[交互设计](mobile-recovery-interaction.md)，页面骨架归[移动PRD](../../prd/mobile-app/mobile-app.md#前后台与进程重开恢复2026-11-02)，实施状态与命令回执归[执行记录](../../exec/app-experience-foreground-recovery-20261102.md)。
+用户在前台发起任务，手机端 Agent 持有计算。用户在该对话中选择播放并取得本次工具的成功结果后，播放器可准备媒体。任务和播放各自结束时释放各自资源。产品规则归[交互设计](mobile-recovery-interaction.md)，页面骨架归[移动 PRD](../../prd/mobile-app/mobile-app.md#前后台与进程重开恢复2026-11-02)，实施状态归[执行记录](../../exec/app-experience-foreground-recovery-20261102.md)。
 
 本文所有新增适配器、关联对象、观察回调和播放接线均为**建议、未实现**。图中的现有宿主与Factory继续使用原实现。前稿正文和原六幅图完整保留于[历史快照](history/mobile-recovery-mixed-draft-20261103.md)，快照中的相对路径按原目录解释。
 
@@ -477,23 +478,23 @@ flowchart LR
 
 ### 背景与问题
 
-本节按[本轮架构决策](ios-app-architecture-decision.md)补充iOS第一阶段。前文保留原日期正文与图示；本轮实施边界采用本节，Android、播放器和持续后台任务的具体实现延后。当前已存在账户范围的Thread presence观察，本节只补精确到本轮执行的关联、许可与恢复合同。
+现有 Thread presence 提供账户范围的运行状态。iOS 要在后台许可到期时收尾指定执行，在同进程恢复订阅，在进程重开后核对已保存结果，均需区分同一 Thread 中的不同轮次。本节定义宿主如何将系统许可关联到原生产者。
 
 ### 目标与边界
 
-先保留当前Python Factory与CLI路径，完成iOS挂起和重开接入。路线二后续把Agent执行责任整体迁到现有Node host，产品状态和持久化身份保持。系统后台执行时间独立于语言、页面和媒体。新增代码均为建议、未实现。
+iOS 挂起和重开沿当前 Python Factory 与 CLI 路径接入。原生宿主管理 iOS 系统许可，Factory 持有已接受的执行，页面订阅事件，进程重开后按原身份读取已保存记录。新增许可、精确关联及恢复接线为建议、未实现。
 
 ### 概念与规则
 
 执行归属为`账户 + thread_id + message_id + dispatch_turn_id + 当前宿主代次 + 原生产者引用`。业务Thread及SDK会话保存在原记录中；生产者引用、系统句柄和当前代次只存在于运行内存。运行代次重建后，旧系统句柄与旧生产者引用全部失效。
 
-本节的许可专指iOS系统后台句柄。资源准入、admission lease及其释放顺序继续由原Factory处理，等待用户和语言迁移均不改变原资源算法。
+本节的许可指 iOS 系统后台句柄。资源准入、admission lease 及其释放顺序由原 Factory 管理。
 
-`BackendRuntimeManager`继续合并启动与投影状态。`EmbeddedDreamBackend`持有本次系统许可和绑定信息；`InkRuntime`转发已有请求与观察；`ClaudeAgentThreadFactory`持有当前生产者、锁和停止。后续TS执行归属由现有`host.cjs`承接，迁移后Python移动入口转发业务调用，原移动Python Factory退出生产者职责。
+`BackendRuntimeManager` 合并启动请求并向界面提供运行状态。`InkRuntime` 转发原生请求，`ClaudeAgentThreadFactory` 持有生产者和锁并处理停止。建议由 `EmbeddedDreamBackend` 持有本次系统许可与生产者的绑定，接收接受和终态回调。
 
 #### 推荐拓扑
 
-第一阶段复用实线中的现有模块。虚线包含建议、未实现的精确关联、后台接线及路线二TS迁移。所有端侧运行环境处于同一App进程，系统挂起同时影响这些线程。
+实线为现有调用，虚线为建议、未实现的许可与执行关联。端侧模块均在同一 iOS App 进程内，系统挂起时一起停止调度。[旧路线拓扑](history/ios-execution-topology-20261115.md)保留原评估图。
 
 ```mermaid
 flowchart TB
@@ -515,8 +516,6 @@ flowchart TB
         subgraph NODE["嵌入式Node运行环境"]
             HOST["host.cjs：应用持有"]
             NEXT["Next Worker：登录、BFF、局部页面"]
-            TS["建议、未实现：host.cjs持有TS Agent执行"]
-            RUN["ClaudeAgentRunner：demo基础，IM适配待实现"]
             CLI["worker.mjs / 原Runtime入口"]
             CMD["ios-process-boundary / 包内guest工具"]
         end
@@ -538,17 +537,11 @@ flowchart TB
     I -.-> B
     F -. 精确接受与终态观察 .-> B
     B -. 申请和释放 .-> OS
-    HOST -. 后续整体接管Agent .-> TS
-    TS -.-> RUN
-    RUN -. SDK自定义spawn适配 .-> CLI
-    TS -. 原认证DTO调用Python业务 .-> H
     CLI --> FILES
     D --> FILES
 ```
 
-TS Agent执行Worker复用嵌入式Node。SDK 0.2.20的`spawnClaudeCodeProcess`适配器实现stdin、stdout、退出、错误和kill合同，映射到当前私有Runtime Worker控制；不使用桌面默认spawn寻找iOS系统CLI。CLI内部Bash等命令继续由原guest边界处理，`CLAUDE_CODE_TMPDIR`继续由服务端按原thread workspace绑定并校验。模型、资源策略和工具权限沿原拥有者，页面无法覆盖。
-
-当前host.cjs在私有控制socket关闭时结束对应Runtime Worker。TS执行所有者必须在整轮执行期间持有该SDK控制连接；页面事件订阅单独释放，禁止把页面断连传递为关闭控制连接。执行完成、显式停止或受控到期收尾后，执行所有者才按原顺序释放CLI与文件资源。
+Python SDK 通过 [IOSClaudeTransport](../../../backend/mobile_runtime/ios_claude_transport.py) 连接当前 CLI Worker。[host.cjs](../../../frontend/ios/runtime/host.cjs) 在该私有控制连接关闭时终止对应 Worker。页面离开只释放事件订阅，SDK 控制连接继续归原执行持有。原任务终态和保存回执决定页面恢复时的反馈。
 
 #### 接受与许可
 
@@ -613,7 +606,9 @@ stateDiagram-v2
 
 #### 音频边界
 
-本阶段只保留`thread/turn/toolCall/output/resource`关联及“已保存媒体结果交给原播放器合同”的边界。播放器、媒体问答和锁屏控制后续接入，实际播放许可与Agent计算许可分别申请和释放。音频、静音播放、心跳与系统组件显示均不承担通用计算保活。
+现有 Agent 在当前 Thread 请求启用 `mobile_clock_audio` 时可调用该工具。原 AskUserQuestion 收集播放选择，MCP 生成 `playback_requested` 或 `declined`。建议的前端消费端仅接收当前账户、Thread、turn 和 toolCallId 匹配的实时成功播放请求，并去重后交给原生播放器。等待中显示 v4.2 角色或已有播放。进程重开读取历史只更新对话，旧等待和旧结果均不触发新播放。
+
+媒体准备、播放会话和系统控件接线待实现，详见[端侧音频问答与播放](mobile-clock-audio-frontend.md)和[iOS 系统播放器开发合同](ios-system-player-technical.md)。实际播放使用自己的音频会话。等待回答或播放结束后，剩余计算仍按本轮任务的系统许可处理。
 
 ### 第一阶段验收条件
 

@@ -1,6 +1,7 @@
 <!-- [Input] ink-dream iOS工程、开发签名和目标设备。 -->
 <!-- [Output] 本地准备、构建、安装、启动及安装失败处理步骤。 -->
 <!-- [Pos] iPhone开发安装手册；商店发行归App Store上架手册。 -->
+<!-- [Sync] 2026-11-26: 记录 Runtime 锁定版本变化后的资源准备流程。 -->
 <!-- [Sync] 2026-11-23: 登记公开 IP 证书、源站直连 transport、原打包输入和自动续期。 -->
 <!-- [Sync] 2026-11-04: 移动配置改为完整运行配置，说明.env复制、Admin连接选择及编辑器入口。 -->
 <!-- [Sync] 2026-11-03: 增加公网Admin配置片段及合并步骤，核对Product API地址和既有前端配置。 -->
@@ -40,6 +41,8 @@ security find-identity -v -p codesigning
 2. 按[构建内存与恢复手册](build-memory-and-recovery.md)确认本次构建容量和可恢复制品。
 3. Python、Node、Guest及字体资源缺失时，按`frontend/ios/scripts/`内对应准备脚本的错误提示补齐。
 4. Web源码变更后按下方顺序准备Next；同一准备目录贯穿构建、验证及Xcode资源阶段。并行任务使用各自具名目录。
+
+`frontend/ios/node-dependencies.json` 的 Runtime 版本更新后，执行 `python3 frontend/ios/scripts/prepare-node.py`。脚本校验归档摘要，在独立临时目录解包，从该归档生成 JavaScript 资源、许可证和适配回执。
 
 ```bash
 export INK_IOS_NEXT_ROOT="<仓库绝对目录>/frontend/ios/build/<本次安装>/Next"

@@ -8,6 +8,7 @@
 # [Sync] 2026-10-30: package only the pinned official Linux ARM64 ntn executable and its MIT notice for the existing command interpreter.
 # [Sync] 2026-11-03: include the same-version Runtime Linux ARM64 ripgrep and bind only its iOS command selection to the verified guest executable.
 # [Sync] 2026-11-26: derive the archive cache name from the locked Runtime version.
+# [Sync] 2026-11-26: extract the locked Runtime into a fresh directory for each preparation.
 import base64
 import hashlib
 import json
@@ -15,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 
@@ -86,14 +88,19 @@ def prepare():
     runtime.mkdir(exist_ok=True)
     archive = runtime / f"runtime-{LOCK['runtime']['version']}-darwin-arm64.tgz"
     download(LOCK["runtime"], archive)
-    with tarfile.open(archive) as bundle:
-        bundle.extractall(runtime, filter="data")
+    with tempfile.TemporaryDirectory(prefix="runtime-source-", dir=runtime) as directory:
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(directory, filter="data")
+        prepare_runtime(node, runtime, Path(directory) / "package")
+
+
+def prepare_runtime(node, runtime, package):
     generated = runtime / "generated"
     shutil.rmtree(generated, ignore_errors=True)
     core = generated / "core"
     core.mkdir(parents=True)
     receipt = []
-    source = runtime / "package/runtime/lib/core"
+    source = package / "runtime/lib/core"
     for original in sorted(source.rglob("*.js")):
         relative = original.relative_to(source)
         target = core / relative
@@ -132,9 +139,9 @@ def prepare():
     notice = node / "LICENSE"
     download(LOCK["node"]["notice"], notice)
     shutil.copy2(notice, licenses / "NodeMobile-LICENSE")
-    for original in (runtime / "package").rglob("LICENSE*"):
+    for original in package.rglob("LICENSE*"):
         if original.is_file():
-            name = "-".join(original.relative_to(runtime / "package").parts)
+            name = "-".join(original.relative_to(package).parts)
             shutil.copy2(original, licenses / name)
     prepare_notion_cli(runtime, generated)
     prepare_ripgrep(runtime, generated)

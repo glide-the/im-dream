@@ -49,11 +49,11 @@
 
 <!-- [Sync] 2026-11-15: 索引iOS两路线架构决策及第一阶段恢复合同，原方案与历史图示保留。 -->
 
+<!-- [Sync] 2026-11-26: 终止 Agent 的 TS 迁移，现行 iOS 工作回到恢复与音频设计。 -->
+
 # Kastention 跨平台方案
 
-用户已选择路线二。三个Claude入口迁入`frontend/packages`的现行实施边界见[TS Agent、MCP与插件模块化方案](../claude-agent/typescript-agent-modular-migration.md)，包含Python业务数据边界保留、TS层简化、最小闭环与完整迁移估算。
-
-本轮iOS架构判断见[App架构取舍](ios-app-architecture-decision.md)：按用户最新范围只比较保留Python业务并迁移Agent的路线二、全面迁移本地业务的路线三，推荐路线二分阶段交付。先执行[第一阶段交互](mobile-recovery-interaction.md#2026-11-15-ios第一阶段任务交互)与[宿主恢复合同](mobile-background-execution-technical.md#2026-11-15-ios第一阶段宿主与恢复合同)，随后迁移Agent；音频接入独立延后。新增行为均为建议、未实现。
+iOS 复用现有 Python Agent、MCP、插件和 CLI 执行链。先设计切后台与进程重开后的任务核对，再设计用户确认后的媒体播放。Agent 的 TS 迁移及原排期已终止。[现行架构决策](ios-app-architecture-decision.md)
 
 APP-04分为[产品交互设计](mobile-recovery-interaction.md)与[开发文档](mobile-background-execution-technical.md)。产品稿定义手机本机计算、用户/Agent/媒体/播放器身份、媒体确认后播放、失败反馈和恢复；开发稿直接包含iOS/Android拓扑、适配器类图、运行期对象关系、接口及正常/异常时序。Web沿原路径。新增实现均为建议、未实现，持续计算缺口和平台前置明确列出。[前稿及原六幅图](history/mobile-recovery-mixed-draft-20261103.md)完整保留，[执行记录](../../exec/app-experience-foreground-recovery-20261102.md)维护实施状态与验证证据。
 

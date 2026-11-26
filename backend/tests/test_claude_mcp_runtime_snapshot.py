@@ -1,4 +1,5 @@
 # [Sync] 2026-11-13: selection precedes credential reads and rejects disabled or out-of-scope connections.
+# [Sync] 2026-11-20: history checks only matching saved App snapshots and never starts discovery.
 """Managed MCP Runtime snapshot loader contracts.
 
 [Input] Enabled user/workspace rows, encrypted fake credentials, and injected stdio profiles.
@@ -205,6 +206,53 @@ def test_expired_app_inventory_is_refreshed_before_first_turn_projection():
         second = await loader.load("7", None)
         assert second.mcp_app_resource_bindings == first.mcp_app_resource_bindings
         assert len(calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_history_app_bindings_only_read_selected_matching_snapshots():
+    async def scenario():
+        matched = _server("saved-apps", "apps__saved")
+        missing = _server("missing-app", "missing")
+        unrelated = _server("unrelated-app", "unrelated")
+        not_allowed = _server("plain-mcp", "plain")
+        reads = []
+        discoveries = []
+        resource = "ui://apps/history.html"
+
+        class HistoryRepository(_Repository):
+            async def get_discovery_snapshot(self, actor_id, server):
+                reads.append(server.id)
+                return await super().get_discovery_snapshot(actor_id, server)
+
+        class Refresher:
+            async def discover_one(self, actor_id, server_id, **kwargs):
+                discoveries.append(server_id)
+
+        repository = HistoryRepository([matched, missing, unrelated, not_allowed], snapshots={
+            matched.id: {
+                "status": "complete",
+                "inventory": {
+                    "tools": [{"name": "read", "_meta": {"ui": {"resourceUri": resource}}}],
+                    "resources": [{"uri": resource}],
+                },
+            },
+        })
+        loader = ManagedMcpRuntimeSnapshotLoader(
+            repository, None, stdio_profiles=StdioProfileResolver({}),
+            max_servers=8, app_inventory_refresher=Refresher(),
+            app_server_keys_provider=lambda: ("apps__saved", "missing", "unrelated"),
+        )
+
+        bindings = await loader.load_mcp_app_resource_bindings(
+            "7", None, registered_tool_names=frozenset({
+                "mcp__apps__saved__read", "mcp__missing__read", "mcp__plain__read",
+            }),
+        )
+
+        assert bindings == {"apps__saved": {"read": resource}}
+        assert reads == [matched.id, missing.id]
+        assert discoveries == []
 
     asyncio.run(scenario())
 

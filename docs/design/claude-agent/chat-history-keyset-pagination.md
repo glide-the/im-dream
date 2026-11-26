@@ -787,6 +787,12 @@ stateDiagram-v2
 
 `ChatPanel` 和 `useModelConfig` 按浏览器会话共享进行中的 `GET /api/system-config` 及其解析结果。模型保存回执后发起独立读取，注入原生 transport 的读取继续传递取消信号。
 
+### 历史消息的 MCP App 补投影（2026-11-20）
+
+分页、全量历史与单消息过程详情共用 `_project_chat_history_messages`。读回所请求的消息后，只有当前内容中缺少 `mcpAppResult` 的历史 MCP 成功结果才参与补投影。普通正文、已经保存的 App 投影、未完成结果和错误结果不触发该读取。
+
+需要补投影时，按当前用户授权读取连接及当前快照，只查询候选工具涉及且符合 Apps 策略的启用连接。沿用精确工具与资源绑定校验。缺少完整有效快照或读取失败时，保留原工具输出供阅读。浏览历史期间不启动 MCP 发现。工具运行前的快照刷新沿用[现行 MCP Apps 策略](../claude-mcp/mcp-apps-integration-strategy.md)。
+
 ### 原生进行中Thread保留与UI发布
 
 发现：`useNativeChatThread.openThread`原先对不同Thread递增读取代次、关闭当前reader并执行hydrate。上一轮两页正文预览覆盖静态阅读，运行中实例的连接和投影未保留。新增受控SSE基线两项失败分别显示：隐藏页面仍增加React提交；A→B导航取消A reader。

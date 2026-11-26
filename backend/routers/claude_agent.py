@@ -1,4 +1,5 @@
 # [Sync] 2026-11-27: 拒绝竞争发送，返回当前输入端和远端占用。
+# [Sync] 2026-11-20: history loads current MCP App descriptors only for saved results that need projection.
 # [Sync] 2026-11-13: public Chat tools project platform types and explicit MCP names per message and queue input.
 # [Sync] 2026-11-08: only the same sole unclaimed pending input may explicitly retry preparation; uncertain dispatch stays blocked.
 # [Sync] 2026-11-04: 默认空tools仅选择后端平台工具类型；普通发送与排队传递选择，scheduled不启用端侧工具。
@@ -780,8 +781,9 @@ def _project_chat_turn_navigation(messages: list[dict[str, Any]]) -> list[dict[s
 
 async def _load_current_user_mcp_app_resource_bindings(
     current_user: dict,
+    registered_tool_names: frozenset[str],
 ) -> dict[str, dict[str, str]]:
-    """Best-effort read of current user-scope descriptor bindings for history."""
+    """Read current user-scope descriptors for the saved tools on this page."""
 
     try:
         from claude_mcp.service import (  # noqa: PLC0415
@@ -804,12 +806,70 @@ async def _load_current_user_mcp_app_resource_bindings(
             return await loader.load_mcp_app_resource_bindings(
                 actor.canonical_user_id,
                 None,
+                registered_tool_names=registered_tool_names,
             )
     except Exception:  # noqa: BLE001 - history must retain ordinary MCP output
         logger.warning(
             "Managed MCP App history descriptor projection failed safely."
         )
         return {}
+
+
+def _legacy_history_mcp_tool_name(part: Any) -> str | None:
+    if (
+        not isinstance(part, dict)
+        or "mcpAppResult" in part
+        or part.get("state") != "output-available"
+    ):
+        return None
+    name = part.get("toolName")
+    output = part.get("output")
+    if (
+        not isinstance(name, str)
+        or not name.startswith("mcp__")
+        or not isinstance(output, dict)
+        or not isinstance(output.get("content"), list)
+        or (output.get("isError") is not None and output.get("isError") is not False)
+    ):
+        return None
+    return name
+
+
+async def _project_chat_history_messages(
+    current_user: dict,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    registered_tool_names: set[str] = set()
+    for message in messages:
+        parts = message.get("parts")
+        if (
+            message.get("role") != "assistant"
+            or message.get("metadata_decode_error") is True
+            or not isinstance(parts, list)
+        ):
+            continue
+        names = {
+            name for part in parts
+            if (name := _legacy_history_mcp_tool_name(part)) is not None
+        }
+        if not names:
+            continue
+        metadata = message.get("metadata")
+        if metadata is None or (
+            isinstance(metadata, dict) and not PublicChatMetadataDto.from_storage(metadata)[1]
+        ):
+            registered_tool_names.update(names)
+    bindings = (
+        await _load_current_user_mcp_app_resource_bindings(
+            current_user, frozenset(registered_tool_names)
+        )
+        if registered_tool_names
+        else None
+    )
+    return [
+        _project_chat_message_for_client(message, mcp_app_resource_bindings=bindings)
+        for message in messages
+    ]
 
 
 async def _resolve_platform_model_alias(
@@ -1813,20 +1873,12 @@ async def claude_agent_thread_messages(
                 status_code=400,
                 detail="limit is required for cursor pagination",
             )
-        mcp_app_resource_bindings = (
-            await _load_current_user_mcp_app_resource_bindings(current_user)
-        )
         result = await _chat_invoke(current_user, chat.list_messages, chat_dto.ThreadIdInputDTO(thread_id=thread_id))
-        messages = [
-            _project_chat_message_for_client(
-                message,
-                mcp_app_resource_bindings=mcp_app_resource_bindings,
-            )
-            for message in (item.model_dump() for item in result.messages)
-        ]
         return {
             "thread": _project_chat_thread_for_client(thread),
-            "messages": messages,
+            "messages": await _project_chat_history_messages(
+                current_user, [item.model_dump() for item in result.messages]
+            ),
         }
     if cursor is not None and known_latest_message_id is not None:
         raise HTTPException(
@@ -1868,18 +1920,9 @@ async def claude_agent_thread_messages(
     next_cursor = None
     if page.get("has_more") is True and page_messages:
         next_cursor = _encode_chat_message_cursor(thread_id, page_messages[0])
-    mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(current_user)
-    )
     return {
         "thread": _project_chat_thread_for_client(thread),
-        "messages": [
-            _project_chat_message_for_client(
-                message,
-                mcp_app_resource_bindings=mcp_app_resource_bindings,
-            )
-            for message in page_messages
-        ],
+        "messages": await _project_chat_history_messages(current_user, page_messages),
         "next_cursor": next_cursor,
         "has_more": page.get("has_more") is True,
         "latest_message_id": page.get("latest_message_id"),
@@ -1905,13 +1948,10 @@ async def claude_agent_thread_message_process(
     result = await _chat_invoke(current_user, chat.process_detail, chat_dto.MessageDetailInputDTO(thread_id=thread_id, message_id=message_id))
     if result.message is None:
         raise HTTPException(status_code=404, detail="Message process not found")
-    mcp_app_resource_bindings = (
-        await _load_current_user_mcp_app_resource_bindings(current_user)
+    (message,) = await _project_chat_history_messages(
+        current_user, [result.message.model_dump()]
     )
-    return _project_chat_message_for_client(
-        result.message.model_dump(),
-        mcp_app_resource_bindings=mcp_app_resource_bindings,
-    )
+    return message
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/subagents")

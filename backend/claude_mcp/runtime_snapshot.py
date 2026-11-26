@@ -1,4 +1,5 @@
 # [Sync] 2026-11-13: optional Chat selection filters actor/workspace connections before credential/discovery work.
+# [Sync] 2026-11-20: history reads only existing descriptor snapshots for candidate App servers.
 """In-memory Runtime projection of managed MCP configuration.
 
 [Input] Enabled actor user/workspace Server rows, stdio policy profiles, and encrypted credential references.
@@ -224,8 +225,10 @@ class ManagedMcpRuntimeSnapshotLoader:
         self,
         actor_id: str,
         workspace_id: str | None,
+        *,
+        registered_tool_names: frozenset[str] | None = None,
     ) -> dict[str, dict[str, str]]:
-        """Read fresh, non-secret descriptor bindings without loading credentials."""
+        """Read current history bindings from saved inventory."""
 
         if not await self.repository.capability_available():
             raise ClaudeMcpError(
@@ -240,12 +243,20 @@ class ManagedMcpRuntimeSnapshotLoader:
                 "Managed Claude MCP server count exceeds policy.",
             )
         ordered = sorted(enabled, key=lambda row: 0 if row.scope == "user" else 1)
-        return await self._app_bindings_for_rows(actor_id, ordered)
+        if registered_tool_names is not None:
+            # Match the prefixes of authorized rows, including server keys containing "__".
+            ordered = [
+                row for row in ordered
+                if any(name.startswith(f"mcp__{row.server_key}__") for name in registered_tool_names)
+            ]
+        return await self._app_bindings_for_rows(actor_id, ordered, refresh_missing=False)
 
     async def _app_bindings_for_rows(
         self,
         actor_id: str,
         rows: list[Any],
+        *,
+        refresh_missing: bool = True,
     ) -> dict[str, dict[str, str]]:
         getter = getattr(self.repository, "get_discovery_snapshot", None)
         if not callable(getter) or not rows:
@@ -260,8 +271,13 @@ class ManagedMcpRuntimeSnapshotLoader:
                 return {}
             selected_keys = set(provided)
 
+        if not refresh_missing and selected_keys is not None:
+            rows = [row for row in rows if row.server_key in selected_keys]
+
         async def current_snapshot(server: Any) -> Any | None:
             snapshot = await getter(actor_id, server)
+            if not refresh_missing:
+                return snapshot
             if (
                 isinstance(snapshot, Mapping)
                 and snapshot.get("status") == "complete"

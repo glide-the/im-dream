@@ -1,5 +1,6 @@
 # [Sync] 2026-11-27: 覆盖可继续的独立输入与活动轮次的竞争拒绝。
 # [Sync] 2026-11-13: cover explicit MCP names and rejection of client connection configuration.
+# [Sync] 2026-11-20: verify history skips MCP reads for ordinary messages and recovers eligible legacy App results.
 # [Sync] 2026-11-08: same-ID pending preparation retry retains owner/claim gates and rejects uncertain dispatch.
 # [Sync] 2026-11-04: 增加公开tools默认关闭、显式选择与非法平台定义拒绝合同。
 # [Sync] 2026-11-04: versioned origin creation and deferred continuation persistence.
@@ -26,6 +27,7 @@ import asyncio
 import sys
 import types
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -88,7 +90,7 @@ def boundary(monkeypatch):
     assert not hasattr(database, "get_deck_with_voices")
     for name in ("get_db", "get_chat_thread", "create_chat_thread", "list_chat_threads", "list_chat_threads_for_search", "delete_chat_thread", "list_chat_messages", "list_chat_message_page", "get_latest_chat_message_id", "get_chat_message_process_detail", "save_chat_message", "get_system_config"):
         monkeypatch.setattr(database, name, forbidden)
-    async def bindings(user_id):
+    async def bindings(current_user, registered_tool_names):
         return {}
     monkeypatch.setattr(routes, "_load_current_user_mcp_app_resource_bindings", bindings)
     async def model_selection(user_id, client_model_alias, system_config, *, access_token):
@@ -629,6 +631,67 @@ def test_history_preserves_canonical_parts_without_dream_pg(boundary):
     assert response.status_code == 200
     assert len(response.json()["messages"][0]["parts"]) == 2
     assert [call[0] for call in calls] == ["chat-thread.get", "chat-message.list"]
+
+
+@pytest.mark.parametrize("path", ["messages", "messages?limit=2", "messages/message-1/process"])
+def test_plain_history_skips_mcp_bindings(boundary, monkeypatch, path):
+    from routers import claude_agent as routes
+
+    client, _, _, _ = boundary
+    bindings = AsyncMock(return_value={})
+    monkeypatch.setattr(routes, "_load_current_user_mcp_app_resource_bindings", bindings)
+
+    response = request(client, "GET", f"/api/claude-agent/threads/owned-thread/{path}")
+
+    assert response.status_code == 200
+    bindings.assert_not_awaited()
+
+
+def test_history_reads_bindings_only_for_unprojected_mcp_results(boundary, monkeypatch):
+    from routers import claude_agent as routes
+
+    client, outputs, _, _ = boundary
+    output = {"content": [{"type": "text", "text": "Legacy answer"}]}
+    legacy = {
+        "type": "tool-invocation",
+        "toolName": "mcp__apps__read",
+        "toolCallId": "legacy-call",
+        "state": "output-available",
+        "input": {},
+        "output": output,
+    }
+    saved = {
+        **legacy,
+        "toolName": "mcp__saved__read",
+        "toolCallId": "saved-call",
+        "mcpAppResult": {
+            "version": 1,
+            "serverRef": "saved",
+            "toolName": "read",
+            "toolCallId": "saved-call",
+            "input": {},
+            "workspaceScope": None,
+            "resourceUri": "ui://saved/app.html",
+            "result": output,
+        },
+    }
+    ordinary = {**legacy, "toolName": "Read", "toolCallId": "ordinary-call"}
+    failed = {**legacy, "toolName": "mcp__failed__read", "output": {**output, "isError": True}}
+    outputs["chat-message.page"]["messages"] = [
+        {**message_value(), "parts": [legacy, saved, ordinary, failed], "metadata": {}}
+    ]
+    bindings = AsyncMock(return_value={"apps": {"read": "ui://apps/app.html"}})
+    monkeypatch.setattr(routes, "_load_current_user_mcp_app_resource_bindings", bindings)
+
+    response = request(client, "GET", "/api/claude-agent/threads/owned-thread/messages?limit=2")
+
+    assert response.status_code == 200
+    assert bindings.await_count == 1
+    assert bindings.await_args.args[1] == frozenset({"mcp__apps__read"})
+    projected, persisted, plain, error = response.json()["messages"][0]["parts"]
+    assert projected["mcpAppResult"]["resourceUri"] == "ui://apps/app.html"
+    assert persisted["mcpAppResult"] == saved["mcpAppResult"]
+    assert plain == ordinary and error == failed
 
 
 def test_turn_navigation_pairs_public_user_messages_without_crossing_turns(boundary):
