@@ -4,6 +4,7 @@ description: Run reliable full-business-journey Playwright automation and visual
 ---
 
 <!-- [Input] Repository contracts, selected business scenario and existing authentication checkpoints. -->
+<!-- [Sync] 2026-11-24: honor the user's Luna test-stage setting for isolated verification. -->
 <!-- [Output] Scoped browser validation and resumable evidence without credential contents. -->
 <!-- [Pos] Existing Ink-Dream QA skill, including normal-account session recovery. -->
 <!-- [Sync] 2026-10-12: consult and maintain the successful login source before retrying authentication. -->
@@ -20,7 +21,8 @@ For authenticated real-business QA, read [references/auth-checkpoints.md](refere
 
 ## Test execution agent
 
-Delegate bounded provider-free, isolated, mocked-browser, source/unit, and
+When the user disables `luna-test-stage`, keep isolated verification in the
+primary agent. When Luna routing is enabled, delegate bounded provider-free, isolated, mocked-browser, source/unit, and
 visual-regression execution to the `luna_test_runner` custom agent. It is
 configured for `gpt-5.6-luna`, high reasoning, and Fast mode. Give it the exact
 spec/command, worktree, expected evidence, owned ports/data, and cleanup scope;
@@ -30,7 +32,7 @@ Keep real-user or real-model business acceptance, production mutation,
 migration/destructive work, approvals, diagnosis, and implementation in the
 primary agent. If the runner cannot access the required browser or runtime,
 report a harness blocker; do not silently replace the requested lane. Apply the
-full routing contract from `$luna-test-stage` when available.
+full routing contract from `$luna-test-stage` when enabled.
 
 ## Non-negotiable rules
 
