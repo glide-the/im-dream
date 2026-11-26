@@ -5,7 +5,7 @@
 // [Sync] 2026-09-27: verify queue capability failure preserves the draft, status check recovers, and Stop returns after clearing.
 // [Sync] 2026-09-28: clear the Tiptap draft with user keyboard input before asserting the single Stop action.
 // [Sync] 2026-09-28: verify real ChatPanel removes dispatched/failed queue cards and preserves another queued action.
-// [Sync] 2026-10-25: hold the original queue GET across several poll ticks and require one outstanding read.
+// [Sync] 2026-11-26: count queue GETs for screen visibility, continuation readiness, and explicit recovery.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -144,13 +144,27 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
 
     const root = createRoot(document.querySelector('#root'));
     window.__unmountStopHarness = () => root.unmount();
-    root.render(React.createElement(ChatPanel, {
+    const fetchRequest = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (!String(input).endsWith('/stream')) return fetchRequest(input, init);
+      const stream = new ReadableStream({
+        start(controller) {
+          window.__emitContinuationReady = () => {
+            controller.enqueue(new TextEncoder().encode('data: {"type":"data-continuation","state":"ready"}' + String.fromCharCode(10, 10)));
+          };
+          init.signal.addEventListener('abort', () => controller.close(), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }));
+    };
+    root.render(React.createElement(React.StrictMode, {}, React.createElement(ChatPanel, {
       threadId: '${THREAD_ID}',
       initialMessages: [],
       initialRuntimeRunning: true,
       initialToolConfirmationKnown: true,
+      reconnectStreamNonce: 1,
       inputPlaceholder: 'Ask Ink & Memory…',
-    }));
+    })));
   `;
 
   const harnessPort = await reserveEphemeralPort();
@@ -160,6 +174,10 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     cacheDir,
     configFile: false,
     logLevel: 'silent',
+    optimizeDeps: {
+      entries: ['app/_dream/components/chat/ChatPanel.tsx', 'app/_dream/i18n.ts'],
+      include: ['react', 'react-dom/client', 'react/jsx-runtime'],
+    },
     server: { host: '127.0.0.1', port: harnessPort, strictPort: true },
     plugins: [{
       name: 'chat-stop-control-browser-harness',
@@ -200,8 +218,8 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   let stopFinishedCount = 0;
   let stopHeaders: Record<string, string> = {};
   let queueReady = false;
-  let queueReadCount = 0;
   let queueReadStartedCount = 0;
+  let queuePostCount = 0;
   let holdQueueReads = true;
   let releaseQueueRead!: () => void;
   const queueReadRelease = new Promise<void>((resolve) => { releaseQueueRead = resolve; });
@@ -211,6 +229,7 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
   let markStopStarted!: () => void;
   const stopStarted = new Promise<void>((resolve) => { markStopStarted = resolve; });
   const failures: string[] = [];
+  page.on('pageerror', error => failures.push(error.message));
 
   page.on('requestfailed', request => failures.push(
     `${request.failure()?.errorText ?? 'failed'} ${request.url()}`,
@@ -255,8 +274,8 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
         queueReadStartedCount += 1;
         if (holdQueueReads) await queueReadRelease;
       }
+      if (request.method() === 'POST') queuePostCount += 1;
       const unavailable = request.method() === 'POST' || !queueReady;
-      if (request.method() === 'GET' && queueReady) queueReadCount += 1;
       await route.fulfill({
         status: unavailable ? 503 : 200,
         contentType: 'application/json',
@@ -275,22 +294,32 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
 
   try {
     await server.listen();
-    // Use the browser's clock to cover multiple original polling intervals
-    // while the first real component request remains unanswered.
+    await page.addInitScript(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    });
     await page.clock.install({ time: new Date('2026-10-25T00:00:00Z') });
     await page.clock.pauseAt(new Date('2026-10-25T00:00:01Z'));
     await page.goto(`${origin}/chat-stop-control`);
-    await expect.poll(() => queueReadStartedCount).toBe(1);
+    await expect.poll(() => queueReadStartedCount, {
+      message: 'The visible conversation starts exactly one queue read',
+      timeout: 12_000,
+    }).toBe(1);
     await page.clock.runFor(6_000);
     expect(queueReadStartedCount).toBe(1);
     holdQueueReads = false;
+    const initialRead = page.waitForResponse(response => response.url().endsWith('/inputs') && response.request().method() === 'GET');
     releaseQueueRead();
+    await initialRead;
+    await page.clock.runFor(6_000);
+    expect(queueReadStartedCount).toBe(1);
     await page.clock.resume();
     const editor = page.locator('#chat-input');
     await editor.fill('keep this queued draft');
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await editor.press('Enter');
     const queueError = page.getByRole('alert').filter({ hasText: 'Messages cannot be queued right now' });
     await expect(queueError).toBeVisible();
+    expect(queuePostCount).toBe(1);
+    await expect.poll(() => queueReadStartedCount).toBe(2);
     await expect(editor).toHaveText('keep this queued draft');
     const errorBox = await queueError.boundingBox();
     const dockBox = await page.locator('.ai-input-dock').boundingBox();
@@ -318,29 +347,31 @@ test('clicking Stop emits one POST that survives ChatPanel unmount', async ({ pa
     await expect(editor).toHaveText('keep this queued draft');
     const cards = page.getByTestId('thread-input-queue-card');
     await expect(cards).toHaveCount(2);
+    expect(queueReadStartedCount).toBe(3);
     queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
       ? { ...entry, status: 'dispatching', revision: 2, dispatch_turn_id: 'turn-one' } : entry);
-    const readsBeforeDispatch = queueReadCount;
-    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeDispatch);
+    await page.evaluate(() => {
+      (window as Window & { __emitContinuationReady: () => void }).__emitContinuationReady();
+    });
     await expect(cards).toHaveCount(1);
+    expect(queueReadStartedCount).toBe(4);
     await expect(cards.first()).toContainText('second queued message');
-    queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
-      ? { ...entry, status: 'failed', revision: 3 } : entry);
-    const readsBeforeFailure = queueReadCount;
-    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeFailure);
-    await expect(cards).toHaveCount(1);
     await expect(cards.first().getByRole('button', { name: 'Adjust direction' })).toBeEnabled();
     queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
-      ? { ...entry, status: 'state_unknown', revision: 4 } : entry);
-    const readsBeforeUnknown = queueReadCount;
-    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeUnknown);
-    await expect(cards).toHaveCount(1);
+      ? { ...entry, status: 'state_unknown', revision: 3 } : entry);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toBeVisible();
+    expect(queueReadStartedCount).toBe(5);
     queueEntries = queueEntries.map((entry) => entry.message_id === 'queued-one'
-      ? { ...entry, status: 'failed', revision: 5 } : entry);
-    const readsBeforeReconciled = queueReadCount;
-    await expect.poll(() => queueReadCount).toBeGreaterThan(readsBeforeReconciled);
+      ? { ...entry, status: 'failed', revision: 4 } : entry);
+    await page.getByRole('button', { name: 'Check queue status' }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'result needs review' })).toHaveCount(0);
+    expect(queueReadStartedCount).toBe(6);
     await editor.click();
     await editor.press('ControlOrMeta+A');
     await editor.press('Backspace');

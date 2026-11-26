@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: verify that overlapping events share a follow-up read and disposal discards late snapshots.
 // [Sync] 2026-11-13: capture each queue submission tool descriptor list and explicit empty choices.
 // [Input] Production Thread input queue browser adapter and its persisted status DTO.
 // [Output] Verify guide eligibility, stable message identity, revision and Browser session policy.
@@ -11,7 +12,7 @@
 import { expect, test } from '@playwright/test';
 import { clearBrowserSession, loadBrowserSession } from '../../../lib/browserSession';
 import {
-  canGuideThreadInput, cancelThreadInput, enqueueThreadInput, fetchThreadInputs,
+  canGuideThreadInput, cancelThreadInput, createThreadInputReader, enqueueThreadInput, fetchThreadInputs,
   isThreadInputQueueCard,
   moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry,
 } from '../threadInputQueue';
@@ -21,6 +22,34 @@ const entry: ThreadInputEntry = {
   status: 'queued', revision: 3, dispatch_turn_id: null,
   created_at: '2026-09-26T00:00:00Z', text: 'please continue',
 };
+
+test('queue reader serializes overlapping events and discards work from a disposed Thread', async () => {
+  const reads: Array<{ signal: AbortSignal | null | undefined; resolve: (response: Response) => void }> = [];
+  const snapshots: number[] = [];
+  const reader = createThreadInputReader(entry.thread_id, snapshot => {
+    snapshots.push(snapshot.entries[0].revision);
+  }, (_input, init) => new Promise<Response>(resolve => {
+    reads.push({ signal: init?.signal, resolve });
+  }));
+  const response = (revision: number) => Response.json({ entries: [{ ...entry, revision }], local_owner: true });
+
+  const opened = reader.refresh();
+  expect(reader.refresh()).toBe(opened);
+  await expect.poll(() => reads.length).toBe(1);
+  const changed = reader.refresh();
+  expect(reader.refresh()).toBe(changed);
+  expect(reads).toHaveLength(1);
+  reads[0].resolve(response(3));
+  await opened;
+  await expect.poll(() => reads.length).toBe(2);
+  const waiting = reader.refresh();
+  reader.dispose();
+  expect(reads[1].signal?.aborted).toBe(true);
+  reads[1].resolve(response(4));
+  await Promise.all([changed, waiting]);
+  expect(snapshots).toEqual([3]);
+  expect(reads).toHaveLength(2);
+});
 
 test('only a queued entry with the local owner can be selected for guidance', () => {
   for (const status of ['queued', 'selected', 'dispatching', 'consumed', 'cancelled', 'failed', 'state_unknown'] as const) {
