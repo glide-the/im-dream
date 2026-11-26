@@ -1,3 +1,4 @@
+# [Sync] 2026-11-20: retain only numeric upstream HTTP status for rejected machine-token requests.
 # [Sync] 2026-11-19: name the Admin peer and record response or transport failure per token attempt.
 # [Sync] 2026-11-18: propagate W3C context across cold service-token attempts.
 # [Input] Server-owned OAuth client ID/secret, Admin issuer/resource and bounded HTTP transport.
@@ -86,7 +87,10 @@ class OAuthClientCredentialsTokenSource:
                                 if len(raw) > self._config.max_response_bytes:
                                     raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
                             if not 200 <= response.status_code < 300:
-                                raise AdminDataError("ADMIN_SERVICE_AUTH_UNAVAILABLE", 503)
+                                raise AdminDataError(
+                                    "ADMIN_SERVICE_AUTH_UNAVAILABLE", 503,
+                                    remote=f"admin.oauth.token http_status={response.status_code}",
+                                )
                         finally:
                             response.close()
                         break

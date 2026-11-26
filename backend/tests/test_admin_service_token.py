@@ -1,5 +1,6 @@
 # [Input] Production OAuthClientCredentialsTokenSource with a deterministic fake Admin transport.
 # [Output] Basic client auth, exact grant/resource body, cache reuse, bounded transport recovery and redacted failure evidence.
+# [Sync] 2026-11-20: HTTP rejection diagnostics retain status while excluding upstream headers/body and preserving next-call recovery.
 # [Pos] Provider-free OAuth machine-token protocol tests; no database or external HTTP.
 # [Sync] 2026-09-18: verify machine-token transport may use loopback while issuer identity remains public.
 # [Sync] 2026-09-17: validate one transport-only recovery without retrying an HTTP rejection.
@@ -105,15 +106,48 @@ def test_client_credentials_recovers_one_transport_failure_with_short_timeout() 
     assert len(calls) == 2
 
 
-def test_client_credentials_does_not_retry_http_rejection() -> None:
+@pytest.mark.parametrize("upstream_status", [400, 401, 403, 429, 503])
+def test_client_credentials_does_not_retry_http_rejection(upstream_status: int) -> None:
     calls = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(503, json={"error": "temporarily_unavailable"})
+        return httpx.Response(
+            upstream_status, json={"error": "private upstream credential"},
+            headers={"set-cookie": "private-cookie"},
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    with pytest.raises(AdminDataError):
+    with pytest.raises(AdminDataError) as captured:
         OAuthClientCredentialsTokenSource(_config(), client).access_token()
     assert calls == 1
+    assert captured.value.status_code == 503
+    assert captured.value.remote == f"admin.oauth.token http_status={upstream_status}"
+    diagnostic = str(captured.value) + repr(captured.value)
+    for private in ("private upstream credential", "private-cookie", _config().service_secret):
+        assert private not in diagnostic
+
+
+def test_client_credentials_next_call_recovers_after_http_rejection() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, json={"error": "temporarily_unavailable"})
+        return httpx.Response(200, json={
+            "access_token": "recovered.service.token", "token_type": "Bearer",
+            "expires_in": 300, "scope": "capabilities:read",
+        })
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    source = OAuthClientCredentialsTokenSource(_config(), client)
+    with pytest.raises(AdminDataError):
+        source.access_token()
+    assert calls == 1
+    assert source.access_token() == "recovered.service.token"
+    assert calls == 2
+    assert source.access_token() == "recovered.service.token"
+    assert calls == 2

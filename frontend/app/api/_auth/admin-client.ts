@@ -1,6 +1,7 @@
 // [Input] Explicit Admin public authority, optional internal transport origin, confidential client and canonical v1 DTOs.
 // [Output] Process-shared bounded Admin DTO/OAuth transport with separate private service credentials.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
+// [Sync] 2026-11-20: retire cached transports predating the shared boundary-error protocol without invalidating cache per bundle.
 // [Sync] 2026-10-11: expose the existing transport origin to select validated loopback browser navigation only.
 // [Sync] 2026-10-11: use immutable browser-origin wrappers sharing the original service-token owner.
 // [Sync] 2026-09-18: keep browser/issuer URLs public while routing server-only Admin calls through an exact internal origin.
@@ -111,6 +112,7 @@ export function adminBffConfig(environment: Readonly<Record<string, string | und
 }
 
 export class AdminBffClient {
+  readonly errorProtocol = BffBoundaryError.protocol;
   readonly origin: string;
   readonly transportOrigin: string;
   readonly issuer: string;
@@ -319,6 +321,7 @@ export function configuredAdminBffClient(
   const config = adminBffConfig(environment);
   const owner = globalThis as AdminBffGlobal;
   if (!owner.__inkDreamAdminBffClient || !sameConfig(owner.__inkDreamAdminBffClient.config, config)
+    || owner.__inkDreamAdminBffClient.client.errorProtocol !== BffBoundaryError.protocol
     || owner.__inkDreamAdminBffClient.client.transportOrigin !== config.transportOrigin
     || typeof owner.__inkDreamAdminBffClient.client.forBrowserOrigin !== 'function') {
     owner.__inkDreamAdminBffClient = { config, client: new AdminBffClient(config) };

@@ -1,13 +1,29 @@
 // [Input] Production Admin OAuth transport and BFF Web handlers with strict synthetic provider replies.
 // [Output] PKCE/client/resource binding, Origin/DTO rejection, Bearer principal/profile and safe failure evidence.
 // [Pos] Provider-free security contracts; no network, accounts, database or model calls.
+// [Sync] 2026-11-20: validate persistent callback/lock and preserve safe errors from another route module instance.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AdminBffClient, type AdminBffConfig } from './admin-client.ts';
-import { BffLoginBoundary } from './login-boundary.ts';
-import { createBffHandlers } from './handlers.ts';
+import { BffBoundaryError, BffLoginBoundary } from './login-boundary.ts';
+import { bffFailure, createBffHandlers } from './handlers.ts';
 
 process.env.INK_TRACE_ENABLED = 'false';
+
+test('a cached transport error from another route bundle retains status and rejects unbranded shapes', async () => {
+  const other: typeof import('./login-boundary.ts') = await import(new URL('./login-boundary.ts?other-route', import.meta.url).href);
+  const error = new other.BffBoundaryError('BFF_LOGIN_REQUIRED', 401);
+  assert.notEqual(other.BffBoundaryError, BffBoundaryError);
+  assert.ok(error instanceof BffBoundaryError);
+  const response = bffFailure(error);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { detail: 'BFF_LOGIN_REQUIRED' });
+  for (const unknown of [{ code: 'BFF_LOGIN_REQUIRED', status: 401 }, Object.assign(new Error('private upstream body'), { code: 'BFF_LOGIN_REQUIRED', status: 401 })]) {
+    const rejected = bffFailure(unknown);
+    assert.equal(rejected.status, 503);
+    assert.deepEqual(await rejected.json(), { detail: 'BFF_REQUEST_FAILED' });
+  }
+});
 const origin = 'https://dream.example';
 const issuer = 'https://admin.example/api/auth';
 function fixture() {
@@ -48,7 +64,7 @@ test('Web callback exchanges the original code/PKCE/redirect without a handle an
   const grant = new URLSearchParams(calls.find(call => call.path.endsWith('/oauth2/token'))!.body);
   assert.equal(grant.get('code_verifier'), transaction.code_verifier); assert.equal(grant.get('redirect_uri'), boundary.callbackUri);
   assert.equal(grant.get('client_id'), 'browser'); assert.equal(grant.get('resource'), origin + '/api');
-  const html = await response.text(); assert.match(html, /history.replaceState/); assert.match(html, /sessionStorage/); assert.doesNotMatch(html, /ignored|dbr_|localStorage/);
+  const html = await response.text(); assert.match(html, /history.replaceState/); assert.match(html, /sessionStorage/); assert.match(html, /localStorage/); assert.match(html, /navigator.locks.request/); assert.doesNotMatch(html, /ignored|dbr_/);
   assert.ok(response.headers.getSetCookie().every(value => value.includes('Max-Age=0')));
   assert.equal(calls.some(call => call.path.includes('/browser-sessions/')), false);
 });

@@ -1,5 +1,5 @@
 # [Input] Consume the capacity-one publisher/sink with strict DTO and injected Admin writers.
-# [Output] Verify latest replacement, timeout isolation/serialization, original write identity, and privacy.
+# [Output] Verify latest replacement, timeout isolation/serialization, pending-write diagnostics, original write identity, and privacy.
 # [Pos] Provider-free Admin resource synchronization tests; historical test filename remains indexed.
 # [Sync] 2026-09-14: replace SQL assertions with actual writer DTO/identity checks; retain queue/timeout tests.
 
@@ -165,7 +165,7 @@ def test_slow_api_timeout_is_counted_and_does_not_escape() -> None:
     asyncio.run(exercise())
 
 
-def test_timed_out_driver_calls_never_overlap_or_overtake() -> None:
+def test_timed_out_driver_calls_never_overlap_or_overtake(caplog) -> None:
     async def exercise() -> None:
         metrics = ResourcePipelineMetrics()
         sink = ClaudeAgentResourcePostgresSink(
@@ -198,6 +198,8 @@ def test_timed_out_driver_calls_never_overlap_or_overtake() -> None:
         assert maximum_active == 1
         assert completed == [1, 2]
         assert metrics.snapshot().write_errors_total == 2
+        assert "code=write_timeout outcome=pending" in caplog.text
+        assert "resource snapshot write failed" not in caplog.text
 
     asyncio.run(exercise())
 

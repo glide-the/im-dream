@@ -56,7 +56,7 @@ baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/o
 
 Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS 与 Dream 账户映射。Dream Next/browser、device 和 service 是 OAuth client；Dream 产品用户是用户委托 token 的 subject。FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token 或维护另一套 session/refresh/device authority。Admin operator 使用独立 Admin Session 与 RBAC；Dream 登录不读取、合并或创建 Admin member。
 
-当前源码中FastAPI不安装`SessionMiddleware`，不读取或继承Dream旧`GOOGLE_CLIENT_SECRET`、通用`JWT_SECRET`、Session/OAuth加密secret及旧Cookie策略；进程入口在导入业务模块前移除这些遗留环境变量和Next-only `INK_DREAM_BFF_COOKIE_SECRET`。Web仅在授权码交易期间使用Next加密的HttpOnly交易Cookie；登录后由`browserSession.web.ts`持有内存Access Token和标签页`sessionStorage`刷新凭据。原生私有协议回调继续使用HttpOnly handle与平台Cookie transport。Admin的Google/Better Auth/OAuth secrets、Dream注册service credential、Gateway/Product服务令牌和独立Workflow token各自按用途配置，互不回退。Cloud Run使用独立backend/frontend service account及逐secret IAM；BFF cookie secret只绑定Next，缺少Next service credential或cookie secret时发布在构建前fail closed。
+当前源码中FastAPI不安装`SessionMiddleware`，不读取或继承Dream旧`GOOGLE_CLIENT_SECRET`、通用`JWT_SECRET`、Session/OAuth加密secret及旧Cookie策略；进程入口在导入业务模块前移除这些遗留环境变量和Next-only `INK_DREAM_BFF_COOKIE_SECRET`。Web仅在授权码交易期间使用Next加密的HttpOnly交易Cookie；登录后由`browserSession.web.ts`持有内存Access Token，在同源`localStorage`持久保存刷新凭据与登录标识；callback的`sessionStorage`交付项在初始化后删除。原生私有协议回调继续使用HttpOnly handle与平台Cookie transport。Admin的Google/Better Auth/OAuth secrets、Dream注册service credential、Gateway/Product服务令牌和独立Workflow token各自按用途配置，互不回退。Cloud Run使用独立backend/frontend service account及逐secret IAM；BFF cookie secret只绑定Next，缺少Next service credential或cookie secret时发布在构建前fail closed。
 
 Deck Plugin binding 的 current/history/options/validate/runtime-plan 使用当前 OAuth `dream:read`，save/clear/runtime-prepare 使用 `dream:write`。Dream 从已校验主体解析 default Workspace 后只提交业务定位字段和本地不可变 artifact 证据；Admin 仍重新派生 canonical actor 并检查 Deck/Workspace owner。Google token、Session token、任意用户 ID header、Runtime purpose grant 或 Admin RBAC 身份都不能替代该产品 OAuth access token。
 
@@ -70,7 +70,7 @@ Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contra
 | 用户映射 | Admin保留users.id与业务FK，仅显式校验的关联流程绑定已有账户 | 同邮箱不自动合并；冲突返回明确错误 |
 | 产品登录入口 | Dream渲染原邮箱/密码/注册/Google卡片；浏览器按`/auth/options`直接POST Admin exact-origin action，Dream服务端不接收密码 | 未配置、错误Origin/return或Admin不可用时显示安全反馈；不回退旧Dream认证 |
 | BFF登录 | Admin建立Dream identity Session后返回Next `/auth/start`发起code+PKCE；callback校验一次性state、code、固定redirect URI与PKCE | 拒绝缺失/重放/开放redirect，清该次登录状态 |
-| Web凭据 | 内存Access Token、标签页刷新凭据、同源Bearer API；Admin Session归Admin origin | invalid grant清当前标签页；依赖故障保留刷新凭据 |
+| Web凭据 | 内存Access Token、同源持久刷新凭据与登录标识、Bearer API；Admin Session归Admin origin | 关闭重开先续期；invalid grant清持久状态及同源标签页，依赖故障保留凭据 |
 | 原生会话 | 私有账号回调保留host-only HttpOnly handle与CSRF | 沿原生会话撤销与恢复合同执行 |
 | Dream API | 成熟JWT/JWKS库验证签名、闭集算法、issuer/audience、时间、subject与scope | 无效/过期/错误资源为401；scope不足403 |
 | Admin领域数据 | 独立service credential+用户access token或限定后台授权；Admin检查实体归属 | service不能凭body/header任意user_id改actor |
@@ -103,14 +103,14 @@ session/refresh由Admin撤销；access token短寿命、introspection/deny-list�
 
 ### Refresh与兼容退役
 
-Web标签页复用一个OAuth refresh flight，Next向已发布Admin public token endpoint提交原client/resource与refresh grant；刷新页通过当前标签页凭据恢复。invalid grant清标签页状态；网络故障保留刷新凭据。响应丢失后旧刷新凭据可能已失效，下一次明确拒绝进入重新登录。原生继续由Admin按handle加锁刷新。Dream停止`X-New-Access-Token`滑动自签。CLI public client不持secret，使用[Device OAuth](auth-device.md)。
+Web标签页复用一个OAuth refresh flight，跨标签页通过同源Web Lock串行读取和轮换最新Refresh。Next向已发布Admin public token endpoint提交原client/resource与refresh grant；刷新页、关闭浏览器后重新打开和新标签页通过持久凭据恢复。invalid grant清同源持久状态；网络故障保留刷新凭据。响应丢失后旧刷新凭据可能已失效，下一次明确拒绝进入重新登录。原生继续由Admin按handle加锁刷新。Dream停止`X-New-Access-Token`滑动自签。CLI public client不持secret，使用[Device OAuth](auth-device.md)。
 
 | baseline依赖 | 目标与退役条件 |
 | --- | --- |
 | login/register、Google login/callback | 保留密码登录/注册/Google产品能力，认证迁Admin并恢复OAuth上下文；旧路径如保留仅明确导航/协议转发/错误，不签token |
 | auth/me、api/me | 保持profile DTO，主体来自Admin、数据来自领域接口 |
 | logout、oauth/token、Device | 按规范撤销/导航或兼容转发，不保留authority |
-| Web AuthContext、存储与fetch | React只接收公开用户；Access Token归内存transport；刷新凭据归sessionStorage；清旧localStorage token；保留业务数据与偏好 |
+| Web AuthContext、存储与fetch | React只接收公开用户并同步跨标签退出/替换登录；Access归内存transport；Refresh与登录标识归localStorage；消费一次性sessionStorage交付；保留业务数据与偏好 |
 | FastAPI dependency/SSE、Node MCP Apps、stdio tools、后台任务 | 消费Admin主体/受限委托，保持实体绑定与取消语义 |
 | Gateway subject token/product auth | 保持计费PK；Admin规范定义服务投影，不作为Dream登录authority |
 | Authlib/外部MCP OAuth | 先盘点调用依赖，只退役Dream登录authority，保留仍用外部协议 |
@@ -119,7 +119,7 @@ Web标签页复用一个OAuth refresh flight，Next向已发布Admin public toke
 
 未登录 → Admin登录与授权 → callback校验state/issuer/PKCE → Web标签页凭据建立 → Bearer profile → 已登录。HTTP/HTTPS callback通过Admin公开OAuth接口兑换授权码；配置的原生私有协议callback继续由原handle handler处理。错误state、过期code、invalid grant返回重新登录；依赖故障保留可恢复凭据并显示重试反馈。
 
-Web退出等待当前refresh完成，撤销最新refresh grant，成功后清内存用户、Access Token与sessionStorage；退出失败保留已验证用户并显示重试。退出期间阻止新业务派发并使旧profile读取失效。Admin登录Session、管理`admin_sessions`及其他client保持各自生命周期。既有短寿命Access Token遵循Admin校验规则和到期时间。
+Web退出等待同源Web Lock与当前refresh完成，撤销最新refresh grant，成功后清内存用户、Access Token、持久刷新记录与临时交付，并通知其他标签页清用户；退出失败保留已验证用户并显示重试。退出期间阻止新业务派发并使旧profile读取失效。Admin登录Session、管理`admin_sessions`及其他client保持各自生命周期。既有短寿命Access Token遵循Admin校验规则和到期时间。
 
 `browserSession.web.ts`保存不可变公开用户snapshot及独立请求scope；历史`getBrowserCsrfToken()`调用在Web取得请求scope，scope仅用于异步结果隔离。Web HTTP头只传Access Token；scope与刷新凭据均排除业务DTO和Agent上下文。每次profile读取检查read identity与AbortSignal；clear/logout使旧读取失效；AuthContext只提交当前snapshot。原生`cookieSession.ts`保留原CSRF/header与异步会话合同。
 
