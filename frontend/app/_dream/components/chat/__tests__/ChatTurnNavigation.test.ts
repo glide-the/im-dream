@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: cover current and released dispatch receipts across devices.
 // [Input] Visible Chat turns, server index entries, and streaming/repair metadata.
 // [Output] Regression coverage for one marker per real user input and accurate live reply state.
 // [Pos] Provider-free turn-navigation projection contract.
@@ -57,4 +58,13 @@ test('visible navigation uses dispatch receipts to restore stopped and failed tu
     ['second', 'answered', 'Answer to the queued question'],
     ['third', 'failed', null],
   ]);
+});
+
+test('an active dispatch is running on either device', () => {
+  const messages = [textMessage('saved-input', 'user', 'Earlier message')];
+  const input = { message_id: 'saved-input', dispatch_turn_id: 'saved-turn', status: 'dispatching' } as const;
+  expect(projectVisibleTurnNavigation(messages, false, [input])[0].status).toBe('running');
+  expect(projectVisibleTurnNavigation(messages, true, [input])[0].status).toBe('running');
+  expect(projectVisibleTurnNavigation(messages, true, [{ ...input, status: 'state_unknown' }])[0].status)
+    .toBe('state_unknown');
 });

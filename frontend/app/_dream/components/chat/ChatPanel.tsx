@@ -1,3 +1,5 @@
+// [Sync] 2026-11-27: 其他端仍在执行时保留草稿，释放后自动恢复历史与发送。
+// [Sync] 2026-11-26: surface unreconciled earlier sends and remove rejected optimistic rows.
 // [Sync] 2026-11-26: reconcile the current Thread's navigation summaries with input dispatch receipts.
 // [Sync] 2026-11-18: expose the current conversation bounds for local Notion reading overlays.
 // [Sync] 2026-11-26: refresh queue snapshots on conversation, continuation, and queue action events.
@@ -31,7 +33,7 @@ import { readWebSystemConfig } from '../../api/systemConfigApi';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
 import {readThreadTools} from '../../hooks/useChatToolSelection';
 import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
-import { cancelThreadInput, createThreadInputReader, enqueueThreadInput, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
+import { cancelThreadInput, createThreadInputReader, enqueueThreadInput, isThreadInputQueueCard, pendingChatRetryId, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
 import { TaskSessionLinksFailure } from './TaskSessionNavigation';
 import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSessionLinks';
@@ -118,7 +120,7 @@ import {
   type ToolUIPart,
   type UIMessage,
 } from 'ai';
-import { ClaudeAgentChatTransport } from '../../lib/claude-agent-transport';
+import { ClaudeAgentChatTransport, readClaudeAgentErrorCode } from '../../lib/claude-agent-transport';
 import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
@@ -361,9 +363,9 @@ export default function ChatPanel({
   useEffect(() => { setImageMaterial(null); }, [threadId]);
   const [threadInputs, setThreadInputs] = useState<ThreadInputEntry[]>([]);
   const queueCardEntries = threadInputs.filter(isThreadInputQueueCard);
-  const queueOutcomeUnknown = threadInputs.some((entry) => entry.status === 'state_unknown');
   const [inputOwnerLocal, setInputOwnerLocal] = useState(false);
   const [threadInputError, setThreadInputError] = useState<string | null>(null);
+  const [remoteRunning, setRemoteRunning] = useState(false);
   const [queueCheckPending, setQueueCheckPending] = useState(false);
   const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
   const pendingInputIdsRef = useRef(new Map<string, string>());
@@ -382,7 +384,8 @@ export default function ChatPanel({
     const reader = createThreadInputReader(threadId, (snapshot) => {
       setThreadInputs(snapshot.entries);
       setInputOwnerLocal(snapshot.local_owner);
-    });
+      setRemoteRunning(Boolean(snapshot.remote_running));
+    }, undefined, () => document.visibilityState === 'visible');
     inputReaderRef.current = reader;
     let wasVisible = false;
     const readWhenVisible = () => {
@@ -581,12 +584,20 @@ export default function ChatPanel({
     () => filterClaudeThreadVisibleMessages(messages),
     [messages],
   );
+  const busyRejected = ['CHAT_CONTINUATION_BUSY', 'CHAT_INPUT_RECONCILIATION_REQUIRED'].includes(readClaudeAgentErrorCode(error) ?? '');
+  useEffect(() => {
+    if (busyRejected) {
+      refreshThreadInputsInBackground();
+      clearError();
+    }
+  }, [busyRejected, clearError, refreshThreadInputsInBackground]);
 
   const sendUserMessage = useCallback(async (
     message: ChatUserMessage,
     options: CoordinatedChatSendOptions<Attachment> = {},
   ) => {
     if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
+    if (remoteRunning) throw new Error('CHAT_CONTINUATION_BUSY');
     if (claudeThreadStopPending(threadId)) throw new Error('CHAT_STOP_PENDING');
     await sendCoordinatedChatUserMessage(message, options, {
       onConversationStart,
@@ -596,19 +607,26 @@ export default function ChatPanel({
       incrementTurnGeneration: () => { turnGenerationRef.current += 1; },
       dispatch: async (outgoing) => {
         const identity = JSON.stringify([threadId, outgoing.parts, options.rawAttachments, options.toolChoice, options.tools??readThreadTools(threadId)]);
-        const id = outgoing.id ?? continuationMessageIds.current.get(identity) ?? crypto.randomUUID();
+        const id = outgoing.id ?? pendingChatRetryId(continuationMessageIds.current.get(identity), threadInputs) ?? crypto.randomUUID();
         continuationMessageIds.current.set(identity, id);
         continuationErrorRef.current = null;
+        const hadMessage = messagesRef.current.some((item) => item.id === id);
         await sendMessage({ ...outgoing, id });
         const failure = continuationErrorRef.current as Error | null;
         if (failure) {
-          if ('retryable' in failure && failure.retryable === true) setMessages(current => current.filter(item => item.id !== id));
+          if (['CHAT_CONTINUATION_BUSY', 'CHAT_INPUT_RECONCILIATION_REQUIRED'].includes(readClaudeAgentErrorCode(failure) ?? '')
+            || ('retryable' in failure && failure.retryable === true)) {
+            setMessages((current) => {
+              const existingIndex = hadMessage ? current.findIndex((item) => item.id === id) : -1;
+              return current.filter((item, index) => item.id !== id || index === existingIndex);
+            });
+          }
           throw failure;
         }
         continuationMessageIds.current.delete(identity);
       },
     });
-  }, [editorState, ensureEditorSessionPersisted, historyPending, onConversationStart, sendMessage, setMessages, threadId]);
+  }, [editorState, ensureEditorSessionPersisted, historyPending, onConversationStart, remoteRunning, sendMessage, setMessages, threadId, threadInputs]);
 
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
@@ -753,10 +771,13 @@ export default function ChatPanel({
         { role: 'user', parts: queuedMessageParts },
         { rawAttachments: queuedAttachments, toolChoice: queuedToolChoice, tools:queuedTools },
       );
-    })();
+    })().catch((failure: unknown) => {
+      // useChat has already presented errors from the send transport.
+      if (failure !== continuationErrorRef.current) throw failure;
+    });
   }, [claimQueuedPrompt, historyPending, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, queuedTools, sendUserMessage, submissionStopPending, threadId]);
 
-  const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
+  const recoverAuthoritativeHistory = useCallback(async (refreshInputs = true): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
       threadId,
       reconnectNonce: lastReconnectNonceRef.current,
@@ -803,7 +824,7 @@ export default function ChatPanel({
       setHistoryPage((currentPage) => recovered.overlapsLoadedWindow
         ? { ...currentPage, latestMessageId: recoveredPage.latestMessageId }
         : recoveredPage);
-      if (document.visibilityState === 'visible') refreshThreadInputsInBackground();
+      if (refreshInputs && document.visibilityState === 'visible') refreshThreadInputsInBackground();
       if (!snapshot.running) onConversationSettledRef.current?.();
       return snapshot;
     } catch {
@@ -822,6 +843,12 @@ export default function ChatPanel({
       if (chatPanelMountedRef.current) setIsReloadingAfterError(false);
     }
   }, [clearError, isReloadingAfterError, recoverAuthoritativeHistory]);
+
+  const observedRemote = useRef(false);
+  useEffect(() => {
+    if (observedRemote.current && !remoteRunning) void recoverAuthoritativeHistory(false);
+    observedRemote.current = remoteRunning;
+  }, [remoteRunning, recoverAuthoritativeHistory]);
 
   const loadOlderHistory = useCallback(async () => {
     if (!historyPage.hasMore || !historyPage.nextCursor || olderHistoryAbortRef.current) return;
@@ -1517,7 +1544,7 @@ export default function ChatPanel({
                 onOpenReflectionSection={onOpenReflectionSection}
                 onOpenScheduledTask={onOpenScheduledTask}
                 isLoading={chatLoading}
-                error={error}
+                error={busyRejected ? undefined : error}
                 onReloadAfterError={handleReloadAfterError}
                 isReloadingAfterError={isReloadingAfterError}
                 addToolResult={addToolResult}
@@ -1608,7 +1635,8 @@ export default function ChatPanel({
         {continuationPreparing ? <div role="status" aria-live="polite" style={{ padding: '0.45rem 0.75rem', color: 'var(--color-text-secondary)' }}>
           {t('chat.continuation.preparing')}
         </div> : null}
-        {threadInputError || queueOutcomeUnknown ? (
+        {remoteRunning && <div role="status">{t('chat.continuation.busy')}</div>}
+        {threadInputError ? (
           <div role="alert" className="chat-input-queue-error" style={{
             boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center',
             justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.35rem 0.75rem',
@@ -1616,13 +1644,14 @@ export default function ChatPanel({
             borderRadius: '0.65rem', color: 'var(--color-state-danger)',
             background: 'var(--color-bg-surface-solid)', fontSize: '0.82rem', lineHeight: 1.4,
           }}>
-            <span>{threadInputError ?? t('chat.inputQueue.dispatchedStateUnknown')}</span>
+            <span>{threadInputError}</span>
             {threadInputError !== t('chat.inputQueue.accessDenied')
               && threadInputError !== t('chat.inputQueue.textOnly') ? (
               <button type="button" disabled={queueCheckPending} onClick={() => { void checkThreadInputStatus(); }}
                 style={{ flexShrink: 0, border: 0, background: 'transparent', color: 'inherit',
                   font: 'inherit', fontWeight: 700, textDecoration: 'underline', cursor: queueCheckPending ? 'wait' : 'pointer' }}>
-                {queueCheckPending ? t('chat.inputQueue.checkingStatus') : t('chat.inputQueue.checkStatus')}
+                {t(queueCheckPending ? 'chat.inputQueue.checkingStatus'
+                  : 'chat.inputQueue.checkStatus')}
               </button>
             ) : null}
           </div>
@@ -1650,12 +1679,14 @@ export default function ChatPanel({
             imageMaterial={imageMaterial?.threadId === threadId ? imageMaterial.file : undefined}
             onImageMaterialConsumed={() => setImageMaterial(null)}
             fullAccessEnabled={imFullAccessEnabled}
+            sendBlocked={remoteRunning}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto', tools = []) => {
               if (historyPending) throw new Error('CHAT_HISTORY_PENDING');
               if (isStopping || claudeThreadStopPending(threadId)) {
                 setThreadInputError(t('chat.inputDock.stopping'));
                 throw new Error('CHAT_STOP_PENDING');
               }
+              if (remoteRunning) throw new Error('CHAT_CONTINUATION_BUSY');
               if (agentBusy || inputOwnerLocal) {
                 if (uploadedFiles.length > 0) {
                   setThreadInputError(t('chat.inputQueue.textOnly'));
@@ -1699,9 +1730,9 @@ export default function ChatPanel({
               );
             }}
             placeholder={inputPlaceholder}
-            loading={chatLoading}
+            loading={chatLoading && !remoteRunning}
             loadingLabel={historyPending ? t('chat.historyTurn.loading') : undefined}
-            onStop={!historyPending && canStopMainTurn ? handleStop : undefined}
+            onStop={!historyPending && !remoteRunning && canStopMainTurn ? handleStop : undefined}
             stopPending={isStopping || submissionStopPending}
             workspaceSessionId={!historyPending && workspaceEnabled ? threadId : undefined}
             mode="full"

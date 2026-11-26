@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 按输入端限制并发提交，授权到期时结束本地执行。
 # [Sync] 2026-11-13: queued inputs replace MCP names with their own submission selection, including empty.
 # [Sync] 2026-11-04: 排队输入独立保存tools选择并按本次消息传递，缺省不继承上一条端侧工具。
 # [Sync] 2026-11-04: avoid a second terminal transition for Service-owned continuation claims.
@@ -415,6 +416,35 @@ class ClaudeAgentThreadFactory:
 
         adapter = ChatStreamAdapter()
         lock = self._pool.get_lock(session_id)
+        if request.chat_client_id and lock.locked():
+            # Two HTTP requests can both pass the initial queue read. Reject the
+            # competing ordinary submission before it can wait for a later turn.
+            try:
+                events = (
+                    NormalizedAgentEvent.create("error", {
+                        "errorText": "Conversation is busy",
+                        "errorCode": "CHAT_CONTINUATION_BUSY",
+                        "retryable": True,
+                    }),
+                    NormalizedAgentEvent.create("finish", {"finishReason": "error"}),
+                )
+                for event in events:
+                    tracker.observe(event)
+                    yield adapter.encode(event)
+            finally:
+                try:
+                    for owner in (request.admin_turn_persistence, request.admin_gateway_runtime, request.admin_editor_runtime):
+                        if owner is not None:
+                            try:
+                                await asyncio.to_thread(owner.close)
+                            except Exception:
+                                logger.exception("Unable to close competing turn grant: thread_id=%s", session_id)
+                finally:
+                    if not completion.done():
+                        completion.set_result(tracker.result())
+                    if owner_completion is not None and not owner_completion.done():
+                        owner_completion.set_result(None)
+            return
         try:
             await lock.acquire()
         except BaseException:
@@ -520,6 +550,7 @@ class ClaudeAgentThreadFactory:
         self, *, thread_id: str, user_id: str, message_id: str,
         parts: list[dict[str, Any]], title_candidate: str, tool_choice: str,
         chat: AdminChatData, access_token: str,
+        chat_client_id: str | None = None,
         tools: tuple[str, ...] = (),
         mcp_server_names: tuple[str, ...] = (),
     ) -> chat_dto.QueueEntryDTO:
@@ -527,6 +558,9 @@ class ClaudeAgentThreadFactory:
 
         _validate_session_id(thread_id)
         async with self._input_lock(thread_id):
+            template = self._input_templates.get(thread_id)
+            if template is not None and template.chat_client_id != chat_client_id:
+                raise AdminDataError("CHAT_CONTINUATION_BUSY", 409)
             existing = await asyncio.to_thread(
                 chat.list_inputs, chat_dto.ThreadIdInputDTO(thread_id=thread_id),
                 str(uuid4()), access_token=access_token,
@@ -735,6 +769,23 @@ class ClaudeAgentThreadFactory:
         """Own context assembly plus execution so every RUNNING turn is cancellable."""
         session_id = state.session_id
         turn_id = state.current_turn_id
+        expiry_timer: asyncio.TimerHandle | None = None
+        turn_task = asyncio.current_task()
+        lease_remaining = getattr(type(request.admin_turn_persistence), "execution_lease_remaining", None)
+
+        def check_execution_lease() -> None:
+            nonlocal expiry_timer
+            try:
+                remaining = lease_remaining(
+                    request.admin_turn_persistence, actor_id=request.user_id, thread_id=session_id,
+                )
+            except AdminDataError:
+                remaining = 0
+            if remaining > 0:
+                expiry_timer = asyncio.get_running_loop().call_later(remaining, check_execution_lease)
+            elif turn_task is not None:
+                turn_task.cancel()
+
         session_started = False
         admission_lease: AgentAdmissionLease | None = None
         current_request = request
@@ -744,6 +795,8 @@ class ClaudeAgentThreadFactory:
             admission_lease = self._admission.try_acquire(session_id)
             if request.admin_turn_persistence is not None:
                 request.admin_turn_persistence.start()
+                if callable(lease_remaining):
+                    check_execution_lease()
             if request.admin_gateway_runtime is not None:
                 request.admin_gateway_runtime.start()
             if request.admin_editor_runtime is not None and (
@@ -940,6 +993,8 @@ class ClaudeAgentThreadFactory:
                         session_id,
                     )
         finally:
+            if expiry_timer is not None:
+                expiry_timer.cancel()
             if active_queue_claim is not None and active_queue_claim.status == "dispatching" and request.admin_turn_persistence is not None:
                 try:
                     # Service owns every possible SDK invocation after its
@@ -1139,6 +1194,10 @@ class ClaudeAgentThreadFactory:
 
     def accepting_input(self, thread_id: str) -> bool:
         return thread_id in self._input_accepting
+
+    def owns_client_input(self, thread_id: str, client_id: str | None) -> bool:
+        template = self._input_templates.get(thread_id)
+        return self.accepting_input(thread_id) and template is not None and template.chat_client_id == client_id
 
     def tool_confirmation_snapshot(self, session_id: str) -> dict[str, Any]:
         """Return the Generic Chat runtime's pending confirmation identities.

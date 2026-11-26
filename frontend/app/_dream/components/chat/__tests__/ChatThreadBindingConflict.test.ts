@@ -1,3 +1,5 @@
+// [Sync] 2026-11-27: 验证竞争拒绝、草稿保留、自动解锁及新输入提交。
+// [Sync] 2026-11-26: cover an unreconciled dispatch, rejected draft, and read-only status check.
 // [Input] Structured Dream binding-conflict SSE, a persisted user text/file message, and ChatPanel authoritative recovery callback.
 // [Output] Browser regression proving safe binding/auto-repair error copy,
 //          attachment retention, one-turn submission, and read-only reload recovery.
@@ -50,6 +52,8 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     import '/app/_dream/styles/tokens.css';
     import '/app/_dream/styles/markdown.css';
 
+    const reconciliation = new URLSearchParams(window.location.search).has('reconciliation');
+    const savedInput = { id: 'saved-input', role: 'user', parts: [{ type: 'text', text: 'Earlier message' }] };
     const persistedMessages = [{
       id: 'message-conflict-persisted',
       role: 'user',
@@ -67,7 +71,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     const recovery = () => {
       window.__bindingReloadCount += 1;
       return {
-        messages: [
+        messages: reconciliation ? [savedInput] : [
           ...persistedMessages,
           {
             id: 'message-sync-assistant-persisted',
@@ -89,7 +93,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     createRoot(document.querySelector('#root')).render(
       React.createElement(ChatPanel, {
         threadId: 'thread-binding-conflict',
-        initialMessages: [],
+        initialMessages: reconciliation ? [savedInput] : [],
         queuedPrompt: '请根据附件重新梳理人物关系。',
         queuedAttachments: [{
           name: '人物关系分析.txt',
@@ -100,7 +104,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
           savedAt: '2026-08-31T04:00:00Z',
         }],
         queuedToolChoice: 'auto',
-        queuedPromptNonce: 1,
+        queuedPromptNonce: reconciliation ? undefined : 1,
         claimQueuedPrompt: () => true,
         onReconnectComplete: recovery,
         inputPlaceholder: 'Ask Ink & Memory…',
@@ -114,13 +118,17 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     cacheDir,
     configFile: false,
     logLevel: 'silent',
+    optimizeDeps: {
+      entries: ['app/_dream/components/chat/ChatPanel.tsx', 'app/_dream/i18n.ts'],
+      include: ['react', 'react-dom/client', 'react/jsx-runtime'],
+    },
     server: { host: '127.0.0.1', port: harnessPort, strictPort: true },
     plugins: [{
       name: 'chat-thread-binding-conflict-browser-harness',
       configureServer(vite) {
         vite.middlewares.use(async (request, response, next) => {
           const requestUrl = (request as unknown as { readonly url?: string }).url;
-          if (requestUrl !== '/chat-thread-binding-conflict') return next();
+          if (requestUrl?.split('?')[0] !== '/chat-thread-binding-conflict') return next();
           try {
             const html = await vite.transformIndexHtml(requestUrl, `
               <!doctype html><html><head><link rel="icon" href="data:,"></head>
@@ -151,14 +159,20 @@ test('binding conflict keeps the submitted text and attachment while reload stay
 
   let agentPostCount = 0;
   let agentPostFinishedCount = 0;
-  let errorMode: 'binding' | 'auto-repair' | 'sync' | 'allowance' = 'binding';
+  let errorMode: 'binding' | 'auto-repair' | 'sync' | 'allowance' | 'reconciliation' = 'binding';
+  let queueStatus: 'dispatching' | 'failed' | null = null;
   const diagnostics: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(message.text());
   });
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
-    diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
+    const failure = request.failure()?.errorText ?? 'failed';
+    const path = new URL(request.url()).pathname;
+    // Refresh and navigation may cancel the previous read. Never suppress a send failure.
+    if (request.method() === 'GET' && failure === 'net::ERR_ABORTED'
+      && /^\/api\/claude-agent\/threads\/thread-binding-conflict\/(turn-navigation|inputs|task-links|scheduled-tasks|subagents)$/.test(path)) return;
+    diagnostics.push(`${failure} ${request.url()}`);
   });
   page.on('requestfinished', (request) => {
     const url = new URL(request.url());
@@ -179,6 +193,15 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     }
     if (path === '/api/claude-agent' && request.method() === 'POST') {
       agentPostCount += 1;
+      if (errorMode === 'reconciliation') {
+        if (!queueStatus) queueStatus = 'dispatching';
+        if (queueStatus === 'failed') {
+          await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"type":"finish","finishReason":"stop"}\n\n' });
+          return;
+        }
+        await route.fulfill({ status: 409, json: { detail: { error_code: 'CHAT_CONTINUATION_BUSY' } } });
+        return;
+      }
       const event = errorMode === 'binding'
         ? {
             type: 'error',
@@ -226,8 +249,23 @@ test('binding conflict keeps the submitted text and attachment while reload stay
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"data":{"workspace_enabled":true}}' });
       return;
     }
+    if (path === '/api/gateway/models') {
+      await route.fulfill({ json: { data: [], defaultModelAlias: null } });
+      return;
+    }
     if (path.endsWith('/subagents')) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"tasks":[]}' });
+      return;
+    }
+    if (path.endsWith('/inputs') && errorMode === 'reconciliation') {
+      await route.fulfill({ json: {
+        local_owner: false,
+        entries: queueStatus ? [{
+          message_id: 'saved-input', thread_id: 'thread-binding-conflict', queue_sequence: '1',
+          status: queueStatus, revision: queueStatus === 'dispatching' ? 3 : 4,
+          dispatch_turn_id: 'saved-turn', created_at: '2026-11-26T09:09:00Z', text: 'Earlier message',
+        }] : [],
+      } });
       return;
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
@@ -237,8 +275,8 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     await server.listen();
     await page.goto(`http://127.0.0.1:${harnessPort}/chat-thread-binding-conflict`);
 
-    await expect.poll(() => agentPostCount).toBe(1);
-    const alert = page.getByRole('alert');
+    await expect.poll(() => agentPostCount, { timeout: 20_000 }).toBe(1);
+    const alert = page.locator('[data-chat-turn-error]');
     await expect(alert).toContainText('当前对话暂时无法继续创作');
     await expect(alert).toContainText('本次 Agent 未开始处理');
     await expect(page.getByText('请根据附件重新梳理人物关系。')).toBeVisible();
@@ -271,7 +309,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     errorMode = 'auto-repair';
     await page.reload();
     await expect.poll(() => agentPostCount).toBe(2);
-    const repairAlert = page.getByRole('alert');
+    const repairAlert = alert;
     await expect(repairAlert).toHaveAttribute(
       'data-chat-turn-error',
       'dream-auto-repair-failed',
@@ -287,7 +325,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     errorMode = 'sync';
     await page.reload();
     await expect.poll(() => agentPostCount).toBe(3);
-    const syncAlert = page.getByRole('alert');
+    const syncAlert = alert;
     await expect(syncAlert).toHaveAttribute(
       'data-chat-turn-error',
       'dream-artifact-sync-failed',
@@ -307,7 +345,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     errorMode = 'allowance';
     await page.reload();
     await expect.poll(() => agentPostCount).toBe(4);
-    const allowanceAlert = page.getByRole('alert');
+    const allowanceAlert = alert;
     await expect(allowanceAlert).toHaveAttribute(
       'data-chat-turn-error',
       'gateway-token-allowance-exhausted',
@@ -320,6 +358,31 @@ test('binding conflict keeps the submitted text and attachment while reload stay
 
     await expect.poll(() => agentPostFinishedCount).toBe(4);
     expect(diagnostics).toEqual([]);
+
+    errorMode = 'reconciliation';
+    await page.goto(`http://127.0.0.1:${harnessPort}/chat-thread-binding-conflict?reconciliation`);
+    const editor = page.getByRole('textbox', { name: '聊天输入' });
+    const send = page.getByRole('button', { name: '发送消息' });
+    const busy = page.getByText('此对话正在其他端处理，输入已保留，请稍后继续。');
+    await editor.fill('Keep this draft');
+    await send.click();
+    await expect(busy).toBeVisible();
+    await expect(editor).toHaveText('Keep this draft');
+    await expect(send).toBeDisabled();
+    await expect(page.locator('[data-chat-message-id]')).toHaveCount(1);
+    await editor.fill('Continue here after interruption');
+    await editor.press('Enter');
+    expect(agentPostCount).toBe(5);
+    queueStatus = 'failed';
+    await expect(send).toBeEnabled();
+    await expect(busy).toHaveCount(0);
+    await expect(editor).toContainText('Continue here after interruption');
+    expect(agentPostCount).toBe(5);
+    await send.click();
+    await expect.poll(() => agentPostCount).toBe(6);
+    expect(diagnostics.filter((message) => !message.startsWith(
+      'Failed to load resource: the server responded with a status of 409',
+    ))).toEqual([]);
   } finally {
     await server.close();
     await rm(cacheDir, { recursive: true, force: true });

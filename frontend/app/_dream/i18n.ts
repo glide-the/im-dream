@@ -1,3 +1,5 @@
+// [Sync] 2026-11-27: 移除已中断输入要求返回原设备的提示。
+// [Sync] 2026-11-26: explain pending turn reconciliation without suggesting another send.
 // [Sync] 2026-11-26: localize Reflections progress, stop, settlement, and retry feedback.
 // [Sync] 2026-11-25: localize article-specific Calendar confirmation and insertion results and accessible journal row names.
 // [Sync] 2026-11-24: name the article continuation row and localize scoped read feedback.
@@ -1077,7 +1079,7 @@ const resources = {
           }
         },
         writingContextUnavailable: 'This note could not be prepared. Return to Writing and try again. Your input is kept.',
-        continuation: { title: 'Conversation preparation', unsupported: 'This device cannot restore all required conversation data yet. You can continue on the original device.', busy: 'This conversation is being processed on another device. Your draft is saved.', preparing: 'Preparing this conversation', failed: 'The conversation could not be prepared. Your draft is saved; try again.' },
+        continuation: { title: 'Conversation preparation', unsupported: 'The conversation history could not be restored.', busy: 'This conversation is being processed on another device. Your draft is saved.', preparing: 'Preparing this conversation', failed: 'The conversation could not be prepared. Your draft is saved; try again.' },
         inputQueue: {
           region: 'Queued messages', queued: 'Queued', selected: 'Selected', dispatching: 'Sending',
           consumed: 'Processed', cancelled: 'Cancelled', failed: 'Failed', state_unknown: 'Needs review',
@@ -1095,7 +1097,6 @@ const resources = {
           stateChanged: 'The message state changed. Reload the queue and try again.',
           unavailable: 'Messages cannot be queued right now. Your draft is kept.',
           stateUnknown: 'Queue status is uncertain. Your draft is kept; check the queue before sending again.',
-          dispatchedStateUnknown: 'This message entered the conversation, but its result needs review. Check the conversation before sending it again.',
           checkStatus: 'Check queue status', checkingStatus: 'Checking…',
           sendFailed: 'The message could not be queued. Your draft is kept.'
         },
@@ -2304,7 +2305,7 @@ const resources = {
           }
         },
         writingContextUnavailable: '当前笔记暂时无法用于对话。请返回写作后重试，输入内容已保留。',
-        continuation: { title: '暂时无法继续对话', unsupported: '此端暂时无法恢复所需的对话数据，可以回原端继续。', busy: '此对话正在其他端处理，输入已保留，请稍后继续。', preparing: '正在准备对话', failed: '暂时无法准备对话。输入已保留，请重试。' },
+        continuation: { title: '暂时无法继续对话', unsupported: '暂时无法读取这段对话的历史记录。', busy: '此对话正在其他端处理，输入已保留，请稍后继续。', preparing: '正在准备对话', failed: '暂时无法准备对话。输入已保留，请重试。' },
         inputQueue: {
           region: '待处理消息', queued: '排队中', selected: '已选中', dispatching: '正在发送',
           consumed: '已消费', cancelled: '已取消', failed: '发送失败', state_unknown: '状态待核对',
@@ -2322,7 +2323,6 @@ const resources = {
           stateChanged: '消息状态已变化，请刷新队列后重试。',
           unavailable: '暂时无法排队，草稿已保留。',
           stateUnknown: '排队结果待核对，草稿已保留；再次发送前请先检查队列。',
-          dispatchedStateUnknown: '消息已进入对话，但处理结果待核对；再次发送前请先检查对话。',
           checkStatus: '检查队列状态', checkingStatus: '检查中…',
           sendFailed: '消息未能排队，草稿已保留。'
         },

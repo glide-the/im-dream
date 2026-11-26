@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 普通消息可携带输入端标识。
 // [Sync] 2026-11-13: type public per-message platform and managed MCP selections.
 // [Sync] 2026-10-12: type closed server-owned contextUsage alongside compaction state.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
@@ -38,6 +39,7 @@ export type ToolChoice = 'auto' | 'none' | 'manual';
 export type ChatToolDescriptor = {type:'mobile_clock_audio'} | {type:'mcp';server_name:string};
 
 export type ChatApiSchemaRequestBody = {
+  chat_client_id?: string;
   id: string;
   /** Parent Deck provides the selected Agent's plugin/runtime context. */
   deckId?: string;

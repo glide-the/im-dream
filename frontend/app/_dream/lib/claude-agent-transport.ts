@@ -1,3 +1,5 @@
+// [Sync] 2026-11-27: 保留服务端占用冲突类型。
+// [Sync] 2026-11-26: preserve the pre-send input reconciliation conflict for Chat.
 // [Sync] 2026-11-04: forward transient continuation preparation feedback without history bubbles.
 // [Sync] 2026-10-12: carry actual context-use snapshots through original assistant metadata assembly.
 // [Sync] 2026-10-12: project SDK compaction through existing per-turn metadata; preserve original controls and history.
@@ -602,6 +604,12 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
             ? payload.detail : null;
           const code = detail && typeof detail === 'object' && 'error_code' in detail
             ? detail.error_code : null;
+          if (code === 'CHAT_CONTINUATION_BUSY' || code === 'CHAT_INPUT_RECONCILIATION_REQUIRED') {
+            throw new ClaudeAgentTransportError({
+              type: 'error', errorText: 'This conversation is busy.',
+              errorCode: code,
+            });
+          }
           if (code === 'GATEWAY_MODEL_SELECTION_STALE' || code === 'GATEWAY_MODEL_SELECTION_CONFLICT') {
             throw new ClaudeAgentTransportError({
               type: 'error', errorText: 'The selected model is unavailable or has changed.',

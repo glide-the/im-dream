@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: show active dispatch on either device in turn navigation.
 // [Input] Owner-scoped turn-navigation DTO, visible UIMessage window and input dispatch receipts.
 // [Output] Safe, ID-stable user-turn summaries for the Chat navigation rail.
 // [Pos] Pure Chat turn-navigation projection beside the shared message renderer.
@@ -73,8 +74,8 @@ export function projectVisibleTurnNavigation(
         .filter((part) => part.type === 'file')
         .map((part) => part.filename)
         .filter((name): name is string => typeof name === 'string' && Boolean(name.trim()));
-      const failed = metadataOf(message).dispatch_status === 'failed'
-        || inputByMessageId.get(message.id)?.status === 'failed';
+      const inputStatus = inputByMessageId.get(message.id)?.status;
+      const failed = metadataOf(message).dispatch_status === 'failed' || inputStatus === 'failed';
       currentPosition = items.length;
       positionByMessageId.set(message.id, currentPosition);
       items.push({
@@ -82,7 +83,10 @@ export function projectVisibleTurnNavigation(
         userPreview: text || preview(filenames[0] ?? ''),
         hasAttachment: message.parts.some((part) => part.type === 'file'),
         assistantPreview: null,
-        status: failed ? 'failed' : 'no_reply',
+        status: failed ? 'failed'
+          : inputStatus === 'dispatching' ? 'running'
+          : inputStatus === 'state_unknown' ? 'state_unknown'
+          : 'no_reply',
       });
       continue;
     }

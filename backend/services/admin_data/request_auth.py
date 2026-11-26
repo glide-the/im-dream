@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 把本轮持久化授权的创建标识交给 Chat 执行端。
 # [Sync] 2026-11-16: use client-owned catalog readiness and invalidate only explicit capability failures across all four composition paths.
 # [Sync] 2026-11-12: register exact external-share operations; unavailable capabilities fail closed per request.
 # [Sync] 2026-11-04: register exact continuation operations.
@@ -292,6 +293,7 @@ class AdminRequestAuth:
             grant,
             self.client,
             runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config),
+            continuation_grant_id=request_id,
             session_broker_settings=self._session_broker_settings,
         )
 

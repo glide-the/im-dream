@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 提供当前执行授权标识及本地有效期。
 # [Sync] 2026-11-04: bind continuation operations to the existing persistence authority.
 # [Sync] 2026-10-15: bind and refresh memory actor through the original turn broker.
 # [Sync] 2026-10-10: bind image operation/model ownership and preserve real call identity through original authorization, files and history.
@@ -155,12 +156,14 @@ class AdminTurnPersistence(
         clock: Callable[[], datetime] | None = None,
         renewal_settings: RuntimeRenewalSettings | None = None,
         request_id_factory: Callable[[], str] | None = None,
-        session_broker_settings: SessionProjectionBrokerSettings):
+        session_broker_settings: SessionProjectionBrokerSettings,
+        continuation_grant_id: str | None = None):
         expected_run = resolution.context.workflow_run_id if resolution.context is not None else None
         if (grant.purpose != "server-persistence" or grant.thread_id != resolution.thread_id
             or grant.run_id != expected_run or grant.editor_session_id is not None
             or frozenset(grant.scopes) != frozenset({"dream:read", "dream:write"})):
             raise configuration_invalid()
+        self.continuation_grant_id = continuation_grant_id
         self._resolution = resolution
         self._grant = grant
         self._client = client
@@ -224,6 +227,11 @@ class AdminTurnPersistence(
         except Exception:
             self.close()
             raise
+
+    def execution_lease_remaining(self, *, actor_id: str, thread_id: str) -> float:
+        """Read the renewable persistence grant from the live local keeper."""
+        grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+        return (grant.expires_at - self._clock()).total_seconds()
 
     def current_grant(self, *, actor_id: str, thread_id: str) -> RuntimeGrant:
         self._resolution.context_for(actor_id=actor_id, thread_id=thread_id)

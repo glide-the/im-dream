@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 按请求路径验证移动端队列与恢复读取。
 // [Input] Production native Chat hook, original composer state, iOS Settings adapter and public HTTP/SSE DTOs.
 // [Output] Isolated foreground/reopen/Stop/late-event/no-replay journey specifications.
 // [Pos] Provider-free technical fixture; Simulator application-process and account acceptance remain separate.
@@ -23,7 +24,7 @@ const log=(path,method,body)=>{const value=read();value.calls.push({path,method,
 const record={id:'app04-thread',title:'Existing conversation',deck_id:'fixture-deck',voice_id:'fixture-agent',created_at:'2026-11-02T00:00:00Z',updated_at:'2026-11-02T00:00:00Z'};
 const f=window.__recoveryFixture={failReads:false,holdCreate:false,releaseCreate:null,holdCancelled:false,readers:[],expirations:0,holdPreparation:false,releasePreparation:null,abortedPreparations:0};
 async function transport(input,init={}) {
- const path=String(input),method=init.method||'GET',body=init.body?JSON.parse(init.body):null;log(path,method,body);
+ const path=new URL(String(input),'http://fixture.invalid').pathname,method=init.method||'GET',body=init.body?JSON.parse(init.body):null;log(path,method,body);
  if(path==='/auth/session')return Response.json({user:{id:'7',email:'fixture@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'a'.repeat(43)});
  if(method==='GET'&&f.failReads)throw new TypeError('Explicit fixture network failure');
  if(path==='/api/claude-agent/threads'&&method==='POST'){

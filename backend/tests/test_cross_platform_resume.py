@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 覆盖同端与异端对孤立工具调用的历史恢复。
 # [Sync] 2026-11-26: restore stopped tool history and a confirmed failed user input through the installed Runtime.
 # [Sync] 2026-11-25: verify a synthetic API error leaves the native transcript intact and out of reply comparison.
 # [Input] Canonical synthetic history, isolated workspaces and the installed production SDK/Runtime.
@@ -180,6 +181,33 @@ class TranscriptContract(unittest.TestCase):
         history[1]["parts"][0]["state"] = "call"
         with self.assertRaisesRegex(ClaudeResumeStorageError, "HISTORY_UNSUPPORTED"):
             history_records(history, **args, failed_input_ids=frozenset({"failed-input"}))
+
+    def test_lost_tool_owner_restores_saved_history_on_either_device(self):
+        sid = str(uuid4())
+        for original in (True, False):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                tmp = str(root)
+                lease = ResumeTranscriptLease(thread_id="thread", session_id=sid, cwd=tmp,
+                                             config_home=str(root / "home"), lock_root=tmp)
+                try:
+                    shared = history(True)[:1]
+                    if original:
+                        lease.prepare(history(True), "previous")
+                        path = next((root / "home/projects").glob("*/*.jsonl"))
+                        native = history_records(history(True), thread_id="thread", session_id=sid, cwd=tmp)[:2]
+                        original_bytes = ("\n".join(json.dumps(row) for row in native) + "\n").encode()
+                        path.write_bytes(original_bytes)
+                    failed = frozenset({shared[0]["id"]})
+                    lease.prepare(shared, "new-history", failed_input_ids=failed)
+                    path = next((root / "home/projects").glob("*/*.jsonl"))
+                    records = validate_transcript(path.read_bytes(), sid, allow_user_tail=True)
+                    self.assertEqual(len(records), 1)
+                    self.assertEqual(records[0]["message"]["content"], shared[0]["parts"])
+                    if original:
+                        self.assertEqual(next(path.parent.glob("*.archive-*")).read_bytes(), original_bytes)
+                finally:
+                    lease.close()
 
     def test_atomic_reuse_archive_and_symlink(self):
         with tempfile.TemporaryDirectory(prefix="ink-cross-resume-contract-") as tmp:

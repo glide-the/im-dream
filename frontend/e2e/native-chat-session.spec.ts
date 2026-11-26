@@ -1,3 +1,4 @@
+// [Sync] 2026-11-27: 验证移动端在另一端执行中断后发送新输入。
 // [Sync] 2026-11-26: count one queue read after enqueue and one after the completed edit.
 // [Sync] 2026-11-02: specify selection-owned late queue submission receipts; this addition awaits paused mechanical validation.
 // [Sync] 2026-10-31: retain delayed cancelled readers while qualifying independent acknowledged Stop recovery and late-reader ownership.
@@ -34,14 +35,14 @@ const f=window.__nativeChatFixture={calls:[],mode:'complete',messages:[],queue:[
 const record={id:'fixture-thread',title:'Existing conversation',deck_id:'fixture-deck',voice_id:'fixture-agent',created_at:'2026-10-28T00:00:00Z',updated_at:'2026-10-28T00:00:00Z'};
 const status=()=>f.statusOverride??({running:f.running,lifecycle:f.running?'running':'idle',turn_count:f.messages.length?1:0,pending_tool_call_ids:f.mode==='approval'&&f.running?['fixture-tool']:[],tool_confirmation_observation:'known'});
 async function transport(input,init={}) {
- const path=String(input),method=init.method||'GET',body=init.body?JSON.parse(init.body):null;f.calls.push({path,method,body,headers:Object.fromEntries(new Headers(init.headers))});
+ const url=new URL(String(input),'http://fixture.invalid'),path=url.pathname,method=init.method||'GET',body=init.body?JSON.parse(init.body):null;f.calls.push({path,method,body,headers:Object.fromEntries(new Headers(init.headers))});
  if(f.expired)return new Response(null,{status:401});
  if(path==='/auth/session')return Response.json({user:{id:'1',email:'fixture@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'a'.repeat(43)});
  if(path==='/api/claude-agent/threads' && method==='POST')return Response.json({thread_id:'fixture-thread'});
  if(path.includes('/messages')){
    if(f.holdRecovery&&f.stopped)await new Promise(resolve=>f.recoveryWaiters.push(resolve));
    const latest=f.messages.at(-1)?.id||null;
-   if(f.stableEmptyProbe&&new URL(path,'http://fixture.invalid').searchParams.get('known_latest_message_id')===latest){
+   if(f.stableEmptyProbe&&url.searchParams.get('known_latest_message_id')===latest){
      f.emptyProbeReads++;
      return Response.json({thread:record,messages:[],has_more:false,next_cursor:null,latest_message_id:latest,unchanged:true});
    }
@@ -127,7 +128,7 @@ function Harness(){
   <button onClick={()=>{AppState.currentState='background';AppState.listeners.forEach(fn=>fn('background'));}}>Background</button>
   <button onClick={()=>{AppState.currentState='active';AppState.listeners.forEach(fn=>fn('active'));}}>Foreground</button>
   <button onClick={()=>{f.expired=true;}}>Expire HTTP session</button><button onClick={()=>{f.expiredStream=true;}}>Expire stream session</button>
-  <output aria-label="State">{JSON.stringify({id:session.threadId,running:session.running,posting:session.posting,recovering:session.recovering,unknown:session.unknown,error:session.error,stopping:session.stopping,editRetrying:session.editRetrying,confirmation:session.confirmation?.kind ?? null,queue:session.queue,queueError:session.queueError,editDraftRecovery:session.editDraftRecovery,messages:session.messages})}</output>
+  <output aria-label="State">{JSON.stringify({id:session.threadId,running:session.running,posting:session.posting,recovering:session.recovering,unknown:session.unknown,error:session.error,stopping:session.stopping,editRetrying:session.editRetrying,confirmation:session.confirmation?.kind ?? null,remoteRunning:session.remoteRunning,queue:session.queue,queueError:session.queueError,editDraftRecovery:session.editDraftRecovery,messages:session.messages})}</output>
   <output aria-label="Notice">{notice}</output>
   {mode==='burst-hold'?<div style={{height:400}}><ChatMessageList messages={session.messages} threadId={session.threadId??''} isLoading={session.running}/></div>:null}
   <div aria-label="Queue controls">{session.queue.filter(isThreadInputQueueCard).map(item=><QueueCard key={item.message_id} entry={item} localOwner={session.localOwner} onGuide={session.guide} onCancel={session.cancelInput} onEdit={async(entry,text)=>{try{await session.editInput(entry,text);}finally{f.editsSettled++;}}} onSideChat={async entry=>{const task=await session.sideTask(entry);f.openedSide=task;}}/>)}</div>
@@ -154,6 +155,21 @@ test.beforeEach(async({page})=>{
   await page.goto(base);await expect(page.getByRole('main')).toBeVisible();
 });
 async function state(page:import('@playwright/test').Page){return JSON.parse(await page.getByLabel('State',{exact:true}).innerText());}
+test('another device owns a live turn, then this device sends its draft after interruption',async({page})=>{
+  await page.evaluate(()=>{const f=(window as any).__nativeChatFixture;f.owner=false;f.queue=[{message_id:'old',thread_id:'fixture-thread',queue_sequence:'1',status:'dispatching',revision:3,dispatch_turn_id:'old-turn',created_at:'2026-11-26T09:09:00Z',text:'Earlier'}];});
+  await page.getByRole('button',{name:'Open existing thread',exact:true}).click();
+  await expect.poll(async()=>(await state(page)).remoteRunning).toBe(true);
+  const draft=page.getByLabel('Draft',{exact:true});
+  await draft.fill('Continue from here');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((v:any)=>v.method==='POST'&&v.path==='/api/claude-agent').length)).toBe(0);
+  await page.evaluate(()=>{(window as any).__nativeChatFixture.queue[0].status='failed';});
+  await expect.poll(async()=>(await state(page)).remoteRunning).toBe(false);
+  await expect(draft).toHaveValue('Continue from here');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__nativeChatFixture.calls.filter((v:any)=>v.method==='POST'&&v.path==='/api/claude-agent').length)).toBe(1);
+});
+
 test('Writing A/B sends wait for saved context and use the selected note on the same Thread',async({page})=>{
  await page.evaluate(()=>{(window as any).__nativeChatFixture.owner=false;});
  await page.getByRole('button',{name:'Open existing thread',exact:true}).click();await expect.poll(async()=>(await state(page)).recovering).toBe(false);

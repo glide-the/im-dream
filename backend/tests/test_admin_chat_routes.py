@@ -1,3 +1,4 @@
+# [Sync] 2026-11-27: 覆盖可继续的独立输入与活动轮次的竞争拒绝。
 # [Sync] 2026-11-13: cover explicit MCP names and rejection of client connection configuration.
 # [Sync] 2026-11-08: same-ID pending preparation retry retains owner/claim gates and rejects uncertain dispatch.
 # [Sync] 2026-11-04: 增加公开tools默认关闭、显式选择与非法平台定义拒绝合同。
@@ -281,6 +282,7 @@ def test_thread_tool_host_reuses_owned_running_thread_for_send_and_read(boundary
     monkeypatch.setattr(routes, "_admin_thread", owned)
     factory.session_snapshot = lambda _thread_id: {"lifecycle": "running"}
     factory.accepting_input = lambda _thread_id: True
+    factory.owns_client_input = lambda _thread_id, _client_id: True
     submitted = []
     async def enqueue_input(**kwargs):
         submitted.append(kwargs)
@@ -776,11 +778,12 @@ def test_stream_retains_original_identity_for_service_claim(boundary):
     assert calls[-1][1] == {"purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["dream:read", "dream:write"]}
     assert all(call[0] != "chat-user-message.persist" for call in calls)
     assert len(factory.run_requests) == 1 and factory.run_requests[0].message_id == "public-message-1"
+    assert factory.run_requests[0].chat_client_id  # Each unidentified HTTP composer gets its own owner.
     resolution = factory.run_requests[0].admin_workflow_resolution
     assert resolution is not None and resolution.context_for(actor_id="42", thread_id="owned-thread") is None
 
 
-def test_orphaned_queue_blocks_new_chat_turn_before_runtime(boundary):
+def test_orphaned_local_queue_allows_distinct_new_turn(boundary):
     client, outputs, calls, factory = boundary
     outputs["chat-input.list"] = {"entries": [{
         "message_id": "queued-message", "thread_id": "owned-thread",
@@ -792,10 +795,9 @@ def test_orphaned_queue_blocks_new_chat_turn_before_runtime(boundary):
         "id": "owned-thread",
         "message": {"id": "new-message", "parts": [{"type": "text", "text": "new"}]},
     })
-    assert response.status_code == 409
-    assert response.json()["detail"]["error_code"] == "CHAT_INPUT_RECONCILIATION_REQUIRED"
-    assert [call[0] for call in calls] == ["chat-thread.get", "chat-input.list"]
-    assert not factory.run_requests
+    assert response.status_code == 200
+    assert [req.message_id for req in factory.run_requests] == ["new-message"]
+
 
 
 @pytest.mark.parametrize("status,turn_id,allowed", [
@@ -814,7 +816,7 @@ def test_same_pending_message_may_retry_only_before_durable_claim(boundary, stat
     if allowed:
         assert factory.run_requests[0].message_id == "original-pending"
     else:
-        assert response.json()["detail"]["error_code"] == "CHAT_INPUT_RECONCILIATION_REQUIRED"
+        assert response.json()["detail"]["error_code"] == "CHAT_CONTINUATION_BUSY"
 
 
 @pytest.mark.parametrize("method,path,json_body", [
