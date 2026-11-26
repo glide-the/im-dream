@@ -1,5 +1,5 @@
-// [Input] Production Web credential owner with isolated tab storage, clock and injected HTTP.
-// [Output] Bearer/cookie isolation, renewal concurrency, cancellation, revocation and logout race evidence.
+// [Input] Production Web credential owner with isolated durable/tab storage, shared lock and injected HTTP.
+// [Output] Reopen recovery, cross-tab rotation, Bearer isolation, cancellation, revocation and logout race evidence.
 // [Pos] Provider-free OAuth transport contracts; no accounts, persistence or model calls.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -9,26 +9,36 @@ const profile = { user: { id: '42', email: 'web@example.test', display_name: nul
 const storageKey = 'ink-dream-web-oauth';
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(accept => { resolve = accept; }); return { promise, resolve }; }
 async function tab(value: object = { access_token: 'access.initial', refresh_token: 'refresh.initial', expires_at: Date.now() + 60_000 }) {
-  const values = new Map<string, string>([[storageKey, JSON.stringify(value)]]);
+  const values = new Map<string, string>();
+  const temporary = new Map<string, string>([[storageKey, JSON.stringify(value)]]);
   const events = new EventTarget();
+  const storage = (items: Map<string, string>) => ({ getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => items.set(key, value), removeItem: (key: string) => items.delete(key) });
+  let previous: Promise<unknown> = Promise.resolve();
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-    sessionStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) },
+    localStorage: storage(values), sessionStorage: storage(temporary),
+    navigator: { locks: { request: (_name: string, run: () => Promise<unknown>) => { const pending = previous.then(run); previous = pending.catch(() => undefined); return pending; } } },
     location: { origin: 'https://dream.example' }, dispatchEvent: events.dispatchEvent.bind(events),
   } });
   const owner: typeof import('./browserSession.web.ts') = await import(new URL('./browserSession.web.ts?tab=' + sequence++, import.meta.url).href);
-  return { owner, values, events };
+  return { owner, values, temporary, events };
+}
+function storedRefresh(values: Map<string, string>, expected: string) {
+  const saved = JSON.parse(values.get(storageKey)!);
+  assert.deepEqual(Object.keys(saved).sort(), ['refresh_token', 'session_id']);
+  assert.match(saved.session_id, /^[a-f0-9-]{36}$/);
+  assert.equal(saved.refresh_token, expected);
 }
 function renewed(access = 'access.renewed', refresh = 'refresh.renewed') { return Response.json({ access_token: access, refresh_token: refresh, expires_at: Date.now() + 60_000 }); }
 test.afterEach(() => { Reflect.deleteProperty(globalThis, 'window'); });
 
-test('memory access, refresh-only tab storage, strict public profile and cookie-free Bearer requests', async () => {
-  const { owner, values } = await tab();
+test('memory access, persistent refresh-only credentials, legacy migration and cookie-free Bearer requests', async () => {
+  const { owner, values, temporary } = await tab();
   const calls: { path: string; init?: RequestInit }[] = [];
   const raw: typeof fetch = async (input, init) => { calls.push({ path: String(input), init }); return Response.json(profile); };
   const session = await owner.loadBrowserSession(raw);
   assert.equal(session?.user.id, '42'); assert.ok(Object.isFrozen(session?.user));
   assert.notEqual(owner.getBrowserCsrfToken(), 'access.initial');
-  assert.deepEqual(JSON.parse(values.get(storageKey)!), { refresh_token: 'refresh.initial' });
+  storedRefresh(values, 'refresh.initial'); assert.equal(temporary.has(storageKey), false);
   const request = owner.createBrowserBearerFetch(raw, 'https://dream.example');
   await request('/api/decks', { headers: { Cookie: 'stale=private', Authorization: 'Bearer override', 'x-ink-csrf': 'retired' }, credentials: 'include' });
   for (const call of calls) {
@@ -55,7 +65,7 @@ test('reload rotates one refresh for twelve concurrent requests; aborted caller 
   abort.abort(); await cancellation;
   assert.equal(refreshes, 1); assert.equal(requests, 0);
   gate.resolve(renewed()); await Promise.all(reads);
-  assert.equal(requests, 12); assert.deepEqual(JSON.parse(values.get(storageKey)!), { refresh_token: 'refresh.renewed' });
+  assert.equal(requests, 12); storedRefresh(values, 'refresh.renewed');
 });
 
 test('refresh failure retains credentials and invalid grant clears identity without restoring stale profile', async () => {
@@ -132,4 +142,54 @@ test('invalid refresh stops all waiting protected requests before dispatch and p
   assert.equal(refreshes, 1); assert.equal(business, 0);
   await assert.rejects(request('/api/decks'), /Please log in again/);
   await request('/api/health'); assert.equal(publicReads, 1); assert.equal(business, 0);
+});
+
+test('a fresh page restores only the durable refresh and serializes rotation with an existing tab', async () => {
+  const { owner, values, temporary } = await tab();
+  await owner.loadBrowserSession(async () => Response.json(profile));
+  assert.equal(temporary.size, 0);
+  const reopened: typeof import('./browserSession.web.ts') = await import(new URL('./browserSession.web.ts?tab=' + sequence++, import.meta.url).href);
+  let refreshes = 0;
+  const raw: typeof fetch = async (input, init) => {
+    if (input !== '/auth/refresh') return Response.json(profile);
+    const expected = refreshes === 0 ? 'refresh.initial' : 'refresh.' + refreshes;
+    assert.deepEqual(JSON.parse(String(init?.body)), { refresh_token: expected });
+    refreshes++;
+    await Promise.resolve();
+    return renewed('access.' + refreshes, 'refresh.' + refreshes);
+  };
+  const restored = reopened.loadBrowserSession(raw);
+  const rotated = owner.ensureBrowserAccessToken(raw, true);
+  assert.equal((await restored)?.user.id, '42');
+  assert.ok(await rotated);
+  assert.equal(refreshes, 2); storedRefresh(values, 'refresh.2');
+});
+
+test('a late refresh response cannot restore shared credentials cleared by another tab', async () => {
+  const { owner, values } = await tab();
+  await owner.loadBrowserSession(async () => Response.json(profile));
+  const reopened: typeof import('./browserSession.web.ts') = await import(new URL('./browserSession.web.ts?tab=' + sequence++, import.meta.url).href);
+  const gate = deferred<Response>();
+  const pending = reopened.ensureBrowserAccessToken(async () => gate.promise);
+  await new Promise(resolve => setImmediate(resolve));
+  owner.clearBrowserSession();
+  gate.resolve(renewed());
+  assert.equal(await pending, null);
+  assert.equal(values.has(storageKey), false);
+});
+
+test('a late profile cannot commit or clear a replacement login before its storage event arrives', async () => {
+  for (const status of [200, 401]) {
+    const { owner, values } = await tab();
+    await owner.loadBrowserSession(async () => Response.json(profile));
+    const gate = deferred<Response>();
+    const pending = owner.loadBrowserSession(async () => gate.promise);
+    await new Promise(resolve => setImmediate(resolve));
+    const replacement = { session_id: crypto.randomUUID(), refresh_token: 'refresh.replacement' };
+    values.set(storageKey, JSON.stringify(replacement));
+    gate.resolve(status === 200 ? Response.json(profile) : new Response(null, { status }));
+    assert.equal(await pending, null);
+    assert.deepEqual(JSON.parse(values.get(storageKey)!), replacement);
+    assert.equal(owner.getBrowserCsrfToken(), null);
+  }
 });

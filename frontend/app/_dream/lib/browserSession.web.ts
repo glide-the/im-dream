@@ -1,6 +1,7 @@
-// [Input] Admin OAuth credentials in this tab, Bearer profile DTO and normal fetch requests.
-// [Output] Memory-only access tokens, tab-scoped refresh, coalesced renewal and immutable public user state.
+// [Input] Admin OAuth credentials, origin-persistent refresh state, Bearer profile DTO and normal fetch requests.
+// [Output] Memory-only access tokens, reopen recovery, cross-tab serialized rotation and immutable public user state.
 // [Pos] Web authentication owner; native platform selection retains cookieSession.ts.
+// [Sync] 2026-11-20: persist refresh grants across reopening and serialize refresh/logout with the callback's origin lock.
 // [Sync] 2026-11-19: Web login/read/refresh/logout use explicit OAuth credentials with cookies omitted.
 import { z } from 'zod';
 import { STORAGE_KEYS } from '../constants/storageKeys.ts';
@@ -11,7 +12,9 @@ import type { BrowserSession } from './cookieSession.ts';
 const { BrowserSessionError } = cookieSession;
 
 const token = z.string().regex(/^[A-Za-z0-9._~-]+$/).max(16_384);
-const credentialDto = z.strictObject({ access_token: token.optional(), refresh_token: z.string().min(1).max(16_384).optional(), expires_at: z.number().int().positive().optional() });
+const refreshToken = z.string().min(1).max(16_384);
+const storedDto = z.strictObject({ session_id: z.uuid(), refresh_token: refreshToken });
+const credentialDto = z.strictObject({ session_id: z.uuid().optional(), access_token: token.optional(), refresh_token: refreshToken.optional(), expires_at: z.number().int().positive().optional() });
 const refreshedDto = z.strictObject({ access_token: token, refresh_token: z.string().min(1).max(16_384), expires_at: z.number().int().positive() });
 const userDto = z.strictObject({ user: z.strictObject({ id: z.string().regex(/^[1-9]\d{0,18}$/).refine(value => BigInt(value) <= 9_223_372_036_854_775_807n),
   email: z.email(), display_name: z.string().nullable(), avatar_url: z.string().nullable(), role: z.string(), created_at: z.iso.datetime({ offset: true }).nullable() }) });
@@ -34,25 +37,61 @@ function untilAborted<T>(pending: Promise<T>, signal?: AbortSignal | null): Prom
   });
 }
 
+function changed(restore = false) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ink:auth-state', { detail: { restore } }));
+}
+
+function storedCredentials(): z.infer<typeof storedDto> | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(STORAGE_KEYS.WEB_OAUTH);
+  try { return raw ? storedDto.parse(JSON.parse(raw)) : null; } catch { return null; }
+}
+
 function saveCredentials(value: Credentials | null) {
-  // Only a refresh credential survives reload; the access token stays in memory.
+  // Persist the rotating refresh and its login identity; Access remains memory-only.
   if (typeof window !== 'undefined') {
-    if (value?.refresh_token) window.sessionStorage.setItem(STORAGE_KEYS.WEB_OAUTH, JSON.stringify({ refresh_token: value.refresh_token }));
-    else window.sessionStorage.removeItem(STORAGE_KEYS.WEB_OAUTH);
+    if (value?.refresh_token && value.session_id) window.localStorage.setItem(STORAGE_KEYS.WEB_OAUTH, JSON.stringify({ session_id: value.session_id, refresh_token: value.refresh_token }));
+    else window.localStorage.removeItem(STORAGE_KEYS.WEB_OAUTH);
+    window.sessionStorage.removeItem(STORAGE_KEYS.WEB_OAUTH);
   }
   credentials = value;
 }
 
 function readCredentials(): Credentials | null {
-  if (credentials !== undefined) return credentials;
-  const raw = typeof window === 'undefined' ? null : window.sessionStorage.getItem(STORAGE_KEYS.WEB_OAUTH);
-  let parsed: Credentials | null = null;
-  try { if (raw) parsed = credentialDto.parse(JSON.parse(raw)); } catch { /* Invalid tab data requires a new login. */ }
-  saveCredentials(parsed);
-  return parsed;
+  const saved = storedCredentials();
+  if (credentials === undefined) {
+    let handoff: Credentials | null = null;
+    if (typeof window !== 'undefined') {
+      const raw = window.sessionStorage.getItem(STORAGE_KEYS.WEB_OAUTH);
+      try { if (raw) handoff = credentialDto.parse(JSON.parse(raw)); } catch { /* Malformed handoff requires normal login. */ }
+      window.sessionStorage.removeItem(STORAGE_KEYS.WEB_OAUTH);
+    }
+    // Consume the callback's one-time Access handoff only for the current login.
+    credentials = saved ? { ...(handoff?.session_id === saved.session_id && handoff.refresh_token === saved.refresh_token ? handoff : {}), ...saved }
+      : handoff && (!handoff.session_id || !handoff.refresh_token) ? handoff : null;
+    return credentials;
+  }
+  if (saved && credentials?.session_id === saved.session_id) {
+    credentials = { ...credentials, refresh_token: saved.refresh_token };
+  } else if (saved || credentials?.session_id && credentials.refresh_token) {
+    generation = {}; readIdentity = {}; currentSession = null;
+    credentials = saved;
+    // Notify after the caller establishes its read identity; restore must not re-enter this read.
+    queueMicrotask(() => changed(saved !== null));
+  }
+  return credentials;
 }
 
-function changed() { if (typeof window !== 'undefined') window.dispatchEvent(new Event('ink:auth-state')); }
+function withCredentialLock<T>(operation: () => Promise<T>): Promise<T> {
+  const locks = typeof window === 'undefined' ? undefined : window.navigator?.locks;
+  if (!locks) return Promise.reject(new BrowserSessionError(503, 'Unable to safely restore your session in this browser.'));
+  return locks.request(STORAGE_KEYS.WEB_OAUTH, operation);
+}
+
+function stillStored(value: Credentials): boolean {
+  const saved = storedCredentials();
+  return saved?.session_id === value.session_id && saved?.refresh_token === value.refresh_token;
+}
 
 export function clearBrowserSession(): void {
   if (nativeHost()) return cookieSession.clearBrowserSession();
@@ -78,24 +117,33 @@ export async function ensureBrowserAccessToken(transport: typeof fetch = fetch, 
   if (logoutFlight) throw new BrowserSessionError(401, 'Please log in again.');
   const value = readCredentials();
   if (!value) return null;
-  if (!force && value.access_token && (value.expires_at ?? 0) > Date.now()) return value.access_token;
+  if (!force && value.session_id && value.access_token && (value.expires_at ?? 0) > Date.now()) return value.access_token;
   if (!value.refresh_token) { clearBrowserSession(); return null; }
   if (refreshFlight) return refreshFlight;
-  const identity = generation;
-  const pending = (async () => {
+  const pending = withCredentialLock(async () => {
+    // A different tab may have rotated or revoked while this tab waited for the lock.
+    let latest = readCredentials();
+    if (!latest) return null;
+    if (!latest.session_id) {
+      latest = { ...latest, session_id: crypto.randomUUID() };
+      saveCredentials(latest);
+    }
+    if (!force && latest.access_token && (latest.expires_at ?? 0) > Date.now()) return latest.access_token;
+    if (!latest.refresh_token) { clearBrowserSession(); return null; }
+    const identity = generation;
     let response: Response;
     try { response = await transport('/auth/refresh', { method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: value.refresh_token }) }); }
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: latest.refresh_token }) }); }
     catch { throw new BrowserSessionError(503, 'Unable to renew your session. Please try again.'); }
-    if (identity !== generation) return null;
+    if (identity !== generation || !stillStored(latest)) return null;
     if (response.status === 401) { clearBrowserSession(); return null; }
     if (!response.ok) throw new BrowserSessionError(response.status, 'Unable to renew your session. Please try again.');
     const parsed = refreshedDto.safeParse(await response.json().catch(() => null));
-    if (identity !== generation) return null;
+    if (identity !== generation || !stillStored(latest)) return null;
     if (!parsed.success || parsed.data.expires_at <= Date.now()) throw new BrowserSessionError(503, 'Unable to renew your session. Please try again.');
-    saveCredentials(parsed.data);
+    saveCredentials({ ...parsed.data, session_id: latest.session_id });
     return parsed.data.access_token;
-  })();
+  });
   refreshFlight = pending;
   try { return await pending; } finally { if (refreshFlight === pending) refreshFlight = undefined; }
 }
@@ -103,8 +151,14 @@ export async function ensureBrowserAccessToken(transport: typeof fetch = fetch, 
 export async function loadBrowserSession(transport: typeof fetch = fetch, signal?: AbortSignal): Promise<BrowserSession | null> {
   if (nativeHost()) return cookieSession.loadBrowserSession(transport, signal);
   if (signal?.aborted || logoutFlight) return null;
+  readCredentials();
   const identity = {}; readIdentity = identity;
-  const isCurrent = () => readIdentity === identity && !signal?.aborted && !logoutFlight;
+  const isCurrent = () => {
+    if (signal?.aborted || logoutFlight) return false;
+    // Storage events may still be queued when a profile response arrives.
+    readCredentials();
+    return readIdentity === identity;
+  };
   try {
     const access = await untilAborted(ensureBrowserAccessToken(transport), signal);
     if (!isCurrent() || !access) return null;
@@ -132,16 +186,22 @@ export async function revokeBrowserSession(transport: typeof fetch = fetch): Pro
   const pending = (async () => {
     // Rotation finishes before revocation selects the latest refresh credential.
     if (refreshFlight) await refreshFlight;
-    const value = readCredentials();
-    if (value?.refresh_token) {
-      let response: Response;
-      try { response = await transport('/auth/logout', { method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
-        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: value.refresh_token }) }); }
-      catch { throw new BrowserSessionError(503, 'Unable to log out. Please try again.'); }
-      const body = await response.json().catch(() => null);
-      if (!response.ok || !z.strictObject({ success: z.literal(true) }).safeParse(body).success) throw new BrowserSessionError(response.status, 'Unable to log out. Please try again.');
-    }
-    clearBrowserSession();
+    await withCredentialLock(async () => {
+      let value = readCredentials();
+      if (value?.refresh_token && !value.session_id) {
+        value = { ...value, session_id: crypto.randomUUID() };
+        saveCredentials(value);
+      }
+      if (value?.refresh_token) {
+        let response: Response;
+        try { response = await transport('/auth/logout', { method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: value.refresh_token }) }); }
+        catch { throw new BrowserSessionError(503, 'Unable to log out. Please try again.'); }
+        const body = await response.json().catch(() => null);
+        if (!response.ok || !z.strictObject({ success: z.literal(true) }).safeParse(body).success) throw new BrowserSessionError(response.status, 'Unable to log out. Please try again.');
+      }
+      clearBrowserSession();
+    });
   })();
   logoutFlight = pending;
   try { await pending; } finally { if (logoutFlight === pending) logoutFlight = undefined; }
@@ -200,6 +260,8 @@ export function installBrowserBearerFetch(): void {
   if (typeof window === 'undefined' || nativeHost()) return;
   const owner = globalThis as typeof globalThis & { __inkWebBearerFetch?: typeof fetch };
   if (owner.__inkWebBearerFetch) return;
+  window.addEventListener('storage', event => { if (event.key === null || event.key === STORAGE_KEYS.WEB_OAUTH) readCredentials(); });
+  window.addEventListener('pageshow', () => { readCredentials(); });
   owner.__inkWebBearerFetch = createBrowserBearerFetch(globalThis.fetch.bind(globalThis), window.location.origin);
   globalThis.fetch = owner.__inkWebBearerFetch;
 }

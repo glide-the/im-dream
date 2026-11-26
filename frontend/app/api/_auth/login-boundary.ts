@@ -1,6 +1,7 @@
 // [Input] Explicit Dream public/internal origins, cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
+// [Sync] 2026-11-20: preserve boundary-error identity across Route Handler bundles and transport-cache reloads.
 // [Sync] 2026-10-31: distinguish an exact configured private account redirect from its App-local HTTP receiver; original PKCE/Cookie checks remain.
 // [Sync] 2026-10-11: validate browser navigation evidence before selecting an Admin center; preserve callback origin binding.
 // [Sync] 2026-10-11: derive per-request origin/cookies/callback; Admin verifies the same client's published callback before login.
@@ -16,12 +17,17 @@ import {
 } from 'node:crypto';
 
 export class BffBoundaryError extends Error {
+  static readonly protocol = Symbol.for('ink.dream.bff-boundary-error');
   readonly code: string;
   readonly status: number;
   constructor(code: string, status: number) {
     super(code);
     this.code = code;
     this.status = status;
+    Object.defineProperty(this, BffBoundaryError.protocol, { value: true });
+  }
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return value instanceof Error && Reflect.get(value, BffBoundaryError.protocol) === true;
   }
 }
 

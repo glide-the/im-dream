@@ -1,6 +1,7 @@
 // [Input] OAuth Bearer profile state and Admin-submitting Dream login forms.
 // [Output] React public user/authentication state with success-only logout and safe failure feedback.
 // [Pos] Public authentication context; Web credentials stay in the private transport owner.
+// [Sync] 2026-11-20: restore cross-tab login changes and discard React commits superseded by shared logout.
 // [Sync] 2026-11-19: reflect revoked/cleared Web credentials without exposing credentials to React consumers.
 // [Sync] 2026-09-17: let restored Dream forms submit directly to Admin while keeping browser state token-free.
 // [Sync] 2026-09-15: commit only the current Browser owner snapshot after asynchronous session loading.
@@ -29,18 +30,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isLoading, user, authError]);
   useEffect(() => {
     const abort = new AbortController();
-    const authChanged = () => { if (!abort.signal.aborted) setUser(null); };
+    let restoreIdentity: object = {};
+    const restoreSession = () => {
+      const identity = {}; restoreIdentity = identity;
+      setIsLoading(true);
+      const current = () => !abort.signal.aborted && restoreIdentity === identity;
+      void loadBrowserSession(fetch, abort.signal).then(session => {
+        if (current() && isBrowserSessionCurrent(session)) { setUser(session?.user ?? null); setAuthError(null); }
+      }).catch(() => {
+        if (current()) setAuthError('Unable to check your session. Please try again.');
+      }).finally(() => { if (current()) setIsLoading(false); });
+    };
+    const authChanged = (event: Event) => {
+      if (abort.signal.aborted) return;
+      restoreIdentity = {}; setUser(null); setAuthError(null);
+      if ((event as CustomEvent<{ restore?: boolean }>).detail?.restore) restoreSession();
+      else setIsLoading(false);
+    };
     window.addEventListener('ink:auth-state', authChanged);
     // Discard retired credentials without adopting or transmitting them.
     try { localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN); } catch { /* Retired localStorage credentials never participate in authentication. */ }
     if (new URLSearchParams(window.location.hash.slice(1)).has('access_token')) {
       window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
     }
-    void loadBrowserSession(fetch, abort.signal).then(session => {
-      if (!abort.signal.aborted && isBrowserSessionCurrent(session)) { setUser(session?.user ?? null); setAuthError(null); }
-    }).catch(() => {
-      if (!abort.signal.aborted) setAuthError('Unable to check your session. Please try again.');
-    }).finally(() => { if (!abort.signal.aborted) setIsLoading(false); });
+    restoreSession();
     return () => { abort.abort(); window.removeEventListener('ink:auth-state', authChanged); };
   }, []);
 

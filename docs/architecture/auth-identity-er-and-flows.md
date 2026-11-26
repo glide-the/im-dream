@@ -1,4 +1,4 @@
-<!-- [Sync] 2026-11-19: Web使用OAuth Bearer、标签页续期与退出；原生Cookie合同独立保留。 -->
+<!-- [Sync] 2026-11-20: Web使用OAuth Bearer、持久Refresh与跨标签续期/退出；原生Cookie合同独立保留。 -->
 <!-- [Input] Admin Better Auth schema, canonical Dream user schema, Admin RBAC schema and current BFF/OAuth contracts. -->
 <!-- [Output] Reviewable identity ER model and login/account-linking flow diagrams. -->
 <!-- [Pos] Dream-side visual index; Admin remains the provider and database contract authority. -->
@@ -27,7 +27,7 @@ Admin 原有后台操作员，Dream 原有产品用户。两者属于不同业�
 - `identity.subject_links` 只建立 Dream 协议主体到 canonical user 的显式一对一关系。`identity.admin_subject_links` 是已存在的迁移历史，不参与新登录路径。
 - 相同邮箱只触发冲突检查。旧主体采用必须校验明确源记录、原主键和证据摘要；禁止自动合并。
 - Dream 请求不提交任意 `user_id`。Admin 从已验证 OAuth `sub` 反查 `subject_links`，再在同一事务中执行实体权限过滤。
-- Dream Web在内存持有Access Token，在当前标签页sessionStorage持有刷新凭据；原生私有协议callback保留HttpOnly handle。Google token保留在Admin的第三方认证边界。
+- Dream Web在内存持有Access Token，在同源localStorage持久保存Refresh和随机登录标识；callback一次性sessionStorage交付在初始化后删除。关闭重开通过OAuth续期恢复，同源Web Lock串行跨标签轮换及退出；原生私有协议callback保留HttpOnly handle。Google token保留在Admin的第三方认证边界。
 - Admin 管理路由只接受独立 Admin Session，在每次请求检查 `admin_users` 状态、角色和权限；Dream Session/token 不参与。
 - 浏览器和设备是 public OAuth client；Dream service 是 confidential client。`client_credentials` 只用于无用户后台 scope，不能代替用户委托 token。
 - 无用户后台调用使用 `Authorization: Bearer <service token>`。用户数据调用使用 `Authorization: Bearer <user token>`，Dream 服务端另加 `X-Ink-Dream-Service-Authorization: Bearer <service token>`；Browser 不能写入或读取第二个头。

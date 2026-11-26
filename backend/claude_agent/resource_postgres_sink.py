@@ -1,3 +1,4 @@
+# [Sync] 2026-11-20: describe the async wait deadline as pending while the isolated driver call continues.
 # [Input] Consume strict resource snapshots and an injected typed Admin observer writer.
 # [Output] Provide a capacity-one latest publisher and isolated single-worker Admin API sink.
 # [Pos] Off-path resource synchronization boundary; historical module/class names remain internal compatibility identifiers.
@@ -164,7 +165,10 @@ class ClaudeAgentResourcePostgresSink:
             )
         except asyncio.TimeoutError:
             self._metrics.record_write_error()
-            logger.warning("Claude Agent resource snapshot write failed: code=write_timeout")
+            logger.warning(
+                "Claude Agent resource snapshot write wait timed out: "
+                "code=write_timeout outcome=pending"
+            )
             self._inflight_operation = operation
         except asyncio.CancelledError:
             operation.add_done_callback(self._discard_background_result)
