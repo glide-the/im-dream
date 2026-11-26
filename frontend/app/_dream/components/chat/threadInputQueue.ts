@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: serialize queue reads triggered by lifecycle and input events within one Thread scope.
 // [Sync] 2026-11-13: queue submissions include explicit tools and default to an empty selection.
 // [Input] Authenticated browser session and owned Dream Thread input endpoints.
 // [Output] Typed queue receipt, list, selection, cancellation and side-task transfer calls.
@@ -103,6 +104,36 @@ export async function fetchThreadInputs(threadId: string, signal?: AbortSignal, 
     signal,
   });
   return parseSnapshot(await checkedJson(response));
+}
+
+export function createThreadInputReader(
+  threadId: string,
+  applySnapshot: (snapshot: ThreadInputSnapshot) => void,
+  transport?: typeof fetch,
+) {
+  const controller = new AbortController();
+  let latestRead = Promise.resolve();
+  let scheduledRead: Promise<void> | undefined;
+
+  return {
+    threadId,
+    refresh() {
+      if (!scheduledRead) {
+        // Events before a read starts share it. Events during a read need a fresh snapshot.
+        scheduledRead = latestRead.catch(() => {}).then(async () => {
+          scheduledRead = undefined;
+          if (controller.signal.aborted) return;
+          const snapshot = await fetchThreadInputs(threadId, controller.signal, transport);
+          if (!controller.signal.aborted) applySnapshot(snapshot);
+        });
+        latestRead = scheduledRead;
+      }
+      return scheduledRead;
+    },
+    dispose() {
+      controller.abort();
+    },
+  };
 }
 
 export async function enqueueThreadInput(

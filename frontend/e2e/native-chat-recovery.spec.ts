@@ -1,7 +1,8 @@
 // [Input] Production native Chat hook, original composer state, iOS Settings adapter and public HTTP/SSE DTOs.
 // [Output] Isolated foreground/reopen/Stop/late-event/no-replay journey specifications.
 // [Pos] Provider-free technical fixture; Simulator application-process and account acceptance remain separate.
-// [Sync] 2026-11-02: prepared while luna-test-stage is paused; these specifications have not been executed.
+// [Sync] 2026-11-26: require one queue read per foreground or terminal recovery and zero reads while idle between events.
+// [Sync] 2026-11-02: add the original foreground and process-reopen recovery scenarios.
 import {expect,test,type Page} from '@playwright/test';
 import {createServer,transformWithEsbuild} from 'vite';
 import {fileURLToPath} from 'node:url';
@@ -23,7 +24,7 @@ const record={id:'app04-thread',title:'Existing conversation',deck_id:'fixture-d
 const f=window.__recoveryFixture={failReads:false,holdCreate:false,releaseCreate:null,holdCancelled:false,readers:[],expirations:0,holdPreparation:false,releasePreparation:null,abortedPreparations:0};
 async function transport(input,init={}) {
  const path=String(input),method=init.method||'GET',body=init.body?JSON.parse(init.body):null;log(path,method,body);
- if(path==='/auth/session')return Response.json({user:{id:'owner-A',email:'fixture@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'a'.repeat(43)});
+ if(path==='/auth/session')return Response.json({user:{id:'7',email:'fixture@example.invalid',display_name:null,avatar_url:null,role:'user',created_at:null},csrf_token:'a'.repeat(43)});
  if(method==='GET'&&f.failReads)throw new TypeError('Explicit fixture network failure');
  if(path==='/api/claude-agent/threads'&&method==='POST'){
   if(f.holdCreate)await new Promise(resolve=>f.releaseCreate=resolve);
@@ -184,12 +185,23 @@ test('Settings write failure preserves the active input and records only the fix
  await expect.poll(()=>page.evaluate(()=>(window as any).__recoveryFixture.diagnostics().errors?.recovery?.text??'')).toContain('NATIVE_CHAT_RECOVERY_WRITE_FAILED');await expect(page.getByLabel('Draft',{exact:true})).toHaveValue('Keep input when persistence is unavailable');expect((await calls(page)).filter(call=>call.method==='POST')).toHaveLength(0);
 });
 
-test('inactive leaves the reader intact and background suspends periodic queue reads',async({page})=>{
+test('foreground and terminal recovery read the queue once without periodic reads',async({page})=>{
+ const queueReads=async()=>(await calls(page)).filter(call=>call.method==='GET'&&call.path.endsWith('/inputs')).length;
+ await page.clock.install();
  await send(page);await expect.poll(()=>page.evaluate(()=>(window as any).__recoveryFixture.readers.length)).toBe(1);
+ expect(await queueReads()).toBe(0);
+ await page.clock.fastForward(6000);expect(await queueReads()).toBe(0);
  await page.evaluate(()=>(window as any).__sessionPlatform.change('inactive'));expect(await page.evaluate(()=>(window as any).__recoveryFixture.readers[0].cancelled)).toBe(false);
- await page.getByRole('button',{name:'Background',exact:true}).click();const before=(await calls(page)).filter(call=>call.path.endsWith('/inputs')).length;
- await page.waitForTimeout(2200);expect((await calls(page)).filter(call=>call.path.endsWith('/inputs'))).toHaveLength(before);
- await page.getByRole('button',{name:'Foreground',exact:true}).click();await expect.poll(async()=>(await calls(page)).filter(call=>call.path.endsWith('/inputs')).length).toBeGreaterThan(before);expect(await agentPosts(page)).toHaveLength(1);
+ await page.getByRole('button',{name:'Background',exact:true}).click();
+ await page.clock.fastForward(6000);expect(await queueReads()).toBe(0);
+ await page.getByRole('button',{name:'Foreground',exact:true}).click();
+ await expect.poll(queueReads).toBe(1);
+ await expect.poll(()=>page.evaluate(()=>(window as any).__recoveryFixture.readers.length)).toBe(2);
+ await page.clock.fastForward(6000);expect(await queueReads()).toBe(1);
+ await page.evaluate(()=>{const fixture=(window as any).__recoveryFixture;fixture.complete();fixture.releaseReaders();});
+ await expect.poll(queueReads).toBe(2);
+ await page.clock.fastForward(6000);expect(await queueReads()).toBe(2);
+ expect(await agentPosts(page)).toHaveLength(1);
 });
 
 test('only the primary recovery owner restores a side pointer and stale closure cannot retire its replacement',async({page})=>{

@@ -1,5 +1,6 @@
 // [Sync] 2026-11-26: reconcile the current Thread's navigation summaries with input dispatch receipts.
 // [Sync] 2026-11-18: expose the current conversation bounds for local Notion reading overlays.
+// [Sync] 2026-11-26: refresh queue snapshots on conversation, continuation, and queue action events.
 // [Sync] 2026-11-13: ordinary and queued messages capture current Thread tools without global MCP saves.
 // [Sync] 2026-11-13: retain Chat visibility through the composer without changing Thread or stream lifecycle.
 // [Sync] 2026-11-13: preserve caller Agent context in the combined menu and refresh original model config after confirmed saves.
@@ -30,7 +31,7 @@ import { readWebSystemConfig } from '../../api/systemConfigApi';
 // [Sync] 2026-10-28: share the existing outgoing DTO builder; retain pending-data ownership and public transport.
 import {readThreadTools} from '../../hooks/useChatToolSelection';
 import {buildClaudeChatRequest} from '../../lib/claude-chat-request';
-import { cancelThreadInput, enqueueThreadInput, fetchThreadInputs, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
+import { cancelThreadInput, createThreadInputReader, enqueueThreadInput, isThreadInputQueueCard, moveThreadInputToSideTask, selectThreadInput, ThreadInputError, type ThreadInputEntry } from './threadInputQueue';
 import ThreadInputQueueCard from './ThreadInputQueueCard';
 import { TaskSessionLinksFailure } from './TaskSessionNavigation';
 import { fetchTaskSessionLinks, type TaskSessionLinksSnapshot } from './taskSessionLinks';
@@ -366,6 +367,37 @@ export default function ChatPanel({
   const [queueCheckPending, setQueueCheckPending] = useState(false);
   const [editDraftRecovery, setEditDraftRecovery] = useState<{ id: string; text: string } | null>(null);
   const pendingInputIdsRef = useRef(new Map<string, string>());
+  const inputReaderRef = useRef<ReturnType<typeof createThreadInputReader> | null>(null);
+  const refreshThreadInputs = useCallback(async () => {
+    const reader = inputReaderRef.current;
+    if (reader?.threadId === threadId) await reader.refresh();
+  }, [threadId]);
+  const refreshThreadInputsInBackground = useCallback(() => {
+    void refreshThreadInputs().catch(() => {
+      // Keep the last snapshot available for explicit status checks.
+    });
+  }, [refreshThreadInputs]);
+  useEffect(() => {
+    if (historyPending || !active) return;
+    const reader = createThreadInputReader(threadId, (snapshot) => {
+      setThreadInputs(snapshot.entries);
+      setInputOwnerLocal(snapshot.local_owner);
+    });
+    inputReaderRef.current = reader;
+    let wasVisible = false;
+    const readWhenVisible = () => {
+      const visible = document.visibilityState === 'visible';
+      if (visible && !wasVisible) refreshThreadInputsInBackground();
+      wasVisible = visible;
+    };
+    readWhenVisible();
+    document.addEventListener('visibilitychange', readWhenVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', readWhenVisible);
+      reader.dispose();
+      inputReaderRef.current = null;
+    };
+  }, [active, historyPending, refreshThreadInputsInBackground, threadId]);
   const [modelConfigRefresh,setModelConfigRefresh]=useState(0);
   const lastModelConfigRefresh = useRef(0);
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
@@ -607,6 +639,8 @@ export default function ChatPanel({
   // better-chatbot pattern: parent fetches history, passes as initialMessages).
   useEffect(() => {
     setSettledToolCallIds(new Set(initialSettledToolCallIds));
+    setThreadInputs([]);
+    setInputOwnerLocal(false);
     setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
     setRuntimeRunning(initialRuntimeRunning);
     setToolConfirmationKnown(initialToolConfirmationKnown);
@@ -769,12 +803,13 @@ export default function ChatPanel({
       setHistoryPage((currentPage) => recovered.overlapsLoadedWindow
         ? { ...currentPage, latestMessageId: recoveredPage.latestMessageId }
         : recoveredPage);
+      if (document.visibilityState === 'visible') refreshThreadInputsInBackground();
       if (!snapshot.running) onConversationSettledRef.current?.();
       return snapshot;
     } catch {
       return undefined;
     }
-  }, [threadId]);
+  }, [refreshThreadInputsInBackground, threadId]);
 
   const [isReloadingAfterError, setIsReloadingAfterError] = useState(false);
   const handleReloadAfterError = useCallback(async () => {
@@ -909,6 +944,10 @@ export default function ChatPanel({
           // Persistence becomes authoritative only after stream EOF.
           continue;
         }
+        if (event.type === 'data-continuation' && event.state === 'ready'
+          && document.visibilityState === 'visible') {
+          refreshThreadInputsInBackground();
+        }
         if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
           applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
           continue;
@@ -1026,7 +1065,7 @@ export default function ChatPanel({
         setIsReconnecting(false);
       }
     };
-  }, [historyPending, reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
+  }, [historyPending, reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, refreshThreadInputsInBackground, runtimeRunning, threadId]);
 
   const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting) || submissionStopPending;
   const agentBusy = canStopMainTurn || isStopping || submissionStopPending;
@@ -1089,12 +1128,6 @@ export default function ChatPanel({
     if (active && !historyPending && wasBusy && !agentBusy) void refreshTaskSessionLinks(true);
   }, [active, agentBusy, historyPending, refreshTaskSessionLinks]);
 
-  const refreshThreadInputs = useCallback(async () => {
-    const snapshot = await fetchThreadInputs(threadId);
-    setThreadInputs(snapshot.entries);
-    setInputOwnerLocal(snapshot.local_owner);
-  }, [threadId]);
-
   const inputFailureText = useCallback((error: unknown) => {
     if (error instanceof ThreadInputError) {
       if (error.outcomeUnknown) return t('chat.inputQueue.stateUnknown');
@@ -1119,75 +1152,47 @@ export default function ChatPanel({
     }
   }, [inputFailureText, refreshThreadInputs]);
 
-  useEffect(() => {
-    if (historyPending || !active) return;
-    let observing = true;
-    let inFlight = false;
-    const cancellation = new AbortController();
-    const load = async () => {
-      if (!observing || inFlight || document.visibilityState !== 'visible') return;
-      inFlight = true;
-      try {
-        const snapshot = await fetchThreadInputs(threadId, cancellation.signal);
-        if (observing) {
-          setThreadInputs(snapshot.entries);
-          setInputOwnerLocal(snapshot.local_owner);
-        }
-      } catch {
-        // The queue capability is deployed separately; ordinary history remains usable.
-      } finally {
-        inFlight = false;
-      }
-    };
-    void load();
-    const timer = window.setInterval(() => { void load(); }, 2000);
-    return () => {
-      observing = false;
-      window.clearInterval(timer);
-      cancellation.abort();
-    };
-  }, [active, historyPending, threadId]);
-
   const selectQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
     try {
       const receipt = await selectThreadInput(threadId, entry);
       setThreadInputs((current) => current.map((item) => item.message_id === entry.message_id ? receipt.entry : item));
       setThreadInputError(receipt.interrupt_signalled ? null : t('chat.inputQueue.guideFailed'));
-      await refreshThreadInputs();
     } catch (error) {
       setThreadInputError(inputFailureText(error));
-      void refreshThreadInputs();
+    } finally {
+      refreshThreadInputsInBackground();
     }
-  }, [inputFailureText, refreshThreadInputs, t, threadId]);
+  }, [inputFailureText, refreshThreadInputsInBackground, t, threadId]);
 
-  const cancelQueuedInput = useCallback(async (entry: ThreadInputEntry) => {
+  const cancelQueuedInput = useCallback(async (entry: ThreadInputEntry, refresh = true) => {
     try {
       const updated = await cancelThreadInput(threadId, entry);
       setThreadInputs((current) => current.map((item) => item.message_id === entry.message_id ? updated : item));
       setThreadInputError(null);
-      await refreshThreadInputs();
     } catch (error) {
       setThreadInputError(inputFailureText(error));
-      void refreshThreadInputs();
       throw error;
+    } finally {
+      if (refresh) refreshThreadInputsInBackground();
     }
-  }, [inputFailureText, refreshThreadInputs, threadId]);
+  }, [inputFailureText, refreshThreadInputsInBackground, threadId]);
 
   const editQueuedInput = useCallback(async (entry: ThreadInputEntry, text: string) => {
-    await cancelQueuedInput(entry);
-    const newMessageId = crypto.randomUUID();
+    let newMessageId: string | undefined;
     try {
+      await cancelQueuedInput(entry, false);
+      newMessageId = crypto.randomUUID();
       await enqueueThreadInput(threadId, newMessageId, text, effectiveToolChoice, deckId, voiceId);
       setEditDraftRecovery(null);
       setThreadInputError(null);
-      await refreshThreadInputs();
     } catch (error) {
-      setEditDraftRecovery({ id: newMessageId, text });
+      if (newMessageId) setEditDraftRecovery({ id: newMessageId, text });
       setThreadInputError(inputFailureText(error));
-      void refreshThreadInputs();
       throw error;
+    } finally {
+      refreshThreadInputsInBackground();
     }
-  }, [cancelQueuedInput, deckId, effectiveToolChoice, inputFailureText, refreshThreadInputs, threadId, voiceId]);
+  }, [cancelQueuedInput, deckId, effectiveToolChoice, inputFailureText, refreshThreadInputsInBackground, threadId, voiceId]);
 
   const retryEditedInput = useCallback(async () => {
     if (!editDraftRecovery) return;
@@ -1196,25 +1201,25 @@ export default function ChatPanel({
         effectiveToolChoice, deckId, voiceId);
       setEditDraftRecovery(null);
       setThreadInputError(null);
-      await refreshThreadInputs();
     } catch (error) {
       setThreadInputError(inputFailureText(error));
-      void refreshThreadInputs();
+    } finally {
+      refreshThreadInputsInBackground();
     }
-  }, [deckId, editDraftRecovery, effectiveToolChoice, inputFailureText, refreshThreadInputs, threadId, voiceId]);
+  }, [deckId, editDraftRecovery, effectiveToolChoice, inputFailureText, refreshThreadInputsInBackground, threadId, voiceId]);
 
   const openQueuedInputInSideChat = useCallback(async (entry: ThreadInputEntry) => {
     try {
       const task = await moveThreadInputToSideTask(threadId, entry);
-      await refreshThreadInputs();
       setThreadInputError(task.error_code ? t('chat.inputQueue.sideChatLaunchFailed') : null);
       onOpenTaskThread?.(task.thread_id);
     } catch (error) {
       setThreadInputError(inputFailureText(error));
-      void refreshThreadInputs();
       throw error;
+    } finally {
+      refreshThreadInputsInBackground();
     }
-  }, [inputFailureText, onOpenTaskThread, refreshThreadInputs, t, threadId]);
+  }, [inputFailureText, onOpenTaskThread, refreshThreadInputsInBackground, t, threadId]);
 
   const markToolConfirmationSettled = useCallback((toolCallId: string) => {
     setSettledToolCallIds((current) => {
@@ -1667,11 +1672,12 @@ export default function ChatPanel({
                     ? current.map((item) => item.message_id === entry.message_id ? entry : item)
                     : [...current, entry]);
                   setThreadInputError(null);
-                  void refreshThreadInputs();
                   return;
                 } catch (error) {
                   setThreadInputError(inputFailureText(error));
                   throw error;
+                } finally {
+                  refreshThreadInputsInBackground();
                 }
               }
               const validFiles = uploadedFiles.filter((file) => file.storageKey);

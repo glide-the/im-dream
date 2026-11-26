@@ -1,6 +1,7 @@
 <!-- [Input] Dream public Chat, ThreadFactory, Service, Runner, Admin Chat operations; Claude Agent SDK documentation rechecked 2026-09-27 and restored source inspected 2026-09-26. -->
 <!-- [Output] Thread input queue design, evidence boundaries, target flows, failure handling, and implementation review. -->
 <!-- [Pos] Current design for receiving input while a Dream Agent turn runs; task-session-tools.md owns independent task Tools. -->
+<!-- [Sync] 2026-11-26: specify event-triggered queue reads and recovery on Web and Native. -->
 <!-- [Sync] 2026-11-25: specify SDK terminal receipt handling after a typed provider error and same-session recovery. -->
 <!-- [Sync] 2026-11-26: correlate visible Chat turn summaries with existing dispatch receipts. -->
 <!-- [Sync] 2026-09-27: record Admin 0064-0067 schema/ACL publication and the live-turn acceptance boundary before final E2E. -->
@@ -72,13 +73,54 @@ selected 是选中待引导、尚未提交 SDK 的状态；dispatching 是 Admin
 
 ## 推荐架构与接口
 
-Admin 提供原子 enqueue、list、select、claim、settle、cancel，并将 message_id、thread_id、用户消息、排序序号、revision、状态和派发轮次留在 PostgreSQL。Dream route 复用现有认证、Thread 所有权与消息 DTO；ThreadFactory 负责本地唯一 owner、队列唤醒、锁和 admission；Service 继续负责上下文、SDK 消息、权限确认与 assistant 持久化。Runner 每轮用新的 SDK 客户端，旧轮收到唯一 ResultMessage 后关闭；后续轮按已保存 session_id 恢复。EventBus 仍发布当前轮次事件；前端通过授权队列 GET 轮询恢复状态。
+Admin 提供原子 enqueue、list、select、claim、settle、cancel，并将 message_id、thread_id、用户消息、排序序号、revision、状态和派发轮次留在 PostgreSQL。Dream route 复用现有认证、Thread 所有权与消息 DTO；ThreadFactory 负责本地唯一 owner、队列唤醒、锁和 admission；Service 继续负责上下文、SDK 消息、权限确认与 assistant 持久化。Runner 每轮用新的 SDK 客户端，旧轮收到唯一 ResultMessage 后关闭；后续轮按已保存 session_id 恢复。EventBus 发布当前轮次事件，前端按下文事件调用授权队列 GET。
 
 公开协议：POST /api/claude-agent/threads/{thread_id}/inputs 接受原 Chat message.id 与单个非空文字 part，返回 message_id、queue_sequence、status、revision、text；GET 同路径返回授权队列与当前进程是否拥有 owner；POST /inputs/{message_id}/select 接受 expected_revision，返回新状态与 interrupt_signalled。首轮继续走原 POST /api/claude-agent；运行中前端改走输入端点。附件和 Editor 快照暂不进入排队路径；前端保留草稿并显示拒绝。现有 stop 路由继续返回 stop_requested 与核实后的 lifecycle。HTTP 接收成功只代表已排队，不代表 SDK 消费。
 
 首条消息创建 Thread 的现有 API 可复用。首轮不传 resume；SDK init 回执保存到 Admin。队列默认在旧轮唯一 ResultMessage 被接收且 Service 完成持久化后按序领取。新轮的 Service 必须找到已保存的 session_id 与本地转录；SDK connect 不能把缺失的 resume 降级为新会话。主动引导只能由本地 owner 操作：Admin 先选中，Runner interrupt 发控制请求，收到控制回执后将当前 turn_id 记为引导中断目标；旧轮读取者继续等待唯一 ResultMessage。Service 仅当该 turn_id 匹配、Runner 收到唯一 `error_during_execution` ResultMessage、未报告其他运行错误且终态校验未通过时，将旧轮部分回复持久化为 `cancelled` 并发送 `finish(cancelled=true)`，不发送通用 `error`。该判断只归类旧轮次，不代表 selected 已交给 SDK；唯一消费者仍须等旧轮终态后领取。其他 SDK 错误按原失败路径处理。中断调用失败则把 selected 记为 failed；状态写入失败则停止本地消费。SDK 流断裂或进程 owner 消失时不得从 SSE 片段推断成功。
 
-前端沿用 ChatPanel、AIInputDock、ChatMessageList 和现有 API 客户端。运行中发送成功后显示排队条目；卡片在服务端确认 `dispatching` 后退出输入区，且不触发第二个 useChat 推理流。选择仅对 queued 且有本地 owner 的记录可用。刷新时读历史和队列，并按现有运行状态决定是否重连 SSE；轮询只读取队列状态，不启动推理。队列不可用时保持草稿和同一重试消息 ID，展示明确失败。队列 capability 可用时，普通 Chat 请求先查询本 Thread 是否还有 queued、selected、dispatching 或 state_unknown；若有则返回 CHAT_INPUT_RECONCILIATION_REQUIRED，不能越过孤儿消息。服务端不把 Claude session_id、进程 ID、转录位置或取消句柄投影到浏览器。
+前端沿用 ChatPanel、AIInputDock、ChatMessageList 和现有 API 客户端。运行中发送成功后显示排队条目；卡片在服务端确认 `dispatching` 后退出输入区，且不触发第二个 useChat 推理流。选择仅对 queued 且有本地 owner 的记录可用。恢复时读历史和队列，并按现有运行状态决定是否重连 SSE。队列不可用时保持草稿和同一重试消息 ID，展示明确失败。队列 capability 可用时，普通 Chat 请求先查询本 Thread 是否还有 queued、selected、dispatching 或 state_unknown；若有则返回 CHAT_INPUT_RECONCILIATION_REQUIRED，不能越过孤儿消息。服务端不把 Claude session_id、进程 ID、转录位置或取消句柄投影到浏览器。
+
+### 队列读取事件
+
+网页 `ChatPanel` 在对话可见且历史加载完成、标签页重新可见、历史恢复成功时读取队列。原生 `useNativeChatThread` 在对话打开、前台恢复和轮次结束后的历史恢复成功时读取。重连流收到 `data-continuation` 的 `ready` 后读取已登记的派发状态。排队、引导、取消、编辑、重试编辑、转入侧边对话完成后刷新一次。编辑的取消与替换登记共用一次刷新。用户点选状态核对时执行一次队列读取。
+
+两个客户端复用 `createThreadInputReader`。同一对话作用域内尚未开始的读取合并；请求在途时发生的新事件安排一次后续读取。稳定等待期间的读取数为零。其他设备的队列操作随下一次本端刷新可见。
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Client as ChatPanel / useNativeChatThread
+    participant Reader as createThreadInputReader
+    participant API as claude_agent_thread_inputs
+    User->>Client: 打开对话或回到前台
+    Client->>Reader: 对话就绪，刷新队列
+    Reader->>API: GET /api/claude-agent/threads/{thread_id}/inputs
+    API-->>Reader: entries, local_owner
+    Reader-->>Client: 更新队列卡片和消息状态
+    Note over Client, Reader: 操作回执、重连流 ready 或历史恢复触发下一次读取
+```
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Client as ChatPanel / useNativeChatThread
+    participant Reader as createThreadInputReader
+    participant API as claude_agent_thread_inputs
+    Client->>Reader: 刷新队列
+    Reader->>API: 读取队列
+    alt 读取失败
+        API-->>Reader: 请求错误
+        Reader-->>Client: 保留上次快照
+        User->>Client: 核对队列状态
+        Client->>Reader: 重新读取一次
+        Reader->>API: 读取队列
+        API-->>Client: 更新快照或显示核对失败
+    else 对话作用域结束
+        Client->>Reader: 取消读取
+        Reader->>Reader: 丢弃迟到的快照
+    end
+```
 
 ## 四参与者时序
 

@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: count one queue read after enqueue and one after the completed edit.
 // [Sync] 2026-11-02: specify selection-owned late queue submission receipts; this addition awaits paused mechanical validation.
 // [Sync] 2026-10-31: retain delayed cancelled readers while qualifying independent acknowledged Stop recovery and late-reader ownership.
 // [Sync] 2026-11-01: qualify native Writing context-before-dispatch, A/B snapshots, failed-save draft restoration and cancellation without replay.
@@ -407,6 +408,7 @@ test('native queued edit preserves original revision cancellation, context and i
   const calls=await page.evaluate(()=>(window as any).__nativeChatFixture.calls),cancellation=calls.find((call:any)=>call.path.endsWith('/cancel'));
   expect(cancellation.body).toEqual({expected_revision:1});
   const posts=calls.filter((call:any)=>call.path.endsWith('/inputs')&&call.method==='POST');expect(posts).toHaveLength(2);
+  expect(calls.filter((call:any)=>call.path.endsWith('/inputs')&&call.method==='GET')).toHaveLength(2);
   expect(posts[1].body).toMatchObject({deckId:'fixture-deck',voiceId:'fixture-agent',toolChoice:'manual',message:{parts:[{type:'text',text:'Edited queued draft'}]}});
   expect(posts[1].body.message.id).not.toBe(posts[0].body.message.id);
   expect(calls.filter((call:any)=>call.path==='/api/claude-agent'&&call.method==='POST')).toHaveLength(1);

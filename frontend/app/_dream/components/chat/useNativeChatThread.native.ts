@@ -1,3 +1,4 @@
+// [Sync] 2026-11-26: refresh queue snapshots on foreground recovery, continuation, and queue action events.
 // [Sync] 2026-11-13: native first/ordinary/queued sends carry their own tool descriptor snapshots.
 // [Sync] 2026-11-04: retain native drafts and message identity across safe preparation retries.
 // [Sync] 2026-11-03: retain running Thread readers across Native navigation and publish only the visible selection.
@@ -33,7 +34,7 @@ import {hydrateClaudeThreadSession,fetchClaudeThreadMessages,claudeThreadHydrati
 import {mergeRecoveredLatestPage,prependUniqueOlderMessages} from './chatHistoryWindow';
 import {beginClaudeThreadSubmission,observeClaudeThreadSubmission,requestClaudeSubmittedThreadStop,claudeThreadStopPending,type ClaudeThreadSubmission} from './threadStop';
 import {chatStopMayAbortLocalReaders} from './chatRuntimeState';
-import {fetchThreadInputs,enqueueThreadInput,selectThreadInput,cancelThreadInput,moveThreadInputToSideTask,ThreadInputError,type ThreadInputEntry} from './threadInputQueue';
+import {createThreadInputReader,enqueueThreadInput,selectThreadInput,cancelThreadInput,moveThreadInputToSideTask,ThreadInputError,type ThreadInputEntry} from './threadInputQueue';
 import type {ChatUserMessage} from './chatUserMessageIngress';
 import {confirmToolCall,resolvePendingToolConfirmation,resolveToolName,resolveSandboxNetworkRequest,type PendingToolConfirmation} from './toolConfirmation';
 import type {NativeChatRecovery} from './nativeChatRecovery.native';
@@ -57,16 +58,14 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
   let state={...empty(),threadId:initialId,recovering:Boolean(initialId),previewing:Boolean(initialId),unknown:Boolean(initialId),messages:threadHistoryPreviewMessages(initialId?preview.read(initialId):undefined)};
   const current=box(state),historyPreview=box(preview);
   const listeners=new Set<()=>void>();
-  let queueTimer:ReturnType<typeof setInterval>|undefined,queueInFlight=false;
+  let queueReader:ReturnType<typeof createThreadInputReader>|undefined;
   function setState(patch:typeof state|((value:typeof state)=>typeof state)) {
-    const previousId=state.threadId;
     state=typeof patch==='function'?patch(state):patch;current.current=state;snapshotCache=undefined;
-    if(previousId!==state.threadId&&mounted.current)restartQueue();
     for(const notify of listeners)notify();
   }
   const continuationIds=box(new Map<string,string>());
   const latest=box({context,prepareEditorState,onSettled,onSessionExpired});latest.current={context,prepareEditorState,onSettled,onSessionExpired};
-  const transport:typeof fetch=async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401&&mounted.current){historyPreview.current?.clear();update({messages:[],thread:undefined,unknown:true});latest.current.onSessionExpired?.();}return response;};
+  const transport:typeof fetch=async(input,init)=>{const response=await rawTransport(input,init);if(response.status===401&&mounted.current&&!init?.signal?.aborted){historyPreview.current?.clear();update({messages:[],thread:undefined,unknown:true});latest.current.onSessionExpired?.();}return response;};
   const mounted=box(false),epoch=box(0),selectionEpoch=box(0),connection=box<OpenResponse|null>(null),postLock=box<number|null>(null);
   const livePresentedTurnIds=box(new Set<string>());
   const acknowledgedReaderStops=box(new WeakSet<OpenResponse>());
@@ -75,12 +74,27 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
   function update(patch:Partial<typeof state>|((value:typeof state)=>typeof state)) {if(!mounted.current)return;setState(value=>{const next=typeof patch==='function'?patch(value):{...value,...patch};current.current=next;return next;});}
   function active(id:string,version:number) {return mounted.current && epoch.current===version && current.current.threadId===id;}
   function ownsSelection(id:string,version:number) {return mounted.current && selectionEpoch.current===version && current.current.threadId===id;}
-  function closeReader(acknowledgedStop=false) {for(const pending of contextPreparations.current)pending.abort();contextPreparations.current.clear();if(acknowledgedStop && connection.current)acknowledgedReaderStops.current.add(connection.current);connection.current?.cancel();connection.current=null;if(timer.current)clearTimeout(timer.current);timer.current=undefined;}
+  function closeReader(acknowledgedStop=false) {
+    queueReader?.dispose();
+    queueReader=undefined;
+    for(const pending of contextPreparations.current)pending.abort();
+    contextPreparations.current.clear();
+    if(acknowledgedStop && connection.current)acknowledgedReaderStops.current.add(connection.current);
+    connection.current?.cancel();
+    connection.current=null;
+    if(timer.current)clearTimeout(timer.current);
+    timer.current=undefined;
+  }
   function newChat() {selectionEpoch.current++;epoch.current++;closeReader();queueIds.current.clear();livePresentedTurnIds.current.clear();recovery?.selectThread(null);update(empty());}
   async function refreshQueue(id=current.current.threadId) {
-    if(!id)return;const version=epoch.current;
-    const snapshot=await fetchThreadInputs(id,undefined,transport);
-    if(active(id,version))update({queue:snapshot.entries,localOwner:snapshot.local_owner});
+    if(!id || !mounted.current || current.current.threadId!==id || AppState.currentState==='background')return;
+    queueReader??=createThreadInputReader(id,snapshot=>{
+      update({queue:snapshot.entries,localOwner:snapshot.local_owner});
+    },transport);
+    await queueReader.refresh();
+  }
+  function refreshQueueInBackground(id:string) {
+    void refreshQueue(id).catch(()=>{ /* Preserve the last snapshot for an explicit status check. */ });
   }
   function schedule(id:string,version:number) {
     if(!active(id,version) || AppState.currentState==='background')return;
@@ -96,6 +110,7 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       const events:BackendEvent[]=[];
       for(const event of coalesceClaudeAgentSseEvents(parseClaudeAgentSseBuffer(frames))) {
         if(submission)observeClaudeThreadSubmission(submission,event.type==='finish'?'terminal':'accepted');
+        if(!submission && event.type==='data-continuation' && event.state==='ready' && active(id,version))refreshQueueInBackground(id);
         if(event.type==='error'){submissionFailed=true;if(event.retryable===true)preparationRejected=true;}
         events.push(event);
         if(event.type==='finish'){terminal=true;break;}
@@ -140,7 +155,7 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       update(value=>{const merged=value.previewing?{messages:snapshot.messages,overlapsLoadedWindow:false}:mergeRecoveredLatestPage(value.messages,snapshot.messages,livePresentedTurnIds.current);return {...value,thread:snapshot.thread,messages:merged.messages,historicalMessageIds:new Set([...value.historicalMessageIds,...snapshot.messages.map(message=>message.id)]),running:snapshot.running || stopPending,
         recovering:false,posting:false,previewing:false,unknown:stopPending,error:value.error==='chat.turnNavigation.status.failed'?value.error:null,settled:snapshot.settledToolCallIds,runtimePending:snapshot.runtimePendingToolCallIds,
         nextCursor:!value.previewing&&merged.overlapsLoadedWindow?value.nextCursor:snapshot.nextCursor,hasMore:!value.previewing&&merged.overlapsLoadedWindow?value.hasMore:snapshot.hasMore};});
-      void refreshQueue(id).catch(()=>{});
+      if(!stopPending)refreshQueueInBackground(id);
       if(snapshot.running) {
         await consume(id,version,await stream(`/api/claude-agent/threads/${encodeURIComponent(id)}/stream`,{headers:browserRequestHeaders()}));
         schedule(id,version);
@@ -173,10 +188,10 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
         const entry=await enqueueThreadInput(before.threadId,messageId,input,effective,selected.deckId,selected.voiceId,transport,selected.tools);
         if(ownsSelection(before.threadId,selectionVersion)){
           queueIds.current.delete(input);update(value=>({...value,error:null,queue:[...value.queue.filter(item=>item.message_id!==entry.message_id),entry]}));
-          void refreshQueue(before.threadId).catch(()=>{});
         }
         return;
       } catch(error){if(ownsSelection(before.threadId,selectionVersion))update({error:error instanceof ThreadInputError && error.outcomeUnknown?'chat.inputQueue.stateUnknown':'chat.inputQueue.sendFailed'});throw error;}
+      finally{if(ownsSelection(before.threadId,selectionVersion))refreshQueueInBackground(before.threadId);}
     }
     const parts:UIMessage['parts']=files.filter(file=>file.storageKey).map(file=>({type:'file',url:toFileProxyUrl(file.storageKey!),mediaType:file.mimeType,filename:file.name}));
     if(text)parts.push({type:'text',text});if(!parts.length)return;
@@ -285,39 +300,45 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
   }
   async function guide(entry:ThreadInputEntry) {
     const id=inputThread(entry),version=epoch.current;
-    try{const receipt=await selectThreadInput(id,entry,transport);if(active(id,version))update(value=>({...value,queue:value.queue.map(item=>item.message_id===entry.message_id?receipt.entry:item),queueError:receipt.interrupt_signalled?null:'chat.inputQueue.guideFailed'}));await refreshQueue(id);}
-    catch(error){if(active(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
+    try{const receipt=await selectThreadInput(id,entry,transport);if(active(id,version))update(value=>({...value,queue:value.queue.map(item=>item.message_id===entry.message_id?receipt.entry:item),queueError:receipt.interrupt_signalled?null:'chat.inputQueue.guideFailed'}));}
+    catch(error){if(active(id,version))update({queueError:inputFailureKey(error)});throw error;}
+    finally{if(active(id,version))refreshQueueInBackground(id);}
   }
-  async function cancelInput(entry:ThreadInputEntry) {
+  async function cancelInput(entry:ThreadInputEntry,refresh=true) {
     const id=inputThread(entry),version=epoch.current;
-    try{const receipt=await cancelThreadInput(id,entry,transport);if(active(id,version))update(value=>({...value,queue:value.queue.map(item=>item.message_id===entry.message_id?receipt:item),queueError:null}));await refreshQueue(id);}
-    catch(error){if(active(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
+    try{const receipt=await cancelThreadInput(id,entry,transport);if(active(id,version))update(value=>({...value,queue:value.queue.map(item=>item.message_id===entry.message_id?receipt:item),queueError:null}));}
+    catch(error){if(active(id,version))update({queueError:inputFailureKey(error)});throw error;}
+    finally{if(refresh && active(id,version))refreshQueueInBackground(id);}
   }
   async function editInput(entry:ThreadInputEntry,text:string) {
     const id=inputThread(entry),version=selectionEpoch.current,selected={...latest.current.context};
-    await cancelInput(entry);
-    const messageId=generateId();
-    try{await enqueueThreadInput(id,messageId,text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
-    catch(error){if(ownsSelection(id,version)){update({editDraftRecovery:{id:messageId,text},queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
+    let messageId:string|undefined;
+    try{
+      await cancelInput(entry,false);
+      messageId=generateId();
+      await enqueueThreadInput(id,messageId,text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));
+      if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});
+    } catch(error){
+      if(messageId && ownsSelection(id,version))update({editDraftRecovery:{id:messageId,text},queueError:inputFailureKey(error)});
+      throw error;
+    } finally {
+      if(ownsSelection(id,version))refreshQueueInBackground(id);
+    }
   }
   async function retryEditedInput() {
     const id=current.current.threadId,draft=current.current.editDraftRecovery;if(!id||!draft||current.current.editRetrying)return;
     const version=selectionEpoch.current,selected={...latest.current.context};update({editRetrying:true});
-    try{await enqueueThreadInput(id,draft.id,draft.text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});await refreshQueue(id);}
-    catch(error){if(ownsSelection(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}}
-    finally{if(ownsSelection(id,version))update({editRetrying:false});}
+    try{await enqueueThreadInput(id,draft.id,draft.text,selected.imFullAccessEnabled?'auto':selected.currentToolChoice,selected.deckId,selected.voiceId,transport,readThreadTools(id));if(ownsSelection(id,version))update({editDraftRecovery:null,queueError:null});}
+    catch(error){if(ownsSelection(id,version))update({queueError:inputFailureKey(error)});}
+    finally{if(ownsSelection(id,version)){update({editRetrying:false});refreshQueueInBackground(id);}}
   }
   async function sideTask(entry:ThreadInputEntry) {
     const id=inputThread(entry),version=epoch.current;
-    try{const task=await moveThreadInputToSideTask(id,entry,transport);await refreshQueue(id);if(active(id,version))update({queueError:task.error_code?'chat.inputQueue.sideChatLaunchFailed':null});return task;}
-    catch(error){if(active(id,version)){update({queueError:inputFailureKey(error)});void refreshQueue(id).catch(()=>{});}throw error;}
+    try{const task=await moveThreadInputToSideTask(id,entry,transport);if(active(id,version))update({queueError:task.error_code?'chat.inputQueue.sideChatLaunchFailed':null});return task;}
+    catch(error){if(active(id,version))update({queueError:inputFailureKey(error)});throw error;}
+    finally{if(active(id,version))refreshQueueInBackground(id);}
   }
   let listener:ReturnType<typeof AppState.addEventListener>|undefined;
-  function restartQueue() {
-    if(queueTimer)clearInterval(queueTimer);
-    const read=async()=>{if(queueInFlight||!mounted.current||AppState.currentState==='background')return;queueInFlight=true;try{await refreshQueue();}catch{/* Keep the last queue snapshot; explicit actions own failure feedback. */}finally{queueInFlight=false;}};
-    void read();queueTimer=setInterval(()=>void read(),2000);
-  }
   function start() {
     if(mounted.current)return;mounted.current=true;
     const restored=current.current.threadId;if(restored)void recover(restored,epoch.current);
@@ -325,9 +346,8 @@ function createNativeChatThreadSession(options:NativeChatThreadOptions,initialId
       if(next==='active'&&id){epoch.current++;closeReader();void recover(id,epoch.current);}
       else if(next==='background'){epoch.current++;closeReader();update({posting:false,recovering:false,unknown:Boolean(id)});}
     });
-    restartQueue();
   }
-  function dispose() {mounted.current=false;selectionEpoch.current++;epoch.current++;closeReader();listener?.remove();listener=undefined;if(queueTimer)clearInterval(queueTimer);queueTimer=undefined;}
+  function dispose() {mounted.current=false;selectionEpoch.current++;epoch.current++;closeReader();listener?.remove();listener=undefined;}
   function configure(next:NativeChatThreadOptions) {
     const confirmationChanged=context.imFullAccessEnabled!==next.context.imFullAccessEnabled||context.currentToolChoice!==next.context.currentToolChoice;
     ({context,prepareEditorState,onSettled,onSessionExpired,recovery,transport:rawTransport=clientFetch,stream=openResponse}=next);
@@ -380,6 +400,7 @@ function createNativeChatThreadOwner(initial:NativeChatThreadOptions) {
     if(current.threadId===id)return selected.snapshot().openThread(id);
     const retained=[...sessions].find(session=>session.snapshot().threadId===id);
     select(retained??create(id));options.recovery?.selectThread(id);
+    if(retained)void retained.snapshot().refreshQueue().catch(()=>{});
   }
   function invalidateHistory(id:string) {preview.forget(id);for(const session of sessions)if(session!==selected&&session.snapshot().threadId===id)forget(session);}
   return {
